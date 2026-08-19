@@ -1,20 +1,25 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 19 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
-`80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
-and evidence are the PR #518 review state.
+`80540fc80399957ebcfe18cb2c2a741938e5cf64`; PR #518 is anchored at squash merge
+`1debaeb4a47a73996f8d6960f33a55b881c60850`. The current follow-up evidence is
+unmerged.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 18, SHA-256
-  `f073bd2dc17d169af79e8e9cb0180134cfa03c24fb2701928a9fa13b474c98a8`
+- `docs/transcript-ledger-v5-design.md`, revision 19, SHA-256
+  `2672f1e14eb4e2d9e726b621070fd1fca29869572cffb2b107b53a26cc22e823`
+- `TRANSCRIPT_SEARCH_BOUNDED_MUTATIONS_DESIGN.md`, relational search v8
+  implementation contract, SHA-256
+  `32bfb792c6737d8e842bca4f13995e95ec14eb6c7961c535169a65e38c2c36f3`
 
-Current inventory: 267 discovered stable IDs. The PR #500 squash merge above is
-the historical acceptance anchor and contains 256 of them. The current catalog
-adds eleven executable cases through PR #518. Because PR #518 is not yet
-merged, this document does not claim a merge-object anchor for its current
-executable state.
+Current inventory: 303 discovered stable IDs, SHA-256
+`8fccd155d8b08aa6cec470bcf5fd6ba5c422646947e62a51c011478a5fb9f7be`.
+The PR #500 squash merge above is the historical acceptance anchor and contains
+256 of them. PR #518 added eleven executable cases; revision 19 registers the
+relational-search v8 acceptance cases and replaces deleted schema-v7 sources.
+This document does not claim a merge-object anchor for the unmerged follow-up.
 
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
@@ -221,18 +226,21 @@ command runs before them so a deleted or duplicated conformance case fails
 before execution. Formal release reuses the recorded sequence and adds the
 release-only replay and hygiene evidence below.
 
-| Order | Command                               | Reported scope                                                               |
-| ----- | ------------------------------------- | ---------------------------------------------------------------------------- |
-| 1     | `bun run test:transcript-inventory`   | Stable-ID discovery and inventory integrity                                  |
-| 2     | `git diff --check origin/main...HEAD` | Patch hygiene                                                                |
-| 3     | `bun run typecheck`                   | Provider packages, server, CLI, web, and integration contracts               |
-| 4     | `bun run check`                       | ESLint and Svelte diagnostics                                                |
-| 5     | `bun run test`                        | Common, scripts, every provider unit, server unit, CLI, and web Vitest cases |
-| 6     | `bun run test:integration:server`     | Server black-box and required provider-scripted cases                        |
-| 7     | `bun run test:integration:e2e`        | Lightpanda browser behavior                                                  |
-| 8     | `bun run test:integration:chromium`   | Strict browser geometry and reconnect cases                                  |
-| 9     | `bun run build`                       | Production build                                                             |
-| 10    | `timeout 30s bun run start --port 0`  | Isolated random-port startup                                                 |
+| Order | Command                                               | Reported scope                                                               |
+| ----- | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1     | `bun run test:transcript-inventory`                   | Stable-ID discovery and inventory integrity                                  |
+| 2     | `bun run test:transcript-search-v8-proof -- --matrix` | Sole-runtime production SQL/VDBE/frame matrix                                |
+| 3     | `bun run test:transcript-search-v8-proof -- --rss`    | Isolated dominant-step RSS/HWM matrix                                         |
+| 4     | `bun run test:transcript-search-v8-proof -- --full-h` | Exact `H`-frame WAL construction and verified TRUNCATE                        |
+| 5     | `git diff --check origin/main...HEAD`                 | Patch hygiene                                                                |
+| 6     | `bun run typecheck`                                   | Provider packages, server, CLI, web, and integration contracts               |
+| 7     | `bun run check`                                       | ESLint and Svelte diagnostics                                                |
+| 8     | `bun run test`                                        | Common, scripts, every provider unit, server unit, CLI, and web Vitest cases |
+| 9     | `bun run test:integration:server`                     | Server black-box and required provider-scripted cases                        |
+| 10    | `bun run test:integration:e2e`                        | Lightpanda browser behavior                                                  |
+| 11    | `bun run test:integration:chromium`                   | Strict browser geometry and reconnect cases                                  |
+| 12    | `bun run build`                                       | Production build                                                             |
+| 13    | `timeout 30s bun run start --port 0`                  | Isolated random-port startup                                                 |
 
 Credential-backed `bun run test:live:claude` and
 `bun run test:live:codex` remain separate CI-only compatibility gates. Exact
@@ -396,13 +404,52 @@ local testing.
 
 ### Search
 
-| ID             | Obligation                                                                              | Required evidence              |
-| -------------- | --------------------------------------------------------------------------------------- | ------------------------------ |
-| TLV5-SEARCH.01 | Ordinary commits index only their ordered suffix and never schedule a full replacement. | Unit, performance              |
-| TLV5-SEARCH.02 | Rejected or stalled detached work is absorbed per chat and later work continues.        | Controller unit, real-service unit |
-| TLV5-SEARCH.03 | View replacement deletes old entries before admitting results for the new current view. | Unit, server black-box         |
-| TLV5-SEARCH.04 | Long append series performs work linear in appended rows.                               | Deterministic performance gate |
-| TLV5-SEARCH.05 | Index health is current-view/frontier-qualified: pending until acknowledgement, failed after terminal rejection, and indexed after acknowledged repair, including valid views with no searchable rows. | Core unit, service unit |
+| ID                | Obligation | Required evidence |
+| ----------------- | ---------- | ----------------- |
+| TLV5-SEARCH.01    | Ordinary commits index only their ordered suffix and never schedule a full replacement. | Unit, performance |
+| TLV5-SEARCH.02    | Rejected, stalled, timed-out, or restarted detached work is absorbed per chat; physical completion remains distinct from logical settlement; later work continues. | Controller unit, real-Worker service unit |
+| TLV5-SEARCH.03    | Replacement, deletion, prune, and schema-v7 recovery admit only the current relational v8 view, including cleanup/reintroduction races. | Unit, server black-box |
+| TLV5-SEARCH.04    | Long append series performs work linear in appended rows. | Deterministic performance gate |
+| TLV5-SEARCH.05    | Health is current-view/frontier-qualified; a recordable build failure is invisible until acknowledged full repair, including pad-only views. | Core unit, service unit |
+| TLV5-SEARCH.06.01 | Every receiver cap and cap-plus-one check occurs before persistent `BEGIN IMMEDIATE`, with no first-row bypass or state/WAL mutation. | Schema unit, runtime proof |
+| TLV5-SEARCH.06.02 | Relational term build and cleanup resume from exact durable tuples in at most 32 postings/512 KiB, atomically publish the next active chunk, and fail closed on detectable posting faults. | Schema mutation/restart unit |
+| TLV5-SEARCH.06.03 | Every CI lane selects Bun `canary`, which must resolve to the accepted Bun 1.4.0/SQLite 3.53.2 identity; exact production DDL and primitives remain within `F=49,829`, the 256-MiB RSS ceiling, and exact full-`H` TRUNCATE. | Checked-in release proof |
+| TLV5-SEARCH.07.01 | Global rank/phrase statistics use all and only `active_complete`; request-disallowed active chats influence rank but never appear, and pending residue influences neither. | Query reference unit |
+| TLV5-SEARCH.07.02 | Health, document frequency, rank, snippet identity, and bodies use one persistent read snapshot after query compilation. | Query snapshot unit |
+| TLV5-SEARCH.07.03 | Reader input and output are acknowledgement-driven; every granted slice obeys SQL/byte/position/body caps and quiesce rolls back and closes before acknowledgement. | Query and real-Worker unit |
+| TLV5-SEARCH.08.01 | Two logical permits share one physical grant; same-chat order, finite cleanup fairness, maintenance priority, and separate start/physical watchdogs hold. | Service and supervisor unit |
+| TLV5-SEARCH.08.02 | Timeout, cancellation, malformed events, and unknown outcomes cooperatively retire both Workers through acknowledgement and actual close before any successor or checkpoint. | Service retirement unit, real-Worker timeout unit |
+| TLV5-SEARCH.08.03 | Active posting corruption emits no result, records no per-chat failure, recreates the entire derived database, resyncs, and restores search. | Query/service corruption unit |
+| TLV5-SEARCH.09.01 | Parent and writer WAL authority reserve `F` below `H`, accept only newer observations, release only exact known grants, and trigger verified maintenance before admission deadlocks. | Service WAL unit, full-`H` proof |
+| TLV5-SEARCH.09.02 | Replacement, deletion, and prune remain unsettled until both Workers close and verified TRUNCATE removes synthetic raw/term bytes from main and WAL. | Two-connection privacy and service barrier unit |
+| TLV5-SEARCH.10.01 | Fresh/open identity is exact schema v8, sole runtime/source, ordered page layout/pragmas, and 32-byte fingerprint; old or malformed derived data recreates before admission. | Schema identity unit, server recovery |
+| TLV5-SEARCH.10.02 | The private `unicode61 remove_diacritics 2` helper is no-disk, sole-source approved, fingerprinted, cap-bounded, and preserves native query positions. | Tokenizer unit |
+| TLV5-SEARCH.10.03 | Indexer/reader envelopes have exact grant identities and keys, use the full-envelope 1-MiB UTF-8 metric, and advance only after exact acknowledgements. | Protocol and service contract unit |
+
+#### Search v8 executable traceability
+
+Negative control for the relational migration is
+`0faf7f10e4f5c7223541546f7a82cc2a712c4d68`: it retains schema v7, a
+persistent FTS5 table, and whole-chat replacement. The deterministic failure
+signature is an unbounded FTS5 replacement exceeding the physical Worker
+deadline, followed by shared `SEARCH_INDEX_UNAVAILABLE` collateral failure.
+
+| Requirement | Primary executable evidence | Given | When | Then | Never |
+| ----------- | --------------------------- | ----- | ---- | ---- | ----- |
+| SEARCH.06.01 | `TLV5-SEARCH.06-CAP-PREBEGIN-CORE-UNIT-01`, `TLV5-SEARCH.06-FRAME-RUNTIME-01` | An exact durable state/progress tuple and observed WAL baseline | Each boundary and cap-plus-one raw, term, identifier, timestamp, and envelope input is offered | Boundary values commit within their cap; cap-plus-one rejects before persistent `BEGIN` | Rejection changes `total_changes()`, WAL frames, or the tuple |
+| SEARCH.06.02 | `TLV5-SEARCH.06-MUTATION-CORE-UNIT-01`, `TLV5-SEARCH.06-POSTING-RESTART-CORE-UNIT-01` | Multi-step and pad-only chunks with a restart or injected durable-tail fault at every continuation | Production build/cleanup is replayed from the exact tuple and BLOB cursor | Work resumes once, totals remain exact, and final/zero/raw-delete transitions publish the next active ID atomically | Duplicate terms/counters, stale next IDs, malformed activation, or unbounded verification occurs |
+| SEARCH.06.03 | `TLV5-SEARCH.06-FRAME-RUNTIME-01` | The production schema/primitives on empty, mature ordered/interleaved, and fragmented layouts | All 16 physical classes, isolated RSS cases, and exact full-`H` WAL construction run | Every case stays below its symbolic frame/RSS/time bound and TRUNCATE returns exact zero | Copied SQL, an unapproved runtime/source, spill fallback, or a frame above `F` is accepted |
+| SEARCH.07.01 | `TLV5-SEARCH.07-ACTIVE-COMPLETE-CORE-UNIT-01` | An allowed active chat, a disallowed active chat, and pending fully staged residue | Exact, phrase, prefix, AND, and multilingual reference queries run | Global `N`/average length/df include both active chats, results include only allowed ownership, and ranks match the private FTS5 reference | Pending residue or allowlist membership changes global population statistics |
+| SEARCH.07.02 | `TLV5-SEARCH.07-READ-SNAPSHOT-CORE-UNIT-01` | A writer is held between health/ranking inputs | One query compiles before `BEGIN` and advances its bounded reader | Health, df, rank, snippets, and bodies agree with one snapshot | A second snapshot or pre-compilation persistent read leaks mixed state |
+| SEARCH.07.03 | `TLV5-SEARCH.07-READER-SLICE-CORE-UNIT-01`, `TLV5-SEARCH.07-READER-WORKER-CORE-UNIT-01` | Hot postings, sparse prefixes, bounded allowlist frames, and an active reader transaction | The parent supplies one input acknowledgement or physical grant at a time, then quiesces | Each grant yields within every cap; quiesce rolls back, finalizes, closes, acknowledges, and exits | Self-continuation, unacknowledged framing, or an open snapshot survives quiesce |
+| SEARCH.08.01 | `TLV5-SEARCH.02-PHYSICAL-PROGRESS-SERVICE-UNIT-01`, `TLV5-SEARCH.08-DISPATCH-SERVICE-UNIT-01`, `TLV5-SEARCH.08-WATCHDOG-SERVICE-UNIT-01` | Two admitted logical jobs, same-chat successors, queued cleanup, and controlled watchdog time | Physical grants and `step-started` events are released in a fixed order | Another chat progresses, same-chat order holds, cleanup runs after at most eight live grants, and each watchdog owns only its phase | An unposted job owns a deadline/reservation or two physical grants overlap |
+| SEARCH.08.02 | `TLV5-SEARCH.02-TIMEOUT-RESYNC-SERVICE-UNIT-01`, `TLV5-SEARCH.08-RETIREMENT-SERVICE-UNIT-01` | A committed real-Worker completion is suppressed or a resync Worker fails while close is held | The physical deadline fires and recovery starts | Both Workers acknowledge and actually close before startup TRUNCATE/successor admission; resync and a later chat succeed | `terminate()` counts as SQLite release evidence or successor Workers overlap |
+| SEARCH.08.03 | `TLV5-SEARCH.08-CORRUPTION-RECOVERY-UNIT-01`, `TLV5-SEARCH.08-INDEXER-CORRUPTION-RECOVERY-UNIT-01` | Malformed active positions or a durable indexer posting fault | Query/build detects `SEARCH_INDEX_CORRUPT` | No malformed result is emitted; the whole derived database recreates and authoritative resync restores search | Corruption becomes a per-chat `failed` state or pre-recreation rows escape |
+| SEARCH.09.01 | `TLV5-SEARCH.09-WAL-ADMISSION-UNIT-01`, `TLV5-SEARCH.09-WAL-BOUNDARY-UNIT-01`, `TLV5-SEARCH.09-WAL-MISSING-UNIT-01` | Parent observations at, below, above, stale to, and missing from the `H-F` boundary | A grant completes, errors, or requests its next reservation | Only newer metrics advance authority, the exact known grant releases, and unsafe capacity schedules maintenance before further DML | Stale metrics regress state, missing metrics reopen grants, or reservation exceeds `H` |
+| SEARCH.09.02 | `TLV5-SEARCH.09-PRIVACY-CORE-UNIT-01`, `TLV5-SEARCH.09-SECURE-BARRIER-SERVICE-UNIT-01` | Synthetic raw/term markers checkpointed into main and a reader snapshot held through cleanup | Cleanup commits and TRUNCATE is attempted before and after cooperative reader close | The held attempt is busy and settlement remains open; post-close TRUNCATE is exact zero and markers are absent from main/WAL | Commit alone settles deletion or a busy/nonzero checkpoint reopens admission |
+| SEARCH.10.01 | `TLV5-SEARCH.10-SCHEMA-IDENTITY-CORE-UNIT-01`, `TLV5-SEARCH.03-RESTORE-SERVER-01` | Fresh, schema-v7, malformed-v8, fingerprint-mismatched, and same-identity files | Search opens under Bun 1.4.0/SQLite 3.53.2 | Fresh creation follows ordered readbacks; mismatches recreate before admission; same identity resumes; server recovery performs no provider read | An unapproved source loops recreation or old objects reach reader/writer admission |
+| SEARCH.10.02 | `TLV5-SEARCH.10-TOKENIZER-CORE-UNIT-01` | The sole FTS5 source, multilingual sentinel, `foo_bar`, and cap boundaries | Query/document tokenization and exceptional cleanup run | Native positions, sorted canonical postings, fingerprint, receiver prefix, delete-all, and empty `database_list` are exact | Tokenizer state reaches disk, a first-row bypass occurs, or another source is accepted |
+| SEARCH.10.03 | `TLV5-SEARCH.10-PROTOCOL-CONTRACT-01`, `TLV5-SEARCH.10-ALLOWLIST-FRAMING-SERVICE-UNIT-01` | Exact and malformed indexer/reader envelopes at the 1-MiB boundary | Sender and receiver validate identities, optional WAL, keys, and acknowledgement sequence | Only exact envelopes advance one input or physical step and terminal output settles once | Unknown fields, invalid optional WAL, oversized JSON, or unacknowledged continuation is accepted |
 
 ### Handoff
 
@@ -498,7 +545,7 @@ The status below describes test coverage, not implementation completion.
 | R3 Codex native tail reconciliation           | TLV5-L02.02, TLV5-L05.02, TLV5-L10.01                 | Codex architecture guard, app-server unit, scripted interrupt                                       | Covered |
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
-| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection, stalled-ack isolation, rejected startup/restart replacements, and fresh-catalog exclusive pruning | Covered |
+| R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection, stalled-ack isolation, exact-state reconciliation, post-admission recovery, real-Worker timeout/restart recovery, rejected startup/restart replacements, and fresh-catalog exclusive pruning | Covered |
 | R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
 | R8 serial handoff recovery                    | TLV5-HANDOFF.05                                       | Unit and repeated-handoff server integration                                                        | Covered |
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
@@ -839,11 +886,14 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long native tool tail before exactly one final assistant message`           | L02.02, L10.01              |
 | TLV5-SEARCH.01-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `indexes repeated ordinary commits only as ordered suffixes`                                          | R5                          |
 | TLV5-SEARCH.02-CORE-UNIT-01    | `server/chats/search/__tests__/controller.test.js`: `absorbs a rejected indexing job and continues same-chat and cross-chat queues`                       | R6, L11.03                  |
+| TLV5-SEARCH.02-EXACT-RESYNC-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/schema-v8.test.ts`: covered same-view replacement is exact-current with zero DML while append and mismatched-view repair remain live | SEARCH.02, SEARCH.05 |
+| TLV5-SEARCH.02-POST-ADMISSION-CORE-UNIT-01 | `server/chats/search/__tests__/controller.test.js`: post-admission replacement and prune failures leave search admitted while genuine Worker admission failure remains unavailable | SEARCH.02, L11.03 |
 | TLV5-SEARCH.02-RESYNC-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: rejected chat-A replacements during startup and worker resync remain per-chat while chat B stays searchable | SEARCH.02, L11.03 |
 | TLV5-SEARCH.02-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: a held chat-A acknowledgement permits chat B to finish, preserves A ordering, and gives prune an exclusive barrier | SEARCH.02, L11.03 |
-| TLV5-SEARCH.05-CORE-UNIT-01    | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: index health is qualified by the current view and authoritative frontier | SEARCH.05 |
+| TLV5-SEARCH.02-TIMEOUT-RESYNC-SERVICE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search-service.test.js`: a real indexer commits one replacement step whose physical completion is withheld, times out, retires, resyncs, and admits a later searchable chat | SEARCH.02, SEARCH.08.02, L11.03 |
+| TLV5-SEARCH.05-CORE-UNIT-01    | `server-agents/common/src/search/__tests__/query-v8.test.ts`: index health is qualified by current view and covering authoritative frontier | SEARCH.05 |
 | TLV5-SEARCH.05-SERVICE-UNIT-01 | `server/chats/search/__tests__/controller-service.test.js`: terminal failure records bounded failed state and acknowledged full repair clears it | SEARCH.05 |
-| TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: a valid zero-searchable-row view is indexed at its frontier and later same-view content remains searchable | SEARCH.05, L01.02 |
+| TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/schema-v8.test.ts`: a valid frontier-only view is indexed and later same-view content becomes searchable | SEARCH.05, L01.02 |
 | TLV5-HANDOFF.05-SERVER-01      | `integration-tests/tests/server/repeated-agent-handoff.test.ts`: `recovers one pending handoff while another chat remains fenced`                         | R8, L11.03                  |
 | TLV5-L11.01-SERVER-01          | `integration-tests/tests/server/transcript-corruption-isolation.test.ts`: `fences only the chat whose SQLite ledger is corrupt`                           | L11.01                      |
 | TLV5-L11.01-VIEW-READER-UNIT-01 | `server/ledger/__tests__/view-reader.test.js`: paging, replay, and rendering snapshots translate a ledger fence to one fixed non-retryable degraded-history error | L11.01 |
@@ -887,7 +937,7 @@ for each atomic requirement and records any required complementary tier.
 
 The remaining `Partial` and `Missing` provider-routing, native-probe, browser,
 failure-injection, and accepted-loss rows are explicit catalog or
-nightly follow-up. They do not block dogfood or the active Revision 18 release
+nightly follow-up. They do not block dogfood or the active Revision 19 release
 gate unless a current release red promotes one into that gate. Their statements
 remain here so later coverage cannot silently weaken or disappear.
 
@@ -1019,7 +1069,7 @@ registered cases and gaps promoted by a current release red enter those gates.
 
 ### Release Acceptance
 
-- Every case assigned to the active Revision 18 release gate, including any
+- Every case assigned to the active Revision 19 release gate, including any
   gap promoted by a current release red, reports pass with no undocumented skip.
 - Both exact Codex rollout replays report the expected final row and tail order.
 - The complete validation command sequence is recorded with environment data.

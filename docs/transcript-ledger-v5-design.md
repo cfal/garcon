@@ -1,9 +1,22 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 18, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 19, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 19 replaces the derived workspace FTS index with schema-v8 relational
+postings. Persistent FTS5 crisis merges could make one whole-chat replacement
+exceed the Worker deadline and take search down for every chat. The replacement
+uses bounded raw and 32-term physical grants, an `active_complete` population,
+activation-only global corpus accounting, private in-memory FTS5 tokenizers,
+cooperative Worker retirement, and source-audited WAL reservations. Schema-v7
+derived data is discarded and rebuilt from the ledger; no provider-native
+history participates. The checked bounds are `F=49,829` frames,
+`H=199,316` frames, positive `cache_size=49,893` pages, and maximum WAL size
+`821,181,952` bytes. The sole runtime is Bun 1.4.0 with SQLite 3.53.2 and FTS5
+source ID
+`fts5: 2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24`.
 
 Revision 18 records the final stabilization corrections. Permission history
 has one integration-generated occurrence UUID, named
@@ -655,6 +668,105 @@ CREATE UNIQUE INDEX transcript_submission
   switch or browser-cache hydration. Evicting memory never truncates the
   ledger — scrolling reloads older pages.
 
+### 4.5 Derived transcript search
+
+Transcript search is one workspace-wide, separately rebuildable SQLite
+database under `server-agents/common`; it is never ledger authority. Schema v8
+stores raw chunks, durable per-chunk progress, relational term postings, one
+chat-state row, singleton corpus statistics, and a 32-byte tokenizer
+fingerprint. It has no persistent FTS table, trigger, cascade, migration from
+schema v7, or provider-owned input. Opening an old, malformed, or
+fingerprint-mismatched derived database closes every handle, removes the main
+file plus WAL/SHM, and recreates from current ledger views before admission.
+An unapproved exact SQLite FTS5 source ID refuses search enable instead of
+recreating in a loop.
+
+CI installs Bun through the `canary` channel. Its only accepted resolved search
+runtime is Bun 1.4.0 with SQLite 3.53.2. The package-manager declaration,
+schema identity, tokenizer identity, and production-coupled frame/resource
+proof enforce that one model; no dual runtime or compatibility fallback exists.
+
+Creation sets and reads back `page_size=4096` and `auto_vacuum=NONE` before the
+first schema write or journal-mode change. Every writer verifies WAL,
+`synchronous=NORMAL`, foreign keys, secure deletion, disabled automatic
+checkpointing, `cache_spill=OFF`, and positive `cache_size=49,893`. The reader
+verifies schema identity and tokenizer fingerprint before beginning any
+persistent snapshot.
+
+The searchable population is `active_complete`: the chunk progress is
+complete; its chat state is `indexed/idle`; state and chunk view IDs agree; the
+chunk ordinal is at or below the processed frontier; and processed equals
+target. Global document count, average length, and native phrase document
+frequency use that population across the complete derived index, independently
+of a request allowlist. Candidate, snippet, and body reads then intersect the
+same population with the exact allowed chat, view, and frontier. Fully staged
+pending or failed residue contributes nothing. Activation is the sole global
+addition boundary; an indexed-to-pending transition subtracts the complete
+slot once, while build and cleanup mutate only local slot counters.
+
+Each chunk stores its body and immutable body-token totals. Document length is
+native body occurrences plus one logical zero-weight scope token; no physical
+pad posting exists. Posting positions are strictly increasing zero-based native
+positions encoded as shortest-form positive-delta unsigned LEB128. Every
+bounded build re-tokenizes the source-bounded immutable body, validates and
+round-trips selected postings before DML, and advances exact durable term,
+occurrence, byte, and BLOB-cursor counters. The final insertion itself proves
+all immutable totals, `SUM(frequency)=token_count-1`, and no successor term,
+then completes the chunk, advances the frontier, and selects the next chunk in
+the same transaction. There is no second verification state. A zero-native-term
+body follows the explicit legal pad-only finalization path.
+
+Bounded finalization detects production-write tail and completeness faults;
+reader decoding detects malformed active encodings and recreates the derived
+database before returning a result. A different but still canonical
+same-frequency, same-byte-length positions BLOB is deliberately not detectable
+without a second verification state machine. That accepted residual can alter
+only phrase adjacency for one term in one chunk; authoritative chat ownership,
+global corpus counts, document length, and term presence remain unchanged.
+
+Physical mutation work is receiver-bounded: at most 16 raw rows and 1 MiB of
+raw input, or 32 persisted term rows and 512 KiB of selected term-plus-position
+bytes. Aggregate tokenizer and transport caps apply before `BEGIN IMMEDIATE`
+with no first-row bypass. Every tuple-CAS mismatch is a zero-DML supersession.
+Cleanup first makes a complete chunk non-contributing once, deletes terms and
+raw rows in bounded reverse-key batches, and requires explicit zero counters
+and no remaining terms before raw deletion. Replacement and removal settlement
+remain held through cooperative reader/indexer close and a verified secure
+`wal_checkpoint(TRUNCATE)` barrier.
+
+The service owns two logical mutation permits but posts exactly one physical
+indexer grant at a time; ungranted work owns no Worker deadline or WAL
+reservation. Separate 30-second start and physical watchdogs surround
+`step-started`. Timeout, cancellation, Worker failure, or unknown completion
+fences grants and never authorizes an overlapping replacement Worker or
+TRUNCATE. Cooperative quiesce must roll back or finish the current bounded
+operation, finalize helpers/statements, close SQLite, acknowledge, and produce
+an actual Worker close event before replacement or maintenance.
+
+Routine WAL authority is `wal_checkpoint(NOOP)` only. Both the parent
+reservation and writer-local pre-DML observation require log and uncheckpointed
+backlog plus one `F=49,829`-frame reservation to remain at or below
+`H=199,316`. Every known completion, including zero-DML and deterministic
+error, takes a newer epoch/sequence observation when possible and releases only
+its exact grant reservation. Missing post-step metrics fence later grants;
+unknown outcome retains the reservation. `PASSIVE` is forbidden because it can
+copy accumulated content during an ordinary request.
+
+When another reservation no longer fits, maintenance overtakes ungranted work,
+cooperatively closes both Workers, performs verified TRUNCATE on a fresh
+indexer, advances the WAL epoch, and reopens admission. Append-only workloads
+therefore cannot deadlock at high water.
+
+Query compilation uses a private no-disk in-memory FTS5 `unicode61
+remove_diacritics 2` helper and finishes before the persistent reader begins
+one snapshot. The helper's exact source ID, no-disk pragmas, sentinel token
+stream, deletion, and fingerprint are validated. Persistent evaluation uses
+bounded resumable slices over relational postings: 256 rows/probes, 512 KiB of
+term-plus-position bytes, 4,096 decoded comparisons or aggregate updates, 16
+bodies, and 1 MiB of body bytes per grant. BM25 keeps SQLite's fixed
+`k1=1.2`, `b=.75`, clamped IDF, body frequency, and pad-inclusive document
+length. Reader quiesce rolls back its one snapshot before close and checkpoint.
+
 ## 5. Producer Boundary
 
 ### 5.1 The sink
@@ -1131,15 +1243,17 @@ matrix. "Conversational rows" below means `user-input` rows plus
   execution state. Late content renders in observed order.
 - **Search** indexes conversational content only, keyed
   `(chatId, transcriptViewId, ordinal)` with an appended-through
-  watermark; normal appends index only the suffix; nothing is ever
-  de-indexed within a live view. Commit notifications and view
-  replacement enter the search worker in the same per-chat order, so
-  deleting a replaced view's entries cannot be followed by a delayed
-  old-view insert; the derived index may delete replaced views' entries,
-  and query admission is current-view-qualified regardless.
-  Index status is current-view/frontier-qualified: pending until
-  acknowledgement, failed after terminal indexing rejection, and indexed
-  after acknowledged repair, including valid views with no searchable rows.
+  watermark. Normal appends index only the ordered suffix; view replacement,
+  removal, and prune use bounded relational cleanup plus the secure barrier in
+  4.5. Commit notifications, cleanup tickets, and view replacement remain on
+  the controller-owned same-chat tail, so delayed old-view work either runs
+  before the replacement or fails its full-tuple CAS with zero DML. Candidate
+  reads are always current-view/frontier-qualified and use only
+  `active_complete` chunks. Health uses covering semantics: a same-view
+  `indexed/idle` frontier at or beyond the requested frontier is indexed;
+  same-view deterministic failure is failed; absent, pending, mismatched, or
+  lagging state is pending. A valid view with no native body terms still
+  activates its pad-only document and reports indexed.
 - **Preview** selects the latest conversational row; notices and
   lifecycle state are separate UI signals, never preview text.
 - **Model context and carryover** are the conversational fold, minus the
@@ -1352,10 +1466,11 @@ It is never automatic and is the sole full-transcript replacement path:
 6. Core issues a sink bound to the new view; the typed full-transcript
    replacement event is a core-to-client broadcast, not a sink
    publication.
-7. Search deletes the replaced view's entries and indexes the new view,
-   in the same per-chat order as commits; query admission is
-   current-view-qualified throughout, and a not-yet-indexed replacement
-   returns absent results, never stale ones.
+7. Search subtracts the old active slot, cleans its relational postings in
+   bounded same-chat grants, and holds replacement settlement through
+   cooperative Worker close plus verified TRUNCATE before building the new
+   view. Query admission is current-view-qualified throughout, so a
+   not-yet-active replacement returns absent results, never stale ones.
 
 If staging fails before the cutover, core issues a fresh sink bound to
 the unchanged current view before releasing the reservation; the chat
@@ -1704,6 +1819,12 @@ relevant-entry definition under the 10.2 obligation.
 | Target-chat creation crash before registration | Unregistered target directory removed at startup; a native-fidelity fork may orphan a provider artifact — best-effort rollback, named accepted loss. |
 | Crash-missed native output after genesis | Drift check compares against the integration-emitted watermark, so core-authored rows cannot mask it; notice with Reload; manual reload remediates while the binding is current. |
 | Native session used externally while Garcon is idle | Expected, not a violation; the drift notice surfaces it; manual reload adopts it. |
+| Search opens schema v7 or a missing, malformed, or unequal tokenizer fingerprint | Close all search handles, remove the derived main/WAL/SHM files, and recreate schema v8 from current ledger views before admission; pending derived state is never reinterpreted. |
+| Search runtime reports an unapproved exact FTS5 source ID or sentinel | Search enable fails with a fixed unavailable error; ledger serving and unrelated chat execution continue; no recreate loop or provider history read occurs. |
+| Deterministic tokenizer, content, or schema rejection for one exact build tuple | That tuple becomes failed with a bounded content-free code and contributes no global statistics; acknowledged exact repair resumes from its durable cursor. Timeouts, Worker loss, and unknown outcomes never become per-chat failures. |
+| Malformed active derived posting | Emit no result frame, fence further search admission, and recreate the complete derived database under the corruption policy; there is no per-chat derived-corruption lifecycle. |
+| Search physical timeout, cancellation, Worker error, or unknown completion | Fence later grants and retain the conservative reservation; no Worker replacement or TRUNCATE overlaps the old Worker. Only cooperative acknowledgement, actual close, and verified startup TRUNCATE can reopen search. If native SQLite never returns, search remains fenced until process restart. |
+| Search replacement, removal, or prune reaches its final cleanup transaction | Keep its promise and controller-owned same-chat tail unsettled until both Workers close cooperatively and verified TRUNCATE physically retires the old content. |
 | Chat deletion | Tombstone first; the ledger connection closes before the chat directory is removed. |
 
 ## 16. Consciously Accepted Losses and Limitations
@@ -1875,13 +1996,46 @@ The catalog cites this revision, but its inventory is not repeated here.
   `{requestId, incarnation}` payload as the sole public UUID, while an encode
   assertion proves the durable key remains `incarnation`.
 - **Read folds**: the section 9 matrix as executable assertions per
-  surface; search suffix-only within a live view, replaced-view entry
-  deletion ordered with commits per chat, current-view query admission;
-  preview selection; share snapshots copied at publish and unaffected by
-  reload and view deletion; ordinary export stripping `providerMeta` and
-  session native refs with the raw support export separate; direct
-  providers receive resent inputs exactly once; late content
-  participates normally in every fold.
+  surface; preview selection; share snapshots copied at publish and unaffected
+  by reload and view deletion; ordinary export stripping `providerMeta` and
+  session native refs with the raw support export separate; direct providers
+  receive resent inputs exactly once; late content participates normally in
+  every fold.
+- **Derived search v8**: trace-assert ordered creation/readback and
+  version/fingerprint recreation before admission; exact private-tokenizer
+  pragmas, source allowlist, sentinel, no-disk path, delete-all, fingerprint,
+  and exceptional close/recreate behavior on the sole approved runtime. Generated
+  and fault-injected postings lock minimal positive-delta LEB128, strict bounds,
+  decoded count, byte totals, per-chunk frequency sum, acknowledgement-loss
+  restart, zero-term finalization, and active corruption recreation. Population
+  fixtures distinguish globally active disallowed chats from pending physical
+  residue and compare match set, numeric BM25 order, phrase frequency, AND
+  behavior, and snippet identity with a private reference FTS5 corpus for
+  ASCII, `foo_bar`, diacritics, Hangul, and CJK. Reader instrumentation proves
+  compile-before-BEGIN, one shared snapshot, every slice cap, hot-position
+  continuation, exact sparse-prefix seeks, cancellation, and close-before-
+  checkpoint. Fake-clock service tests prove one physical grant, two logical
+  permits, same-chat order, weighted cleanup, maintenance priority, both
+  watchdog boundaries, exact WAL reservation/observation release, and no
+  overlapping Worker replacement or checkpoint. Two-connection privacy tests
+  hold a reader through replacement, removal, prune, and crash-before-barrier,
+  then require cooperative close, verified TRUNCATE, and absence of synthetic
+  raw/term sentinels from main/WAL bytes before settlement.
+- **Search source/frame/resource proof**: a checked-in exact-DDL,
+  exact-production-SQL oracle is keyed by the sole approved SQLite source ID and
+  covers non-final/final build, first/later cleanup, zero-term finalization,
+  raw stage/delete, activation, indexed-to-pending, prune, frontier/failure,
+  removal, and zero-DML paths on empty, mature ascending/interleaved/descending,
+  and deliberately fragmented layouts. VDBE multiplicity, every cap-plus-one
+  pre-BEGIN rejection, reserved-byte observation, frame high water
+  `F=49,829`, RSS below 256 MiB with spill disabled, and a complete
+  `H=199,316`-frame TRUNCATE below 30 seconds are release gates. Any DDL, SQL,
+  cap, pragma, or supported source change invalidates the numbers and reruns the
+  proof. The accepted run is 80/80 frame cases with maximum 304 frames, 18/18
+  RSS cases with maximum 9,367,552-byte RSS delta, and exact 821,181,952-byte
+  full-`H` WAL retirement in 4,574.374 ms to a zero-byte file. The production
+  proof script SHA-256 is
+  `d2f95ea4a44f95445aafa8416587234668cc4985fb5b2e9b97a20d23f86976aa`.
 - **Drift check**: fixture native files; the probe obligation per
   provider (reported timestamps never exceed core append times for
   observed entries); strictly-newer relevant entries fire and
@@ -1933,7 +2087,7 @@ The catalog cites this revision, but its inventory is not repeated here.
   provenance); the
   single native import with seed-receipt exclusion; the
   delete-then-promote cutover with the replaced view gone and stale-view
-  errors intact; search deletion-then-index ordering; queued entries
+  errors intact; search cleanup, secure barrier, and rebuild ordering; queued entries
   blocking the flow; continuation/fork copying the projection
   into the target chat database transactionally, building fully before
   registration, with unregistered-directory startup cleanup and later
@@ -2211,7 +2365,7 @@ stabilization defects. The current case inventory and gate status live in
     with lazy per-chat corruption fencing; backups via the backup API or
     `VACUUM INTO`; direct synchronous use behind the ledger port with no
     Worker; the ownership journal stays a separately synced file; the
-    workspace FTS search database stays separate, derived, and
+    workspace relational search database stays separate, derived, and
     rebuildable, with replaced-view entries deletable and per-chat
     ordering between commits and view replacement.
 19. Forkability is decided by the owning integration, not core, and a

@@ -5,11 +5,11 @@ single-cursor proposal formerly identified by SHA-256
 `81b5a2bbb1fd662df6c1abcc604ff674128717746e18c27c91d0d3418584f80a`.
 That SHA and every earlier numeric frame pair are superseded.
 
-The accepted design baseline is
-`/tmp/transcript-search-v8-active-complete-freeze-1786813370938391.md`, SHA-256
-`0a90b3b7f85fcb60370eb24092f966b885c0b59a8e4ebf7ef4886f003fda9d6f`,
-plus the subsequently accepted source/runtime evaluation at `K=32`.
-`docs/transcript-ledger-v5-design.md` remains the governing product design.
+The historical derivation freeze had SHA-256
+`0a90b3b7f85fcb60370eb24092f966b885c0b59a8e4ebf7ef4886f003fda9d6f`.
+It is provenance only: this checked-in document is the self-contained search
+implementation contract, and `docs/transcript-ledger-v5-design.md` remains the
+governing product design.
 
 ## Problem and decision
 
@@ -122,6 +122,11 @@ Production constants have one schema/protocol authority:
 | start watchdog | 30,000 ms | Grant post to matching `step-started` |
 | physical watchdog | 30,000 ms | `step-started` to physical completion |
 
+CI installs Bun through the `canary` channel. The only accepted resolved
+runtime is Bun 1.4.0 with SQLite 3.53.2 and exact FTS5 source ID
+`fts5: 2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24`.
+There is no second runtime matrix or compatibility fallback.
+
 Tokenizer receiver limits per candidate raw prefix are independent:
 
 - 16 documents;
@@ -153,8 +158,8 @@ the previous exact acknowledgement.
 
 ## Schema v8
 
-`schema.ts:createSchema()` is the executable DDL authority. The physical shape
-is fixed:
+`schema-database.ts:createSchema()` is the executable DDL authority;
+`schema.ts` is its stable public facade. The physical shape is fixed:
 
 - `search_chat_state` is `WITHOUT ROWID, STRICT`, keyed by `chat_id`, with
   `transcript_view_id`, `status`, `phase`, `target_through`,
@@ -234,7 +239,7 @@ CREATE VIRTUAL TABLE tokenizer_vocab USING fts5vocab(tokenizer_fts, instance);
 
 The helper disables automerge, raises crisis merge, and uses an 8-MiB hashsize,
 which stays inside the reserved non-page-cache headroom. It asserts every
-`database_list` path is empty, allowlists the two exact FTS5 source IDs, checks
+`database_list` path is empty, requires the sole exact FTS5 source ID, checks
 the multilingual sentinel `Crème 東京 foo_bar 한글`, and derives the durable
 32-byte fingerprint from source ID, tokenizer spec, sentinel tuples, query
 compiler version, and posting encoding version.
@@ -510,7 +515,7 @@ remain independent of that TEMP relation.
 Exact phrases use one fixed-term `(term, chat_id, chunk_id)` driver and bounded
 `(chunk_id, term)` point probes for remaining terms/positions. Evaluation is
 chat/document-major: one allowed chat and chunk at a time, one chat accumulator,
-and a global top-100 heap. A document clause score is the sum of its mandatory
+and a globally bounded sorted top-100 accumulator. A document clause score is the sum of its mandatory
 native-phrase BM25 scores; a chat score sums each public clause's best document.
 
 Prefix evaluation uses bounded chunk-major ranges on `(chunk_id, term)`. It has
@@ -586,7 +591,7 @@ frames(X) = 1 + 2X
 `frames` includes the database header and a conservative freelist-trunk page
 for each structural/overflow page under `auto_vacuum=NONE`.
 
-SQLite 3.53.0 and 3.53.2 build a replacement cell before clearing the old cell.
+SQLite 3.53.2 builds a replacement cell before clearing the old cell.
 Every logical update therefore accounts for simultaneous old and new payload
 records. The exact payload-record multiplicities are:
 
@@ -639,15 +644,19 @@ Thus `F=49,829`, `H=4F=199,316`, `cache_size=F+64=49,893`, and maximum WAL
 bytes are `32 + H*(24+4096) = 821,181,952`. Positive cache pages retain dirty
 pages with `cache_spill=OFF`; no spill fallback is allowed.
 
-The accepted external source/runtime evaluation covered both approved SQLite
-sources, empty, mature ascending/interleaved/descending, and deliberately
-fragmented layouts. It included unequal 32,767/32,768-byte cursor replacement,
-cleanup remainder, final/zero/raw-delete next-active cases, 210/210 matrix
-cases, 36/36 RSS profiles, and exact full-`H` TRUNCATE. Maximum measured RSS
-delta was 6.809 MiB. Full-`H` TRUNCATE took 3.808 seconds and 3.872 seconds and
-left zero-byte WAL files. These `/tmp` results establish the accepted constants;
-the release gate still requires the proof to be checked in and coupled to the
-production DDL/primitives rather than copied SQL.
+The checked-in sole-runtime proof calls the production DDL and mutation
+primitives. Its 80/80 matrix cases cover 16 physical operations across empty,
+mature ascending/interleaved/descending, and deliberately fragmented layouts,
+including unequal 32,767/32,768-byte cursor replacement, cleanup remainder,
+and final/zero/raw-delete next-active cases. Maximum observed mutation cost was
+304 WAL frames. Its 18/18 isolated RSS profiles cover six dominant operations
+across three layouts; maximum RSS delta was 9,367,552 bytes and maximum HWM
+delta was 8,892,416 bytes. The exact `H=199,316` construction produced an
+821,181,952-byte WAL, completed TRUNCATE in 4,574.374 ms, and left a zero-byte
+WAL. `scripts/transcript-search-v8-runtime-proof.ts` has SHA-256
+`d2f95ea4a44f95445aafa8416587234668cc4985fb5b2e9b97a20d23f86976aa`;
+the production schema SQL has SHA-256
+`f145dd5094386f487d77762af6dd1417c3643a01214239009a0f88d40ee74797`.
 
 Any DDL, production SQL, cap, pragma, supported source ID, or SQLite version
 change invalidates the numeric authority and reruns the record-layout, VDBE,
@@ -679,15 +688,18 @@ Required checked-in locks:
   continuation, prefix no-match cost, cancellation, and close-before-checkpoint;
 - held-reader secure deletion for replacement/removal/prune and crash-before-
   barrier startup, proving synthetic raw/term markers absent before settlement;
-- production-coupled dual-runtime VDBE/frame/RSS/full-`H` proof.
+- production-coupled sole-runtime VDBE/frame/RSS/full-`H` proof.
 
 All fixtures use deterministic generic content and synthetic identities. No
 real transcript content enters tests or proof artifacts.
 
 ## Module ownership
 
-- `schema.ts`: exact DDL/open identity, tuple-CAS primitives, slot/corpus
-  accounting, bounded indexed seeks, WAL NOOP/capacity, and TRUNCATE primitive.
+- `schema-database.ts`: exact DDL/open identity, shared state/progress tuple
+  readers, bounded indexed navigation, WAL NOOP/capacity, and TRUNCATE.
+- `schema-mutations.ts`: tuple-CAS plans, raw/term/frontier/activation work,
+  slot/corpus accounting, cleanup, failure recording, and prune pages.
+- `schema.ts`: stable public re-export boundary for both schema modules.
 - `tokenizer.ts`: private no-disk `unicode61` helper, source/sentinel approval,
   fingerprint, query tokens, canonical postings, and decoder.
 - `worker-protocol.ts`: bounds, identities, exact envelopes, continuation and
@@ -695,8 +707,12 @@ real transcript content enters tests or proof artifacts.
 - `indexer-jobs.ts` / `indexer-main.ts`: one parent-granted physical step,
   start/completion/error observation, checkpoint verification, and cooperative
   close.
-- `query.ts` / `reader-main.ts`: TEMP allowlist, compile-before-snapshot,
-  active-complete query state machine, bounded reader slices, and quiesce.
+- `query-contract.ts`: compile-before-snapshot query preparation, TEMP
+  allowlist ownership, slice caps/results, and corruption signaling.
+- `query.ts` / `reader-main.ts`: active-complete relational evaluation,
+  bounded reader slices, result streaming, and quiesce.
+- `transcript-search-service-contract.ts`: service inputs plus deterministic
+  Worker error, grant, and physical-result interpretation.
 - `transcript-search-service.ts` / `worker-supervisor.ts`: logical permits,
   weighted dispatch, grant watchdogs, WAL reservations, maintenance, secure
   settlement, corruption recreation, and Worker lifecycle.
