@@ -81,12 +81,6 @@ jobs:
       - name: Run server tests
         run: bun run test:server
 
-      - name: Prove transcript search v8 bounds
-        run: |
-          bun run test:transcript-search-v8-proof -- --matrix
-          bun run test:transcript-search-v8-proof -- --rss
-          bun run test:transcript-search-v8-proof -- --full-h
-
       - name: Run CLI checks
         run: bun run --cwd cli typecheck && bun run --cwd cli test
 

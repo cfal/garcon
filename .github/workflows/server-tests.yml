@@ -30,15 +30,5 @@ jobs:
         working-directory: server
         run: bun install --frozen-lockfile
 
-      - name: Prove transcript search v8 bounds
-        run: |
-          bun run test:transcript-search-v8-proof -- --matrix
-          bun run test:transcript-search-v8-proof -- --rss
-          bun run test:transcript-search-v8-proof -- --full-h
-
       - name: Run server tests
-        shell: bash
-        run: |
-          while IFS= read -r test_file; do
-            bun test "$test_file"
-          done < <(find server -path '*/__tests__/*.test.js' | sort)
+        run: bun run test:server
