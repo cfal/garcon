@@ -14,6 +14,7 @@ export interface SearchCorpusTier {
   readonly sparseChats: number;
   readonly bodyBytes: number;
   readonly oversizedChat: boolean;
+  readonly phraseDecoy: boolean;
 }
 
 export const SEARCH_CORPUS_TIER_S: SearchCorpusTier = {
@@ -24,6 +25,7 @@ export const SEARCH_CORPUS_TIER_S: SearchCorpusTier = {
   sparseChats: 6,
   bodyBytes: 780,
   oversizedChat: false,
+  phraseDecoy: false,
 };
 
 export const SEARCH_CORPUS_TIER_M: SearchCorpusTier = {
@@ -34,6 +36,7 @@ export const SEARCH_CORPUS_TIER_M: SearchCorpusTier = {
   sparseChats: 263,
   bodyBytes: 780,
   oversizedChat: false,
+  phraseDecoy: true,
 };
 
 export const SEARCH_CORPUS_TIER_L: SearchCorpusTier = {
@@ -44,6 +47,7 @@ export const SEARCH_CORPUS_TIER_L: SearchCorpusTier = {
   sparseChats: 134,
   bodyBytes: 780,
   oversizedChat: false,
+  phraseDecoy: false,
 };
 
 export const SEARCH_CORPUS_TIER_ISOLATION: SearchCorpusTier = {
@@ -54,6 +58,7 @@ export const SEARCH_CORPUS_TIER_ISOLATION: SearchCorpusTier = {
   sparseChats: 2,
   bodyBytes: 780,
   oversizedChat: true,
+  phraseDecoy: false,
 };
 
 export interface SeededSearchCorpus {
@@ -62,6 +67,7 @@ export interface SeededSearchCorpus {
   readonly oversizedChatId: string | null;
   readonly markerTerm: string;
   readonly secondaryMarkerTerm: string;
+  readonly phraseDecoyChatId: string | null;
 }
 
 export interface SeededCorpusTotals {
@@ -92,12 +98,23 @@ export async function createSearchCorpusChats(
     denseChatIds.push(await seedChat(`corpus dense seed ${index} ${markerTerm}`));
   }
   for (let index = 0; index < tier.sparseChats; index += 1) {
-    sparseChatIds.push(await seedChat(`corpus sparse seed ${index}`));
+    const content = tier.phraseDecoy && index === 0
+      ? `corpus sparse seed ${index} ${secondaryMarkerTerm} ${markerTerm}`
+      : `corpus sparse seed ${index}`;
+    sparseChatIds.push(await seedChat(content));
   }
   const oversizedChatId = tier.oversizedChat
     ? await seedChat('corpus oversized seed')
     : null;
-  return { denseChatIds, sparseChatIds, oversizedChatId, markerTerm, secondaryMarkerTerm };
+  const phraseDecoyChatId = tier.phraseDecoy ? sparseChatIds[0] ?? null : null;
+  return {
+    denseChatIds,
+    sparseChatIds,
+    oversizedChatId,
+    markerTerm,
+    secondaryMarkerTerm,
+    phraseDecoyChatId,
+  };
 }
 
 export async function bulkAppendCorpusRows(
