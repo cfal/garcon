@@ -24,7 +24,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: canary
 
       # Node backs the vitest step (vitest crashes under Bun's runtime) and any
       # node-shebang tooling; 24 is current and runs TypeScript 7 cleanly.

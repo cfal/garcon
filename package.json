@@ -2,6 +2,7 @@
   "name": "garcon",
   "version": "0.3.4",
   "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
+  "packageManager": "bun@1.4.0",
   "type": "module",
   "main": "server/main.ts",
   "workspaces": [
@@ -41,6 +42,7 @@
     "start": "bun scripts/start.js",
     "bench:chat-ingestion": "bun run --cwd web profile:chat-ingestion",
     "test": "bun run test:server && bun run test:cli && bun run --cwd web test",
+    "test:transcript-search-v8-proof": "bun scripts/transcript-search-v8-runtime-proof.ts",
     "test:transcript-inventory": "bun scripts/validate-transcript-ledger-v5-cases.js",
     "test:cli": "bun run --cwd cli test",
     "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.test.js'",

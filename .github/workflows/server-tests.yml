@@ -24,11 +24,17 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: canary
 
       - name: Install server dependencies
         working-directory: server
         run: bun install --frozen-lockfile
+
+      - name: Prove transcript search v8 bounds
+        run: |
+          bun run test:transcript-search-v8-proof -- --matrix
+          bun run test:transcript-search-v8-proof -- --rss
+          bun run test:transcript-search-v8-proof -- --full-h
 
       - name: Run server tests
         shell: bash
