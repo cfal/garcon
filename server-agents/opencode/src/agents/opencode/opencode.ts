@@ -9,6 +9,8 @@ import {
   extractSessionId,
   extractTextParts,
   isOpenCodeCompactionAssistant,
+  isOpenCodeCompactionContinuationPart,
+  isOpenCodeCompactionControlPart,
   openCodeAssistantTerminal,
   type OpenCodeAssistantTerminal,
   type SSEEvent,
@@ -151,6 +153,14 @@ interface OpenCodeModelCache {
   models: OpenCodeModelOption[];
   fetchedAt: number;
 }
+
+type OpenCodeCompactionPartDropCode =
+  | 'COMPACTION_PART_NO_SESSION'
+  | 'COMPACTION_PART_SESSION_NOT_RUNNING'
+  | 'COMPACTION_PART_BEFORE_PROMPT'
+  | 'COMPACTION_PART_ROUTE_RETIRED'
+  | 'COMPACTION_PART_INVALID_IDENTIFIERS'
+  | 'COMPACTION_PART_IDENTITY_COLLISION';
 
 function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
   return {
@@ -751,8 +761,15 @@ export class OpenCodeRuntime {
       return;
     }
 
-    const route = this.#operationRoutes.resolve(sessionId, event);
+    // Marked parts always pass through current-turn adoption so a foreign named ID cannot
+    // bypass collision refusal through ordinary named resolution.
+    const isCompactionPart = isOpenCodeCompactionControlPart(event)
+      || isOpenCodeCompactionContinuationPart(event);
+    const route = isCompactionPart
+      ? this.#adoptCompactionPart(sessionId, event)
+      : this.#operationRoutes.resolve(sessionId, event);
     if (!route) {
+      if (isCompactionPart) return;
       const part = event.properties?.part;
       const info = event.properties?.info;
       const tool = event.properties?.tool;
@@ -791,6 +808,68 @@ export class OpenCodeRuntime {
     if (belongs) this.#dispatchOpenCodeEvent(event, route);
     const terminal = belongs ? openCodeAssistantTerminal(event) : null;
     if (terminal) route.turn.assistantTerminals.set(terminal.messageId, terminal);
+  }
+
+  #adoptCompactionPart(
+    sessionId: string,
+    event: SSEEvent,
+  ): OpenCodeOperationRoute | null {
+    const session = this.#sessions.get(sessionId);
+    if (!session) {
+      return this.#dropCompactionPart('COMPACTION_PART_NO_SESSION', sessionId, event);
+    }
+    if (session.status !== 'running') {
+      return this.#dropCompactionPart(
+        'COMPACTION_PART_SESSION_NOT_RUNNING',
+        sessionId,
+        event,
+      );
+    }
+    if (session.turn.providerMessageId === null) {
+      return this.#dropCompactionPart('COMPACTION_PART_BEFORE_PROMPT', sessionId, event);
+    }
+    const adoption = this.#operationRoutes.adoptCompactionPart(session.turn, event);
+    switch (adoption.kind) {
+      case 'adopted': {
+        const part = event.properties?.part;
+        this.#logger.debug('Adopted an OpenCode compaction part', {
+          agentSessionId: sessionId,
+          partId: typeof part?.id === 'string' ? part.id : null,
+          messageId: typeof part?.messageID === 'string' ? part.messageID : null,
+        });
+        return adoption.route;
+      }
+      case 'route-retired':
+        return this.#dropCompactionPart('COMPACTION_PART_ROUTE_RETIRED', sessionId, event);
+      case 'invalid-identifiers':
+        return this.#dropCompactionPart(
+          'COMPACTION_PART_INVALID_IDENTIFIERS',
+          sessionId,
+          event,
+        );
+      case 'identity-collision':
+        return this.#dropCompactionPart(
+          'COMPACTION_PART_IDENTITY_COLLISION',
+          sessionId,
+          event,
+        );
+    }
+  }
+
+  #dropCompactionPart(
+    code: OpenCodeCompactionPartDropCode,
+    sessionId: string,
+    event: SSEEvent,
+  ): null {
+    const part = event.properties?.part;
+    this.#logger.warn('Dropping an OpenCode compaction part', {
+      code,
+      agentSessionId: sessionId,
+      eventId: event.id ?? null,
+      partId: typeof part?.id === 'string' ? part.id : null,
+      messageId: typeof part?.messageID === 'string' ? part.messageID : null,
+    });
+    return null;
   }
 
   #handlePermissionEvent(

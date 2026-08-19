@@ -1,6 +1,13 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeOperationRoutes } from '../operation-routes.js';
-import { createOpenCodeTurnContext } from '../turn-events.js';
+import {
+  isOpenCodeCompactionContinuationPart,
+  isOpenCodeCompactionControlPart,
+} from '../sse-events.js';
+import {
+  createOpenCodeTurnContext,
+  openCodeEventBelongsToTurn,
+} from '../turn-events.js';
 
 function createFixture() {
   const logger = {
@@ -57,6 +64,23 @@ function assistantEvent(sessionId, messageId, parentId, eventId) {
     properties: {
       sessionID: sessionId,
       info: { id: messageId, role: 'assistant', parentID: parentId },
+    },
+  };
+}
+
+function compactionPartEvent(part = {}) {
+  return {
+    id: 'event-compaction-part',
+    type: 'message.part.updated',
+    properties: {
+      sessionID: 'session-1',
+      part: {
+        id: 'part-compaction',
+        messageID: 'user-compaction',
+        type: 'compaction',
+        auto: true,
+        ...part,
+      },
     },
   };
 }
@@ -370,5 +394,197 @@ describe('OpenCodeOperationRoutes', () => {
         part: { id: 'steering-a', messageID: 'user-steering-a' },
       },
     })).toBeNull();
+  });
+
+  it('recognizes only provider-marked automatic compaction control parts', () => {
+    for (const event of [
+      { ...compactionPartEvent(), type: 'message.part.delta' },
+      compactionPartEvent({ type: 'text' }),
+      compactionPartEvent({ auto: undefined }),
+      compactionPartEvent({ auto: false }),
+      compactionPartEvent({ auto: 'true' }),
+    ]) {
+      expect(isOpenCodeCompactionControlPart(event)).toBe(false);
+    }
+
+    expect(isOpenCodeCompactionControlPart(compactionPartEvent())).toBe(true);
+    expect(isOpenCodeCompactionControlPart(compactionPartEvent({ overflow: false }))).toBe(true);
+    expect(isOpenCodeCompactionControlPart(compactionPartEvent({ overflow: true }))).toBe(true);
+  });
+
+  it('recognizes only provider-marked automatic compaction continuation parts', () => {
+    const continuation = (part = {}) => compactionPartEvent({
+      type: 'text',
+      auto: undefined,
+      synthetic: true,
+      metadata: { compaction_continue: true },
+      ...part,
+    });
+    for (const event of [
+      { ...continuation(), type: 'message.part.delta' },
+      continuation({ type: 'file' }),
+      continuation({ synthetic: undefined }),
+      continuation({ synthetic: false }),
+      continuation({ metadata: undefined }),
+      continuation({ metadata: {} }),
+      continuation({ metadata: { compaction_continue: false } }),
+      continuation({ metadata: { compaction_continue: 'true' } }),
+    ]) {
+      expect(isOpenCodeCompactionContinuationPart(event)).toBe(false);
+    }
+
+    expect(isOpenCodeCompactionContinuationPart(continuation())).toBe(true);
+    expect(isOpenCodeCompactionContinuationPart(continuation({
+      metadata: { compaction_continue: true, provider_field: 'retained' },
+    }))).toBe(true);
+  });
+
+  it('adopts an automatic compaction control part and resolves the invisible summary chain', () => {
+    const { logger, routes } = createFixture();
+    const operation = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    routes.observe(operation.route, promptEvent(operation.turn, 'user-a', 'event-a'));
+    operation.turn.providerMessageId = 'user-a';
+
+    expect(routes.adoptCompactionPart(operation.turn, compactionPartEvent())).toEqual({
+      kind: 'adopted',
+      route: operation.route,
+    });
+    const summary = {
+      id: 'event-summary',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-summary',
+          role: 'assistant',
+          parentID: 'user-compaction',
+          summary: true,
+          finish: 'stop',
+          time: { completed: 1 },
+        },
+      },
+    };
+    expect(routes.resolveNamed('session-1', summary)).toBe(operation.route);
+    expect(openCodeEventBelongsToTurn(operation.turn, summary)).toBe(false);
+    routes.observe(operation.route, summary);
+
+    const summaryPart = {
+      id: 'event-summary-part',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-summary', messageID: 'assistant-summary', type: 'text' },
+      },
+    };
+    const summaryDelta = {
+      id: 'event-summary-delta',
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-summary',
+        partID: 'part-summary',
+        delta: 'synthetic summary content',
+      },
+    };
+    expect(routes.resolveNamed('session-1', summaryPart)).toBe(operation.route);
+    expect(routes.resolveNamed('session-1', summaryDelta)).toBe(operation.route);
+    expect(openCodeEventBelongsToTurn(operation.turn, summaryPart)).toBe(false);
+    expect(openCodeEventBelongsToTurn(operation.turn, summaryDelta)).toBe(false);
+    expect(operation.turn.assistantMessageIds).not.toContain('assistant-summary');
+    expect(operation.turn.assistantTerminals).toHaveLength(0);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('retires adopted compaction identities with their turn', () => {
+    const { routes } = createFixture();
+    const operation = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    const event = compactionPartEvent();
+    expect(routes.adoptCompactionPart(operation.turn, event).kind).toBe('adopted');
+
+    routes.retireTurn(operation.turn);
+
+    expect(routes.resolveNamed('session-1', event)).toBeNull();
+    expect(routes.adoptCompactionPart(operation.turn, event)).toEqual({
+      kind: 'route-retired',
+    });
+  });
+
+  it('refuses malformed and colliding compaction identities without logging', () => {
+    const { logger, routes } = createFixture();
+    const first = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    const second = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-2',
+      runId: 'run-b',
+    });
+    expect(routes.adoptCompactionPart(first.turn, compactionPartEvent({ id: '' }))).toEqual({
+      kind: 'invalid-identifiers',
+    });
+    expect(routes.adoptCompactionPart(first.turn, compactionPartEvent({ messageID: '' }))).toEqual({
+      kind: 'invalid-identifiers',
+    });
+    expect(routes.bindPart(second.turn, 'part-collision')).toBe(true);
+
+    expect(routes.adoptCompactionPart(first.turn, compactionPartEvent({
+      id: 'part-collision',
+      messageID: 'message-new',
+    }))).toEqual({ kind: 'identity-collision' });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('preserves the metadata-inheritance collision warning', () => {
+    const { logger, routes } = createFixture();
+    const first = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+    const second = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-2',
+      runId: 'run-b',
+    });
+    expect(routes.bindPart(second.turn, 'part-collision')).toBe(true);
+    let partIdReads = 0;
+    let messageIdReads = 0;
+    const part = {
+      get id() {
+        partIdReads += 1;
+        return partIdReads <= 2 ? 'part-unbound' : 'part-collision';
+      },
+      get messageID() {
+        messageIdReads += 1;
+        return messageIdReads <= 2 ? 'message-unbound' : 'message-new';
+      },
+      type: 'text',
+      metadata: { garcon_operation_part_id: first.turn.providerPromptPartId },
+    };
+
+    expect(routes.resolve('session-1', {
+      id: 'event-inheritance-collision',
+      type: 'message.part.updated',
+      properties: { sessionID: 'session-1', part },
+    })).toBeNull();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Ignoring an OpenCode operation identity collision',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        partId: 'part-collision',
+        messageId: 'message-new',
+      }),
+    );
   });
 });

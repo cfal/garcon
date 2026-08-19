@@ -15,6 +15,12 @@ export interface OpenCodeOperationRoute {
   readonly requestAbortController: AbortController;
 }
 
+export type OpenCodeCompactionPartAdoption =
+  | { readonly kind: 'adopted'; readonly route: OpenCodeOperationRoute }
+  | { readonly kind: 'route-retired' }
+  | { readonly kind: 'invalid-identifiers' }
+  | { readonly kind: 'identity-collision' };
+
 export class OpenCodeOperationRoutes {
   readonly #byPart = new Map<string, OpenCodeOperationRoute>();
   readonly #byMessage = new Map<string, OpenCodeOperationRoute>();
@@ -107,6 +113,24 @@ export class OpenCodeOperationRoutes {
     return route;
   }
 
+  adoptCompactionPart(
+    turn: OpenCodeTurnContext,
+    event: SSEEvent,
+  ): OpenCodeCompactionPartAdoption {
+    const route = this.#byTurn.get(turn);
+    if (!route) return { kind: 'route-retired' };
+    const part = event.properties?.part;
+    const partId = typeof part?.id === 'string' ? part.id : '';
+    const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
+    if (!partId || !messageId) return { kind: 'invalid-identifiers' };
+    if (!this.#tryBindContinuation(route, partId, messageId)) {
+      return { kind: 'identity-collision' };
+    }
+    route.turn.observedUserMessageIds.add(messageId);
+    route.turn.providerContinuationMessageIds.add(messageId);
+    return { kind: 'adopted', route };
+  }
+
   observe(route: OpenCodeOperationRoute, event: SSEEvent): void {
     const part = event.properties?.part;
     if (part?.id === route.turn.providerPromptPartId) {
@@ -192,16 +216,25 @@ export class OpenCodeOperationRoutes {
     partId: string,
     messageId: string,
   ): boolean {
+    if (this.#tryBindContinuation(route, partId, messageId)) return true;
+    this.logger.warn('Ignoring an OpenCode operation identity collision', {
+      sessionId: route.sessionId,
+      partId,
+      messageId,
+    });
+    return false;
+  }
+
+  #tryBindContinuation(
+    route: OpenCodeOperationRoute,
+    partId: string,
+    messageId: string,
+  ): boolean {
     const partKey = routeKey(route.sessionId, partId);
     const messageKey = routeKey(route.sessionId, messageId);
     const partRoute = this.#byPart.get(partKey);
     const messageRoute = this.#byMessage.get(messageKey);
     if ((partRoute && partRoute !== route) || (messageRoute && messageRoute !== route)) {
-      this.logger.warn('Ignoring an OpenCode operation identity collision', {
-        sessionId: route.sessionId,
-        partId,
-        messageId,
-      });
       return false;
     }
     this.#byPart.set(partKey, route);

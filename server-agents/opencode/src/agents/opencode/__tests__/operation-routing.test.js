@@ -10,6 +10,7 @@ function createEventStream() {
   const waiters = [];
   const promptRequestsByPart = new Map();
   const promptRequestsByMessage = new Map();
+  const promptRequestsBySession = new Map();
   let closed = false;
   const resolvePrompt = (info) => {
     const request = promptRequestsByMessage.get(info.parentID);
@@ -19,7 +20,10 @@ function createEventStream() {
     if (event.type === 'message.part.updated') {
       const part = event.properties?.part;
       const operationPartId = part?.metadata?.garcon_operation_part_id ?? part?.id;
-      const request = promptRequestsByPart.get(operationPartId);
+      const request = promptRequestsByPart.get(operationPartId)
+        ?? (part?.metadata?.compaction_continue === true
+          ? promptRequestsBySession.get(part.sessionID ?? event.properties?.sessionID)
+          : undefined);
       if (request && typeof part?.messageID === 'string') {
         promptRequestsByMessage.set(part.messageID, request);
       }
@@ -40,6 +44,7 @@ function createEventStream() {
         const partId = input.parts[0].id;
         const request = { resolve, sessionId: input.sessionID };
         promptRequestsByPart.set(partId, request);
+        promptRequestsBySession.set(input.sessionID, request);
         const abort = () => {
           promptRequestsByPart.delete(partId);
           reject(options.signal.reason ?? new Error('OpenCode prompt request aborted'));
@@ -117,6 +122,30 @@ function pushPrompt(eventStream, {
   });
 }
 
+function pushCompactionPart(eventStream, {
+  eventId,
+  kind = 'control',
+  messageId = 'user-compaction',
+  partId = 'part-compaction',
+  sessionId,
+}) {
+  const part = kind === 'control'
+    ? { type: 'compaction', auto: true }
+    : {
+        type: 'text',
+        synthetic: true,
+        metadata: { compaction_continue: true },
+        text: 'Continue after automatic compaction.',
+      };
+  if (partId !== null) part.id = partId;
+  if (messageId !== null) part.messageID = messageId;
+  eventStream.push({
+    id: eventId,
+    type: 'message.part.updated',
+    properties: { sessionID: sessionId, part },
+  });
+}
+
 function pushAssistant(eventStream, {
   eventNumber,
   messageId,
@@ -171,6 +200,27 @@ async function waitFor(predicate) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error('Timed out waiting for condition');
+}
+
+function diagnosticLogger() {
+  const debug = [];
+  const warnings = [];
+  return {
+    debug,
+    warnings,
+    logger: {
+      debug(...args) { debug.push(args); },
+      info() {},
+      warn(...args) { warnings.push(args); },
+      error() {},
+    },
+  };
+}
+
+function compactionWarningCodes(warnings) {
+  return warnings
+    .filter(([message]) => message === 'Dropping an OpenCode compaction part')
+    .map(([, details]) => details.code);
 }
 
 describe('OpenCode operation routing', () => {
@@ -766,6 +816,408 @@ describe('OpenCode operation routing', () => {
     expect(firstEvents[0].rows[0].message.content).toBe('from A');
     expect(secondEvents[0].rows[0].message.content).toBe('from B');
 
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes an automatic compaction summary chain without rows, terminals, or warnings', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-prompt',
+      messageId: 'user-prompt',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-control',
+      sessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-summary-message',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-summary',
+          role: 'assistant',
+          parentID: 'user-compaction',
+          summary: true,
+          finish: 'stop',
+          time: { completed: 1 },
+        },
+      },
+    }, { completePrompt: false });
+    eventStream.push({
+      id: 'event-summary-part',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-summary',
+          messageID: 'assistant-summary',
+          type: 'text',
+          text: 'provider-created summary',
+        },
+      },
+    });
+    eventStream.push({
+      id: 'event-summary-delta',
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-summary',
+        partID: 'part-summary',
+        delta: 'provider-created summary delta',
+      },
+    });
+    eventStream.push({
+      id: 'event-barrier',
+      type: 'session.compacted',
+      properties: { sessionID: 'session-1' },
+    });
+    await waitFor(() => diagnostics.debug.some((entry) => entry[1]?.eventId === 'event-barrier'));
+
+    expect(events).toEqual([]);
+    expect(diagnostics.warnings).toEqual([]);
+    expect(diagnostics.debug.filter(([message]) => (
+      message === 'Adopted an OpenCode compaction part'
+    ))).toHaveLength(1);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes a post-compaction answer and hides provider-created user bookkeeping', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-prompt',
+      messageId: 'user-prompt',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    eventStream.push({
+      id: 'event-continuation-user',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: { id: 'user-continuation', role: 'user' },
+      },
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-continuation-part',
+      kind: 'continuation',
+      messageId: 'user-continuation',
+      partId: 'part-continuation',
+      sessionId: 'session-1',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 10,
+      messageId: 'assistant-answer',
+      parentId: 'user-continuation',
+      sessionId: 'session-1',
+      text: 'user-facing answer',
+    });
+    pushTerminal(eventStream, {
+      eventId: 'event-12',
+      messageId: 'assistant-answer',
+      parentId: 'user-continuation',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+
+    const messages = events
+      .filter((event) => event.type === 'rows')
+      .flatMap((event) => event.rows.map((row) => row.message));
+    expect(messages.map((message) => message.content)).toEqual(['user-facing answer']);
+    expect(events.at(-1)).toMatchObject({
+      type: 'run-ended',
+      runId: 'run-a',
+      outcome: 'finished',
+    });
+    expect(JSON.stringify(events)).not.toContain('Continue after automatic compaction.');
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([]);
+    expect(diagnostics.warnings).toEqual([[
+      'Ignoring an OpenCode event without an operation identity',
+      expect.objectContaining({ eventId: 'event-continuation-user' }),
+    ]]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('drops compaction parts without a session or an observed prompt exactly once', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-no-session',
+      sessionId: 'session-missing',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-before-prompt-control',
+      sessionId: 'session-1',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-before-prompt-continuation',
+      kind: 'continuation',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => diagnostics.warnings.length === 3);
+
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([
+      'COMPACTION_PART_NO_SESSION',
+      'COMPACTION_PART_BEFORE_PROMPT',
+      'COMPACTION_PART_BEFORE_PROMPT',
+    ]);
+    expect(events).toEqual([]);
+    expect(JSON.stringify(diagnostics.warnings)).not.toContain(
+      'Continue after automatic compaction.',
+    );
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('drops compaction parts for completed and aborted sessions exactly once', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-complete', 'session-abort'], {
+      logger: diagnostics.logger,
+    });
+    const completedEvents = [];
+    await runtime.startSession({
+      command: 'complete',
+      chatId: 'chat-complete',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-complete', completedEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-complete-prompt',
+      messageId: 'user-complete',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-complete',
+      text: 'complete',
+    });
+    pushTerminal(eventStream, {
+      eventId: 'event-complete-terminal',
+      messageId: 'assistant-complete',
+      parentId: 'user-complete',
+      sessionId: 'session-complete',
+    });
+    await waitFor(() => completedEvents.some((event) => event.type === 'run-ended'));
+    pushCompactionPart(eventStream, {
+      eventId: 'event-after-complete',
+      sessionId: 'session-complete',
+    });
+
+    const abortedEvents = [];
+    await runtime.startSession({
+      command: 'abort',
+      chatId: 'chat-abort',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-abort', abortedEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-abort-prompt',
+      messageId: 'user-abort',
+      partId: promptPart(promptAsync, 1),
+      sessionId: 'session-abort',
+      text: 'abort',
+    });
+    await waitFor(() => runtime.isRunning('session-abort'));
+    await expect(runtime.abort('session-abort')).resolves.toBe(true);
+    pushCompactionPart(eventStream, {
+      eventId: 'event-after-abort',
+      kind: 'continuation',
+      sessionId: 'session-abort',
+    });
+    await waitFor(() => compactionWarningCodes(diagnostics.warnings).length === 2);
+
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([
+      'COMPACTION_PART_SESSION_NOT_RUNNING',
+      'COMPACTION_PART_SESSION_NOT_RUNNING',
+    ]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('does not adopt into another session after the owning route retires', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-old', 'session-new'], {
+      logger: diagnostics.logger,
+    });
+    const oldEvents = [];
+    const newEvents = [];
+    await runtime.startSession({
+      command: 'old',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-old', oldEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-old-prompt',
+      messageId: 'user-old',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-old',
+      text: 'old',
+    });
+    await runtime.startSession({
+      command: 'new',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-new', newEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-new-prompt',
+      messageId: 'user-new',
+      partId: promptPart(promptAsync, 1),
+      sessionId: 'session-new',
+      text: 'new',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-retired-route',
+      sessionId: 'session-old',
+    });
+    await waitFor(() => diagnostics.warnings.length === 1);
+
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([
+      'COMPACTION_PART_ROUTE_RETIRED',
+    ]);
+    expect(oldEvents).toEqual([]);
+    expect(newEvents).toEqual([]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('drops malformed compaction identities once without transcript content', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1'], {
+      logger: diagnostics.logger,
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-prompt',
+      messageId: 'user-prompt',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-missing-part-id',
+      partId: null,
+      sessionId: 'session-1',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-missing-message-id',
+      messageId: null,
+      sessionId: 'session-1',
+    });
+    await waitFor(() => diagnostics.warnings.length === 2);
+
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([
+      'COMPACTION_PART_INVALID_IDENTIFIERS',
+      'COMPACTION_PART_INVALID_IDENTIFIERS',
+    ]);
+    expect(events).toEqual([]);
+    expect(JSON.stringify(diagnostics.warnings)).not.toContain('first');
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('logs one fixed warning when compaction identities collide', async () => {
+    const diagnostics = diagnosticLogger();
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1', 'session-1'], {
+      logger: diagnostics.logger,
+    });
+    const firstEvents = [];
+    const secondEvents = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-a',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', firstEvents),
+    });
+    const firstPromptPartId = promptPart(promptAsync, 0);
+    pushPrompt(eventStream, {
+      eventId: 'event-first-prompt',
+      messageId: 'user-first',
+      partId: firstPromptPartId,
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    await runtime.startSession({
+      command: 'second',
+      chatId: 'chat-b',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-b', secondEvents),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-second-prompt',
+      messageId: 'user-second',
+      partId: promptPart(promptAsync, 1),
+      sessionId: 'session-1',
+      text: 'second',
+    });
+    pushCompactionPart(eventStream, {
+      eventId: 'event-collision',
+      messageId: 'user-first',
+      partId: firstPromptPartId,
+      sessionId: 'session-1',
+    });
+    await waitFor(() => diagnostics.warnings.length === 1);
+
+    expect(compactionWarningCodes(diagnostics.warnings)).toEqual([
+      'COMPACTION_PART_IDENTITY_COLLISION',
+    ]);
+    expect(diagnostics.warnings).toHaveLength(1);
+    expect(diagnostics.warnings[0][0]).toBe('Dropping an OpenCode compaction part');
+    expect(JSON.stringify(diagnostics.warnings)).not.toContain(
+      'Ignoring an OpenCode operation identity collision',
+    );
+    expect(firstEvents).toEqual([]);
+    expect(secondEvents).toEqual([]);
     eventStream.close();
     await runtime.shutdown();
   });

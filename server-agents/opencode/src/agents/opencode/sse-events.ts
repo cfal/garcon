@@ -114,6 +114,24 @@ export function isOpenCodeCompactionAssistant(info: unknown): boolean {
   return info.summary === true || info.mode === 'compaction' || info.agent === 'compaction';
 }
 
+// OpenCode marks every provider-created automatic compaction control part with auto=true.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/compaction.ts#L513-L536
+export function isOpenCodeCompactionControlPart(event: SSEEvent): boolean {
+  if (event.type !== 'message.part.updated') return false;
+  const part = event.properties?.part;
+  return isRecord(part) && part.type === 'compaction' && part.auto === true;
+}
+
+// The metadata key distinguishes compaction continuation from other synthetic text parts.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/compaction.ts#L486-L501
+export function isOpenCodeCompactionContinuationPart(event: SSEEvent): boolean {
+  if (event.type !== 'message.part.updated') return false;
+  const part = event.properties?.part;
+  if (!isRecord(part) || part.type !== 'text' || part.synthetic !== true) return false;
+  const metadata = isRecord(part.metadata) ? part.metadata : null;
+  return metadata?.compaction_continue === true;
+}
+
 export function extractSessionId(event: SSEEvent): string | undefined {
   const props = event.properties || {};
   return props.sessionID
