@@ -171,6 +171,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		readState: {
 			enqueueReadReceipt: vi.fn(),
 		},
+		completionNotifier: { notify: vi.fn() },
 		...overrides,
 	};
 }

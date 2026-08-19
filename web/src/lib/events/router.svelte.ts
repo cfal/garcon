@@ -151,6 +151,10 @@ export interface EventRouterReadStateStore {
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
 }
 
+export interface EventRouterCompletionNotifier {
+	notify: () => void;
+}
+
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
 	agentSettings: EventRouterAgentSettings;
@@ -161,6 +165,7 @@ export interface EventRouterStores {
 	conversationUi: ConversationUiPort;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
+	completionNotifier: EventRouterCompletionNotifier;
 }
 
 function extractFirstLine(text: string): string {
@@ -287,6 +292,7 @@ function buildDispatch(
 		getPendingChatId,
 		clearPendingChatId,
 		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
+		notifyCompletion: stores.completionNotifier.notify,
 	};
 
 	const chatEventCtx: ChatEventContext = {

@@ -22,6 +22,7 @@
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DesktopLayoutOrderSetting from './DesktopLayoutOrderSetting.svelte';
+	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 
 	interface SettingRowOptions {
 		disabled?: boolean;
@@ -276,6 +277,7 @@
 					class="w-24 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-center font-mono text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				/>
 			</div>
+			<CompletionSoundSettings />
 			<div class="mt-2 border-t border-border pb-1 pt-2">
 				<h3 class="py-2 text-sm font-medium text-foreground">{m.settings_file_opening()}</h3>
 				{@render fileOpenPlacementRow(

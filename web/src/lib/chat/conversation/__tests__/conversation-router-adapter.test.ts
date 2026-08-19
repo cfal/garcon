@@ -69,6 +69,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		conversationUi: new ConversationUiState(),
 		startupCoordinator: new StartupCoordinator(),
 		readReceiptOutbox: { enqueue: vi.fn() },
+		notifyCompletion: vi.fn(),
 	};
 }
 
