@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { Database } from 'bun:sqlite';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { Database } from 'bun:sqlite';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { HistoricalSearchMessageRow } from '../rows.js';
@@ -15,6 +15,7 @@ import {
   SEARCH_PRUNE_CORPUS_SUBTRACT_SQL,
   SEARCH_PERSISTED_SUCCESSOR_SQL,
   SEARCH_RAW_DELETE_CANDIDATES_SQL,
+  SEARCH_SCHEMA_SQL_SHA256,
   SEARCH_TERM_STEP_MAX_ROWS,
   SEARCH_WAL_HIGH_WATER_FRAMES,
   activateChat,
@@ -107,7 +108,7 @@ function completeBuild(
 }
 
 describe('transcript search v8 schema', () => {
-  it('creates the exact layout and recreates only version or fingerprint mismatches', async () => {
+  it('[TLV5-SEARCH.10-SCHEMA-IDENTITY-CORE-UNIT-01] creates the exact layout and recreates only identity mismatches', async () => {
     const { dbPath, tokenizer } = await fixture();
     try {
       const first = await openSearchDatabase(dbPath, {
@@ -162,16 +163,35 @@ describe('transcript search v8 schema', () => {
       expect(getChatState(recreated.db, 'resume-chat')).toBeNull();
       closeSearchDatabase(recreated.db);
 
+      const malformed = await openSearchDatabase(dbPath, {
+        tokenizerFingerprint: differentFingerprint,
+      });
+      planReplacement(malformed.db, {
+        chatId: 'malformed-chat',
+        transcriptViewId: 'malformed-view',
+        targetThrough: 1,
+      });
+      malformed.db.exec('DROP INDEX search_chunk_terms_by_term');
+      closeSearchDatabase(malformed.db);
+
+      const repaired = await openSearchDatabase(dbPath, {
+        tokenizerFingerprint: differentFingerprint,
+      });
+      expect(repaired.recreated).toBe(true);
+      expect(getChatState(repaired.db, 'malformed-chat')).toBeNull();
+      closeSearchDatabase(repaired.db);
+
       expect(SEARCH_TERM_STEP_MAX_ROWS).toBe(32);
       expect(SEARCH_MAX_DIRTY_FRAMES).toBe(49_829);
       expect(SEARCH_WAL_HIGH_WATER_FRAMES).toBe(199_316);
       expect(SEARCH_MAX_WAL_BYTES).toBe(821_181_952);
+      expect(SEARCH_SCHEMA_SQL_SHA256).toHaveLength(64);
     } finally {
       tokenizer.close();
     }
   });
 
-  it('keeps staged rows out of global population until activation', async () => {
+  it('[TLV5-SEARCH.02-EXACT-RESYNC-CORE-UNIT-01] keeps staged rows out of global population and covered plans exact-current', async () => {
     const { dbPath, tokenizer } = await fixture();
     const opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
     try {
@@ -249,7 +269,87 @@ describe('transcript search v8 schema', () => {
     }
   });
 
-  it('resumes one durable term cursor and finalizes zero-native chunks', async () => {
+  it('preserves a same-identity database across a transient open failure', async () => {
+    const { dbPath, tokenizer } = await fixture();
+    const opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
+    planReplacement(opened.db, {
+      chatId: 'locked-chat',
+      transcriptViewId: 'locked-view',
+      targetThrough: 1,
+    });
+    closeSearchDatabase(opened.db);
+
+    const blocker = new Database(dbPath);
+    try {
+      blocker.exec('PRAGMA journal_mode = DELETE');
+      blocker.exec('PRAGMA locking_mode = EXCLUSIVE');
+      blocker.exec('BEGIN EXCLUSIVE');
+      await expect(openSearchDatabase(dbPath, {
+        tokenizerFingerprint: tokenizer.fingerprint,
+      })).rejects.toThrow(/locked/i);
+      expect((await readFile(dbPath)).byteLength).toBeGreaterThan(0);
+    } finally {
+      blocker.exec('ROLLBACK');
+      blocker.close(false);
+    }
+
+    const resumed = await openSearchDatabase(dbPath, {
+      tokenizerFingerprint: tokenizer.fingerprint,
+    });
+    try {
+      expect(resumed.recreated).toBe(false);
+      expect(getChatState(resumed.db, 'locked-chat')?.transcriptViewId).toBe('locked-view');
+    } finally {
+      closeSearchDatabase(resumed.db);
+      tokenizer.close();
+    }
+  });
+
+  it('[TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01] indexes a frontier-only view and later appends searchable content', async () => {
+    const { dbPath, tokenizer } = await fixture();
+    const opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
+    try {
+      const plan = planReplacement(opened.db, {
+        chatId: 'empty-chat',
+        transcriptViewId: 'empty-view',
+        targetThrough: 3,
+      });
+      const frontier = requireState(advanceFrontier(opened.db, {
+        expectedState: plan.state,
+        throughOrdinal: 3,
+      }).state);
+      const indexed = requireState(activateChat(opened.db, { expectedState: frontier }).state);
+      expect(indexed).toMatchObject({
+        status: 'indexed',
+        phase: 'idle',
+        processedThrough: 3,
+        targetThrough: 3,
+        slotDocumentCount: 0,
+        slotTokenCount: 0,
+      });
+      expect(corpus(opened.db)).toEqual({ documents: 0, tokens: 0 });
+
+      const append = planAppend(opened.db, {
+        chatId: indexed.chatId,
+        transcriptViewId: indexed.transcriptViewId,
+        expectedAfterOrdinal: 3,
+        targetThrough: 4,
+      });
+      const repaired = completeBuild(opened.db, tokenizer, append.state, [{
+        ordinal: 4,
+        role: 'assistant',
+        timestamp: null,
+        body: 'synthetic later searchable content',
+      }]);
+      expect(repaired).toMatchObject({ status: 'indexed', processedThrough: 4 });
+      expect(corpus(opened.db).documents).toBe(1);
+    } finally {
+      closeSearchDatabase(opened.db);
+      tokenizer.close();
+    }
+  });
+
+  it('[TLV5-SEARCH.06-POSTING-RESTART-CORE-UNIT-01] resumes one durable term cursor and finalizes zero-native chunks', async () => {
     const { dbPath, tokenizer } = await fixture();
     let opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
     try {
@@ -421,7 +521,7 @@ describe('transcript search v8 schema', () => {
     }
   });
 
-  it('publishes next active chunks atomically and securely retires replacement rows', async () => {
+  it('[TLV5-SEARCH.06-MUTATION-CORE-UNIT-01] [TLV5-SEARCH.09-PRIVACY-CORE-UNIT-01] publishes next active chunks atomically and securely retires replacement rows', async () => {
     const { dbPath, tokenizer } = await fixture();
     const opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
     const marker = 'synthetic-secure-retirement-marker';
@@ -468,31 +568,58 @@ describe('transcript search v8 schema', () => {
       }
       current = requireState(activateChat(opened.db, { expectedState: current }).state);
 
-      const replacement = planReplacement(opened.db, {
-        chatId: current.chatId,
-        transcriptViewId: 'new-view',
-        targetThrough: 0,
+      expect(truncateWal(opened.db)).toEqual({
+        busy: 0,
+        logFrames: 0,
+        checkpointedFrames: 0,
       });
-      current = replacement.state;
-      let sawRawDeleteNext = false;
-      while (current.phase === 'replacement-cleanup') {
-        const result = cleanupStep(opened.db, { expectedState: current });
-        if (result.disposition === 'cleanup-progress') {
-          current = result.state;
-          if (result.deletedRows === 1 && current.activeChunkId !== null) {
-            sawRawDeleteNext = true;
+      expect((await readFile(dbPath)).includes(Buffer.from(marker))).toBe(true);
+      const heldReader = openSearchReadDatabase(dbPath, {
+        tokenizerFingerprint: tokenizer.fingerprint,
+      });
+      heldReader.exec('BEGIN');
+      expect(heldReader.query<{ body: string }, []>(`
+        SELECT body FROM search_chunks WHERE chat_id = 'replacement-chat' ORDER BY ordinal LIMIT 1
+      `).get()?.body).toContain(marker);
+      opened.db.exec('PRAGMA busy_timeout = 0');
+
+      try {
+        const replacement = planReplacement(opened.db, {
+          chatId: current.chatId,
+          transcriptViewId: 'new-view',
+          targetThrough: 0,
+        });
+        current = replacement.state;
+        let sawRawDeleteNext = false;
+        while (current.phase === 'replacement-cleanup') {
+          const result = cleanupStep(opened.db, { expectedState: current });
+          if (result.disposition === 'cleanup-progress') {
+            current = result.state;
+            if (result.deletedRows === 1 && current.activeChunkId !== null) {
+              sawRawDeleteNext = true;
+            }
+            continue;
           }
-          continue;
+          if (result.disposition !== 'replacement-checkpoint') {
+            throw new Error('test expected replacement checkpoint');
+          }
+          current = result.state;
         }
-        if (result.disposition !== 'replacement-checkpoint') {
-          throw new Error('test expected replacement checkpoint');
-        }
-        current = result.state;
+        expect(sawRawDeleteNext).toBe(true);
+        expect(truncateWal(opened.db).busy).toBe(1);
+        expect(current.phase).toBe('replacement-checkpoint');
+        expect((await readFile(dbPath)).includes(Buffer.from(marker))).toBe(true);
+      } finally {
+        heldReader.exec('ROLLBACK');
+        heldReader.close();
+        opened.db.exec('PRAGMA busy_timeout = 5000');
       }
-      expect(sawRawDeleteNext).toBe(true);
+
       const checkpoint = truncateWal(opened.db);
       expect(checkpoint).toEqual({ busy: 0, logFrames: 0, checkpointedFrames: 0 });
       expect((await readFile(dbPath)).includes(Buffer.from(marker))).toBe(false);
+      expect((await readFile(`${dbPath}-wal`)).includes(Buffer.from(marker))).toBe(false);
+      expect((await stat(`${dbPath}-wal`)).size).toBe(0);
       const resumed = completeReplacementCheckpoint(opened.db, { expectedState: current });
       expect(resumed).toMatchObject({ disposition: 'build', state: { phase: 'replacement-build' } });
     } finally {
@@ -638,7 +765,7 @@ describe('transcript search v8 schema', () => {
     }
   });
 
-  it('rejects cap-plus-one inputs before a transaction or WAL change', async () => {
+  it('[TLV5-SEARCH.06-CAP-PREBEGIN-CORE-UNIT-01] rejects cap-plus-one inputs before a transaction or WAL change', async () => {
     const { dbPath, tokenizer } = await fixture();
     const opened = await openSearchDatabase(dbPath, { tokenizerFingerprint: tokenizer.fingerprint });
     try {

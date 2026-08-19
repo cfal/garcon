@@ -44,7 +44,7 @@ const wal = {
 };
 
 describe('transcript search v8 Worker protocol', () => {
-  it('locks physical grant identities, constants, and exact request shapes', () => {
+  it('[TLV5-SEARCH.10-PROTOCOL-CONTRACT-01] locks physical grant identities, constants, and exact request shapes', () => {
     expect({
       K: SEARCH_TERM_STEP_MAX_ROWS,
       F: SEARCH_MAX_DIRTY_FRAMES,
@@ -98,6 +98,20 @@ describe('transcript search v8 Worker protocol', () => {
       walEpoch: 1,
       step: { kind: 'start-removal', chatId: 'x'.repeat(257) },
     })).toBe(false);
+    expect(isIndexerRequest({
+      ...identity,
+      type: 'physical-step-grant',
+      grantId: 8,
+      walEpoch: 1,
+      step: { kind: 'mark-failed', expectedState: state, errorCode: 'SEARCH_POSTING_INVALID' },
+    })).toBe(true);
+    expect(isIndexerRequest({
+      ...identity,
+      type: 'physical-step-grant',
+      grantId: 8,
+      walEpoch: 1,
+      step: { kind: 'mark-failed', expectedState: state, errorCode: 'SEARCH_STATE_INVARIANT' },
+    })).toBe(false);
   });
 
   it('validates optional WAL observations as part of the complete event', () => {
@@ -150,6 +164,7 @@ describe('transcript search v8 Worker protocol', () => {
       ...knownError,
       wal: { ...wal, walObservationSequence: 0 },
     })).toBe(false);
+    expect(isIndexerEvent({ ...knownError, grantId: null, wal })).toBe(false);
 
     const unknownError = { ...knownError, code: 'INDEXER_INTERNAL', retryable: true } as const;
     expect(isIndexerWalAuthoritativeErrorCode(unknownError.code)).toBe(false);
@@ -210,18 +225,58 @@ describe('transcript search v8 Worker protocol', () => {
   });
 
   it('locks reader input, slice, quiesce, and terminal-result contracts', () => {
+    const query = {
+      version: 1,
+      clauses: [{
+        kind: 'all-words',
+        tokens: [{ text: 'synthetic', normalized: 'synthetic', match: 'exact' }],
+      }],
+    } as const;
+    expect(isReaderRequest({
+      ...identity,
+      type: 'search-start',
+      query,
+      limit: 10,
+    })).toBe(true);
+    expect(isReaderRequest({
+      ...identity,
+      type: 'search-start',
+      query: { ...query, unexpected: true },
+      limit: 10,
+    })).toBe(false);
     expect(isReaderRequest({
       ...identity,
       type: 'search-start',
       query: {
-        version: 1,
+        ...query,
+        clauses: [{ ...query.clauses[0], unexpected: true }],
+      },
+      limit: 10,
+    })).toBe(false);
+    expect(isReaderRequest({
+      ...identity,
+      type: 'search-start',
+      query: {
+        ...query,
         clauses: [{
-          kind: 'all-words',
-          tokens: [{ text: 'synthetic', normalized: 'synthetic', match: 'exact' }],
+          ...query.clauses[0],
+          tokens: [{ ...query.clauses[0].tokens[0], unexpected: true }],
         }],
       },
       limit: 10,
-    })).toBe(true);
+    })).toBe(false);
+    expect(isReaderRequest({
+      ...identity,
+      type: 'search-start',
+      query: {
+        ...query,
+        clauses: [{
+          ...query.clauses[0],
+          tokens: [{ ...query.clauses[0].tokens[0], normalized: 'mismatch' }],
+        }],
+      },
+      limit: 10,
+    })).toBe(false);
     expect(isReaderRequest({
       ...identity,
       type: 'reader-step-grant',
@@ -251,6 +306,26 @@ describe('transcript search v8 Worker protocol', () => {
         done: true,
       },
     })).toBe(true);
+
+    const termProgress = {
+      ...identity,
+      type: 'physical-step-complete',
+      grantId: 4,
+      result: {
+        kind: 'term-progress',
+        completion: 'continue',
+        state,
+        insertedTerms: 32,
+        insertedOccurrences: 65_536,
+        completedChunk: false,
+      },
+      wal,
+    } as const;
+    expect(isIndexerEvent(termProgress)).toBe(true);
+    expect(isIndexerEvent({
+      ...termProgress,
+      result: { ...termProgress.result, insertedOccurrences: 65_537 },
+    })).toBe(false);
   });
 
   it('enforces the exact full-envelope UTF-8 byte ceiling', () => {

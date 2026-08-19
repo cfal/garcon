@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  SEARCH_APPROVED_FTS5_SOURCE_ID,
   SEARCH_QUERY_MAX_NATIVE_TOKENS,
   SEARCH_QUERY_MAX_NORMALIZED_TERM_BYTES,
   SEARCH_TOKENIZER_HASH_SIZE_BYTES,
@@ -11,24 +12,14 @@ import {
   encodeCanonicalPositions,
 } from '../tokenizer.js';
 
-const FINGERPRINTS = new Map([
-  [
-    'fts5: 2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977f20b',
-    'e77eb39b4b47ee078376ab970e434ea22bba4e578187276517d85325a2c05322',
-  ],
-  [
-    'fts5: 2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24',
-    '3614f048777f7becf10ec03b0c7b607db11f334fbf0d13d12e7cd05e17d523b8',
-  ],
-]);
+const APPROVED_FINGERPRINT = '3614f048777f7becf10ec03b0c7b607db11f334fbf0d13d12e7cd05e17d523b8';
 
 describe('transcript search v8 tokenizer', () => {
-  it('locks approved runtime semantics and native query positions', () => {
+  it('[TLV5-SEARCH.10-TOKENIZER-CORE-UNIT-01] locks the sole runtime semantics and native query positions', () => {
     const tokenizer = SearchTokenizer.create();
     try {
-      expect(Buffer.from(tokenizer.fingerprint).toString('hex')).toBe(
-        FINGERPRINTS.get(tokenizer.sourceId),
-      );
+      expect(tokenizer.sourceId).toBe(SEARCH_APPROVED_FTS5_SOURCE_ID);
+      expect(Buffer.from(tokenizer.fingerprint).toString('hex')).toBe(APPROVED_FINGERPRINT);
       expect(tokenizer.tokenizeQuery('Crème 東京 foo_bar 한글').map((token) => ({
         term: Buffer.from(token.term).toString('utf8'),
         position: token.position,

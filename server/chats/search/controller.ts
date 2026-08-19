@@ -8,7 +8,10 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import type { HistoricalSearchMessageRow } from '@garcon/server-agent-common/search/rows';
-import type { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
+import type {
+  PrunedChatCleanup,
+  TranscriptSearchService,
+} from '@garcon/server-agent-common/search/transcript-search-service';
 import type {
   LedgerRow,
   TranscriptView,
@@ -62,14 +65,14 @@ export class TranscriptSearchController {
     if (this.#enabled) return;
     try {
       await this.#deps.service.enable(this.#lifecycleAbort.signal);
-      this.#enabled = true;
-      this.#admissionFailed = false;
-      await this.#syncAll();
     } catch (error) {
       this.#enabled = false;
       this.#admissionFailed = true;
       throw error;
     }
+    this.#enabled = true;
+    this.#admissionFailed = false;
+    await this.#syncAll();
   }
 
   catalogMayHaveChanged(chatId: string): void {
@@ -191,7 +194,13 @@ export class TranscriptSearchController {
 
   async #syncAll(): Promise<void> {
     if (!this.#enabled || this.#closed) return;
-    const chatIds = [...new Set(this.#deps.listChatIds())];
+    let chatIds: string[];
+    try {
+      chatIds = [...new Set(this.#deps.listChatIds())];
+    } catch (error) {
+      this.#warnCatalogFailure('synchronization', error);
+      return;
+    }
     await Promise.all(chatIds.map(async (chatId) => {
       try {
         await this.#enqueue(chatId, () => this.#syncCurrentChat(chatId));
@@ -199,7 +208,14 @@ export class TranscriptSearchController {
         this.#warnIndexFailure(chatId, 'resync', error);
       }
     }));
-    await this.#deps.service.pruneChats([...new Set(this.#deps.listChatIds())]);
+    try {
+      await this.#deps.service.pruneChats(
+        () => [...new Set(this.#deps.listChatIds())],
+        (cleanups) => this.#registerPrunedChatCleanups(cleanups),
+      );
+    } catch (error) {
+      this.#warnCatalogFailure('pruning', error);
+    }
   }
 
   async #syncChat(chatId: string): Promise<void> {
@@ -289,6 +305,26 @@ export class TranscriptSearchController {
       operation,
       code: searchFailureCode(error),
     });
+  }
+
+  #warnCatalogFailure(operation: 'synchronization' | 'pruning', error: unknown): void {
+    this.#deps.logger.warn(`Transcript search catalog ${operation} failed`, {
+      operation: 'resync',
+      code: searchFailureCode(error),
+    });
+  }
+
+  #registerPrunedChatCleanups(cleanups: readonly PrunedChatCleanup[]): void {
+    for (const cleanup of cleanups) this.#indexedViews.delete(cleanup.expectedState.chatId);
+    for (const cleanup of cleanups) {
+      const chatId = cleanup.expectedState.chatId;
+      this.#schedule(chatId, 'prune-reconcile', async () => {
+        if (this.#deps.listChatIds().includes(chatId)) {
+          await this.#syncCurrentChat(chatId);
+        }
+        await this.#deps.service.finishPrunedChatCleanup(cleanup);
+      });
+    }
   }
 
   #enqueue(chatId: string, work: () => Promise<void>): Promise<void> {

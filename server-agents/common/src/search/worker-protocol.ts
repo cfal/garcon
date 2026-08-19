@@ -14,6 +14,7 @@ import type {
   PrunedChatCleanup,
   SearchChatState,
 } from './schema.js';
+import { SEARCH_TOKENIZER_MAX_NATIVE_TOKENS } from './tokenizer.js';
 
 export type { PrunedChatCleanup, SearchChatState } from './schema.js';
 export {
@@ -142,7 +143,7 @@ export type IndexerPhysicalStep =
   | {
       readonly kind: 'mark-failed';
       readonly expectedState: SearchChatState;
-      readonly errorCode: string;
+      readonly errorCode: IndexerRecordableBuildErrorCode;
     }
   | {
       readonly kind: 'prune-mark';
@@ -554,7 +555,7 @@ function physicalStep(value: unknown): value is IndexerPhysicalStep {
     case 'mark-failed':
       return exactKeys(candidate, ['kind', 'expectedState', 'errorCode'])
         && searchState(candidate.expectedState)
-        && failureCode(candidate.errorCode);
+        && isIndexerRecordableBuildErrorCode(candidate.errorCode);
     case 'prune-mark':
       return exactKeys(candidate, ['kind', 'allowedChatIds', 'afterChatId'])
         && Array.isArray(candidate.allowedChatIds)
@@ -608,6 +609,7 @@ function physicalResult(value: unknown): value is PhysicalStepResult {
         && nonNegativeSafeInteger(candidate.insertedTerms)
         && Number(candidate.insertedTerms) <= 32
         && nonNegativeSafeInteger(candidate.insertedOccurrences)
+        && Number(candidate.insertedOccurrences) <= SEARCH_TOKENIZER_MAX_NATIVE_TOKENS
         && typeof candidate.completedChunk === 'boolean';
     case 'frontier-progress':
       return exactKeys(candidate, ['kind', 'completion', 'state'])
@@ -730,20 +732,25 @@ function allowedChats(value: unknown): value is readonly TranscriptSearchAllowed
 
 function searchQuery(value: unknown): value is ChatSearchQueryV1 {
   const candidate = record(value);
-  if (!candidate || candidate.version !== 1
+  if (!candidate || !exactKeys(candidate, ['version', 'clauses'])
+      || candidate.version !== 1
       || !Array.isArray(candidate.clauses)
       || candidate.clauses.length > CHAT_SEARCH_MAX_TERMS) return false;
   let tokenCount = 0;
   for (const valueClause of candidate.clauses) {
     const clause = record(valueClause);
-    if (!clause || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
+    if (!clause || !exactKeys(clause, ['kind', 'tokens'])
+        || (clause.kind !== 'phrase' && clause.kind !== 'all-words')
         || !Array.isArray(clause.tokens) || clause.tokens.length === 0) return false;
     tokenCount += clause.tokens.length;
     if (tokenCount > CHAT_SEARCH_MAX_WORDS) return false;
     for (const valueToken of clause.tokens) {
       const token = record(valueToken);
-      if (!token || typeof token.text !== 'string' || typeof token.normalized !== 'string'
-          || !hasWellFormedUtf16(token.text) || !hasWellFormedUtf16(token.normalized)
+      if (!token || !exactKeys(token, ['text', 'normalized', 'match'])
+          || !boundedText(token.text, SEARCH_WORKER_MAX_ENVELOPE_BYTES)
+          || !boundedText(token.normalized, SEARCH_WORKER_MAX_ENVELOPE_BYTES)
+          || token.text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase()
+            !== token.normalized
           || (token.match !== 'exact' && token.match !== 'prefix')
           || (clause.kind === 'phrase' && token.match !== 'exact')
           || (token.match === 'prefix'
@@ -932,7 +939,8 @@ export function isIndexerEvent(value: unknown): value is IndexerEvent {
         return false;
       }
       return candidate.wal === undefined
-        || (isIndexerWalAuthoritativeErrorCode(candidate.code)
+        || (candidate.grantId !== null
+          && isIndexerWalAuthoritativeErrorCode(candidate.code)
           && isWalObservation(candidate.wal));
     }
     default:

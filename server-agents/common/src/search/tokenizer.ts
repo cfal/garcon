@@ -12,16 +12,14 @@ export const SEARCH_TOKENIZER_MAX_POSITION_BYTES = 524_288;
 export const SEARCH_QUERY_MAX_NATIVE_TOKENS = 8_192;
 export const SEARCH_QUERY_MAX_NORMALIZED_TERM_BYTES = 32 * 1_024;
 export const SEARCH_TOKENIZER_HASH_SIZE_BYTES = 8 * 1_024 * 1_024;
+export const SEARCH_APPROVED_FTS5_SOURCE_ID =
+  'fts5: 2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24';
 
 const TOKENIZER_SPEC = 'unicode61 remove_diacritics 2';
 const TOKENIZER_SENTINEL = 'Crème 東京 foo_bar 한글';
 const TOKENIZER_FINGERPRINT_DOMAIN = 'garcon/transcript-search/tokenizer-fingerprint/v8\0';
 const POSTING_ENCODING = 'positive-delta-uleb128-v1';
 const MAX_POSITION_VARINT_BYTES = 3;
-const APPROVED_FTS5_SOURCE_IDS = new Set([
-  'fts5: 2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977f20b',
-  'fts5: 2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24',
-]);
 
 export interface NativeQueryToken {
   readonly term: Uint8Array;
@@ -330,7 +328,7 @@ export class SearchTokenizer {
         this.#db.query<{ sourceId: string }, []>('SELECT fts5_source_id() AS sourceId').get()
           ?.sourceId ?? '',
       );
-      if (!APPROVED_FTS5_SOURCE_IDS.has(this.sourceId)) {
+      if (this.sourceId !== SEARCH_APPROVED_FTS5_SOURCE_ID) {
         throw tokenizerError('SEARCH_TOKENIZER_UNSUPPORTED');
       }
       const sentinel = this.#tokenizeInstances([TOKENIZER_SENTINEL], {
@@ -471,15 +469,19 @@ export class SearchTokenizer {
     try {
       return work();
     } catch (error) {
+      let replacement: Database | null = null;
       try {
         this.#db.close(false);
-        this.#db = createTokenizerDatabase();
+        replacement = createTokenizerDatabase();
         const sourceId = String(
-          this.#db.query<{ sourceId: string }, []>('SELECT fts5_source_id() AS sourceId').get()
+          replacement.query<{ sourceId: string }, []>('SELECT fts5_source_id() AS sourceId').get()
             ?.sourceId ?? '',
         );
         if (sourceId !== this.sourceId) throw tokenizerError('SEARCH_TOKENIZER_UNSUPPORTED');
+        this.#db = replacement;
+        replacement = null;
       } catch {
+        replacement?.close(false);
         this.#closed = true;
       }
       throw error;

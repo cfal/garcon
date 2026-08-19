@@ -42,6 +42,7 @@ function harness() {
     appendRows: mock(async () => undefined),
     deleteChat: mock(async () => undefined),
     pruneChats: mock(async () => undefined),
+    finishPrunedChatCleanup: mock(async () => undefined),
     search: mock(async ({ allowedChats }) => ({
       results: allowedChats.map(({ chatId, transcriptViewId }) => ({
         chatId,
@@ -93,6 +94,22 @@ function deferred() {
   return { promise, resolve };
 }
 
+function cleanupState(chatId, transcriptViewId, targetThrough) {
+  return {
+    chatId,
+    transcriptViewId,
+    status: 'pending',
+    phase: 'removal-cleanup',
+    targetThrough,
+    processedThrough: targetThrough,
+    activeChunkId: 1,
+    slotDocumentCount: 1,
+    slotTokenCount: 2,
+    lastErrorCode: null,
+    updatedAt: '2026-08-10T10:00:00.000Z',
+  };
+}
+
 describe('TranscriptSearchController', () => {
   it('indexes each current ledger view when enabled', async () => {
     const test = harness();
@@ -108,7 +125,97 @@ describe('TranscriptSearchController', () => {
         expect.objectContaining({ ordinal: 2, role: 'assistant', body: 'world' }),
       ],
     });
-    expect(test.service.pruneChats).toHaveBeenCalledWith(['chat-1']);
+    expect(test.service.pruneChats).toHaveBeenCalledTimes(1);
+    const [snapshot, beforeAdmissionReopens] = test.service.pruneChats.mock.calls[0];
+    expect(snapshot()).toEqual(['chat-1']);
+    expect(beforeAdmissionReopens).toBeFunction();
+  });
+
+  it('[TLV5-SEARCH.02-POST-ADMISSION-CORE-UNIT-01] keeps search admitted after startup and restart synchronization failures', async () => {
+    const test = harness();
+    test.service.replaceChat.mockRejectedValueOnce(new Error('WORKER_TIMEOUT'));
+    test.service.pruneChats.mockRejectedValueOnce(new Error('SEARCH_INDEX_UNAVAILABLE'));
+
+    await expect(test.controller.initialize(true)).resolves.toBeUndefined();
+    await expect(test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    })).resolves.toMatchObject({
+      results: [expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' })],
+    });
+    expect(test.logger.warn).toHaveBeenCalledWith('Transcript search indexing job failed', {
+      chatId: 'chat-1',
+      operation: 'resync',
+      code: 'WORKER_TIMEOUT',
+    });
+    expect(test.logger.warn).toHaveBeenCalledWith('Transcript search catalog pruning failed', {
+      operation: 'resync',
+      code: 'SEARCH_INDEX_UNAVAILABLE',
+    });
+
+    const resync = test.service.setResyncHandler.mock.calls[0][0];
+    test.service.pruneChats.mockRejectedValueOnce(new Error('SEARCH_INDEX_UNAVAILABLE'));
+    await expect(resync()).resolves.toBeUndefined();
+    await expect(test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    })).resolves.toMatchObject({
+      results: [expect.objectContaining({ chatId: 'chat-1', transcriptViewId: 'view-1' })],
+    });
+  });
+
+  it('reports admission failure only when the search service cannot enable', async () => {
+    const test = harness();
+    test.service.enable.mockRejectedValueOnce(new Error('worker admission failed'));
+
+    await expect(test.controller.initialize(true)).rejects.toThrow('worker admission failed');
+    await expect(test.controller.search({
+      query: 'hello',
+      allowedChatIds: ['chat-1'],
+    })).rejects.toMatchObject({
+      code: 'SEARCH_INDEX_UNAVAILABLE',
+      message: 'Transcript search is unavailable',
+      retryable: true,
+    });
+    expect(test.service.replaceChat).not.toHaveBeenCalled();
+    expect(test.service.pruneChats).not.toHaveBeenCalled();
+  });
+
+  it('[TLV5-SEARCH.03-PRUNE-REINTRODUCTION-SERVICE-UNIT-01] invalidates pruned view identity before registering exact cleanup on the chat tail', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.replaceChat.mockClear();
+    const cleanup = { expectedState: cleanupState('chat-1', 'view-1', 2) };
+    const beforeAdmissionReopens = test.service.pruneChats.mock.calls[0][1];
+
+    beforeAdmissionReopens([cleanup]);
+    await settle();
+
+    expect(test.service.replaceChat).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+    }));
+    expect(test.service.finishPrunedChatCleanup).toHaveBeenCalledWith(cleanup);
+    expect(test.service.replaceChat.mock.invocationCallOrder[0])
+      .toBeLessThan(test.service.finishPrunedChatCleanup.mock.invocationCallOrder[0]);
+  });
+
+  it('does not submit a stale prune ticket when same-chat reconciliation fails', async () => {
+    const test = harness();
+    await test.controller.initialize(true);
+    test.service.replaceChat.mockClear();
+    test.service.replaceChat.mockRejectedValueOnce(new Error('SEARCH_WRITE_REJECTED'));
+    const cleanup = { expectedState: cleanupState('chat-1', 'view-1', 2) };
+
+    test.service.pruneChats.mock.calls[0][1]([cleanup]);
+    await settle();
+
+    expect(test.service.finishPrunedChatCleanup).not.toHaveBeenCalled();
+    expect(test.logger.warn).toHaveBeenCalledWith('Transcript search indexing job failed', {
+      chatId: 'chat-1',
+      operation: 'prune-reconcile',
+      code: 'SEARCH_WRITE_REJECTED',
+    });
   });
 
   it('indexes only the committed suffix during normal appends', async () => {
@@ -499,7 +606,8 @@ describe('TranscriptSearchController', () => {
 
     expect(test.service.replaceChat).toHaveBeenCalledTimes(1);
     expect(test.service.deleteChat).toHaveBeenCalledWith('chat-fenced');
-    expect(test.service.pruneChats).toHaveBeenCalledWith(['chat-1', 'chat-fenced']);
+    expect(test.service.pruneChats).toHaveBeenCalledTimes(1);
+    expect(test.service.pruneChats.mock.calls[0][0]()).toEqual(['chat-1', 'chat-fenced']);
     expect(test.service.search).toHaveBeenCalledWith(expect.objectContaining({
       allowedChats: [{ chatId: 'chat-1', transcriptViewId: 'view-1', throughOrdinal: 2 }],
     }));
