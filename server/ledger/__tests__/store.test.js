@@ -286,7 +286,7 @@ describe('TranscriptLedgerStore', () => {
         kind: 'notice',
         at,
         message: 'advisory',
-        detail: { action: 'reload-native-history' },
+        detail: { type: 'ordinary-notice' },
       },
       session('session-one'),
       {

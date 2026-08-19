@@ -92,8 +92,8 @@ function fixtureDrafts() {
       kind: 'notice',
       at: AT,
       providerMeta: null,
-      message: 'Native history changed.',
-      detail: { action: 'reload-native-history' },
+      message: 'Ordinary durable notice.',
+      detail: { type: 'ordinary-notice' },
     },
     {
       kind: 'notice',

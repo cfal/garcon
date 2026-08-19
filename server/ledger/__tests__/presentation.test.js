@@ -78,8 +78,8 @@ describe('transcript ledger presentation', () => {
         ordinal: 3,
         at: AT,
         providerMeta: null,
-        message: 'Native history changed.',
-        detail: { action: 'reload-native-history' },
+        message: 'Ordinary durable notice.',
+        detail: { type: 'ordinary-notice' },
       },
       {
         kind: 'agent-switch',
@@ -147,7 +147,10 @@ describe('transcript ledger presentation', () => {
       [8, 'permission-expired'],
     ]);
     expect(rendered[0].message.metadata).toEqual({ clientMessageId: 'client-message-1' });
-    expect(rendered[2].message.action).toBe('reload-native-history');
+    expect(rendered[2].message).toMatchObject({
+      type: 'transcript-notice',
+      content: 'Ordinary durable notice.',
+    });
   });
 });
 

@@ -661,6 +661,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					direction: 'backward',
 					chatId,
 					visibleLimit: limit,
+					purpose: 'activation',
 					isCurrent: () => (
 						epoch === this.#loadEpoch
 						&& (!this.activeChatId || this.activeChatId === chatId)

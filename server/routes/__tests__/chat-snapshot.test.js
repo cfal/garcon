@@ -125,7 +125,7 @@ async function getSnapshot(testFixture, query) {
 }
 
 describe('GET /api/v1/chats/snapshot', () => {
-  test('returns a bounded provider-neutral snapshot with default limit', async () => {
+  test('[TLV5-L09.03-SNAPSHOT-ROUTE-UNIT-01] returns a bounded background snapshot without activation', async () => {
     const testFixture = fixture();
     const { response, body } = await getSnapshot(testFixture, `chatId=${CHAT_ID}`);
 

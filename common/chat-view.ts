@@ -3,6 +3,8 @@ import type { ChatMessage } from './chat-types';
 
 export const CHAT_MESSAGES_MAX_LIMIT = 200;
 
+export type TranscriptReadPurpose = 'activation';
+
 export interface TranscriptMessage {
   readonly ordinal: number;
   readonly message: ChatMessage;

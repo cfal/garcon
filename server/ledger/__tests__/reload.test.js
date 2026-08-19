@@ -185,17 +185,14 @@ describe('TranscriptReloadService', () => {
         message: 'Some earlier chat history could not be migrated. Quarantine reference: artifact-1.',
         detail: quarantineDetail,
       });
-      expect(ledger.currentRows('chat-1').some((row) => (
-        row.kind === 'notice' && row.detail.action === 'reload-native-history'
-      ))).toBe(false);
     }, {
       frozenDrafts: [
         {
           kind: 'notice',
           at: TS,
           providerMeta: null,
-          message: 'Native history changed.',
-          detail: { action: 'reload-native-history' },
+          message: 'Ordinary durable notice.',
+          detail: { type: 'ordinary-notice' },
         },
         {
           kind: 'notice',

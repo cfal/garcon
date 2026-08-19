@@ -9,7 +9,8 @@ import type {
   GetSharedChatResponse,
   ShareChatResponse,
 } from '../../../common/share-types.js';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import type { ChatOperationalNoticeMessage } from '../../../common/ws-events.js';
+import { NATIVE_TRANSCRIPT_DRIFT_NOTICE } from '../../../server/ledger/native-activity.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   assistantContents,
@@ -36,7 +37,7 @@ interface ClaudeNativeSession {
 }
 
 describe('native transcript reload', () => {
-  test('[TLV5-L08.04-SERVER-01] warns about native drift, preserves queued entries, and leaves shares unchanged', async () => {
+  test('[TLV5-L08.04-SERVER-01] [TLV5-L09.05-SERVER-01] keeps drift transient until explicit native Reload', async () => {
     const environment: Record<string, string> = {};
     let releasePath = '';
 
@@ -45,6 +46,9 @@ describe('native transcript reload', () => {
         (agent) => agent.id === 'claude',
       );
       if (!claude) throw new Error('Claude integration is missing from the agent catalog.');
+      await fixture.client.updateSettings({
+        features: { transcriptSearch: { enabled: true } },
+      });
 
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startChat({
@@ -83,6 +87,16 @@ describe('native transcript reload', () => {
       await fixture.client.waitForTurnTerminal(chatId, held.turnId);
       const beforeDrift = await fixture.client.getMessages(chatId);
       expect(messagesOfType(beforeDrift.messages, 'transcript-notice')).toEqual([]);
+      const searchRequest = {
+        query: 'native-reload-baseline',
+        chatIds: [chatId],
+        limit: 20,
+      };
+      const searchBeforeDrift = await fixture.client.waitForChatSearch(
+        searchRequest,
+        (response) => response.index.pendingChatCount === 0
+          && response.results.some((result) => result.chatId === chatId),
+      );
       const share = await fixture.client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
       const sharedBeforeReload = await fixture.client.get<GetSharedChatResponse>(
         `/api/v1/shared?token=${encodeURIComponent(share.shareToken)}&limit=100`,
@@ -93,12 +107,12 @@ describe('native transcript reload', () => {
       });
 
       const native = await claudeNativeSession(fixture.dirs, chatId);
-      const externalContent = `external-native-${crypto.randomUUID()}`;
+      const externalContent = 'synthetic-external-native-output';
       await appendFile(native.path, `${JSON.stringify({
         sessionId: native.agentSessionId,
         type: 'assistant',
-        uuid: crypto.randomUUID(),
-        timestamp: new Date(Date.now() + 1_000).toISOString(),
+        uuid: '00000000-0000-4000-8000-000000000001',
+        timestamp: '2099-01-01T00:00:00.000Z',
         cwd: fixture.dirs.project,
         message: {
           role: 'assistant',
@@ -107,32 +121,53 @@ describe('native transcript reload', () => {
       })}\n`, 'utf8');
 
       const driftCursor = fixture.client.markEvents();
-      const servedWhileProbing = await fixture.client.getMessages(chatId);
+      const servedWhileProbing = await fixture.client.getMessages(chatId, {
+        purpose: 'activation',
+      });
       expect(servedWhileProbing.transcriptViewId).toBe(beforeDrift.transcriptViewId);
       expect(assistantContents(servedWhileProbing.messages)).not.toContain(externalContent);
       await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
+        (event): event is ChatOperationalNoticeMessage =>
+          event.type === 'chat-operational-notice'
           && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'transcript-notice'
-            && entry.message.action === 'reload-native-history'),
+          && event.noticeType === 'warning'
+          && event.content === NATIVE_TRANSCRIPT_DRIFT_NOTICE,
         'native drift notice publication',
         { afterIndex: driftCursor },
       );
       const drifted = await fixture.client.getMessages(chatId);
-      expect(drifted.transcriptViewId).toBe(beforeDrift.transcriptViewId);
+      expect(drifted).toMatchObject({
+        transcriptViewId: beforeDrift.transcriptViewId,
+        lastOrdinal: beforeDrift.lastOrdinal,
+        messages: beforeDrift.messages,
+      });
       expect(assistantContents(drifted.messages)).not.toContain(externalContent);
-      expect(messagesOfType(drifted.messages, 'transcript-notice')).toEqual([
-        expect.objectContaining({
-          action: 'reload-native-history',
-          content: expect.stringContaining('changed outside Garcon'),
-        }),
-      ]);
-      expect(messagesOfType(
-        (await fixture.client.getMessages(chatId)).messages,
-        'transcript-notice',
-      )).toHaveLength(1);
+      expect(messagesOfType(drifted.messages, 'transcript-notice')).toEqual([]);
+      expect(await fixture.client.searchChats(searchRequest)).toEqual(searchBeforeDrift);
+      const externalSearch = await fixture.client.searchChats({
+        query: externalContent,
+        chatIds: [chatId],
+        limit: 20,
+      });
+      expect(externalSearch.index.pendingChatCount).toBe(0);
+      expect(externalSearch.results).toEqual([]);
+
+      const repeatedDriftCursor = fixture.client.markEvents();
+      await fixture.client.getMessages(chatId, { purpose: 'activation' });
+      await fixture.client.waitForEvent(
+        (event): event is ChatOperationalNoticeMessage =>
+          event.type === 'chat-operational-notice'
+          && event.chatId === chatId
+          && event.noticeType === 'warning'
+          && event.content === NATIVE_TRANSCRIPT_DRIFT_NOTICE,
+        'repeated native drift notice publication',
+        { afterIndex: repeatedDriftCursor },
+      );
+      expect(await fixture.client.getMessages(chatId)).toMatchObject({
+        transcriptViewId: beforeDrift.transcriptViewId,
+        lastOrdinal: beforeDrift.lastOrdinal,
+        messages: beforeDrift.messages,
+      });
 
       let blockedReload: unknown;
       try {

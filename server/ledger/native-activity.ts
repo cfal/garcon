@@ -1,6 +1,14 @@
-import type { AgentIntegration } from '@garcon/server-agent-interface';
+import type {
+  AgentIntegration,
+  AgentNativeActivityProbe,
+  AgentNativeActivityResult,
+  AgentNativeSessionRef,
+} from '@garcon/server-agent-interface';
+import { isDeepStrictEqual } from 'node:util';
+import type { ChatOperationalNoticeMessage } from '../../common/ws-events.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
+import type { NativeActivityProviderWatermark } from './contracts.js';
 import type { TranscriptLedgerService } from './service.js';
 
 export const NATIVE_TRANSCRIPT_DRIFT_NOTICE =
@@ -10,171 +18,237 @@ interface NativeActivityIntegrationDirectory {
   get(agentId: string): AgentIntegration | null;
 }
 
+interface ScheduledTimeout {
+  cancel(): void;
+}
+
+interface NativeActivityEligibilityKey {
+  readonly agentId: string;
+  readonly transcriptViewId: string;
+  readonly sessionOrdinal: number;
+  readonly nativeSession: AgentNativeSessionRef;
+  readonly providerWatermark: NativeActivityProviderWatermark;
+}
+
+interface EligibleNativeActivityCheck {
+  readonly key: NativeActivityEligibilityKey;
+  readonly probe: AgentNativeActivityProbe;
+}
+
+interface PendingNativeActivityCheck {
+  readonly key: NativeActivityEligibilityKey;
+  readonly controller: AbortController;
+  readonly token: symbol;
+}
+
 export interface NativeTranscriptActivityServiceOptions {
-  readonly ledger: TranscriptLedgerService;
+  readonly ledger: Pick<TranscriptLedgerService, 'nativeActivityState'>;
   readonly registry: Pick<IChatRegistry, 'getChat'>;
   readonly integrations: NativeActivityIntegrationDirectory;
   readonly ownsExecution: (chatId: string) => boolean;
-  readonly probeTimeoutMs?: number;
+  readonly notifyOperationalNotice: (
+    chatId: string,
+    noticeType: ChatOperationalNoticeMessage['noticeType'],
+    content: string,
+  ) => void;
+  readonly scheduleTimeout?: (callback: () => void, delay: number) => ScheduledTimeout;
 }
 
 const logger = createLogger('ledger:native-activity');
-const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
+const PROBE_TIMEOUT_MS = 5_000;
 
-export type NativeActivityCheckReason = 'open' | 'pre-resume';
+export type NativeActivityCheckReason = 'activation';
 
 export class NativeTranscriptActivityService {
-  readonly #pendingChecks = new Map<string, symbol>();
-  readonly #probeTimeoutMs: number;
+  readonly #pendingChecks = new Map<string, PendingNativeActivityCheck>();
+  readonly #scheduleTimeout: NonNullable<NativeTranscriptActivityServiceOptions['scheduleTimeout']>;
 
   constructor(private readonly options: NativeTranscriptActivityServiceOptions) {
-    this.#probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
-    if (!Number.isSafeInteger(this.#probeTimeoutMs) || this.#probeTimeoutMs < 1) {
-      throw new TypeError('Native transcript activity probe timeout must be a positive integer');
-    }
+    this.#scheduleTimeout = options.scheduleTimeout ?? scheduleTimeout;
   }
 
   requestCheck(chatId: string, reason: NativeActivityCheckReason): void {
-    if (this.#pendingChecks.has(chatId)) return;
-    const token = Symbol(chatId);
-    this.#pendingChecks.set(chatId, token);
-    const clear = () => {
-      if (this.#pendingChecks.get(chatId) === token) this.#pendingChecks.delete(chatId);
-    };
-    void this.#runRequestedCheck(chatId, reason, clear).catch((error) => {
-      logger.warn('Native transcript activity check failed', {
-        chatId,
-        reason,
-        code: errorCode(error),
-      });
-    });
-  }
-
-  check(
-    chatId: string,
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<boolean> {
-    return this.#check(chatId, signal, () => {});
-  }
-
-  async #check(
-    chatId: string,
-    signal: AbortSignal,
-    settled: () => void,
-    reason?: NativeActivityCheckReason,
-  ): Promise<boolean> {
+    const current = this.#pendingChecks.get(chatId);
+    let eligible: EligibleNativeActivityCheck | null;
     try {
-      signal.throwIfAborted();
-      if (this.options.ownsExecution(chatId)) return false;
-      const entry = this.options.registry.getChat(chatId);
-      if (!entry) return false;
-      const integration = this.options.integrations.get(entry.agentId);
-      if (!integration?.nativeActivity) return false;
-
-      const before = this.options.ledger.nativeActivityState(chatId);
-      const nativeSession = before.session?.detail.nativeSession ?? null;
-      if (!nativeSession) return false;
-
-      let result;
-      try {
-        result = await integration.nativeActivity.lastActivity(nativeSession, signal);
-      } catch (error) {
-        if (signal.aborted) return false;
-        logger.warn('Native transcript activity probe failed', {
-          chatId,
-          agentId: entry.agentId,
-          ...(reason ? { reason } : {}),
-          code: errorCode(error),
-        });
-        return false;
-      }
-      if (signal.aborted || this.options.ownsExecution(chatId)) return false;
-      if (result.kind === 'unavailable' || result.value.lastEntryAt === null) return false;
-
-      const observedAt = timestamp(result.value.lastEntryAt);
-      if (observedAt === null) {
-        logger.warn('Native transcript activity probe returned an invalid timestamp', {
-          chatId,
-          agentId: entry.agentId,
-        });
-        return false;
-      }
-
-      const current = this.options.ledger.nativeActivityState(chatId);
-      if (activityStateChanged(before, current)) return false;
-      if (this.options.registry.getChat(chatId)?.agentId !== entry.agentId) return false;
-      const providerAt = timestamp(current.providerWatermarkAt);
-      if (providerAt !== null && observedAt <= providerAt) return false;
-      const warnedAt = timestamp(current.lastNoticeWatermarkAt);
-      if (warnedAt !== null && observedAt <= warnedAt) return false;
-
-      this.options.ledger.appendNotice({
-        chatId,
-        viewId: current.viewId,
-        message: NATIVE_TRANSCRIPT_DRIFT_NOTICE,
-        detail: {
-          type: 'native-transcript-drift',
-          action: 'reload-native-history',
-          observedNativeWatermark: result.value.lastEntryAt,
-        },
-      });
-      return true;
-    } finally {
-      settled();
+      eligible = this.options.ownsExecution(chatId) ? null : this.#eligibility(chatId);
+    } catch {
+      current?.controller.abort();
+      this.#pendingChecks.delete(chatId);
+      this.#log('Native transcript activity eligibility failed', chatId, reason,
+        'NATIVE_ACTIVITY_ELIGIBILITY_FAILED');
+      return;
     }
+
+    if (!eligible) {
+      if (current) {
+        current.controller.abort();
+        this.#pendingChecks.delete(chatId);
+      }
+      return;
+    }
+    if (current && eligibilityKeysEqual(current.key, eligible.key)) return;
+    current?.controller.abort();
+
+    const attempt: PendingNativeActivityCheck = {
+      key: eligible.key,
+      controller: new AbortController(),
+      token: Symbol(chatId),
+    };
+    this.#pendingChecks.set(chatId, attempt);
+    void this.#runAttempt(chatId, reason, attempt, eligible.probe)
+      .catch(() => {
+        this.#log('Native transcript activity check failed', chatId, reason,
+          'NATIVE_ACTIVITY_CHECK_FAILED');
+      });
   }
 
-  async #runRequestedCheck(
+  async #runAttempt(
     chatId: string,
     reason: NativeActivityCheckReason,
-    clear: () => void,
+    attempt: PendingNativeActivityCheck,
+    probe: AgentNativeActivityProbe,
   ): Promise<void> {
-    const controller = new AbortController();
-    let resolveTimeout!: () => void;
-    const timeoutReached = new Promise<void>((resolve) => {
-      resolveTimeout = resolve;
-    });
-    const timeout = setTimeout(() => {
+    const { controller, key } = attempt;
+    const timeout = this.#scheduleTimeout(() => {
+      this.#log('Native transcript activity check timed out', chatId, reason,
+        'NATIVE_ACTIVITY_CHECK_TIMEOUT');
       controller.abort();
-      clear();
-      logger.warn('Native transcript activity check timed out', {
-        chatId,
-        reason,
-        code: 'NATIVE_ACTIVITY_CHECK_TIMEOUT',
-      });
-      resolveTimeout();
-    }, this.#probeTimeoutMs);
-    timeout.unref?.();
+    }, PROBE_TIMEOUT_MS);
+    const aborted = waitForAbort(controller.signal);
+
     try {
-      await Promise.race([
-        this.#check(chatId, controller.signal, clear, reason).then(() => undefined),
-        timeoutReached,
-      ]);
+      const result = probeResult(probe, key.nativeSession, controller.signal);
+      const outcome = await Promise.race([result, aborted.promise]);
+      if (outcome.kind === 'aborted') return;
+      if (outcome.kind === 'failed') {
+        if (!controller.signal.aborted) {
+          this.#log('Native transcript activity probe failed', chatId, reason,
+            'NATIVE_ACTIVITY_PROBE_FAILED', key.agentId);
+        }
+        return;
+      }
+      if (controller.signal.aborted) return;
+      this.#presentResult(chatId, reason, key, outcome.value);
     } finally {
-      clearTimeout(timeout);
-      clear();
+      aborted.cancel();
+      timeout.cancel();
+      if (this.#pendingChecks.get(chatId)?.token === attempt.token) {
+        this.#pendingChecks.delete(chatId);
+      }
     }
+  }
+
+  #presentResult(
+    chatId: string,
+    reason: NativeActivityCheckReason,
+    attempted: NativeActivityEligibilityKey,
+    result: AgentNativeActivityResult,
+  ): void {
+    if (result.kind === 'unavailable' || result.value.lastEntryAt === null) return;
+    const observedAt = timestamp(result.value.lastEntryAt);
+    if (observedAt === null) {
+      this.#log('Native transcript activity probe returned an invalid timestamp', chatId, reason,
+        'NATIVE_ACTIVITY_INVALID_TIMESTAMP', attempted.agentId);
+      return;
+    }
+    if (this.options.ownsExecution(chatId)) return;
+
+    const current = this.#eligibility(chatId);
+    if (!current || !eligibilityKeysEqual(attempted, current.key)) return;
+    const providerAt = timestamp(current.key.providerWatermark.at);
+    if (providerAt === null || observedAt <= providerAt) return;
+
+    this.options.notifyOperationalNotice(chatId, 'warning', NATIVE_TRANSCRIPT_DRIFT_NOTICE);
+  }
+
+  #eligibility(chatId: string): EligibleNativeActivityCheck | null {
+    const entry = this.options.registry.getChat(chatId);
+    if (!entry) return null;
+    const integration = this.options.integrations.get(entry.agentId);
+    if (!integration?.nativeActivity) return null;
+    const activity = this.options.ledger.nativeActivityState(chatId);
+    const session = activity.session;
+    const nativeSession = session?.detail.nativeSession ?? null;
+    const providerWatermark = activity.providerWatermark;
+    if (!session || !nativeSession || !providerWatermark) return null;
+    return {
+      key: {
+        agentId: entry.agentId,
+        transcriptViewId: activity.viewId,
+        sessionOrdinal: session.ordinal,
+        nativeSession,
+        providerWatermark,
+      },
+      probe: integration.nativeActivity,
+    };
+  }
+
+  #log(
+    message: string,
+    chatId: string,
+    reason: NativeActivityCheckReason,
+    code: string,
+    agentId?: string,
+  ): void {
+    logger.warn(message, { chatId, reason, code, ...(agentId ? { agentId } : {}) });
   }
 }
 
-function activityStateChanged(
-  before: ReturnType<TranscriptLedgerService['nativeActivityState']>,
-  current: ReturnType<TranscriptLedgerService['nativeActivityState']>,
+function eligibilityKeysEqual(
+  left: NativeActivityEligibilityKey,
+  right: NativeActivityEligibilityKey,
 ): boolean {
-  return current.viewId !== before.viewId
-    || current.session?.ordinal !== before.session?.ordinal
-    || current.providerWatermarkAt !== before.providerWatermarkAt
-    || current.lastNoticeWatermarkAt !== before.lastNoticeWatermarkAt;
+  return left.agentId === right.agentId
+    && left.transcriptViewId === right.transcriptViewId
+    && left.sessionOrdinal === right.sessionOrdinal
+    && left.providerWatermark.ordinal === right.providerWatermark.ordinal
+    && left.providerWatermark.at === right.providerWatermark.at
+    && isDeepStrictEqual(left.nativeSession, right.nativeSession);
 }
 
-function errorCode(error: unknown): string {
-  return error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)
-    ? error.message
-    : 'NATIVE_ACTIVITY_CHECK_FAILED';
+function probeResult(
+  probe: AgentNativeActivityProbe,
+  nativeSession: AgentNativeSessionRef,
+  signal: AbortSignal,
+): Promise<
+  | { readonly kind: 'result'; readonly value: AgentNativeActivityResult }
+  | { readonly kind: 'failed' }
+> {
+  try {
+    return probe.lastActivity(nativeSession, signal).then(
+      (value) => ({ kind: 'result' as const, value }),
+      () => ({ kind: 'failed' as const }),
+    );
+  } catch {
+    return Promise.resolve({ kind: 'failed' });
+  }
 }
 
-function timestamp(value: string | null): number | null {
-  if (value === null) return null;
+function waitForAbort(signal: AbortSignal): {
+  readonly promise: Promise<{ readonly kind: 'aborted' }>;
+  cancel(): void;
+} {
+  let resolve!: (value: { readonly kind: 'aborted' }) => void;
+  const promise = new Promise<{ readonly kind: 'aborted' }>((done) => {
+    resolve = done;
+  });
+  const onAbort = () => resolve({ kind: 'aborted' });
+  if (signal.aborted) onAbort();
+  else signal.addEventListener('abort', onAbort, { once: true });
+  return {
+    promise,
+    cancel: () => signal.removeEventListener('abort', onAbort),
+  };
+}
+
+function scheduleTimeout(callback: () => void, delay: number): ScheduledTimeout {
+  const timeout = setTimeout(callback, delay);
+  timeout.unref?.();
+  return { cancel: () => clearTimeout(timeout) };
+}
+
+function timestamp(value: string): number | null {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
 }

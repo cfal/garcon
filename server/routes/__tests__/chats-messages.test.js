@@ -151,6 +151,52 @@ function createRoutesFixture(overrides = {}) {
 }
 
 describe('GET /api/v1/chats/messages', () => {
+  it('[TLV5-L09.03-ROUTE-UNIT-01] forwards activation only for a newest-history read', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const activeUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}&purpose=activation`,
+    );
+    const backgroundUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`,
+    );
+    const olderUrl = new URL(
+      `http://localhost/api/v1/chats/messages?chatId=${CHAT_ID}`
+      + '&beforeOrdinal=10&transcriptViewId=view-1&purpose=activation',
+    );
+
+    await expect(routes['/api/v1/chats/messages'].GET(new Request(activeUrl), activeUrl))
+      .resolves.toMatchObject({ status: 200 });
+    expect(chatViews.page).toHaveBeenNthCalledWith(
+      1,
+      CHAT_ID,
+      20,
+      undefined,
+      undefined,
+      undefined,
+      'activation',
+    );
+
+    await expect(routes['/api/v1/chats/messages'].GET(new Request(backgroundUrl), backgroundUrl))
+      .resolves.toMatchObject({ status: 200 });
+    expect(chatViews.page).toHaveBeenNthCalledWith(
+      2,
+      CHAT_ID,
+      20,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    const olderResponse = await routes['/api/v1/chats/messages'].GET(
+      new Request(olderUrl),
+      olderUrl,
+    );
+    expect(olderResponse.status).toBe(400);
+    expect((await olderResponse.json()).errorCode).toBe('VALIDATION_FAILED');
+    expect(chatViews.page).toHaveBeenCalledTimes(2);
+  });
+
   it('clamps view-qualified pagination before reading the ledger', async () => {
     const { agents, chatViews, routes } = createRoutesFixture();
     const url = new URL(
@@ -173,7 +219,14 @@ describe('GET /api/v1/chats/messages', () => {
       resendCandidates: [{ ordinal: 11, content: 'Try again', attachmentNames: [] }],
       limit: 200,
     });
-    expect(chatViews.page).toHaveBeenCalledWith(CHAT_ID, 200, 10, 'view-1');
+    expect(chatViews.page).toHaveBeenCalledWith(
+      CHAT_ID,
+      200,
+      10,
+      'view-1',
+      undefined,
+      undefined,
+    );
     expect(agents.resendCandidates).toHaveBeenCalledWith(CHAT_ID);
   });
 

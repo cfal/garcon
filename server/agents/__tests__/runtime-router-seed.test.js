@@ -117,7 +117,6 @@ function makeRouter(overrides = {}) {
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
-    nativeActivity: overrides.nativeActivity,
   });
   return {
     router,
@@ -235,14 +234,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
   });
 
-  it('schedules native activity immediately before resuming without waiting for it', async () => {
+  it('[TLV5-L09.03-RUNTIME-UNIT-01] resumes without a native-activity scheduling dependency', async () => {
     const order = [];
-    const nativeActivity = {
-      requestCheck: mock(() => {
-        order.push('probe');
-        return new Promise(() => {});
-      }),
-    };
     const resume = mock(async (request) => {
       order.push('resume');
       request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
@@ -253,7 +246,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
       },
-      nativeActivity,
       resume,
     });
     const beginRun = transcript.ledger.beginRun.bind(transcript.ledger);
@@ -264,8 +256,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-1' });
 
-    expect(order).toEqual(['probe', 'begin', 'resume']);
-    expect(nativeActivity.requestCheck).toHaveBeenCalledWith('chat-1', 'pre-resume');
+    expect(order).toEqual(['begin', 'resume']);
   });
 
   it('rejects a local-to-cloud override before provider dispatch', async () => {

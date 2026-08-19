@@ -353,6 +353,9 @@ export async function startServer(): Promise<void> {
         if (!executionQueries) throw new Error('Chat execution coordinator is not initialized');
         return executionQueries.ownsExecution(chatId);
       },
+      notifyOperationalNotice(chatId, noticeType, content) {
+        eventWiring?.notifyOperationalNotice(chatId, noticeType, content);
+      },
     });
     const transcriptReader = new TranscriptViewReader(
       transcriptLedger,
@@ -384,7 +387,6 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
-      nativeActivity: nativeTranscriptActivity,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>

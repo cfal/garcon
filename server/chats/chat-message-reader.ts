@@ -1,4 +1,4 @@
-import type { TranscriptPage } from '../../common/chat-view.js';
+import type { TranscriptPage, TranscriptReadPurpose } from '../../common/chat-view.js';
 
 export interface TranscriptPageReader {
   page(
@@ -6,5 +6,7 @@ export interface TranscriptPageReader {
     limit: number,
     beforeOrdinal?: number,
     expectedTranscriptViewId?: string,
+    signal?: AbortSignal,
+    purpose?: TranscriptReadPurpose,
   ): Promise<TranscriptPage>;
 }

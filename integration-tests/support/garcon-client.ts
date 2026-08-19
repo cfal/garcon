@@ -81,6 +81,7 @@ import {
   parseTranscriptMessages,
   type ResendCandidate,
   type TranscriptMessage,
+  type TranscriptReadPurpose,
 } from '../../common/chat-view.js';
 import type {
   RemoteSettingsSnapshot,
@@ -840,8 +841,16 @@ export class GarconTestClient {
   async getMessages(
     chatId: string,
     options: { limit?: number } & (
-      | { beforeOrdinal?: undefined; transcriptViewId?: never }
-      | { beforeOrdinal: number; transcriptViewId: string }
+      | {
+          beforeOrdinal?: undefined;
+          transcriptViewId?: never;
+          purpose?: TranscriptReadPurpose;
+        }
+      | {
+          beforeOrdinal: number;
+          transcriptViewId: string;
+          purpose?: never;
+        }
     ) = {},
   ): Promise<ChatMessagesPage> {
     const query = new URLSearchParams({
@@ -852,6 +861,7 @@ export class GarconTestClient {
       query.set('beforeOrdinal', String(options.beforeOrdinal));
       query.set('transcriptViewId', options.transcriptViewId);
     }
+    if (options.purpose !== undefined) query.set('purpose', options.purpose);
     const response = await this.get<Record<string, unknown>>(`/api/v1/chats/messages?${query}`);
     const historyState = response.historyState as { kind?: unknown } | undefined;
     if (historyState && historyState.kind !== 'complete') {

@@ -99,7 +99,7 @@ describe('persistence lifecycle', () => {
           kind: 'notice',
           at,
           message: 'context-notice-must-not-reach-provider',
-          detail: { action: 'reload-native-history' },
+          detail: { type: 'ordinary-notice' },
           providerMeta: null,
         },
         {

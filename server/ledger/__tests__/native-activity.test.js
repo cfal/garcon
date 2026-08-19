@@ -7,346 +7,395 @@ import {
   NATIVE_TRANSCRIPT_DRIFT_NOTICE,
   NativeTranscriptActivityService,
 } from '../native-activity.ts';
-import { ledgerRowsToMessages } from '../presentation.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 
+const CHAT_ID = 'synthetic-chat';
 const SESSION_AT = '2026-08-12T00:00:01.000Z';
 const PROVIDER_AT = '2026-08-12T00:00:02.000Z';
 const EXTERNAL_AT = '2026-08-12T00:00:03.000Z';
+const IMPORTED_AT = '2026-08-12T00:00:04.000Z';
 
 describe('NativeTranscriptActivityService', () => {
-  it('[TLV5-L09.05-CORE-UNIT-01] warns from the integration watermark and deduplicates the observed native tail', async () => {
-    await withFixture(async ({ ledger, activity, setNativeAt }) => {
-      ledger.initializeChat('chat-1', baseRows());
+  it('[TLV5-L09.05-CORE-UNIT-01] emits repeatable transient warnings without mutating the ledger', async () => {
+    await withLedger(async ({ ledger }) => {
+      ledger.initializeChat(CHAT_ID, baseRows());
+      const rowsBefore = ledger.currentRows(CHAT_ID);
+      const viewBefore = ledger.currentView(CHAT_ID);
+      const watermarkBefore = ledger.highWatermark(CHAT_ID);
+      const notices = [];
+      const lastActivity = mock(async () => ({
+        kind: 'ready',
+        value: { lastEntryAt: EXTERNAL_AT },
+      }));
+      const options = {
+        ledger,
+        registry: { getChat: () => ({ agentId: 'test-a' }) },
+        integrations: {
+          get: () => ({ nativeActivity: { lastActivity } }),
+        },
+        ownsExecution: () => false,
+        notifyOperationalNotice: (chatId, noticeType, content) => {
+          notices.push({ chatId, noticeType, content });
+        },
+      };
+      const activity = new NativeTranscriptActivityService(options);
 
-      expect(await activity.check('chat-1')).toBe(true);
-      expect(await activity.check('chat-1')).toBe(false);
-      setNativeAt('2026-08-12T00:00:04.000Z');
-      expect(await activity.check('chat-1')).toBe(true);
+      activity.requestCheck(CHAT_ID, 'activation');
+      await waitFor(() => notices.length === 1);
+      await drainMicrotasks();
+      activity.requestCheck(CHAT_ID, 'activation');
+      await waitFor(() => notices.length === 2);
+      await drainMicrotasks();
+      new NativeTranscriptActivityService(options).requestCheck(CHAT_ID, 'activation');
+      await waitFor(() => notices.length === 3);
 
-      const notices = ledger.currentRows('chat-1').filter((row) => row.kind === 'notice');
-      expect(notices.map((row) => row.message)).toEqual([
-        NATIVE_TRANSCRIPT_DRIFT_NOTICE,
-        NATIVE_TRANSCRIPT_DRIFT_NOTICE,
-      ]);
-      expect(notices.map((row) => row.detail.observedNativeWatermark)).toEqual([
-        EXTERNAL_AT,
-        '2026-08-12T00:00:04.000Z',
-      ]);
-      expect(ledgerRowsToMessages(notices).map((message) => message.action)).toEqual([
-        'reload-native-history',
-        'reload-native-history',
-      ]);
+      expect(notices).toEqual(Array.from({ length: 3 }, () => ({
+        chatId: CHAT_ID,
+        noticeType: 'warning',
+        content: NATIVE_TRANSCRIPT_DRIFT_NOTICE,
+      })));
+      expect(lastActivity).toHaveBeenCalledTimes(3);
+      expect(ledger.currentRows(CHAT_ID)).toEqual(rowsBefore);
+      expect(ledger.currentView(CHAT_ID)).toEqual(viewBefore);
+      expect(ledger.highWatermark(CHAT_ID)).toEqual(watermarkBefore);
     });
   });
 
-  it('coalesces requested checks per chat and releases the slot after settlement', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setNativeAt, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      const pending = deferred();
-      setResult(pending.promise);
-
-      activity.requestCheck('chat-1', 'open');
-      activity.requestCheck('chat-1', 'pre-resume');
-
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
-      await waitFor(() => ledger.currentRows('chat-1').some((row) => row.kind === 'notice'));
-
-      setNativeAt('2026-08-12T00:00:04.000Z');
-      activity.requestCheck('chat-1', 'open');
-      await waitFor(() => lastActivity.mock.calls.length === 2);
-
-      expect(lastActivity).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('aborts a stalled requested check and releases its coalescing slot', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      setResult(new Promise(() => {}));
-
-      activity.requestCheck('chat-1', 'open');
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      const firstSignal = lastActivity.mock.calls[0][1];
-      expect(firstSignal).toBeInstanceOf(AbortSignal);
-      expect(await waitForAbort(firstSignal)).toBe(true);
-
-      for (let attempt = 0; attempt < 100 && lastActivity.mock.calls.length < 2; attempt += 1) {
-        activity.requestCheck('chat-1', 'pre-resume');
-        await Bun.sleep(1);
-      }
-
-      expect(lastActivity).toHaveBeenCalledTimes(2);
-      const secondSignal = lastActivity.mock.calls[1][1];
-      expect(secondSignal).toBeInstanceOf(AbortSignal);
-      expect(await waitForAbort(secondSignal)).toBe(true);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    }, { probeTimeoutMs: 10 });
-  });
-
-  it('logs stalled requested checks with structured context', async () => {
-    const warnings = [];
-    const originalWarn = console.warn;
-    console.warn = mock((...args) => warnings.push(args));
-
-    try {
-      await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-        ledger.initializeChat('chat-1', baseRows());
-        setResult(new Promise(() => {}));
-
-        activity.requestCheck('chat-1', 'open');
-        expect(await waitForAbort(lastActivity.mock.calls[0][1])).toBe(true);
-        await waitForWarnings(warnings);
-
-        expect(warnings.length).toBeGreaterThan(0);
-        expect(warnings.some((entry) => {
-          const details = entry.find((value) => value && typeof value === 'object');
-          return details?.chatId === 'chat-1' && details?.reason === 'open';
-        })).toBe(true);
-      }, { probeTimeoutMs: 10 });
-    } finally {
-      console.warn = originalWarn;
-    }
-  });
-
-  it('does not include provider error content in requested-check diagnostics', async () => {
-    const privateContent = 'private-native-provider-content';
-    const warnings = [];
-    const originalWarn = console.warn;
-    console.warn = mock((...args) => warnings.push(args));
-
-    try {
-      await withFixture(async ({ ledger, activity, setResult }) => {
-        ledger.initializeChat('chat-1', baseRows());
-        setResult(new Error(privateContent));
-
-        activity.requestCheck('chat-1', 'pre-resume');
-        await waitForWarnings(warnings);
-
-        expect(warnings.length).toBeGreaterThan(0);
-        expect(JSON.stringify(warnings)).not.toContain(privateContent);
-        expect(warnings.some((entry) => {
-          const details = entry.find((value) => value && typeof value === 'object');
-          return details?.chatId === 'chat-1' && details?.reason === 'pre-resume';
-        })).toBe(true);
-      });
-    } finally {
-      console.warn = originalWarn;
-    }
-  });
-
-  it('does not let later core-authored rows hide missed native output', async () => {
-    await withFixture(async ({ ledger, activity }) => {
-      ledger.initializeChat('chat-1', [
-        ...baseRows(),
+  it('[TLV5-L09.04-STORE-UNIT-01] qualifies the provider watermark by ordinal and timestamp', async () => {
+    await withLedger(async ({ ledger, store }) => {
+      const view = ledger.initializeChat(CHAT_ID, [
+        ...baseRows({ providerAt: SESSION_AT }),
+        coreInput('core input', 'core-input-1', IMPORTED_AT),
         {
-          kind: 'user-input',
-          at: '2026-08-12T00:00:10.000Z',
-          detail: {
-            clientMessageId: 'message-1',
-            message: new UserMessage('2026-08-12T00:00:10.000Z', 'new input'),
-            attachments: [],
-            steer: false,
-          },
+          kind: 'notice',
+          at: IMPORTED_AT,
+          message: 'Ordinary durable notice.',
+          detail: { type: 'ordinary-notice' },
           providerMeta: null,
         },
         {
           kind: 'permission-resolved',
-          at: '2026-08-12T00:00:11.000Z',
+          at: IMPORTED_AT,
           lifecycle: {
             kind: 'resolved',
-            permissionOccurrenceId: 'incarnation-1',
+            permissionOccurrenceId: 'synthetic-permission',
             decision: { allow: true },
           },
           providerMeta: null,
         },
         {
           kind: 'run-ended',
-          at: '2026-08-12T00:00:12.000Z',
+          at: IMPORTED_AT,
           outcome: 'interrupted',
           origin: 'core',
           providerMeta: null,
         },
       ]);
 
-      expect(ledger.nativeActivityState('chat-1').providerWatermarkAt).toBe(PROVIDER_AT);
-      expect(await activity.check('chat-1')).toBe(true);
-    });
-  });
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 2,
+        at: SESSION_AT,
+      });
 
-  it('counts native-imported user rows and probes only the current binding', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity }) => {
-      const view = ledger.initializeChat('chat-1', [
-        ...baseRows(),
-        {
-          kind: 'user-input',
-          at: EXTERNAL_AT,
-          detail: {
-            clientMessageId: null,
-            message: new UserMessage(EXTERNAL_AT, 'imported input'),
-            attachments: [],
-            steer: false,
-          },
-          providerMeta: null,
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'provider-row',
+        at: SESSION_AT,
+        message: new AssistantMessage(SESSION_AT, 'provider timestamp collision'),
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 7,
+        at: SESSION_AT,
+      });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'user-input',
+        at: IMPORTED_AT,
+        detail: {
+          clientMessageId: null,
+          message: new UserMessage(IMPORTED_AT, 'synthetic imported input'),
+          attachments: [],
+          steer: false,
         },
-      ]);
-
-      expect(ledger.nativeActivityState('chat-1').providerWatermarkAt).toBe(EXTERNAL_AT);
-      expect(await activity.check('chat-1')).toBe(false);
-      ledger.advanceContentStart('chat-1', view.viewId, 4);
-      expect(await activity.check('chat-1')).toBe(false);
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('treats unavailable and failed probes as advisory', async () => {
-    await withFixture(async ({ ledger, activity, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      setResult({ kind: 'unavailable' });
-      expect(await activity.check('chat-1')).toBe(false);
-      setResult(new Error('probe failed'));
-      expect(await activity.check('chat-1')).toBe(false);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
-  });
-
-  it('does not probe native history while the execution coordinator owns the chat', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity }) => {
-      ledger.initializeChat('chat-1', baseRows());
-
-      expect(await activity.check('chat-1')).toBe(false);
-      expect(lastActivity).not.toHaveBeenCalled();
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    }, { ownsExecution: () => true });
-  });
-
-  it('probes a native session fact that arrives after interruption', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setNativeAt }) => {
-      ledger.initializeChat('chat-1');
-      const producer = ledger.openProducer('chat-1', 'test');
-      ledger.beginRun('chat-1', 'run-1');
-      ledger.interruptRun('chat-1');
-      producer.sink.publish({
-        type: 'session',
-        session: {
-          agentSessionId: 'native-late',
-          nativeSession: {
-            ownerId: 'test',
-            schemaVersion: 1,
-            value: { path: '/tmp/native-late.jsonl' },
-          },
-          nativeSeedReceipt: null,
-        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 8,
+        at: IMPORTED_AT,
       });
-      setNativeAt('2026-08-12T00:00:21.000Z');
-
-      expect(await activity.check('chat-1')).toBe(true);
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      expect(lastActivity.mock.calls[0][0]).toEqual({
-        ownerId: 'test',
-        schemaVersion: 1,
-        value: { path: '/tmp/native-late.jsonl' },
-      });
-      expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual([
-        'run-ended',
-        'session',
-        'notice',
-      ]);
     });
   });
 
-  it('drops a pending native result when execution starts before the probe settles', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      const pending = deferred();
-      setResult(pending.promise);
+  it('coalesces equal pending work and releases only the completed attempt', async () => {
+    const fixture = serviceFixture();
+    const first = deferred();
+    fixture.enqueueProbe(first.promise, { kind: 'unavailable' });
 
-      const check = activity.check('chat-1');
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      ledger.openProducer('chat-1', 'test');
-      ledger.beginRun('chat-1', 'run-1');
-      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+    fixture.activity.requestCheck(CHAT_ID, 'activation');
+    fixture.activity.requestCheck(CHAT_ID, 'activation');
+    expect(fixture.probeCalls).toHaveLength(1);
 
-      expect(await check).toBe(false);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
+    first.resolve({ kind: 'unavailable' });
+    await waitFor(() => fixture.timers[0]?.cancelled === true);
+    fixture.activity.requestCheck(CHAT_ID, 'activation');
+    await waitFor(() => fixture.probeCalls.length === 2);
+    await waitFor(() => fixture.timers[1]?.cancelled === true);
   });
 
-  it('[TLV5-L09.04-CORE-UNIT-01] drops a pending native result when the transcript view is replaced', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-      const current = ledger.initializeChat('chat-1', baseRows());
-      const pending = deferred();
-      setResult(pending.promise);
+  it('[TLV5-L09.04-CORE-UNIT-01] supersedes and fences every changed eligibility dimension', async () => {
+    const scenarios = eligibilityChanges();
 
-      const check = activity.check('chat-1');
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      const staging = ledger.stageView('chat-1', baseRows(), 1);
-      ledger.replaceCurrentView('chat-1', current.viewId, staging.viewId);
-      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+    for (const scenario of scenarios) {
+      const fenced = serviceFixture();
+      const heldFence = deferred();
+      fenced.enqueueProbe(heldFence.promise);
+      fenced.activity.requestCheck(CHAT_ID, 'activation');
+      scenario.mutate(fenced);
+      heldFence.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+      await waitFor(() => fenced.timers[0]?.cancelled === true);
+      if (fenced.notices.length !== 0) {
+        throw new Error(`${scenario.name} escaped the result fence`);
+      }
+      expect(fenced.probeCalls[0].signal.aborted).toBe(false);
 
-      expect(await check).toBe(false);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
+      const superseded = serviceFixture();
+      const oldProbe = deferred();
+      const replacementProbe = deferred();
+      superseded.enqueueProbe(oldProbe.promise, replacementProbe.promise);
+      superseded.activity.requestCheck(CHAT_ID, 'activation');
+      scenario.mutate(superseded);
+      superseded.activity.requestCheck(CHAT_ID, 'activation');
+
+      expect(superseded.probeCalls).toHaveLength(2);
+      expect(superseded.probeCalls[0].signal.aborted).toBe(true);
+      await waitFor(() => superseded.timers[0]?.cancelled === true);
+      oldProbe.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+      await drainMicrotasks();
+      superseded.activity.requestCheck(CHAT_ID, 'activation');
+      if (superseded.probeCalls.length !== 2) {
+        throw new Error(`${scenario.name} completion cleared its replacement token`);
+      }
+      replacementProbe.resolve({ kind: 'unavailable' });
+      await waitFor(() => superseded.timers[1]?.cancelled === true);
+      expect(superseded.notices).toEqual([]);
+    }
   });
 
-  it('drops a pending native result when the current native session changes', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      const pending = deferred();
-      setResult(pending.promise);
+  it('[TLV5-L09.04-CORE-UNIT-02] contains ineligible, failed, owned, and timed-out probes', async () => {
+    const ineligible = [
+      (fixture) => fixture.setOwned(true),
+      (fixture) => fixture.setChatExists(false),
+      (fixture) => fixture.setIntegrationAvailable(false),
+      (fixture) => fixture.updateState((current) => ({ ...current, session: null })),
+      (fixture) => fixture.updateState((current) => ({ ...current, providerWatermark: null })),
+    ];
+    for (const makeIneligible of ineligible) {
+      const fixture = serviceFixture();
+      makeIneligible(fixture);
+      fixture.activity.requestCheck(CHAT_ID, 'activation');
+      expect(fixture.probeCalls).toEqual([]);
+      expect(fixture.timers).toEqual([]);
+    }
 
-      const check = activity.check('chat-1');
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      ledger.openProducer('chat-1', 'test').sink.publish({
-        type: 'session',
-        session: {
-          agentSessionId: 'native-2',
-          nativeSession: {
-            ownerId: 'test',
-            schemaVersion: 1,
-            value: { path: '/tmp/native-2.jsonl' },
-          },
-          nativeSeedReceipt: null,
-        },
-      });
-      pending.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+    const quietResults = [
+      { kind: 'unavailable' },
+      { kind: 'ready', value: { lastEntryAt: null } },
+      { kind: 'ready', value: { lastEntryAt: 'not-a-timestamp' } },
+      { kind: 'ready', value: { lastEntryAt: PROVIDER_AT } },
+      { kind: 'ready', value: { lastEntryAt: SESSION_AT } },
+    ];
+    for (const result of quietResults) {
+      const fixture = serviceFixture();
+      fixture.enqueueProbe(result);
+      fixture.activity.requestCheck(CHAT_ID, 'activation');
+      await waitFor(() => fixture.timers[0]?.cancelled === true);
+      expect(fixture.notices).toEqual([]);
+    }
 
-      expect(await check).toBe(false);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
-  });
+    const ownership = serviceFixture();
+    const heldOwnership = deferred();
+    ownership.enqueueProbe(heldOwnership.promise);
+    ownership.activity.requestCheck(CHAT_ID, 'activation');
+    ownership.setOwned(true);
+    heldOwnership.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+    await waitFor(() => ownership.timers[0]?.cancelled === true);
+    expect(ownership.notices).toEqual([]);
 
-  it('drops a pending native result when provider output advances the watermark', async () => {
-    await withFixture(async ({ ledger, activity, lastActivity, setResult }) => {
-      ledger.initializeChat('chat-1', baseRows());
-      const pending = deferred();
-      setResult(pending.promise);
+    const privateProviderContent = 'synthetic-private-provider-content';
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = mock((...args) => warnings.push(args));
+    try {
+      const failed = serviceFixture();
+      failed.enqueueProbe(new Error(privateProviderContent));
+      failed.activity.requestCheck(CHAT_ID, 'activation');
+      await waitFor(() => failed.timers[0]?.cancelled === true);
+      expect(failed.notices).toEqual([]);
+      expect(JSON.stringify(warnings)).not.toContain(privateProviderContent);
+      expect(JSON.stringify(warnings)).toContain('NATIVE_ACTIVITY_PROBE_FAILED');
+    } finally {
+      console.warn = originalWarn;
+    }
 
-      const check = activity.check('chat-1');
-      expect(lastActivity).toHaveBeenCalledTimes(1);
-      ledger.openProducer('chat-1', 'test').sink.publish({
-        type: 'rows',
-        rows: [{
-          message: new AssistantMessage('2026-08-12T00:00:02.500Z', 'late provider output'),
-        }],
-      });
-      pending.resolve({
-        kind: 'ready',
-        value: { lastEntryAt: '2026-08-12T00:00:04.000Z' },
-      });
-
-      expect(await check).toBe(false);
-      expect(ledger.currentRows('chat-1').some((row) => row.kind === 'notice')).toBe(false);
-    });
+    const timedOut = serviceFixture();
+    const stalled = deferred();
+    timedOut.enqueueProbe(stalled.promise, { kind: 'unavailable' });
+    timedOut.activity.requestCheck(CHAT_ID, 'activation');
+    expect(timedOut.timers[0].delay).toBe(5_000);
+    timedOut.timers[0].fire();
+    await waitFor(() => timedOut.probeCalls[0].signal.aborted);
+    await waitFor(() => timedOut.timers[0].cancelled);
+    timedOut.activity.requestCheck(CHAT_ID, 'activation');
+    await waitFor(() => timedOut.probeCalls.length === 2);
+    await waitFor(() => timedOut.timers[1]?.cancelled === true);
+    stalled.resolve({ kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } });
+    await drainMicrotasks();
+    expect(timedOut.notices).toEqual([]);
   });
 });
 
+function eligibilityChanges() {
+  return [
+    {
+      name: 'transcript view',
+      mutate: (fixture) => fixture.updateState((current) => ({
+        ...current,
+        viewId: 'synthetic-view-b',
+        session: { ...current.session, viewId: 'synthetic-view-b' },
+      })),
+    },
+    {
+      name: 'agent',
+      mutate: (fixture) => fixture.setAgentId('test-b'),
+    },
+    {
+      name: 'session row',
+      mutate: (fixture) => fixture.updateState((current) => ({
+        ...current,
+        session: { ...current.session, ordinal: current.session.ordinal + 1 },
+      })),
+    },
+    {
+      name: 'native reference',
+      mutate: (fixture) => fixture.updateState((current) => ({
+        ...current,
+        session: {
+          ...current.session,
+          detail: {
+            ...current.session.detail,
+            nativeSession: syntheticNativeSession('synthetic-native-session-b'),
+          },
+        },
+      })),
+    },
+    {
+      name: 'provider ordinal at the same timestamp',
+      mutate: (fixture) => fixture.updateState((current) => ({
+        ...current,
+        providerWatermark: {
+          ...current.providerWatermark,
+          ordinal: current.providerWatermark.ordinal + 1,
+        },
+      })),
+    },
+    {
+      name: 'provider timestamp',
+      mutate: (fixture) => fixture.updateState((current) => ({
+        ...current,
+        providerWatermark: { ...current.providerWatermark, at: EXTERNAL_AT },
+      })),
+    },
+  ];
+}
+
+function serviceFixture() {
+  let currentState = syntheticActivityState();
+  let agentId = 'test-a';
+  let owned = false;
+  let chatExists = true;
+  let integrationAvailable = true;
+  const queuedProbeResults = [];
+  const probeCalls = [];
+  const notices = [];
+  const timers = [];
+  const lastActivity = mock((nativeSession, signal) => {
+    probeCalls.push({ nativeSession, signal, agentId });
+    const result = queuedProbeResults.shift() ?? { kind: 'unavailable' };
+    return result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
+  });
+  const activity = new NativeTranscriptActivityService({
+    ledger: { nativeActivityState: () => currentState },
+    registry: { getChat: () => chatExists ? { agentId } : null },
+    integrations: {
+      get: () => integrationAvailable ? { nativeActivity: { lastActivity } } : null,
+    },
+    ownsExecution: () => owned,
+    notifyOperationalNotice: (chatId, noticeType, content) => {
+      notices.push({ chatId, noticeType, content });
+    },
+    scheduleTimeout(callback, delay) {
+      const timer = {
+        delay,
+        cancelled: false,
+        fire() {
+          if (!timer.cancelled) callback();
+        },
+      };
+      timers.push(timer);
+      return { cancel: () => { timer.cancelled = true; } };
+    },
+  });
+
+  return {
+    activity,
+    notices,
+    probeCalls,
+    timers,
+    enqueueProbe(...results) { queuedProbeResults.push(...results); },
+    setAgentId(value) { agentId = value; },
+    setOwned(value) { owned = value; },
+    setChatExists(value) { chatExists = value; },
+    setIntegrationAvailable(value) { integrationAvailable = value; },
+    updateState(update) { currentState = update(currentState); },
+  };
+}
+
+function syntheticActivityState() {
+  return {
+    viewId: 'synthetic-view-a',
+    session: {
+      kind: 'session',
+      viewId: 'synthetic-view-a',
+      ordinal: 1,
+      at: SESSION_AT,
+      detail: {
+        agentSessionId: 'synthetic-agent-session-a',
+        nativeSession: syntheticNativeSession('synthetic-native-session-a'),
+        nativeSeedReceipt: null,
+      },
+      providerMeta: null,
+    },
+    providerWatermark: { ordinal: 2, at: PROVIDER_AT },
+  };
+}
+
+function syntheticNativeSession(sessionId) {
+  return {
+    ownerId: 'test-a',
+    schemaVersion: 1,
+    value: { sessionId },
+  };
+}
+
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 async function waitFor(predicate) {
@@ -357,72 +406,56 @@ async function waitFor(predicate) {
   throw new Error('Condition did not settle within the microtask budget.');
 }
 
-async function waitForAbort(signal) {
-  if (signal.aborted) return true;
-  return Promise.race([
-    new Promise((resolve) => signal.addEventListener('abort', () => resolve(true), { once: true })),
-    Bun.sleep(250).then(() => false),
-  ]);
+async function drainMicrotasks() {
+  for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
 }
 
-async function waitForWarnings(warnings) {
-  for (let attempt = 0; attempt < 100 && warnings.length === 0; attempt += 1) {
-    await Bun.sleep(1);
-  }
-}
-
-function baseRows() {
+function baseRows(options = {}) {
+  const providerAt = options.providerAt ?? PROVIDER_AT;
   return [
     {
       kind: 'session',
       at: SESSION_AT,
       detail: {
-        agentSessionId: 'native-1',
-        nativeSession: {
-          ownerId: 'test',
-          schemaVersion: 1,
-          value: { path: '/tmp/native-1.jsonl' },
-        },
+        agentSessionId: 'synthetic-agent-session-a',
+        nativeSession: syntheticNativeSession('synthetic-native-session-a'),
         nativeSeedReceipt: null,
       },
       providerMeta: null,
     },
     {
       kind: 'provider-row',
-      at: PROVIDER_AT,
-      message: new AssistantMessage(PROVIDER_AT, 'observed answer'),
+      at: providerAt,
+      message: new AssistantMessage(providerAt, 'synthetic observed output'),
       providerMeta: null,
     },
   ];
 }
 
-async function withFixture(run, options = {}) {
+function coreInput(content, clientMessageId, at) {
+  return {
+    kind: 'user-input',
+    at,
+    detail: {
+      clientMessageId,
+      message: new UserMessage(at, content),
+      attachments: [],
+      steer: false,
+    },
+    providerMeta: null,
+  };
+}
+
+async function withLedger(run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-native-activity-'));
-  const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(root), {
+  const store = new TranscriptLedgerStore(root, {
     now: () => '2026-08-12T00:00:20.000Z',
   });
-  let result = { kind: 'ready', value: { lastEntryAt: EXTERNAL_AT } };
-  const lastActivity = mock(async () => {
-    if (result instanceof Error) throw result;
-    return result;
-  });
-  const activity = new NativeTranscriptActivityService({
-    ledger,
-    registry: { getChat: () => ({ agentId: 'test' }) },
-    integrations: {
-      get: () => ({ nativeActivity: { lastActivity } }),
-    },
-    ownsExecution: (chatId) => ledger.isRunActive(chatId),
-    ...options,
+  const ledger = new TranscriptLedgerService(store, {
+    now: () => '2026-08-12T00:00:20.000Z',
   });
   try {
-    await run({
-      ledger,
-      activity,
-      lastActivity,
-      setNativeAt(value) { result = { kind: 'ready', value: { lastEntryAt: value } }; },
-      setResult(value) { result = value; },
-    });
+    await run({ ledger, store });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });

@@ -61,6 +61,7 @@ import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 import type {
   CompleteChatHistoryResponse,
+  TranscriptReadPurpose,
   UnavailableChatHistoryResponse,
 } from '../../common/chat-view.js';
 import {
@@ -231,6 +232,14 @@ function parseMessagesLimit(value: string | null): number | Response {
     return jsonError('limit must be a positive integer', 400, 'VALIDATION_FAILED', false);
   }
   return Math.min(parsed, CHAT_MESSAGES_MAX_LIMIT);
+}
+
+function parseTranscriptReadPurpose(
+  value: string | null,
+): TranscriptReadPurpose | Response | undefined {
+  if (value === null) return undefined;
+  if (value === 'activation') return value;
+  return jsonError('purpose must be activation', 400, 'VALIDATION_FAILED', false);
 }
 
 function optionalStringOrNull(value: unknown): string | null | undefined {
@@ -457,10 +466,20 @@ export default function createChatRoutes({
       const beforeOrdinalRaw = url.searchParams.get('beforeOrdinal');
       const beforeOrdinal = parseBeforeOrdinal(beforeOrdinalRaw);
       if (beforeOrdinal instanceof Response) return beforeOrdinal;
+      const purpose = parseTranscriptReadPurpose(url.searchParams.get('purpose'));
+      if (purpose instanceof Response) return purpose;
       const expectedTranscriptViewId = url.searchParams.get('transcriptViewId')?.trim() ?? '';
       if (beforeOrdinal !== undefined && !expectedTranscriptViewId) {
         return jsonError(
           'transcriptViewId query parameter is required for earlier pages',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
+      if (beforeOrdinal !== undefined && purpose === 'activation') {
+        return jsonError(
+          'activation purpose is valid only for newest history',
           400,
           'VALIDATION_FAILED',
           false,
@@ -472,6 +491,8 @@ export default function createChatRoutes({
         limit,
         beforeOrdinal,
         expectedTranscriptViewId || undefined,
+        undefined,
+        purpose,
       );
       if (
         expectedTranscriptViewId

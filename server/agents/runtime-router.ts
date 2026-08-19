@@ -47,7 +47,6 @@ import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
-import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
@@ -76,7 +75,6 @@ export interface AgentRuntimeRouterOptions {
   ): Promise<CarriedContext | null>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
-  nativeActivity?: NativeTranscriptActivityService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
 }
 
@@ -102,7 +100,6 @@ export class AgentRuntimeRouter {
   readonly #createCarriedContext: NonNullable<AgentRuntimeRouterOptions['createCarriedContext']>;
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
-  readonly #nativeActivity: NativeTranscriptActivityService | null;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, TranscriptProducerLease>();
   readonly #executionHandles = new Map<string, {
@@ -122,7 +119,6 @@ export class AgentRuntimeRouter {
       ?? (async (_chatId, _entry, messages) => renderCarriedContext(messages));
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
-    this.#nativeActivity = options.nativeActivity ?? null;
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
     this.#ledger.subscribe((event) => {
       if (event.type !== 'run-ended') return;
@@ -247,7 +243,6 @@ export class AgentRuntimeRouter {
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
-    this.#nativeActivity?.requestCheck(chatId, 'pre-resume');
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);

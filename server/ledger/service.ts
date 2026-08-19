@@ -13,7 +13,6 @@ import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
   InputComposition,
   LedgerAgentSwitchRow,
-  LedgerNoticeRow,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
@@ -357,28 +356,6 @@ export class TranscriptLedgerService {
     ) {
       permissions!.set(claim.permissionOccurrenceId, { ...active, claimId: null });
     }
-  }
-
-  appendNotice(input: {
-    readonly chatId: string;
-    readonly viewId: TranscriptViewId;
-    readonly message: string;
-    readonly detail: LedgerNoticeRow['detail'];
-  }): LedgerNoticeRow {
-    const [row] = this.#store.append(input.chatId, input.viewId, [{
-      kind: 'notice',
-      at: this.#now(),
-      message: input.message,
-      detail: input.detail,
-      providerMeta: null,
-    }]);
-    this.#notify({
-      type: 'rows',
-      chatId: input.chatId,
-      viewId: input.viewId,
-      rows: [row!],
-    });
-    return row as LedgerNoticeRow;
   }
 
   // Records the ownership boundary as durable history. Handoff advances the content-start

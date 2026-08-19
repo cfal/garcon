@@ -66,8 +66,7 @@ describe('frozen transcript drafts', () => {
     const requestedTool = new BashToolUseMessage(AT, 'tool-1', 'pwd');
 
     expect(frozenDrafts([
-      new TranscriptNoticeMessage(AT, quarantineMessage, undefined, quarantineDetail),
-      new TranscriptNoticeMessage(AT, 'The transcript may have changed.', 'reload-native-history'),
+      new TranscriptNoticeMessage(AT, quarantineMessage, quarantineDetail),
       new TranscriptNoticeMessage(AT, 'Ordinary transcript notice.'),
       new TranscriptNoticeMessage(AT, quarantineMessage),
       new PermissionRequestMessage(AT, 'permission-1', requestedTool),

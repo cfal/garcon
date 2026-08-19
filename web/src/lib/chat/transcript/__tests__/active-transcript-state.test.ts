@@ -727,7 +727,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforeLoad + 1);
 	});
 
-	it('[TLV5-PAGE.09-WEB-UNIT-04] loads a newest visible target across trailing hidden raw budgets', async () => {
+	it('[TLV5-PAGE.09-WEB-UNIT-04] [TLV5-L09.03-WEB-UNIT-01] marks only the active newest request across trailing hidden raw budgets', async () => {
 		const chat = new ActiveTranscriptState();
 		const revisionBeforeLoad = chat.feedMutationClock.dataRevision;
 		vi.mocked(getChatMessages)
@@ -771,7 +771,7 @@ describe('ActiveTranscriptState', () => {
 		await expect(chat.loadMessages('chat-1')).resolves.toHaveLength(50);
 
 		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
-			{ chatId: 'chat-1', limit: 50 },
+			{ chatId: 'chat-1', limit: 50, purpose: 'activation' },
 			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 101, transcriptViewId: 'generation-1' },
 			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 51, transcriptViewId: 'generation-1' },
 		]);

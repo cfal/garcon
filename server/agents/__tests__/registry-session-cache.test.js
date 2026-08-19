@@ -176,12 +176,6 @@ describe('AgentRegistry session cache', () => {
         reason: 'already ended',
       },
     });
-    ledger.appendNotice({
-      chatId: CHAT_ID,
-      viewId,
-      message: 'preview-notice',
-      detail: { action: 'reload-native-history' },
-    });
     await Promise.resolve();
     const registry = createRegistry({
       ensure: async () => ledger.currentView(CHAT_ID),

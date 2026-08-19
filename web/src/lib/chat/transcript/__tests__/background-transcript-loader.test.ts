@@ -63,7 +63,7 @@ describe('BackgroundTranscriptLoader', () => {
 		vi.mocked(getChatMessages).mockReset();
 	});
 
-	it('[TLV5-PAGE.09-WEB-BACKGROUND-01] fills a cached newest snapshot across trailing hidden raw budgets', async () => {
+	it('[TLV5-PAGE.09-WEB-BACKGROUND-01] [TLV5-L09.03-WEB-BACKGROUND-01] fills a background snapshot without activation', async () => {
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce(boundedNewestPage([], 250, 151))
 			.mockResolvedValueOnce(boundedNewestPage([], 150, 51))

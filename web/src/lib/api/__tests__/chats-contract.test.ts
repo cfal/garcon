@@ -973,6 +973,11 @@ describe('chats API contract', () => {
 
 		await getChatMessages({ chatId: 'c/2' });
 		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/messages?chatId=c%2F2&limit=50');
+
+		await getChatMessages({ chatId: 'c/3', purpose: 'activation' });
+		expect(fetchMock.mock.calls[5][0]).toBe(
+			'/api/v1/chats/messages?chatId=c%2F3&limit=50&purpose=activation',
+		);
 	});
 
 	it('rejects malformed chat message page metadata', async () => {

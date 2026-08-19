@@ -368,8 +368,8 @@ export class TranscriptLedgerStore {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
       const session = this.#currentSession(entry, current);
-      const watermark = entry.db.query<{ at: string }, [string, number]>(`
-        SELECT at
+      const watermark = entry.db.query<{ ordinal: number; at: string }, [string, number]>(`
+        SELECT ordinal, at
         FROM transcript_rows
         WHERE view_id = ? AND ordinal >= ? AND (
           kind IN (
@@ -390,25 +390,10 @@ export class TranscriptLedgerStore {
         )
         ORDER BY ordinal DESC LIMIT 1
       `).get(current.viewId, current.contentStartOrdinal);
-      const notice = entry.db.query<StoredLedgerRow, [string, number, string]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ?
-          AND ordinal >= ?
-          AND kind = 'notice'
-          AND json_extract(payload_json, '$.value.detail.type') = ?
-        ORDER BY ordinal DESC LIMIT 1
-      `).get(current.viewId, current.contentStartOrdinal, 'native-transcript-drift');
-      const noticeRow = notice ? decodeStoredRow(notice) : null;
-      const noticeWatermark = noticeRow?.kind === 'notice'
-        && typeof noticeRow.detail.observedNativeWatermark === 'string'
-        ? noticeRow.detail.observedNativeWatermark
-        : null;
       return {
         viewId: current.viewId,
         session,
-        providerWatermarkAt: watermark?.at ?? null,
-        lastNoticeWatermarkAt: noticeWatermark,
+        providerWatermark: watermark ?? null,
       };
     });
   }

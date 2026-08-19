@@ -46,7 +46,6 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
-        row.detail.action === 'reload-native-history' ? 'reload-native-history' : undefined,
         isCarryoverMigrationQuarantineNoticeDetail(row.detail) ? row.detail : undefined,
       );
     case 'agent-switch':

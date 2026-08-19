@@ -23,6 +23,7 @@ import {
 	parseTranscriptMessages,
 	type ChatHistoryResponse,
 	type TranscriptMessage,
+	type TranscriptReadPurpose,
 } from '$shared/chat-view';
 import type {
 	ChatListEntry,
@@ -396,8 +397,16 @@ export type ChatMessagesRequest = {
 	chatId: string;
 	limit?: number;
 } & (
-	| { beforeOrdinal?: undefined; transcriptViewId?: string }
-	| { beforeOrdinal: number; transcriptViewId: string }
+	| {
+			beforeOrdinal?: undefined;
+			transcriptViewId?: string;
+			purpose?: TranscriptReadPurpose;
+		}
+	| {
+			beforeOrdinal: number;
+			transcriptViewId: string;
+			purpose?: never;
+		}
 );
 
 interface ValidatedChatMessagesPage {
@@ -455,6 +464,9 @@ export async function getChatMessages(params: ChatMessagesRequest): Promise<Chat
 	}
 	if (params.transcriptViewId !== undefined) {
 		query.set('transcriptViewId', params.transcriptViewId);
+	}
+	if (params.purpose !== undefined) {
+		query.set('purpose', params.purpose);
 	}
 	const response = await apiGet<{
 		historyState?: unknown;

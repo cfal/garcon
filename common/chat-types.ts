@@ -642,7 +642,6 @@ export class TranscriptNoticeMessage {
   constructor(
     public timestamp: string,
     public content: string,
-    public action?: 'reload-native-history',
     public detail?: TranscriptNoticeDetail,
   ) {}
 }
@@ -1160,7 +1159,6 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         return new TranscriptNoticeMessage(
           str(data.timestamp),
           str(data.content),
-          data.action === 'reload-native-history' ? data.action : undefined,
           detail,
         );
       }

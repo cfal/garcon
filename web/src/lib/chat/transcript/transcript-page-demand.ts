@@ -6,6 +6,7 @@ import {
 	type CompleteChatHistoryResponse,
 	type TranscriptMessage,
 	type TranscriptPage,
+	type TranscriptReadPurpose,
 	type UnavailableChatHistoryResponse,
 } from '$shared/chat-view';
 import {
@@ -29,12 +30,14 @@ export type TranscriptPageDemandOptions = TranscriptPageDemandBase & (
 			direction: 'backward';
 			beforeOrdinal?: number;
 			transcriptViewId?: string;
+			purpose?: TranscriptReadPurpose;
 		}
 	| {
 			direction: 'later';
 			afterOrdinal: number;
 			throughOrdinal: number;
 			transcriptViewId: string;
+			purpose?: never;
 		}
 );
 
@@ -181,8 +184,17 @@ function pageRequest(
 		};
 	}
 	return transcriptViewId
-		? { chatId: options.chatId, limit: remainingVisible, transcriptViewId }
-		: { chatId: options.chatId, limit: remainingVisible };
+		? {
+				chatId: options.chatId,
+				limit: remainingVisible,
+				transcriptViewId,
+				...(options.purpose ? { purpose: options.purpose } : {}),
+			}
+		: {
+				chatId: options.chatId,
+				limit: remainingVisible,
+				...(options.purpose ? { purpose: options.purpose } : {}),
+			};
 }
 
 function validateDemandPage(page: CompletePage, request: ChatMessagesRequest): void {

@@ -44,7 +44,6 @@ import { createLogger } from '../lib/log.js';
 import type { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
-import type { NativeTranscriptActivityService } from '../ledger/native-activity.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
@@ -184,7 +183,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
-    nativeActivity?: NativeTranscriptActivityService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
   }) {
     this.#registry = args.registry;
@@ -206,7 +204,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       createCarriedContext: args.createCarriedContext,
       ledger: this.#ledger,
       adoption: this.#adoption,
-      nativeActivity: args.nativeActivity,
       hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
     });
     this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;

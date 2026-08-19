@@ -65,8 +65,7 @@ describe('transcript ledger read-fold matrix', () => {
           ordinal: 3,
           message: new TranscriptNoticeMessage(
             AT,
-            'Native history changed.',
-            'reload-native-history',
+            'Ordinary durable notice.',
           ),
         },
         {
@@ -74,7 +73,6 @@ describe('transcript ledger read-fold matrix', () => {
           message: new TranscriptNoticeMessage(
             AT,
             QUARANTINE_NOTICE,
-            undefined,
             QUARANTINE_DETAIL,
           ),
         },
@@ -190,8 +188,8 @@ function allRowKindDrafts() {
       kind: 'notice',
       at: AT,
       providerMeta: null,
-      message: 'Native history changed.',
-      detail: { action: 'reload-native-history' },
+      message: 'Ordinary durable notice.',
+      detail: { type: 'ordinary-notice' },
     },
     {
       kind: 'notice',

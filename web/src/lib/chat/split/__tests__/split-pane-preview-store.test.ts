@@ -83,7 +83,7 @@ describe('SplitPanePreviewStore', () => {
 		});
 	});
 
-	it('loads an HTTP snapshot and persists it through the shared cache', async () => {
+	it('[TLV5-L09.03-WEB-PREVIEW-01] loads a split-pane preview without activation', async () => {
 		vi.mocked(getChatMessages).mockResolvedValueOnce(page([entry(1, 'loaded')]));
 		const storage = new LocalChatTranscriptStorage();
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
