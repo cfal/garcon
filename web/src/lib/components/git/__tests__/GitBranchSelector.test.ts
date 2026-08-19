@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitBranchSelector from '../GitBranchSelector.svelte';
 
@@ -74,6 +74,27 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 		expect(screen.getByRole('option', { name: /branch-0/ })).toBeTruthy();
 		expect(screen.queryByRole('option', { name: /branch-119/ })).toBeNull();
 		expect(document.querySelectorAll('[data-git-ref-virtual-row]').length).toBeLessThan(40);
+	});
+
+	it('expands the ref list within the viewport without wrapping long names', () => {
+		const longBranch = 'feature/a-branch-name-that-benefits-from-the-available-screen-width';
+		renderSelector({
+			refs: [
+				{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
+				{
+					name: longBranch,
+					ref: `refs/heads/${longBranch}`,
+					kind: 'local-branch',
+				},
+			],
+		});
+
+		const menuClass = document.querySelector('[data-slot="popover-content"]')?.className ?? '';
+		const branchText = within(
+			screen.getByRole('option', { name: new RegExp(longBranch) }),
+		).getByText(longBranch);
+		expect(menuClass).toContain('w-[min(36rem,calc(100vw-1rem))]');
+		expect(branchText.className).toContain('truncate');
 	});
 
 	it('reclaims focus when the switch is cancelled', async () => {

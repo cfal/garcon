@@ -127,7 +127,11 @@
 	);
 	const resolvedIconClass = $derived(cn('text-muted-foreground w-4 h-4', iconClass));
 	const resolvedLabelClass = $derived(
-		cn('text-sm font-medium truncate', isMobile ? 'max-w-[6rem]' : 'max-w-[140px]', labelClass),
+		cn(
+			'text-sm font-medium truncate sm:max-w-64',
+			isMobile ? 'max-w-[6rem]' : 'max-w-[140px]',
+			labelClass,
+		),
 	);
 	const resolvedChevronClass = $derived(
 		cn(
@@ -138,7 +142,7 @@
 	);
 	const resolvedMenuClass = $derived(
 		cn(
-			'w-72 max-w-[calc(100vw-1rem)] max-h-[min(28rem,var(--bits-popover-content-available-height))] overflow-hidden rounded-lg border-border p-0 shadow-lg',
+			'w-[min(36rem,calc(100vw-1rem))] max-h-[min(28rem,var(--bits-popover-content-available-height))] overflow-hidden rounded-lg border-border p-0 shadow-lg',
 			menuClass,
 		),
 	);
@@ -435,18 +439,19 @@
 	}}
 >
 	<Dialog.Content
+		class="w-[calc(100%-2rem)] sm:max-w-2xl"
 		showCloseButton={!isSwitchingBranch}
 		onCloseAutoFocus={handleSwitchDialogCloseAutoFocus}
 	>
 		{#if pendingSwitchRef}
-			<Dialog.Header>
-				<div class="flex min-w-0 items-center">
+			<Dialog.Header class="min-w-0 max-w-full">
+				<div class="flex min-w-0 max-w-full items-center">
 					<div class="mr-3 shrink-0 rounded-full bg-diff-modified p-2">
 						<GitBranch class="h-5 w-5 text-diff-modified-foreground" />
 					</div>
 					<Dialog.Title
 						aria-label={switchBranchTitle}
-						class="flex min-w-0 flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
+						class="flex min-w-0 max-w-full flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
 					>
 						<span aria-hidden="true" class="shrink-0"
 							>{pendingSwitchRef.kind === 'local-branch'

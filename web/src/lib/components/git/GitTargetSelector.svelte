@@ -92,7 +92,7 @@
 		isLoading={target.branches.isLoadingBranches}
 		{disabled}
 		{isMobile}
-		triggerClass="h-8 max-w-40 px-2 text-xs"
+		triggerClass="h-8 max-w-40 px-2 text-xs sm:max-w-80"
 		labelClass="max-w-24 text-xs"
 		onToggle={toggleBranchSelector}
 		onClose={() => target.branches.closeBranchDropdown()}
