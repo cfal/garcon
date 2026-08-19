@@ -67,7 +67,7 @@ describe('OpenCodeRuntime model discovery', () => {
     }, 'file:///tmp/garcon-opencode-plugin.js')).toEqual({
       KEEP_ME: 'yes',
       OPENCODE_CONFIG_CONTENT: '{}',
-      OPENCODE_DISABLE_AUTOCOMPACT: '1',
+      OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
   });

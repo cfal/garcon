@@ -5,7 +5,7 @@ import { buildOpenCodeServerEnv } from '../server-instance.ts';
 const PACKAGE_ROOT = new URL('../../../../', import.meta.url);
 
 describe('OpenCode V1 automatic compaction architecture', () => {
-  it('[TLV5-OPENCODE.02-UNIT-01] forces autocompaction off in the owned server environment', () => {
+  it('[TLV5-OPENCODE.02-UNIT-01] does not force autocompaction off and preserves operator overrides', () => {
     const environment = buildOpenCodeServerEnv(
       {
         KEEP_ME: 'yes',
@@ -18,17 +18,18 @@ describe('OpenCode V1 automatic compaction architecture', () => {
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? '{}')).not.toHaveProperty('plugin');
     expect(environment).toMatchObject({
       KEEP_ME: 'yes',
-      OPENCODE_DISABLE_AUTOCOMPACT: '1',
+      OPENCODE_DISABLE_AUTOCOMPACT: '0',
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     });
+    expect(buildOpenCodeServerEnv({})).not.toHaveProperty('OPENCODE_DISABLE_AUTOCOMPACT');
     expect(environment).not.toHaveProperty('OPENCODE_PURE');
   });
 
-  it('[TLV5-OPENCODE.02-STATIC-01] disables provider autocompaction and removes session-latest continuation support', () => {
+  it('[TLV5-OPENCODE.02-STATIC-01] keeps compaction enabled and ships no plugin or session-latest route', () => {
     const serverInstance = readFileSync(new URL('../server-instance.ts', import.meta.url), 'utf8');
     const manifest = JSON.parse(readFileSync(new URL('package.json', PACKAGE_ROOT), 'utf8'));
 
-    expect(serverInstance).toContain("OPENCODE_DISABLE_AUTOCOMPACT: '1'");
+    expect(serverInstance).not.toContain('OPENCODE_DISABLE_AUTOCOMPACT');
     expect(serverInstance).not.toContain('operation-identity-plugin');
     expect(manifest.garconBuild).not.toHaveProperty('standaloneEntrypoints');
     expect(manifest.exports).not.toHaveProperty('./operation-identity-plugin');
