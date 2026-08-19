@@ -1,0 +1,22 @@
+name: Transcript Search Endurance
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  endurance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+      - working-directory: server
+        run: bun install --frozen-lockfile
+      - working-directory: integration-tests
+        run: bun install --frozen-lockfile
+      - run: bun run test:search-endurance

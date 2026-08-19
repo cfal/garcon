@@ -42,7 +42,12 @@ import type {
   MarkChatsReadRequest,
   MarkChatsReadResponse,
 } from '../../common/chat-list.js';
-import type { ChatSearchRequest, ChatSearchResponse } from '../../common/chat-search.js';
+import type {
+  ChatSearchRequest,
+  ChatSearchResponse,
+  TranscriptSearchPhase,
+  TranscriptSearchStatusResponse,
+} from '../../common/chat-search.js';
 import {
   parseChatSnapshotResponse,
   type ChatSnapshotResponse,
@@ -690,6 +695,42 @@ export class GarconTestClient {
     return this.post<ChatSearchResponse>('/api/v1/chats/search', request);
   }
 
+  async timedSearchChats(request: ChatSearchRequest): Promise<{
+    status: number;
+    elapsedMs: number;
+    body: ChatSearchResponse & { error?: string; errorCode?: string };
+  }> {
+    const started = performance.now();
+    const { response, parsed } = await this.requestRaw('POST', '/api/v1/chats/search', request);
+    return {
+      status: response.status,
+      elapsedMs: performance.now() - started,
+      body: parsed as ChatSearchResponse & { error?: string; errorCode?: string },
+    };
+  }
+
+  async timedGet(path: string): Promise<{ status: number; elapsedMs: number }> {
+    const started = performance.now();
+    const { response } = await this.requestRaw('GET', path);
+    return { status: response.status, elapsedMs: performance.now() - started };
+  }
+
+  async waitForSearchPhase(
+    phases: readonly TranscriptSearchPhase[],
+    options: { timeoutMs: number },
+  ): Promise<TranscriptSearchStatusResponse> {
+    const deadline = Date.now() + options.timeoutMs;
+    let last: TranscriptSearchStatusResponse | null = null;
+    while (Date.now() < deadline) {
+      last = await this.get<TranscriptSearchStatusResponse>('/api/v1/chats/search/status');
+      if (phases.includes(last.phase)) return last;
+      await Bun.sleep(250);
+    }
+    throw new Error(
+      `Search phase ${JSON.stringify(phases)} not reached. Last: ${JSON.stringify(last)}`,
+    );
+  }
+
   async waitForChatSearch(
     request: ChatSearchRequest,
     predicate: (response: ChatSearchResponse) => boolean,
@@ -1094,6 +1135,16 @@ export class GarconTestClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const { response, parsed } = await this.requestRaw(method, path, body);
+    if (!response.ok) throw new GarconApiError(response.status, parsed, method, path);
+    return parsed as T;
+  }
+
+  private async requestRaw(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<{ response: Response; parsed: unknown }> {
     const response = await fetch(`${this.#baseUrl}${path}`, {
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
@@ -1109,8 +1160,7 @@ export class GarconTestClient {
         : { requestBody: redact(body, this.#redactSensitiveDiagnostics) }),
       responseBody: redact(parsed, this.#redactSensitiveDiagnostics),
     });
-    if (!response.ok) throw new GarconApiError(response.status, parsed, method, path);
-    return parsed as T;
+    return { response, parsed };
   }
 
   private sendWs(message: ClientWsMessage): void {

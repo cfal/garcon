@@ -174,6 +174,10 @@ export class GarconProcess {
     return this.#baseUrl;
   }
 
+  get pid(): number | null {
+    return this.#exitCode === null ? this.#child.pid : null;
+  }
+
   get logs(): readonly string[] {
     return this.#logs.values();
   }
@@ -230,6 +234,10 @@ export class GarconProcess {
   describeLogs(): string {
     const logs = this.logs;
     return logs.length > 0 ? logs.join('\n') : '(no Garcon logs captured)';
+  }
+
+  capturedOutput(): string {
+    return this.logs.join('\n');
   }
 
   async #terminateAfterStartupFailure(): Promise<void> {

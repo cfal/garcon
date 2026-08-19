@@ -48,6 +48,8 @@
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
     "test:integration:chromium": "bun run --cwd integration-tests test:chromium",
+    "test:search-gate": "bun run --cwd integration-tests test:search-gate",
+    "test:search-endurance": "bun run --cwd integration-tests test:search-endurance",
     "test:live": "bun run --cwd integration-tests test:live",
     "test:live:claude": "bun run --cwd integration-tests test:live:claude",
     "test:live:codex": "bun run --cwd integration-tests test:live:codex",
