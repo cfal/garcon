@@ -334,6 +334,7 @@ async function exerciseInterruptedCompaction(
   const summary = marker(`${phase.toUpperCase()}_INTERRUPTED_SUMMARY`);
   const stoppedAnswer = marker(`${phase.toUpperCase()}_INTERRUPTED_ANSWER`);
   const recoveryPrompt = marker(`${phase.toUpperCase()}_RECOVERY_PROMPT`);
+  const recoverySummary = marker(`${phase.toUpperCase()}_RECOVERY_SUMMARY`);
   const recoveryAnswer = marker(`${phase.toUpperCase()}_RECOVERY_ANSWER`);
   const requestCursor = testEnvironment.model.markRequests();
   testEnvironment.model.scriptFault({
@@ -375,30 +376,38 @@ async function exerciseInterruptedCompaction(
     expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
     expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
 
-    held.release();
-    testEnvironment.model.reset();
+    if (phase === 'summary') {
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoverySummary)]);
+    }
     testEnvironment.model.scriptTurn([chatCompletionsText(recoveryAnswer)]);
-    const recoveryCursor = fixture.client.markEvents();
-    const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
-      chatId,
-      command: recoveryPrompt,
-    }));
-    await waitForVisibleResponse({
-      fixture,
-      chatId,
-      turnId: recovery.turnId,
-      marker: recoveryAnswer,
-      afterIndex: recoveryCursor,
-    });
+    try {
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: recoveryPrompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: recoveryAnswer,
+        afterIndex: recoveryCursor,
+      });
 
-    const recovered = await fixture.client.getMessages(chatId);
-    expect(userContents(recovered.messages)).toEqual([prompt, recoveryPrompt]);
-    expect(assistantContents(recovered.messages)).toEqual([recoveryAnswer]);
-    expect(messagesOfType(recovered.messages, 'error')).toEqual([]);
-    expectCompactionInternalsHidden(recovered.messages, [overflow, summary, stoppedAnswer]);
-    expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(
-      phase === 'summary' ? 3 : 4,
-    );
+      const recovered = await fixture.client.getMessages(chatId);
+      expect(userContents(recovered.messages)).toEqual([prompt, recoveryPrompt]);
+      expect(assistantContents(recovered.messages)).toEqual([recoveryAnswer]);
+      expect(messagesOfType(recovered.messages, 'error')).toEqual([]);
+      expectCompactionInternalsHidden(recovered.messages, [
+        overflow,
+        summary,
+        stoppedAnswer,
+        recoverySummary,
+      ]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(4);
+    } finally {
+      held.release();
+    }
     testEnvironment.model.assertSettled();
   }, withScriptedOpenCode());
 }
