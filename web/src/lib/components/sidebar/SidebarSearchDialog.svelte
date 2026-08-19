@@ -13,7 +13,11 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
+	import type {
+		ChatSearchIndexStatus,
+		ChatSearchResult,
+		TranscriptSearchStatusV1,
+	} from '$shared/chat-search';
 
 	interface SidebarSearchDialogProps {
 		open: boolean;
@@ -25,6 +29,7 @@
 		transcriptSearchLoading?: boolean;
 		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchStatus?: TranscriptSearchStatusV1 | null;
 		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
@@ -53,6 +58,7 @@
 		transcriptSearchLoading = false,
 		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
+		transcriptSearchStatus = null,
 		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
@@ -263,6 +269,7 @@
 					loading={transcriptSearchLoading}
 					indexing={transcriptSearchIndexing}
 					index={transcriptSearchIndex}
+					status={transcriptSearchStatus}
 					error={transcriptSearchError}
 					onRetry={onRetryTranscriptSearch}
 				/>

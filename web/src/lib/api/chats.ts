@@ -78,6 +78,7 @@ import type {
 	ChatSearchNavigateResponse,
 	ChatSearchRequest,
 	ChatSearchResponse,
+	TranscriptSearchStatusResponse,
 } from '$shared/chat-search';
 import type { ChatDetailsResponse } from '$shared/chat-details';
 import {
@@ -543,6 +544,12 @@ export async function searchChatTranscripts(
 	options?: ApiFetchOptions,
 ): Promise<ChatSearchResponse> {
 	return apiPost<ChatSearchResponse>('/api/v1/chats/search', request, options);
+}
+
+export async function getTranscriptSearchStatus(
+	options?: ApiFetchOptions,
+): Promise<TranscriptSearchStatusResponse> {
+	return apiGet<TranscriptSearchStatusResponse>('/api/v1/chats/search/status', options);
 }
 
 export interface DeleteChatResponse {

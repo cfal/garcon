@@ -597,6 +597,7 @@
 	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
 	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
+	transcriptSearchStatus={sidebarSearch.transcriptSearchStatus}
 	transcriptSearchError={sidebarSearch.transcriptSearchError}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}

@@ -28,6 +28,42 @@ describe('SidebarTranscriptSearchStatus', () => {
 		expect(row.classList.contains('bg-chat-thinking')).toBe(true);
 	});
 
+	it('[TLV5-SEARCH.09-UI-06] renders only exact resync progress states', async () => {
+		const baseStatus = {
+			version: 1 as const,
+			phase: 'rebuilding' as const,
+			chats: { indexed: 3, pending: 7, failed: 0 },
+			queuedJobs: 1,
+			resync: { completedChats: 3, totalChats: 10 },
+			backlogRows: 20,
+			activeChat: null,
+			lastErrorCode: null,
+			updatedAt: '2026-08-19T00:00:00.000Z',
+		};
+		const view = render(SidebarTranscriptSearchStatus, {
+			enabled: true,
+			indexing: true,
+			status: baseStatus,
+		});
+		const row = screen.getByRole('status');
+		expect(row.textContent).toContain(m.sidebar_search_indexing_progress({ done: 3, total: 10 }));
+
+		await view.rerender({
+			enabled: true,
+			indexing: true,
+			status: { ...baseStatus, resync: { completedChats: 10, totalChats: 10 } },
+		});
+		expect(row.textContent).toContain(m.sidebar_search_finalizing());
+
+		await view.rerender({
+			enabled: true,
+			indexing: true,
+			status: { ...baseStatus, resync: null },
+		});
+		expect(row.textContent).toContain(m.sidebar_search_updating());
+		expect(row.textContent).not.toContain('10');
+	});
+
 	it('keeps one row mounted and stops presenting a stale pending count as live', async () => {
 		const view = render(SidebarTranscriptSearchStatus, {
 			enabled: true,

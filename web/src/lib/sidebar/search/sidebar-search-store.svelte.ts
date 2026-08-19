@@ -28,6 +28,7 @@ import type {
 	ChatSearchRequest,
 	ChatSearchResult,
 	ChatSearchResponse,
+	TranscriptSearchStatusV1,
 } from '$shared/chat-search';
 
 export interface SavedSearchEditorState {
@@ -69,8 +70,8 @@ export interface SidebarSearchStoreDeps {
 	waitForTranscriptIndexRetry?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
 
-const TRANSCRIPT_SEARCH_MAX_ATTEMPTS = 4;
-const TRANSCRIPT_SEARCH_RETRY_DELAY_MS = 250;
+const TRANSCRIPT_SEARCH_MAX_ATTEMPTS = 2;
+const TRANSCRIPT_SEARCH_RETRY_DELAY_MS = 1_000;
 
 export class SidebarSearchStore {
 	activeQuery = $state('');
@@ -91,11 +92,14 @@ export class SidebarSearchStore {
 	transcriptSearchLoading = $state(false);
 	transcriptSearchIndexing = $state(false);
 	transcriptSearchError = $state<string | null>(null);
+	transcriptSearchStatus = $state<TranscriptSearchStatusV1 | null>(null);
 
 	private managerOrigin = $state<'search-dialog' | null>(null);
 	private editorOrigin = $state<SavedSearchDialogOrigin | null>(null);
 	private loadPromise: Promise<void> | null = null;
 	private transcriptSearchRequestId = 0;
+	private lastRefreshIndexedCount = -1;
+	private statusRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly deps: SidebarSearchStoreDeps) {}
 
@@ -374,6 +378,7 @@ export class SidebarSearchStore {
 	}
 
 	clearTranscriptSearch(): void {
+		this.clearStatusRefreshTimer();
 		this.transcriptSearchRequestId += 1;
 		this.transcriptSearchQuery = '';
 		this.transcriptSearchResults = [];
@@ -381,10 +386,32 @@ export class SidebarSearchStore {
 		this.transcriptSearchLoading = false;
 		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
+		this.lastRefreshIndexedCount = -1;
+	}
+
+	applyTranscriptSearchStatus(status: TranscriptSearchStatusV1): void {
+		this.transcriptSearchStatus = status;
+		if (!this.transcriptSearchIndexing || !this.transcriptSearchQuery) return;
+		const terminal = status.phase === 'ready'
+			|| status.phase === 'degraded'
+			|| status.phase === 'failed';
+		const progressed = status.chats.indexed > this.lastRefreshIndexedCount;
+		if (!terminal && !progressed) return;
+		if (this.statusRefreshTimer) return;
+		this.statusRefreshTimer = setTimeout(() => {
+			this.statusRefreshTimer = null;
+			this.lastRefreshIndexedCount = this.transcriptSearchStatus?.chats.indexed ?? -1;
+			void this.refreshTranscriptSearch(this.transcriptSearchQuery);
+		}, terminal ? 0 : 1_000);
+	}
+
+	destroy(): void {
+		this.transcriptSearchRequestId += 1;
+		this.clearStatusRefreshTimer();
 	}
 
 	async refreshTranscriptSearch(
-		query: string,
+		query = this.transcriptSearchQuery,
 		options: { signal?: AbortSignal } = {},
 	): Promise<void> {
 		if (!this.deps.getTranscriptSearchEnabled()) {
@@ -406,6 +433,7 @@ export class SidebarSearchStore {
 		this.transcriptSearchLoading = false;
 		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
+		this.clearStatusRefreshTimer();
 		if (candidateIds.length === 0) {
 			this.transcriptSearchIndex = {
 				indexedChatCount: 0,
@@ -437,11 +465,12 @@ export class SidebarSearchStore {
 					const retryableIndexError = error instanceof ApiError
 						&& error.retryable
 						&& (error.errorCode === 'SEARCH_INDEX_BUSY'
-							|| error.errorCode === 'SEARCH_INDEX_UNAVAILABLE');
+							|| error.errorCode === 'SEARCH_INDEX_UNAVAILABLE'
+							|| error.errorCode === 'SEARCH_TIMEOUT');
 					if (!retryableIndexError || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) throw error;
 					this.transcriptSearchLoading = false;
 					this.transcriptSearchIndexing = true;
-					await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);
+					await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS, options.signal);
 					if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
 					continue;
 				}
@@ -452,13 +481,14 @@ export class SidebarSearchStore {
 				}
 				this.transcriptSearchResults = result.results;
 				this.transcriptSearchIndex = result.index;
-				if (result.index.pendingChatCount === 0 || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) {
+				this.lastRefreshIndexedCount = result.index.indexedChatCount;
+				if (result.index.pendingChatCount === 0) {
+					this.transcriptSearchIndexing = false;
 					return;
 				}
 				this.transcriptSearchLoading = false;
 				this.transcriptSearchIndexing = true;
-				await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);
-				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+				return;
 			}
 		} catch (error) {
 			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, options.signal))
@@ -469,14 +499,20 @@ export class SidebarSearchStore {
 			}
 			this.transcriptSearchResults = [];
 			this.transcriptSearchIndex = null;
+			this.transcriptSearchIndexing = false;
 			this.transcriptSearchError = m.sidebar_search_transcript_error();
 			this.deps.logError?.('Failed to search chat transcripts:', error);
 		} finally {
 			if (this.isCurrentTranscriptRequest(requestId, options.signal)) {
 				this.transcriptSearchLoading = false;
-				this.transcriptSearchIndexing = false;
 			}
 		}
+	}
+
+	private clearStatusRefreshTimer(): void {
+		if (!this.statusRefreshTimer) return;
+		clearTimeout(this.statusRefreshTimer);
+		this.statusRefreshTimer = null;
 	}
 
 	private isCurrentTranscriptRequest(requestId: number, signal?: AbortSignal): boolean {

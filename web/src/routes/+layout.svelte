@@ -61,12 +61,13 @@
 		setSingletonSurfaces,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
+	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
 	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
-	import { searchChatTranscripts } from '$lib/api/chats';
+	import { getTranscriptSearchStatus, searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
@@ -284,14 +285,20 @@
 
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
+	const transcriptSearchStatusRouter = new TranscriptSearchStatusRouter(
+		ws,
+		(status) => sidebarSearch.applyTranscriptSearchStatus(status),
+	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
+	transcriptSearchStatusRouter.start();
 	scheduledPromptsRouter.start();
 	snippetsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
+		transcriptSearchStatusRouter.tick();
 		scheduledPromptsRouter.tick();
 		snippetsRouter.tick();
 	});
@@ -299,6 +306,11 @@
 	$effect(() => {
 		const connectedAt = ws.connectionStatus.lastConnectedAt;
 		if (!connectedAt) return;
+		untrack(() => {
+			void getTranscriptSearchStatus()
+				.then((status) => sidebarSearch.applyTranscriptSearchStatus(status))
+				.catch(() => undefined);
+		});
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 	});
@@ -383,10 +395,12 @@
 	onDestroy(() => {
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
+		transcriptSearchStatusRouter.destroy();
 		scheduledPromptsRouter.destroy();
 		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
+		sidebarSearch.destroy();
 		readReceiptOutbox.destroy();
 		chatProcessingReconciler.destroy();
 		ws.disconnect();

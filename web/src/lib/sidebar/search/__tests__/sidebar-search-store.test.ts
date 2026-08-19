@@ -8,6 +8,7 @@ import {
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { ApiError } from '$lib/api/client';
+import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -68,6 +69,23 @@ function createStore(
 		...overrides,
 	});
 	return { store, notifyError, logError };
+}
+
+function makeStatus(
+	overrides: Partial<TranscriptSearchStatusV1> = {},
+): TranscriptSearchStatusV1 {
+	return {
+		version: 1,
+		phase: 'rebuilding',
+		chats: { indexed: 0, pending: 1, failed: 0 },
+		queuedJobs: 1,
+		resync: { completedChats: 0, totalChats: 1 },
+		backlogRows: 1,
+		activeChat: null,
+		lastErrorCode: null,
+		updatedAt: '2026-08-19T00:00:00.000Z',
+		...overrides,
+	};
 }
 
 describe('SidebarSearchStore', () => {
@@ -311,13 +329,13 @@ describe('SidebarSearchStore', () => {
 			expect(logError).not.toHaveBeenCalled();
 		});
 
-		it('retries a busy search without surfacing an error', async () => {
+		it('[TLV5-SEARCH.09-UI-01] retries one timeout after exactly one second', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockRejectedValueOnce(new ApiError(
 					503,
-					'Transcript search is busy',
-					'SEARCH_INDEX_BUSY',
+					'Transcript search timed out',
+					'SEARCH_TIMEOUT',
 					undefined,
 					true,
 				))
@@ -341,7 +359,7 @@ describe('SidebarSearchStore', () => {
 			await store.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
-			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
+			expect(waitForTranscriptIndexRetry).toHaveBeenCalledWith(1_000, undefined);
 			expect(store.transcriptSearchError).toBeNull();
 			expect(logError).not.toHaveBeenCalled();
 		});
@@ -381,7 +399,7 @@ describe('SidebarSearchStore', () => {
 			expect(logError).not.toHaveBeenCalled();
 		});
 
-		it('surfaces a busy index after bounded retries are exhausted', async () => {
+		it('[TLV5-SEARCH.09-UI-02] surfaces a busy index after one retry', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockRejectedValue(new ApiError(
@@ -398,12 +416,13 @@ describe('SidebarSearchStore', () => {
 
 			await store.refreshTranscriptSearch('needle');
 
-			expect(searchChatTranscripts).toHaveBeenCalledTimes(4);
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 			expect(store.transcriptSearchError).not.toBeNull();
 			expect(logError).toHaveBeenCalledTimes(1);
 		});
 
-		it('polls bounded index progress until pending chats become searchable', async () => {
+		it('[TLV5-SEARCH.09-UI-03] parks pending results until a terminal status refresh', async () => {
+			vi.useFakeTimers();
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValueOnce({
@@ -436,27 +455,39 @@ describe('SidebarSearchStore', () => {
 						unsupportedChatCount: 0,
 					},
 				});
-			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
-			const { store } = createStore([makeChat({ id: 'c1' })], null, {
-				searchChatTranscripts,
-				waitForTranscriptIndexRetry,
-			});
+			try {
+				const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+					waitForTranscriptIndexRetry,
+				});
 
-			await store.refreshTranscriptSearch('needle');
+				await store.refreshTranscriptSearch('needle');
 
-			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
-			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchIndex).toEqual({
-				indexedChatCount: 1,
-				pendingChatCount: 0,
-				failedChatCount: 0,
-				unsupportedChatCount: 0,
-			});
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-			expect(store.transcriptSearchIndexing).toBe(false);
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+				expect(waitForTranscriptIndexRetry).not.toHaveBeenCalled();
+				expect(store.transcriptSearchIndexing).toBe(true);
+
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'ready',
+					chats: { indexed: 1, pending: 0, failed: 0 },
+					queuedJobs: 0,
+					resync: null,
+					backlogRows: 0,
+				}));
+				await vi.runAllTimersAsync();
+
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+				expect(store.transcriptSearchIndex?.pendingChatCount).toBe(0);
+				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
+				expect(store.transcriptSearchIndexing).toBe(false);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
-		it('stops polling incomplete startup indexing after a bounded number of attempts', async () => {
+		it('[TLV5-SEARCH.09-UI-04] does not poll without status progress', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
 				.mockResolvedValue({
@@ -477,11 +508,61 @@ describe('SidebarSearchStore', () => {
 			});
 
 			await store.refreshTranscriptSearch('needle');
+			store.applyTranscriptSearchStatus(makeStatus());
 
-			expect(searchChatTranscripts).toHaveBeenCalledTimes(4);
-			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(3);
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+			expect(waitForTranscriptIndexRetry).not.toHaveBeenCalled();
 			expect(store.transcriptSearchLoading).toBe(false);
-			expect(store.transcriptSearchIndexing).toBe(false);
+			expect(store.transcriptSearchIndexing).toBe(true);
+			expect(store.transcriptSearchStatus).toEqual(makeStatus());
+			store.destroy();
+		});
+
+		it('[TLV5-SEARCH.09-UI-05] coalesces progress refreshes and flushes terminal status', async () => {
+			vi.useFakeTimers();
+			try {
+				const pending = {
+					query: 'needle',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 0,
+						pendingChatCount: 1,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				};
+				const searchChatTranscripts = vi
+					.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+					.mockResolvedValue(pending);
+				const { store } = createStore([makeChat({ id: 'c1' })], null, {
+					searchChatTranscripts,
+				});
+				await store.refreshTranscriptSearch('needle');
+
+				for (const indexed of [1, 2, 3]) {
+					store.applyTranscriptSearchStatus(makeStatus({
+						chats: { indexed, pending: 1, failed: 0 },
+					}));
+				}
+				await vi.advanceTimersByTimeAsync(999);
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+				await vi.advanceTimersByTimeAsync(1);
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+
+				store.applyTranscriptSearchStatus(makeStatus({
+					phase: 'degraded',
+					chats: { indexed: 3, pending: 0, failed: 1 },
+					queuedJobs: 0,
+					resync: null,
+					backlogRows: 0,
+				}));
+				await vi.runAllTimersAsync();
+				expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
+				store.destroy();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it('surfaces localized failures but treats aborts as silent cancellation', async () => {
