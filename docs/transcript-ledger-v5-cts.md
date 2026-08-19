@@ -1,20 +1,21 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 18 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 19 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
-and evidence are the PR #518 review state.
+include PR #518 and the PR #527 native-drift review state.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 18, SHA-256
-  `f073bd2dc17d169af79e8e9cb0180134cfa03c24fb2701928a9fa13b474c98a8`
+- `docs/transcript-ledger-v5-design.md`, revision 19, SHA-256
+  `9cc7791c0524083af088bd29c113b33cec0f430cf2a78c84686fbe14a6c68893`
 
-Current inventory: 267 discovered stable IDs. The PR #500 squash merge above is
-the historical acceptance anchor and contains 256 of them. The current catalog
-adds eleven executable cases through PR #518. Because PR #518 is not yet
-merged, this document does not claim a merge-object anchor for its current
-executable state.
+Current inventory: 278 discovered stable IDs. The PR #500 squash merge above is
+the historical acceptance anchor and contains 256 of them. PR #518 merge
+`1debaeb4a47a73996f8d6960f33a55b881c60850` added eleven executable cases; the
+current native-drift change adds eleven more. Because PR #527 is not yet
+merged, this document does not claim a merge-object anchor for that final
+increment.
 
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
@@ -331,9 +332,9 @@ local testing.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
 | TLV5-L09.01 | Every supported probe performs a bounded tail read and excludes housekeeping.                                                  | Provider fixture unit  |
 | TLV5-L09.02 | Reported relevant timestamps satisfy the provider timestamp obligation or the probe returns `unavailable`.                     | Provider fixture unit  |
-| TLV5-L09.03 | Open and pre-resume checks never delay paging or provider dispatch.                                                            | Server black-box       |
-| TLV5-L09.04 | Timeout, failure, unavailability, ownership change, view change, session change, or watermark change produces no stale notice. | Unit, server black-box |
-| TLV5-L09.05 | A strictly newer idle tail produces one idempotent notice and never gates use.                                                 | Unit, server black-box |
+| TLV5-L09.03 | Only a successful active newest-history load schedules a probe after returning; earlier, replay, background, preview, failed-read, dispatch, timer, and startup paths do not. | Core, route, web unit |
+| TLV5-L09.04 | Equal pending eligibility coalesces; every changed agent, view, session row/ref, provider ordinal/timestamp, ownership, timeout, failure, unavailability, or abort fences stale output. | Store and core unit |
+| TLV5-L09.05 | A strictly newer idle tail sends only a repeatable process-lifetime operational warning, appends no ledger row, and never gates use; manual Reload alone reconciles. | Core unit, server black-box |
 
 ### L10 Explicit History Imports
 
@@ -499,7 +500,7 @@ The status below describes test coverage, not implementation completion.
 | R4 destructive active window                  | TLV5-UX.01 through TLV5-UX.09, TLV5-UX.11, TLV5-UX.17 | Active-state, controller, static, and strict Chromium cases; timer machinery deleted                 | Covered |
 | R5 search full replacement on append          | TLV5-SEARCH.01                                        | Search controller suffix and linearity tests                                                        | Covered |
 | R6 detached search rejection                  | TLV5-SEARCH.02                                        | Controller rejection, stalled-ack isolation, rejected startup/restart replacements, and fresh-catalog exclusive pruning | Covered |
-| R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Core timeout, coalescing, identity-change units                                                     | Partial |
+| R7 blocking native probe                      | TLV5-L09.03 through TLV5-L09.05                       | Activation-only core/route/web scheduling, exact eligibility and timeout units, and transient-warning Reload black-box | Covered |
 | R8 serial handoff recovery                    | TLV5-HANDOFF.05                                       | Unit and repeated-handoff server integration                                                        | Covered |
 | R9 duplicate handoff marker                   | TLV5-HANDOFF.06                                       | Matching, conflicting, and duplicate marker units                                                   | Covered |
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
@@ -706,7 +707,7 @@ deleted recovery architecture.
 
 | ID       | Accepted loss or forbidden recovery                                                                                  | Current state                           |
 | -------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| TLV5-A01 | Crash may lose provider output not yet accepted; drift and manual reload are the only remediation.                   | Partial                                 |
+| TLV5-A01 | Crash may lose provider output not yet accepted; a later activation may warn when newer native evidence exists, and, where supported, manual Reload is the only reconciliation. | Partial                                 |
 | TLV5-A02 | Commit failure fences and does not retry producer events.                                                            | Covered                                 |
 | TLV5-A03 | Commit-before-dispatch crash strands dispatch; same-ID retry never redispatches.                                     | Covered                                 |
 | TLV5-A04 | Late old output may interleave with a later run and is never reconciled.                                             | Covered core, partial provider matrix   |
@@ -741,7 +742,7 @@ Static negative guards should reject reintroduction of:
 | Search worker rejects                                                | No unhandled rejection; same and other chat queues continue               | Covered                                         |
 | Search worker stalls                                                 | Other chats proceed; stalled chat preserves operation order               | Covered                                         |
 | Search watermark mismatches                                          | One explicit resync, no normal-append full scans                          | Covered                                         |
-| Native probe never resolves                                          | Request and dispatch remain responsive; probe aborts and leaves no notice | Partial black-box evidence                      |
+| Native probe never resolves                                          | Active newest history returns first; the bounded probe aborts and leaves no warning or ledger row | Covered unit and route evidence                  |
 | WebSocket closes or drops send between replay pages                  | Partial replay discarded; next reconnect restarts safely                  | Covered unit and exact Chromium fault placement |
 | Handoff registry, journal, checkpoint, reopen, or notification fails | Only affected chat fenced; independent recovery and shutdown cleanup      | Partial full-stage matrix                       |
 | Evicted ledger checkpoint or close fails                             | Failure belongs to evicted chat; requested chat opens                     | Covered                                         |
@@ -764,7 +765,20 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L02.01-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `commits atomic batches with dense view-local ordinals`                                                          | L02.01                      |
 | TLV5-L08.02-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `atomically deletes the replaced view when promoting staging`                                                    | L08.02                      |
 | TLV5-L11.04-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `attributes an eviction close failure and retries that handle on shutdown`                                       | L11.04                      |
-| TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: `drops a pending native result when the transcript view is replaced`                                   | L09.04                      |
+| TLV5-L09.03-CORE-STATIC-01     | `server/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling has exactly one activation-history call site and no runtime pre-resume hook | L09.03 |
+| TLV5-L09.03-CORE-UNIT-01       | `server/ledger/__tests__/native-activity-page-reader.test.js`: newest history returns before its advisory probe is scheduled | L09.03 |
+| TLV5-L09.03-CORE-UNIT-02       | `server/ledger/__tests__/native-activity-page-reader.test.js`: earlier, background, and failed history reads schedule nothing | L09.03 |
+| TLV5-L09.03-ROUTE-UNIT-01      | `server/routes/__tests__/chats-messages.test.js`: only a newest-history request may carry activation and earlier activation is rejected | L09.03 |
+| TLV5-L09.03-RUNTIME-UNIT-01    | `server/agents/__tests__/runtime-router-seed.test.js`: native resume has no native-activity scheduling dependency | L09.03 |
+| TLV5-L09.03-SNAPSHOT-ROUTE-UNIT-01 | `server/routes/__tests__/chat-snapshot.test.js`: bounded background snapshots do not activate the probe | L09.03 |
+| TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background visible-demand paging carries no activation purpose | L09.03 |
+| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/split/__tests__/split-pane-preview-store.test.ts`: split-pane preview paging carries no activation purpose | L09.03 |
+| TLV5-L09.03-WEB-UNIT-01        | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: only active newest visible demand is marked across hidden raw budgets | L09.03 |
+| TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: every changed agent, view, session ordinal/ref, or provider ordinal/timestamp supersedes and fences the old attempt | L09.04 |
+| TLV5-L09.04-CORE-UNIT-02       | `server/ledger/__tests__/native-activity.test.js`: ineligible, failed, execution-owned, invalid, unavailable, and timed-out probes emit nothing | L09.04 |
+| TLV5-L09.04-STORE-UNIT-01      | `server/ledger/__tests__/native-activity.test.js`: the provider watermark is qualified by both ordinal and timestamp | L09.04 |
+| TLV5-L09.05-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: a newer tail emits repeatable transient warnings without mutating the ledger or retaining completed state | L09.05 |
+| TLV5-L09.05-SERVER-01          | `integration-tests/tests/server/native-transcript-reload.test.ts`: external rows remain absent through transient warning delivery and enter the transcript only through explicit Reload | L09.05, L08.04 |
 | TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |
@@ -887,7 +901,7 @@ for each atomic requirement and records any required complementary tier.
 
 The remaining `Partial` and `Missing` provider-routing, native-probe, browser,
 failure-injection, and accepted-loss rows are explicit catalog or
-nightly follow-up. They do not block dogfood or the active Revision 18 release
+nightly follow-up. They do not block dogfood or the active Revision 19 release
 gate unless a current release red promotes one into that gate. Their statements
 remain here so later coverage cannot silently weaken or disappear.
 
@@ -905,20 +919,6 @@ The two Codex rollout procedures are separately assigned to release acceptance.
 Equivalent cases are required for OpenCode and Pi. Codex retains its existing
 black-box case. Each reference provider also needs explicit scripted cases for
 the remaining five provider matrix rows.
-
-### Native Activity Follow-up
-
-`TLV5-L09.03-SERVER-01`
-
-> Given a native probe that never resolves, when the newest page is requested,
-> then the ledger page returns before probe timeout and the eventual abort adds
-> no notice.
-
-`TLV5-L09.03-SERVER-02`
-
-> Given the same stalled probe before native resume, when input is accepted,
-> then provider dispatch starts without waiting and the late probe cannot append
-> after execution ownership changes.
 
 ### Browser Covering Follow-up
 
@@ -1019,7 +1019,7 @@ registered cases and gaps promoted by a current release red enter those gates.
 
 ### Release Acceptance
 
-- Every case assigned to the active Revision 18 release gate, including any
+- Every case assigned to the active Revision 19 release gate, including any
   gap promoted by a current release red, reports pass with no undocumented skip.
 - Both exact Codex rollout replays report the expected final row and tail order.
 - The complete validation command sequence is recorded with environment data.

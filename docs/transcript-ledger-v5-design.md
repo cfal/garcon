@@ -1,9 +1,21 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 18, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 19, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 19 makes native drift detection activation-only and transient. A
+successful active newest-history load returns before scheduling one bounded
+probe. Older pages, replay continuations, background reads, provider dispatch,
+timers, and startup never schedule it. Equal in-flight checks coalesce; a
+changed agent, view, session row, native reference, or provider watermark
+aborts and supersedes the pending check, and every result revalidates that
+exact key plus execution ownership. A newer native tail emits only a
+process-lifetime `chat-operational-notice`. The durable drift notice, its
+Reload action and warning watermark, completed-result policy, and ineffective
+pre-resume hook are deleted. Explicit manual Reload remains the sole
+reconciliation path.
 
 Revision 18 records the final stabilization corrections. Permission history
 has one integration-generated occurrence UUID, named
@@ -207,10 +219,11 @@ The decisions:
 10. **Concurrent-exclusive native ownership, advisory detection.** While
     Garcon is actively executing or importing a native session, nothing
     else may write it concurrently. Non-concurrent external use is
-    expected — it is the manual-reload product case. The native drift
-    check probes only the current binding, compares against
-   integration-emitted history only, appends a visible notice
-   recommending manual reload, and never blocks anything.
+    expected — it is the manual-reload product case. After a successful active
+    newest-history load, the native drift check may probe only the current
+    binding and compare against integration-emitted history. A newer tail
+    sends a transient operational warning recommending manual reload; it
+    appends no ledger row and never blocks anything.
 11. **Migration is not native-session import.** Genesis adoption reads pre-V5
     integration-owned history only through `legacyHistoryImport`; manual
     Reload and native-fidelity fork seeding read their concrete native session
@@ -299,15 +312,18 @@ The decisions:
   by it; requests qualified by a replaced view receive a typed
   stale-view error whether or not its rows still exist. There are no
   exceptions: shares are snapshot artifacts, not ledger readers.
-- **L9 Advisory drift detection.** The native drift check is a
-  point-in-time bounded tail read at chat open and before native resume,
-  probing only the chat's current binding. The probe obligation: the
-  reported relevant-entry timestamp must be no later than core's append
-  time for any entry Garcon observed; a provider that cannot guarantee
-  this returns `unavailable`. The check may only append an idempotent
-  visible notice and never blocks the chat, gates resume, requires
-  acknowledgement, disables submission, or creates a persistent drifted
-  state.
+- **L9 Advisory drift detection.** A successful active newest-history load
+  returns before scheduling one point-in-time bounded tail read of the chat's
+  current binding. Older pages, replay continuations, background reads,
+  provider dispatch, timers, and startup never schedule it. The probe
+  obligation: the reported relevant-entry timestamp must be no later than
+  core's append time for any entry Garcon observed; a provider that cannot
+  guarantee this returns `unavailable`. Equal pending work coalesces; changed
+  eligibility supersedes it; every result revalidates the exact agent, view,
+  session row and native reference, provider ordinal/timestamp, and execution
+  ownership. A strictly newer tail may send a transient operational warning.
+  The check appends no ledger row, stores no warning state, and never blocks
+  the chat, gates resume, requires acknowledgement, or disables submission.
 - **L10 Explicit history imports.** Complete integration-owned history reads
   occur only at genesis adoption through `legacyHistoryImport`, explicit
   manual Reload through `nativeHistoryImport`, and native-fidelity target
@@ -412,11 +428,9 @@ Kind semantics:
 - `user-input`: appended when the input becomes outbound (7.1). `detail`
   records the `clientMessageId`, the attachment manifest, and whether
   the input was a steer (display styling).
-- `notice`: durable advisory. The drift notice's message is "The
-  transcript may have changed outside Garcon. Consider reloading from
-  native history." and its rendering carries a Reload action. `detail`
-  records the observed native watermark for idempotency. The carryover
-  quarantine notice's message is "Some earlier chat history could not be
+- `notice`: durable advisory. Native drift is not represented by this row;
+  its warning is a process-lifetime operational event outside the ledger. The
+  carryover quarantine notice's message is "Some earlier chat history could not be
   migrated. Quarantine reference: {artifactId}." Its `detail` records the same
   opaque `artifactId` plus `errorCode` under
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
@@ -827,8 +841,8 @@ durability:
 - Nothing buffers, so there is no flush concept, no accepted-but-
   unpersisted state, and no publish/close race protocol. The loss window
   is events the provider emitted that core had not yet handled at crash,
-  plus the NORMAL power-loss window (4.3); the drift check surfaces
-  newer native evidence where the provider persisted it, and manual
+  plus the NORMAL power-loss window (4.3); a later active history load may
+  surface newer native evidence where the provider persisted it, and manual
   reload is the remediation.
 - Ordinary request validation (for example rejecting an absurdly
   oversized submission) may remain at the API boundary; it is not a
@@ -1126,6 +1140,10 @@ matrix. "Conversational rows" below means `user-input` rows plus
 | `session` | no | no | no | no | no | support export only |
 | `run-ended` | turn state only | no | no | no | no | yes |
 
+The native-drift operational warning is outside this matrix. It is a transient
+server event and enters no ledger page, replay, search result, preview, share,
+model context, carryover, or export.
+
 - **Rendering** shows conversational rows, notices, and specialized
   permission rows; turn state derives from `run-ended` rows and live
   execution state. Late content renders in observed order.
@@ -1211,20 +1229,33 @@ be missed — a false negative, acceptable for an advisory check.
 
 ### 10.3 The check
 
-The native drift check is a point-in-time comparison, not a watcher. It
-probes only the chat's current binding and runs at exactly two moments,
-per chat, while no run is active: when a chat is opened or loaded (the
-first open after server startup is a special case), and immediately
-before a native resume.
+The native drift check is a point-in-time comparison, not a watcher. One
+successful active newest-history load returns its page before scheduling the
+probe in a microtask. The read explicitly carries the sole
+`purpose: 'activation'` marker; only the active transcript's newest request may
+set it. Older pages, bounded replay continuations, background snapshots,
+split-pane previews, search, provider dispatch or resume, timers, and startup
+never schedule a probe. A failed history read schedules nothing.
+
+Each chat has at most one pending check. Eligibility is the exact tuple of
+agent ID, transcript view ID, current session-row ordinal, structurally equal
+native-session reference, and the latest integration-emitted provider
+watermark `(ordinal, at)`. An equal request joins the pending work. Any changed
+tuple aborts and supersedes it. Ineligible or execution-owned state aborts and
+removes pending work. Completion removes only the attempt whose token still
+owns the pending entry; there is no completed-result cache, cooldown,
+last-warning watermark, or persisted scheduler state.
 
 One strict rule, single mode:
 
-> Notice when the native session's last conversation-relevant entry is
-> strictly newer than the provider watermark for that session.
+> Warn when the native session's last conversation-relevant entry is strictly
+> newer than the provider watermark timestamp for that session.
 
 The provider watermark is the latest integration-emitted row for that
 session: `provider-row`, `session`, provider-origin `run-ended`, and
-integration-emitted permission rows. Core-authored rows — user inputs,
+integration-emitted permission rows. The watermark carries both row ordinal
+and timestamp: timestamp remains the native comparison value, while ordinal
+fences ledger changes whose timestamps collide. Core-authored rows — user inputs,
 notices, `permission-resolved`, and core-origin `run-ended` — are
 excluded: they do not prove native provider history was observed, and
 they must not be able to hide missed native output behind the user's own
@@ -1239,14 +1270,20 @@ anything the provider persisted beyond the last integration-emitted row
 is strictly newer and fires — which is the feature, since manual reload
 is how the user adopts it.
 
-On trigger, core appends the visible `notice` row with the Reload
-action; a new notice appends only when the observed native watermark
-advances past the last notice's recorded watermark, so repeated opens do
-not re-warn. The check is advisory and permanently non-blocking: it
-never blocks the chat, never gates resume, never requires
-acknowledgement, never disables submission, and creates no persistent
-drifted state. False negatives are accepted; an `unavailable` probe is
-silent.
+The provider call has a five-second hard timeout. Before presenting its
+result, core requires no execution ownership, re-derives eligibility, and
+requires exact tuple equality. Timeout, failure, abort, `unavailable`, invalid
+timestamp, ownership change, or tuple change produces no warning. This result
+fence contains a provider that ignores abort.
+
+On trigger, core sends the fixed warning as a process-lifetime
+`chat-operational-notice`; it appends no ledger row and carries no durable
+action. A later activation may probe and warn again for unchanged drift. The
+check is advisory and permanently non-blocking: history delivery never awaits
+it, and it never gates resume, requires acknowledgement, or disables
+submission. False negatives and a client missing the transient event are
+accepted; explicit manual Reload remains available and is the sole
+reconciliation action.
 
 ## 11. Genesis Adoption and Manual Full Reload
 
@@ -1381,7 +1418,7 @@ are self-contained snapshots.
 The product rule for history: external or crash-missed native activity
 is adoptable only while its session is the current binding. Once
 ownership moves on (handoff), the displayed prefix is frozen and final;
-the drift notice at open and pre-resume is the built-in prompt to reload
+an activation-time operational warning is the best-effort prompt to reload
 before handing off.
 
 Continuation, fork, and genesis adoption reuse the frozen projection defined
@@ -1684,7 +1721,7 @@ relevant-entry definition under the 10.2 obligation.
 | Permission event lacks its concrete operation/run correlation | Structured transcript-content-free warning and drop; no synthetic run ID, durable permission row, or conversational fallback. If the dropped fact is `requested`, its provider may remain waiting on an unanswerable decision; the warning is the diagnostic and user interrupt is the remediation. |
 | Permission response capability rejects | Core abandons the ephemeral claim; no resolved row is appended and the same live occurrence may be retried if its other fences remain valid. |
 | Crash mid-run | No `run-ended` row; restart synthesizes nothing; the transcript simply ends; preceding inputs remain scan-eligible only if no provider output intervened; accepted. |
-| Runtime writes natively after its run ended | The drift check fires (strictly newer than the integration-emitted watermark); manual reload adopts it. |
+| Runtime writes natively after its run ended | A later active newest-history load may send a transient warning when the tail is strictly newer than the integration-emitted watermark; manual reload adopts it. |
 | Pinned OpenCode V1 reaches its context limit | Automatic compaction is disabled; the owning operation emits a visible provider failure. No unnamed continuation is routed by session. |
 | Commit failure or unknown commit outcome | No broadcast; the chat's ledger fences for writes (4.4). |
 | OS or power failure under `synchronous=NORMAL` | Recent committed-but-unsynced transactions may be lost; process-crash recovery is unaffected; within the accepted-loss posture. |
@@ -1702,8 +1739,8 @@ relevant-entry definition under the 10.2 obligation.
 | Requests against the deleted replaced view | Typed stale-view error, identical whether or not the rows still exist; shares are unaffected because they are snapshots. |
 | Fork requested at a row the provider has not persisted yet | The integration refuses with a typed retryable error; core propagates it unchanged. The same fork succeeds once native history settles, and no session-less fork is produced in the meantime. |
 | Target-chat creation crash before registration | Unregistered target directory removed at startup; a native-fidelity fork may orphan a provider artifact — best-effort rollback, named accepted loss. |
-| Crash-missed native output after genesis | Drift check compares against the integration-emitted watermark, so core-authored rows cannot mask it; notice with Reload; manual reload remediates while the binding is current. |
-| Native session used externally while Garcon is idle | Expected, not a violation; the drift notice surfaces it; manual reload adopts it. |
+| Crash-missed native output after genesis | The activation-time check compares against the integration-emitted watermark, so core-authored rows cannot mask it; a transient warning may surface it, and manual reload remediates while the binding is current. |
+| Native session used externally while Garcon is idle | Expected, not a violation; a later active newest-history load may warn, and manual reload adopts it. |
 | Chat deletion | Tombstone first; the ledger connection closes before the chat directory is removed. |
 
 ## 16. Consciously Accepted Losses and Limitations
@@ -1711,9 +1748,9 @@ relevant-entry definition under the 10.2 obligation.
 Every deliberate gap, in one place, so it is not "fixed" later:
 
 1. A process crash loses events the provider emitted that core had not
-   yet handled, and the tail of the interrupted run; the drift check
-   detects it where native evidence exists, and manual reload recovers
-   it; otherwise it is gone. This is the same loss window a provider's
+   yet handled, and the tail of the interrupted run; a later activation may
+   warn where newer native evidence exists, and manual reload recovers it;
+   otherwise it is gone. This is the same loss window a provider's
    own native JSONL carries. Under `synchronous=NORMAL`, an OS or power
    failure can additionally lose recently committed transactions;
    process-crash recovery is unaffected, and the same detection and
@@ -1746,7 +1783,8 @@ Every deliberate gap, in one place, so it is not "fixed" later:
 10. External native truncation or rewriting whose tail timestamp is not
     newer than the integration-emitted watermark goes undetected; the
     drift probe's timestamp obligation also admits false negatives, and
-    `unavailable` probes are silent.
+    `unavailable` probes are silent. The warning is process-lifetime and may
+    be missed or repeated across activations.
 11. Silent bit-level corruption that SQLite does not detect is
     undetected by Garcon as well (pages carry no checksums by default);
     detected corruption fences that chat only.
@@ -1882,17 +1920,19 @@ The catalog cites this revision, but its inventory is not repeated here.
   session native refs with the raw support export separate; direct
   providers receive resent inputs exactly once; late content
   participates normally in every fold.
-- **Drift check**: fixture native files; the probe obligation per
-  provider (reported timestamps never exceed core append times for
-  observed entries); strictly-newer relevant entries fire and
-  housekeeping entries do not; the integration-emitted watermark
-  computed by the bounded descending scan with the payload predicate
-  (core-authored inputs, notices, `permission-resolved`, and core-origin
-  `run-ended` rows never raise it; imported rows count); quiet after
-  cleanly finished runs and after reload; post-interrupt native
-  persistence fires; current-binding-only probing; notice dedup by
-  watermark; pre-resume timing; unavailable probes silent; non-blocking
-  behavior on every surface.
+- **Drift check**: fixture native files; the probe obligation per provider
+  (reported timestamps never exceed core append times for observed entries);
+  successful active newest-history completion precedes scheduling and never
+  awaits the probe; earlier, replay, background, preview, failed-read,
+  dispatch, timer, and startup paths schedule nothing; equal pending work
+  coalesces while every changed eligibility dimension aborts, supersedes, and
+  fences stale results. The integration-emitted watermark is `(ordinal, at)`
+  from the bounded descending scan with the payload predicate; core-authored
+  rows never raise it and imported rows count. Timeout, failure,
+  `unavailable`, ownership change, invalid timestamps, and abort-ignoring
+  probes emit nothing. A strictly newer idle tail emits only a transient
+  `chat-operational-notice`, appends no ledger row, and may warn again on a
+  later activation; manual Reload alone reconciles the transcript.
 - **Genesis adoption**: every integration explicitly declares
   `legacyHistoryImport`; core calls only that facet, never infers it from or
   falls back to `nativeHistoryImport`. Frozen-prefix and legacy-source
@@ -2088,9 +2128,10 @@ stabilization defects. The current case inventory and gate status live in
 1. The governing posture is simplicity over crash-perfect attribution or
    recovery: no producer identity, no retry protocol, no delivery
    evidence, no durable run attribution, and no producer acceptance-capacity
-   protocol; commit failures fence; crash loss is detected by the drift check
-   and repaired by manual reload. HTTP pages and WebSocket replay frames have
-   their own bounded transport contracts; those are not producer flow control.
+   protocol; commit failures fence; a later activation may warn about crash
+   loss where newer native evidence exists, and manual reload repairs it. HTTP
+   pages and WebSocket replay frames have their own bounded transport
+   contracts; those are not producer flow control.
 2. `publish()` commits synchronously: acceptance and durability are the
    same point; no ledger transaction spans an `await`; observed order is
    synchronous-call order on the event loop; broadcast follows commit
@@ -2157,13 +2198,17 @@ stabilization defects. The current case inventory and gate status live in
     JSONL reader behind the legacy facet, writes no V5 JSONL, and keeps Reload
     null. OpenCode remains directory-scoped; released directoryless recovery
     is deferred.
-12. The native drift check probes only the current binding under the
-    stated probe obligation and uses the integration-emitted watermark —
-    core-authored inputs, notices, `permission-resolved`, and
-    core-origin `run-ended` rows never raise it — computed by a bounded
-    descending scan with a payload predicate; it is permanently
-    non-blocking. Ownership is concurrent-exclusive: non-concurrent
-    external use is the reload product case, not a violation.
+12. A successful active newest-history load returns before scheduling the
+    native drift check for the current binding. No other read or execution
+    path schedules it. Equal pending eligibility coalesces, changed exact
+    eligibility supersedes it, and every result revalidates execution
+    ownership. The integration-emitted watermark is `(ordinal, at)` —
+    core-authored inputs, notices, `permission-resolved`, and core-origin
+    `run-ended` rows never raise it — computed by a bounded descending scan
+    with a payload predicate. A newer tail emits only a transient operational
+    warning; there is no ledger notice, persisted warning state, cache, or
+    cooldown. Ownership is concurrent-exclusive: non-concurrent external use
+    is the reload product case, not a violation.
 13. Permission lifecycle is durable typed history with one
     integration-generated `permissionOccurrenceId` UUID per native occurrence.
     Requested and terminal events reuse that UUID; provider-native request IDs
