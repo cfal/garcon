@@ -1,6 +1,7 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
+import { SEARCH_TIMESTAMP_MAX_BYTES } from './schema.js';
 
 const MAX_BODY_CHARS = 64_000;
 const MAX_TOOL_INPUT_CHARS = 16_000;
@@ -292,11 +293,15 @@ function projectOne(message: ChatMessage): {
   };
   const raw = messageText(message, budget);
   const body = raw.replace(/\s+/g, ' ').trim();
+  const timestamp = typeof message.timestamp === 'string'
+    && Buffer.byteLength(message.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
+    ? message.timestamp
+    : null;
   return {
     truncated: budget.truncated,
     row: body ? {
       role: roleForMessage(message),
-      timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+      timestamp,
       body,
     } : null,
   };

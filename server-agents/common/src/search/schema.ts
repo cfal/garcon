@@ -7,11 +7,12 @@ export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 9;
 export const SEARCH_INGEST_TXN_MAX_ROWS = 256;
 export const SEARCH_INGEST_TXN_MAX_BYTES = 1_048_576;
 export const SEARCH_INGEST_ROW_MAX_BYTES = 1_048_576;
+export const SEARCH_TIMESTAMP_MAX_BYTES = 256;
 export const SEARCH_DELETE_BATCH_MAX_ROWS = 512;
 export const SEARCH_FTS_CRISISMERGE = 1_000;
 export const SEARCH_FTS_AUTOMERGE = 4;
 export const SEARCH_FTS_MERGE_PAGES_PER_TXN = 16;
-export const SEARCH_FTS_RANK = 'bm25(1.0, 0.0)';
+export const SEARCH_FTS_RANK = 'bm25(1.0)';
 
 export type SearchChatStatus = 'pending' | 'indexed' | 'failed';
 
@@ -72,34 +73,32 @@ const SEARCH_SCHEMA_OBJECT_SQL: ReadonlyMap<string, SearchSchemaObject> = new Ma
   transcript_view_id TEXT NOT NULL,
   ordinal            INTEGER NOT NULL,
   role               INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
-  timestamp          TEXT,
+  timestamp          TEXT CHECK(
+    timestamp IS NULL OR length(CAST(timestamp AS BLOB)) <= ${SEARCH_TIMESTAMP_MAX_BYTES}
+  ),
   body               TEXT NOT NULL,
-  chat_scope         TEXT NOT NULL GENERATED ALWAYS AS (
-    'c' || lower(hex(CAST(chat_id AS BLOB)))
-  ) STORED,
   UNIQUE(chat_id, transcript_view_id, ordinal)
 ) STRICT` }],
   ['search_chunks_fts', { masterType: 'table', sql: `CREATE VIRTUAL TABLE search_chunks_fts USING fts5(
   body,
-  chat_scope,
   content='search_chunks',
   content_rowid='id',
   columnsize=0,
   tokenize='unicode61 remove_diacritics 2'
 )` }],
   ['search_chunks_ai', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_ai AFTER INSERT ON search_chunks BEGIN
-  INSERT INTO search_chunks_fts(rowid, body, chat_scope)
-  VALUES (new.id, new.body, new.chat_scope);
+  INSERT INTO search_chunks_fts(rowid, body)
+  VALUES (new.id, new.body);
 END` }],
   ['search_chunks_ad', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_ad AFTER DELETE ON search_chunks BEGIN
-  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
-  VALUES ('delete', old.id, old.body, old.chat_scope);
+  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
+  VALUES ('delete', old.id, old.body);
 END` }],
-  ['search_chunks_au', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_au AFTER UPDATE OF body, chat_id ON search_chunks BEGIN
-  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
-  VALUES ('delete', old.id, old.body, old.chat_scope);
-  INSERT INTO search_chunks_fts(rowid, body, chat_scope)
-  VALUES (new.id, new.body, new.chat_scope);
+  ['search_chunks_au', { masterType: 'trigger', sql: `CREATE TRIGGER search_chunks_au AFTER UPDATE OF body ON search_chunks BEGIN
+  INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
+  VALUES ('delete', old.id, old.body);
+  INSERT INTO search_chunks_fts(rowid, body)
+  VALUES (new.id, new.body);
 END` }],
 ]);
 
@@ -420,7 +419,12 @@ export function insertRowsBatch(db: Database, input: {
   for (const row of input.rows) {
     const rowBytes = Buffer.byteLength(row.body, 'utf8');
     if (rowBytes > SEARCH_INGEST_ROW_MAX_BYTES) throw searchError('SEARCH_ROW_TOO_LARGE');
-    batchBytes += rowBytes;
+    if (row.timestamp !== null && typeof row.timestamp !== 'string') {
+      throw searchError('SEARCH_ROW_INVALID');
+    }
+    const timestampBytes = row.timestamp === null ? 0 : Buffer.byteLength(row.timestamp, 'utf8');
+    if (timestampBytes > SEARCH_TIMESTAMP_MAX_BYTES) throw searchError('SEARCH_ROW_INVALID');
+    batchBytes += rowBytes + timestampBytes;
   }
   if (input.rows.length > 1 && batchBytes > SEARCH_INGEST_TXN_MAX_BYTES) {
     throw searchError('SEARCH_BATCH_TOO_LARGE');

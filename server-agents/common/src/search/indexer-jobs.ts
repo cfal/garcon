@@ -4,6 +4,7 @@ import {
   SEARCH_INGEST_ROW_MAX_BYTES,
   SEARCH_INGEST_TXN_MAX_BYTES,
   SEARCH_INGEST_TXN_MAX_ROWS,
+  SEARCH_TIMESTAMP_MAX_BYTES,
   closeSearchDatabase,
   deleteChatBatch,
   deleteStaleRowsBatch,
@@ -82,8 +83,11 @@ function sliceBatches(
   let current: HistoricalSearchMessageRow[] = [];
   let bytes = 0;
   for (const row of rows) {
-    const rowBytes = Buffer.byteLength(row.body, 'utf8');
-    if (rowBytes > SEARCH_INGEST_ROW_MAX_BYTES) throw new Error('SEARCH_ROW_TOO_LARGE');
+    const bodyBytes = Buffer.byteLength(row.body, 'utf8');
+    if (bodyBytes > SEARCH_INGEST_ROW_MAX_BYTES) throw new Error('SEARCH_ROW_TOO_LARGE');
+    const timestampBytes = row.timestamp === null ? 0 : Buffer.byteLength(row.timestamp, 'utf8');
+    if (timestampBytes > SEARCH_TIMESTAMP_MAX_BYTES) throw new Error('SEARCH_ROW_INVALID');
+    const rowBytes = bodyBytes + timestampBytes;
     if (
       current.length >= SEARCH_INGEST_TXN_MAX_ROWS
       || (current.length > 0 && bytes + rowBytes > SEARCH_INGEST_TXN_MAX_BYTES)

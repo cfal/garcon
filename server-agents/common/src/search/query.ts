@@ -306,28 +306,24 @@ function searchIndexStatusForPreparedAllowed(
   const counts = db.query<{
     indexed: number;
     failed: number;
-    unsupported: number;
   }, []>(`
     SELECT
       COALESCE(SUM(CASE WHEN state.status = 'indexed'
         AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS indexed,
-      COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-      COALESCE(SUM(CASE WHEN state.status = 'unsupported'
-        AND state.indexed_through >= allowed.through_ordinal THEN 1 ELSE 0 END), 0) AS unsupported
+      COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
     FROM temp.search_allowed_chats allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
       AND state.transcript_view_id = allowed.transcript_view_id
-  `).get() ?? { indexed: 0, failed: 0, unsupported: 0 };
+  `).get() ?? { indexed: 0, failed: 0 };
   const indexedChatCount = Number(counts.indexed);
   const failedChatCount = Number(counts.failed);
-  const unsupportedChatCount = Number(counts.unsupported);
   return {
     indexedChatCount,
     failedChatCount,
-    unsupportedChatCount,
+    unsupportedChatCount: 0,
     pendingChatCount: Math.max(
       0,
-      allowed.length - indexedChatCount - failedChatCount - unsupportedChatCount,
+      allowed.length - indexedChatCount - failedChatCount,
     ),
   };
 }
@@ -353,6 +349,9 @@ function collectSnippets(
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
     ${SEARCHABLE_STATE_JOIN}
+    JOIN temp.search_allowed_chats allowed ON allowed.chat_id = chunks.chat_id
+      AND allowed.transcript_view_id = chunks.transcript_view_id
+      AND chunks.ordinal <= allowed.through_ordinal
     JOIN temp.search_result_chats results ON results.chat_id = chunks.chat_id
       AND results.transcript_view_id = chunks.transcript_view_id
     WHERE search_chunks_fts MATCH ?
@@ -392,6 +391,7 @@ function collectSingleTermSearch(
     ${SEARCHABLE_STATE_JOIN}
     JOIN temp.search_allowed_chats allowed ON allowed.chat_id = chunks.chat_id
       AND allowed.transcript_view_id = chunks.transcript_view_id
+      AND chunks.ordinal <= allowed.through_ordinal
     WHERE search_chunks_fts MATCH ?
   `).all(`body:(${term.query})`);
   const matches = new Map<string, SnippetMatch & ResultRow>();
@@ -474,8 +474,9 @@ function collectMultiTermResults(
     FROM search_chunks_fts
     JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
     ${SEARCHABLE_STATE_JOIN}
-    JOIN allowed ON allowed.chat_id = chunks.chat_id
+    JOIN temp.search_allowed_chats allowed ON allowed.chat_id = chunks.chat_id
       AND allowed.transcript_view_id = chunks.transcript_view_id
+      AND chunks.ordinal <= allowed.through_ordinal
     WHERE search_chunks_fts MATCH ?
     GROUP BY chunks.chat_id, chunks.transcript_view_id
   `).join(' UNION ALL ');

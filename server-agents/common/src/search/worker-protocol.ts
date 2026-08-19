@@ -12,6 +12,7 @@ import {
 import type { HistoricalSearchMessageRow } from './rows.js';
 import {
   SEARCH_INGEST_ROW_MAX_BYTES,
+  SEARCH_TIMESTAMP_MAX_BYTES,
   type SearchChatState,
   type SearchStatusCounts,
 } from './schema.js';
@@ -170,7 +171,10 @@ function searchRow(value: unknown): value is HistoricalSearchMessageRow {
     && ['ordinal', 'role', 'timestamp', 'body'].every((key) => Object.hasOwn(row!, key))
     && positiveInteger(row!.ordinal)
     && ['user', 'assistant', 'tool', 'system'].includes(String(row!.role))
-    && (row!.timestamp === null || typeof row!.timestamp === 'string')
+    && (row!.timestamp === null || (
+      typeof row!.timestamp === 'string'
+      && Buffer.byteLength(row!.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
+    ))
     && typeof row!.body === 'string';
 }
 

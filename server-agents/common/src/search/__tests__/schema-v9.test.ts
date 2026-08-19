@@ -7,6 +7,7 @@ import { searchTranscriptIndexV1 } from '../query.js';
 import {
   SEARCH_INGEST_ROW_MAX_BYTES,
   SEARCH_INGEST_TXN_MAX_ROWS,
+  SEARCH_TIMESTAMP_MAX_BYTES,
   closeSearchDatabase,
   deleteChatBatch,
   deleteStaleRowsBatch,
@@ -358,6 +359,100 @@ describe('schema v9', () => {
       targetThrough: 1, expectedAfterOrdinal: 0,
     });
     expect(markerSearch(db, 'chat-0009', 'view-a', 2, marker).results).toHaveLength(0);
+    db.close();
+  });
+
+  test('[TLV5-SEARCH.09-SCHEMA-03] every query path stops at the request frontier', async () => {
+    const db = await openFresh();
+    planChatSync(db, {
+      mode: 'replace', chatId: 'chat-frontier', transcriptViewId: 'view-frontier',
+      targetThrough: 2, expectedAfterOrdinal: 0,
+    });
+    insertRowsBatch(db, {
+      chatId: 'chat-frontier',
+      transcriptViewId: 'view-frontier',
+      rows: [
+        { ...syntheticRows({ seed: 1, count: 1 })[0]!, body: 'alphafrontier betafrontier' },
+        {
+          ...syntheticRows({ seed: 2, count: 1, startOrdinal: 2 })[0]!,
+          body: 'alphafrontier betafrontier laterfrontier',
+        },
+      ],
+      advanceTo: 2,
+    });
+    finishChatSync(db, { chatId: 'chat-frontier', transcriptViewId: 'view-frontier' });
+
+    expect(markerSearch(
+      db, 'chat-frontier', 'view-frontier', 1, 'laterfrontier',
+    ).results).toHaveLength(0);
+    const multi = searchTranscriptIndexV1(db, {
+      query: {
+        version: 1,
+        clauses: [
+          {
+            kind: 'all-words',
+            tokens: [{ text: 'alphafrontier', normalized: 'alphafrontier', match: 'exact' }],
+          },
+          {
+            kind: 'all-words',
+            tokens: [{ text: 'betafrontier', normalized: 'betafrontier', match: 'exact' }],
+          },
+        ],
+      },
+      allowedChats: [{
+        chatId: 'chat-frontier', transcriptViewId: 'view-frontier', throughOrdinal: 1,
+      }],
+    });
+    expect(multi.results).toEqual([
+      expect.objectContaining({
+        chatId: 'chat-frontier',
+        matchedMessageCount: 1,
+        snippets: [expect.objectContaining({ ordinal: 1 })],
+      }),
+    ]);
+    expect(multi.index).toMatchObject({
+      indexedChatCount: 1,
+      pendingChatCount: 0,
+      failedChatCount: 0,
+      unsupportedChatCount: 0,
+    });
+    db.close();
+  });
+
+  test('[TLV5-SEARCH.07-SCHEMA-05] timestamp bytes are bounded in code and storage', async () => {
+    const db = await openFresh();
+    planChatSync(db, {
+      mode: 'replace', chatId: 'chat-timestamp', transcriptViewId: 'view-timestamp',
+      targetThrough: 1, expectedAfterOrdinal: 0,
+    });
+    const base = syntheticRows({ seed: 1, count: 1 })[0]!;
+    const before = db.query<{ value: number }, []>('SELECT total_changes() AS value').get()!.value;
+    const oversized = 'é'.repeat(SEARCH_TIMESTAMP_MAX_BYTES / 2 + 1);
+    expect(() => insertRowsBatch(db, {
+      chatId: 'chat-timestamp', transcriptViewId: 'view-timestamp',
+      rows: [{ ...base, timestamp: oversized }], advanceTo: 1,
+    })).toThrow('SEARCH_ROW_INVALID');
+    expect(db.query<{ value: number }, []>('SELECT total_changes() AS value').get()!.value)
+      .toBe(before);
+    expect(() => db.query(`
+      INSERT INTO search_chunks(
+        chat_id, transcript_view_id, ordinal, role, timestamp, body
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run('chat-timestamp', 'view-timestamp', 1, 0, oversized, 'body')).toThrow();
+
+    insertRowsBatch(db, {
+      chatId: 'chat-timestamp', transcriptViewId: 'view-timestamp',
+      rows: [{ ...base, timestamp: 'é'.repeat(SEARCH_TIMESTAMP_MAX_BYTES / 2) }], advanceTo: 1,
+    });
+    finishChatSync(db, { chatId: 'chat-timestamp', transcriptViewId: 'view-timestamp' });
+    const chunkColumns = db.query<{ name: string }, []>(
+      "SELECT name FROM pragma_table_xinfo('search_chunks') ORDER BY cid",
+    ).all().map((row) => row.name);
+    const ftsColumns = db.query<{ name: string }, []>(
+      "SELECT name FROM pragma_table_xinfo('search_chunks_fts') ORDER BY cid",
+    ).all().map((row) => row.name);
+    expect(chunkColumns).not.toContain('chat_scope');
+    expect(ftsColumns).not.toContain('chat_scope');
     db.close();
   });
 

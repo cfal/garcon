@@ -121,6 +121,18 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     durations.sort((left, right) => left - right);
     expect(durations[Math.floor(durations.length * 0.5)]).toBeLessThan(CONVERGED_P50_BUDGET_MS);
     expect(durations[Math.floor(durations.length * 0.95)]).toBeLessThan(CONVERGED_P95_BUDGET_MS);
+    const multiClause = await fixture.client.timedSearchChats({
+      query: `${corpus.markerTerm} ${corpus.secondaryMarkerTerm}`,
+      limit: 50,
+    });
+    expect(multiClause.status).toBe(200);
+    expect(multiClause.body.results.length).toBeGreaterThanOrEqual(10);
+    expect(multiClause.body.results.every((result) => (
+      result.snippets.some((snippet) => (
+        snippet.text.includes(corpus.markerTerm)
+        && snippet.text.includes(corpus.secondaryMarkerTerm)
+      ))
+    ))).toBe(true);
 
     for (let round = 0; round < 10; round += 1) {
       const [left, right] = await Promise.all([

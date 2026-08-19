@@ -61,6 +61,7 @@ export interface SeededSearchCorpus {
   readonly sparseChatIds: readonly string[];
   readonly oversizedChatId: string | null;
   readonly markerTerm: string;
+  readonly secondaryMarkerTerm: string;
 }
 
 export interface SeededCorpusTotals {
@@ -73,6 +74,7 @@ export async function createSearchCorpusChats(
   tier: SearchCorpusTier,
 ): Promise<SeededSearchCorpus> {
   const markerTerm = 'quartzmarker';
+  const secondaryMarkerTerm = 'cobaltmarker';
   const denseChatIds: string[] = [];
   const sparseChatIds: string[] = [];
   const seedChat = async (content: string): Promise<string> => {
@@ -95,7 +97,7 @@ export async function createSearchCorpusChats(
   const oversizedChatId = tier.oversizedChat
     ? await seedChat('corpus oversized seed')
     : null;
-  return { denseChatIds, sparseChatIds, oversizedChatId, markerTerm };
+  return { denseChatIds, sparseChatIds, oversizedChatId, markerTerm, secondaryMarkerTerm };
 }
 
 export async function bulkAppendCorpusRows(
@@ -117,7 +119,9 @@ export async function bulkAppendCorpusRows(
     };
     for (let index = 0; index < rowCount; index += 1) {
       const generated = syntheticBody(random, rowBytes);
-      const body = index % 11 === 0 ? `${generated} ${corpus.markerTerm}` : generated;
+      const body = index % 11 === 0
+        ? `${generated} ${corpus.markerTerm} ${corpus.secondaryMarkerTerm}`
+        : generated;
       bodyBytes += Buffer.byteLength(body, 'utf8');
       const at = '2026-01-01T00:00:00.000Z';
       batch.push(index % 2 === 0

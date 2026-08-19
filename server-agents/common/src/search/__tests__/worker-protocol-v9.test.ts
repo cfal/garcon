@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SEARCH_INGEST_ROW_MAX_BYTES } from '../schema.js';
+import { SEARCH_INGEST_ROW_MAX_BYTES, SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
 import {
   MAX_ALLOWLIST_PER_FRAME,
   MAX_ROWS_PER_FRAME,
@@ -81,6 +81,13 @@ describe('worker protocol v9', () => {
       rows: [{
         ...syntheticRows({ seed: 3, count: 1 })[0]!,
         body: 'a'.repeat(SEARCH_INGEST_ROW_MAX_BYTES + 1),
+      }],
+    })).toBe(false);
+    expect(isIndexerRequest({
+      ...valid,
+      rows: [{
+        ...syntheticRows({ seed: 3, count: 1 })[0]!,
+        timestamp: 'é'.repeat(SEARCH_TIMESTAMP_MAX_BYTES / 2 + 1),
       }],
     })).toBe(false);
     expect(isIndexerRequest({ ...valid, done: false })).toBe(false);
