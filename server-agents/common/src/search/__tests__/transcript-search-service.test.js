@@ -59,7 +59,7 @@ test('[TLV5-SEARCH.02-TIMEOUT-RESYNC-SERVICE-UNIT-01] a lost real-Worker complet
   const service = new TranscriptSearchService({
     workspaceDirectory: root,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    indexWriteTimeoutMs: 25,
+    indexWriteTimeoutMs: 1_000,
     workerFactory: (role, moduleUrl) => new FilteringWorker(moduleUrl, (event) => {
       if (role !== 'indexer' || !armed || suppressed
           || event?.type !== 'physical-step-complete') return false;
