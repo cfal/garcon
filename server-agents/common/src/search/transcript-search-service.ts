@@ -194,6 +194,7 @@ export class TranscriptSearchService {
       },
       afterRestart: async () => {
         this.#logRestart('SEARCH_INDEXER_RESTARTED');
+        if (this.#indexRecreated) this.#retireReadersForRecreatedIndex();
         await this.#resyncHandler?.();
       },
       onAdmitted: () => {
@@ -409,7 +410,8 @@ export class TranscriptSearchService {
     try {
       event = await raceAgainstSignal(pending, request.signal);
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if ((error instanceof DOMException && error.name === 'AbortError')
+          || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
         this.#queryCounters.timedOut += 1;
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
@@ -429,6 +431,14 @@ export class TranscriptSearchService {
     this.#queryCounters.served += 1;
     this.#recordQueryDuration(performance.now() - started);
     return { results: event.results, index: event.index };
+  }
+
+  #retireReadersForRecreatedIndex(): void {
+    for (const slot of this.#readers) {
+      slot.state = 'quarantined';
+      slot.supervisor.crash();
+    }
+    this.#noteStatusMaybeChanged();
   }
 
   async disableAndDelete(signal: AbortSignal): Promise<void> {

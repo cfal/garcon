@@ -108,12 +108,14 @@ function instrumentingWorkerFactory(options: {
     deliver: (event: MessageEvent<unknown>) => void,
   ) => void;
   onPost?: (role: 'indexer' | 'reader', ordinal: number, message: unknown) => void;
+  onCreate?: (role: 'indexer' | 'reader', ordinal: number, worker: Worker) => void;
 }): (role: 'indexer' | 'reader', moduleUrl: string) => Worker {
   let readerOrdinal = 0;
   let indexerOrdinal = 0;
   return (role, moduleUrl) => {
     const worker = new Worker(moduleUrl);
     const ordinal = role === 'reader' ? readerOrdinal++ : indexerOrdinal++;
+    options.onCreate?.(role, ordinal, worker);
     return new Proxy(worker, {
       set(target, property, value) {
         if (property === 'onmessage' && typeof value === 'function') {
@@ -392,6 +394,63 @@ describe('transcript search service v9', () => {
     await second.close();
   });
 
+  test('[TLV5-SEARCH.06-SVC-03] recreated indexes replace every stale reader handle', async () => {
+    const root = workspace();
+    const records: Array<{ message: string; fields: unknown }> = [];
+    const searchReaders: number[] = [];
+    let indexer: Worker | null = null;
+    let rebuilt = false;
+    const service = new TranscriptSearchService({
+      workspaceDirectory: root,
+      logger: logger(records),
+      workerFactory: instrumentingWorkerFactory({
+        onCreate: (role, ordinal, worker) => {
+          if (role === 'indexer' && ordinal === 0) indexer = worker;
+        },
+        onPost: (role, ordinal, message) => {
+          if (role === 'reader' && (message as { type?: unknown }).type === 'search-start') {
+            searchReaders.push(ordinal);
+          }
+        },
+      }),
+    });
+    await service.enable(new AbortController().signal);
+    await build(service, 'chat-recreated', 'view-recreated', 20, 'oldreadermarker');
+    service.setResyncHandler(async () => {
+      await build(service, 'chat-recreated', 'view-recreated', 20, 'newreadermarker');
+      rebuilt = true;
+    });
+
+    if (!indexer) throw new Error('indexer worker not captured');
+    const closed = new Promise<void>((resolve) => {
+      indexer!.addEventListener('close', () => resolve(), { once: true });
+    });
+    indexer.terminate();
+    await closed;
+    const dbPath = join(root, 'transcript-search', 'index.sqlite');
+    for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) rmSync(file, { force: true });
+
+    await waitFor(() => rebuilt && records.filter((record) => (
+      (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
+    )).length === 2, 10_000);
+    searchReaders.length = 0;
+    const results = await Promise.all([
+      service.search(searchRequest(
+        'chat-recreated', 'view-recreated', 20, 'newreadermarker',
+      )),
+      service.search(searchRequest(
+        'chat-recreated', 'view-recreated', 20, 'newreadermarker',
+      )),
+    ]);
+    expect(results.every((result) => result.results.length === 1)).toBe(true);
+    expect(searchReaders.length).toBeGreaterThanOrEqual(2);
+    expect(searchReaders.every((ordinal) => ordinal >= 2)).toBe(true);
+    expect((await service.search(searchRequest(
+      'chat-recreated', 'view-recreated', 20, 'oldreadermarker',
+    ))).results).toHaveLength(0);
+    await service.close();
+  }, 20_000);
+
   test('[TLV5-SEARCH.09-SVC-03] resync scope prevents false ready status', async () => {
     const service = new TranscriptSearchService({ workspaceDirectory: workspace(), logger: logger() });
     await service.enable(new AbortController().signal);
@@ -625,6 +684,7 @@ describe('transcript search service v9', () => {
     await expect(service.search(searchRequest(
       'chat-grace', 'view-grace', 20, 'gracemarker',
     ))).rejects.toThrow('SEARCH_TIMEOUT');
+    expect(service.queryStats().timedOut).toBe(1);
     await expect(service.search(searchRequest(
       'chat-grace', 'view-grace', 20, 'gracemarker',
     ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-grace' })] });
