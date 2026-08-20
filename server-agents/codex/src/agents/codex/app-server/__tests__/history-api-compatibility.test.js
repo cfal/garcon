@@ -3,7 +3,7 @@ import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 
 describe('bundled Codex history API compatibility', () => {
   it('recognizes thread/turns/list as a public method', async () => {
-    const client = new CodexAppServerClient();
+    const client = new CodexAppServerClient({ shutdownGraceMs: 100 });
     try {
       const initialized = await client.connect();
       expect(initialized.userAgent).toBeString();
