@@ -819,7 +819,16 @@ export class OpenCodeRuntime {
     if (
       typeof toolMessageId === 'string'
       && !route.turn.assistantMessageIds.has(toolMessageId)
-    ) return;
+    ) {
+      // The provider stays blocked on the unanswered request; the warning is
+      // the diagnostic and user interrupt is the remediation.
+      this.#logger.warn('Ignoring an OpenCode permission for a message outside its turn', {
+        agentSessionId: sessionId,
+        eventId: event.id ?? null,
+        toolMessageId,
+      });
+      return;
+    }
     const permission = extractPermissionRequest(event);
     if (!permission) return;
     if (route.permissionMode === 'manualBypass') {
@@ -1136,7 +1145,6 @@ export class OpenCodeRuntime {
       permissionMode,
       scope.directory,
     );
-    request.onSessionActivated?.(agentSessionId);
     this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
@@ -1146,6 +1154,10 @@ export class OpenCodeRuntime {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
       if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+      // Activation publishes the durable session fact, so it must follow every
+      // failure whose cleanup deletes the just-created native session; a chat
+      // must never stay durably bound to a session this path removed.
+      request.onSessionActivated?.(agentSessionId);
     } catch (error) {
       this.#operationRoutes.unregister(route);
       this.#sessions.delete(agentSessionId);
