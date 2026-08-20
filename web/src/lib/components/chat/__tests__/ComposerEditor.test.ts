@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
+// Keeps the lifecycle assertion independent of lazy-module transform latency.
+import '../ComposerEditor.svelte';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 
 describe('ComposerEditor integration', () => {
