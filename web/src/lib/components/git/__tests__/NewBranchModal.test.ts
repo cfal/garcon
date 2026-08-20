@@ -7,9 +7,19 @@ function renderModal(overrides: Record<string, unknown> = {}) {
 		currentBranch: 'main',
 		newBranchName: 'feature/ref-base',
 		refOptions: [
-			{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch' },
-			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
-			{ name: 'v1.0.0', ref: 'refs/tags/v1.0.0', kind: 'tag' },
+			{
+				name: 'main',
+				ref: 'refs/heads/main',
+				kind: 'local-branch',
+				updatedAt: null,
+			},
+			{
+				name: 'origin/main',
+				ref: 'refs/remotes/origin/main',
+				kind: 'remote-branch',
+				updatedAt: null,
+			},
+			{ name: 'v1.0.0', ref: 'refs/tags/v1.0.0', kind: 'tag', updatedAt: null },
 		],
 		selectedBaseRef: '',
 		isLoadingRefs: false,

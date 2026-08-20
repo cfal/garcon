@@ -32,6 +32,7 @@
     "./generation-prompts": "./generation-prompts.ts",
     "./generation-test-contracts": "./generation-test-contracts.ts",
     "./gh": "./gh.ts",
+    "./git-refs": "./git-refs.ts",
     "./http-error": "./http-error.ts",
     "./json": "./json.ts",
     "./model-catalog": "./model-catalog.ts",

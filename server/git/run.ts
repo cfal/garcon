@@ -295,7 +295,10 @@ export function stripDiffHeaders(diff: string): string {
 
 // Asserts that the given path is an accessible git working tree.
 // Throws on failure with a descriptive error message.
-export async function assertGitRepository(projectPath: string): Promise<void> {
+export async function assertGitRepository(
+  projectPath: string,
+  signal?: AbortSignal,
+): Promise<void> {
   try {
     await fs.access(projectPath);
   } catch {
@@ -307,9 +310,10 @@ export async function assertGitRepository(projectPath: string): Promise<void> {
     ({ stdout } = await runGit(
       projectPath,
       ['rev-parse', '--is-inside-work-tree'],
-      readOnlyGitOptions(),
+      readOnlyGitOptions({ signal }),
     ));
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error;
     throw new Error('Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.');
   }
 

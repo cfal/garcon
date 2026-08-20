@@ -235,6 +235,7 @@ describe('GET /api/v1/git/refs validation', () => {
     const url = makeUrl('/api/v1/git/refs', {
       project: gitFixturePath,
       limit: String(GIT_REF_RESULT_LIMITS.max + 1),
+      sort: 'updated',
     });
     const response = await handler(new Request(url), url);
     const body = await response.json();
@@ -242,6 +243,48 @@ describe('GET /api/v1/git/refs validation', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe(`Invalid limit. Expected an integer between 1 and ${GIT_REF_RESULT_LIMITS.max}.`);
   });
+
+  it('accepts an omitted sort pair and valid explicit pairs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-ref-route-'));
+    try {
+      await runGitCommand(projectPath, ['init']);
+      for (const params of [
+        {},
+        { sort: 'name', direction: 'asc' },
+        { sort: 'updated', direction: 'desc' },
+      ]) {
+        const url = makeUrl('/api/v1/git/refs', {
+          project: projectPath,
+          ...params,
+        });
+        const response = await handler(new Request(url), url);
+        expect(response.status).toBe(200);
+      }
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  for (const [label, params] of [
+    ['only sort', { sort: 'updated' }],
+    ['only direction', { direction: 'desc' }],
+    ['an empty sort', { sort: '', direction: 'asc' }],
+    ['an unknown sort', { sort: 'created', direction: 'asc' }],
+    ['an unknown direction', { sort: 'name', direction: 'forward' }],
+  ]) {
+    it(`returns 400 for ${label}`, async () => {
+      const url = makeUrl('/api/v1/git/refs', {
+        project: gitFixturePath,
+        ...params,
+      });
+      const response = await handler(new Request(url), url);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        'Invalid ref sort. Expected sort=name|updated and direction=asc|desc together.',
+      );
+    });
+  }
 });
 
 describe('POST /api/v1/git/workbench/snapshot validation', () => {

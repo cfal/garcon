@@ -62,9 +62,7 @@
 	});
 
 	function editComparison(): void {
-		if (projectPath && controller.target.branches.refs.length === 0) {
-			void controller.target.branches.fetchRefs(projectPath);
-		}
+		if (projectPath) void controller.target.branches.fetchRefs(projectPath);
 		transientLayers.open('main-inert', () => comparison.editComparison());
 	}
 

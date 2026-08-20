@@ -19,6 +19,7 @@ import type { SettingsStore } from '../settings/store.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { isThinkingMode } from '../../common/chat-modes.js';
 import { isRecord } from '../../common/json.js';
+import { isGitRefKind, parseGitRefSort } from '../../common/git-refs.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
 import { jsonError } from '../lib/http-error.js';
@@ -149,10 +150,6 @@ function validPositiveLimit(value: unknown, fallback: number, max: number): numb
   return limit;
 }
 
-function isGitRefKind(value: unknown): value is GitRefKind {
-  return value === 'local-branch' || value === 'remote-branch' || value === 'tag' || value === 'other';
-}
-
 function validNonNegativeInteger(value: unknown, fallback: number, max: number): number | null {
   const next = value === null || value === undefined ? fallback : Number(value);
   if (!Number.isInteger(next) || next < 0 || next > max) return null;
@@ -246,15 +243,26 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   async function getRefs(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
     const limit = validPositiveLimit(url.searchParams.get('limit'), GIT_REF_RESULT_LIMITS.default, GIT_REF_RESULT_LIMITS.max);
+    const sort = parseGitRefSort(
+      url.searchParams.get('sort'),
+      url.searchParams.get('direction'),
+    );
     if (project instanceof Response) return project;
     if (limit === null) {
       return gitRouteError(`Invalid limit. Expected an integer between 1 and ${GIT_REF_RESULT_LIMITS.max}.`, 400);
+    }
+    if (!sort) {
+      return gitRouteError(
+        'Invalid ref sort. Expected sort=name|updated and direction=asc|desc together.',
+        400,
+      );
     }
     return gitJson(git, () =>
       git.getRefs({
         projectPath: project,
         query: url.searchParams.get('query') ?? undefined,
         limit,
+        sort,
         signal: request.signal,
       }),
     );

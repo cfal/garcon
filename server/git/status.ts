@@ -7,6 +7,7 @@ import { createGenerationRequestSignal } from '../settings/generation-limits.js'
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS } from './types.js';
+import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -19,6 +20,7 @@ import type {
   GitRefOption,
   GitRefsResponse,
   GitRefsOptions,
+  GitRefSort,
   ProjectOptions,
   PushOptions,
   RemoteInfo,
@@ -47,13 +49,6 @@ type CommitMessageDiffRunner = (
   args: string[],
   options?: { disableOptionalLocks?: boolean },
 ) => Promise<{ stdout: string }>;
-
-const REF_KIND_ORDER: Record<GitRefOption['kind'], number> = {
-  'local-branch': 0,
-  'remote-branch': 1,
-  tag: 2,
-  other: 3,
-};
 
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
@@ -98,9 +93,23 @@ function gitRefDisplayName(refname: string): Pick<GitRefOption, 'name' | 'kind'>
   return { name: refname, kind: 'other' };
 }
 
+function gitRefSortArgs(sort: GitRefSort): string[] {
+  const prefix = sort.direction === 'desc' ? '-' : '';
+  const primary = sort.key === 'name' ? 'refname:lstrip=2' : 'creatordate';
+  return ['--sort=refname', `--sort=${prefix}${primary}`];
+}
+
+function creatorDateIso(value: string | undefined): string | null {
+  if (!value || !/^-?\d+$/.test(value)) return null;
+  const milliseconds = Number(value) * 1_000;
+  if (!Number.isSafeInteger(milliseconds)) return null;
+  const timestamp = new Date(milliseconds);
+  return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : null;
+}
+
 function parseGitRefLine(line: string, currentBranch: string | null, head: string): GitRefOption | null {
   if (!line) return null;
-  const [refname, objectName] = line.split('\0');
+  const [refname, objectName, creatorDate] = line.split('\0');
   if (!refname) return null;
   if (refname.startsWith('refs/remotes/') && refname.endsWith('/HEAD')) return null;
 
@@ -113,16 +122,38 @@ function parseGitRefLine(line: string, currentBranch: string | null, head: strin
     name,
     ref: refname,
     kind,
+    updatedAt: creatorDateIso(creatorDate),
     ...(isCurrent ? { isCurrent: true } : {}),
   };
 }
 
-function sortGitRefs(refs: GitRefOption[]): GitRefOption[] {
-  return refs.sort((a, b) => {
-    const kindDelta = REF_KIND_ORDER[a.kind] - REF_KIND_ORDER[b.kind];
-    if (kindDelta !== 0) return kindDelta;
-    return a.name.localeCompare(b.name);
-  });
+interface GitHeadIdentity {
+  currentBranch: string | null;
+  head: string;
+}
+
+async function readGitHeadIdentity(
+  projectPath: string,
+  signal?: AbortSignal,
+): Promise<GitHeadIdentity> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', 'HEAD', '--symbolic-full-name', 'HEAD'],
+      readOnlyGitOptions({ signal }),
+    );
+    const [head = '', symbolicHead = ''] = stdout.trim().split(/\r?\n/);
+    const prefix = 'refs/heads/';
+    return {
+      head,
+      currentBranch: symbolicHead.startsWith(prefix)
+        ? symbolicHead.slice(prefix.length)
+        : null,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { currentBranch: null, head: '' };
+  }
 }
 
 async function resolveLocalBranchCheckoutName(
@@ -399,53 +430,28 @@ export function createStatusOperations(agents: GitAgentRunner) {
     projectPath,
     query,
     limit,
+    sort = DEFAULT_GIT_REF_SORT,
     signal,
   }: GitRefsOptions): Promise<GitRefsResponse> {
-    await assertGitRepository(projectPath);
+    await assertGitRepository(projectPath, signal);
     const normalizedQuery = normalizeRefSearchQuery(query);
     if (normalizedQuery === null) return { refs: [] };
 
-    let currentBranch: string | null = null;
-    let head = '';
-
-    try {
-      const { stdout } = await runGit(
-        projectPath,
-        ['symbolic-ref', '--quiet', '--short', 'HEAD'],
-        readOnlyGitOptions({ signal }),
-      );
-      currentBranch = stdout.trim() || null;
-    } catch {
-      currentBranch = null;
-    }
-
-    try {
-      const { stdout } = await runGit(
-        projectPath,
-        ['rev-parse', '--verify', 'HEAD'],
-        readOnlyGitOptions({ signal }),
-      );
-      head = stdout.trim();
-    } catch {
-      head = '';
-    }
-
-    const { stdout } = await runGit(
-      projectPath,
-      [
-        'for-each-ref',
-        `--count=${normalizeRefResultLimit(limit)}`,
-        '--format=%(refname)%00%(objectname)',
-        ...refPatternsForQuery(normalizedQuery),
-      ],
-      readOnlyGitOptions({ signal }),
-    );
-    const refs = sortGitRefs(
-      stdout
-        .split('\n')
-        .map((line) => parseGitRefLine(line, currentBranch, head))
-        .filter((ref): ref is GitRefOption => Boolean(ref)),
-    );
+    const refArgs = [
+      'for-each-ref',
+      `--count=${normalizeRefResultLimit(limit)}`,
+      ...gitRefSortArgs(sort),
+      '--format=%(refname)%00%(objectname)%00%(creatordate:unix)',
+      ...refPatternsForQuery(normalizedQuery),
+    ];
+    const [identity, refResult] = await Promise.all([
+      readGitHeadIdentity(projectPath, signal),
+      runGit(projectPath, refArgs, readOnlyGitOptions({ signal })),
+    ]);
+    const refs = refResult.stdout
+      .split('\n')
+      .map((line) => parseGitRefLine(line, identity.currentBranch, identity.head))
+      .filter((ref): ref is GitRefOption => Boolean(ref));
     return { refs };
   }
 
