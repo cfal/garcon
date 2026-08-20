@@ -1,14 +1,15 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 19 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 20 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
-include PR #518 and the PR #527 native-drift review state.
+include PR #518, the PR #527 native-drift review state, the PR #529 compaction
+repair, and the revision 20 OpenCode legacy-absence correction.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 19, SHA-256
-  `9cc7791c0524083af088bd29c113b33cec0f430cf2a78c84686fbe14a6c68893`
+- `docs/transcript-ledger-v5-design.md`, revision 20, SHA-256
+  `e5700703b533cd6419a76153d85975e88f0359938978f8c7acf6810bbd8ce13a`
 
 Current inventory: 278 discovered stable IDs. The PR #500 squash merge above is
 the historical acceptance anchor and contains 256 of them. PR #518 merge
@@ -235,10 +236,10 @@ release-only replay and hygiene evidence below.
 | 9     | `bun run build`                       | Production build                                                             |
 | 10    | `timeout 30s bun run start --port 0`  | Isolated random-port startup                                                 |
 
-Credential-backed `bun run test:live:claude` and
-`bun run test:live:codex` remain separate CI-only compatibility gates. Exact
-rollout replays are release-acceptance cases, not dependencies of routine
-local testing.
+Credential-backed `bun run test:live:claude`, `bun run test:live:codex`, and
+`bun run test:live:opencode` remain separate CI-only compatibility gates.
+Exact rollout replays are release-acceptance cases, not dependencies of
+routine local testing.
 
 ## Atomic Requirement Registry
 

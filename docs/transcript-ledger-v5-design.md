@@ -1,6 +1,6 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 19, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 20, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
@@ -2127,12 +2127,14 @@ stabilization defects. The current case inventory and gate status live in
    Remove the three-minute prune timer and timer-only cases; preserve
    non-destructive active mutations, then discard expanded state on chat switch
    and prove bounded-cache restoration.
-6. **Make the OpenCode V1 limitation explicit in production.** Set
-   `OPENCODE_DISABLE_AUTOCOMPACT=1` on the owned process, delete the
-   session-latest compaction plugin/map, and replace scripted continuation
-   success expectations with an attributed visible context-limit failure.
-   Track V2/improved compaction and directoryless history import as follow-up
-   work, not alternate release paths.
+6. **Route OpenCode V1 automatic compaction through the owning turn.** Keep
+   the session-latest compaction plugin/map deleted, adopt OpenCode's marked
+   compaction control and continuation parts into the active turn's route
+   (#529), and keep autocompaction unforced on the owned process while
+   preserving operator overrides. An unmarked or failed compaction surfaces
+   as that operation's visible failure. Track V2/improved compaction and
+   directoryless history import as follow-up work, not alternate release
+   paths.
 7. **Close the remaining stabilization inventory.** Complete search, native
    probe, handoff, fork, replay, LRU, duplicate-input, adoption, and migration
    checks recorded in the CTS catalog; remove temporary diagnostics and
