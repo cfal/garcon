@@ -205,6 +205,7 @@ async function waitForActiveTarget(
     { timeout: 20_000 },
     { expectedFileName: fileName, expectedTarget: target },
   );
+  if (target === "editor") await waitForAnimationFrames(page, 1);
 }
 
 async function setScrollOffset(
