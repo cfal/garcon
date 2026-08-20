@@ -487,12 +487,6 @@ describe('CommitController', () => {
 		await controller.setContext('/project', '/project');
 		await controller.setPresentationVisible(true);
 
-		expect(controller.directorySelection('src')).toMatchObject({
-			checked: false,
-			mixed: false,
-			fileCount: 2,
-		});
-
 		controller.toggleDirectory('src', true);
 		expect(await controller.waitForQueue()).toBe(true);
 
@@ -502,11 +496,7 @@ describe('CommitController', () => {
 			['src/a.ts', 'src/b.ts'],
 			'stage',
 		);
-		expect(controller.directorySelection('src')).toMatchObject({
-			checked: true,
-			mixed: false,
-			fileCount: 2,
-		});
+		expect(Object.values(controller.intents).every((intent) => intent.desiredSelected)).toBe(true);
 	});
 
 	it('unstages staged descendant files in one batch when a directory is cleared', async () => {
@@ -540,11 +530,7 @@ describe('CommitController', () => {
 			['src/a.ts', 'src/b.ts'],
 			'unstage',
 		);
-		expect(controller.directorySelection('src')).toMatchObject({
-			checked: false,
-			mixed: false,
-			fileCount: 2,
-		});
+		expect(Object.values(controller.intents).every((intent) => !intent.desiredSelected)).toBe(true);
 	});
 
 	it('does not restage already staged mixed files during directory staging', async () => {
@@ -603,10 +589,10 @@ describe('CommitController', () => {
 		});
 		mockedApi.getGitWorkbenchSnapshot.mockImplementation(async (projectPath) =>
 			snapshot([
-				fileNode(
-					projectPath === '/project' ? 'project.ts' : 'worktree.ts',
-					{ staged: true, hasUnstaged: false },
-				),
+				fileNode(projectPath === '/project' ? 'project.ts' : 'worktree.ts', {
+					staged: true,
+					hasUnstaged: false,
+				}),
 			]),
 		);
 		const controller = makeController();

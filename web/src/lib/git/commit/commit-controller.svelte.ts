@@ -3,7 +3,6 @@ import {
 	getGitWorkbenchSnapshot,
 	gitCommitIndex,
 	gitStagePaths,
-	type GitChangeStats,
 	type GitTreeNode,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
@@ -31,14 +30,6 @@ export interface QuickCommitPathIntent {
 	isRunning: boolean;
 	runningMode: QuickCommitStageMode | null;
 	error: string | null;
-}
-
-export interface QuickCommitDirectorySelection {
-	checked: boolean;
-	mixed: boolean;
-	isRunning: boolean;
-	error: string | null;
-	fileCount: number;
 }
 
 export interface CommitControllerDeps extends GitSurfaceControllerDeps {
@@ -71,6 +62,7 @@ export class CommitController implements PortableSingletonController {
 	readonly target: GitTargetSessionController;
 	tree = $state<GitTreeNode[]>([]);
 	intents = $state<Record<string, QuickCommitPathIntent>>({});
+	readonly fileNodes = $derived.by(() => flattenCommitFileNodes(this.tree));
 	message = $state('');
 	treeLoadState = $state<QuickCommitTreeLoadState>('idle');
 	isProcessingQueue = $state(false);
@@ -91,6 +83,18 @@ export class CommitController implements PortableSingletonController {
 	private disposed = false;
 	private contextGeneration = 0;
 	private loadedTargetIdentity: string | null = null;
+	private selectedChangeStats = $derived.by(() => {
+		let additions = 0;
+		let deletions = 0;
+		for (const node of this.fileNodes) {
+			const intent = this.intentFor(node.path);
+			if (!intent?.desiredSelected) continue;
+			const stats = commitStatsForNode(node);
+			additions += stats.additions;
+			deletions += stats.deletions;
+		}
+		return { additions, deletions };
+	});
 
 	constructor(private readonly deps: CommitControllerDeps) {
 		this.target = new GitTargetSessionController({
@@ -98,8 +102,7 @@ export class CommitController implements PortableSingletonController {
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
 			canChangeTarget: () =>
-				this.canClose &&
-				deps.gitMutations.pendingCount(singletonSurfaceId('commit')) === 0,
+				this.canClose && deps.gitMutations.pendingCount(singletonSurfaceId('commit')) === 0,
 			onTargetChanged: (_target, identity, reason, identityChanged) =>
 				this.setTargetIdentity(identity, reason, identityChanged),
 		});
@@ -115,10 +118,6 @@ export class CommitController implements PortableSingletonController {
 
 	get projectIdentityPending(): boolean {
 		return this.target.projectIdentityPending;
-	}
-
-	get fileNodes(): GitTreeNode[] {
-		return flattenCommitFileNodes(this.tree);
 	}
 
 	get isLoadingTree(): boolean {
@@ -173,11 +172,11 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	get totalAdditions(): number {
-		return this.selectedStats().additions;
+		return this.selectedChangeStats.additions;
 	}
 
 	get totalDeletions(): number {
-		return this.selectedStats().deletions;
+		return this.selectedChangeStats.deletions;
 	}
 
 	get canCommit(): boolean {
@@ -269,28 +268,6 @@ export class CommitController implements PortableSingletonController {
 
 	intentFor(path: string): QuickCommitPathIntent | null {
 		return this.intents[path] ?? null;
-	}
-
-	directorySelection(path: string): QuickCommitDirectorySelection {
-		const node = findCommitTreeNode(this.tree, path);
-		const files = node ? flattenCommitFileNodes([node]) : [];
-		const intents = files
-			.map((file) => this.intentFor(file.path))
-			.filter((item): item is QuickCommitPathIntent => Boolean(item));
-		const selectedCount = intents.filter((item) => item.desiredSelected).length;
-		const checked = intents.length > 0 && selectedCount === intents.length;
-		return {
-			checked,
-			mixed: selectedCount > 0 && selectedCount < intents.length,
-			isRunning: intents.some((item) => item.isRunning),
-			error: intents.find((item) => item.error)?.error ?? null,
-			fileCount: intents.length,
-		};
-	}
-
-	nodeStats(path: string): GitChangeStats {
-		const node = this.fileNodes.find((candidate) => candidate.path === path);
-		return node ? commitStatsForNode(node) : { additions: 0, deletions: 0 };
 	}
 
 	togglePath(path: string, desiredSelected: boolean): void {
@@ -693,19 +670,6 @@ export class CommitController implements PortableSingletonController {
 		});
 	}
 
-	private selectedStats(): GitChangeStats {
-		let additions = 0;
-		let deletions = 0;
-		for (const node of this.fileNodes) {
-			const intent = this.intentFor(node.path);
-			if (!intent?.desiredSelected) continue;
-			const stats = commitStatsForNode(node);
-			additions += stats.additions;
-			deletions += stats.deletions;
-		}
-		return { additions, deletions };
-	}
-
 	private fileErrorSummary(errors: string[]): string {
 		const first = errors[0] ?? '';
 		if (errors.length <= 1) return first;
@@ -740,11 +704,7 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	private reconcilePathsAfterStage(paths: string[], desiredSelected: boolean): void {
-		const result = reconcileCommitTreeAfterStage(
-			this.tree,
-			new Set(paths),
-			desiredSelected,
-		);
+		const result = reconcileCommitTreeAfterStage(this.tree, new Set(paths), desiredSelected);
 		if (result.changed) this.tree = result.nodes;
 	}
 
@@ -810,10 +770,7 @@ export class CommitController implements PortableSingletonController {
 		if (reason === 'invalidation' && this.isPresentationVisible) {
 			const generation = this.contextGeneration;
 			await this.waitForQueue();
-			if (
-				generation === this.contextGeneration &&
-				identity === this.target.identity
-			) {
+			if (generation === this.contextGeneration && identity === this.target.identity) {
 				await this.refreshTreeSnapshot();
 			}
 		}
