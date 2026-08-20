@@ -158,6 +158,7 @@ async function addRow(input: {
   chatId: string;
   transcriptViewId: string;
   type: ChatRowType;
+  title: string;
   content: string;
   identity: string;
 }): Promise<AddChatRowResponse> {
@@ -167,6 +168,7 @@ async function addRow(input: {
     chatId: input.chatId,
     transcriptViewId: input.transcriptViewId,
     type: input.type,
+    title: input.title,
     content: input.content,
   });
 }
@@ -180,14 +182,27 @@ function rowLocator(page: Page, row: Pick<AddChatRowResponse, 'transcriptViewId'
 async function expectRenderedRow(
   page: Page,
   row: Pick<AddChatRowResponse, 'transcriptViewId' | 'ordinal'>,
-  messageType: 'transcript-notice' | 'error',
-  content: string,
+  expected: {
+    messageType: 'transcript-notice' | 'error';
+    title: string;
+    content: string;
+    variantClass: 'border-status-info-border' | 'border-status-error-border';
+  },
 ): Promise<void> {
   const locator = rowLocator(page, row);
   await locator.waitFor();
   expect(await locator.count()).toBe(1);
-  expect(await locator.getAttribute('data-chat-message-type')).toBe(messageType);
-  await locator.getByText(content, { exact: true }).waitFor();
+  expect(await locator.getAttribute('data-chat-message-type')).toBe(expected.messageType);
+  const card = locator.locator('article.cli-row-message');
+  await card.waitFor();
+  expect(await card.getAttribute('class')).toContain(expected.variantClass);
+  await card.getByText(expected.title, { exact: true }).waitFor();
+  await card.getByText(expected.content, { exact: true }).waitFor();
+  expect(await card.locator('svg[aria-hidden="true"]').count()).toBe(1);
+  expect(await card.locator('button').count()).toBe(0);
+  if (expected.messageType === 'error') {
+    expect(await locator.getByText('Error', { exact: true }).count()).toBe(0);
+  }
 }
 
 async function waitForTrackedContent(page: Page, content: string): Promise<void> {
@@ -355,12 +370,15 @@ describe('Chromium transcript chat rows', () => {
 
         const noticeContent = 'browser chat row notice';
         const errorContent = 'browser chat row error';
+        const noticeTitle = 'Browser deployment';
+        const errorTitle = 'Browser release validation';
         markPhase('publishing live notice and error chat rows');
         const notice = await addRow({
           fixture,
           chatId: targetChatId,
           transcriptViewId: target.transcriptViewId,
           type: 'notice',
+          title: noticeTitle,
           content: noticeContent,
           identity: 'browser-live-notice',
         });
@@ -369,6 +387,7 @@ describe('Chromium transcript chat rows', () => {
           chatId: targetChatId,
           transcriptViewId: target.transcriptViewId,
           type: 'error',
+          title: errorTitle,
           content: errorContent,
           identity: 'browser-live-error',
         });
@@ -383,16 +402,38 @@ describe('Chromium transcript chat rows', () => {
           transcriptViewId: target.transcriptViewId,
           type: 'error',
         });
-        await expectRenderedRow(fixture.page, notice, 'transcript-notice', noticeContent);
-        await expectRenderedRow(fixture.page, error, 'error', errorContent);
+        await expectRenderedRow(fixture.page, notice, {
+          messageType: 'transcript-notice',
+          title: noticeTitle,
+          content: noticeContent,
+          variantClass: 'border-status-info-border',
+        });
+        await expectRenderedRow(fixture.page, error, {
+          messageType: 'error',
+          title: errorTitle,
+          content: errorContent,
+          variantClass: 'border-status-error-border',
+        });
         await waitForTrackedContent(observerPage, noticeContent);
         await waitForTrackedContent(observerPage, errorContent);
+        await waitForTrackedContent(observerPage, noticeTitle);
+        await waitForTrackedContent(observerPage, errorTitle);
         await expectComposerStable(fixture.page, 'chat row draft remains stable');
 
         markPhase('restoring the warmed background transcript');
         await selectSidebarChat(observerPage, targetChatId, errorContent);
-        await expectRenderedRow(observerPage, notice, 'transcript-notice', noticeContent);
-        await expectRenderedRow(observerPage, error, 'error', errorContent);
+        await expectRenderedRow(observerPage, notice, {
+          messageType: 'transcript-notice',
+          title: noticeTitle,
+          content: noticeContent,
+          variantClass: 'border-status-info-border',
+        });
+        await expectRenderedRow(observerPage, error, {
+          messageType: 'error',
+          title: errorTitle,
+          content: errorContent,
+          variantClass: 'border-status-error-border',
+        });
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
         expect(await chatSummaryMetadata(fixture, targetChatId)).toEqual(initialTargetSummary);
         const liveBoxes = await Promise.all([
@@ -437,9 +478,10 @@ describe('Chromium transcript chat rows', () => {
                 at: '2026-08-18T12:00:00.000Z',
                 message: 'browser replay notice',
                 detail: {
-                  type: 'chat-row',
+                  type: 'cli-row',
                   clientMessageId: 'browser-replay-notice-message',
                   presentation: 'notice',
+                  title: 'Replay deployment',
                 },
               });
               const errorResult = store.appendChatRow(targetChatId, {
@@ -447,9 +489,10 @@ describe('Chromium transcript chat rows', () => {
                 at: '2026-08-18T12:00:01.000Z',
                 message: 'browser replay error',
                 detail: {
-                  type: 'chat-row',
+                  type: 'cli-row',
                   clientMessageId: 'browser-replay-error-message',
                   presentation: 'error',
+                  title: 'Replay release validation',
                 },
               });
               replayRows.notice = {
@@ -516,17 +559,35 @@ describe('Chromium transcript chat rows', () => {
         await expectRenderedRow(
           fixture.page,
           missedNotice,
-          'transcript-notice',
-          'browser replay notice',
+          {
+            messageType: 'transcript-notice',
+            title: 'Replay deployment',
+            content: 'browser replay notice',
+            variantClass: 'border-status-info-border',
+          },
         );
-        await expectRenderedRow(fixture.page, missedError, 'error', 'browser replay error');
+        await expectRenderedRow(fixture.page, missedError, {
+          messageType: 'error',
+          title: 'Replay release validation',
+          content: 'browser replay error',
+          variantClass: 'border-status-error-border',
+        });
         await expectRenderedRow(
           observerPage,
           missedNotice,
-          'transcript-notice',
-          'browser replay notice',
+          {
+            messageType: 'transcript-notice',
+            title: 'Replay deployment',
+            content: 'browser replay notice',
+            variantClass: 'border-status-info-border',
+          },
         );
-        await expectRenderedRow(observerPage, missedError, 'error', 'browser replay error');
+        await expectRenderedRow(observerPage, missedError, {
+          messageType: 'error',
+          title: 'Replay release validation',
+          content: 'browser replay error',
+          variantClass: 'border-status-error-border',
+        });
         for (const page of [fixture.page, observerPage]) {
           for (const row of [notice, error, missedNotice, missedError]) {
             expect(await rowLocator(page, row).count()).toBe(1);
@@ -546,11 +607,32 @@ describe('Chromium transcript chat rows', () => {
           ordinal: entry.ordinal,
           type: entry.message.type,
           content: 'content' in entry.message ? entry.message.content : null,
+          detail: 'detail' in entry.message ? entry.message.detail : undefined,
         }))).toEqual([
-          { ordinal: notice.ordinal, type: 'transcript-notice', content: noticeContent },
-          { ordinal: error.ordinal, type: 'error', content: errorContent },
-          { ordinal: missedNotice.ordinal, type: 'transcript-notice', content: 'browser replay notice' },
-          { ordinal: missedError.ordinal, type: 'error', content: 'browser replay error' },
+          {
+            ordinal: notice.ordinal,
+            type: 'transcript-notice',
+            content: noticeContent,
+            detail: { type: 'cli-row', title: noticeTitle },
+          },
+          {
+            ordinal: error.ordinal,
+            type: 'error',
+            content: errorContent,
+            detail: { type: 'cli-row', title: errorTitle },
+          },
+          {
+            ordinal: missedNotice.ordinal,
+            type: 'transcript-notice',
+            content: 'browser replay notice',
+            detail: { type: 'cli-row', title: 'Replay deployment' },
+          },
+          {
+            ordinal: missedError.ordinal,
+            type: 'error',
+            content: 'browser replay error',
+            detail: { type: 'cli-row', title: 'Replay release validation' },
+          },
         ]);
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
         expect(await chatSummaryMetadata(fixture, targetChatId)).toEqual(initialTargetSummary);

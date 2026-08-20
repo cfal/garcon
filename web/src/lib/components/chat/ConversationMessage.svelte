@@ -12,6 +12,7 @@
 		AgentSwitchMessage,
 		ToolResultMessage,
 		AskUserQuestionToolUseMessage,
+		isCliRowPresentationDetail,
 	} from '$shared/chat-types';
 	import type {
 		ChatMessage,
@@ -34,6 +35,7 @@
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
+	import CliRowMessage from './rows/CliRowMessage.svelte';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
@@ -157,6 +159,15 @@
 	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
 	const asNotice = $derived(message instanceof TranscriptNoticeMessage ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
+	const asCliRow = $derived.by(() => {
+		const cliMessage = asNotice ?? asError;
+		if (!cliMessage || !isCliRowPresentationDetail(cliMessage.detail)) return null;
+		return {
+			presentation: asError ? ('error' as const) : ('notice' as const),
+			content: cliMessage.content,
+			...(cliMessage.detail.title === undefined ? {} : { title: cliMessage.detail.title }),
+		};
+	});
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
 	const asPermissionRequest = $derived(
@@ -177,7 +188,7 @@
 	});
 	function ignorePermissionDecision(): void {}
 
-	const showNonAssistantHeader = $derived(message instanceof ErrorMessage);
+	const showNonAssistantHeader = $derived(Boolean(asError && !asCliRow));
 
 	function getFormattedContent(): string {
 		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
@@ -691,6 +702,8 @@
 								/>
 							</ContextMenuContent>
 						</ContextMenu>
+					{:else if asCliRow}
+						<CliRowMessage {...asCliRow} />
 					{:else if asNotice}
 						<ChatEventCard variant="info">
 							{#snippet body()}

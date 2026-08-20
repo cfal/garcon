@@ -1,5 +1,6 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { TranscriptMessage } from '@garcon/common/chat-view';
+import { isCliRowPresentationDetail } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
@@ -96,6 +97,8 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
 
 function formatMessage(entry: TranscriptMessage): string {
   const { type, timestamp, ...payload } = entry.message;
+  const messageDetail = 'detail' in entry.message ? entry.message.detail : undefined;
+  const cliDetail = isCliRowPresentationDetail(messageDetail) ? messageDetail : null;
   const images = 'images' in payload && Array.isArray(payload.images)
     ? payload.images
     : undefined;
@@ -107,7 +110,10 @@ function formatMessage(entry: TranscriptMessage): string {
   if (images && images.length > 0) {
     content += `\n[${images.length} image attachments omitted from text output]`;
   }
-  return `[${entry.ordinal}] ${timestamp} ${type}\n${truncateStatusText(content)}`;
+  const cliLabel = cliDetail
+    ? ` (CLI)${cliDetail.title === undefined ? '' : ` — ${cliDetail.title}`}`
+    : '';
+  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}\n${truncateStatusText(content)}`;
 }
 
 function redactDataUrls(_key: string, value: unknown): unknown {

@@ -142,31 +142,53 @@ describe('SharedChatPage', () => {
 		});
 	});
 
-	it('renders shared notice and error chat rows with distinct cards', async () => {
-		const chatRows = response([], 0, 2, { nextBefore: null });
+	it('renders CLI provenance while retaining generic notice and error paths', async () => {
+		const chatRows = response([], 0, 4, { nextBefore: null });
 		chatRows.snapshot.messages = [
 			{
 				type: 'transcript-notice',
 				timestamp: '2025-01-02T03:05:00.000Z',
 				content: 'Shared notice.\nSecond line.',
+				detail: { type: 'cli-row', title: 'Deployment' },
 			},
 			{
 				type: 'error',
 				timestamp: '2025-01-02T03:05:01.000Z',
 				content: 'Shared error.',
+				detail: { type: 'cli-row', title: 'Release validation' },
+			},
+			{
+				type: 'transcript-notice',
+				timestamp: '2025-01-02T03:05:02.000Z',
+				content: 'Internal notice.',
+			},
+			{
+				type: 'error',
+				timestamp: '2025-01-02T03:05:03.000Z',
+				content: 'Provider error.',
 			},
 		];
-		chatRows.page.end = 2;
+		chatRows.page.end = 4;
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(chatRows);
 
 		const { container } = render(SharedChatPageTestHost);
 
-		const error = await screen.findByText('Shared error.');
-		const noticeCard = container.querySelector('article.border-status-info-border');
+		const noticeCard = (await screen.findByText('Deployment')).closest('article');
+		const errorCard = screen.getByText('Release validation').closest('article');
+		expect(noticeCard?.className).toContain('cli-row-message');
+		expect(noticeCard?.className).toContain('border-status-info-border');
+		expect(screen.getByText('CLI notice').className).toContain('sr-only');
 		expect(noticeCard?.querySelector('.whitespace-pre-wrap')?.textContent).toBe(
 			'Shared notice.\nSecond line.',
 		);
-		expect(error.closest('article')?.className).toContain('border-status-error-border');
-		expect(screen.getByText('2 of 2 messages')).toBeTruthy();
+		expect(errorCard?.className).toContain('cli-row-message');
+		expect(errorCard?.className).toContain('border-status-error-border');
+		expect(screen.getByText('CLI error').className).toContain('sr-only');
+		expect(screen.getByText('Internal notice.').closest('article')?.className)
+			.toContain('border-status-info-border');
+		expect(screen.getByText('Provider error.').closest('article')?.className)
+			.toContain('border-status-error-border');
+		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(2);
+		expect(screen.getByText('4 of 4 messages')).toBeTruthy();
 	});
 });

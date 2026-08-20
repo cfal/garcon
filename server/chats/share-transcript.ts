@@ -9,6 +9,7 @@ import {
   ToolResultMessage,
   TranscriptNoticeMessage,
   UserMessage,
+  isCliRowPresentationDetail,
   parseChatMessage,
   type ChatMessage,
   type TodoItem,
@@ -208,10 +209,16 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     };
   }
   if (message instanceof ErrorMessage) {
-    return { role: 'Error', timestamp: message.timestamp, content: message.content || '' };
+    const role = isCliRowPresentationDetail(message.detail)
+      ? `CLI Error${message.detail.title === undefined ? '' : ` — ${message.detail.title}`}`
+      : 'Error';
+    return { role, timestamp: message.timestamp, content: message.content || '' };
   }
   if (message instanceof TranscriptNoticeMessage) {
-    return { role: 'Notice', timestamp: message.timestamp, content: message.content || '' };
+    const role = isCliRowPresentationDetail(message.detail)
+      ? `CLI Notice${message.detail.title === undefined ? '' : ` — ${message.detail.title}`}`
+      : 'Notice';
+    return { role, timestamp: message.timestamp, content: message.content || '' };
   }
   if (message instanceof PermissionRequestMessage) {
     const requested = formatToolUseMessage(message.requestedTool);

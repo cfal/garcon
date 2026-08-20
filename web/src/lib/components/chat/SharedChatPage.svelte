@@ -10,11 +10,13 @@
 		ErrorMessage,
 		TranscriptNoticeMessage,
 		isToolUseMessage,
+		isCliRowPresentationDetail,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
+	import CliRowMessage from '$lib/components/chat/rows/CliRowMessage.svelte';
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -32,6 +34,12 @@
 	interface SharedMessageEntry {
 		index: number;
 		message: ChatMessage;
+	}
+
+	interface CliRowView {
+		presentation: 'notice' | 'error';
+		title?: string;
+		content: string;
 	}
 
 	let messages = $state<SharedMessageEntry[]>([]);
@@ -58,6 +66,20 @@
 				}
 			})
 			.filter((entry): entry is SharedMessageEntry => entry !== null);
+	}
+
+	function cliRowView(message: ChatMessage): CliRowView | null {
+		if (
+			!(message instanceof TranscriptNoticeMessage || message instanceof ErrorMessage) ||
+			!isCliRowPresentationDetail(message.detail)
+		) {
+			return null;
+		}
+		return {
+			presentation: message instanceof ErrorMessage ? 'error' : 'notice',
+			content: message.content,
+			...(message.detail.title === undefined ? {} : { title: message.detail.title }),
+		};
 	}
 
 	onMount(() => {
@@ -239,6 +261,7 @@
 				{/if}
 				{#each messages as entry (entry.index)}
 					{@const message = entry.message}
+					{@const cliRow = cliRowView(message)}
 					<svelte:boundary>
 						{#snippet failed(error)}
 							<MessageRenderFallback {error} />
@@ -299,6 +322,8 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
+							{:else if cliRow}
+								<CliRowMessage {...cliRow} />
 							{:else if message instanceof TranscriptNoticeMessage}
 								<ChatEventCard variant="info">
 									{#snippet body()}

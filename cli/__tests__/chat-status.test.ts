@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
-  AssistantMessage,
-  ToolResultMessage,
-  UserMessage,
+	AssistantMessage,
+	ErrorMessage,
+	ToolResultMessage,
+	TranscriptNoticeMessage,
+	UserMessage,
 } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from '../args.js';
 import { formatChatStatus, runChatStatus, type ChatStatusClient } from '../chat-status.js';
@@ -206,6 +208,44 @@ describe('chat status', () => {
     expect(value).toContain('older messages available');
     expect(value).toContain('... [truncated; use --json for the complete snapshot]');
     expect(value).not.toContain('x'.repeat(4_001));
+  });
+
+  test('marks CLI rows and titles without relabeling provider errors', () => {
+    const value = formatChatStatus(snapshot({
+      transcript: {
+        availability: 'available',
+        transcriptViewId: 'view-1',
+        messages: [{
+          ordinal: 1,
+          message: new TranscriptNoticeMessage(
+            TIMESTAMP,
+            'Deployment window opened.',
+            { type: 'cli-row', title: 'Deployment' },
+          ),
+        }, {
+          ordinal: 2,
+          message: new ErrorMessage(
+            TIMESTAMP,
+            'Validation failed.',
+            { type: 'cli-row' },
+          ),
+        }, {
+          ordinal: 3,
+          message: new ErrorMessage(TIMESTAMP, 'Provider failed.'),
+        }],
+        lastOrdinal: 3,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 3,
+        hasMore: false,
+      },
+    }));
+
+    expect(value).toContain(
+      `[1] ${TIMESTAMP} transcript-notice (CLI) — Deployment\nDeployment window opened.`,
+    );
+    expect(value).toContain(`[2] ${TIMESTAMP} error (CLI)\nValidation failed.`);
+    expect(value).toContain(`[3] ${TIMESTAMP} error\nProvider failed.`);
+    expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI)`);
   });
 
   test('passes request correlation and emits the unchanged snapshot as JSON', async () => {

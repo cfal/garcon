@@ -142,6 +142,8 @@
 	"chat_message_compaction_tokens": "{pre} → {post} tokens",
 	"chat_message_entered_plan_mode": "Entered plan mode",
 	"chat_message_error": "Error",
+	"chat_message_cli_error": "CLI error",
+	"chat_message_cli_notice": "CLI notice",
 	"chat_message_delivery_failed": "Failed to send",
 	"chat_message_delivery_sending": "Sending",
 	"chat_message_delivery_sent": "Sent",
