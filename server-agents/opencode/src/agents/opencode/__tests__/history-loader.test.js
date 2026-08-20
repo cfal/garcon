@@ -8,6 +8,7 @@ import {
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
+  OpenCodeTranscriptNotFoundError,
   loadLegacyOpenCodeChatMessages,
   loadOpenCodeChatMessages,
   loadRequiredOpenCodeChatMessages,
@@ -429,6 +430,27 @@ describe('OpenCode history loader', () => {
     expect(outcomes).toEqual(invalidImportPartCases.map(([label]) => [label, 'rejected']));
     expect(get).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
     expect(messages).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
+  });
+
+  it('[TLV5-ADOPT.07-OPENCODE-UNIT-02] fails legacy import for a recorded session the provider cannot return', async () => {
+    let getResult = { error: { name: 'NotFoundError' } };
+    const get = mock(() => Promise.resolve(getResult));
+    const messages = mock(() => Promise.resolve({ data: [] }));
+    const getClient = mock(() => Promise.resolve({ session: { get, messages } }));
+
+    await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).rejects.toThrow(OpenCodeTranscriptNotFoundError);
+
+    getResult = { data: { directory: '/tmp/elsewhere' } };
+    await expect(loadLegacyOpenCodeChatMessages('session-1', getClient, {
+      directory: '/tmp',
+    })).rejects.toThrow(OpenCodeTranscriptNotFoundError);
+
+    await expect(loadLegacyOpenCodeChatMessages(null, getClient)).resolves.toEqual([]);
+    await expect(loadLegacyOpenCodeChatMessages('', getClient)).resolves.toEqual([]);
+    expect(getClient).toHaveBeenCalledTimes(2);
+    expect(messages).not.toHaveBeenCalled();
   });
 
   it('[TLV5-ADOPT.08-OPENCODE-NATIVE-UNIT-01] rejects invalid selected parts and recognized content payloads before retry', async () => {

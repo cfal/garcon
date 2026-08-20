@@ -5,6 +5,20 @@ Status: revision 19, implementation and release acceptance complete. Supersedes 
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
+Revision 20 corrects two OpenCode notes against shipped behavior. Legacy
+absence: a chat that records no native session is the only positive legacy
+absence; a recorded session the provider cannot return within scope — missing
+or outside the recorded directory — fails genesis adoption with the ordinary
+retryable typed error and creates no view, because a production store
+replacement showed the previous scoped-NotFound-is-absence rule committing a
+permanent false-empty view, the outcome Decision 11 forbids. Restoring the
+source lets a later open import the real history. Compaction: the repair
+landed as #529 supersedes revision 19's disable — pinned V1 automatic
+compaction runs with marker-part routing that adopts OpenCode's marked
+control and continuation parts into the owning turn's route, and a
+successful overflow summary continues the turn; session-latest routing
+remains deleted.
+
 Revision 19 makes native drift detection activation-only and transient. A
 successful active newest-history load returns before scheduling one bounded
 probe. Older pages, replay continuations, background reads, provider dispatch,
@@ -1667,20 +1681,21 @@ relevant-entry definition under the 10.2 obligation.
   `provider-row`s; real-binary scripted tier retained. Both history facets use
   the same supported directory-scoped source and translation implementation,
   through occasion-specific wrappers where needed; they remain explicitly
-  declared and are invoked only for their respective occasions. Scoped typed
-  NotFound is positive absence for legacy migration, while a missing concrete
-  native session fails Reload or native-fidelity seeding.
+  declared and are invoked only for their respective occasions. A chat that
+  records no native session is the only positive legacy absence; a recorded
+  session that is missing or outside the recorded directory scope fails
+  legacy migration exactly as it fails Reload or native-fidelity seeding, so
+  adoption creates no false-empty view and a later open retries once the
+  source returns.
   This release does not add unscoped discovery for released directoryless
   sessions; improved legacy import moves with the eventual V2/support follow-up.
   Normal execution, previews, and Reload remain directory-scoped. Pinned V1
-  automatic compaction is
-  disabled with `OPENCODE_DISABLE_AUTOCOMPACT=1`: its synthetic continuation
-  exposes only a session identity, so session-latest routing is forbidden and
-  removed. Context exhaustion becomes an ordinary visible failed run. The
-  integration currently has no manual compaction facet; users hand off or
-  start a new chat. V2/improved automatic compaction support is a deferred
-  follow-up requiring an immutable operation carrier. Probe: storage tail
-  message timestamps.
+  automatic compaction runs with marker-part routing (#529): OpenCode marks
+  its compaction control and continuation parts, the runtime adopts them into
+  the owning turn's route, and a successful overflow summary continues the
+  turn with only user-facing output. Session-latest routing remains forbidden
+  and deleted. The integration has no manual compaction facet. Probe: storage
+  tail message timestamps.
 - **Pi**: notify-before-persist; the ledger is the only trustworthy
   durable copy. All V4 settlement machinery (`pi-turn-settlement.ts`,
   occurrence ordinals, item aliases) is deleted. Crash-buffered Pi
@@ -1722,7 +1737,7 @@ relevant-entry definition under the 10.2 obligation.
 | Permission response capability rejects | Core abandons the ephemeral claim; no resolved row is appended and the same live occurrence may be retried if its other fences remain valid. |
 | Crash mid-run | No `run-ended` row; restart synthesizes nothing; the transcript simply ends; preceding inputs remain scan-eligible only if no provider output intervened; accepted. |
 | Runtime writes natively after its run ended | A later active newest-history load may send a transient warning when the tail is strictly newer than the integration-emitted watermark; manual reload adopts it. |
-| Pinned OpenCode V1 reaches its context limit | Automatic compaction is disabled; the owning operation emits a visible provider failure. No unnamed continuation is routed by session. |
+| Pinned OpenCode V1 reaches its context limit | Marker-routed automatic compaction summarizes and continues under the owning operation; a failed summary surfaces as that operation's visible provider failure. No unnamed continuation is routed by session. |
 | Commit failure or unknown commit outcome | No broadcast; the chat's ledger fences for writes (4.4). |
 | OS or power failure under `synchronous=NORMAL` | Recent committed-but-unsynced transactions may be lost; process-crash recovery is unaffected; within the accepted-loss posture. |
 | Ledger corruption (`SQLITE_CORRUPT` on open or query) | That chat fences with a typed error; other chats are unaffected; `.recover` is the support path. |
@@ -1797,14 +1812,15 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     self-contained snapshots; the confirmation dialog is the safeguard.
 15. A native-fidelity fork that crashes before target registration may
     orphan a provider artifact; best-effort rollback only.
-16. Pinned OpenCode V1 automatic compaction is disabled because its automatic
-    continuation has no immutable operation carrier on Garcon's transport. A
-    sufficiently long OpenCode chat may therefore end with a visible,
-    operation-attributed context-limit failure. The current remediation is a
-    handoff or new chat; V2 and improved compaction/import support are one
-    explicit follow-up. Released directoryless OpenCode history is likewise
-    outside this release's supported migration discovery and is not recovered
-    through an unscoped fallback.
+16. Pinned OpenCode V1 automatic compaction is adopted through marker-part
+    routing into the owning turn; a compaction OpenCode fails to mark, or
+    whose summary fails, surfaces as that operation's visible failure rather
+    than an unnamed continuation. Released directoryless OpenCode history
+    remains outside this release's supported migration discovery and is not
+    recovered through an unscoped fallback; a recorded session the scoped
+    lookup cannot return fails adoption visibly and retryably instead of
+    adopting an empty view, so the chat stays unadopted until its source
+    returns or it is deleted.
 17. A carryover migration quarantine proves that some pre-V5 prefix could not
     be converted. The original artifact remains available for support, but its
     rows are absent from the ledger. A durable warning keeps that loss visible
@@ -2000,12 +2016,13 @@ The catalog cites this revision, but its inventory is not repeated here.
   180-second interval, and a static assertion proves the timer,
   `history-pruned`, and immediate-compaction machinery are absent. Compact and
   wide Chromium coverage locks final-row visibility and position.
-- **OpenCode V1 compaction**: the owned process receives
-  `OPENCODE_DISABLE_AUTOCOMPACT=1`; the session-latest continuation map and
-  plugin are absent; a context-limit fixture produces a visible failed run on
-  the operation that caused it and no unnamed continuation rows. A pinned
-  scripted observation records that the V1 transport emits no usable immutable
-  automatic-compaction carrier. V2 behavior is not asserted in this release.
+- **OpenCode V1 compaction**: the owned process does not force autocompaction
+  off and preserves operator overrides; the session-latest continuation map
+  and plugin remain absent. Scripted fixtures prove threshold and first-turn
+  overflow compaction continue with only user-facing output through the
+  owning turn's route, overflow replay inherits operation metadata without
+  duplicating the user row, and interruption during summary and continuation
+  leaves the next turn clean.
 - **Handoff**: the 12.1 ordering (reservation, empty queue, close,
   verified checkpoint, then decision) with fault injection at an
   injected sync/rename seam; crash before the decision restores the
@@ -2293,12 +2310,13 @@ stabilization defects. The current case inventory and gate status live in
     recent cache, including its raw earlier-page continuation, and pages older
     rows from the ledger. The three-minute live-edge prune timer and its state
     machine are deleted.
-24. Pinned OpenCode V1 runs with `OPENCODE_DISABLE_AUTOCOMPACT=1`, and Garcon
-    deletes session-latest automatic-continuation routing because that
-    continuation exposes no immutable operation carrier on the V1 transport.
-    Context exhaustion is a visible failure attributed to the owning run.
-    V2/improved compaction and directoryless legacy import are explicit
-    follow-ups.
+24. Pinned OpenCode V1 automatic compaction is marker-routed: OpenCode marks
+    its compaction control and continuation parts, the runtime adopts them
+    into the owning turn's route, and a successful overflow summary continues
+    the turn with only user-facing output, while an unmarked or failed
+    compaction surfaces as that operation's visible failure. Session-latest
+    continuation routing stays deleted. Directoryless legacy import remains
+    an explicit follow-up.
 
 Also resolved across revisions: store-what-you-showed with one core ledger and
 view-wide ordinals; pre-V5 adoption reconstructing the served composite from

@@ -339,9 +339,12 @@ export async function loadLegacyOpenCodeChatMessages(
   getClient: OpenCodeClientGetter,
   options: OpenCodeHistoryLoadOptions = {},
 ): Promise<ChatMessage[]> {
-  const result = await requestScopedOpenCodeStoredMessages(sessionId, getClient, options);
-  if (result.kind === 'not-found') return [];
-  return convertImportableOpenCodeStoredMessages(result.messages);
+  // A chat that records no native session is the only positive legacy absence.
+  // A recorded session the provider cannot return within scope is loss, not
+  // absence: adoption must fail and retry later instead of permanently
+  // committing a false-empty view.
+  if (!sessionId) return [];
+  return loadRequiredOpenCodeChatMessages(sessionId, getClient, options);
 }
 
 export async function loadRequiredOpenCodeChatMessages(

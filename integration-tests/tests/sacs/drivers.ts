@@ -172,6 +172,9 @@ async function prepareOpenCodeHistorySource(
   const sessionId = binding.agentSessionId;
   if (!sessionId) throw new Error(`SACS OpenCode chat ${chatId} has no persisted session.`);
   let originalMessage: { readonly id: string; readonly data: string } | null = null;
+  let removedTables:
+    | readonly { readonly table: string; readonly rows: readonly OpenCodeStoredRow[] }[]
+    | null = null;
   return {
     async corrupt() {
       const database = new Database(path, { strict: true });
@@ -200,6 +203,26 @@ async function prepareOpenCodeHistorySource(
       }
     },
     async restore() {
+      if (removedTables) {
+        const restoredTables = removedTables;
+        removedTables = null;
+        const database = new Database(path, { strict: true });
+        try {
+          database.transaction(() => {
+            for (const { table, rows } of restoredTables) {
+              for (const row of rows) {
+                const columns = Object.keys(row);
+                database.query(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${
+                  columns.map(() => '?').join(', ')
+                })`).run(...Object.values(row));
+              }
+            }
+          })();
+        } finally {
+          database.close();
+        }
+        return;
+      }
       if (!originalMessage) {
         throw new Error(`SACS OpenCode session ${sessionId} was not captured before restore.`);
       }
@@ -214,6 +237,15 @@ async function prepareOpenCodeHistorySource(
     async remove() {
       const database = new Database(path, { strict: true });
       try {
+        removedTables = [
+          { table: 'session', column: 'id' },
+          { table: 'message', column: 'session_id' },
+          { table: 'part', column: 'session_id' },
+        ].map(({ table, column }) => ({
+          table,
+          rows: database.query(`SELECT * FROM ${table} WHERE ${column} = ?`)
+            .all(sessionId) as OpenCodeStoredRow[],
+        }));
         database.transaction(() => {
           database.query('DELETE FROM part WHERE session_id = ?').run(sessionId);
           database.query('DELETE FROM message WHERE session_id = ?').run(sessionId);
@@ -226,21 +258,40 @@ async function prepareOpenCodeHistorySource(
   };
 }
 
+type OpenCodeStoredRow = Record<string, string | number | bigint | null | Uint8Array>;
+
 const openCodeLegacyHistoryImport: SacsLegacyHistoryImportFacet = {
   kind: 'legacy-history-import',
   releasedJsonl: null,
   directoryScoped: {
     async moveBindingToDifferentDirectory(fixture, chatId) {
       const registryPath = join(fixture.dirs.workspace, 'chats.json');
-      const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
-        sessions?: Record<string, Record<string, unknown>>;
+      const rebindProjectPath = async (
+        update: (chat: Record<string, unknown>) => void,
+      ) => {
+        const registry = JSON.parse(await readFile(registryPath, 'utf8')) as {
+          sessions?: Record<string, Record<string, unknown>>;
+        };
+        const chat = registry.sessions?.[chatId];
+        if (!chat) throw new Error(`SACS chat ${chatId} is missing from the registry.`);
+        update(chat);
+        await writeFile(registryPath, JSON.stringify(registry));
+        return chat;
       };
-      const chat = registry.sessions?.[chatId];
-      if (!chat) throw new Error(`SACS chat ${chatId} is missing from the registry.`);
       const projectPath = join(fixture.dirs.root, 'opencode-other-project');
       await mkdir(projectPath, { recursive: true });
-      chat.projectPath = projectPath;
-      await writeFile(registryPath, JSON.stringify(registry));
+      let originalProjectPath: unknown;
+      await rebindProjectPath((chat) => {
+        originalProjectPath = chat.projectPath;
+        chat.projectPath = projectPath;
+      });
+      return {
+        async restore() {
+          await rebindProjectPath((chat) => {
+            chat.projectPath = originalProjectPath;
+          });
+        },
+      };
     },
   },
   prepare: prepareOpenCodeHistorySource,

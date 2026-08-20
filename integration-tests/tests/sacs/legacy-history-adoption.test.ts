@@ -113,42 +113,47 @@ for (const driverFactory of sacsScriptedDriverFactories) {
       }, activeDriver.fixtureOptions);
     }, SACS_TIMEOUT_MS);
 
-    test('[TLV5-ADOPT.01-SACS-ABSENCE-01] adopts a valid empty view when the supported legacy source is absent', async () => {
-      const activeDriver = requireDriver(driver, driverFactory.label);
-      const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
+    // Directory-scoped providers treat a recorded session the provider cannot
+    // return as loss rather than absence; their absence and loss cases live in
+    // the directory-scoped block below.
+    if (!driverFactory.legacyHistoryImport?.directoryScoped) {
+      test('[TLV5-ADOPT.01-SACS-ABSENCE-01] adopts a valid empty view when the supported legacy source is absent', async () => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
 
-      await withIntegrationFixture(`${activeDriver.id}-sacs-legacy-absence`, async (fixture) => {
-        try {
-          const planted = await completedChat(fixture, activeDriver, 'ABSENT');
-          const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
-          const before = await fixture.client.getMessages(planted.chatId);
-          const originalSessionDetail = requireSingleSessionDetail(
-            readRows(fixture, planted.chatId, before.transcriptViewId),
-          );
-          const originalRegistryBinding = await readRegistrySessionBinding(
-            fixture,
-            planted.chatId,
-          );
-          expect(originalRegistryBinding).toEqual(originalSessionDetail);
+        await withIntegrationFixture(`${activeDriver.id}-sacs-legacy-absence`, async (fixture) => {
+          try {
+            const planted = await completedChat(fixture, activeDriver, 'ABSENT');
+            const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
+            const before = await fixture.client.getMessages(planted.chatId);
+            const originalSessionDetail = requireSingleSessionDetail(
+              readRows(fixture, planted.chatId, before.transcriptViewId),
+            );
+            const originalRegistryBinding = await readRegistrySessionBinding(
+              fixture,
+              planted.chatId,
+            );
+            expect(originalRegistryBinding).toEqual(originalSessionDetail);
 
-          await restartWithPreV5Chat(fixture, planted.chatId, () => source.remove());
+            await restartWithPreV5Chat(fixture, planted.chatId, () => source.remove());
 
-          const adopted = await fixture.client.getMessages(planted.chatId);
-          expect(adopted.messages).toEqual([]);
-          expect(readCurrentView(fixture, planted.chatId)).toMatchObject({
-            viewId: transcriptViewId(adopted.transcriptViewId),
-          });
-          const adoptedRows = readRows(fixture, planted.chatId, adopted.transcriptViewId);
-          expect(adoptedRows).toHaveLength(1);
-          expect(requireSingleSessionDetail(adoptedRows)).toEqual(originalSessionDetail);
-          expect(await readRegistrySessionBinding(fixture, planted.chatId))
-            .toEqual(originalRegistryBinding);
-          activeDriver.assertSettled(fixture);
-        } finally {
-          activeDriver.reset();
-        }
-      }, activeDriver.fixtureOptions);
-    }, SACS_TIMEOUT_MS);
+            const adopted = await fixture.client.getMessages(planted.chatId);
+            expect(adopted.messages).toEqual([]);
+            expect(readCurrentView(fixture, planted.chatId)).toMatchObject({
+              viewId: transcriptViewId(adopted.transcriptViewId),
+            });
+            const adoptedRows = readRows(fixture, planted.chatId, adopted.transcriptViewId);
+            expect(adoptedRows).toHaveLength(1);
+            expect(requireSingleSessionDetail(adoptedRows)).toEqual(originalSessionDetail);
+            expect(await readRegistrySessionBinding(fixture, planted.chatId))
+              .toEqual(originalRegistryBinding);
+            activeDriver.assertSettled(fixture);
+          } finally {
+            activeDriver.reset();
+          }
+        }, activeDriver.fixtureOptions);
+      }, SACS_TIMEOUT_MS);
+    }
 
     test('[TLV5-ADOPT.02-SERVER-FAIL-CLOSED-01] exposes a typed import failure, leaves no view, and retries from the beginning', async () => {
       const activeDriver = requireDriver(driver, driverFactory.label);
@@ -427,7 +432,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
     }
 
     if (driverFactory.id === 'opencode') {
-      test('[TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01][TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01] keeps legacy discovery within the recorded project directory', async () => {
+      test('[TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01][TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01] fails a binding moved outside the recorded project directory until it returns', async () => {
         const activeDriver = requireDriver(driver, driverFactory.label);
         const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
         const directoryScoped = requireDirectoryScopedFacet(legacy, driverFactory.label);
@@ -438,22 +443,116 @@ for (const driverFactory of sacsScriptedDriverFactories) {
             const outOfScope = await completedChat(fixture, activeDriver, 'SCOPED_ABSENT');
             await legacy.prepare(fixture, inScope.chatId, inScope.rows);
 
+            let moved: { restore(): Promise<void> } | undefined;
             await fixture.restartGarcon({
               beforeStart: async () => {
                 await Promise.all([
                   removeLedger(fixture, inScope.chatId),
                   removeLedger(fixture, outOfScope.chatId),
                 ]);
-                await directoryScoped.moveBindingToDifferentDirectory(fixture, outOfScope.chatId);
+                moved = await directoryScoped.moveBindingToDifferentDirectory(
+                  fixture,
+                  outOfScope.chatId,
+                );
               },
             });
 
             expect(conversationalContents(
               (await fixture.client.getMessages(inScope.chatId)).messages,
             )).toEqual(inScope.contents);
-            const absent = await fixture.client.getMessages(outOfScope.chatId);
-            expect(absent.messages).toEqual([]);
+            const failure = await fixture.client.getMessages(outOfScope.chatId).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            expect(failure).toBeInstanceOf(GarconApiError);
+            expect(failure).toMatchObject({
+              status: 503,
+              body: {
+                errorCode: 'TRANSCRIPT_UNAVAILABLE',
+                retryable: true,
+              },
+            });
+            expect(readCurrentView(fixture, outOfScope.chatId)).toBeNull();
+
+            await fixture.restartGarcon({ beforeStart: () => moved!.restore() });
+
+            const recovered = await fixture.client.getMessages(outOfScope.chatId);
+            expect(conversationalContents(recovered.messages)).toEqual(outOfScope.contents);
             expect(readCurrentView(fixture, outOfScope.chatId)).not.toBeNull();
+            activeDriver.assertSettled(fixture);
+          } finally {
+            activeDriver.reset();
+          }
+        }, activeDriver.fixtureOptions);
+      }, SACS_TIMEOUT_MS);
+
+      test('[TLV5-ADOPT.01-SACS-OPENCODE-ABSENCE-01] adopts a valid empty view only when the chat records no session', async () => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
+
+        await withIntegrationFixture(`${activeDriver.id}-sacs-legacy-absence`, async (fixture) => {
+          try {
+            const planted = await completedChat(fixture, activeDriver, 'ABSENT');
+            const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
+
+            await restartWithPreV5Chat(fixture, planted.chatId, async () => {
+              await source.remove();
+              await updateRegistryChat(fixture, planted.chatId, (chat) => {
+                chat.agentSessionId = null;
+                chat.nativeSession = null;
+                chat.nativeSeedReceipt = null;
+              });
+            });
+
+            const adopted = await fixture.client.getMessages(planted.chatId);
+            expect(adopted.messages).toEqual([]);
+            expect(readCurrentView(fixture, planted.chatId)).toMatchObject({
+              viewId: transcriptViewId(adopted.transcriptViewId),
+            });
+            expect(readRows(fixture, planted.chatId, adopted.transcriptViewId)).toEqual([]);
+            activeDriver.assertSettled(fixture);
+          } finally {
+            activeDriver.reset();
+          }
+        }, activeDriver.fixtureOptions);
+      }, SACS_TIMEOUT_MS);
+
+      test('[TLV5-ADOPT.02-SACS-OPENCODE-MISSING-01] fails adoption while the recorded session is missing and recovers after restoration', async () => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
+
+        await withIntegrationFixture(`${activeDriver.id}-sacs-legacy-missing`, async (fixture) => {
+          try {
+            const planted = await completedChat(fixture, activeDriver, 'MISSING');
+            const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
+            const before = await fixture.client.getMessages(planted.chatId);
+            const originalSessionDetail = requireSingleSessionDetail(
+              readRows(fixture, planted.chatId, before.transcriptViewId),
+            );
+
+            await restartWithPreV5Chat(fixture, planted.chatId, () => source.remove());
+
+            const failure = await fixture.client.getMessages(planted.chatId).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            expect(failure).toBeInstanceOf(GarconApiError);
+            expect(failure).toMatchObject({
+              status: 503,
+              body: {
+                errorCode: 'TRANSCRIPT_UNAVAILABLE',
+                retryable: true,
+              },
+            });
+            expect(readCurrentView(fixture, planted.chatId)).toBeNull();
+
+            await source.restore();
+
+            const recovered = await fixture.client.getMessages(planted.chatId);
+            expect(conversationalContents(recovered.messages)).toEqual(planted.contents);
+            expect(requireSingleSessionDetail(
+              readRows(fixture, planted.chatId, recovered.transcriptViewId),
+            )).toEqual(originalSessionDetail);
             activeDriver.assertSettled(fixture);
           } finally {
             activeDriver.reset();

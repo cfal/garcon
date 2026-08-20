@@ -55,7 +55,7 @@ export interface SacsDirectoryScopedHistoryFacet {
   moveBindingToDifferentDirectory(
     fixture: IntegrationFixture,
     chatId: string,
-  ): Promise<void>;
+  ): Promise<{ restore(): Promise<void> }>;
 }
 
 export interface SacsLegacyHistoryImportFacet {

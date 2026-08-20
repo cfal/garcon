@@ -472,8 +472,8 @@ cache restoration.
 
 | ID                | Obligation                                                                                                      | Required evidence   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------- | ------------------- |
-| TLV5-OPENCODE.01  | Pinned V1 context exhaustion produces one visible attributed failure and no automatic continuation.            | Provider scripted   |
-| TLV5-OPENCODE.02  | The owned process disables autocompaction and ships no plugin or session-latest continuation route.             | Static              |
+| TLV5-OPENCODE.01  | Pinned V1 automatic compaction is marker-routed into the owning turn and continues with only user-facing output. | Provider scripted   |
+| TLV5-OPENCODE.02  | The owned process does not force autocompaction off and ships no plugin or session-latest continuation route.   | Static plus unit    |
 
 ### Observability and Release Hygiene
 
@@ -695,8 +695,8 @@ not merely that the final transcript matched.
 
 | ID                | Current evidence                                                                                                      | State          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------- | -------------- |
-| TLV5-OPENCODE.01  | Pinned real-binary context exhaustion asserts one request, one visible error, a failed terminal, and no continuation. | Covered |
-| TLV5-OPENCODE.02  | Static source guard requires the owned disable flag and absence of the plugin and session-latest route.              | Covered |
+| TLV5-OPENCODE.01  | Pinned real-binary fixtures assert threshold and first-turn overflow compaction continue through the owning turn's route, replay inherits operation metadata, and interruption leaves the next turn clean. | Covered |
+| TLV5-OPENCODE.02  | Static and unit guards keep autocompaction unforced and require absence of the plugin and session-latest route.       | Covered |
 
 Parsing already stored compaction summaries remains supported.
 
@@ -792,17 +792,20 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.04-CONTRACT-01      | `common/__tests__/transcript-notice-contract.test.js`: exact quarantine detail parser and round trip                                                      | ADOPT.04                    |
 | TLV5-ADOPT.05-CORE-MATRIX-01   | `server/ledger/__tests__/quarantine-notice.test.js`: frozen-only preservation and read-fold exclusion                                                     | ADOPT.05                    |
 | TLV5-ADOPT.06-CORE-UNIT-01     | `server/ledger/__tests__/reload.test.js`: Reload carries quarantine while dropping ordinary notices                                                       | ADOPT.06                    |
-| TLV5-ADOPT.01-SACS-ABSENCE-01  | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver treats a missing supported source as empty while preserving the exact session row and registry binding | ADOPT.01, ADOPT.07       |
+| TLV5-ADOPT.01-SACS-ABSENCE-01  | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every non-directory-scoped scripted driver treats a missing supported source as empty while preserving the exact session row and registry binding | ADOPT.01, ADOPT.07       |
+| TLV5-ADOPT.01-SACS-OPENCODE-ABSENCE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: OpenCode adopts a valid empty view only for a chat that records no session | ADOPT.01, ADOPT.07       |
 | TLV5-ADOPT.02-SERVER-FAIL-CLOSED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: provider read failure returns typed HTTP failure, creates no view, isolates another chat, and retries | ADOPT.02, ADOPT.07  |
+| TLV5-ADOPT.02-SACS-OPENCODE-MISSING-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: a recorded OpenCode session missing from provider storage fails adoption with the typed retryable error, creates no view, and recovers in place after restoration | ADOPT.02, ADOPT.07  |
 | TLV5-ADOPT.04-SACS-QUARANTINE-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver adopts with the exact durable quarantine warning and artifact         | ADOPT.04, ADOPT.07          |
 | TLV5-ADOPT.07-SACS-CAPABILITY-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every independently registered scripted driver advertises the legacy fixture facet and the exact Direct/OpenCode source-control roster | ADOPT.07 |
 | TLV5-ADOPT.07-SACS-IMPORT-01   | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: every scripted driver imports exact released history once with addressed order              | ADOPT.07                    |
 | TLV5-ADOPT.07-SACS-DIRECT-OPENAI-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct OpenAI released JSONL is adoption-only and later context is ledger-derived         | ADOPT.07                    |
 | TLV5-ADOPT.07-SACS-DIRECT-RESPONSES-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct Responses released JSONL is adoption-only and later context is ledger-derived | ADOPT.07                    |
 | TLV5-ADOPT.07-SACS-DIRECT-ANTHROPIC-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: Direct Anthropic released JSONL is adoption-only and later context is ledger-derived | ADOPT.07                    |
-| TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: OpenCode imports only the recorded project-directory source                              | ADOPT.07                    |
-| TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: scoped OpenCode NotFound is positive legacy absence without unscoped fallback        | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: OpenCode imports only the recorded project-directory source and fails a binding moved out of it until it returns | ADOPT.07                    |
+| TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01 | `integration-tests/tests/sacs/legacy-history-adoption.test.ts`: scoped OpenCode NotFound fails legacy adoption without unscoped fallback instead of adopting an empty view | ADOPT.07                    |
 | TLV5-ADOPT.07-OPENCODE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: strict OpenCode legacy import rejects missing/non-string user and assistant text plus assistant reasoning payloads, accepts either reasoning string carrier even when the other is non-string plus empty strings/housekeeping, and retries the same scoped source | ADOPT.02, ADOPT.07 |
+| TLV5-ADOPT.07-OPENCODE-UNIT-02 | `server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js`: OpenCode legacy import throws for a recorded session the provider reports NotFound or out of scope and stays empty only without a session id | ADOPT.02, ADOPT.07 |
 | TLV5-ADOPT.07-AMP-READ-FAILURE-UNIT-01 | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp distinguishes positive absence from provider read failure and retries the same repaired source | ADOPT.07 |
 | TLV5-ADOPT.07-AMP-UNIT-01      | `server-agents/amp/src/__tests__/legacy-history-import.test.js`: Amp legacy import rejects a missing user text payload, per-role empty part types, and recognized/empty-type mixtures in both orders while accepting per-role nonempty unknown types and explicit empty content arrays on the same repaired source | ADOPT.07 |
 | TLV5-ADOPT.07-CLAUDE-UNIT-01   | `server-agents/claude/src/agents/claude/__tests__/history-loader.test.js`: strict Claude legacy import rejects malformed part envelopes for user and assistant, mixed recognized/malformed arrays in both orders, and incomplete known payloads; preserves top-level user/assistant strings; and accepts per-role unknown nonempty typed parts plus explicit empty content arrays before same-source retry | ADOPT.02, ADOPT.07 |
@@ -893,8 +896,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-UX.17-WEB-UNIT-04         | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switching discards expansion and restores the exact bounded tail with earlier paging available | R4 switch restoration |
 | TLV5-UX.17-COMPACT-CHROMIUM-01 | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact live-edge expansion survives the retired delay and later growth in canonical order with the final row visible | R4 compact geometry |
 | TLV5-UX.17-WIDE-CHROMIUM-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide live-edge expansion survives the retired delay and later growth in canonical order with the final row visible    | R4 wide geometry    |
-| TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: context exhaustion fails visibly without continuation                             | OPENCODE.01                 |
-| TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: disable flag and route deletion                               | OPENCODE.02                 |
+| TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction continues with only user-facing output and pinned markers    | OPENCODE.01                 |
+| TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: compaction stays enabled with no plugin or session-latest route | OPENCODE.02              |
 | TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
 
 ## Cataloged Follow-up and Release Procedures
