@@ -2046,7 +2046,13 @@ The catalog cites this revision, but its inventory is not repeated here.
   current session null until the new owner's session row; carryover
   recomputed from the immutable watermark after restart; carryover-fork
   completeness for every provider and native-fidelity fork for
-  Claude, Codex, and OpenCode.
+  Claude, Codex, and OpenCode. Native-fork conformance is SACS-shared:
+  the oracle lives at the public transcript and registry boundary, each
+  native-fork driver declares a `forking` facet whose unsettle hook
+  removes a fork point from that provider's native store, and the shared
+  cases prove prefix seeding with independent resume plus the
+  not-settled refusal that becomes a sessionless handoff fork only with
+  consent.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites
