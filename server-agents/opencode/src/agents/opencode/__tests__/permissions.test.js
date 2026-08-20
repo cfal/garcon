@@ -429,6 +429,83 @@ describe('OpenCodeRuntime permissions', () => {
     provider.shutdown();
   });
 
+  it('drops and warns for a permission naming a message outside its turn', async () => {
+    const { OpenCodeRuntime } = await import('../opencode.js');
+    const warn = mock(() => undefined);
+    const eventStream = createAsyncEventStream(promptHarness);
+    const promptAsync = client.session.promptAsync;
+    const localClient = {
+      permission: { reply: mock(() => Promise.resolve({ data: true })) },
+      global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
+      session: {
+        create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
+        prompt: (...args) => promptHarness.prompt(...args),
+        promptAsync,
+        abort: mock(() => Promise.resolve()),
+      },
+    };
+    const runtime = new OpenCodeRuntime({
+      logger: { debug: () => {}, info: () => {}, warn, error: () => {} },
+      createInstance: mock(() => Promise.resolve({
+        client: localClient,
+        server: { close: () => {} },
+      })),
+    });
+    const published = collectOperation('run-foreign');
+    await runtime.startSession({
+      command: 'test command',
+      chatId: '123',
+      permissionMode: 'default',
+      operation: published.operation,
+    });
+
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_foreign_prompt',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'sess-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-foreign',
+            type: 'text',
+            text: 'test command',
+          },
+        },
+      },
+    });
+    eventStream.push({
+      directory: '/repo',
+      payload: {
+        id: 'evt_foreign_permission',
+        type: 'permission.asked',
+        properties: {
+          sessionID: 'sess-1',
+          requestID: 'req-foreign',
+          permission: 'bash',
+          tool: { messageID: 'user-foreign', callID: 'call-foreign' },
+        },
+      },
+    });
+
+    await waitFor(() => warn.mock.calls.some(([message]) => (
+      message === 'Ignoring an OpenCode permission for a message outside its turn'
+    )));
+    const warned = warn.mock.calls.find(([message]) => (
+      message === 'Ignoring an OpenCode permission for a message outside its turn'
+    ));
+    expect(warned[1]).toEqual({
+      agentSessionId: 'sess-1',
+      eventId: 'evt_foreign_permission',
+      toolMessageId: 'user-foreign',
+    });
+    expect(published.events.some((event) => event.type === 'permission')).toBe(false);
+    expect(localClient.permission.reply).not.toHaveBeenCalled();
+    eventStream.close();
+    runtime.shutdown();
+  });
+
   it('isolates a failed manual bypass reply without stalling the global event stream', async () => {
     const eventStream = createAsyncEventStream(promptHarness);
     const reply = deferred();

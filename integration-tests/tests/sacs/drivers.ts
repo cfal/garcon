@@ -205,7 +205,6 @@ async function prepareOpenCodeHistorySource(
     async restore() {
       if (removedTables) {
         const restoredTables = removedTables;
-        removedTables = null;
         const database = new Database(path, { strict: true });
         try {
           database.transaction(() => {
@@ -221,6 +220,7 @@ async function prepareOpenCodeHistorySource(
         } finally {
           database.close();
         }
+        removedTables = null;
         return;
       }
       if (!originalMessage) {
