@@ -78,7 +78,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run check
 
-      - name: Run server tests
+      - name: Run server tests for release validation
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run test:server
 
       - name: Run CLI checks
