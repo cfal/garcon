@@ -485,6 +485,41 @@ describeOnLinux('OpenCode against a scripted model', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('forwards image attachments through the real binary to the model request', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('IMAGE_PROMPT');
+    const reply = marker('IMAGE_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+    const onePixelPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk'
+      + '+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const dataUrl = `data:image/png;base64,${onePixelPng}`;
+
+    await withIntegrationFixture('opencode-scripted-image', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      const requestCursor = testEnvironment.model.markRequests();
+      const started = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        images: [{ data: dataUrl, name: 'pixel.png', mimeType: 'image/png' }],
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: started.turnId,
+        marker: reply,
+        afterIndex: eventCursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].userTexts.join('\n')).toContain(prompt);
+      expect(JSON.stringify(requests[0].body)).toContain(onePixelPng);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {

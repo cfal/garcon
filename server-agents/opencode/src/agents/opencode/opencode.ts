@@ -1095,7 +1095,6 @@ export class OpenCodeRuntime {
       thinkingMode,
       operation,
     } = request;
-    void images;
     void thinkingMode;
     const scope = createOpenCodeRequestScope(projectPath);
 
@@ -1169,7 +1168,7 @@ export class OpenCodeRuntime {
       throw error;
     }
 
-    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
+    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId, images ?? []);
 
     const promptRequest = this.#runScopedTurnRequest(
       scope,
@@ -1203,7 +1202,6 @@ export class OpenCodeRuntime {
       thinkingMode,
       operation,
     } = request;
-    void images;
     void thinkingMode;
     const pendingSession = this.#sessions.get(agentSessionId);
     if (pendingSession) await this.#quiesceSessionBeforeTurn(agentSessionId, pendingSession);
@@ -1257,7 +1255,7 @@ export class OpenCodeRuntime {
       permissionMode,
       scope.directory,
     );
-    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId);
+    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId, images ?? []);
 
     try {
       await this.#globalEventListener.start(scope.directory);

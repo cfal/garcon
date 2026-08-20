@@ -1,3 +1,4 @@
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
@@ -19,7 +20,7 @@ export interface OpenCodeExecutionRequest {
 
 export interface OpenCodeStartRequest extends OpenCodeExecutionRequest {
   readonly command: string;
-  readonly images?: readonly unknown[];
+  readonly images?: readonly AgentAttachment[];
   readonly onSessionActivated?: (agentSessionId: string) => void;
 }
 

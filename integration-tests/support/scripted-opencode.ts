@@ -131,7 +131,11 @@ function openCodeConfig(modelBaseUrl: string): Record<string, unknown> {
           [OPENCODE_TEST_MODEL_ID]: {
             id: OPENCODE_TEST_MODEL_ID,
             name: 'Garcon Fake Model',
-            attachment: false,
+            attachment: true,
+            // The image input modality is what unsupportedParts() gates on;
+            // without it OpenCode replaces file parts with an error text part.
+            // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/provider/transform.ts#L386-L422
+            modalities: { input: ['text', 'image'], output: ['text'] },
             reasoning: false,
             temperature: false,
             tool_call: true,
@@ -501,6 +505,7 @@ export function scriptedOpenCodeStartRequest(input: {
   projectPath: string;
   command: string;
   permissionMode?: StartChatCommandRequest['permissionMode'];
+  images?: StartChatCommandRequest['images'];
 }): StartChatCommandRequest {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -513,6 +518,7 @@ export function scriptedOpenCodeStartRequest(input: {
     thinkingMode: OPENCODE_TEST_THINKING_MODE,
     agentSettings: OPENCODE_AGENT_SETTINGS,
     command: input.command,
+    ...(input.images ? { images: input.images } : {}),
   };
 }
 
