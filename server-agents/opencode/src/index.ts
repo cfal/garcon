@@ -28,6 +28,7 @@ import {
   loadLegacyOpenCodeChatMessages,
   loadRequiredOpenCodeChatMessages,
 } from './agents/opencode/history-loader.js';
+import { createOpenCodeNativeForking } from './agents/opencode/forking.js';
 import { getOpenCodeAuthStatus } from './agents/opencode/opencode-auth.js';
 import { OpenCodeRuntime } from './agents/opencode/opencode.js';
 import { createOpenCodeNativeActivityProbe } from './agents/opencode/native-activity.js';
@@ -68,7 +69,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
   readonly compaction = null;
-  readonly forking = null;
+  readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
@@ -103,6 +104,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       logger,
       withClient: (operation) => runtime.withClientLease((client) => operation(async () => client)),
     });
+    this.forking = createOpenCodeNativeForking({ runtime, nativeSessions, sessionId });
     this.steering = {
       captureTarget: (request) => runtime.steering.captureTarget(request.agentSessionId),
       steer: (request) => runtime.steering.steer(request),

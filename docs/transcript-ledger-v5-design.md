@@ -1,9 +1,19 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 20, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 21, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 21 adds OpenCode to the native-fidelity fork providers. Upstream V1
+forks a session server-side at an exclusive message boundary, so the facet
+resolves the anchor row's `providerMeta` identity to the first message to
+exclude and forks the tip when the anchor message is last; an identity the
+provider has not persisted refuses with the standard not-settled error, and
+discard deletes the forked provider session. The boundary is
+message-granular: a mid-message anchor includes the anchor message's
+trailing parts, and the fork's feed is the forked session's native record,
+as section 12.3 already requires.
 
 Revision 20 corrects two OpenCode notes against shipped behavior. Legacy
 absence: a chat that records no native session is the only positive legacy
@@ -1507,9 +1517,8 @@ rows never enter the target.
 
 Identical watermark semantics at a user-chosen row instead of the tip.
 Carryover fork is complete at cutover for every provider.
-Native-fidelity fork is preserved only where it is already reliable,
-currently Claude and Codex, through the nullable `forking` facet
-consuming `providerMeta`.
+Native-fidelity fork ships only where it is reliable — Claude, Codex, and
+OpenCode — through the nullable `forking` facet consuming `providerMeta`.
 
 Forkability is the integration's decision, never core's. Core selects the
 row, hands its `providerMeta` to the `forking` facet unread, and reports
@@ -1694,7 +1703,11 @@ relevant-entry definition under the 10.2 obligation.
   its compaction control and continuation parts, the runtime adopts them into
   the owning turn's route, and a successful overflow summary continues the
   turn with only user-facing output. Session-latest routing remains forbidden
-  and deleted. The integration has no manual compaction facet. Probe: storage
+  and deleted. The integration has no manual compaction facet. Native-fidelity
+  fork uses the provider's server-side session fork at an exclusive
+  message boundary resolved from the anchor row's `providerMeta`; the boundary
+  is message-granular, an unpersisted anchor refuses as not settled, and
+  discard deletes the forked provider session. Probe: storage
   tail message timestamps.
 - **Pi**: notify-before-persist; the ledger is the only trustworthy
   durable copy. All V4 settlement machinery (`pi-turn-settlement.ts`,
@@ -2033,7 +2046,7 @@ The catalog cites this revision, but its inventory is not repeated here.
   current session null until the new owner's session row; carryover
   recomputed from the immutable watermark after restart; carryover-fork
   completeness for every provider and native-fidelity fork for
-  Claude/Codex only.
+  Claude, Codex, and OpenCode.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites
@@ -2294,8 +2307,9 @@ stabilization defects. The current case inventory and gate status live in
     past it, keeping the marker with the owner it closes; roll-forward
     adopts an existing marker instead of appending a second.
 21. Carryover fork is complete at cutover for every provider;
-    native-fidelity fork ships only where already reliable (Claude,
-    Codex); target-chat creation builds the ledger fully and registers
+    native-fidelity fork ships only where reliable (Claude, Codex, and
+    OpenCode via the provider's server-side message-boundary fork);
+    target-chat creation builds the ledger fully and registers
     last, with unregistered-directory startup cleanup and fork-orphan
     provider artifacts as a named accepted loss.
 22. HTTP history paging validates an expected view before reading, performs one

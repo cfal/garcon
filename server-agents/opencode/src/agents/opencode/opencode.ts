@@ -1308,13 +1308,28 @@ export class OpenCodeRuntime {
 
   async forkSession(
     sourceSessionId: string,
-    options: { projectPath?: string | null } = {},
+    options: { projectPath?: string | null; messageId?: string } = {},
   ): Promise<string> {
     return this.#endpointCoordinator.forkSession(
       sourceSessionId,
-      options.projectPath,
+      options,
       (label, scope, operation) => this.#runScopedSessionRequest(label, scope, operation),
     );
+  }
+
+  async deleteSession(agentSessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.withClientLease(async (client) => {
+      const result = await this.#runScopedSessionRequest(
+        'OpenCode forked session delete',
+        {},
+        (requestSignal, requestScope) => client.session.delete(
+          withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
+          { signal: requestSignal },
+        ),
+        { signal },
+      );
+      throwOpenCodeResultError(result, 'OpenCode forked session delete failed');
+    });
   }
 
   abort(agentSessionId: string): Promise<boolean> {

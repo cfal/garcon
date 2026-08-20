@@ -1,15 +1,16 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 20 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 21 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, the PR #527 native-drift review state, the PR #529 compaction
-repair, and the revision 20 OpenCode legacy-absence correction.
+repair, the revision 20 OpenCode legacy-absence correction, and the revision
+21 OpenCode native-fidelity fork.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 20, SHA-256
-  `e5700703b533cd6419a76153d85975e88f0359938978f8c7acf6810bbd8ce13a`
+- `docs/transcript-ledger-v5-design.md`, revision 21, SHA-256
+  `c258d7c81c98e687faab9c79d7a09fe59036120816072754f84584e83c68d1eb`
 
 Current inventory: 278 discovered stable IDs. The PR #500 squash merge above is
 the historical acceptance anchor and contains 256 of them. PR #518 merge
@@ -832,6 +833,9 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-ADOPT.08-RELOAD-CORE-UNIT-02 | `server/ledger/__tests__/reload.test.js`: successfully opened validly empty native source cuts over | ADOPT.08 |
 | TLV5-ADOPT.08-NATIVE-SEED-SANITATION-UNIT-01 | `server/ledger/__tests__/native-history-seed.test.js`: invalid native seed evidence fails before draft creation | ADOPT.08 |
 | TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01 | `server/chats/__tests__/fork-chat.test.js`: selected native history failure discards the fork without registry publication or fallback feed | ADOPT.08 |
+| TLV5-FORK.01-OPENCODE-UNIT-01 | `server-agents/opencode/src/agents/opencode/__tests__/forking.test.js`: the OpenCode facet resolves exclusive message boundaries from part and message anchors, forks the tip for a last-message anchor, refuses unpersisted anchors as not settled, stays unmaterialized only for sessionless whole-chat forks, retargets preserved seed receipts, and deletes the forked session on discard | FORK.01, FORK.03 |
+| TLV5-FORK.01-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-scripted-persistence.test.ts`: a fork point missing from the real binary's native store returns the retryable not-settled refusal and succeeds as a handoff fork only with consent | FORK.01, FORK.02 |
+| TLV5-FORK.03-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-scripted-persistence.test.ts`: a point fork against the real binary seeds exactly the prefix from the forked native session, leaves the source untouched, and resumes on the forked session | FORK.03 |
 | TLV5-ADOPT.09-CARRYOVER-UNIT-01 | `server/chats/__tests__/carryover-transcript-store.test.js`: a small injected cap distinguishes the filtered model projection from the complete lossless frozen source | ADOPT.09 |
 | TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: frozen user identity and provider-rendered rows map exactly with null provider metadata | ADOPT.09 |
 | TLV5-ADOPT.09-FROZEN-DRAFT-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: `AgentSwitchMessage` maps to a durable `agent-switch` draft rather than `provider-row` | ADOPT.09 |

@@ -80,17 +80,20 @@ export class OpenCodeEndpointCoordinator {
 
   async forkSession(
     sourceSessionId: string,
-    projectPath: string | null | undefined,
+    options: { projectPath?: string | null; messageId?: string },
     runScopedRequest: ScopedSessionRequest,
   ): Promise<string> {
     const sessionID = sourceSessionId.trim();
     if (!sessionID) throw new Error('Cannot fork OpenCode session: missing source session id');
-    const scope = createOpenCodeRequestScope(projectPath);
+    const scope = createOpenCodeRequestScope(options.projectPath);
     const result: any = await this.withClientLease((client) => runScopedRequest(
       'OpenCode session fork',
       scope,
       (signal, requestScope) => client.session.fork(
-        withOpenCodeRequestScope({ sessionID }, requestScope),
+        withOpenCodeRequestScope({
+          sessionID,
+          ...(options.messageId ? { messageID: options.messageId } : {}),
+        }, requestScope),
         { signal },
       ),
     ));
