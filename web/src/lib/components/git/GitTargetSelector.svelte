@@ -88,6 +88,7 @@
 	<GitBranchSelector
 		currentBranch={target.branches.currentBranch || 'HEAD'}
 		refs={target.branches.refs}
+		sort={target.branches.branchSort}
 		isOpen={target.branches.showBranchDropdown}
 		isLoading={target.branches.isLoadingBranches}
 		{disabled}
@@ -100,7 +101,12 @@
 		onSwitchBranch={(branch, refKind) => void target.switchBranch(branch, refKind)}
 		onSearchRefs={(query) => {
 			if (target.activeProjectPath) {
-				return target.branches.fetchRefs(target.activeProjectPath, query);
+				return target.branches.searchBranchRefs(target.activeProjectPath, query);
+			}
+		}}
+		onSortRefs={(key, query) => {
+			if (target.activeProjectPath) {
+				return target.branches.toggleBranchSort(target.activeProjectPath, key, query);
 			}
 		}}
 	/>

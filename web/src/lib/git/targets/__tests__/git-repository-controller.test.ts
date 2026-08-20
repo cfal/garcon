@@ -131,7 +131,19 @@ describe('GitRepositoryController', () => {
 			await controller.openBranchDropdown('/project');
 
 			expect(controller.showBranchDropdown).toBe(true);
-			expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
+			expect(getGitRefs).toHaveBeenCalledWith('/project', {
+				query: '',
+				limit: 200,
+				sort: { key: 'name', direction: 'asc' },
+				signal: expect.any(AbortSignal),
+			});
+		});
+
+		it('keeps full and deferred metadata refreshes free of ref loads', () => {
+			controller.refreshAll('/project');
+			controller.refreshDeferredMetadata('/project');
+
+			expect(getGitRefs).not.toHaveBeenCalled();
 		});
 	});
 

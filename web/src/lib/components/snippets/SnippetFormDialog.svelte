@@ -51,7 +51,7 @@
 		}
 	}
 
-	function handleTemplateKeyDown(event: KeyboardEvent): void {
+	function handleFormKeyDown(event: KeyboardEvent): void {
 		if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
 		event.preventDefault();
 		void save();
@@ -59,17 +59,17 @@
 </script>
 
 <Dialog.Root {open} requestClose={() => !form.saving && onClose()}>
-		<Dialog.Content
-			class="top-[var(--app-viewport-center-y)] flex max-h-[min(42rem,calc(var(--app-height)-1rem))] flex-col sm:top-[50%] sm:max-w-2xl"
-		>
-		<Dialog.Header>
+	<Dialog.Content
+		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(42rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[42rem] sm:pointer-fine:w-[calc(100vw-2rem)] sm:pointer-fine:max-w-2xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
+	>
+		<Dialog.Header class="shrink-0 border-b border-border px-5 py-4 pr-12 sm:pl-6 sm:pr-12">
 			<Dialog.Title>
 				{snippet ? m.snippets_form_edit_title() : m.snippets_form_add_title()}
 			</Dialog.Title>
 			<Dialog.Description>{m.snippets_form_description()}</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="min-h-0 space-y-5 overflow-y-auto px-0.5 py-1">
+		<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
 			<div class="space-y-1.5">
 				<label for="snippet-short-name" class="text-sm font-medium text-foreground">
 					{m.snippets_short_name_label()}
@@ -100,7 +100,7 @@
 				<textarea
 					id="snippet-template"
 					bind:value={form.template}
-					onkeydown={handleTemplateKeyDown}
+					onkeydown={handleFormKeyDown}
 					rows="12"
 					placeholder={m.snippets_template_placeholder({
 						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
@@ -122,15 +122,37 @@
 					{form.templateError ?? ''}
 				</p>
 			</div>
+
+			<div class="space-y-1.5">
+				<label for="snippet-default-arguments" class="text-sm font-medium text-foreground">
+					{m.snippets_default_arguments_label()}
+				</label>
+				<textarea
+					id="snippet-default-arguments"
+					bind:value={form.defaultArguments}
+					onkeydown={handleFormKeyDown}
+					rows="4"
+					placeholder={m.snippets_default_arguments_placeholder()}
+					aria-invalid={Boolean(form.defaultArgumentsError)}
+					aria-describedby="snippet-default-arguments-help snippet-default-arguments-error"
+					class="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+				></textarea>
+				<p id="snippet-default-arguments-help" class="text-xs text-muted-foreground">
+					{m.snippets_default_arguments_help()}
+				</p>
+				<p id="snippet-default-arguments-error" class="min-h-4 text-xs text-destructive">
+					{form.defaultArgumentsError ?? ''}
+				</p>
+			</div>
+
+			{#if form.error}
+				<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+					{form.error}
+				</p>
+			{/if}
 		</div>
 
-		{#if form.error}
-			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-				{form.error}
-			</p>
-		{/if}
-
-		<Dialog.Footer>
+		<Dialog.Footer class="shrink-0 border-t border-border px-5 py-3 sm:px-6">
 			<Button variant="secondary" onclick={onClose} disabled={form.saving}>
 				{m.snippets_cancel()}
 			</Button>

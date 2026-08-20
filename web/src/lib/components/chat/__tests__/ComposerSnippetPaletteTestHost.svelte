@@ -14,6 +14,8 @@
 		count?: number;
 		failLoads?: boolean;
 		firstTemplate?: string;
+		firstDefaultArguments?: string;
+		refreshedDefaultArguments?: string;
 		initialQuery?: string;
 		contextHint?: string | null;
 		insertionResult?: SnippetInsertionResult;
@@ -25,6 +27,8 @@
 		count = 12,
 		failLoads = false,
 		firstTemplate,
+		firstDefaultArguments = '',
+		refreshedDefaultArguments,
 		initialQuery = '',
 		contextHint = null,
 		insertionResult = 'inserted',
@@ -50,6 +54,7 @@
 				: index % 2 === 0
 					? `Review item ${index}`
 					: `Summarize item ${index}`,
+		defaultArguments: index === 0 ? untrack(() => firstDefaultArguments) : '',
 		createdAt: '2026-01-01T00:00:00.000Z',
 		updatedAt: '2026-01-01T00:00:00.000Z',
 	}));
@@ -81,7 +86,7 @@
 	{open}
 	onOpenChange={(nextOpen) => (open = nextOpen)}
 	{initialQuery}
-	interactionKey={interactionKey}
+	{interactionKey}
 	{contextHint}
 	onInsert={(snippet, argumentsText) => {
 		selected = snippet.shortName;
@@ -95,8 +100,10 @@
 	onEditSnippets={() => (editCount += 1)}
 />
 
-<button type="button" data-testid="change-interaction-key" onclick={() => (interactionKey = 'chat-b')}
-	>Change interaction key</button
+<button
+	type="button"
+	data-testid="change-interaction-key"
+	onclick={() => (interactionKey = 'chat-b')}>Change interaction key</button
 >
 <button
 	type="button"
@@ -109,10 +116,15 @@
 					id: 'new-snippet',
 					shortName: 'item-new',
 					template: 'New item',
+					defaultArguments: '',
 					createdAt: '2026-01-01T00:00:00.000Z',
 					updatedAt: '2026-01-01T00:00:00.000Z',
 				},
-				...entries,
+				...entries.map((entry) =>
+					entry.id === 'snippet-0' && refreshedDefaultArguments !== undefined
+						? { ...entry, defaultArguments: refreshedDefaultArguments }
+						: entry,
+				),
 			],
 		})}>Refresh snapshot</button
 >

@@ -4,7 +4,7 @@ import type { ExpandSnippetRequest, ExpandSnippetResponse } from '$shared/snippe
 
 const request: ExpandSnippetRequest = {
 	shortName: 'review',
-	arguments: 'the API',
+	arguments: { type: 'value', value: 'the API' },
 	context: { type: 'project', projectPath: '/repo' },
 };
 

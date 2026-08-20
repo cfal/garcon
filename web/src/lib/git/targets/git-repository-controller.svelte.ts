@@ -175,14 +175,6 @@ export class GitRepositoryController {
 		}
 	}
 
-	async fetchBranches(projectPath: string): Promise<void> {
-		await this.branchSelector.fetchBranches(projectPath);
-	}
-
-	async fetchRefs(projectPath: string, query = ''): Promise<void> {
-		await this.branchSelector.fetchRefs(projectPath, query);
-	}
-
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
 		const contextGeneration = this.captureContext(projectPath);
 		if (contextGeneration === null) return;
@@ -209,12 +201,10 @@ export class GitRepositoryController {
 
 	refreshAll(projectPath: string): void {
 		this.fetchGitStatus(projectPath);
-		this.fetchBranches(projectPath);
 		this.fetchRemoteStatus(projectPath);
 	}
 
 	refreshDeferredMetadata(projectPath: string): void {
-		this.fetchBranches(projectPath);
 		this.fetchRemoteStatus(projectPath);
 	}
 

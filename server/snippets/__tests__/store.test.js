@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import crypto, { randomUUID } from 'crypto';
 import { SnippetStore } from '../store.ts';
 
 const createdDirs = [];
@@ -19,6 +19,7 @@ function snippet(id, shortName = id) {
     id,
     shortName,
     template: `Template ${id}`,
+    defaultArguments: '',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
@@ -39,7 +40,7 @@ describe('snippet persistence', () => {
     await store.create(snippet('a'), 1);
     await store.update(
       'b',
-      { shortName: 'c', template: 'Updated' },
+      { shortName: 'c', template: 'Updated', defaultArguments: '' },
       '2026-01-02T00:00:00.000Z',
       2,
     );
@@ -57,6 +58,7 @@ describe('snippet persistence', () => {
     const filePath = path.join(dir, 'snippets.json');
     expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({
+      version: 2,
       revision: 3,
       snippets: [{ id: 'a' }, { id: 'b', shortName: 'c' }],
     });
@@ -71,14 +73,16 @@ describe('snippet persistence', () => {
 
     await store.update(
       original.id,
-      { shortName: original.shortName, template: 'Updated' },
+      {
+        shortName: original.shortName,
+        template: 'Updated',
+        defaultArguments: '',
+      },
       original.updatedAt,
       1,
     );
 
-    expect(store.snapshot().snippets[0].updatedAt).toBe(
-      '2026-01-01T00:00:00.001Z',
-    );
+    expect(store.snapshot().snippets[0].updatedAt).toBe('2026-01-01T00:00:00.001Z');
   });
 
   it('enforces name uniqueness', async () => {
@@ -86,11 +90,9 @@ describe('snippet persistence', () => {
     const store = new SnippetStore(dir);
     await store.init();
     await store.create(snippet('a', 'review'), 0);
-    await expect(store.create(snippet('b', 'review'), 1)).rejects.toMatchObject(
-      {
-        code: 'SNIPPET_NAME_CONFLICT',
-      },
-    );
+    await expect(store.create(snippet('b', 'review'), 1)).rejects.toMatchObject({
+      code: 'SNIPPET_NAME_CONFLICT',
+    });
   });
 
   it('sorts loaded snippets in case-insensitive alphanumeric order', async () => {
@@ -98,14 +100,9 @@ describe('snippet persistence', () => {
     await fs.writeFile(
       path.join(dir, 'snippets.json'),
       JSON.stringify({
-        version: 1,
+        version: 2,
         revision: 3,
-        snippets: [
-          snippet('item-10'),
-          snippet('zulu'),
-          snippet('item-2'),
-          snippet('alpha'),
-        ],
+        snippets: [snippet('item-10'), snippet('zulu'), snippet('item-2'), snippet('alpha')],
       }),
     );
 
@@ -120,16 +117,18 @@ describe('snippet persistence', () => {
     ]);
   });
 
-  it('recovers valid version-one rows while keeping the first duplicate', async () => {
+  it('atomically migrates valid version-one rows without changing logical metadata', async () => {
     const dir = await tempDir();
+    const filePath = path.join(dir, 'snippets.json');
+    const withoutDefaultArguments = ({ defaultArguments: _defaultArguments, ...rest }) => rest;
     await fs.writeFile(
-      path.join(dir, 'snippets.json'),
+      filePath,
       JSON.stringify({
         version: 1,
         revision: 3,
         snippets: [
-          snippet('a', 'review'),
-          snippet('b', 'review'),
+          withoutDefaultArguments(snippet('a', 'review')),
+          withoutDefaultArguments(snippet('b', 'review')),
           { invalid: true },
         ],
       }),
@@ -138,19 +137,79 @@ describe('snippet persistence', () => {
     await store.init();
     expect(store.snapshot()).toMatchObject({
       revision: 3,
-      snippets: [{ id: 'a' }],
+      snippets: [{ id: 'a', defaultArguments: '' }],
     });
+    const migrated = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(migrated).toEqual({
+      version: 2,
+      revision: 3,
+      snippets: [snippet('a', 'review')],
+    });
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+
+    await new SnippetStore(dir).init();
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(migrated);
+  });
+
+  it('strictly decodes version-two defaults', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, 'snippets.json'),
+      JSON.stringify({
+        version: 2,
+        revision: 4,
+        snippets: [
+          {
+            ...snippet('valid'),
+            template: 'Review {{arguments}}',
+            defaultArguments: 'API',
+          },
+          { ...snippet('missing'), defaultArguments: undefined },
+          { ...snippet('unused'), defaultArguments: 'unused' },
+        ],
+      }),
+    );
+
+    const store = new SnippetStore(dir);
+    await store.init();
+    expect(store.snapshot()).toMatchObject({
+      revision: 4,
+      snippets: [{ id: 'valid', defaultArguments: 'API' }],
+    });
+  });
+
+  it('keeps version one intact when its migration write fails', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'snippets.json');
+    const { defaultArguments: _defaultArguments, ...versionOneSnippet } = snippet('review');
+    const persisted = JSON.stringify({
+      version: 1,
+      revision: 2,
+      snippets: [versionOneSnippet],
+    });
+    await fs.writeFile(filePath, persisted);
+
+    const originalRandomUUID = crypto.randomUUID;
+    crypto.randomUUID = () => 'migration-write-failure';
+    await fs.mkdir(path.join(dir, `.snippets.json.${process.pid}.migration-write-failure.tmp`));
+    try {
+      await expect(new SnippetStore(dir).init()).rejects.toBeTruthy();
+    } finally {
+      crypto.randomUUID = originalRandomUUID;
+    }
+
+    expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
   });
 
   it('rejects future file versions instead of reinterpreting them', async () => {
     const dir = await tempDir();
     await fs.writeFile(
       path.join(dir, 'snippets.json'),
-      JSON.stringify({ version: 2, revision: 0, snippets: [] }),
+      JSON.stringify({ version: 3, revision: 0, snippets: [] }),
     );
 
     await expect(new SnippetStore(dir).init()).rejects.toThrow(
-      'Unsupported snippets.json version: 2',
+      'Unsupported snippets.json version: 3',
     );
   });
 
@@ -161,23 +220,27 @@ describe('snippet persistence', () => {
     );
     await fs.writeFile(
       path.join(dir, 'snippets.json'),
-      JSON.stringify({ version: 1, revision: 7, snippets }),
+      JSON.stringify({ version: 2, revision: 7, snippets }),
     );
     const store = new SnippetStore(dir);
     await store.init();
 
-    await expect(
-      store.create(snippet('overflow', 'overflow'), 7),
-    ).rejects.toMatchObject({ code: 'SNIPPET_LIMIT_REACHED' });
+    await expect(store.create(snippet('overflow', 'overflow'), 7)).rejects.toMatchObject({
+      code: 'SNIPPET_LIMIT_REACHED',
+    });
     expect(store.snapshot()).toEqual({ revision: 7, snippets });
   });
 
   it('rejects an over-cap file instead of truncating persisted snippets', async () => {
     const dir = await tempDir();
     const filePath = path.join(dir, 'snippets.json');
-    const snippets = Array.from({ length: 101 }, (_, index) =>
-      snippet(`snippet-${index}`, `item-${index}`),
-    );
+    const snippets = Array.from({ length: 101 }, (_, index) => {
+      const { defaultArguments: _defaultArguments, ...versionOneSnippet } = snippet(
+        `snippet-${index}`,
+        `item-${index}`,
+      );
+      return versionOneSnippet;
+    });
     const persisted = JSON.stringify({ version: 1, revision: 7, snippets });
     await fs.writeFile(filePath, persisted);
 
@@ -191,7 +254,7 @@ describe('snippet persistence', () => {
     const dir = await tempDir();
     const filePath = path.join(dir, 'snippets.json');
     const file = {
-      version: 1,
+      version: 2,
       revision: Number.MAX_SAFE_INTEGER,
       snippets: [],
     };
@@ -199,9 +262,7 @@ describe('snippet persistence', () => {
     const store = new SnippetStore(dir);
     await store.init();
 
-    await expect(
-      store.create(snippet('a'), Number.MAX_SAFE_INTEGER),
-    ).rejects.toMatchObject({
+    await expect(store.create(snippet('a'), Number.MAX_SAFE_INTEGER)).rejects.toMatchObject({
       code: 'SNIPPET_REVISION_EXHAUSTED',
       status: 409,
       retryable: false,

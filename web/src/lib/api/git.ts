@@ -7,6 +7,22 @@ import {
 	type ApiFetchOptions,
 } from './client.js';
 import {
+	DEFAULT_GIT_REF_SORT,
+	type GitRefKind,
+	type GitRefsResponse,
+	type GitRefSort,
+} from '$shared/git-refs';
+export {
+	DEFAULT_GIT_REF_SORT,
+	GIT_REF_RESULT_LIMITS,
+	type GitRefKind,
+	type GitRefOption,
+	type GitRefsResponse,
+	type GitRefSort,
+	type GitRefSortDirection,
+	type GitRefSortKey,
+} from '$shared/git-refs';
+import {
 	getGitReviewDocumentFileBodies,
 	type GitReviewBodyPurpose,
 	type GitReviewBodyState,
@@ -238,15 +254,6 @@ export interface GitRemoteStatus {
 	error?: string;
 }
 
-export type GitRefKind = 'local-branch' | 'remote-branch' | 'tag' | 'other';
-
-export interface GitRefOption {
-	name: string;
-	ref: string;
-	kind: GitRefKind;
-	isCurrent?: boolean;
-}
-
 export interface GitHistoryCommitListResponse {
 	project: string;
 	ref: string;
@@ -476,14 +483,25 @@ export async function getBranches(
 	return apiGet(`/api/v1/git/branches?${projectParam(project)}`);
 }
 
+export type GetGitRefsOptions = ApiFetchOptions & {
+	query?: string;
+	limit?: number;
+	sort?: GitRefSort;
+};
+
 export async function getGitRefs(
 	project: string,
-	options: { query?: string; limit?: number } = {},
-): Promise<{ refs: GitRefOption[]; error?: string }> {
-	const params = new URLSearchParams({ project });
-	if (options.query) params.set('query', options.query);
-	if (options.limit) params.set('limit', String(options.limit));
-	return apiGet(`/api/v1/git/refs?${params.toString()}`);
+	options: GetGitRefsOptions = {},
+): Promise<GitRefsResponse & { error?: string }> {
+	const { query, limit, sort = DEFAULT_GIT_REF_SORT, ...fetchOptions } = options;
+	const params = new URLSearchParams({
+		project,
+		sort: sort.key,
+		direction: sort.direction,
+	});
+	if (query) params.set('query', query);
+	if (limit) params.set('limit', String(limit));
+	return apiGet(`/api/v1/git/refs?${params.toString()}`, fetchOptions);
 }
 
 export async function gitCheckoutRef(

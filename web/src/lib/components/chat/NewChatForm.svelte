@@ -374,7 +374,7 @@
 			const [result] = await Promise.all([
 				snippetExpansion.run({
 					shortName: snippet.shortName,
-					arguments: argumentsText,
+					arguments: { type: 'value', value: argumentsText },
 					context,
 				}),
 				focusPendingSnippetExpansion(),

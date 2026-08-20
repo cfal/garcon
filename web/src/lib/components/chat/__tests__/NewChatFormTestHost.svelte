@@ -28,6 +28,7 @@
 		allowDirectChats?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
+		snippetDefaultArguments?: string;
 		onStartChat?: (config: NewChatConfig) => void;
 	}
 
@@ -35,6 +36,7 @@
 		allowDirectChats = false,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
+		snippetDefaultArguments = '',
 		onStartChat = () => {},
 	}: Props = $props();
 	const notifications = createNotificationsStore();
@@ -102,6 +104,7 @@
 							id: 'snippet-review',
 							shortName: 'review',
 							template: snippetTemplate,
+							defaultArguments: snippetDefaultArguments,
 							createdAt: '2026-01-01T00:00:00.000Z',
 							updatedAt: '2026-01-01T00:00:00.000Z',
 						},

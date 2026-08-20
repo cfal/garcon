@@ -112,7 +112,11 @@ function stubMatchMedia(matches: boolean): void {
 
 async function renderSubmittableForm(
 	onStartChat: () => void,
-	props: { snippetTrigger?: string; snippetTemplate?: string } = {},
+	props: {
+		snippetTrigger?: string;
+		snippetTemplate?: string;
+		snippetDefaultArguments?: string;
+	} = {},
 ): Promise<HTMLTextAreaElement> {
 	const chatsApi = await import('$lib/api/chats');
 	vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
@@ -533,7 +537,7 @@ describe('NewChatForm', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
 				shortName: 'review',
-				arguments: 'the API',
+				arguments: { type: 'value', value: 'the API' },
 				context: { type: 'project', projectPath: '/workspace/project' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -541,6 +545,45 @@ describe('NewChatForm', () => {
 
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
+
+	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'expanded',
+		});
+		const messageInput = await renderSubmittableForm(vi.fn());
+
+		await fireEvent.input(messageInput, { target: { value: '/s review' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await waitFor(() => expect(messageInput.value).toBe('expanded'));
+		await fireEvent.input(messageInput, { target: { value: '/s review ' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await waitFor(() => expect(messageInput.value).toBe('expanded'));
+
+		expect(snippetsApi.expandSnippet).toHaveBeenNthCalledWith(
+			1,
+			{
+				shortName: 'review',
+				arguments: { type: 'default' },
+				context: { type: 'project', projectPath: '/workspace/project' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(snippetsApi.expandSnippet).toHaveBeenNthCalledWith(
+			2,
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'project', projectPath: '/workspace/project' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it('opens from an inline trigger and replaces the captured span in the first message', async () => {
@@ -572,7 +615,42 @@ describe('NewChatForm', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
 				shortName: 'review',
-				arguments: '',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'project', projectPath: '/workspace/project' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+	});
+
+	it('inserts an unchanged saved default as an explicit palette value', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'EXPANDED',
+		});
+		const messageInput = await renderSubmittableForm(vi.fn(), {
+			snippetDefaultArguments: 'saved default',
+		});
+		await fireEvent.input(messageInput, { target: { value: 'Before replace after' } });
+		messageInput.setSelectionRange(7, 14);
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		const argumentsInput = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(argumentsInput.value).toBe('saved default');
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await waitFor(() => expect(messageInput.value).toBe('Before EXPANDED after'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: 'saved default' },
 				context: { type: 'project', projectPath: '/workspace/project' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),

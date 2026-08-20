@@ -159,15 +159,15 @@ describe('ComposerSnippetPalette', () => {
 
 		await screen.findByRole('option', { name: /item-0/ });
 
-		expect(
-			screen.getByLabelText('Uses the {{arguments}} placeholder').textContent,
-		).toBe('{{arguments}}');
-		expect(
-			screen.getByLabelText('Uses the {{project_path}} placeholder').textContent,
-		).toBe('{{project_path}}');
-		expect(
-			screen.getByLabelText('Uses the {{chat_id}} placeholder').textContent,
-		).toBe('{{chat_id}}');
+		expect(screen.getByLabelText('Uses the {{arguments}} placeholder').textContent).toBe(
+			'{{arguments}}',
+		);
+		expect(screen.getByLabelText('Uses the {{project_path}} placeholder').textContent).toBe(
+			'{{project_path}}',
+		);
+		expect(screen.getByLabelText('Uses the {{chat_id}} placeholder').textContent).toBe(
+			'{{chat_id}}',
+		);
 	});
 
 	it('collects arguments before inserting a snippet that uses them', async () => {
@@ -193,6 +193,68 @@ describe('ComposerSnippetPalette', () => {
 		);
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0');
 		expect(screen.getByTestId('selected-arguments').textContent).toBe(rawArguments);
+	});
+
+	it('prefills saved defaults and places the collapsed caret at the end', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			firstDefaultArguments: 'staged changes',
+		});
+		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+
+		const input = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(input.value).toBe('staged changes');
+		expect(input.selectionStart).toBe(input.value.length);
+		expect(input.selectionEnd).toBe(input.value.length);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0'));
+		expect(screen.getByTestId('selected-arguments').textContent).toBe('staged changes');
+	});
+
+	it('clears a prefill without losing focus and inserts explicit empty', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			firstDefaultArguments: 'staged changes',
+		});
+		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+		const input = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		const clear = screen.getByRole('button', { name: 'Clear' }) as HTMLButtonElement;
+
+		await fireEvent.click(clear);
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(input.value).toBe('');
+		expect(input.selectionStart).toBe(0);
+		expect(clear.disabled).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0'));
+		expect(screen.getByTestId('selected-arguments').textContent).toBe('');
+	});
+
+	it('does not replace an edited draft when the snippet snapshot refreshes', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			firstDefaultArguments: 'saved default',
+			refreshedDefaultArguments: 'new server default',
+		});
+		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+		const input = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		await fireEvent.input(input, { target: { value: 'edited draft' } });
+
+		await fireEvent.click(screen.getByTestId('refresh-snapshot'));
+
+		expect(input.value).toBe('edited draft');
 	});
 
 	it('keeps over-limit arguments visible and prevents insertion', async () => {
@@ -249,6 +311,23 @@ describe('ComposerSnippetPalette', () => {
 		expect(reopened.value).toBe(rawArguments);
 	});
 
+	it('reopens a failed cleared insertion without restoring the saved default', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			firstDefaultArguments: 'saved default',
+			insertionResult: 'failed',
+		});
+		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Clear' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		const reopened = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(reopened.value).toBe('');
+	});
+
 	it('settles an arguments cancel as a chain cancellation', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,
@@ -272,10 +351,9 @@ describe('ComposerSnippetPalette', () => {
 		render(ComposerSnippetPaletteTestHost);
 		const composer = screen.getByRole('textbox', { name: 'Composer prompt' });
 
-		await fireEvent.keyDown(
-			await screen.findByRole('dialog', { name: 'Insert Snippet' }),
-			{ key: 'Escape' },
-		);
+		await fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Insert Snippet' }), {
+			key: 'Escape',
+		});
 
 		await waitFor(() => expect(screen.getByTestId('cancel-count').textContent).toBe('1'));
 		expect(screen.getByTestId('palette-open').textContent).toBe('false');
@@ -308,9 +386,7 @@ describe('ComposerSnippetPalette', () => {
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
 		await waitFor(() => expect(screen.getByTestId('cancel-count').textContent).toBe('1'));
 		await waitFor(() =>
-			expect(document.activeElement).toBe(
-				screen.getByRole('textbox', { name: 'Composer prompt' }),
-			),
+			expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Composer prompt' })),
 		);
 	});
 

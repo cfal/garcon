@@ -23,6 +23,12 @@
 			<p class="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
 				{snippetPreview(snippet)}
 			</p>
+			{#if snippet.defaultArguments.length > 0}
+				<p class="mt-1 flex min-w-0 gap-1 text-xs text-muted-foreground">
+					<span class="shrink-0 font-medium">{m.snippets_default_arguments_summary()}:</span>
+					<span class="min-w-0 truncate">{snippet.defaultArguments}</span>
+				</p>
+			{/if}
 		</div>
 		<div class="flex shrink-0 gap-1">
 			<Button

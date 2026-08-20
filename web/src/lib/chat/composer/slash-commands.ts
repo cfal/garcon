@@ -6,7 +6,7 @@
 import type { SlashCommand } from '$shared/slash-commands';
 import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
-import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
+import { SNIPPET_SHORT_NAME_PATTERN, type SnippetArgumentsInput } from '$shared/snippets';
 import type { ChatOrderBoundary } from '$shared/chat-order-contracts';
 import { normalizeTags } from '$shared/tags';
 
@@ -125,9 +125,7 @@ export interface CompactCommand {
 }
 
 export type SteerCommandParseResult =
-	| { kind: 'not-command' }
-	| { kind: 'invalid' }
-	| { kind: 'valid'; prompt: string };
+	{ kind: 'not-command' } | { kind: 'invalid' } | { kind: 'valid'; prompt: string };
 
 const STEER_COMMAND_RE = /^\s*\/(?:steer|st)(?=\s|$)(?:\s+([\s\S]*))?$/i;
 
@@ -206,9 +204,7 @@ export function parseTagCommand(input: string): TagCommandParseResult {
 }
 
 export type ScheduleInCommandError =
-	| ScheduleDurationError
-	| 'prompt-required'
-	| 'slash-prompt-unsupported';
+	ScheduleDurationError | 'prompt-required' | 'slash-prompt-unsupported';
 
 export type ScheduleInCommandParseResult =
 	| { kind: 'not-command' }
@@ -244,7 +240,11 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 export type SnippetCommandParseResult =
 	| { kind: 'not-command' }
 	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }
-	| { kind: 'valid'; shortName: string; arguments: string };
+	| { kind: 'valid'; shortName: string; arguments: SnippetArgumentsInput };
+
+function stripSnippetArgumentSeparator(remainder: string): string {
+	return remainder.startsWith('\r\n') ? remainder.slice(2) : remainder.slice(1);
+}
 
 export function parseSnippetCommand(input: string): SnippetCommandParseResult {
 	const command = /^\/(\S+)(?=\s|$)/.exec(input);
@@ -264,6 +264,9 @@ export function parseSnippetCommand(input: string): SnippetCommandParseResult {
 	return {
 		kind: 'valid',
 		shortName,
-		arguments: remainder ? remainder.slice(1) : '',
+		arguments:
+			remainder.length === 0
+				? { type: 'default' }
+				: { type: 'value', value: stripSnippetArgumentSeparator(remainder) },
 	};
 }

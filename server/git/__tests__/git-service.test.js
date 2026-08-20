@@ -111,11 +111,12 @@ function createGitService(options) {
   };
 }
 
-async function runGitCommand(cwd, args) {
+async function runGitCommand(cwd, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     });
     let stdout = "";
     let stderr = "";
@@ -167,6 +168,19 @@ async function initRepoWithCommit(projectPath) {
   await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
   await runGitCommand(projectPath, ["add", "a.txt"]);
   await runGitCommand(projectPath, ["commit", "-m", "initial"]);
+}
+
+async function commitFileAt(projectPath, file, contents, message, timestamp) {
+  await fs.writeFile(path.join(projectPath, file), contents, "utf-8");
+  await runGitCommand(projectPath, ["add", file]);
+  await runGitCommand(projectPath, ["commit", "-m", message], {
+    env: {
+      GIT_AUTHOR_DATE: timestamp,
+      GIT_COMMITTER_DATE: timestamp,
+    },
+  });
+  const { stdout } = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+  return stdout.trim();
 }
 
 function findTreeNode(nodes, nodePath) {
@@ -3417,6 +3431,7 @@ describe("git ref checkout and branch creation", () => {
         name: "main",
         ref: "refs/heads/main",
         kind: "local-branch",
+        updatedAt: expect.any(String),
         isCurrent: true,
       });
       expect(refs.some((ref) => ref.kind === "remote-branch")).toBe(false);
@@ -3430,6 +3445,7 @@ describe("git ref checkout and branch creation", () => {
         name: "origin/main",
         ref: "refs/remotes/origin/main",
         kind: "remote-branch",
+        updatedAt: expect.any(String),
       });
       expect(remoteRefs.some((ref) => ref.name === "origin/HEAD")).toBe(false);
 
@@ -3441,6 +3457,7 @@ describe("git ref checkout and branch creation", () => {
         name: "v1.0.0",
         ref: "refs/tags/v1.0.0",
         kind: "tag",
+        updatedAt: expect.any(String),
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -3482,6 +3499,273 @@ describe("git ref checkout and branch creation", () => {
 
       expect(refs).toHaveLength(1);
       expect(refs[0].name).toContain("main");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("sorts before limiting and reports branch and tag creator timestamps", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-sorting-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const oldTimestamp = "2024-01-01T00:00:00Z";
+    const newTimestamp = "2024-03-01T00:00:00Z";
+    const tagTimestamp = "2024-04-01T00:00:00Z";
+
+    try {
+      await runGitCommand(projectPath, ["init"]);
+      await runGitCommand(projectPath, [
+        "config",
+        "user.email",
+        "test@example.com",
+      ]);
+      await runGitCommand(projectPath, ["config", "user.name", "Test User"]);
+      const oldHash = await commitFileAt(
+        projectPath,
+        "dated.txt",
+        "old\n",
+        "old",
+        oldTimestamp,
+      );
+      await runGitCommand(projectPath, ["branch", "-M", "main"]);
+      await runGitCommand(projectPath, ["branch", "candidate-old", oldHash]);
+      const newHash = await commitFileAt(
+        projectPath,
+        "dated.txt",
+        "new\n",
+        "new",
+        newTimestamp,
+      );
+      await runGitCommand(projectPath, ["branch", "candidate-new", newHash]);
+      await runGitCommand(projectPath, ["branch", "tie-b", newHash]);
+      await runGitCommand(projectPath, ["branch", "tie-a", newHash]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/candidate-new",
+        newHash,
+      ]);
+      await runGitCommand(projectPath, ["tag", "release-light", oldHash]);
+      await runGitCommand(
+        projectPath,
+        ["tag", "-a", "release-annotated", oldHash, "-m", "release"],
+        {
+          env: {
+            GIT_AUTHOR_DATE: tagTimestamp,
+            GIT_COMMITTER_DATE: tagTimestamp,
+          },
+        },
+      );
+      await fs.writeFile(path.join(projectPath, "artifact.bin"), "artifact\n");
+      const { stdout: blobHash } = await runGitCommand(projectPath, [
+        "hash-object",
+        "-w",
+        "artifact.bin",
+      ]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/tags/artifact-blob",
+        blobHash.trim(),
+      ]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/tags/artifact-commit",
+        oldHash,
+      ]);
+
+      const defaultName = await git.getRefs({
+        projectPath,
+        query: "candidate",
+      });
+      expect(
+        defaultName.refs
+          .filter((ref) => ref.kind === "local-branch")
+          .map((ref) => ref.name),
+      ).toEqual(["candidate-new", "candidate-old"]);
+
+      const descendingName = await git.getRefs({
+        projectPath,
+        query: "candidate",
+        sort: { key: "name", direction: "desc" },
+      });
+      expect(
+        descendingName.refs
+          .filter((ref) => ref.kind === "local-branch")
+          .map((ref) => ref.name),
+      ).toEqual(["candidate-old", "candidate-new"]);
+
+      const newest = await git.getRefs({
+        projectPath,
+        query: "candidate",
+        limit: 1,
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(newest.refs).toMatchObject([
+        {
+          name: "candidate-new",
+          updatedAt: "2024-03-01T00:00:00.000Z",
+        },
+      ]);
+
+      const oldestFirst = await git.getRefs({
+        projectPath,
+        query: "candidate",
+        sort: { key: "updated", direction: "asc" },
+      });
+      const oldestLocalBranches = oldestFirst.refs.filter(
+        (ref) => ref.kind === "local-branch",
+      );
+      expect(oldestLocalBranches.map((ref) => ref.name)).toEqual([
+        "candidate-old",
+        "candidate-new",
+      ]);
+      expect(oldestLocalBranches.map((ref) => ref.updatedAt)).toEqual([
+        "2024-01-01T00:00:00.000Z",
+        "2024-03-01T00:00:00.000Z",
+      ]);
+
+      const tied = await git.getRefs({
+        projectPath,
+        query: "tie",
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(tied.refs.map((ref) => ref.name)).toEqual(["tie-a", "tie-b"]);
+
+      const remote = await git.getRefs({
+        projectPath,
+        query: "origin/candidate-new",
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(remote.refs).toMatchObject([
+        {
+          kind: "remote-branch",
+          updatedAt: "2024-03-01T00:00:00.000Z",
+        },
+      ]);
+
+      const tags = await git.getRefs({
+        projectPath,
+        query: "release",
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(
+        tags.refs.map(({ name, updatedAt }) => ({ name, updatedAt })),
+      ).toEqual([
+        {
+          name: "release-annotated",
+          updatedAt: "2024-04-01T00:00:00.000Z",
+        },
+        {
+          name: "release-light",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      const artifactsAscending = await git.getRefs({
+        projectPath,
+        query: "artifact",
+        sort: { key: "updated", direction: "asc" },
+      });
+      expect(
+        artifactsAscending.refs.map(({ name, updatedAt }) => ({
+          name,
+          updatedAt,
+        })),
+      ).toEqual([
+        { name: "artifact-blob", updatedAt: null },
+        {
+          name: "artifact-commit",
+          updatedAt: "2024-01-01T00:00:00.000Z",
+        },
+      ]);
+      const artifactsDescending = await git.getRefs({
+        projectPath,
+        query: "artifact",
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(artifactsDescending.refs.map((ref) => ref.name)).toEqual([
+        "artifact-commit",
+        "artifact-blob",
+      ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("returns refs without a HEAD identity in an unborn repository", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-unborn-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await runGitCommand(projectPath, ["init"]);
+      await fs.writeFile(path.join(projectPath, "artifact.bin"), "artifact\n");
+      const { stdout: blobHash } = await runGitCommand(projectPath, [
+        "hash-object",
+        "-w",
+        "artifact.bin",
+      ]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/tags/artifact",
+        blobHash.trim(),
+      ]);
+
+      const { refs } = await git.getRefs({ projectPath, query: "artifact" });
+
+      expect(refs).toEqual([
+        {
+          name: "artifact",
+          ref: "refs/tags/artifact",
+          kind: "tag",
+          updatedAt: null,
+        },
+      ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses three Git commands and one ref query regardless of branch count", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-commands-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      for (const branch of ["alpha", "beta", "gamma", "delta"]) {
+        await runGitCommand(projectPath, ["branch", branch]);
+      }
+      const commands = [];
+      const originalSpawn = Bun.spawn;
+      Bun.spawn = (command, options) => {
+        if (command[0] === "git") commands.push(command.slice(1));
+        return originalSpawn(command, options);
+      };
+      try {
+        await git.getRefs({
+          projectPath,
+          sort: { key: "updated", direction: "desc" },
+        });
+      } finally {
+        Bun.spawn = originalSpawn;
+      }
+
+      expect(commands).toHaveLength(3);
+      expect(commands.filter(([name]) => name === "for-each-ref")).toHaveLength(
+        1,
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

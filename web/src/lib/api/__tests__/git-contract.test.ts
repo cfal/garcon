@@ -149,23 +149,55 @@ describe('git API contract', () => {
 	});
 
 	it('getGitRefs calls GET with project param', async () => {
+		const controller = new AbortController();
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				refs: [
-					{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
-					{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+					{
+						name: 'main',
+						ref: 'refs/heads/main',
+						kind: 'local-branch',
+						updatedAt: '2026-08-18T12:00:00.000Z',
+						isCurrent: true,
+					},
+					{
+						name: 'origin/main',
+						ref: 'refs/remotes/origin/main',
+						kind: 'remote-branch',
+						updatedAt: '2026-08-18T12:00:00.000Z',
+					},
 				],
 			}),
 		);
 
-		const result = await getGitRefs('/project', { query: 'origin/main', limit: 50 });
+		const result = await getGitRefs('/project', {
+			query: 'origin/main',
+			limit: 50,
+			sort: { key: 'updated', direction: 'desc' },
+			signal: controller.signal,
+		});
 
 		expect(result.refs[1].name).toBe('origin/main');
-		const [url] = fetchMock.mock.calls[0];
+		const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(url).toContain('/api/v1/git/refs');
 		expect(url).toContain('project=%2Fproject');
 		expect(url).toContain('query=origin%2Fmain');
 		expect(url).toContain('limit=50');
+		expect(url).toContain('sort=updated');
+		expect(url).toContain('direction=desc');
+		expect(request.signal?.aborted).toBe(false);
+		controller.abort();
+		expect(request.signal?.aborted).toBe(true);
+	});
+
+	it('getGitRefs sends the default sort pair', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ refs: [] }));
+
+		await getGitRefs('/project');
+
+		const [url] = fetchMock.mock.calls[0] as [string];
+		expect(url).toContain('sort=name');
+		expect(url).toContain('direction=asc');
 	});
 
 	it('getRemoteStatus calls GET with project param', async () => {

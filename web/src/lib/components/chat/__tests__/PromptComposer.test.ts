@@ -965,7 +965,7 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
 				shortName: 'review',
-				arguments: 'the API',
+				arguments: { type: 'value', value: 'the API' },
 				context: { type: 'chat', chatId: 'chat-snippet-review' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -973,6 +973,48 @@ describe('PromptComposer focus', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		expect(onsubmit).toHaveBeenCalledTimes(1);
+	});
+
+	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'expanded',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-default',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('expanded'));
+		await fireEvent.input(textarea, { target: { value: '/s review ' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('expanded'));
+
+		expect(snippetsApi.expandSnippet).toHaveBeenNthCalledWith(
+			1,
+			{
+				shortName: 'review',
+				arguments: { type: 'default' },
+				context: { type: 'chat', chatId: 'chat-snippet-default' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(snippetsApi.expandSnippet).toHaveBeenNthCalledWith(
+			2,
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'chat', chatId: 'chat-snippet-default' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it('locks the prompt during expansion and Escape preserves the invocation', async () => {
@@ -1065,6 +1107,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-insert',
 			selectedStatus: 'running',
+			snippetDefaultArguments: 'the API',
 			onsubmit,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -1073,8 +1116,10 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
-		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(argumentsInput, { target: { value: 'the API' } });
+		const argumentsInput = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(argumentsInput.value).toBe('the API');
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
 		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
@@ -1083,7 +1128,7 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
 				shortName: 'review',
-				arguments: 'the API',
+				arguments: { type: 'value', value: 'the API' },
 				context: { type: 'chat', chatId: 'chat-snippet-insert' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -1120,7 +1165,7 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
 				shortName: 'review',
-				arguments: '',
+				arguments: { type: 'value', value: '' },
 				context: { type: 'chat', chatId: 'chat-inline-snippet' },
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
