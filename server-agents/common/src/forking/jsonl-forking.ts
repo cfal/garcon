@@ -11,6 +11,7 @@ import {
   type AgentEstablishedSession,
   type NativeMessageSource,
 } from '@garcon/server-agent-interface';
+import { hasNodeErrorCode } from '../lib/errors.js';
 import type { AgentNativeEvidenceSource } from '../native-session/evidence-source.js';
 import type { PathNativeSessionCodec } from '../native-session/path-native-session.js';
 import {
@@ -154,6 +155,12 @@ async function resolveProviderPoint(
   const native = await options.nativeEvidence.load({
     chat: request.source,
     signal: request.admission.signal,
+  }).catch((error) => {
+    // A source file the provider has not written yet holds no native
+    // positions; refusing as not settled keeps the retry and
+    // handoff-consent flow instead of surfacing a raw filesystem error.
+    if (hasNodeErrorCode(error, 'ENOENT')) throw missingNativePoint();
+    throw error;
   });
   for (const message of native.messages) {
     const source = getNativeMessageRevisionSource(message);

@@ -253,6 +253,17 @@ describe('createJsonlNativeForking prefix protection', () => {
     });
   });
 
+  it('refuses a point in a source the provider has not written yet as not settled', async () => {
+    const fixture = await createFixture();
+    await rm(fixture.sourcePath, { force: true });
+
+    await expect(fixture.forking.fork(fixture.request)).rejects.toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+      details: { nativeForkReason: 'not-settled' },
+    });
+  });
+
   it('rejects a selected row that cannot be found in native history', async () => {
     const fixture = await createFixture();
     const filesBeforeFork = await readdir(fixture.root);
