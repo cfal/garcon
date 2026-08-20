@@ -45,6 +45,7 @@ export async function runAddRow(
     chatId: target.chatId,
     transcriptViewId: target.transcriptViewId,
     type: command.type,
+    ...(command.title === undefined ? {} : { title: command.title }),
     content: validatedContent,
   }, signal);
   output.result([

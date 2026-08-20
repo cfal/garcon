@@ -11,8 +11,10 @@ export const CHAT_ROW_TYPES = ['notice', 'error'] as const;
 export type ChatRowType = (typeof CHAT_ROW_TYPES)[number];
 
 export const CHAT_ROW_CONTENT_MAX_BYTES = 64 * 1024;
+export const CHAT_ROW_TITLE_MAX_CODE_POINTS = 120;
 
 const utf8Encoder = new TextEncoder();
+const chatRowTitleControl = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 
 export interface ChatRowTargetResponse {
   readonly success: true;
@@ -26,6 +28,7 @@ export interface AddChatRowRequest {
   readonly chatId: string;
   readonly transcriptViewId: string;
   readonly type: ChatRowType;
+  readonly title?: string;
   readonly content: string;
 }
 
@@ -57,17 +60,42 @@ export function parseChatRowContent(value: unknown): string {
   return value;
 }
 
+export function parseChatRowTitle(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new CommandRequestValidationError('title must be a string');
+  }
+  const title = value.trim();
+  if (title.length === 0) {
+    throw new CommandRequestValidationError('title must not be empty');
+  }
+  if (!title.isWellFormed()) {
+    throw new CommandRequestValidationError('title must contain well-formed Unicode');
+  }
+  if (chatRowTitleControl.test(title)) {
+    throw new CommandRequestValidationError('title must be a single line');
+  }
+  if ([...title].length > CHAT_ROW_TITLE_MAX_CODE_POINTS) {
+    throw new CommandRequestValidationError(
+      `title must be at most ${CHAT_ROW_TITLE_MAX_CODE_POINTS} characters`,
+    );
+  }
+  return title;
+}
+
 export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
   const body = requestRecord(value);
   if (body.type !== 'notice' && body.type !== 'error') {
     throw new CommandRequestValidationError('type must be notice or error');
   }
+  const title = parseChatRowTitle(body.title);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     type: body.type,
+    ...(title === undefined ? {} : { title }),
     content: parseChatRowContent(body.content),
   };
 }

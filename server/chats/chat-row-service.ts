@@ -55,6 +55,7 @@ export class ChatRowService {
         viewId: transcriptViewId(input.transcriptViewId),
         clientMessageId: input.clientMessageId,
         type: input.type,
+        title: input.title,
         content: input.content,
       }));
       return {

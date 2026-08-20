@@ -27,7 +27,12 @@ function chatRow(ordinal, presentation, content, viewId = 'view-0001') {
     ordinal,
     at: '2026-01-01T00:00:01.000Z',
     message: content,
-    detail: { type: 'chat-row', clientMessageId: `chat-row-${ordinal}`, presentation },
+    detail: {
+      type: 'cli-row',
+      clientMessageId: `chat-row-${ordinal}`,
+      presentation,
+      title: null,
+    },
     providerMeta: null,
   };
 }

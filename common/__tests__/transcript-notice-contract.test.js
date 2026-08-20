@@ -23,4 +23,48 @@ describe('transcript notice contracts', () => {
     expect(parsed?.detail).toEqual(message.detail);
     expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
   });
+
+  it('sanitizes CLI provenance on notice and error messages', () => {
+    for (const type of ['transcript-notice', 'error']) {
+      const parsed = parseChatMessage({
+        type,
+        timestamp: AT,
+        content: 'Synthetic CLI row.',
+        detail: {
+          type: 'cli-row',
+          title: 'Deployment',
+          clientMessageId: 'must-not-cross-the-ledger-boundary',
+          presentation: type === 'error' ? 'error' : 'notice',
+        },
+      });
+
+      expect(JSON.parse(JSON.stringify(parsed))).toEqual({
+        type,
+        timestamp: AT,
+        content: 'Synthetic CLI row.',
+        detail: { type: 'cli-row', title: 'Deployment' },
+      });
+    }
+  });
+
+  it('accepts untitled CLI detail and rejects malformed title shape', () => {
+    expect(parseChatMessage({
+      type: 'error',
+      timestamp: AT,
+      content: 'Untitled error.',
+      detail: { type: 'cli-row' },
+    })?.detail).toEqual({ type: 'cli-row' });
+    expect(parseChatMessage({
+      type: 'error',
+      timestamp: AT,
+      content: 'Malformed error.',
+      detail: { type: 'cli-row', title: '' },
+    })).toBeNull();
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Malformed notice.',
+      detail: { type: 'cli-row', title: null },
+    })).toBeNull();
+  });
 });

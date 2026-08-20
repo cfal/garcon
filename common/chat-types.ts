@@ -626,7 +626,11 @@ export class ToolResultMessage {
 
 export class ErrorMessage {
   readonly type = 'error' as const;
-  constructor(public timestamp: string, public content: string) {}
+  constructor(
+    public timestamp: string,
+    public content: string,
+    public detail?: CliRowPresentationDetail,
+  ) {}
 }
 
 export interface CarryoverMigrationQuarantineNoticeDetail {
@@ -635,7 +639,14 @@ export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly errorCode: string;
 }
 
-export type TranscriptNoticeDetail = CarryoverMigrationQuarantineNoticeDetail;
+export interface CliRowPresentationDetail {
+  readonly type: 'cli-row';
+  readonly title?: string;
+}
+
+export type TranscriptNoticeDetail =
+  | CarryoverMigrationQuarantineNoticeDetail
+  | CliRowPresentationDetail;
 
 export class TranscriptNoticeMessage {
   readonly type = 'transcript-notice' as const;
@@ -1118,13 +1129,35 @@ export function isCarryoverMigrationQuarantineNoticeDetail(
     && detail.errorCode.length > 0;
 }
 
-function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
-  if (!isCarryoverMigrationQuarantineNoticeDetail(value)) return null;
+export function isCliRowPresentationDetail(
+  value: unknown,
+): value is CliRowPresentationDetail {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const detail = value as Record<string, unknown>;
+  return detail.type === 'cli-row'
+    && (
+      detail.title === undefined
+      || (typeof detail.title === 'string' && detail.title.length > 0)
+    );
+}
+
+function parseCliRowPresentationDetail(value: unknown): CliRowPresentationDetail | null {
+  if (!isCliRowPresentationDetail(value)) return null;
   return {
-    type: value.type,
-    artifactId: value.artifactId,
-    errorCode: value.errorCode,
+    type: 'cli-row',
+    ...(value.title === undefined ? {} : { title: value.title }),
   };
+}
+
+function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (isCarryoverMigrationQuarantineNoticeDetail(value)) {
+    return {
+      type: value.type,
+      artifactId: value.artifactId,
+      errorCode: value.errorCode,
+    };
+  }
+  return parseCliRowPresentationDetail(value);
 }
 
 // Constructs a typed ChatMessage class instance from raw data.
@@ -1148,8 +1181,13 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
 
     case 'tool-result':
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
-    case 'error':
-      return new ErrorMessage(str(data.timestamp), str(data.content));
+    case 'error': {
+      const detail = data.detail === undefined
+        ? undefined
+        : parseCliRowPresentationDetail(data.detail);
+      if (detail === null) return null;
+      return new ErrorMessage(str(data.timestamp), str(data.content), detail);
+    }
     case 'transcript-notice':
       {
         const detail = data.detail === undefined

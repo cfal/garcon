@@ -102,9 +102,10 @@ describe('transcript ledger presentation', () => {
         providerMeta: null,
         message: '  exact notice\n',
         detail: {
-          type: 'chat-row',
+          type: 'cli-row',
           clientMessageId: 'chat-row-notice',
           presentation: 'notice',
+          title: 'Deployment',
         },
       },
       {
@@ -114,9 +115,10 @@ describe('transcript ledger presentation', () => {
         providerMeta: null,
         message: 'exact error',
         detail: {
-          type: 'chat-row',
+          type: 'cli-row',
           clientMessageId: 'chat-row-error',
           presentation: 'error',
+          title: null,
         },
       },
       permissionRow(7, {
@@ -181,9 +183,17 @@ describe('transcript ledger presentation', () => {
     });
     expect(rendered[4].message).toBeInstanceOf(TranscriptNoticeMessage);
     expect(rendered[4].message).toMatchObject({ content: '  exact notice\n' });
-    expect(rendered[4].message.detail).toBeUndefined();
+    expect(rendered[4].message.detail).toEqual({
+      type: 'cli-row',
+      title: 'Deployment',
+    });
     expect(rendered[5].message).toBeInstanceOf(ErrorMessage);
     expect(rendered[5].message).toMatchObject({ content: 'exact error', timestamp: AT });
+    expect(rendered[5].message.detail).toEqual({ type: 'cli-row' });
+    expect(JSON.stringify([rendered[4].message, rendered[5].message]))
+      .not.toContain('clientMessageId');
+    expect(JSON.stringify([rendered[4].message, rendered[5].message]))
+      .not.toContain('presentation');
   });
 });
 

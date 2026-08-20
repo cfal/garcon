@@ -13,6 +13,7 @@ import {
   TranscriptLedgerStore,
   transcriptViewId,
 } from '../index.ts';
+import { decodeLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 
 const at = '2026-08-12T00:00:00.000Z';
@@ -175,13 +176,14 @@ describe('TranscriptLedgerStore', () => {
       contentStartOrdinal: 1,
     });
     const message = '  notice content\n';
-    const notice = chatRowDetail('chat-row-1', 'notice');
+    const submittedNotice = chatRowDetail('chat-row-1', 'notice', '  Deployment  ');
+    const notice = chatRowDetail('chat-row-1', 'notice', 'Deployment');
 
     const first = store.appendChatRow('chat-one', {
       viewId: view.viewId,
       at,
       message,
-      detail: notice,
+      detail: submittedNotice,
     });
     const retry = store.appendChatRow('chat-one', {
       viewId: view.viewId,
@@ -195,8 +197,14 @@ describe('TranscriptLedgerStore', () => {
     expect(() => store.appendChatRow('chat-one', {
       viewId: view.viewId,
       at,
+      message,
+      detail: chatRowDetail('chat-row-1', 'notice', 'Different title'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
       message: 'changed',
-      detail: chatRowDetail('chat-row-1', 'error'),
+      detail: chatRowDetail('chat-row-1', 'error', 'Deployment'),
     })).toThrow(SubmissionConflictError);
     expect(() => store.appendInputAndCompose('chat-one', {
       viewId: view.viewId,
@@ -217,8 +225,69 @@ describe('TranscriptLedgerStore', () => {
     store = new TranscriptLedgerStore(root);
     expect(store.currentRows('chat-one')).toMatchObject([
       { kind: 'notice', ordinal: 1, message, detail: notice },
-      { kind: 'notice', ordinal: 2, message, detail: { clientMessageId: 'chat-row-2' } },
+      {
+        kind: 'notice',
+        ordinal: 2,
+        message,
+        detail: { clientMessageId: 'chat-row-2', title: null },
+      },
     ]);
+  });
+
+  it('rejects malformed durable CLI row titles without fencing the ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message: 'invalid title',
+      detail: chatRowDetail('chat-row-1', 'notice', 'x'.repeat(121)),
+    })).toThrow('title must be at most 120 characters');
+    expect(store.currentRows('chat-one')).toEqual([]);
+    expect(store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message: 'healthy row',
+      detail: chatRowDetail('chat-row-2', 'notice'),
+    }).inserted).toBe(true);
+  });
+
+  it('rejects malformed stored CLI row detail at the codec boundary', () => {
+    const storedRow = (detail, overrides = {}) => ({
+      view_id: 'view-one',
+      ordinal: 1,
+      kind: 'notice',
+      at,
+      client_message_id: 'chat-row-1',
+      payload_json: JSON.stringify({
+        providerMeta: null,
+        value: { message: 'stored row', detail },
+      }),
+      ...overrides,
+    });
+    const valid = chatRowDetail('chat-row-1', 'notice');
+
+    expect(decodeLedgerRow(storedRow(valid))).toMatchObject({
+      kind: 'notice',
+      detail: valid,
+    });
+    expect(() => decodeLedgerRow(storedRow({ ...valid, title: undefined })))
+      .toThrow('Stored chat row detail is invalid');
+    expect(() => decodeLedgerRow(storedRow({ ...valid, title: '' })))
+      .toThrow('Stored chat row detail is invalid');
+    expect(() => decodeLedgerRow(storedRow({ ...valid, title: 7 })))
+      .toThrow('Stored chat row detail is invalid');
+    expect(() => decodeLedgerRow(storedRow({ ...valid, clientMessageId: 'other' })))
+      .toThrow('Stored chat row identity does not match its payload');
+    expect(() => decodeLedgerRow(storedRow(valid, {
+      payload_json: JSON.stringify({
+        providerMeta: { source: 'provider' },
+        value: { message: 'stored row', detail: valid },
+      }),
+    }))).toThrow('Stored chat row provider metadata must be null');
   });
 
   it('rejects a chat row collision with an existing user input without fencing', () => {
@@ -989,8 +1058,8 @@ function userDraft(clientMessageId, content) {
   return { kind: 'user-input', at, detail: inputDetail(clientMessageId, content) };
 }
 
-function chatRowDetail(clientMessageId, presentation) {
-  return { type: 'chat-row', clientMessageId, presentation };
+function chatRowDetail(clientMessageId, presentation, title = null) {
+  return { type: 'cli-row', clientMessageId, presentation, title };
 }
 
 function provider(content) {

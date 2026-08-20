@@ -10,6 +10,7 @@ const command: AddRowCliCommand = {
   configDir: '/tmp/config',
   chatId: '1787000000000000',
   type: 'error',
+  title: 'Release validation',
   content: '  durable error\n',
   readsContentFromStdin: false,
 };
@@ -55,6 +56,7 @@ describe('runAddRow', () => {
       chatId: command.chatId,
       transcriptViewId: 'view-1',
       type: 'error',
+      title: command.title,
       content: command.content,
     });
     expect(results).toEqual([
@@ -67,6 +69,7 @@ describe('runAddRow', () => {
       ].join('\n'),
     ]);
     expect(results[0]).not.toContain(command.content!);
+    expect(results[0]).not.toContain(command.title!);
   });
 
   test('validates content before making the first client call', async () => {

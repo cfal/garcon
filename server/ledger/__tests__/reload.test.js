@@ -232,7 +232,7 @@ describe('TranscriptReloadService', () => {
       const rows = ledger.currentRows('chat-1');
 
       expect(replacement.contentStartOrdinal).toBe(3);
-      expect(rows.some((row) => row.kind === 'notice' && row.detail.type === 'chat-row')).toBe(false);
+      expect(rows.some((row) => row.kind === 'notice' && row.detail.type === 'cli-row')).toBe(false);
       expect(JSON.stringify(rows)).not.toContain('frozen notice');
       expect(JSON.stringify(rows)).not.toContain('frozen error');
       expect(JSON.stringify(rows)).not.toContain('frozen provider error');
@@ -247,9 +247,10 @@ describe('TranscriptReloadService', () => {
           providerMeta: null,
           message: 'frozen notice',
           detail: {
-            type: 'chat-row',
+            type: 'cli-row',
             clientMessageId: 'frozen-notice',
             presentation: 'notice',
+            title: null,
           },
         },
         {
@@ -258,9 +259,10 @@ describe('TranscriptReloadService', () => {
           providerMeta: null,
           message: 'frozen error',
           detail: {
-            type: 'chat-row',
+            type: 'cli-row',
             clientMessageId: 'frozen-error',
             presentation: 'error',
+            title: null,
           },
         },
         {

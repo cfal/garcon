@@ -69,6 +69,7 @@ describe('TranscriptLedgerService', () => {
         viewId: view.viewId,
         clientMessageId: 'chat-row-1',
         type: 'error',
+        title: 'Release validation',
         content: 'durable error',
       });
       const retry = ledger.appendChatRow({
@@ -76,6 +77,7 @@ describe('TranscriptLedgerService', () => {
         viewId: view.viewId,
         clientMessageId: 'chat-row-1',
         type: 'error',
+        title: 'Release validation',
         content: 'durable error',
       });
 
@@ -89,7 +91,11 @@ describe('TranscriptLedgerService', () => {
         rows: [{
           kind: 'notice',
           message: 'durable error',
-          detail: { type: 'chat-row', presentation: 'error' },
+          detail: {
+            type: 'cli-row',
+            presentation: 'error',
+            title: 'Release validation',
+          },
         }],
       });
       expect(ledger.conversationMessages('chat-1')).toEqual([]);

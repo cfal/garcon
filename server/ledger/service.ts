@@ -365,6 +365,7 @@ export class TranscriptLedgerService {
     readonly viewId: TranscriptViewId;
     readonly clientMessageId: string;
     readonly type: ChatRowType;
+    readonly title?: string;
     readonly content: string;
   }): AppendChatRowResult {
     const result = this.#store.appendChatRow(input.chatId, {
@@ -372,9 +373,10 @@ export class TranscriptLedgerService {
       at: this.#now(),
       message: input.content,
       detail: {
-        type: 'chat-row',
+        type: 'cli-row',
         clientMessageId: input.clientMessageId,
         presentation: input.type,
+        title: input.title ?? null,
       },
     });
     if (result.inserted) {

@@ -10,7 +10,10 @@ import {
   type ThinkingMode,
 } from '@garcon/common/chat-modes';
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
-import type { ChatRowType } from '@garcon/common/chat-row-contracts';
+import {
+  parseChatRowTitle,
+  type ChatRowType,
+} from '@garcon/common/chat-row-contracts';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
@@ -25,7 +28,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] add-row <chat-id> --type <notice|error> <content>
+  garcon-cli [connection options] add-row <chat-id> --type <notice|error> [--title <title>] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -36,7 +39,8 @@ saved execution settings, so it may edit files or run tools. Use - as the
 message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
-add-row appends one durable user-visible transcript row without contacting the agent.
+add-row appends one durable presentation-only notice or error to chat history.
+It never sends, queues, or exposes the row to the agent.
 
 List resources:
   agents
@@ -57,7 +61,7 @@ Options:
   --model <id>                 Model value or raw model; required for a new chat
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
-  --title <title>              Set the chat title after the turn is accepted
+  --title <title>              Set a new-chat title or add-row heading
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
   --allow-steer                With send-async, steer the active turn when busy; never queues
@@ -152,6 +156,7 @@ export interface AddRowCliCommand extends CliConnectionOptions {
   readonly kind: 'add-row';
   readonly chatId: ChatId;
   readonly type: ChatRowType;
+  readonly title?: string;
   readonly content: string | null;
   readonly readsContentFromStdin: boolean;
 }
@@ -277,7 +282,6 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['model', '--model'],
   ['permissions', '--permissions'],
   ['reasoning-effort', '--reasoning-effort'],
-  ['title', '--title'],
   ['tag', '--tag'],
   ['resume', '--resume'],
   ['json', '--json'],
@@ -308,6 +312,7 @@ function parseSendAsync(
   connection: CliConnectionOptions,
 ): SendAsyncCliCommand {
   rejectControlForbiddenOptions(values, 'send-async');
+  if (values.title !== undefined) throw argumentError('--title cannot be used with send-async');
   if (values.type !== undefined) throw argumentError('--type cannot be used with send-async');
   if (parsed.positionals.length !== 3) {
     throw argumentError('send-async requires a chat ID and one message');
@@ -335,6 +340,7 @@ function parseStop(
   connection: CliConnectionOptions,
 ): StopCliCommand {
   rejectControlForbiddenOptions(values, 'stop');
+  if (values.title !== undefined) throw argumentError('--title cannot be used with stop');
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer cannot be used with stop');
   }
@@ -364,6 +370,14 @@ function parseAddRow(
   if (values.type !== 'notice' && values.type !== 'error') {
     throw argumentError('add-row requires --type notice or --type error');
   }
+  let title: string | undefined;
+  try {
+    title = parseChatRowTitle(values.title);
+  } catch (error) {
+    throw argumentError(error instanceof Error ? error.message : 'title is invalid', {
+      cause: error,
+    });
+  }
   const argument = parsed.positionals[2]!;
   const readsContentFromStdin = argument === '-';
   if (!readsContentFromStdin && argument.trim().length === 0) {
@@ -374,6 +388,7 @@ function parseAddRow(
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'add-row'),
     type: values.type,
+    ...(title === undefined ? {} : { title }),
     content: readsContentFromStdin ? null : argument,
     readsContentFromStdin,
   };
@@ -561,7 +576,6 @@ export function parseCliArgs(
   const model = nonEmptyOption(values.model as string | undefined, '--model');
   const cwd = nonEmptyOption(values.cwd as string | undefined, '--cwd');
   const resume = nonEmptyOption(values.resume as string | undefined, '--resume');
-  const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const additionalTags = parseAdditionalTags(values.tag);
   const tokens = parsed.tokens ?? [];
   const connection = {
@@ -646,6 +660,7 @@ export function parseCliArgs(
     throw argumentError('--allow-steer can only be used with send-async');
   }
   if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
+  const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const modes = parseModeOptions(values);
 
   if (endpointId !== undefined && providerId === undefined) {

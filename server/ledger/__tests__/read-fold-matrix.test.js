@@ -188,6 +188,7 @@ describe('transcript ledger read-fold matrix', () => {
         viewId: view.viewId,
         clientMessageId: 'chat-row-notice',
         type: 'notice',
+        title: 'Presentation checkpoint',
         content: 'presentation notice',
       });
       const error = ledger.appendChatRow({
@@ -195,6 +196,7 @@ describe('transcript ledger read-fold matrix', () => {
         viewId: view.viewId,
         clientMessageId: 'chat-row-error',
         type: 'error',
+        title: 'Failure checkpoint',
         content: 'chat row error',
       });
       const producer = ledger.openProducer(CHAT_ID, 'test');
@@ -257,8 +259,22 @@ describe('transcript ledger read-fold matrix', () => {
         firstOrdinal: 2,
         lastOrdinal: 4,
         messages: [
-          { ordinal: 2, message: new TranscriptNoticeMessage(CHAT_ROW_AT, 'presentation notice') },
-          { ordinal: 3, message: new ErrorMessage(CHAT_ROW_AT, 'chat row error') },
+          {
+            ordinal: 2,
+            message: new TranscriptNoticeMessage(
+              CHAT_ROW_AT,
+              'presentation notice',
+              { type: 'cli-row', title: 'Presentation checkpoint' },
+            ),
+          },
+          {
+            ordinal: 3,
+            message: new ErrorMessage(
+              CHAT_ROW_AT,
+              'chat row error',
+              { type: 'cli-row', title: 'Failure checkpoint' },
+            ),
+          },
           { ordinal: 4, message: new ErrorMessage(AT, 'provider error') },
         ],
       })]);

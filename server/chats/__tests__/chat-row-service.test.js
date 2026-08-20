@@ -31,7 +31,28 @@ describe('ChatRowService', () => {
         timestamp: AT,
       });
       expect(retry).toMatchObject({ status: 'duplicate', ordinal: 1, timestamp: AT });
-      expect(ledger.currentRows(CHAT_ID)).toHaveLength(1);
+      expect(ledger.currentRows(CHAT_ID)).toMatchObject([{
+        kind: 'notice',
+        message: 'durable error',
+        detail: {
+          type: 'cli-row',
+          clientMessageId: 'message-1',
+          presentation: 'error',
+          title: 'Release validation',
+        },
+      }]);
+
+      await expect(service.add(
+        request({ title: 'Different title' }),
+        new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', retryable: false });
+      expect(ledger.appendChatRow({
+        chatId: CHAT_ID,
+        viewId: ledger.currentView(CHAT_ID).viewId,
+        clientMessageId: 'message-2',
+        type: 'notice',
+        content: 'healthy notice',
+      }).inserted).toBe(true);
     });
   });
 
@@ -102,7 +123,10 @@ describe('ChatRowService', () => {
       logger: { warn },
     });
 
-    await expect(service.add(request(), new AbortController().signal)).rejects.toEqual(
+    await expect(service.add(request({
+      title: 'Private release title',
+      content: 'Private release detail',
+    }), new AbortController().signal)).rejects.toEqual(
       expect.objectContaining({
         code: 'TRANSCRIPT_UNAVAILABLE',
         message: 'Chat transcript is unavailable.',
@@ -116,6 +140,8 @@ describe('ChatRowService', () => {
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain('/private');
     expect(JSON.stringify(warn.mock.calls)).not.toContain(CHAT_ID);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Private release title');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Private release detail');
   });
 });
 
@@ -157,6 +183,7 @@ function request(overrides = {}) {
     chatId: CHAT_ID,
     transcriptViewId: 'view-1',
     type: 'error',
+    title: 'Release validation',
     content: 'durable error',
     ...overrides,
   };

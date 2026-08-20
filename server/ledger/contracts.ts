@@ -60,30 +60,35 @@ export interface LedgerNoticeRow extends LedgerRowBase {
   readonly detail: JsonObject;
 }
 
-export interface LedgerChatRowNoticeDetail extends JsonObject {
-  readonly type: 'chat-row';
+export interface LedgerCliRowNoticeDetail extends JsonObject {
+  readonly type: 'cli-row';
   readonly clientMessageId: string;
   readonly presentation: ChatRowType;
+  readonly title: string | null;
 }
 
-export interface LedgerChatRowNoticeRow extends LedgerNoticeRow {
-  readonly detail: LedgerChatRowNoticeDetail;
+export interface LedgerCliRowNoticeRow extends LedgerNoticeRow {
+  readonly detail: LedgerCliRowNoticeDetail;
   readonly providerMeta: null;
 }
 
-export function isLedgerChatRowNoticeDetail(
+export function isLedgerCliRowNoticeDetail(
   value: JsonObject,
-): value is LedgerChatRowNoticeDetail {
-  return value.type === 'chat-row'
+): value is LedgerCliRowNoticeDetail {
+  return value.type === 'cli-row'
     && typeof value.clientMessageId === 'string'
     && value.clientMessageId.length > 0
-    && (value.presentation === 'notice' || value.presentation === 'error');
+    && (value.presentation === 'notice' || value.presentation === 'error')
+    && (
+      value.title === null
+      || (typeof value.title === 'string' && value.title.length > 0)
+    );
 }
 
-export function isLedgerChatRowNoticeRow(row: LedgerRow): row is LedgerChatRowNoticeRow {
+export function isLedgerCliRowNoticeRow(row: LedgerRow): row is LedgerCliRowNoticeRow {
   return row.kind === 'notice'
     && row.providerMeta === null
-    && isLedgerChatRowNoticeDetail(row.detail);
+    && isLedgerCliRowNoticeDetail(row.detail);
 }
 
 export interface LedgerAgentSwitchDetail {
@@ -177,11 +182,11 @@ export interface AppendChatRowRequest {
   readonly viewId: TranscriptViewId;
   readonly at: string;
   readonly message: string;
-  readonly detail: LedgerChatRowNoticeDetail;
+  readonly detail: LedgerCliRowNoticeDetail;
 }
 
 export interface AppendChatRowResult {
-  readonly row: LedgerChatRowNoticeRow;
+  readonly row: LedgerCliRowNoticeRow;
   readonly inserted: boolean;
 }
 

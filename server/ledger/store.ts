@@ -9,12 +9,15 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
-import { parseChatRowContent } from '../../common/chat-row-contracts.js';
+import {
+  parseChatRowContent,
+  parseChatRowTitle,
+} from '../../common/chat-row-contracts.js';
 import {
   decodeLedgerRow,
-  chatRowFingerprint,
+  cliRowFingerprint,
   encodeLedgerDraft,
-  parseLedgerChatRowNoticeDetail,
+  parseLedgerCliRowNoticeDetail,
   submissionFingerprint,
   type StoredLedgerRow,
 } from './codec.js';
@@ -22,7 +25,7 @@ import type {
   AppendChatRowRequest,
   AppendChatRowResult,
   InputComposition,
-  LedgerChatRowNoticeRow,
+  LedgerCliRowNoticeRow,
   LedgerCheckpoint,
   LedgerRow,
   LedgerRowDraft,
@@ -36,7 +39,7 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import {
-  isLedgerChatRowNoticeRow,
+  isLedgerCliRowNoticeRow,
   isPresentationOnlyProviderRow,
   transcriptViewId,
 } from './contracts.js';
@@ -208,8 +211,12 @@ export class TranscriptLedgerStore {
   }
 
   appendChatRow(chatId: string, request: AppendChatRowRequest): AppendChatRowResult {
-    const detail = parseLedgerChatRowNoticeDetail(request.detail);
-    if (!detail) throw new TypeError('Chat row notice detail is required');
+    const parsedDetail = parseLedgerCliRowNoticeDetail(request.detail);
+    if (!parsedDetail) throw new TypeError('CLI row notice detail is required');
+    const detail = {
+      ...parsedDetail,
+      title: parseChatRowTitle(parsedDetail.title) ?? null,
+    };
     const message = parseChatRowContent(request.message);
     const draft: LedgerRowDraft = {
       kind: 'notice',
@@ -228,9 +235,9 @@ export class TranscriptLedgerStore {
       );
       if (existing) {
         if (
-          !isLedgerChatRowNoticeRow(existing)
-          || chatRowFingerprint(existing.message, existing.detail)
-            !== chatRowFingerprint(message, detail)
+          !isLedgerCliRowNoticeRow(existing)
+          || cliRowFingerprint(existing.message, existing.detail)
+            !== cliRowFingerprint(message, detail)
         ) {
           throw new SubmissionConflictError(detail.clientMessageId);
         }
@@ -241,7 +248,7 @@ export class TranscriptLedgerStore {
       const [row] = materializeRows(request.viewId, [encoded], ordinal);
       runTransaction(entry.db, () => insertEncodedRows(entry.db, request.viewId, [encoded], ordinal));
       entry.nextOrdinal += 1;
-      return { row: row as LedgerChatRowNoticeRow, inserted: true };
+      return { row: row as LedgerCliRowNoticeRow, inserted: true };
     });
   }
 

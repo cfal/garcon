@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CHAT_ROW_CONTENT_MAX_BYTES,
+  CHAT_ROW_TITLE_MAX_CODE_POINTS,
   parseAddChatRowRequest,
   parseAddChatRowResponse,
   parseChatRowContent,
+  parseChatRowTitle,
   parseChatRowTargetResponse,
 } from '../chat-row-contracts.ts';
 
@@ -23,6 +25,33 @@ describe('chat row contracts', () => {
       ...request,
       type: 'error',
     });
+  });
+
+  it('canonicalizes optional titles without changing row content', () => {
+    expect(parseAddChatRowRequest({
+      ...request,
+      title: '  Release   validation  ',
+    })).toEqual({
+      ...request,
+      title: 'Release   validation',
+    });
+    expect(parseAddChatRowRequest({ ...request, title: null })).toEqual(request);
+    expect(parseChatRowTitle('Deployment')).toBe('Deployment');
+  });
+
+  it('enforces the single-line title boundary in Unicode code points', () => {
+    const astral = '\u{1f680}';
+    expect(parseChatRowTitle(astral.repeat(CHAT_ROW_TITLE_MAX_CODE_POINTS)))
+      .toBe(astral.repeat(CHAT_ROW_TITLE_MAX_CODE_POINTS));
+    expect(() => parseChatRowTitle(astral.repeat(CHAT_ROW_TITLE_MAX_CODE_POINTS + 1)))
+      .toThrow('at most 120 characters');
+    expect(() => parseChatRowTitle('x'.repeat(CHAT_ROW_TITLE_MAX_CODE_POINTS + 1)))
+      .toThrow('at most 120 characters');
+    expect(() => parseChatRowTitle(' \t ')).toThrow('must not be empty');
+    expect(() => parseChatRowTitle('first\nsecond')).toThrow('single line');
+    expect(() => parseChatRowTitle('first\u2028second')).toThrow('single line');
+    expect(() => parseChatRowTitle(String.fromCharCode(0xd800))).toThrow('well-formed Unicode');
+    expect(() => parseChatRowTitle(42)).toThrow('must be a string');
   });
 
   it('enforces the UTF-8 content boundary and well-formed Unicode', () => {

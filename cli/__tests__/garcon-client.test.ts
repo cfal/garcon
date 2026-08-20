@@ -687,6 +687,7 @@ describe('GarconClient add-row', () => {
     chatId: runRequest.chatId,
     transcriptViewId: 'view-1',
     type: 'error' as const,
+    title: 'Release validation',
     content: 'durable error',
   };
 

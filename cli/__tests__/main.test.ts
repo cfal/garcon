@@ -386,7 +386,8 @@ describe('main', () => {
     const capture = capturedOutput();
     const requests: Array<{ url: string; body: Record<string, string> | null }> = [];
     const exitCode = await main([
-      'add-row', CHAT_ID, '--type', 'error', 'Synthetic failure detail.',
+      'add-row', CHAT_ID, '--type', 'error', '--title', 'Release validation',
+      'Synthetic failure detail.',
     ], {
       fetch: async (input, init) => {
         const url = String(input);
@@ -411,6 +412,7 @@ describe('main', () => {
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
       type: 'error',
+      title: 'Release validation',
       content: 'Synthetic failure detail.',
     });
     expect(capture.results).toEqual([
@@ -423,6 +425,7 @@ describe('main', () => {
       ].join('\n'),
     ]);
     expect(capture.results[0]).not.toContain('Synthetic failure detail.');
+    expect(capture.results[0]).not.toContain('Release validation');
     expect(capture.diagnostics).toEqual([]);
   });
 
@@ -463,6 +466,24 @@ describe('main', () => {
     expect(discovered).toBeFalse();
     expect(invalidCapture.diagnostics).toEqual([
       'arguments: content must contain well-formed Unicode',
+    ]);
+
+    let titleDiscovery = false;
+    const invalidTitleCapture = capturedOutput();
+    const invalidTitleExitCode = await main([
+      'add-row', CHAT_ID, '--type', 'notice', '--title', 'first\nsecond', 'content',
+    ], {
+      discoverRuntime: async () => {
+        titleDiscovery = true;
+        return stubDiscovery();
+      },
+      output: invalidTitleCapture.output,
+    });
+
+    expect(invalidTitleExitCode).toBe(2);
+    expect(titleDiscovery).toBeFalse();
+    expect(invalidTitleCapture.diagnostics).toEqual([
+      'arguments: title must be a single line',
     ]);
   });
 

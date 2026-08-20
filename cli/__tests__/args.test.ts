@@ -419,6 +419,7 @@ describe('add-row arguments', () => {
       '--workspace', 'review',
       'add-row', CHAT_ID,
       '--type', 'notice',
+      '--title', '  Deployment  ',
       '  exact content\n',
     ], ENV)).toEqual({
       kind: 'add-row',
@@ -426,14 +427,16 @@ describe('add-row arguments', () => {
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       type: 'notice',
+      title: 'Deployment',
       content: '  exact content\n',
       readsContentFromStdin: false,
     });
     expect(parseCliArgs([
-      'add-row', CHAT_ID, '-', '--type', 'error',
+      'add-row', CHAT_ID, '-', '--type', 'error', '--title', 'Release validation',
     ], ENV)).toMatchObject({
       kind: 'add-row',
       type: 'error',
+      title: 'Release validation',
       content: null,
       readsContentFromStdin: true,
     });
@@ -450,6 +453,10 @@ describe('add-row arguments', () => {
     [['add-row', CHAT_ID, '--type', 'notice', 'one', 'two'], 'requires a chat ID and one content argument'],
     [['add-row', 'bad', '--type', 'notice', 'content'], 'valid Garcon chat ID'],
     [['add-row', CHAT_ID, '--type', 'notice', '   '], 'row content must not be empty'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--title', '   ', 'content'], 'title must not be empty'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--title', 'first\nsecond', 'content'], 'title must be a single line'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--title', 'x'.repeat(121), 'content'], 'title must be at most 120 characters'],
+    [['add-row', CHAT_ID, '--type', 'notice', '--title', 'one', '--title', 'two', 'content'], 'only once'],
     [['add-row', CHAT_ID, '--type', 'notice', '--json', 'content'], '--json cannot be used with add-row'],
     [['send-async', CHAT_ID, '--type', 'notice', 'content'], '--type cannot be used with send-async'],
     [['stop', CHAT_ID, '--type', 'notice'], '--type cannot be used with stop'],

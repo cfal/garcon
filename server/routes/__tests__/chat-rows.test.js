@@ -57,8 +57,12 @@ describe('chat row routes', () => {
     const add = mock(async (input) => ({
       success: true,
       commandType: 'chat-row-add',
-      ...input,
+      clientRequestId: input.clientRequestId,
+      clientMessageId: input.clientMessageId,
+      chatId: input.chatId,
+      transcriptViewId: input.transcriptViewId,
       ordinal: 4,
+      type: input.type,
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     }));
@@ -70,6 +74,7 @@ describe('chat row routes', () => {
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
       type: 'notice',
+      title: '  Deployment  ',
       content: '  exact content\n',
     };
 
@@ -81,7 +86,21 @@ describe('chat row routes', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(add).toHaveBeenCalledWith(body, expect.any(AbortSignal));
-    expect(await response.json()).toMatchObject({ status: 'appended', ordinal: 4 });
+    expect(add).toHaveBeenCalledWith({
+      ...body,
+      title: 'Deployment',
+    }, expect.any(AbortSignal));
+    expect(await response.json()).toEqual({
+      success: true,
+      commandType: 'chat-row-add',
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      chatId: CHAT_ID,
+      transcriptViewId: 'view-1',
+      ordinal: 4,
+      type: 'notice',
+      status: 'appended',
+      timestamp: '2026-08-18T00:00:00.000Z',
+    });
   });
 });

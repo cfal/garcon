@@ -9,9 +9,23 @@ import {
   UserMessage,
   isCarryoverMigrationQuarantineNoticeDetail,
   type ChatMessage,
+  type CliRowPresentationDetail,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
-import { isLedgerChatRowNoticeDetail, type LedgerRow } from './contracts.js';
+import {
+  isLedgerCliRowNoticeDetail,
+  type LedgerCliRowNoticeDetail,
+  type LedgerRow,
+} from './contracts.js';
+
+function cliRowPresentationDetail(
+  detail: LedgerCliRowNoticeDetail,
+): CliRowPresentationDetail {
+  return {
+    type: 'cli-row',
+    ...(detail.title === null ? {} : { title: detail.title }),
+  };
+}
 
 export function ledgerRowsToMessages(rows: readonly LedgerRow[]): ChatMessage[] {
   return rows.flatMap((row) => {
@@ -44,8 +58,11 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'provider-row':
       return row.message;
     case 'notice': {
-      if (isLedgerChatRowNoticeDetail(row.detail) && row.detail.presentation === 'error') {
-        return new ErrorMessage(row.at, row.message);
+      if (isLedgerCliRowNoticeDetail(row.detail)) {
+        const detail = cliRowPresentationDetail(row.detail);
+        return row.detail.presentation === 'error'
+          ? new ErrorMessage(row.at, row.message, detail)
+          : new TranscriptNoticeMessage(row.at, row.message, detail);
       }
       return new TranscriptNoticeMessage(
         row.at,
