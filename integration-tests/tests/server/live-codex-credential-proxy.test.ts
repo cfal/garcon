@@ -7,7 +7,7 @@ import { startLiveCodexTestEnvironment } from '../../support/live-codex.js';
 
 describe('live Codex credential proxy', () => {
   test('keeps the provider credential out of Codex files and environment', async () => {
-    const previousTestingKey = process.env.CODEX_TESTING_KEY;
+    const previousTestingKey = process.env.OPENAI_TESTING_KEY;
     const testingKey = `garcon-live-proxy-test-${crypto.randomUUID()}`;
     let authorization: string | null = null;
     const upstream = Bun.serve({
@@ -19,7 +19,7 @@ describe('live Codex credential proxy', () => {
       },
     });
     const root = await mkdtemp(join(tmpdir(), 'garcon-live-codex-proxy-test-'));
-    process.env.CODEX_TESTING_KEY = testingKey;
+    process.env.OPENAI_TESTING_KEY = testingKey;
 
     try {
       const environment = await startLiveCodexTestEnvironment({
@@ -59,9 +59,9 @@ describe('live Codex credential proxy', () => {
       }
     } finally {
       if (previousTestingKey === undefined) {
-        delete process.env.CODEX_TESTING_KEY;
+        delete process.env.OPENAI_TESTING_KEY;
       } else {
-        process.env.CODEX_TESTING_KEY = previousTestingKey;
+        process.env.OPENAI_TESTING_KEY = previousTestingKey;
       }
       upstream.stop(true);
       await rm(root, { recursive: true, force: true });

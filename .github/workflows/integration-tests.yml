@@ -63,12 +63,12 @@ jobs:
         id: claude-config
         shell: bash
         env:
-          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
-          if [ -n "$CLAUDE_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
-            echo "::add-mask::$CLAUDE_TESTING_KEY"
+          if [ -n "$DEEPSEEK_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
+            echo "::add-mask::$DEEPSEEK_TESTING_KEY"
             echo "::add-mask::$CLAUDE_TESTING_BASE_URL"
             echo "::add-mask::$CLAUDE_TESTING_MODEL"
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -99,7 +99,7 @@ jobs:
       - name: Run live Claude conformance tests
         if: steps.claude-config.outputs.available == 'true'
         env:
-          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: bun run test:live:claude
@@ -109,12 +109,12 @@ jobs:
         if: always() && steps.claude-config.outputs.available == 'true'
         shell: bash
         env:
-          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
           if [ -d integration-tests/artifacts/server ]; then
-            for value in "$CLAUDE_TESTING_KEY" "$CLAUDE_TESTING_BASE_URL" "$CLAUDE_TESTING_MODEL"; do
+            for value in "$DEEPSEEK_TESTING_KEY" "$CLAUDE_TESTING_BASE_URL" "$CLAUDE_TESTING_MODEL"; do
               echo "::add-mask::$value"
               set +e
               grep --recursive --fixed-strings --files-with-matches \
@@ -154,13 +154,13 @@ jobs:
         id: codex-key
         shell: bash
         env:
-          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
         run: |
-          if [ -n "$CODEX_TESTING_KEY" ]; then
-            echo "::add-mask::$CODEX_TESTING_KEY"
+          if [ -n "$OPENAI_TESTING_KEY" ]; then
+            echo "::add-mask::$OPENAI_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "CODEX_TESTING_KEY is unavailable; skipping live Codex tests."
+            echo "OPENAI_TESTING_KEY is unavailable; skipping live Codex tests."
           fi
 
       - name: Check out repository
@@ -186,7 +186,7 @@ jobs:
       - name: Run live Codex conformance tests
         if: steps.codex-key.outputs.available == 'true'
         env:
-          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
         run: bun run test:live:codex
 
       - name: Verify Codex diagnostics contain no testing credential
@@ -194,13 +194,13 @@ jobs:
         if: always() && steps.codex-key.outputs.available == 'true'
         shell: bash
         env:
-          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
         run: |
-          echo "::add-mask::$CODEX_TESTING_KEY"
+          echo "::add-mask::$OPENAI_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
             set +e
             grep --recursive --fixed-strings --files-with-matches \
-              -- "$CODEX_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+              -- "$OPENAI_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
             audit_status=$?
             set -e
             if [ "$audit_status" -eq 0 ]; then
@@ -235,13 +235,13 @@ jobs:
         id: opencode-key
         shell: bash
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
         run: |
-          if [ -n "$OPENCODE_TESTING_KEY" ]; then
-            echo "::add-mask::$OPENCODE_TESTING_KEY"
+          if [ -n "$DEEPSEEK_TESTING_KEY" ]; then
+            echo "::add-mask::$DEEPSEEK_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "OPENCODE_TESTING_KEY is unavailable; skipping live OpenCode tests."
+            echo "DEEPSEEK_TESTING_KEY is unavailable; skipping live OpenCode tests."
           fi
 
       - name: Check out repository
@@ -267,7 +267,7 @@ jobs:
       - name: Run live OpenCode conformance tests
         if: steps.opencode-key.outputs.available == 'true'
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
         run: bun run test:live:opencode
 
       - name: Verify OpenCode diagnostics contain no testing credential
@@ -275,13 +275,13 @@ jobs:
         if: always() && steps.opencode-key.outputs.available == 'true'
         shell: bash
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
+          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
         run: |
-          echo "::add-mask::$OPENCODE_TESTING_KEY"
+          echo "::add-mask::$DEEPSEEK_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
             set +e
             grep --recursive --fixed-strings --files-with-matches \
-              -- "$OPENCODE_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+              -- "$DEEPSEEK_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
             audit_status=$?
             set -e
             if [ "$audit_status" -eq 0 ]; then

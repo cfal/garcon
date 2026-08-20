@@ -169,9 +169,9 @@ async function removeProxyRoot(root: string, testingKey: string): Promise<void> 
 export async function startLiveCodexTestEnvironment(
   options: LiveCodexTestEnvironmentOptions = {},
 ): Promise<LiveCodexTestEnvironment> {
-  const testingKey = options.testingKey ?? process.env.CODEX_TESTING_KEY?.trim();
+  const testingKey = options.testingKey ?? process.env.OPENAI_TESTING_KEY?.trim();
   if (!testingKey) {
-    throw new Error('CODEX_TESTING_KEY is required for live Codex integration tests.');
+    throw new Error('OPENAI_TESTING_KEY is required for live Codex integration tests.');
   }
   await access(CODEX_BINARY, constants.X_OK);
   const nodeBinary = Bun.which('node');

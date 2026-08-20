@@ -33,7 +33,7 @@ function claudeRequestModel(): string {
 }
 
 export async function liveClaudeServerEnvironment(): Promise<Record<string, string>> {
-  const testingKey = requiredTestingEnvironment('CLAUDE_TESTING_KEY');
+  const testingKey = requiredTestingEnvironment('DEEPSEEK_TESTING_KEY');
   const testingBaseUrl = requiredTestingEnvironment('CLAUDE_TESTING_BASE_URL');
   const testingModel = requiredTestingEnvironment('CLAUDE_TESTING_MODEL');
   await access(CLAUDE_BINARY, constants.X_OK);
