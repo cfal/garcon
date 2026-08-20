@@ -205,7 +205,7 @@ describe('AgentRuntimeRouter forks', () => {
     });
   });
 
-  it('delegates a row with no native position instead of deciding for the integration', async () => {
+  it('keeps an identity-less point anchor distinguishable from a whole-session fork', async () => {
     const fork = mock(async () => ({ kind: 'unmaterialized' }));
     const { router, entry } = makeRouter(fork);
 
@@ -215,9 +215,17 @@ describe('AgentRuntimeRouter forks', () => {
       targetChatId: 'target-chat',
       messageOrdinal: 1,
     });
+    await router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+    });
 
-    expect(fork).toHaveBeenCalledTimes(1);
-    expect(fork.mock.calls[0][0]).toMatchObject({ providerMeta: null });
+    expect(fork).toHaveBeenCalledTimes(2);
+    // A point anchor without provider identity reaches the facet as a truthy
+    // empty object so its refusal path runs; only a whole-session fork is null.
+    expect(fork.mock.calls[0][0].providerMeta).toEqual({});
+    expect(fork.mock.calls[1][0].providerMeta).toBeNull();
   });
 
 });

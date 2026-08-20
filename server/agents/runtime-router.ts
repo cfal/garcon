@@ -553,7 +553,10 @@ export class AgentRuntimeRouter {
         endpoint: context.endpoint,
         admission: context.admission,
         source: sourceReference,
-        providerMeta: args.messageOrdinal === undefined ? null : args.providerMeta ?? null,
+        // A point fork must stay distinguishable from a whole-chat fork even
+        // when the anchor row carries no provider identity: an empty object
+        // reaches the facet's refusal path instead of forking the tip.
+        providerMeta: args.messageOrdinal === undefined ? null : args.providerMeta ?? {},
       });
       if (result.kind === 'unmaterialized') return result;
       return {
