@@ -1,4 +1,8 @@
 import { getGitRefs, gitCheckoutRef, gitCreateBranch, type GitRefOption } from '$lib/api/git.js';
+import {
+	persistGitBranchSortPreference,
+	readGitBranchSortPreference,
+} from '$lib/git/targets/git-branch-sort-preference.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import {
 	DEFAULT_GIT_REF_SORT,
@@ -30,7 +34,7 @@ export class GitBranchSelectorState {
 	currentEffectiveProjectKey = $state<string | null>(null);
 	currentBranch = $state('');
 	refs = $state<GitRefOption[]>([]);
-	branchSort = $state<GitRefSort>({ ...DEFAULT_GIT_REF_SORT });
+	branchSort = $state<GitRefSort>(readGitBranchSortPreference());
 	isLoadingBranches = $state(false);
 	showBranchDropdown = $state(false);
 	showNewBranchModal = $state(false);
@@ -163,6 +167,7 @@ export class GitBranchSelectorState {
 					? 'desc'
 					: 'asc';
 		this.branchSort = { key, direction };
+		persistGitBranchSortPreference(this.branchSort);
 		await this.searchBranchRefs(projectPath, query);
 	}
 

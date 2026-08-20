@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { getGitRefs, gitCheckoutRef, gitCreateBranch } from '$lib/api/git.js';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitRefs: vi.fn(),
@@ -45,6 +46,7 @@ describe('GitBranchSelectorState', () => {
 	let branchSelector: GitBranchSelectorState;
 
 	beforeEach(() => {
+		localStorage.clear();
 		vi.clearAllMocks();
 		vi.mocked(getGitRefs).mockResolvedValue({
 			refs: [
@@ -70,6 +72,32 @@ describe('GitBranchSelectorState', () => {
 			],
 		});
 		branchSelector = new GitBranchSelectorState();
+	});
+
+	it('persists sort selections globally and restores the latest direction', async () => {
+		await branchSelector.toggleBranchSort('/project', 'updated');
+
+		expect(localStorage.length).toBe(1);
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.gitBranchSort) ?? '')).toEqual(
+			UPDATED_DESC,
+		);
+		expect(new GitBranchSelectorState().branchSort).toEqual(UPDATED_DESC);
+
+		await branchSelector.toggleBranchSort('/project', 'updated');
+
+		expect(new GitBranchSelectorState().branchSort).toEqual(UPDATED_ASC);
+	});
+
+	it.each([
+		['malformed JSON', '{broken'],
+		['non-object JSON', '[]'],
+		['partial sort', JSON.stringify({ key: 'updated' })],
+		['unknown key', JSON.stringify({ key: 'recent', direction: 'desc' })],
+		['unknown direction', JSON.stringify({ key: 'updated', direction: 'newest' })],
+	])('falls back to Name ascending for %s in persisted sort', (_name, value) => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.gitBranchSort, value);
+
+		expect(new GitBranchSelectorState().branchSort).toEqual(NAME_ASC);
 	});
 
 	it('reuses branch data for the same project and resets on project changes', () => {
