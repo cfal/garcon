@@ -98,6 +98,7 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 		expect(nameSort.getAttribute('aria-pressed')).toBe('true');
 		expect(updatedSort.getAttribute('aria-pressed')).toBe('false');
 		expect(nameSort.hasAttribute('aria-sort')).toBe(false);
+		expect(nameSort.className).toContain('-ml-2');
 		expect(listbox.contains(nameSort)).toBe(false);
 		expect(sortGroup.className).toContain('overflow-y-auto');
 		expect(sortGroup.style.getPropertyValue('scrollbar-gutter')).toBe('stable');
@@ -129,15 +130,23 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 		expect(onSearchRefs).not.toHaveBeenCalled();
 	});
 
-	it('renders canonical Updated timestamps and accessible unavailable values', () => {
-		const updatedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString();
+	it('renders sub-day Updated timestamps and accessible unavailable values', () => {
+		const now = Date.now();
+		const hourUpdatedAt = new Date(now - (23 * 60 + 30) * 60 * 1_000).toISOString();
+		const minuteUpdatedAt = new Date(now - (59 * 60 + 30) * 1_000).toISOString();
 		renderSelector({
 			refs: [
 				{
-					name: 'recent',
-					ref: 'refs/heads/recent',
+					name: 'recent-hour',
+					ref: 'refs/heads/recent-hour',
 					kind: 'local-branch',
-					updatedAt,
+					updatedAt: hourUpdatedAt,
+				},
+				{
+					name: 'recent-minute',
+					ref: 'refs/heads/recent-minute',
+					kind: 'local-branch',
+					updatedAt: minuteUpdatedAt,
 				},
 				{
 					name: 'missing',
@@ -159,10 +168,13 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 			],
 		});
 
-		const timestamp = document.querySelector('time');
-		expect(timestamp?.getAttribute('datetime')).toBe(updatedAt);
-		expect(timestamp?.getAttribute('title')).toBeTruthy();
-		expect(timestamp?.textContent?.trim()).toBeTruthy();
+		const hourRow = screen.getByRole('option', { name: /recent-hour/ });
+		const minuteRow = screen.getByRole('option', { name: /recent-minute/ });
+		const hourTimestamp = within(hourRow).getByText('23h ago');
+		expect(hourTimestamp.getAttribute('datetime')).toBe(hourUpdatedAt);
+		expect(hourTimestamp.getAttribute('title')).toBeTruthy();
+		expect(within(minuteRow).getByText('59m ago')).toBeTruthy();
+		expect(within(hourRow).getByText('recent-hour').className).toContain('-ml-2');
 		expect(screen.getAllByTitle('Updated time unavailable')).toHaveLength(3);
 		expect(screen.getAllByText('Updated time unavailable')).toHaveLength(3);
 	});

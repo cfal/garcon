@@ -46,12 +46,12 @@
 	onclick={() => onSelect(ref)}
 	data-git-ref-virtual-row={ref.ref}
 >
-	<span class="flex h-4 w-4 items-center justify-center">
+	<span class="-ml-2 flex h-4 w-4 items-center justify-center">
 		{#if isCurrent}
 			<Check class="h-3.5 w-3.5 text-status-success-foreground" />
 		{/if}
 	</span>
-	<span class="min-w-0 truncate">{ref.name}</span>
+	<span class="-ml-2 min-w-0 truncate">{ref.name}</span>
 	{#if updated}
 		<time
 			datetime={updatedAt ?? undefined}

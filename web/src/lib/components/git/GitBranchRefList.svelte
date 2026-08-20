@@ -135,8 +135,8 @@
 					style={`height:${REF_OPTION_ROW_HEIGHT}px; transform:translateY(${virtualWindow.getOffset(index)}px);`}
 					data-git-ref-virtual-row={`unavailable-${index}`}
 				>
-					<TriangleAlert class="h-3.5 w-3.5 text-status-warning-foreground" />
-					<span class="truncate">{m.git_branch_selector_ref_unavailable()}</span>
+					<TriangleAlert class="-ml-2 h-3.5 w-3.5 text-status-warning-foreground" />
+					<span class="-ml-2 truncate">{m.git_branch_selector_ref_unavailable()}</span>
 					<span aria-hidden="true" class="text-right text-xs">—</span>
 				</button>
 			{/snippet}
@@ -180,7 +180,7 @@
 			aria-pressed={sort.key === 'name'}
 			aria-label={nextSortLabel('name')}
 			onclick={() => onSort('name')}
-			class="inline-flex min-w-0 items-center gap-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="-ml-2 inline-flex min-w-0 items-center gap-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<span class="truncate">{m.git_branch_selector_name()}</span>
 			{@render sortIcon('name')}
