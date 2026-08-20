@@ -93,7 +93,7 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     });
   });
 
-  it('resolves a part anchor to the next message as the exclusive boundary', async () => {
+  it('bounds a part anchor just past its owning message', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const messages = mock(() => Promise.resolve({ data: STORED_SOURCE_MESSAGES }));
     const { forking } = createForking({ fork, messages });
@@ -105,12 +105,12 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     expect(outcome.kind).toBe('materialized');
     expect(fork.mock.calls[0][0]).toEqual({
       sessionID: 'source-session',
-      messageID: 'msg_c',
+      messageID: 'msg_b0',
       directory: '/repo',
     });
   });
 
-  it('resolves a message anchor and forks the tip when the anchor message is last', async () => {
+  it('bounds message anchors, including a last-message anchor, past their own message', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const messages = mock(() => Promise.resolve({ data: STORED_SOURCE_MESSAGES }));
     const { forking } = createForking({ fork, messages });
@@ -119,16 +119,42 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
       providerMeta: { entryId: 'msg_c' },
     }));
     expect(atUserRow.kind).toBe('materialized');
-    expect(fork.mock.calls[0][0]).toMatchObject({ messageID: 'msg_d' });
+    expect(fork.mock.calls[0][0]).toMatchObject({ messageID: 'msg_c0' });
 
+    // A last-message anchor still carries a boundary, so provider messages
+    // appended between resolution and the fork call stay excluded.
     const atTip = await forking.fork(forkRequest({
       providerMeta: { entryId: 'prt_d1' },
     }));
     expect(atTip.kind).toBe('materialized');
     expect(fork.mock.calls[1][0]).toEqual({
       sessionID: 'source-session',
+      messageID: 'msg_d0',
       directory: '/repo',
     });
+  });
+
+  it('deletes the forked session when receipt retargeting fails after the fork', async () => {
+    const receipt = receiptForCarriedContext({ prefix: 'SEED::' }, 'source-session');
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const sessionDelete = mock(() => Promise.resolve({}));
+    const get = mock(() => Promise.resolve({ error: { name: 'InternalError' } }));
+    const messages = mock(() => Promise.resolve({ data: [] }));
+    const { forking } = createForking({ fork, delete: sessionDelete, get, messages });
+
+    const failure = await forking.fork(forkRequest({
+      source: {
+        chatId: 'source-chat',
+        agentId: 'opencode',
+        agentSessionId: 'source-session',
+        nativeSession: null,
+        nativeSeedReceipt: receipt,
+      },
+    })).then(() => null, (error) => error);
+
+    expect(failure).not.toBeNull();
+    expect(sessionDelete).toHaveBeenCalledTimes(1);
+    expect(sessionDelete.mock.calls[0][0]).toEqual({ sessionID: 'forked-session' });
   });
 
   it('refuses an anchor the provider has not persisted as not settled', async () => {

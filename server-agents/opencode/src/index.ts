@@ -25,6 +25,7 @@ import {
 import { createOpenCodeConfig } from './config.js';
 import { OpenCodeExecution } from './agents/opencode/execution.js';
 import {
+  OpenCodeTranscriptNotFoundError,
   loadLegacyOpenCodeChatMessages,
   loadRequiredOpenCodeChatMessages,
 } from './agents/opencode/history-loader.js';
@@ -197,7 +198,20 @@ function createOpenCodeNativeEvidence(
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      return { messages: await load(chat, signal, loadRequiredOpenCodeChatMessages) };
+      try {
+        return { messages: await load(chat, signal, loadRequiredOpenCodeChatMessages) };
+      } catch (error) {
+        // Missing or out-of-scope native evidence surfaces as the typed
+        // failure so Reload and fork seeding report it instead of a raw error.
+        if (error instanceof OpenCodeTranscriptNotFoundError) {
+          throw new AgentIntegrationError(
+            'TRANSCRIPT_UNAVAILABLE',
+            'The OpenCode native session is missing or outside the recorded project directory',
+            false,
+          );
+        }
+        throw error;
+      }
     },
     async loadLegacy({ chat, signal }) {
       signal.throwIfAborted();

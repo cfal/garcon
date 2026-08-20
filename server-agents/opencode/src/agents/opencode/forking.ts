@@ -39,29 +39,39 @@ export function createOpenCodeNativeForking(
         if (request.providerMeta) throw notSettled();
         return { kind: 'unmaterialized' };
       }
-      const boundary = request.providerMeta
-        ? await resolveForkBoundary(options.runtime, request, sourceSessionId)
+      const anchorMessageId = request.providerMeta
+        ? await resolveAnchorMessageId(options.runtime, request, sourceSessionId)
         : null;
       const forkedSessionId = await options.runtime.forkSession(sourceSessionId, {
         projectPath: request.projectPath,
-        ...(boundary ? { messageId: boundary } : {}),
+        // Appending a character to the fixed-length ascending anchor id yields
+        // an exclusive boundary that includes the anchor message and excludes
+        // every later one, even if the provider appends concurrently; upstream
+        // validates only the "msg" prefix.
+        // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/schema/src/v1/session.ts#L17-L20
+        ...(anchorMessageId ? { messageId: `${anchorMessageId}0` } : {}),
       });
-      return {
-        kind: 'materialized',
-        session: {
-          agentSessionId: forkedSessionId,
-          nativeSession: options.nativeSessions.encode({
-            path: createArtificialNativePath('opencode', forkedSessionId),
+      try {
+        return {
+          kind: 'materialized',
+          session: {
             agentSessionId: forkedSessionId,
-            modelEndpointId: null,
-          }),
-          nativeSeedReceipt: await retargetForkedSeedReceipt(
-            options.runtime,
-            request,
-            forkedSessionId,
-          ),
-        },
-      };
+            nativeSession: options.nativeSessions.encode({
+              path: createArtificialNativePath('opencode', forkedSessionId),
+              agentSessionId: forkedSessionId,
+              modelEndpointId: null,
+            }),
+            nativeSeedReceipt: await retargetForkedSeedReceipt(
+              options.runtime,
+              request,
+              forkedSessionId,
+            ),
+          },
+        };
+      } catch (error) {
+        await options.runtime.deleteSession(forkedSessionId).catch(() => undefined);
+        throw error;
+      }
     },
     async discard(session, signal) {
       signal.throwIfAborted();
@@ -70,14 +80,13 @@ export function createOpenCodeNativeForking(
   };
 }
 
-// Upstream clones messages with id < messageID. The boundary is therefore the
-// message after the one owning the anchor's provider identity; an anchor in
-// the last message forks the whole session.
-async function resolveForkBoundary(
+// Locates the stored message owning the anchor's provider identity; an
+// identity the provider has not persisted refuses as not settled.
+async function resolveAnchorMessageId(
   runtime: OpenCodeRuntime,
   request: AgentNativeForkRequest,
   sourceSessionId: string,
-): Promise<string | null> {
+): Promise<string> {
   const entryId = typeof request.providerMeta?.entryId === 'string'
     ? request.providerMeta.entryId
     : '';
@@ -88,11 +97,18 @@ async function resolveForkBoundary(
       signal: request.admission.signal,
       throwOnError: true,
     })
-  ));
-  const anchorIndex = messages.findIndex((message) => ownsEntry(message, entryId));
-  if (anchorIndex === -1) throw notSettled();
-  const boundary = messages[anchorIndex + 1]?.info?.id;
-  return typeof boundary === 'string' && boundary ? boundary : null;
+  )).catch((error) => {
+    if (error instanceof AgentIntegrationError) throw error;
+    throw new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'OpenCode fork boundary resolution failed',
+      true,
+    );
+  });
+  const anchor = messages.find((message) => ownsEntry(message, entryId));
+  const anchorMessageId = anchor?.info?.id;
+  if (typeof anchorMessageId !== 'string' || !anchorMessageId) throw notSettled();
+  return anchorMessageId;
 }
 
 async function retargetForkedSeedReceipt(
