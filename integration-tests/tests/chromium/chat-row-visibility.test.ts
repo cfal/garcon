@@ -11,6 +11,7 @@ import {
   withChromiumFixture,
   type ChromiumFixture,
 } from '../../support/chromium-fixture.js';
+import { waitForPersistedChat } from '../../support/persisted-chat.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const EXPECTED_RECONNECT_BROWSER_ERRORS = [
@@ -105,6 +106,32 @@ async function chatSummaryMetadata(
     isUnread: chat.isUnread,
     isProcessing: chat.isProcessing,
   };
+}
+
+async function waitForDurablyReadChatSummaryMetadata(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<Awaited<ReturnType<typeof chatSummaryMetadata>>> {
+  const initial = await chatSummaryMetadata(fixture, chatId);
+  const lastActivityAt = initial.lastActivityAt;
+  if (!lastActivityAt) {
+    throw new Error(`Chat ${chatId} had no activity to mark read`);
+  }
+  await waitForPersistedChat({
+    directories: fixture.integration.dirs,
+    chatId,
+    timeoutMs: 20_000,
+    timeoutMessage: `Chat ${chatId} did not persist its read receipt`,
+    select: (chat) => typeof chat.lastReadAt === 'string'
+      && chat.lastReadAt >= lastActivityAt
+      ? true
+      : null,
+  });
+  const persisted = await chatSummaryMetadata(fixture, chatId);
+  if (persisted.isUnread) {
+    throw new Error(`Chat ${chatId} remained unread after its read receipt persisted`);
+  }
+  return persisted;
 }
 
 async function openChat(page: Page, baseUrl: string, chatId: string, marker: string): Promise<void> {
@@ -320,7 +347,10 @@ describe('Chromium transcript chat rows', () => {
           `[data-sidebar-virtual-row="${targetChatId}"] [data-slot="sidebar-chat-summary"]`,
         );
         await targetSummary.waitFor();
-        const initialTargetSummary = await chatSummaryMetadata(fixture, targetChatId);
+        const initialTargetSummary = await waitForDurablyReadChatSummaryMetadata(
+          fixture,
+          targetChatId,
+        );
         await captureComposer(fixture.page, 'chat row draft remains stable');
 
         const noticeContent = 'browser chat row notice';
