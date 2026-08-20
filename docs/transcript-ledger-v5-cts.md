@@ -12,12 +12,12 @@ Governing artifact:
 - `docs/transcript-ledger-v5-design.md`, revision 21, SHA-256
   `287987bb8cf07c099b04143a75682a02fca4de9e3f06fce8d01502d0b71055a4`
 
-Current inventory: 278 discovered stable IDs. The PR #500 squash merge above is
-the historical acceptance anchor and contains 256 of them. PR #518 merge
-`1debaeb4a47a73996f8d6960f33a55b881c60850` added eleven executable cases; the
-current native-drift change adds eleven more. Because PR #527 is not yet
-merged, this document does not claim a merge-object anchor for that final
-increment.
+Current inventory: 367 discovered stable IDs, validated by
+`scripts/validate-transcript-ledger-v5-cases.js` against
+`scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
+above is the historical acceptance anchor for the first 256; later merged
+increments (PR #518, PR #527, PR #529, and the revision 20/21 OpenCode
+corrections) account for the rest, each anchored by its own merge commit.
 
 Coverage state records whether an oracle exists; it does not claim that
 production already satisfies an intentional-red case.
