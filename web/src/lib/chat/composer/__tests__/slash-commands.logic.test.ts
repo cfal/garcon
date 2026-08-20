@@ -174,26 +174,46 @@ describe('parseSnippetCommand', () => {
 			expect(parseSnippetCommand(`${command} review`)).toEqual({
 				kind: 'valid',
 				shortName: 'review',
-				arguments: '',
+				arguments: { type: 'default' },
 			});
 		}
 	});
 
-	it('preserves raw arguments', () => {
+	it('distinguishes omitted arguments from an explicit empty value', () => {
+		expect(parseSnippetCommand('/s review')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: { type: 'default' },
+		});
+		for (const input of ['/s review ', '/s review\t', '/s review\n', '/s review\r\n']) {
+			expect(parseSnippetCommand(input)).toEqual({
+				kind: 'valid',
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+			});
+		}
+	});
+
+	it('preserves raw explicit arguments after exactly one separator', () => {
 		expect(parseSnippetCommand('/snippet review API  boundaries\nthen concurrency')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: 'API  boundaries\nthen concurrency',
+			arguments: { type: 'value', value: 'API  boundaries\nthen concurrency' },
 		});
 		expect(parseSnippetCommand('/s review first\r\nsecond')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: 'first\r\nsecond',
+			arguments: { type: 'value', value: 'first\r\nsecond' },
 		});
 		expect(parseSnippetCommand('/snippet review   indented\n')).toEqual({
 			kind: 'valid',
 			shortName: 'review',
-			arguments: '  indented\n',
+			arguments: { type: 'value', value: '  indented\n' },
+		});
+		expect(parseSnippetCommand('/snippet review\r\nsecond')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: { type: 'value', value: 'second' },
 		});
 	});
 

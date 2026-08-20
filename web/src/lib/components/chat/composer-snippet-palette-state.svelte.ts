@@ -138,7 +138,7 @@ export class ComposerSnippetPaletteState {
 		if (snippetTemplateUsesArguments(snippet.template)) {
 			queueMicrotask(() => {
 				this.argumentsSnippet = snippet;
-				this.argumentsDraft = '';
+				this.argumentsDraft = snippet.defaultArguments;
 				this.argumentsDialogOpen = true;
 			});
 			return;

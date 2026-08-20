@@ -58,6 +58,7 @@
 		steerWithCtrlEnter?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
+		snippetDefaultArguments?: string;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -86,6 +87,7 @@
 		steerWithCtrlEnter = true,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
+		snippetDefaultArguments = '',
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -334,6 +336,7 @@
 							id: 'snippet-review',
 							shortName: 'review',
 							template: snippetTemplate,
+							defaultArguments: snippetDefaultArguments,
 							createdAt: '2026-01-01T00:00:00.000Z',
 							updatedAt: '2026-01-01T00:00:00.000Z',
 						},

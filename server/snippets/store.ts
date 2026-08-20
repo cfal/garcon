@@ -1,4 +1,5 @@
 import path from 'path';
+import { promises as fs } from 'fs';
 import {
   SNIPPET_MAX_COUNT,
   normalizeSnippet,
@@ -7,33 +8,45 @@ import {
   type SnippetDefinitionInput,
   type SnippetsSnapshot,
 } from '../../common/snippets.js';
-import { JsonFileStore } from '../lib/json-file-store.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { SnippetDomainError } from './errors.js';
 
+const SNIPPETS_FILE_VERSION = 2;
+
 interface SnippetsFile {
-  version: 1;
+  version: typeof SNIPPETS_FILE_VERSION;
   revision: number;
   snippets: Snippet[];
 }
 
-function emptyFile(): SnippetsFile {
-  return { version: 1, revision: 0, snippets: [] };
+interface NormalizedSnippetsFile {
+  file: SnippetsFile;
+  migrated: boolean;
 }
 
-function normalizeFile(value: unknown): SnippetsFile {
+function emptyFile(): SnippetsFile {
+  return { version: SNIPPETS_FILE_VERSION, revision: 0, snippets: [] };
+}
+
+function normalizeV1Snippet(value: unknown): Snippet | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return normalizeSnippet({
+    ...(value as Record<string, unknown>),
+    defaultArguments: '',
+  });
+}
+
+function normalizeFile(value: unknown): NormalizedSnippetsFile {
   if (!value || typeof value !== 'object' || Array.isArray(value))
-    return emptyFile();
+    return { file: emptyFile(), migrated: false };
   const raw = value as Record<string, unknown>;
-  if (raw.version !== 1) {
-    throw new Error(
-      `Unsupported snippets.json version: ${String(raw.version)}`,
-    );
+  if (raw.version !== 1 && raw.version !== SNIPPETS_FILE_VERSION) {
+    throw new Error(`Unsupported snippets.json version: ${String(raw.version)}`);
   }
   const revision =
-    typeof raw.revision === 'number' &&
-    Number.isSafeInteger(raw.revision) &&
-    raw.revision >= 0
+    typeof raw.revision === 'number' && Number.isSafeInteger(raw.revision) && raw.revision >= 0
       ? raw.revision
       : 0;
   const snippets: Snippet[] = [];
@@ -41,14 +54,12 @@ function normalizeFile(value: unknown): SnippetsFile {
   const names = new Set<string>();
   if (Array.isArray(raw.snippets)) {
     for (const value of raw.snippets) {
-      const snippet = normalizeSnippet(value);
+      const snippet = raw.version === 1 ? normalizeV1Snippet(value) : normalizeSnippet(value);
       if (!snippet || ids.has(snippet.id) || names.has(snippet.shortName)) {
         continue;
       }
       if (snippets.length >= SNIPPET_MAX_COUNT) {
-        throw new Error(
-          `snippets.json exceeds the maximum of ${SNIPPET_MAX_COUNT} snippets`,
-        );
+        throw new Error(`snippets.json exceeds the maximum of ${SNIPPET_MAX_COUNT} snippets`);
       }
       ids.add(snippet.id);
       names.add(snippet.shortName);
@@ -56,10 +67,25 @@ function normalizeFile(value: unknown): SnippetsFile {
     }
   }
   return {
-    version: 1,
-    revision,
-    snippets: sortSnippetsByShortName(snippets),
+    file: {
+      version: SNIPPETS_FILE_VERSION,
+      revision,
+      snippets: sortSnippetsByShortName(snippets),
+    },
+    migrated: raw.version === 1,
   };
+}
+
+async function readFile(filePath: string): Promise<NormalizedSnippetsFile> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return normalizeFile(JSON.parse(raw));
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) {
+      return { file: emptyFile(), migrated: false };
+    }
+    throw error;
+  }
 }
 
 function cloneSnippet(snippet: Snippet): Snippet {
@@ -67,21 +93,18 @@ function cloneSnippet(snippet: Snippet): Snippet {
 }
 
 export class SnippetStore {
-  readonly #persistence: JsonFileStore<SnippetsFile>;
+  readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file = emptyFile();
 
   constructor(workspaceDir: string) {
-    this.#persistence = new JsonFileStore({
-      filePath: path.join(workspaceDir, 'snippets.json'),
-      mode: 0o600,
-      empty: emptyFile,
-      normalize: normalizeFile,
-    });
+    this.#filePath = path.join(workspaceDir, 'snippets.json');
   }
 
   async init(): Promise<void> {
-    this.#file = await this.#persistence.read();
+    const loaded = await readFile(this.#filePath);
+    if (loaded.migrated) await this.#write(loaded.file);
+    this.#file = loaded.file;
   }
 
   snapshot(): SnippetsSnapshot {
@@ -92,9 +115,7 @@ export class SnippetStore {
   }
 
   getByShortName(shortName: string): Snippet | null {
-    const snippet = this.#file.snippets.find(
-      (entry) => entry.shortName === shortName,
-    );
+    const snippet = this.#file.snippets.find((entry) => entry.shortName === shortName);
     return snippet ? cloneSnippet(snippet) : null;
   }
 
@@ -107,9 +128,7 @@ export class SnippetStore {
           409,
         );
       }
-      if (
-        draft.snippets.some((entry) => entry.shortName === snippet.shortName)
-      ) {
+      if (draft.snippets.some((entry) => entry.shortName === snippet.shortName)) {
         throw new SnippetDomainError(
           'SNIPPET_NAME_CONFLICT',
           `A snippet named ${snippet.shortName} already exists`,
@@ -117,11 +136,7 @@ export class SnippetStore {
         );
       }
       if (draft.snippets.some((entry) => entry.id === snippet.id)) {
-        throw new SnippetDomainError(
-          'SNIPPET_VALIDATION_FAILED',
-          'Snippet ID already exists',
-          409,
-        );
+        throw new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet ID already exists', 409);
       }
       draft.snippets.push(cloneSnippet(snippet));
     });
@@ -137,10 +152,7 @@ export class SnippetStore {
       const index = draft.snippets.findIndex((entry) => entry.id === id);
       if (index < 0) throw this.#notFound();
       if (
-        draft.snippets.some(
-          (entry) =>
-            entry.id !== id && entry.shortName === definition.shortName,
-        )
+        draft.snippets.some((entry) => entry.id !== id && entry.shortName === definition.shortName)
       ) {
         throw new SnippetDomainError(
           'SNIPPET_NAME_CONFLICT',
@@ -164,10 +176,7 @@ export class SnippetStore {
     });
   }
 
-  async #mutate(
-    expectedRevision: number,
-    change: (draft: SnippetsFile) => void,
-  ): Promise<void> {
+  async #mutate(expectedRevision: number, change: (draft: SnippetsFile) => void): Promise<void> {
     await this.#lock.runExclusive('snippets', async () => {
       if (expectedRevision !== this.#file.revision) {
         throw new SnippetDomainError(
@@ -188,22 +197,20 @@ export class SnippetStore {
       change(draft);
       draft.snippets = sortSnippetsByShortName(draft.snippets);
       draft.revision += 1;
-      await this.#persistence.write(draft);
+      await this.#write(draft);
       this.#file = draft;
     });
   }
 
+  async #write(file: SnippetsFile): Promise<void> {
+    await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
+  }
+
   #notFound(): SnippetDomainError {
-    return new SnippetDomainError(
-      'SNIPPET_NOT_FOUND',
-      'Snippet not found',
-      404,
-    );
+    return new SnippetDomainError('SNIPPET_NOT_FOUND', 'Snippet not found', 404);
   }
 }
 
 function nextUpdatedAt(current: string, candidate: string): string {
-  return new Date(
-    Math.max(Date.parse(candidate), Date.parse(current) + 1),
-  ).toISOString();
+  return new Date(Math.max(Date.parse(candidate), Date.parse(current) + 1)).toISOString();
 }

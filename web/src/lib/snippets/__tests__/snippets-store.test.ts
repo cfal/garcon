@@ -9,6 +9,7 @@ function snippet(id: string): Snippet {
 		id,
 		shortName: `snippet-${id}`,
 		template: `Template ${id}`,
+		defaultArguments: '',
 		createdAt: '2029-01-01T00:00:00.000Z',
 		updatedAt: '2029-01-01T00:00:00.000Z',
 	};
@@ -26,11 +27,11 @@ describe('SnippetsStore', () => {
 		expect(get).not.toHaveBeenCalled();
 
 		await store.ensureLoaded();
-		await store.create({ shortName: 'a', template: 'Template a' });
+		await store.create({ shortName: 'a', template: 'Template a', defaultArguments: '' });
 
 		expect(create).toHaveBeenCalledWith({
 			expectedRevision: 0,
-			snippet: { shortName: 'a', template: 'Template a' },
+			snippet: { shortName: 'a', template: 'Template a', defaultArguments: '' },
 		});
 		expect(store.snapshot).toEqual(snapshot(1, ['a']));
 	});
@@ -42,7 +43,9 @@ describe('SnippetsStore', () => {
 		const store = new SnippetsStore({ get, create });
 		store.applySnapshot(snapshot(2, ['a']));
 
-		await expect(store.create({ shortName: 'b', template: 'Template b' })).rejects.toBe(conflict);
+		await expect(
+			store.create({ shortName: 'b', template: 'Template b', defaultArguments: '' }),
+		).rejects.toBe(conflict);
 
 		expect(get).toHaveBeenCalledTimes(1);
 		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
@@ -55,7 +58,11 @@ describe('SnippetsStore', () => {
 		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
 		store.applySnapshot(snapshot(1, ['a']));
 		const olderRefresh = store.refresh();
-		const creating = store.create({ shortName: 'b', template: 'Template b' });
+		const creating = store.create({
+			shortName: 'b',
+			template: 'Template b',
+			defaultArguments: '',
+		});
 
 		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
 		resolvers[0](snapshot(1, ['a']));
@@ -73,7 +80,9 @@ describe('SnippetsStore', () => {
 		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
 		store.applySnapshot(snapshot(1, ['a']));
 
-		await expect(store.create({ shortName: 'a', template: 'Other' })).rejects.toBe(conflict);
+		await expect(
+			store.create({ shortName: 'a', template: 'Other', defaultArguments: '' }),
+		).rejects.toBe(conflict);
 
 		expect(get).not.toHaveBeenCalled();
 	});

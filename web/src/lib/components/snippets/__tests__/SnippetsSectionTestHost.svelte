@@ -13,11 +13,12 @@
 
 	let { blockRefresh = false, blockSave = false }: Props = $props();
 
-	function entry(id: string, shortName: string, template: string): Snippet {
+	function entry(id: string, shortName: string, template: string, defaultArguments = ''): Snippet {
 		return {
 			id,
 			shortName,
 			template,
+			defaultArguments,
 			createdAt: '2026-01-01T00:00:00.000Z',
 			updatedAt: '2026-01-01T00:00:00.000Z',
 		};
@@ -53,7 +54,12 @@
 				revision: current.revision + 1,
 				snippets: sortSnippetsByShortName([
 					...current.snippets,
-					entry(`created-${current.revision}`, request.snippet.shortName, request.snippet.template),
+					entry(
+						`created-${current.revision}`,
+						request.snippet.shortName,
+						request.snippet.template,
+						request.snippet.defaultArguments,
+					),
 				]),
 			};
 			return { success: true, snapshot: current };

@@ -13,6 +13,9 @@ describe('SnippetsSection', () => {
 
 		const name = screen.getByRole('textbox', { name: 'Short name' }) as HTMLInputElement;
 		const template = screen.getByRole('textbox', { name: 'Snippet text' });
+		const defaultArguments = screen.getByRole('textbox', {
+			name: 'Default arguments (optional)',
+		});
 		const save = screen.getByRole('button', { name: 'Save' });
 		expect(
 			screen.getByText(
@@ -26,16 +29,31 @@ describe('SnippetsSection', () => {
 		expect(screen.getByText(/Use only lowercase letters/)).toBeTruthy();
 
 		await fireEvent.input(name, { target: { value: 'review_api-2' } });
+		await fireEvent.input(defaultArguments, {
+			target: { value: '\n staged changes \nsecond line ' },
+		});
 		await fireEvent.click(save);
 
 		expect(await screen.findByText('review_api-2')).toBeTruthy();
+		expect(screen.getByText('Default:')).toBeTruthy();
+		expect(screen.getByText(/staged changes/)).toBeTruthy();
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_api-2' }));
 		expect(
 			(screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement).value,
 		).toBe('\nReview {{arguments}}\n');
+		expect(
+			(
+				screen.getByRole('textbox', {
+					name: 'Default arguments (optional)',
+				}) as HTMLTextAreaElement
+			).value,
+		).toBe('\n staged changes \nsecond line ');
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Snippet text' }), {
 			target: { value: '\nUpdated {{arguments}}\n' },
+		});
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Default arguments (optional)' }), {
+			target: { value: '' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
@@ -43,6 +61,72 @@ describe('SnippetsSection', () => {
 		expect(
 			(screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement).value,
 		).toBe('\nUpdated {{arguments}}\n');
+		expect(
+			(
+				screen.getByRole('textbox', {
+					name: 'Default arguments (optional)',
+				}) as HTMLTextAreaElement
+			).value,
+		).toBe('');
+		expect(screen.queryByText('Default:')).toBeNull();
+	});
+
+	it('preserves an invalid default until its arguments token is restored', async () => {
+		render(SnippetsSectionTestHost);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add snippet' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
+			target: { value: 'review_api' },
+		});
+		const template = screen.getByRole('textbox', { name: 'Snippet text' });
+		const defaultArguments = screen.getByRole('textbox', {
+			name: 'Default arguments (optional)',
+		}) as HTMLTextAreaElement;
+		const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		await fireEvent.input(template, { target: { value: 'Review this' } });
+		await fireEvent.input(defaultArguments, { target: { value: 'staged changes' } });
+
+		expect(
+			screen.getByText('Add {{arguments}} to the snippet text or clear the default.'),
+		).toBeTruthy();
+		expect(defaultArguments.value).toBe('staged changes');
+		expect(save.disabled).toBe(true);
+
+		await fireEvent.input(template, { target: { value: 'Review {{arguments}}' } });
+		expect(
+			screen.queryByText('Add {{arguments}} to the snippet text or clear the default.'),
+		).toBeNull();
+		expect(defaultArguments.value).toBe('staged changes');
+		expect(save.disabled).toBe(false);
+	});
+
+	it('enforces the default limit and saves from either multiline field shortcut', async () => {
+		render(SnippetsSectionTestHost);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add snippet' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
+			target: { value: 'review_api' },
+		});
+		const template = screen.getByRole('textbox', { name: 'Snippet text' });
+		const defaultArguments = screen.getByRole('textbox', {
+			name: 'Default arguments (optional)',
+		}) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Review {{arguments}}' } });
+		await fireEvent.input(defaultArguments, { target: { value: 'x'.repeat(32_001) } });
+		expect(screen.getByText('Default arguments cannot exceed 32,000 characters.')).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+
+		await fireEvent.input(defaultArguments, { target: { value: 'staged changes' } });
+		await fireEvent.keyDown(defaultArguments, { key: 'Enter' });
+		expect(defaultArguments.value).toBe('staged changes');
+		await fireEvent.keyDown(defaultArguments, { key: 'Enter', ctrlKey: true });
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
+		expect(await screen.findByText('review_api')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_api' }));
+		await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Snippet text' }), {
+			key: 'Enter',
+			metaKey: true,
+		});
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
 	});
 
 	it('closes the form through every cancel path and restores focus', async () => {
@@ -55,6 +139,8 @@ describe('SnippetsSection', () => {
 		const dialog = await screen.findByRole('dialog', { name: 'Add Snippet' });
 		expect(dialog.className).toContain('var(--app-viewport-center-y)');
 		expect(dialog.className).toContain('var(--app-height)');
+		expect(dialog.className).toContain('overflow-hidden');
+		expect(dialog.querySelector('.overflow-y-auto')).toBeTruthy();
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
 			target: { value: 'unfinished' },
 		});

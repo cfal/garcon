@@ -1,6 +1,9 @@
 import {
+	SNIPPET_ARGUMENTS_MAX_LENGTH,
+	SNIPPET_ARGUMENTS_TOKEN,
 	SNIPPET_SHORT_NAME_PATTERN,
 	SNIPPET_TEMPLATE_MAX_LENGTH,
+	snippetTemplateUsesArguments,
 	type Snippet,
 	type SnippetDefinitionInput,
 } from '$shared/snippets';
@@ -9,6 +12,7 @@ import * as m from '$lib/paraglide/messages.js';
 export class SnippetFormState {
 	shortName = $state('');
 	template = $state('');
+	defaultArguments = $state('');
 	saving = $state(false);
 	error = $state<string | null>(null);
 	#editingId: string | null = null;
@@ -38,20 +42,39 @@ export class SnippetFormState {
 		return null;
 	}
 
+	get defaultArgumentsError(): string | null {
+		if (this.defaultArguments.length > SNIPPET_ARGUMENTS_MAX_LENGTH) {
+			return m.snippets_default_arguments_too_long();
+		}
+		if (this.defaultArguments.length > 0 && !snippetTemplateUsesArguments(this.template)) {
+			return m.snippets_default_arguments_requires_token({
+				argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
+			});
+		}
+		return null;
+	}
+
 	get canSave(): boolean {
-		return !this.saving && !this.shortNameError && !this.templateError;
+		return (
+			!this.saving && !this.shortNameError && !this.templateError && !this.defaultArgumentsError
+		);
 	}
 
 	reset(snippet: Snippet | null): void {
 		this.#editingId = snippet?.id ?? null;
 		this.shortName = snippet?.shortName ?? '';
 		this.template = snippet?.template ?? '';
+		this.defaultArguments = snippet?.defaultArguments ?? '';
 		this.saving = false;
 		this.error = null;
 	}
 
 	buildDefinition(): SnippetDefinitionInput | null {
-		if (this.shortNameError || this.templateError) return null;
-		return { shortName: this.shortName, template: this.template };
+		if (this.shortNameError || this.templateError || this.defaultArgumentsError) return null;
+		return {
+			shortName: this.shortName,
+			template: this.template,
+			defaultArguments: this.defaultArguments,
+		};
 	}
 }

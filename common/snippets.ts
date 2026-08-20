@@ -8,8 +8,7 @@ export const SNIPPET_ARGUMENTS_TOKEN = '{{arguments}}';
 export const SNIPPET_PROJECT_PATH_TOKEN = '{{project_path}}';
 export const SNIPPET_CHAT_ID_TOKEN = '{{chat_id}}';
 
-const SNIPPET_TEMPLATE_TOKEN_PATTERN =
-  /\\?\{\{(?:arguments|project_path|chat_id)\}\}/g;
+const SNIPPET_TEMPLATE_TOKEN_PATTERN = /\\?\{\{(?:arguments|project_path|chat_id)\}\}/g;
 
 export type SnippetTemplateVariable = 'arguments' | 'project_path' | 'chat_id';
 
@@ -42,10 +41,7 @@ export function* matchSnippetTemplateTokens(
   }
 }
 
-function snippetTemplateUsesVariable(
-  template: string,
-  variable: SnippetTemplateVariable,
-): boolean {
+function snippetTemplateUsesVariable(template: string, variable: SnippetTemplateVariable): boolean {
   for (const match of matchSnippetTemplateTokens(template)) {
     if (!match.escaped && match.variable === variable) return true;
   }
@@ -81,13 +77,13 @@ export const SNIPPET_ERROR_CODES = {
   projectPathNotDirectory: 'SNIPPET_PROJECT_PATH_NOT_DIRECTORY',
 } as const;
 
-export type SnippetErrorCode =
-  (typeof SNIPPET_ERROR_CODES)[keyof typeof SNIPPET_ERROR_CODES];
+export type SnippetErrorCode = (typeof SNIPPET_ERROR_CODES)[keyof typeof SNIPPET_ERROR_CODES];
 
 export interface Snippet {
   id: string;
   shortName: string;
   template: string;
+  defaultArguments: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +91,7 @@ export interface Snippet {
 export interface SnippetDefinitionInput {
   shortName: string;
   template: string;
+  defaultArguments: string;
 }
 
 export interface SnippetsSnapshot {
@@ -122,12 +119,13 @@ export interface SnippetsMutationResponse {
 }
 
 export type SnippetExpansionContext =
-  | { type: 'chat'; chatId: string }
-  | { type: 'project'; projectPath: string };
+  { type: 'chat'; chatId: string } | { type: 'project'; projectPath: string };
+
+export type SnippetArgumentsInput = { type: 'default' } | { type: 'value'; value: string };
 
 export interface ExpandSnippetRequest {
   shortName: string;
-  arguments: string;
+  arguments: SnippetArgumentsInput;
   context: SnippetExpansionContext;
 }
 
@@ -140,14 +138,9 @@ export interface ExpandSnippetResponse {
   expandedText: string;
 }
 
-export const SNIPPETS_INVALIDATION_REASONS = [
-  'created',
-  'updated',
-  'removed',
-] as const;
+export const SNIPPETS_INVALIDATION_REASONS = ['created', 'updated', 'removed'] as const;
 
-export type SnippetsInvalidationReason =
-  (typeof SNIPPETS_INVALIDATION_REASONS)[number];
+export type SnippetsInvalidationReason = (typeof SNIPPETS_INVALIDATION_REASONS)[number];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -160,9 +153,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     (Object.getPrototypeOf(prototype) === null &&
       typeof prototype.constructor === 'function' &&
       prototype.constructor.name === 'Object');
-  return isPlainObject
-    ? (value as Record<string, unknown>)
-    : null;
+  return isPlainObject ? (value as Record<string, unknown>) : null;
 }
 
 function requiredString(value: unknown): string | null {
@@ -181,28 +172,31 @@ export function isSnippetShortName(value: unknown): value is string {
   return typeof value === 'string' && SNIPPET_SHORT_NAME_PATTERN.test(value);
 }
 
-export function isSnippetsInvalidationReason(
-  value: unknown,
-): value is SnippetsInvalidationReason {
+export function isSnippetsInvalidationReason(value: unknown): value is SnippetsInvalidationReason {
   return (
     typeof value === 'string' &&
     (SNIPPETS_INVALIDATION_REASONS as readonly string[]).includes(value)
   );
 }
 
-export function normalizeSnippetDefinitionInput(
-  value: unknown,
-): SnippetDefinitionInput | null {
+export function normalizeSnippetDefinitionInput(value: unknown): SnippetDefinitionInput | null {
   const raw = asRecord(value);
   if (!raw || !isSnippetShortName(raw.shortName)) return null;
   if (
     typeof raw.template !== 'string' ||
     !raw.template.trim() ||
-    raw.template.length > SNIPPET_TEMPLATE_MAX_LENGTH
+    raw.template.length > SNIPPET_TEMPLATE_MAX_LENGTH ||
+    typeof raw.defaultArguments !== 'string' ||
+    raw.defaultArguments.length > SNIPPET_ARGUMENTS_MAX_LENGTH ||
+    (raw.defaultArguments.length > 0 && !snippetTemplateUsesArguments(raw.template))
   ) {
     return null;
   }
-  return { shortName: raw.shortName, template: raw.template };
+  return {
+    shortName: raw.shortName,
+    template: raw.template,
+    defaultArguments: raw.defaultArguments,
+  };
 }
 
 export function normalizeSnippet(value: unknown): Snippet | null {
@@ -225,9 +219,7 @@ export function compareSnippetShortNames(left: string, right: string): number {
   return snippetShortNameCollator.compare(left, right);
 }
 
-export function sortSnippetsByShortName(
-  snippets: readonly Snippet[],
-): Snippet[] {
+export function sortSnippetsByShortName(snippets: readonly Snippet[]): Snippet[] {
   return [...snippets].sort(
     (left, right) =>
       compareSnippetShortNames(left.shortName, right.shortName) ||
@@ -235,9 +227,7 @@ export function sortSnippetsByShortName(
   );
 }
 
-export function normalizeSnippetsSnapshot(
-  value: unknown,
-): SnippetsSnapshot | null {
+export function normalizeSnippetsSnapshot(value: unknown): SnippetsSnapshot | null {
   const raw = asRecord(value);
   if (
     !raw ||
@@ -265,27 +255,32 @@ export function normalizeSnippetsSnapshot(
   };
 }
 
-export function normalizeSnippetsMutationResponse(
-  value: unknown,
-): SnippetsMutationResponse | null {
+export function normalizeSnippetsMutationResponse(value: unknown): SnippetsMutationResponse | null {
   const raw = asRecord(value);
   if (!raw || raw.success !== true) return null;
   const snapshot = normalizeSnippetsSnapshot(raw.snapshot);
   return snapshot ? { success: true, snapshot } : null;
 }
 
-export function normalizeExpandSnippetRequest(
-  value: unknown,
-): ExpandSnippetRequest | null {
+export function normalizeSnippetArgumentsInput(value: unknown): SnippetArgumentsInput | null {
   const raw = asRecord(value);
-  const context = asRecord(raw?.context);
+  if (!raw) return null;
+  if (raw.type === 'default') return { type: 'default' };
   if (
-    !raw ||
-    !isSnippetShortName(raw.shortName) ||
-    typeof raw.arguments !== 'string' ||
-    raw.arguments.length > SNIPPET_ARGUMENTS_MAX_LENGTH ||
-    !context
+    raw.type === 'value' &&
+    typeof raw.value === 'string' &&
+    raw.value.length <= SNIPPET_ARGUMENTS_MAX_LENGTH
   ) {
+    return { type: 'value', value: raw.value };
+  }
+  return null;
+}
+
+export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequest | null {
+  const raw = asRecord(value);
+  const argumentsInput = normalizeSnippetArgumentsInput(raw?.arguments);
+  const context = asRecord(raw?.context);
+  if (!raw || !isSnippetShortName(raw.shortName) || !argumentsInput || !context) {
     return null;
   }
   if (context.type === 'chat') {
@@ -293,7 +288,7 @@ export function normalizeExpandSnippetRequest(
     return chatId
       ? {
           shortName: raw.shortName,
-          arguments: raw.arguments,
+          arguments: argumentsInput,
           context: { type: 'chat', chatId },
         }
       : null;
@@ -303,7 +298,7 @@ export function normalizeExpandSnippetRequest(
     return projectPath
       ? {
           shortName: raw.shortName,
-          arguments: raw.arguments,
+          arguments: argumentsInput,
           context: { type: 'project', projectPath },
         }
       : null;
@@ -311,9 +306,7 @@ export function normalizeExpandSnippetRequest(
   return null;
 }
 
-export function normalizeExpandSnippetResponse(
-  value: unknown,
-): ExpandSnippetResponse | null {
+export function normalizeExpandSnippetResponse(value: unknown): ExpandSnippetResponse | null {
   const raw = asRecord(value);
   const snippetId = requiredString(raw?.snippetId);
   const snippetUpdatedAt = isoTimestamp(raw?.snippetUpdatedAt);

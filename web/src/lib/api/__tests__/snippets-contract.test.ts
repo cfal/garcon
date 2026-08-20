@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSnippet, expandSnippet, getSnippets } from '../snippets';
+import { createSnippet, expandSnippet, getSnippets, updateSnippet } from '../snippets';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -11,6 +11,7 @@ const snippet = {
 	id: 'snippet-review',
 	shortName: 'review',
 	template: 'Review {{arguments}} in {{project_path}}',
+	defaultArguments: 'the API',
 	createdAt: '2029-01-01T00:00:00.000Z',
 	updatedAt: '2029-01-01T00:00:00.000Z',
 };
@@ -21,6 +22,66 @@ describe('snippets API contract', () => {
 	beforeEach(() => {
 		fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
+	});
+
+	it('sends raw defaults in updates and rejects snapshots that omit them', async () => {
+		fetchMock.mockResolvedValueOnce(
+			Response.json({ success: true, snapshot: { revision: 2, snippets: [snippet] } }),
+		);
+		await updateSnippet({
+			expectedRevision: 1,
+			id: snippet.id,
+			snippet: {
+				shortName: snippet.shortName,
+				template: snippet.template,
+				defaultArguments: '\n staged changes ',
+			},
+		});
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			expectedRevision: 1,
+			id: snippet.id,
+			snippet: {
+				shortName: snippet.shortName,
+				template: snippet.template,
+				defaultArguments: '\n staged changes ',
+			},
+		});
+
+		const { defaultArguments: _defaultArguments, ...preDefaultArgumentsSnippet } = snippet;
+		fetchMock.mockResolvedValueOnce(
+			Response.json({ revision: 1, snippets: [preDefaultArgumentsSnippet] }),
+		);
+		await expect(getSnippets()).rejects.toThrow('Invalid snippets response');
+	});
+
+	it('sends default omission and explicit empty as distinct expansion requests', async () => {
+		const response = {
+			success: true,
+			snippetId: snippet.id,
+			snippetUpdatedAt: snippet.updatedAt,
+			shortName: snippet.shortName,
+			contextProjectPath: '/repo',
+			expandedText: 'Review',
+		};
+		fetchMock.mockImplementation(() => Promise.resolve(Response.json(response)));
+
+		await expandSnippet({
+			shortName: snippet.shortName,
+			arguments: { type: 'default' },
+			context: { type: 'project', projectPath: '/repo' },
+		});
+		await expandSnippet({
+			shortName: snippet.shortName,
+			arguments: { type: 'value', value: '' },
+			context: { type: 'project', projectPath: '/repo' },
+		});
+
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+			arguments: { type: 'default' },
+		});
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+			arguments: { type: 'value', value: '' },
+		});
 	});
 
 	afterEach(() => {
@@ -36,7 +97,11 @@ describe('snippets API contract', () => {
 		);
 		await createSnippet({
 			expectedRevision: 1,
-			snippet: { shortName: 'review', template: snippet.template },
+			snippet: {
+				shortName: 'review',
+				template: snippet.template,
+				defaultArguments: snippet.defaultArguments,
+			},
 		});
 
 		const [url, options] = fetchMock.mock.calls[1];
@@ -44,7 +109,11 @@ describe('snippets API contract', () => {
 		expect(options.method).toBe('POST');
 		expect(JSON.parse(options.body)).toEqual({
 			expectedRevision: 1,
-			snippet: { shortName: 'review', template: snippet.template },
+			snippet: {
+				shortName: 'review',
+				template: snippet.template,
+				defaultArguments: snippet.defaultArguments,
+			},
 		});
 	});
 
@@ -67,7 +136,7 @@ describe('snippets API contract', () => {
 		await expect(
 			expandSnippet({
 				shortName: 'review',
-				arguments: 'the API',
+				arguments: { type: 'value', value: 'the API' },
 				context: { type: 'project', projectPath: '/repo' },
 			}),
 		).rejects.toThrow('Invalid snippet expansion response');
@@ -80,7 +149,7 @@ describe('snippets API contract', () => {
 		const expanding = expandSnippet(
 			{
 				shortName: 'review',
-				arguments: 'the API',
+				arguments: { type: 'value', value: 'the API' },
 				context: { type: 'project', projectPath: '/repo' },
 			},
 			{ signal: controller.signal },

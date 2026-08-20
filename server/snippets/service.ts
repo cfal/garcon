@@ -16,18 +16,12 @@ import {
   type UpdateSnippetRequest,
 } from '../../common/snippets.js';
 import type { IChatRegistry } from '../chats/store.js';
-import {
-  assertRealWithinProjectBase,
-  isProjectBoundaryError,
-} from '../lib/path-boundary.js';
+import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
 
-function projectPathAccessError(
-  error: unknown,
-  projectPath: string,
-): SnippetDomainError | null {
+function projectPathAccessError(error: unknown, projectPath: string): SnippetDomainError | null {
   const code =
     error && typeof error === 'object' && 'code' in error
       ? (error as NodeJS.ErrnoException).code
@@ -167,6 +161,8 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         404,
       );
     }
+    const argumentsText =
+      input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
     const chatId = input.context.type === 'chat' ? input.context.chatId : null;
     if (chatId === null && snippetTemplateUsesChatId(snippet.template)) {
       throw new SnippetDomainError(
@@ -175,12 +171,13 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         422,
       );
     }
-    const { contextProjectPath, resolvedProjectPath } =
-      await this.#resolveProjectPath(input.context);
+    const { contextProjectPath, resolvedProjectPath } = await this.#resolveProjectPath(
+      input.context,
+    );
     let expandedText: string;
     try {
       expandedText = expandSnippetTemplate(snippet.template, {
-        arguments: input.arguments,
+        arguments: argumentsText,
         projectPath: resolvedProjectPath,
         chatId: chatId ?? '',
       });
@@ -213,9 +210,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     if (context.type === 'project') {
       return {
         contextProjectPath: context.projectPath,
-        resolvedProjectPath: await this.deps.projectPaths.resolve(
-          context.projectPath,
-        ),
+        resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath),
       };
     }
     const chat = this.deps.chats.getChat(context.chatId);
@@ -229,18 +224,12 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     }
     return {
       contextProjectPath,
-      resolvedProjectPath: await this.deps.projectPaths.resolve(
-        contextProjectPath,
-      ),
+      resolvedProjectPath: await this.deps.projectPaths.resolve(contextProjectPath),
     };
   }
 
   #validationError(): SnippetDomainError {
-    return new SnippetDomainError(
-      'SNIPPET_VALIDATION_FAILED',
-      'Snippet is invalid',
-      400,
-    );
+    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet is invalid', 400);
   }
 
   #emitInvalidated(reason: SnippetsInvalidationReason): void {
