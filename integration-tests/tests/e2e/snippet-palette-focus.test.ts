@@ -81,11 +81,23 @@ describe('snippet palette focus', () => {
       });
 
       await fixture.page.waitForFunction(
-        () =>
-          [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some((dialog) =>
-            dialog.textContent?.includes('Arguments for /snippet review'),
-          ),
+        (expected) => {
+          const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find(
+            (element) => element.textContent?.includes('Arguments for /snippet review'),
+          );
+          const textarea = [...document.querySelectorAll<HTMLTextAreaElement>('textarea')].find(
+            (element) => element.labels?.[0]?.textContent?.trim() === 'Arguments',
+          );
+          return (
+            Boolean(dialog) &&
+            document.activeElement === textarea &&
+            textarea?.value === expected &&
+            textarea.selectionStart === expected.length &&
+            textarea.selectionEnd === expected.length
+          );
+        },
         { timeout: 20_000 },
+        'staged changes',
       );
       const argumentsField = await fixture.page.evaluate(() => {
         const textarea = [...document.querySelectorAll<HTMLTextAreaElement>('textarea')].find(
@@ -95,11 +107,15 @@ describe('snippet palette focus', () => {
         return {
           focused: document.activeElement === textarea,
           value: textarea.value,
+          selectionStart: textarea.selectionStart,
+          selectionEnd: textarea.selectionEnd,
         };
       });
       expect(argumentsField).toEqual({
         focused: true,
         value: 'staged changes',
+        selectionStart: 'staged changes'.length,
+        selectionEnd: 'staged changes'.length,
       });
       await fixture.page.evaluate(() => {
         const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find(
