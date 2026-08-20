@@ -20,8 +20,45 @@ import {
   type OpenCodeBinaryVerification,
 } from './opencode-process-supervisor.js';
 
-export const LIVE_OPENCODE_MODEL = 'deepseek/deepseek-v4-flash';
 export const LIVE_OPENCODE_THINKING_MODE = 'none';
+
+// Testing credentials are named for the model provider whose quota they spend,
+// so the same secret drives every agent lane that bills that provider.
+export interface LiveOpenCodeProvider {
+  readonly providerId: string;
+  readonly model: string;
+  readonly keyEnv: string;
+  readonly testingKeyEnv: string;
+}
+
+const LIVE_OPENCODE_PROVIDERS: Record<string, LiveOpenCodeProvider> = {
+  deepseek: {
+    providerId: 'deepseek',
+    model: 'deepseek/deepseek-v4-flash',
+    keyEnv: 'DEEPSEEK_API_KEY',
+    testingKeyEnv: 'DEEPSEEK_TESTING_KEY',
+  },
+  openai: {
+    providerId: 'openai',
+    model: 'openai/gpt-5.4-nano',
+    keyEnv: 'OPENAI_API_KEY',
+    testingKeyEnv: 'OPENAI_TESTING_KEY',
+  },
+};
+
+export function liveOpenCodeProvider(): LiveOpenCodeProvider {
+  const requested = process.env.OPENCODE_TESTING_PROVIDER?.trim() || 'deepseek';
+  const provider = LIVE_OPENCODE_PROVIDERS[requested];
+  if (!provider) {
+    throw new Error(
+      `Unsupported OPENCODE_TESTING_PROVIDER "${requested}"; expected one of: ${
+        Object.keys(LIVE_OPENCODE_PROVIDERS).join(', ')
+      }.`,
+    );
+  }
+  const model = process.env.OPENCODE_TESTING_MODEL?.trim();
+  return model ? { ...provider, model } : provider;
+}
 
 const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   ownerId: 'opencode',
@@ -30,21 +67,23 @@ const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
 };
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
-function requiredTestingKey(): string {
-  const key = process.env.OPENCODE_TESTING_KEY?.trim();
+function requiredTestingKey(provider: LiveOpenCodeProvider): string {
+  const key = process.env[provider.testingKeyEnv]?.trim();
   if (!key) {
-    throw new Error('OPENCODE_TESTING_KEY is required for live OpenCode integration tests.');
+    throw new Error(
+      `${provider.testingKeyEnv} is required for live OpenCode integration tests against ${provider.providerId}.`,
+    );
   }
   return key;
 }
 
-function liveOpenCodeConfig(): Record<string, unknown> {
+function liveOpenCodeConfig(provider: LiveOpenCodeProvider): Record<string, unknown> {
   return {
     formatter: false,
     lsp: false,
-    enabled_providers: ['deepseek'],
-    model: LIVE_OPENCODE_MODEL,
-    small_model: LIVE_OPENCODE_MODEL,
+    enabled_providers: [provider.providerId],
+    model: provider.model,
+    small_model: provider.model,
     agent: {
       title: { disable: true },
       summary: { disable: true },
@@ -53,7 +92,8 @@ function liveOpenCodeConfig(): Record<string, unknown> {
 }
 
 export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOptions> {
-  const testingKey = requiredTestingKey();
+  const provider = liveOpenCodeProvider();
+  const testingKey = requiredTestingKey(provider);
   await access(OPENCODE_BINARY, constants.X_OK);
 
   return {
@@ -82,7 +122,7 @@ export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOp
         OPENCODE_DISABLE_EMBEDDED_WEB_UI: '1',
         OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: '1',
         OPENCODE_DISABLE_SHARE: '1',
-        DEEPSEEK_API_KEY: testingKey,
+        [provider.keyEnv]: testingKey,
         npm_config_cache: paths.npmCache,
         GARCON_TEST_OPENCODE_REAL_BINARY: OPENCODE_BINARY,
         GARCON_TEST_OPENCODE_VERIFICATION: paths.verification,
@@ -104,7 +144,7 @@ export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOp
         paths.managedConfig,
         paths.temp,
       ].map((directory) => mkdir(directory, { recursive: true })));
-      await writeFile(paths.config, JSON.stringify(liveOpenCodeConfig(), null, 2), {
+      await writeFile(paths.config, JSON.stringify(liveOpenCodeConfig(provider), null, 2), {
         mode: 0o600,
       });
       await writeOpenCodePluginSeed(paths.globalConfig);
@@ -139,7 +179,7 @@ export function liveOpenCodeStartRequest(input: {
     chatId: input.chatId,
     agentId: 'opencode',
     projectPath: input.projectPath,
-    model: LIVE_OPENCODE_MODEL,
+    model: liveOpenCodeProvider().model,
     permissionMode: 'bypassPermissions',
     thinkingMode: LIVE_OPENCODE_THINKING_MODE,
     agentSettings: OPENCODE_AGENT_SETTINGS,
@@ -159,6 +199,6 @@ export function liveOpenCodeRunRequest(input: {
     permissionMode: 'bypassPermissions',
     thinkingMode: LIVE_OPENCODE_THINKING_MODE,
     agentSettings: OPENCODE_AGENT_SETTINGS,
-    model: LIVE_OPENCODE_MODEL,
+    model: liveOpenCodeProvider().model,
   };
 }
