@@ -61,7 +61,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           if (!anchor) throw new Error('Source transcript is missing the first reply row.');
 
           const forkChatId = fixture.newChatId();
-          await fixture.client.forkChat({
+          await forkChatOnceSettled(fixture, {
             sourceChatId: source.chatId,
             chatId: forkChatId,
             upToOrdinal: anchor.ordinal,
@@ -189,6 +189,28 @@ async function twoTurnChat(
   expect((await fixture.client.waitForTurnTerminal(chatId, second.turnId)).type)
     .toBe('agent-run-finished');
   return { chatId, firstPrompt, firstReply, secondPrompt, secondReply };
+}
+
+// A row the provider has not settled into native history yet refuses with a
+// retryable 409 by contract; the point fork polls that refusal briefly. Any
+// other failure, including an untyped 500, still fails immediately.
+async function forkChatOnceSettled(
+  fixture: IntegrationFixture,
+  request: Parameters<IntegrationFixture['client']['forkChat']>[0],
+): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      await fixture.client.forkChat(request);
+      return;
+    } catch (error) {
+      const unsettled = error instanceof GarconApiError
+        && error.status === 409
+        && (error.body as { errorCode?: string }).errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
+      if (!unsettled || Date.now() >= deadline) throw error;
+    }
+    await Bun.sleep(250);
+  }
 }
 
 async function readRegistryAgentSessionId(
