@@ -3,6 +3,22 @@ import { isRecord } from '@garcon/common/json';
 export interface OpenCodeModelOption {
   value: string;
   label: string;
+  supportsImages?: boolean;
+}
+
+// The server computes capabilities.input from config modalities and the
+// registry, so it is the authoritative image-input signal; older payloads
+// without it fall back to the raw declarations.
+function modelSupportsImages(model: Record<string, unknown>): boolean | undefined {
+  const capabilities = isRecord(model.capabilities) ? model.capabilities : null;
+  const input = capabilities && isRecord(capabilities.input) ? capabilities.input : null;
+  if (input && typeof input.image === 'boolean') return input.image;
+  const modalities = isRecord(model.modalities) ? model.modalities : null;
+  if (modalities && Array.isArray(modalities.input)) {
+    return modalities.input.includes('image');
+  }
+  if (typeof model.attachment === 'boolean') return model.attachment;
+  return undefined;
 }
 
 export function configuredProvidersFromResult(result: any): any[] {
@@ -26,9 +42,11 @@ export function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
     for (const [modelKey, model] of Object.entries(agentModelsObj)) {
       if (!isRecord(model)) continue;
       const modelId = typeof model.id === 'string' ? model.id : modelKey;
+      const supportsImages = modelSupportsImages(model);
       models.push({
         value: `${providerId}/${modelId}`,
         label: `${providerName}: ${typeof model.name === 'string' ? model.name : modelId}`,
+        ...(supportsImages === undefined ? {} : { supportsImages }),
       });
     }
   }

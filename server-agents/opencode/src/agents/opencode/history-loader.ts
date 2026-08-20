@@ -4,6 +4,7 @@ import {
   ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
+  type ChatImage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import path from 'node:path';
@@ -100,6 +101,26 @@ function extractUserTextFromParts(parts: unknown[] | string): string {
     .join('\n');
 }
 
+// Submitted images persist as user file parts with data URLs; the round trip
+// restores them so Reload and fork seeding keep the attachment manifest.
+function extractUserImagesFromParts(parts: unknown[] | string): ChatImage[] {
+  if (!Array.isArray(parts)) return [];
+  return parts
+    .map((part) => asRecord(part))
+    .filter((part) => (
+      part.type === 'file'
+      && typeof part.mime === 'string'
+      && part.mime.startsWith('image/')
+      && typeof part.url === 'string'
+      && part.url.startsWith('data:')
+    ))
+    .map((part) => ({
+      data: part.url as string,
+      name: typeof part.filename === 'string' && part.filename ? part.filename : 'image',
+      mimeType: part.mime as string,
+    }));
+}
+
 function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): boolean {
   return info.summary === true || info.mode === 'compaction' || info.agent === 'compaction';
 }
@@ -125,7 +146,8 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
       }
 
       const text = extractUserTextFromParts(message.parts ?? []);
-      if (!text.trim()) {
+      const hasFileParts = parts.some((part) => part.type === 'file');
+      if (!text.trim() && !hasFileParts) {
         if (parts.some((part) => part.type === 'text' && part.synthetic === true)) {
           overflowCompactionPending = false;
           replayExpectedText = null;
@@ -273,8 +295,13 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
 
     if (info.role === 'user') {
       const text = extractUserTextFromParts(msg.parts || []);
-      if (text?.trim()) {
-        push(new UserMessage(ts, stripResolvedFileMentionContext(text)), info.id);
+      const images = extractUserImagesFromParts(msg.parts || []);
+      if (text?.trim() || images.length > 0) {
+        push(new UserMessage(
+          ts,
+          stripResolvedFileMentionContext(text ?? ''),
+          images.length > 0 ? images : undefined,
+        ), info.id);
       }
       continue;
     }

@@ -432,6 +432,54 @@ describe('OpenCode history loader', () => {
     expect(messages).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
   });
 
+  it('restores submitted images from stored user file parts', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { id: 'msg_img', role: 'user', time: { created: '2026-08-20T00:00:00.000Z' } },
+              parts: [
+                { id: 'prt_text', type: 'text', text: 'describe this' },
+                {
+                  id: 'prt_img',
+                  type: 'file',
+                  mime: 'image/png',
+                  filename: 'screenshot.png',
+                  url: 'data:image/png;base64,aGVsbG8=',
+                },
+                { id: 'prt_doc', type: 'file', mime: 'application/pdf', url: 'data:application/pdf;base64,ZG9j' },
+              ],
+            },
+            {
+              info: { id: 'msg_img_only', role: 'user', time: { created: '2026-08-20T00:00:01.000Z' } },
+              parts: [{
+                id: 'prt_only',
+                type: 'file',
+                mime: 'image/jpeg',
+                url: 'data:image/jpeg;base64,d29ybGQ=',
+              }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      type: 'user-message',
+      content: 'describe this',
+      images: [{ data: 'data:image/png;base64,aGVsbG8=', name: 'screenshot.png', mimeType: 'image/png' }],
+    });
+    expect(messages[1]).toMatchObject({
+      type: 'user-message',
+      content: '',
+      images: [{ data: 'data:image/jpeg;base64,d29ybGQ=', name: 'image', mimeType: 'image/jpeg' }],
+    });
+  });
+
   it('[TLV5-ADOPT.07-OPENCODE-UNIT-02] fails legacy import for a recorded session the provider cannot return', async () => {
     let getResult = { error: { name: 'NotFoundError' } };
     const get = mock(() => Promise.resolve(getResult));

@@ -96,6 +96,55 @@ describe('OpenCodeRuntime model discovery', () => {
     expect(providerList).not.toHaveBeenCalled();
   });
 
+  it('carries each model image capability from server capabilities with raw fallbacks', async () => {
+    const configProviders = mock(() => Promise.resolve({
+      data: {
+        providers: [{
+          id: 'mixed',
+          name: 'Mixed',
+          models: {
+            visual: {
+              id: 'visual',
+              name: 'Visual',
+              capabilities: { input: { text: true, image: true } },
+            },
+            textual: {
+              id: 'textual',
+              name: 'Textual',
+              capabilities: { input: { text: true, image: false } },
+            },
+            declared: {
+              id: 'declared',
+              name: 'Declared',
+              modalities: { input: ['text', 'image'] },
+            },
+            attach: { id: 'attach', name: 'Attach', attachment: true },
+            unknown: { id: 'unknown', name: 'Unknown' },
+          },
+        }],
+      },
+    }));
+    const createInstance = mock(() => Promise.resolve({
+      client: {
+        config: { providers: configProviders },
+        permission: { reply: mock(() => Promise.resolve({})) },
+        provider: { list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })) },
+      },
+      server: { close: mock(() => {}) },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const provider = new OpenCodeRuntime({ createInstance });
+
+    expect(await provider.getModels()).toEqual([
+      { value: 'mixed/visual', label: 'Mixed: Visual', supportsImages: true },
+      { value: 'mixed/textual', label: 'Mixed: Textual', supportsImages: false },
+      { value: 'mixed/declared', label: 'Mixed: Declared', supportsImages: true },
+      { value: 'mixed/attach', label: 'Mixed: Attach', supportsImages: true },
+      { value: 'mixed/unknown', label: 'Mixed: Unknown' },
+    ]);
+  });
+
   it('falls back to provider.list when the SDK has no config.providers method', async () => {
     const providerList = mock(() => Promise.resolve({
       data: {
