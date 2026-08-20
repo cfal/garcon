@@ -114,7 +114,9 @@ jobs:
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
           if [ -d integration-tests/artifacts/server ]; then
-            for value in "$DEEPSEEK_TESTING_KEY" "$CLAUDE_TESTING_BASE_URL" "$CLAUDE_TESTING_MODEL"; do
+            # Only the credential is audited: the base URL and model are public
+            # lane configuration that legitimately appears in diagnostics.
+            for value in "$DEEPSEEK_TESTING_KEY"; do
               echo "::add-mask::$value"
               set +e
               grep --recursive --fixed-strings --files-with-matches \
