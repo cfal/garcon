@@ -261,13 +261,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
         mode: 0o600,
       });
       await writeOpenCodePluginSeed(paths.globalConfig);
-      const shim = join(paths.bin, 'opencode');
-      await writeFile(shim, [
-        '#!/bin/sh',
-        `exec ${shellQuote(process.execPath)} ${shellQuote(SUPERVISOR_MODULE)} "$@"`,
-        '',
-      ].join('\n'), { mode: 0o755 });
-      await chmod(shim, 0o755);
+      await writeOpenCodeSupervisorShim(paths.bin);
       const version = await verifyPinnedBinaryVersion({
         binary: OPENCODE_BINARY,
         env: buildOpenCodeProviderEnvironment(resolveServerEnvironment(directories)),
@@ -278,55 +272,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       } satisfies OpenCodeBinaryVerification);
     },
     async afterGarconStop(directories) {
-      const failures: string[] = [];
-      const deadline = Date.now() + 5_000;
-      let records = await readSupervisorStateRecords(directories);
-      while (Date.now() < deadline) {
-        records = await readSupervisorStateRecords(directories);
-        if (!records.flatMap(({ state }) => processIdentities(state)).some(identityAlive)) break;
-        await Bun.sleep(20);
-      }
-      records = await readSupervisorStateRecords(directories);
-      for (const record of records) {
-        const survivors = processIdentities(record.state).filter(identityAlive);
-        if (survivors.length === 0) continue;
-
-        // Re-reading immediately before signaling prevents an old state snapshot from acting
-        // on a later wrapper generation that reused the same state-file PID.
-        const latest = await readJsonFile<OpenCodeProcessState>(record.path);
-        if (
-          !latest
-          || latest.generationId !== record.state.generationId
-        ) {
-          failures.push(
-            `OpenCode generation ${record.state.generationId} survived without a matching signal-safe record`,
-          );
-          continue;
-        }
-        const signalable = processIdentities(latest).filter(identityAlive);
-        for (const identity of signalable) {
-          try {
-            // The final identity check narrows the unavoidable /proc-to-kill interval and
-            // refuses any PID whose Linux start time no longer matches the test record.
-            if (identityAlive(identity)) process.kill(identity.pid, 'SIGKILL');
-          } catch {
-            // Already gone between the check and the signal.
-          }
-        }
-        const signalDeadline = Date.now() + 1_000;
-        while (Date.now() < signalDeadline && signalable.some(identityAlive)) {
-          await Bun.sleep(10);
-        }
-        const remaining = signalable.filter(identityAlive).map(({ pid }) => pid);
-        failures.push(
-          `OpenCode wrapper ${latest.wrapperPid} (provider ${latest.providerPid}, mode ${latest.mode})`
-          + ` survived Garcon stop; signaled owned identities ${signalable.map(({ pid }) => pid).join(', ')}`,
-          ...remaining.map((pid) => `OpenCode identity ${pid} survived its cleanup SIGKILL`),
-        );
-      }
-      if (failures.length > 0) {
-        throw new Error(`OpenCode process cleanup failed:\n${failures.join('\n')}`);
-      }
+      await terminateOrphanedOpenCodeSupervisors(directories);
       cleanedRoots.add(directories.root);
     },
     extraDiagnostics(directories) {
@@ -380,6 +326,72 @@ export function startScriptedOpenCodeTestEnvironment(options: {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+// Routes every `opencode` invocation through the test-only supervisor so provider
+// processes stay identifiable and sweepable after a hard Garcon stop.
+export async function writeOpenCodeSupervisorShim(binDir: string): Promise<void> {
+  const shim = join(binDir, 'opencode');
+  await writeFile(shim, [
+    '#!/bin/sh',
+    `exec ${shellQuote(process.execPath)} ${shellQuote(SUPERVISOR_MODULE)} "$@"`,
+    '',
+  ].join('\n'), { mode: 0o755 });
+  await chmod(shim, 0o755);
+}
+
+export async function terminateOrphanedOpenCodeSupervisors(
+  directories: IntegrationDirectories,
+): Promise<void> {
+  const failures: string[] = [];
+  const deadline = Date.now() + 5_000;
+  let records = await readSupervisorStateRecords(directories);
+  while (Date.now() < deadline) {
+    records = await readSupervisorStateRecords(directories);
+    if (!records.flatMap(({ state }) => processIdentities(state)).some(identityAlive)) break;
+    await Bun.sleep(20);
+  }
+  records = await readSupervisorStateRecords(directories);
+  for (const record of records) {
+    const survivors = processIdentities(record.state).filter(identityAlive);
+    if (survivors.length === 0) continue;
+
+    // Re-reading immediately before signaling prevents an old state snapshot from acting
+    // on a later wrapper generation that reused the same state-file PID.
+    const latest = await readJsonFile<OpenCodeProcessState>(record.path);
+    if (
+      !latest
+      || latest.generationId !== record.state.generationId
+    ) {
+      failures.push(
+        `OpenCode generation ${record.state.generationId} survived without a matching signal-safe record`,
+      );
+      continue;
+    }
+    const signalable = processIdentities(latest).filter(identityAlive);
+    for (const identity of signalable) {
+      try {
+        // The final identity check narrows the unavoidable /proc-to-kill interval and
+        // refuses any PID whose Linux start time no longer matches the test record.
+        if (identityAlive(identity)) process.kill(identity.pid, 'SIGKILL');
+      } catch {
+        // Already gone between the check and the signal.
+      }
+    }
+    const signalDeadline = Date.now() + 1_000;
+    while (Date.now() < signalDeadline && signalable.some(identityAlive)) {
+      await Bun.sleep(10);
+    }
+    const remaining = signalable.filter(identityAlive).map(({ pid }) => pid);
+    failures.push(
+      `OpenCode wrapper ${latest.wrapperPid} (provider ${latest.providerPid}, mode ${latest.mode})`
+      + ` survived Garcon stop; signaled owned identities ${signalable.map(({ pid }) => pid).join(', ')}`,
+      ...remaining.map((pid) => `OpenCode identity ${pid} survived its cleanup SIGKILL`),
+    );
+  }
+  if (failures.length > 0) {
+    throw new Error(`OpenCode process cleanup failed:\n${failures.join('\n')}`);
+  }
 }
 
 export async function writeOpenCodePluginSeed(globalConfigDir: string): Promise<void> {

@@ -1,7 +1,5 @@
 import { constants } from 'node:fs';
 import { access, mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
   AgentRunCommandRequest,
@@ -9,18 +7,22 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { IntegrationFixtureOptions } from './integration-fixture.js';
 import {
+  OPENCODE_BINARY,
   OPENCODE_VERSION,
   openCodePaths,
+  terminateOrphanedOpenCodeSupervisors,
   writeOpenCodePluginSeed,
+  writeOpenCodeSupervisorShim,
 } from './scripted-opencode.js';
-import { verifyPinnedBinaryVersion } from './opencode-process-supervisor.js';
+import {
+  verifyPinnedBinaryVersion,
+  writeJsonAtomic,
+  type OpenCodeBinaryVerification,
+} from './opencode-process-supervisor.js';
 
 export const LIVE_OPENCODE_MODEL = 'deepseek/deepseek-v4-flash';
 export const LIVE_OPENCODE_THINKING_MODE = 'none';
 
-const OPENCODE_BINARY = fileURLToPath(
-  new URL('../node_modules/.bin/opencode', import.meta.url),
-);
 const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   ownerId: 'opencode',
   schemaVersion: 1,
@@ -82,12 +84,17 @@ export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOp
         OPENCODE_DISABLE_SHARE: '1',
         DEEPSEEK_API_KEY: testingKey,
         npm_config_cache: paths.npmCache,
-        PATH: `${dirname(OPENCODE_BINARY)}:${SYSTEM_PATH}`,
+        GARCON_TEST_OPENCODE_REAL_BINARY: OPENCODE_BINARY,
+        GARCON_TEST_OPENCODE_VERIFICATION: paths.verification,
+        GARCON_TEST_OPENCODE_PROCESS_STATE: paths.processState,
+        PATH: `${paths.bin}:${SYSTEM_PATH}`,
       };
     },
     async prepareWorkspace(directories) {
       const paths = openCodePaths(directories);
       await Promise.all([
+        paths.bin,
+        paths.processState,
         paths.xdgConfig,
         paths.globalConfig,
         paths.xdgData,
@@ -101,7 +108,8 @@ export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOp
         mode: 0o600,
       });
       await writeOpenCodePluginSeed(paths.globalConfig);
-      await verifyPinnedBinaryVersion({
+      await writeOpenCodeSupervisorShim(paths.bin);
+      const version = await verifyPinnedBinaryVersion({
         binary: OPENCODE_BINARY,
         expectedVersion: OPENCODE_VERSION,
         env: {
@@ -109,6 +117,13 @@ export async function liveOpenCodeFixtureOptions(): Promise<IntegrationFixtureOp
           PATH: SYSTEM_PATH,
         },
       });
+      await writeJsonAtomic(paths.verification, {
+        binary: OPENCODE_BINARY,
+        version,
+      } satisfies OpenCodeBinaryVerification);
+    },
+    async afterGarconStop(directories) {
+      await terminateOrphanedOpenCodeSupervisors(directories);
     },
   };
 }

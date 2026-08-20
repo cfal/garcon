@@ -228,20 +228,20 @@ jobs:
   opencode-live:
     name: Live OpenCode conformance
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Check for OpenCode testing key
         id: opencode-key
         shell: bash
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
         run: |
           if [ -n "$OPENCODE_TESTING_KEY" ]; then
             echo "::add-mask::$OPENCODE_TESTING_KEY"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "CODEX_TESTING_KEY is unavailable; skipping live OpenCode tests."
+            echo "OPENCODE_TESTING_KEY is unavailable; skipping live OpenCode tests."
           fi
 
       - name: Check out repository
@@ -267,7 +267,7 @@ jobs:
       - name: Run live OpenCode conformance tests
         if: steps.opencode-key.outputs.available == 'true'
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
         run: bun run test:live:opencode
 
       - name: Verify OpenCode diagnostics contain no testing credential
@@ -275,7 +275,7 @@ jobs:
         if: always() && steps.opencode-key.outputs.available == 'true'
         shell: bash
         env:
-          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          OPENCODE_TESTING_KEY: ${{ secrets.OPENCODE_TESTING_KEY }}
         run: |
           echo "::add-mask::$OPENCODE_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
