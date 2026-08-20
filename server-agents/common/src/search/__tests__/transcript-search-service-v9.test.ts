@@ -673,7 +673,7 @@ describe('transcript search service v9', () => {
     const service = new TranscriptSearchService({
       workspaceDirectory: workspace(),
       logger: logger(records),
-      readerRequestTimeoutMs: 20,
+      readerRequestTimeoutMs: 500,
       workerFactory: interceptingWorkerFactory((reader, event, deliver) => {
         if (reader === 0 && (event.data as { type?: unknown }).type === 'search-result') return;
         deliver(event);
@@ -688,14 +688,12 @@ describe('transcript search service v9', () => {
     await expect(service.search(searchRequest(
       'chat-grace', 'view-grace', 20, 'gracemarker',
     ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-grace' })] });
-    await Bun.sleep(300);
-    expect(service.status().phase).toBe('degraded');
-    await Bun.sleep(1_200);
-    expect(records.some((record) => (
+    await waitFor(() => service.status().phase === 'degraded');
+    await waitFor(() => records.some((record) => (
       (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
-    ))).toBe(true);
+    )));
     await service.close();
-  });
+  }, 10_000);
 
   test('[TLV5-SEARCH.07-SVC-05] deletion sequences bounded maintenance after checkpoint', async () => {
     const requests: string[] = [];
