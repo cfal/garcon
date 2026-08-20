@@ -29,12 +29,13 @@ function stopOpenCodeProcess(proc: ChildProcess): void {
 }
 
 export async function createOpenCodeInstance(input: {
-  port: number;
   signal: AbortSignal;
 }): Promise<OpenCodeInstance> {
   const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
   input.signal.throwIfAborted();
-  const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', `--port=${input.port}`], {
+  // Port 0 delegates allocation to the OS; the resolved port arrives through
+  // the readiness line parsed below, so collisions cannot fail startup.
+  const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', '--port=0'], {
     env: buildOpenCodeServerEnv(process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

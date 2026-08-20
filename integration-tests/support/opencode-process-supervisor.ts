@@ -344,7 +344,9 @@ function parseServeArguments(argv: string[]): { hostname: string; port: number }
     if (argument.startsWith('--hostname=')) hostname = argument.slice('--hostname='.length);
     if (argument.startsWith('--port=')) port = Number(argument.slice('--port='.length));
   }
-  if (!Number.isInteger(port) || port <= 0) {
+  // Port 0 requests an OS-assigned port, matching the production spawn; the
+  // proxy reports the bound port in its synthesized readiness line.
+  if (!Number.isInteger(port) || port < 0) {
     throw new Error(`Supervisor could not parse the requested port from: ${argv.join(' ')}`);
   }
   return { hostname, port };
@@ -627,9 +629,14 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         await shutdownPromise;
         return exitCode;
       }
-      // Garcon parses the readiness line it would have seen from the real server.
+      // Garcon parses the readiness line it would have seen from the real server;
+      // the bound address covers an OS-assigned port when the request was port 0.
+      const boundAddress = frontend!.address();
+      const boundPort = typeof boundAddress === 'object' && boundAddress
+        ? boundAddress.port
+        : serve.port;
       process.stdout.write(
-        `opencode server listening on http://${serve.hostname}:${serve.port}\n`,
+        `opencode server listening on http://${serve.hostname}:${boundPort}\n`,
       );
     }
   } catch (error) {

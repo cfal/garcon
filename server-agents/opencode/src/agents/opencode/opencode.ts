@@ -128,7 +128,6 @@ interface OpenCodeRuntimeOptions {
   shutdownStartupGraceMs?: number;
   now?: () => number;
   createInstance?: (input: {
-    port: number;
     signal: AbortSignal;
   }) => Promise<OpenCodeInstance>;
 }
@@ -145,7 +144,6 @@ interface NormalizedOpenCodeRuntimeOptions {
   now: () => number;
   requiresExecutable: boolean;
   createInstance: (input: {
-    port: number;
     signal: AbortSignal;
   }) => Promise<OpenCodeInstance>;
 }
@@ -572,10 +570,9 @@ export class OpenCodeRuntime {
           throw new Error('opencode executable not found in $PATH');
         }
 
-        const port = 10000 + Math.floor(Math.random() * 50000);
         const result: OpenCodeInstance = await withAbortableTimeout(
           (signal) => this.#instanceCreations.track(
-            () => this.#options.createInstance({ port, signal }),
+            () => this.#options.createInstance({ signal }),
             signal,
           ),
           this.#options.startupTimeoutMs,
