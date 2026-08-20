@@ -289,7 +289,7 @@ LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
 
 The Lightpanda suite reuses the same process fixture and fake provider to exercise the production SPA without graphical screenshot assertions. CI pins and verifies the Lightpanda binary; local runs require `LIGHTPANDA_BIN` to name an executable binary.
 
-Future integration coverage should add credential-backed, non-blocking validation for Claude Code, Codex, Pi, Cursor Agent, OpenCode, Amp, Factory Droid, and other supported agents; real OpenAI, Anthropic, and provider-preset APIs; agent-native transcript, permission, tool, compaction, and subprocess behavior; authentication; partial assistant-token reconnects; and a graphical Chromium/WebKit lane for layout, screenshot, and accessibility rendering checks. External canaries must remain separate from deterministic correctness gates because they are costly and nondeterministic.
+Future integration coverage should add credential-backed, non-blocking validation for Pi, Cursor Agent, Amp, Factory Droid, and other supported agents; broaden the existing Claude Code, Codex, and OpenCode live lanes across real provider APIs; cover agent-native transcript, permission, tool, compaction, and subprocess behavior; authentication; partial assistant-token reconnects; and a graphical Chromium/WebKit lane for layout, screenshot, and accessibility rendering checks. External canaries must remain separate from deterministic correctness gates because they are costly and nondeterministic.
 
 Repository layout:
 

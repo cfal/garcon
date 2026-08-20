@@ -10,9 +10,10 @@
     "test:chromium": "bun ../scripts/run-test-files.js 'tests/chromium/*.test.ts' --max-concurrency=1 --timeout=120000",
     "test:search-gate": "bun test --max-concurrency=1 --timeout=900000 tests/search-gate/transcript-search-v9-scale-gate.test.ts",
     "test:search-endurance": "bun test --max-concurrency=1 --timeout=2400000 tests/search-gate/transcript-search-v9-endurance.test.ts",
-    "test:live": "bun run test:live:claude && bun run test:live:codex",
+    "test:live": "bun run test:live:claude && bun run test:live:codex && bun run test:live:opencode",
     "test:live:claude": "bun test --max-concurrency=1 --timeout=120000 tests/live/claude",
     "test:live:codex": "bun test --max-concurrency=1 --timeout=240000 tests/live/codex",
+    "test:live:opencode": "bun test --max-concurrency=1 --timeout=180000 tests/live/opencode",
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {

@@ -225,6 +225,87 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  opencode-live:
+    name: Live OpenCode conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check for OpenCode testing key
+        id: opencode-key
+        shell: bash
+        env:
+          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+        run: |
+          if [ -n "$OPENCODE_TESTING_KEY" ]; then
+            echo "::add-mask::$OPENCODE_TESTING_KEY"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "CODEX_TESTING_KEY is unavailable; skipping live OpenCode tests."
+          fi
+
+      - name: Check out repository
+        if: steps.opencode-key.outputs.available == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        if: steps.opencode-key.outputs.available == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install server dependencies
+        if: steps.opencode-key.outputs.available == 'true'
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        if: steps.opencode-key.outputs.available == 'true'
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Run live OpenCode conformance tests
+        if: steps.opencode-key.outputs.available == 'true'
+        env:
+          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+        run: bun run test:live:opencode
+
+      - name: Verify OpenCode diagnostics contain no testing credential
+        id: opencode-diagnostics-audit
+        if: always() && steps.opencode-key.outputs.available == 'true'
+        shell: bash
+        env:
+          OPENCODE_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+        run: |
+          echo "::add-mask::$OPENCODE_TESTING_KEY"
+          if [ -d integration-tests/artifacts/server ]; then
+            set +e
+            grep --recursive --fixed-strings --files-with-matches \
+              -- "$OPENCODE_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
+            audit_status=$?
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live OpenCode diagnostics contain the testing credential and will not be uploaded."
+              exit 1
+            fi
+            if [ "$audit_status" -ne 1 ]; then
+              echo "safe=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Live OpenCode diagnostics could not be audited and will not be uploaded."
+              exit 1
+            fi
+          fi
+          echo "safe=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload live OpenCode diagnostics
+        if: failure() && steps.opencode-key.outputs.available == 'true' && steps.opencode-diagnostics-audit.outputs.safe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-live-integration-diagnostics
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
   lightpanda-e2e:
     name: Lightpanda E2E
     runs-on: ubuntu-latest

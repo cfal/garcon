@@ -1013,7 +1013,7 @@ registered cases and gaps promoted by a current release red enter those gates.
 
 ### Live CI Gate
 
-- Credential-backed Claude and Codex smoke coverage.
+- Credential-backed Claude, Codex, and OpenCode smoke coverage.
 - Live tests verify compatibility and required exact messages; they are not the
   primary routing or ordering correctness proof.
 
