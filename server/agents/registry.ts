@@ -5,7 +5,6 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
   AgentTranscriptSourceLocation,
-  AgentTurnRetryStatus,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
@@ -46,11 +45,7 @@ import type { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
-import type {
-  TranscriptCommitEvent,
-  TranscriptLedgerService,
-  TranscriptRetryStatusEvent,
-} from '../ledger/service.js';
+import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
@@ -445,14 +440,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }
   onTranscriptCommitted(listener: (event: TranscriptCommitEvent) => void | Promise<void>): void {
     this.#transcriptListeners.add(listener);
-  }
-
-  onRunRetryStatus(listener: (event: TranscriptRetryStatusEvent) => void): void {
-    this.#ledger.subscribeRunRetryStatus(listener);
-  }
-
-  turnRetryStatus(chatId: string): AgentTurnRetryStatus | null {
-    return this.#ledger.runRetryStatus(chatId);
   }
 
   async currentTranscriptViewId(chatId: string): Promise<string> {

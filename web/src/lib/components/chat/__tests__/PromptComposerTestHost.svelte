@@ -193,7 +193,6 @@
 		isArchived: false,
 		isProcessing: selectedIsProcessing,
 		processingPhase: selectedIsProcessing ? 'running' : null,
-		processingRetry: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		status: selectedStatus,

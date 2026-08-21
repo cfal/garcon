@@ -2,7 +2,7 @@
 // metadata such as status text; per-chat processing state owns tray visibility.
 
 import * as m from '$lib/paraglide/messages.js';
-import type { ChatProcessingPhase, ChatTurnRetryStatus } from '$shared/chat-types';
+import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type TurnStatus =
 	| 'idle'
@@ -26,30 +26,6 @@ export interface LoadingStatusEntry extends LoadingStatus {
 export interface StoppingSnapshot {
 	turnStatus: TurnStatus;
 	loadingStatusStack: LoadingStatusEntry[];
-}
-
-const PROVIDER_RETRY_STATUS_ID = '__provider-retry__';
-
-function providerRetryText(retry: ChatTurnRetryStatus): string {
-	const base = retry.attempt > 0
-		? m.chat_loading_provider_retry({ attempt: retry.attempt, message: retry.message })
-		: m.chat_loading_provider_retry_plain({ message: retry.message });
-	const time = retry.nextAttemptAt ? formatRetryTime(retry.nextAttemptAt) : '';
-	return time ? `${base} · ${m.chat_loading_provider_retry_next({ time })}` : base;
-}
-
-function formatRetryTime(iso: string): string {
-	const date = new Date(iso);
-	if (Number.isNaN(date.getTime())) return '';
-	const sameDay = date.toDateString() === new Date().toDateString();
-	return sameDay
-		? date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-		: date.toLocaleString(undefined, {
-				month: 'short',
-				day: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit',
-			});
 }
 
 export class ConversationLifecycleState {
@@ -154,7 +130,6 @@ export class ConversationLifecycleState {
 	applyProcessingSnapshotPhase(
 		chatId: string,
 		phase: ChatProcessingPhase | null,
-		retry: ChatTurnRetryStatus | null,
 		sentAt: number | null,
 	): void {
 		if (
@@ -164,14 +139,10 @@ export class ConversationLifecycleState {
 			&& sentAt !== null
 			&& sentAt <= this.#stoppingStartedAt
 		) return;
-		this.applyProcessingPhase(chatId, phase, retry);
+		this.applyProcessingPhase(chatId, phase);
 	}
 
-	applyProcessingPhase(
-		chatId: string,
-		phase: ChatProcessingPhase | null,
-		retry: ChatTurnRetryStatus | null,
-	): void {
+	applyProcessingPhase(chatId: string, phase: ChatProcessingPhase | null): void {
 		if (this.currentChatId !== chatId) return;
 		if (phase === null) {
 			this.clearTurnStatus(chatId);
@@ -197,19 +168,5 @@ export class ConversationLifecycleState {
 				can_interrupt: true,
 			});
 		}
-		this.#applyProviderRetry(retry);
-	}
-
-	// Keeps the provider-retry entry on top of the status stack while the
-	// upstream wait lasts; interruption stays available the whole time.
-	#applyProviderRetry(retry: ChatTurnRetryStatus | null): void {
-		this.popLoadingStatus(PROVIDER_RETRY_STATUS_ID);
-		if (!retry) return;
-		this.pushLoadingStatus({
-			id: PROVIDER_RETRY_STATUS_ID,
-			text: providerRetryText(retry),
-			tokens: 0,
-			can_interrupt: true,
-		});
 	}
 }

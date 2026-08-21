@@ -177,7 +177,7 @@ describe('Claude against a scripted model', () => {
       await held.requested;
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running', retry: null }],
+        chats: [{ chatId, phase: 'running' }],
       });
 
       held.release();

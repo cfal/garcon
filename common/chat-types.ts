@@ -30,19 +30,9 @@ export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
 export const CHAT_PROCESSING_PHASES = ['running', 'stopping'] as const;
 export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 
-// Transient detail for a running turn whose provider is waiting out an
-// upstream retry. Presentation metadata beside the processing phase, never a
-// busy-ness signal of its own; it exists only while the phase is non-null.
-export interface ChatTurnRetryStatus {
-  attempt: number;
-  message: string;
-  nextAttemptAt: string | null;
-}
-
 export interface ChatProcessingEntry {
   chatId: string;
   phase: ChatProcessingPhase;
-  retry: ChatTurnRetryStatus | null;
 }
 
 export interface ChatMessageMetadata {

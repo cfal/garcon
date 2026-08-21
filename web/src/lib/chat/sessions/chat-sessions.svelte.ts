@@ -21,11 +21,7 @@ import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
-import type {
-	ChatProcessingEntry,
-	ChatProcessingPhase,
-	ChatTurnRetryStatus,
-} from '$shared/chat-types';
+import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
 import type {
 	ChatOrderBoundary,
 	ReorderChatResponse,
@@ -39,7 +35,6 @@ export interface ChatProcessingTransition {
 	chatId: string;
 	previousPhase: ChatProcessingPhase | null;
 	phase: ChatProcessingPhase | null;
-	retry: ChatTurnRetryStatus | null;
 }
 
 export interface ChatSessionsStoreDeps {
@@ -78,12 +73,7 @@ export interface ChatSessionsPort {
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
 	processingPhase(chatId: string): ChatProcessingPhase | null;
-	processingRetry(chatId: string): ChatTurnRetryStatus | null;
-	applyProcessingEvent(
-		chatId: string,
-		phase: ChatProcessingPhase | null,
-		retry: ChatTurnRetryStatus | null,
-	): ChatProcessingTransition;
+	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
 	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
 }
 
@@ -132,7 +122,6 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 		isArchived: session.isArchived ?? false,
 		isProcessing: session.processingPhase !== null,
 		processingPhase: session.processingPhase,
-		processingRetry: session.processingPhase !== null ? (session.processingRetry ?? null) : null,
 		canReloadFromNativeHistory: session.canReloadFromNativeHistory === true,
 		isUnread: session.isUnread ?? false,
 		status: 'running',
@@ -149,12 +138,6 @@ function arraysEqual(a: string[], b: string[]): boolean {
 		if (a[i] !== b[i]) return false;
 	}
 	return true;
-}
-
-function retryEqual(a: ChatTurnRetryStatus | null, b: ChatTurnRetryStatus | null): boolean {
-	if (a === b) return true;
-	if (!a || !b) return false;
-	return a.attempt === b.attempt && a.message === b.message && a.nextAttemptAt === b.nextAttemptAt;
 }
 
 function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
@@ -180,7 +163,6 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.isArchived === b.isArchived &&
 		a.isProcessing === b.isProcessing &&
 		a.processingPhase === b.processingPhase &&
-		retryEqual(a.processingRetry, b.processingRetry) &&
 		a.canReloadFromNativeHistory === b.canReloadFromNativeHistory &&
 		a.isUnread === b.isUnread &&
 		a.status === b.status &&
@@ -296,8 +278,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#selectionWriteAcked: string | null = null;
 	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
 	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
-	#retrySnapshot: Map<string, ChatTurnRetryStatus> | null = null;
-	readonly #retryOverrides = new Map<string, ChatTurnRetryStatus | null>();
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -525,9 +505,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			const next = toRecord(session);
 			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
 			next.isProcessing = next.processingPhase !== null;
-			next.processingRetry = next.processingPhase !== null
-				? this.#resolveRetry(next.id, next.processingRetry)
-				: null;
 			const prev = this.byId[next.id];
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
@@ -557,8 +534,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			if (serverIdSet.has(chatId)) continue;
 			this.#processingOverrides.delete(chatId);
 			this.#processingSnapshot?.delete(chatId);
-			this.#retryOverrides.delete(chatId);
-			this.#retrySnapshot?.delete(chatId);
 		}
 		const draftOrder: string[] = [];
 		for (const id of this.order) {
@@ -598,7 +573,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			isArchived: false,
 			isProcessing: false,
 			processingPhase: null,
-			processingRetry: null,
 			canReloadFromNativeHistory: false,
 			isUnread: false,
 			status: 'draft',
@@ -644,9 +618,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
-		next.processingRetry = next.processingPhase !== null
-			? this.#resolveRetry(entry.id, next.processingRetry)
-			: null;
 		const nextById = { ...this.byId, [entry.id]: next };
 		const nextOrder = insertServerEntry(this.order, nextById, entry.id, entry.orderGroup, previous);
 		this.byId = nextById;
@@ -661,8 +632,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	removeChat(chatId: string): void {
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
-		this.#retryOverrides.delete(chatId);
-		this.#retrySnapshot?.delete(chatId);
 		removeLocalStorageItem(chatExecutionDraftStorageKey(chatId));
 		if (!this.byId[chatId]) return;
 
@@ -744,48 +713,29 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		return this.#resolveProcessing(chatId, this.byId[chatId]?.processingPhase ?? null);
 	}
 
-	processingRetry(chatId: string): ChatTurnRetryStatus | null {
-		if (this.processingPhase(chatId) === null) return null;
-		return this.#resolveRetry(chatId, this.byId[chatId]?.processingRetry ?? null);
-	}
-
 	/** Applies a WebSocket-authoritative processing event for one chat. */
 	applyProcessingEvent(
 		chatId: string,
 		phase: ChatProcessingPhase | null,
-		retry: ChatTurnRetryStatus | null,
 	): ChatProcessingTransition {
 		const previousPhase = this.processingPhase(chatId);
 		this.#processingOverrides.set(chatId, phase);
-		this.#retryOverrides.set(chatId, phase !== null ? retry : null);
 		const chat = this.byId[chatId];
-		if (!chat) return { chatId, previousPhase, phase, retry };
+		if (!chat) return { chatId, previousPhase, phase };
 
-		if (
-			chat.processingPhase !== phase ||
-			chat.isProcessing !== (phase !== null) ||
-			!retryEqual(chat.processingRetry, retry)
-		) {
+		if (chat.processingPhase !== phase || chat.isProcessing !== (phase !== null)) {
 			this.byId = {
 				...this.byId,
-				[chatId]: {
-					...chat,
-					isProcessing: phase !== null,
-					processingPhase: phase,
-					processingRetry: retry,
-				},
+				[chatId]: { ...chat, isProcessing: phase !== null, processingPhase: phase },
 			};
 		}
-		return { chatId, previousPhase, phase, retry };
+		return { chatId, previousPhase, phase };
 	}
 
 	/** Replaces processing state from a correlated snapshot. Later WebSocket
 	 *  events override this baseline; REST list responses never do. */
 	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[] {
 		const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
-		const retrySnapshot = new Map(
-			entries.flatMap((entry) => (entry.retry ? [[entry.chatId, entry.retry] as const] : [])),
-		);
 		const chatIds = new Set([
 			...Object.keys(this.byId),
 			...(this.#processingSnapshot?.keys() ?? []),
@@ -795,32 +745,18 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const transitions = [...chatIds].map((chatId) => ({
 			chatId,
 			previousPhase: this.processingPhase(chatId),
-			previousRetry: this.processingRetry(chatId),
 			phase: snapshot.get(chatId) ?? null,
-			retry: retrySnapshot.get(chatId) ?? null,
 		}));
 		this.#processingSnapshot = snapshot;
 		this.#processingOverrides.clear();
-		this.#retrySnapshot = retrySnapshot;
-		this.#retryOverrides.clear();
 
 		let changed = false;
 		const nextById = { ...this.byId };
 
 		for (const [id, record] of Object.entries(nextById)) {
 			const phase = snapshot.get(id) ?? null;
-			const retry = retrySnapshot.get(id) ?? null;
-			if (
-				record.processingPhase !== phase ||
-				record.isProcessing !== (phase !== null) ||
-				!retryEqual(record.processingRetry, retry)
-			) {
-				nextById[id] = {
-					...record,
-					isProcessing: phase !== null,
-					processingPhase: phase,
-					processingRetry: retry,
-				};
+			if (record.processingPhase !== phase || record.isProcessing !== (phase !== null)) {
+				nextById[id] = { ...record, isProcessing: phase !== null, processingPhase: phase };
 				changed = true;
 			}
 		}
@@ -828,13 +764,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (changed) {
 			this.byId = nextById;
 		}
-		return transitions
-			.filter(
-				(transition) =>
-					transition.previousPhase !== transition.phase ||
-					!retryEqual(transition.previousRetry, transition.retry),
-			)
-			.map(({ chatId, previousPhase, phase, retry }) => ({ chatId, previousPhase, phase, retry }));
+		return transitions.filter((transition) => transition.previousPhase !== transition.phase);
 	}
 
 	#resolveProcessing(
@@ -844,15 +774,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const override = this.#processingOverrides.get(chatId);
 		if (override !== undefined || this.#processingOverrides.has(chatId)) return override ?? null;
 		if (this.#processingSnapshot) return this.#processingSnapshot.get(chatId) ?? null;
-		return restValue;
-	}
-
-	#resolveRetry(
-		chatId: string,
-		restValue: ChatTurnRetryStatus | null,
-	): ChatTurnRetryStatus | null {
-		if (this.#retryOverrides.has(chatId)) return this.#retryOverrides.get(chatId) ?? null;
-		if (this.#retrySnapshot) return this.#retrySnapshot.get(chatId) ?? null;
 		return restValue;
 	}
 }

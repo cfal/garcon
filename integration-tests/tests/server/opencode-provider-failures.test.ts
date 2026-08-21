@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ChatProcessingUpdatedMessage, ServerWsMessage } from '../../../common/ws-events.js';
+import type { ServerWsMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -251,18 +251,6 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         projectPath: fixture.dirs.project,
         command: prompt,
       }));
-      // The upstream retry wait is surfaced as transient processing detail
-      // instead of dead air, and it clears once the turn recovers.
-      const retryStatus = await fixture.client.waitForEvent(
-        (event): event is ChatProcessingUpdatedMessage =>
-          event.type === 'chat-processing-updated'
-          && event.chatId === chatId
-          && event.retry !== null,
-        'processing retry detail',
-        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-      );
-      expect(retryStatus.phase).toBe('running');
-      expect(retryStatus.retry?.message).toBeTruthy();
       await waitForVisibleResponse({
         fixture,
         chatId,
@@ -270,11 +258,6 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         marker: reply,
         afterIndex: cursor,
       });
-      const settled = await fixture.client.waitForProcessing(chatId, false, {
-        afterIndex: cursor,
-        timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      });
-      expect(settled.retry).toBeNull();
       // Real OpenCode retried the retryable 500 exactly once before succeeding.
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
 

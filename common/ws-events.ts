@@ -15,7 +15,6 @@ import {
   CHAT_PROCESSING_PHASES,
   type ChatProcessingEntry,
   type ChatProcessingPhase,
-  type ChatTurnRetryStatus,
   type ChatStopIntent,
   type ChatStopOutcome,
 } from './chat-types';
@@ -168,7 +167,6 @@ export class ChatProcessingUpdatedMessage {
   constructor(
     public chatId: string,
     public phase: ChatProcessingPhase | null,
-    public retry: ChatTurnRetryStatus | null = null,
   ) {}
 }
 
@@ -421,19 +419,6 @@ function reconnectControlResults(value: unknown): ReconnectControlResult[] | nul
   return results;
 }
 
-// Returns null for an absent advisory and undefined for a malformed one so
-// callers can reject drifted payloads instead of silently dropping the field.
-function chatTurnRetryStatus(value: unknown): ChatTurnRetryStatus | null | undefined {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const retry = value as Record<string, unknown>;
-  const message = requiredStr(retry.message);
-  if (!message) return undefined;
-  if (typeof retry.attempt !== 'number' || !Number.isFinite(retry.attempt)) return undefined;
-  if (retry.nextAttemptAt !== null && typeof retry.nextAttemptAt !== 'string') return undefined;
-  return { attempt: retry.attempt, message, nextAttemptAt: retry.nextAttemptAt };
-}
-
 function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotResult | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
@@ -448,10 +433,9 @@ function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotRes
     const entry = valueEntry as Record<string, unknown>;
     const chatId = requiredStr(entry.chatId);
     const phase = CHAT_PROCESSING_PHASES.find((valuePhase) => valuePhase === entry.phase);
-    const retry = chatTurnRetryStatus(entry.retry);
-    if (!chatId || !phase || retry === undefined || seen.has(chatId)) return null;
+    if (!chatId || !phase || seen.has(chatId)) return null;
     seen.add(chatId);
-    chats.push({ chatId, phase, retry });
+    chats.push({ chatId, phase });
   }
 
   return { outcome: 'snapshot', chats };
@@ -689,9 +673,8 @@ export function parseServerWsMessage(
       const phase = data.phase === null
         ? null
         : CHAT_PROCESSING_PHASES.find((entry) => entry === data.phase);
-      const retry = chatTurnRetryStatus(data.retry);
-      return chatId && phase !== undefined && retry !== undefined
-        ? new ChatProcessingUpdatedMessage(chatId, phase, retry)
+      return chatId && phase !== undefined
+        ? new ChatProcessingUpdatedMessage(chatId, phase)
         : null;
     }
     case 'chat-execution-control-updated': {

@@ -10,7 +10,7 @@ import {
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
-import type { ChatProcessingPhase, ChatTurnRetryStatus } from './chat-types.js';
+import type { ChatProcessingPhase } from './chat-types.js';
 import {
   isRelationallyValidBoundedTranscriptPage,
   isRelationallyValidNewestTranscriptPage,
@@ -82,7 +82,6 @@ export interface ChatSnapshotResponse {
   messageLimit: number;
   chat: ChatSnapshotChat;
   processingPhase: ChatProcessingPhase | null;
-  processingRetry: ChatTurnRetryStatus | null;
   control: ChatExecutionControlState;
   transientFeed: ChatTransientFeedSnapshot;
   transcript: ChatSnapshotTranscript;
@@ -105,7 +104,6 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
     : raw.processingPhase === 'running' || raw.processingPhase === 'stopping'
       ? raw.processingPhase
       : fail('processingPhase is invalid');
-  const processingRetry = parseProcessingRetry(raw.processingRetry);
   const control = parseChatExecutionControlState(raw.control);
   if (!control) fail('control is invalid');
   const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed);
@@ -122,26 +120,10 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
     messageLimit,
     chat,
     processingPhase,
-    processingRetry,
     control,
     transientFeed,
     transcript,
   };
-}
-
-function parseProcessingRetry(value: unknown): ChatTurnRetryStatus | null {
-  if (value === undefined || value === null) return null;
-  const raw = record(value, 'processingRetry');
-  if (typeof raw.attempt !== 'number' || !Number.isFinite(raw.attempt)) {
-    fail('processingRetry.attempt is invalid');
-  }
-  if (typeof raw.message !== 'string' || !raw.message) {
-    fail('processingRetry.message is invalid');
-  }
-  if (raw.nextAttemptAt !== null && typeof raw.nextAttemptAt !== 'string') {
-    fail('processingRetry.nextAttemptAt is invalid');
-  }
-  return { attempt: raw.attempt, message: raw.message, nextAttemptAt: raw.nextAttemptAt };
 }
 
 function parseChat(value: unknown): ChatSnapshotChat {

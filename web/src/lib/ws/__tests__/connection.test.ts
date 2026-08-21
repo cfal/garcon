@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GARCON_WS_AUTH_PROTOCOL_PREFIX, GARCON_WS_PROTOCOL } from '$shared/ws-auth';
-import type {
-	ChatProcessingEntry,
-	ChatProcessingPhase,
-	ChatTurnRetryStatus,
-} from '$shared/chat-types';
+import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte';
 import { ChatProcessingReconciler } from '../chat-processing-reconciler.svelte';
 import { WsConnection } from '../connection.svelte';
@@ -69,22 +65,15 @@ function processingHarness() {
 	const phases = new Map<string, ChatProcessingPhase>();
 	const order: string[] = [];
 	const sessions = {
-		applyProcessingEvent(
-			chatId: string,
-			phase: ChatProcessingPhase | null,
-			retry: ChatTurnRetryStatus | null,
-		) {
+		applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null) {
 			const previousPhase = phases.get(chatId) ?? null;
 			if (phase === null) phases.delete(chatId);
 			else phases.set(chatId, phase);
 			order.push(`event:${String(phase)}`);
-			return { chatId, previousPhase, phase, retry };
+			return { chatId, previousPhase, phase };
 		},
 		processingPhase(chatId: string) {
 			return phases.get(chatId) ?? null;
-		},
-		processingRetry() {
-			return null;
 		},
 		reconcileProcessing(entries: readonly ChatProcessingEntry[]) {
 			const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
@@ -94,7 +83,6 @@ function processingHarness() {
 					chatId,
 					previousPhase: phases.get(chatId) ?? null,
 					phase: snapshot.get(chatId) ?? null,
-					retry: null,
 				}))
 				.filter((transition) => transition.previousPhase !== transition.phase);
 			phases.clear();
@@ -104,7 +92,7 @@ function processingHarness() {
 		},
 	} satisfies Pick<
 		ChatSessionsPort,
-		'applyProcessingEvent' | 'processingPhase' | 'processingRetry' | 'reconcileProcessing'
+		'applyProcessingEvent' | 'processingPhase' | 'reconcileProcessing'
 	>;
 	return { sessions, order, phase: (chatId: string) => phases.get(chatId) ?? null };
 }
@@ -385,7 +373,7 @@ describe('WsConnection', () => {
 
 		await expect(probe).resolves.toEqual({
 			outcome: 'snapshot',
-			chats: [{ chatId: 'chat-1', phase: 'stopping', retry: null }],
+			chats: [{ chatId: 'chat-1', phase: 'stopping' }],
 		});
 		expect(order).toEqual(['consumer:stop-probe', 'resolved']);
 		connection.disconnect();

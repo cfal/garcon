@@ -137,9 +137,7 @@
 				>
 					{activeSpinners[animationPhase]}
 				</span>
-				<span class="truncate text-sm font-medium text-foreground" title={statusText}
-					>{statusText}...</span
-				>
+				<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
 			</div>
 
 			{#if quickCommitVisible || (canInterrupt && onAbort)}

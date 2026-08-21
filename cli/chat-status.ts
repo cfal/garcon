@@ -48,23 +48,12 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
   const lines = [
     `chat id: ${snapshot.chat.id}`,
     `status: ${snapshot.processingPhase ?? 'idle'}`,
-  ];
-  if (snapshot.processingRetry !== null) {
-    const { attempt, message, nextAttemptAt } = snapshot.processingRetry;
-    lines.push(
-      'provider retry: '
-        + (attempt > 0 ? `attempt ${attempt}, ` : '')
-        + message
-        + (nextAttemptAt !== null ? ` (next attempt ${nextAttemptAt})` : ''),
-    );
-  }
-  lines.push(
     `observed at: ${snapshot.observedAt}`,
     `title: ${snapshot.chat.title}`,
     `agent: ${snapshot.chat.agentId}`,
     `ownership epoch: ${snapshot.chat.agentOwnershipEpoch}`,
     `carryover revision: ${snapshot.chat.carryOverRevision}`,
-  );
+  ];
   if (snapshot.chat.model !== null) lines.push(`model: ${snapshot.chat.model}`);
   if (snapshot.chat.apiProviderId !== null) {
     lines.push(`provider: ${snapshot.chat.apiProviderId}`);

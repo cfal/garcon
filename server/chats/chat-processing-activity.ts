@@ -1,13 +1,11 @@
 import type {
   ChatProcessingEntry,
   ChatProcessingPhase,
-  ChatTurnRetryStatus,
 } from '../../common/chat-types.js';
 
 interface RunningChatSource {
   isChatRunning(chatId: string): boolean;
   getRunningChatIdsSnapshot(): string[];
-  turnRetryStatus(chatId: string): ChatTurnRetryStatus | null;
 }
 
 interface TurnReservationSource {
@@ -33,13 +31,6 @@ export class ChatProcessingActivity {
     return this.reservations.isChatStopInFlight(chatId) ? 'stopping' : 'running';
   }
 
-  // Presentation detail for the phase, never a busy-ness signal: a retry
-  // status exists only while the same projection reports a running turn.
-  retry(chatId: string): ChatTurnRetryStatus | null {
-    if (this.phase(chatId) === null) return null;
-    return this.running.turnRetryStatus(chatId);
-  }
-
   snapshot(): ChatProcessingEntry[] {
     const chatIds = new Set([
       ...this.running.getRunningChatIdsSnapshot(),
@@ -49,7 +40,7 @@ export class ChatProcessingActivity {
       .sort()
       .flatMap((chatId) => {
         const phase = this.phase(chatId);
-        return phase ? [{ chatId, phase, retry: this.retry(chatId) }] : [];
+        return phase ? [{ chatId, phase }] : [];
       });
   }
 }

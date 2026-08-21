@@ -26,7 +26,6 @@ function createFixture(overrides = {}) {
     onSessionCreated: mock((callback) => { agent.session = callback; }),
     onFinished: mock((callback) => { agent.finished = callback; }),
     onFailed: mock((callback) => { agent.failed = callback; }),
-    onRunRetryStatus: mock((callback) => { agent.retry = callback; }),
     resendCandidates: mock(() => []),
     settleTurn: mock(() => undefined),
     discardTurn: mock(() => undefined),
@@ -84,7 +83,6 @@ function createFixture(overrides = {}) {
   };
   const processing = {
     phase: mock(() => null),
-    retry: mock(() => null),
     ...overrides.processing,
   };
   const wiring = wireServerEvents({
@@ -389,20 +387,6 @@ describe('server event wiring', () => {
       'chat-session-created',
     ]);
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
-  });
-
-  it('broadcasts the processing phase with retry detail when a run retry status changes', async () => {
-    const retry = { attempt: 1, message: 'Provider is overloaded', nextAttemptAt: null };
-    const fixture = createFixture({
-      processing: { phase: mock(() => 'running'), retry: mock(() => retry) },
-    });
-
-    fixture.agent.retry({ chatId: 'chat-1', runId: 'run-1', retry });
-    await fixture.wiring.waitForIdle();
-
-    expect(fixture.published).toEqual([
-      { type: 'chat-processing-updated', chatId: 'chat-1', phase: 'running', retry },
-    ]);
   });
 
   it('publishes a Stop outcome before the resulting processing phase', async () => {

@@ -302,7 +302,7 @@ export function wireServerEvents({
     queueErrorMessage: string,
     options: TurnEventMetadata,
   ): Promise<void> {
-    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId), processing.retry(chatId)));
+    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     if (consumeProcessFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
@@ -362,18 +362,14 @@ export function wireServerEvents({
     // Captures the phase before scheduling so rapid stop and terminal transitions
     // preserve the intermediate stopping state.
     const phase = processing.phase(chatId);
-    const retry = processing.retry(chatId);
     scheduleChatTask(chatId, 'server-events: processing broadcast failed', () => {
       if (!chatExists(chatId)) return;
-      broadcast(new ChatProcessingUpdatedMessage(chatId, phase, retry));
+      broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
     });
   };
   queue.onProcessingInvalidated((chatId) => {
     if (inlineTerminalReleases.has(chatId)) return;
     publishProcessing(chatId);
-  });
-  agentRegistry.onRunRetryStatus((event) => {
-    publishProcessing(event.chatId);
   });
   const broadcastSessionStopped = (
     chatId: string,
@@ -397,7 +393,7 @@ export function wireServerEvents({
       inlineTerminalReleases.delete(chatId);
     }
     if (chatExists(chatId)) {
-      broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId), processing.retry(chatId)));
+      broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     }
   };
   agentRegistry.onSessionCreated((chatId) => {

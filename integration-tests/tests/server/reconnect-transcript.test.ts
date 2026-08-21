@@ -277,7 +277,7 @@ describe('reconnect and transcript stability', () => {
       const state = await fixture.client.reconnectState([chatId]);
       expect(state.processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running', retry: null }],
+        chats: [{ chatId, phase: 'running' }],
       });
       expect(state.controlResults).toMatchObject([{ chatId, outcome: 'snapshot' }]);
 

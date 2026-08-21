@@ -13,9 +13,6 @@ export interface OpenCodeTurnContext {
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;
-  // Set while an upstream retry status is surfaced so stale busy or idle
-  // frames from a previous turn cannot publish spurious clears.
-  providerRetryActive: boolean;
   providerContinuationMessageIds: Set<string>;
   recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;
@@ -63,7 +60,6 @@ export function createOpenCodeTurnContext(
     operation,
     providerMessageId: null,
     providerPromptPartId: createOpenCodePromptPartId(),
-    providerRetryActive: false,
     providerContinuationMessageIds: new Set(),
     recentEventIds: new Set(),
     providerSteeringPartIds: new Set(),

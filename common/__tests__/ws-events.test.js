@@ -1,70 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
-  ChatProcessingUpdatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
-
-describe('parseServerWsMessage chat-processing-updated', () => {
-  const retry = { attempt: 3, message: 'Provider is overloaded', nextAttemptAt: '2026-08-21T20:23:00.000Z' };
-
-  it('parses a phase without retry detail', () => {
-    const parsed = parseServerWsMessage({
-      type: 'chat-processing-updated',
-      chatId: 'chat-1',
-      phase: 'running',
-    });
-
-    expect(parsed).toBeInstanceOf(ChatProcessingUpdatedMessage);
-    expect(parsed).toMatchObject({ chatId: 'chat-1', phase: 'running', retry: null });
-  });
-
-  it('parses a phase with retry detail', () => {
-    const parsed = parseServerWsMessage({
-      type: 'chat-processing-updated',
-      chatId: 'chat-1',
-      phase: 'running',
-      retry,
-    });
-
-    expect(parsed).toMatchObject({ chatId: 'chat-1', phase: 'running', retry });
-  });
-
-  it('rejects a malformed retry detail', () => {
-    expect(parseServerWsMessage({
-      type: 'chat-processing-updated',
-      chatId: 'chat-1',
-      phase: 'running',
-      retry: { attempt: 'first', message: 'x', nextAttemptAt: null },
-    })).toBeNull();
-  });
-
-  it('parses snapshot entries carrying retry detail', () => {
-    const parsed = parseServerWsMessage({
-      type: 'ws-pong',
-      clientRequestId: 'probe-1',
-      sentAt: 5,
-      serverTime: '2026-08-21T00:00:00.000Z',
-      serverInstanceId: 'server-1',
-      processing: {
-        outcome: 'snapshot',
-        chats: [
-          { chatId: 'chat-1', phase: 'running', retry },
-          { chatId: 'chat-2', phase: 'stopping' },
-        ],
-      },
-    });
-
-    expect(parsed?.processing).toEqual({
-      outcome: 'snapshot',
-      chats: [
-        { chatId: 'chat-1', phase: 'running', retry },
-        { chatId: 'chat-2', phase: 'stopping', retry: null },
-      ],
-    });
-  });
-});
 
 describe('parseServerWsMessage chat-operational-notice', () => {
   it('parses a complete notice payload', () => {

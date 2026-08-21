@@ -4,7 +4,7 @@ import type {
 	ChatProcessingTransition,
 	ChatSessionsPort,
 } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ChatProcessingPhase, ChatTurnRetryStatus } from '$shared/chat-types';
+import type { ChatProcessingPhase } from '$shared/chat-types';
 import type {
 	ChatProcessingSnapshotSource,
 	WsMessageConsumer,
@@ -40,18 +40,14 @@ function makeSessions(
 	initialPhases: ReadonlyArray<readonly [string, ChatProcessingPhase]> = [],
 ) {
 	const phases = new Map<string, ChatProcessingPhase>(initialPhases);
-	const retries = new Map<string, ChatTurnRetryStatus>();
 	return {
-		applyProcessingEvent: vi.fn((chatId, phase, retry) => {
+		applyProcessingEvent: vi.fn((chatId, phase) => {
 			const previousPhase = phases.get(chatId) ?? null;
 			if (phase === null) phases.delete(chatId);
 			else phases.set(chatId, phase);
-			if (phase !== null && retry) retries.set(chatId, retry);
-			else retries.delete(chatId);
-			return { chatId, previousPhase, phase, retry };
+			return { chatId, previousPhase, phase };
 		}),
 		processingPhase: vi.fn((chatId) => phases.get(chatId) ?? null),
-		processingRetry: vi.fn((chatId) => retries.get(chatId) ?? null),
 		reconcileProcessing: vi.fn(() => {
 			for (const transition of transitions) {
 				if (transition.phase === null) phases.delete(transition.chatId);
@@ -61,7 +57,7 @@ function makeSessions(
 		}),
 	} satisfies Pick<
 		ChatSessionsPort,
-		'applyProcessingEvent' | 'processingPhase' | 'processingRetry' | 'reconcileProcessing'
+		'applyProcessingEvent' | 'processingPhase' | 'reconcileProcessing'
 	>;
 }
 
@@ -108,8 +104,8 @@ describe('ChatProcessingReconciler', () => {
 				phase: 'stopping',
 			}),
 		).toBe(true);
-		expect(sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-1', 'stopping', null);
-		expect(presentation.applyProcessingPhase).toHaveBeenCalledWith('chat-1', 'stopping', null);
+		expect(sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-1', 'stopping');
+		expect(presentation.applyProcessingPhase).toHaveBeenCalledWith('chat-1', 'stopping');
 		expect(sessions.applyProcessingEvent.mock.invocationCallOrder[0]).toBeLessThan(
 			presentation.applyProcessingPhase.mock.invocationCallOrder[0],
 		);
@@ -118,8 +114,8 @@ describe('ChatProcessingReconciler', () => {
 	it('applies snapshot transitions only to the matching presentation', () => {
 		const socket = makeConnection();
 		const transitions = [
-			{ chatId: 'chat-1', previousPhase: 'stopping', phase: null, retry: null },
-			{ chatId: 'chat-2', previousPhase: null, phase: 'running', retry: null },
+			{ chatId: 'chat-1', previousPhase: 'stopping', phase: null },
+			{ chatId: 'chat-2', previousPhase: null, phase: 'running' },
 		] satisfies ChatProcessingTransition[];
 		const sessions = makeSessions(transitions);
 		const reconciler = new ChatProcessingReconciler(socket.connection, sessions);
@@ -130,10 +126,10 @@ describe('ChatProcessingReconciler', () => {
 			expect(socket.consume(pong([{ chatId: 'chat-2', phase: 'running' }]))).toBe(false);
 
 			expect(sessions.reconcileProcessing).toHaveBeenCalledWith([
-				{ chatId: 'chat-2', phase: 'running', retry: null },
+				{ chatId: 'chat-2', phase: 'running' },
 			]);
 			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledOnce();
-			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', null, null, 1);
+			expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', null, 1);
 			expect(presentation.clearTurnPermissionRequests).toHaveBeenCalledOnce();
 			expect(info).toHaveBeenCalledWith(
 				'[ChatProcessingReconciler] Processing snapshot repaired state',
@@ -159,7 +155,7 @@ describe('ChatProcessingReconciler', () => {
 		socket.consume(pong([{ chatId: 'chat-1', phase: 'running' }]));
 
 		expect(sessions.reconcileProcessing).toHaveReturnedWith([]);
-		expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', 'running', null, 1);
+		expect(presentation.applyProcessingSnapshotPhase).toHaveBeenCalledWith('chat-1', 'running', 1);
 		expect(presentation.clearTurnPermissionRequests).not.toHaveBeenCalled();
 	});
 
@@ -176,10 +172,9 @@ describe('ChatProcessingReconciler', () => {
 				get currentChatId() {
 					return lifecycle.currentChatId;
 				},
-				applyProcessingPhase: (chatId, phase, retry) =>
-					lifecycle.applyProcessingPhase(chatId, phase, retry),
-				applyProcessingSnapshotPhase: (chatId, phase, retry, sentAt) =>
-					lifecycle.applyProcessingSnapshotPhase(chatId, phase, retry, sentAt),
+				applyProcessingPhase: (chatId, phase) => lifecycle.applyProcessingPhase(chatId, phase),
+				applyProcessingSnapshotPhase: (chatId, phase, sentAt) =>
+					lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt),
 				clearTurnPermissionRequests: vi.fn(),
 			});
 
@@ -236,7 +231,7 @@ describe('ChatProcessingReconciler', () => {
 		(source) => {
 			const socket = makeConnection();
 			const sessions = makeSessions([
-				{ chatId: 'private-chat-id', previousPhase: 'running', phase: null, retry: null },
+				{ chatId: 'private-chat-id', previousPhase: 'running', phase: null },
 			]);
 			new ChatProcessingReconciler(socket.connection, sessions);
 			const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
@@ -269,10 +264,9 @@ describe('ChatProcessingReconciler', () => {
 			get currentChatId() {
 				return lifecycle.currentChatId;
 			},
-			applyProcessingPhase: (chatId, phase, retry) =>
-				lifecycle.applyProcessingPhase(chatId, phase, retry),
-			applyProcessingSnapshotPhase: (chatId, phase, retry, sentAt) =>
-				lifecycle.applyProcessingSnapshotPhase(chatId, phase, retry, sentAt),
+			applyProcessingPhase: (chatId, phase) => lifecycle.applyProcessingPhase(chatId, phase),
+			applyProcessingSnapshotPhase: (chatId, phase, sentAt) =>
+				lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt),
 			clearTurnPermissionRequests: vi.fn(),
 		});
 

@@ -12,9 +12,7 @@ import {
   isOpenCodeCompactionContinuationPart,
   isOpenCodeCompactionControlPart,
   openCodeAssistantTerminal,
-  openCodeSessionStatusChange,
   type OpenCodeAssistantTerminal,
-  type OpenCodeSessionStatusChange,
   type SSEEvent,
 } from './sse-events.js';
 import {
@@ -753,14 +751,6 @@ export class OpenCodeRuntime {
       return;
     }
 
-    // Session status has no operation identity, so it is adopted at the session
-    // scope before route resolution would drop it.
-    const statusChange = openCodeSessionStatusChange(event);
-    if (statusChange) {
-      this.#handleSessionStatusChange(sessionId, statusChange);
-      return;
-    }
-
     // Marked parts always pass through current-turn adoption so a foreign named ID cannot
     // bypass collision refusal through ordinary named resolution.
     const isCompactionPart = isOpenCodeCompactionControlPart(event)
@@ -814,20 +804,6 @@ export class OpenCodeRuntime {
     if (belongs) this.#dispatchOpenCodeEvent(event, route);
     const terminal = belongs ? openCodeAssistantTerminal(event) : null;
     if (terminal) route.turn.assistantTerminals.set(terminal.messageId, terminal);
-  }
-
-  #handleSessionStatusChange(sessionId: string, change: OpenCodeSessionStatusChange): void {
-    const session = this.#sessions.get(sessionId);
-    if (!session || session.status !== 'running') return;
-    if (change.kind === 'clear' && !session.turn.providerRetryActive) return;
-    session.turn.providerRetryActive = change.kind === 'retry';
-    this.#publish(sessionId, session.turn.operation, {
-      type: 'retry-status',
-      runId: session.turn.operation.runId,
-      retry: change.kind === 'retry'
-        ? { attempt: change.attempt, message: change.message, nextAttemptAt: change.nextAttemptAt }
-        : null,
-    });
   }
 
   #handlePermissionEvent(

@@ -65,7 +65,6 @@ export function createChatSnapshotRoutes(deps: ChatSnapshotRouteDeps): RouteMap 
             messageLimit,
             chat: summary.chat,
             processingPhase: summary.processingPhase,
-            processingRetry: summary.processingRetry,
             control,
             transientFeed,
             transcript,

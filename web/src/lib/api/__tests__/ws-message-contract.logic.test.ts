@@ -591,8 +591,8 @@ describe('parseServerWsMessage', () => {
 		expect((snapshot as ReconnectStateMessage).processing).toEqual({
 			outcome: 'snapshot',
 			chats: [
-				{ chatId: 'chat-b', phase: 'stopping', retry: null },
-				{ chatId: 'chat-a', phase: 'running', retry: null },
+				{ chatId: 'chat-b', phase: 'stopping' },
+				{ chatId: 'chat-a', phase: 'running' },
 			],
 		});
 		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
@@ -633,7 +633,7 @@ describe('parseServerWsMessage', () => {
 		expect(pong).toBeInstanceOf(WsPongMessage);
 		expect((pong as WsPongMessage).processing).toEqual({
 			outcome: 'snapshot',
-			chats: [{ chatId: 'chat-a', phase: 'stopping', retry: null }],
+			chats: [{ chatId: 'chat-a', phase: 'stopping' }],
 		});
 		expect((pong as WsPongMessage).serverInstanceId).toBe('server-instance-test');
 		const unavailablePong = parseServerWsMessage({
