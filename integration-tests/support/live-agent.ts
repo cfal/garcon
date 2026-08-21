@@ -16,14 +16,14 @@ export function liveMarker(label: string): string {
 }
 
 export function exactReplyPrompt(value: string): string {
-  return `Reply with exactly ${value}. Do not use tools.`;
+  return `Reply with exactly this text: ${value}. Copy it character for character. Do not use tools.`;
 }
 
 // A prompt that may still be unanswered when the next one is dispatched gets folded into it, so
 // it must not forbid what that successor asks for. Otherwise the merged instruction contradicts
 // itself and the answer depends on which half the model picks.
 export function foldableReplyPrompt(value: string): string {
-  return `Reply with exactly ${value}.`;
+  return `Reply with exactly this text: ${value}. Copy it character for character.`;
 }
 
 export function expectFinished(type: string): void {

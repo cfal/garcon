@@ -129,8 +129,8 @@ describe('live Claude lifecycle', () => {
       const firstMarker = marker('PARENT_FIRST');
       const secondMarker = marker('PARENT_SECOND');
       const firstPrompt = [
-        'Use the Bash tool now to run exactly `sleep 2`.',
-        `After it succeeds, reply with exactly ${firstMarker}.`,
+        'Use the Bash tool immediately, as your first action, to run exactly `sleep 2`.',
+        `After it succeeds, reply with exactly this text: ${firstMarker}. Copy it character for character.`,
         'Do not run any other command.',
       ].join(' ');
       const secondPrompt = foldableReplyPrompt(secondMarker);
@@ -148,8 +148,8 @@ describe('live Claude lifecycle', () => {
       const childChatId = fixture.newChatId();
       const childMarker = marker('CHILD');
       const childPrompt = [
-        'Use the Bash tool now to run exactly `sleep 2`.',
-        `After it succeeds, reply with exactly ${childMarker}.`,
+        'Use the Bash tool immediately, as your first action, to run exactly `sleep 2`.',
+        `After it succeeds, reply with exactly this text: ${childMarker}. Copy it character for character.`,
         'Do not run any other command.',
       ].join(' ');
       const childCursor = fixture.client.markEvents();
@@ -580,7 +580,7 @@ describe('live Claude lifecycle', () => {
     await withIntegrationFixture('live-claude-interrupt-and-send', async (fixture) => {
       const chatId = fixture.newChatId();
       const interruptedPrompt = [
-        'Use the Bash tool now to run exactly `sleep 30`.',
+        'Use the Bash tool immediately, as your first action, to run exactly `sleep 30`.',
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly SHOULD_NOT_COMPLETE.',
       ].join(' ');
@@ -651,7 +651,7 @@ describe('live Claude lifecycle', () => {
       const stoppedStarted = join(fixture.dirs.project, '.claude-stop-started');
       const stoppedCommand = 'touch .claude-stop-started && sleep 30';
       const stoppedPrompt = [
-        `Use the Bash tool now to run exactly \`${stoppedCommand}\`.`,
+        `Use the Bash tool immediately, as your first action, to run exactly \`${stoppedCommand}\`.`,
         'Do not perform other work before the command finishes.',
         'After it finishes, reply with exactly STOPPED_TURN_SHOULD_NOT_COMPLETE.',
       ].join(' ');
@@ -783,7 +783,7 @@ describe('live Claude lifecycle', () => {
 });
 
 async function waitForFile(path: string): Promise<void> {
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (await Bun.file(path).exists()) return;
     await Bun.sleep(25);
