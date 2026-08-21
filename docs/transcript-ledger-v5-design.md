@@ -1675,10 +1675,14 @@ relevant-entry definition under the 10.2 obligation.
 - **Claude**: persist-before-notify append-only JSONL native format.
   Micro-compaction re-appends dedupe at translation by uuid; uuid is
   stamped into `providerMeta` for native-fidelity fork and import dedup.
-  Probe: last conversation entry timestamp (creation-stamped, satisfying
-  the obligation), excluding file-history snapshots, queue operations,
-  and summary bookkeeping. Importer excludes carryover seed context by
-  seed receipt.
+  The session file itself may materialize asynchronously after a turn's
+  result — the CLI has been observed with no JSONL on disk moments after
+  a completed turn — so a fork point resolved before the file exists
+  refuses as not settled and the client retries or asks for handoff
+  consent. Probe: last conversation entry timestamp (creation-stamped,
+  satisfying the obligation), excluding file-history snapshots, queue
+  operations, and summary bookkeeping. Importer excludes carryover seed
+  context by seed receipt.
 - **Codex**: the live app-server stream is the display truth and does
   not match the rollout row-for-row; the rollout is resume state and the
   reload source for the current binding. Item ids dedupe redelivery at

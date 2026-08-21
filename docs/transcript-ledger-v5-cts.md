@@ -10,7 +10,7 @@ repair, the revision 20 OpenCode legacy-absence correction, and the revision
 Governing artifact:
 
 - `docs/transcript-ledger-v5-design.md`, revision 21, SHA-256
-  `287987bb8cf07c099b04143a75682a02fca4de9e3f06fce8d01502d0b71055a4`
+  `01c4a81993a3e2b219d5afe2a7713d032539d29690f9223936468f0839463e60`
 
 Current inventory: 367 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
