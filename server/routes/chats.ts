@@ -40,11 +40,9 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   GoalControlDeliveryError,
   DomainError,
-  isDomainError,
   QueueEntrySteerError,
   ValidationDomainError,
 } from '../lib/domain-error.js';
-import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import type { ChatReorderResult } from '../settings/types.js';
@@ -740,11 +738,6 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      // An untyped fork failure otherwise leaves no server-side trace behind
-      // its opaque 500.
-      if (!isDomainError(error) && !(error instanceof AgentIntegrationError)) {
-        logger.error('fork: chat fork failed:', error as Error);
-      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -820,9 +813,6 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (!isDomainError(error) && !(error instanceof AgentIntegrationError)) {
-        logger.error('fork: chat fork-run failed:', error as Error);
       }
       return jsonErrorFromUnknown(error);
     }
