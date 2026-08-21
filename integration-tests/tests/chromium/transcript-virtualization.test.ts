@@ -2490,12 +2490,13 @@ async function verifyPostTouchMomentumRemeasurement(fixture: ChromiumFixture): P
     });
   });
   await fixture.page.setViewportSize({ width: 390, height: 700 });
-  const chatId = await seedTranscript(fixture.integration, 40, 'chromium-touch-remeasurement');
+  const chatId = await seedTranscript(fixture.integration, 20, 'chromium-touch-remeasurement');
   let drag: TranscriptTouchDrag | null = null;
 
   try {
-    await prepareTranscript(fixture, chatId);
+    await prepareTranscript(fixture, chatId, 40);
     expect(await fixture.page.evaluate(() => navigator.userAgent)).toContain('iPhone');
+    expect(await transcriptEntryCount(fixture.page)).toBe(40);
 
     for (const mode of ['growth', 'shrink'] as const) {
       await scrollToPosition(fixture.page, 'middle');
