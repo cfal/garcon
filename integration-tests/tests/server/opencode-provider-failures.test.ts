@@ -231,7 +231,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  test('retries one HTTP 500 through OpenCode and then succeeds without duplicate user rows', async () => {
+  test('[TLV5-L06.07-OPENCODE-SCRIPTED-01] retries one HTTP 500 with one durable advisory and no duplicate user rows', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('HTTP500_PROMPT');
     const reply = marker('HTTP500_REPLY');

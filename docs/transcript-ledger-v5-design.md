@@ -1,9 +1,24 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 21, implementation and release acceptance complete. Supersedes `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
+Status: revision 22 integrated design. Supersedes
+`AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 22 reconciles presentation-only transcript rows across core,
+integrations, and shared rendering. The already-shipped `add-row` surface
+appends a durable core-owned notice or error without creating agent work; both
+forms, plus integration-emitted `ErrorMessage` rows, render and enter share
+snapshots and export but never search, preview, model context, resend
+boundaries, carryover, or fork seeds. An integration may also publish one
+narrow advisory: a nonblank `notice` for its active `runId`. Core drops
+stale-run and blank events, strips the ephemeral correlation, and commits an
+ordinary durable `notice` row. This reports a provider-owned wait; it is not a
+retry, status, acknowledgement, or control protocol. OpenCode uses it to
+surface each distinct upstream retry schedule while the owning turn remains
+active. Rendered notices and errors now carry their optional title in one
+top-level `title` field; CLI detail is provenance only.
 
 Revision 21 adds OpenCode to the native-fidelity fork providers. Upstream V1
 forks a session server-side at an exclusive message boundary, so the facet
@@ -139,10 +154,11 @@ view (user choice), deleting the `retained` status, retained reads, disk
 reporting, and all GC policy. `binding_json` dissolves: the latest
 `session` ledger row at or after `content_start_ordinal` is the durable
 session authority and the registry becomes a repairable cache. Event
-correlation rules are finalized (`runId` mandatory on `run-ended` and
-permission lifecycle, absent on rows and session), fixing the late-end
-contradiction; `run-ended: failed` may carry optional sanitized error
-detail (user choice); duplicate-submission retries never re-dispatch;
+correlation rules make `runId` mandatory on `run-ended` and permission
+lifecycle events and absent on rows and session facts, fixing the late-end
+contradiction; revision 22 extends that ephemeral correlation to producer
+notice events without storing it. `run-ended: failed` may carry optional
+sanitized error detail (user choice); duplicate-submission retries never re-dispatch;
 handoff staging is an in-memory plan with a self-contained decision
 record and verified checkpoint; export privacy is split; dark validation
 is deleted.
@@ -192,10 +208,10 @@ The decisions:
    sink. The sink is a capability object: possession is the fence, and
    core closes it at handoff, reload, deletion, and shutdown.
    `publish()` validates, canonicalizes, and commits synchronously —
-   acceptance and durability are the same point. That, plus a
-   session-ref codec, separate nullable legacy-migration and Reload
-   history imports, an optional tail probe, and an optional native fork,
-   is the entire provider surface.
+   acceptance and durability are the same point. That, plus a narrow
+   active-run display-only notice event, a session-ref codec, separate
+   nullable legacy-migration and Reload history imports, an optional tail
+   probe, and an optional native fork, is the entire provider surface.
 4. **Strictly append-only normal operation.** No revert, truncation,
    reconciliation, automatic reload, or generalized reset. No
    modification, removal, reordering, or ordinal reuse. Equal-content
@@ -211,10 +227,11 @@ The decisions:
 6. **Resend is a backward scan, not a protocol.** A turn-starting
    dispatch initializes its prompt with the current input and scans
    preceding rows newest-first, collecting user inputs, skipping over
-   interruption `run-ended` rows, and stopping at provider output, any
-   permission request, or any other `run-ended` row. Opting out is
-   ephemeral composer state. There are no markers, no retraction rows,
-   and no delivery evidence of any kind.
+   interruption `run-ended` rows, notices, and presentation-only provider
+   errors, and stopping at conversational provider output, any permission
+   request, or any other `run-ended` row. Opting out is ephemeral composer
+   state. There are no markers, no retraction rows, and no delivery evidence
+   of any kind.
 7. **One manual exception.** The explicit user action "Reload from
    native history" is the sole full-transcript replacement path. It
    rotates a narrow `transcriptViewId`; nothing else does. It is never
@@ -224,14 +241,15 @@ The decisions:
    source through its tail, and atomically deletes the replaced view in
    the cutover transaction.
 8. **Runs are ephemeral correlation.** Active execution holds an
-   in-memory `runId`. `runId` is mandatory on `run-ended` and permission
-   lifecycle events — the events that touch run or actionability state —
-   and absent from content rows and session facts. A user interrupt
+   in-memory `runId`. `runId` is mandatory on `run-ended`, permission
+   lifecycle, and producer notice events — the events that touch run or
+   actionability state or authorize a run-scoped advisory — and absent from
+   stored content, notice, and session rows. A user interrupt
    immediately marks the run stopped and appends
    `run-ended: interrupted`; provider abort is best-effort; a duplicate
    or stale end signal is ignored and never stored; an interrupt with no
-   active run is an idle no-op. Late provider content and session facts
-   always commit while the sink is open.
+   active run is an idle no-op. Late provider content and session facts always
+   commit while the sink is open; producer notices do not outlive their run.
 9. **The session row is the session authority.** The latest `session`
    ledger row at or after the view's `content_start_ordinal` is the
    durable authority for the current `agentSessionId`, native ref, and
@@ -289,16 +307,21 @@ The decisions:
   returns the existing queue disposition or ledger row and never
   re-dispatches; the same ID with different content is a typed conflict;
   a submission qualified by a stale view after manual reload is
-  rejected, never deduplicated into the replacement.
+  rejected, never deduplicated into the replacement. A presentation-only chat
+  row uses the same view-local identity and conflict boundary over its type,
+  title, and content, but never dispatches agent work.
 - **L5 At-most-once, observed order.** Every accepted event is committed
   at acceptance or the chat fences; there is no retry protocol and no
   producer event identity. Late provider content and session facts —
-  received after an interruption or another run's start — always commit
-  in observed order while the sink is open; they participate in every
-  read fold but cannot change processing state or make an old permission
-  actionable. A duplicate or stale `run-ended` is ignored and never
-  becomes a row. Across a crash, events the provider emitted but core
-  had not yet handled are lost, accepted.
+  received after an interruption or another run's start — always commit in
+  observed order while the sink is open. Conversational output participates
+  in every read fold; presentation-only errors render but enter no
+  conversational fold. Neither can change processing state or make an old
+  permission actionable. Producer notices are run-scoped advisories rather
+  than content: only a nonblank event for the active run commits, and a stale
+  event is dropped. A duplicate or stale `run-ended` is ignored and never
+  becomes a row. Across a crash, events the provider emitted but core had not
+  yet handled are lost, accepted.
 - **L6 Run lifecycle.** Core applies each chat's events in the order
   their synchronous appends begin on the event loop; no ledger
   transaction spans an `await`. A session event is required only before
@@ -306,14 +329,16 @@ The decisions:
   resumed turns create no session row. `run-ended` is a durable
   lifecycle row (`outcome: finished | failed | interrupted`,
   `origin: provider | core`, optional sanitized `error`); run
-  correlation is an ephemeral in-memory `runId`, mandatory on
-  `run-ended` and permission lifecycle events and absent from content
-  rows and session facts: a user interrupt immediately marks the run
+  correlation is an ephemeral in-memory `runId`, mandatory on `run-ended`,
+  permission lifecycle, and producer notice events and absent from stored
+  content, notice, and session rows: a user interrupt immediately marks the run
   stopped and appends `run-ended: interrupted`; a later end signal for a
   stopped or unknown run is ignored; an interrupt with no active run is
   an idle no-op. The prior run's rows and its `run-ended` are committed
   before the scheduler starts the next queued turn. A crashed process
-  leaves no `run-ended`; restart synthesizes nothing.
+  leaves no `run-ended`; restart synthesizes nothing. A nonblank producer
+  notice is accepted only for the current active run and stored as an ordinary
+  notice without `runId`; stale-run and blank notices are ignored.
 - **L7 The sink is a capability.** Producers publish only through the
   chat's single active sink object, issued by core and bound to the
   current view. Possession is the fence: core closes the sink at
@@ -437,7 +462,7 @@ by reload, continuation/fork seeding, and adoption.
 | Kind | Writer | Rendered |
 | --- | --- | --- |
 | `user-input` | core | yes |
-| `notice` | core | yes |
+| `notice` | core, including `add-row` and accepted producer advisories | yes |
 | `agent-switch` | core | yes |
 | `permission-resolved` | core | specialized |
 | `provider-row` | integration | yes |
@@ -452,15 +477,19 @@ Kind semantics:
 - `user-input`: appended when the input becomes outbound (7.1). `detail`
   records the `clientMessageId`, the attachment manifest, and whether
   the input was a steer (display styling).
-- `notice`: durable advisory. Native drift is not represented by this row;
-  its warning is a process-lifetime operational event outside the ledger. The
-  carryover quarantine notice's message is "Some earlier chat history could not be
-  migrated. Quarantine reference: {artifactId}." Its `detail` records the same
-  opaque `artifactId` plus `errorCode` under
+- `notice`: durable advisory. An accepted active-run producer advisory is an
+  ordinary notice; its optional title is presentation metadata, and its
+  `runId` is never stored. Native drift is not represented by this row; its
+  warning is a process-lifetime operational event outside the ledger. The
+  carryover quarantine notice's message is "Some earlier chat history could not
+  be migrated. Quarantine reference: {artifactId}." Its `detail` records the
+  same opaque `artifactId` plus `errorCode` under
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload.
+  Reload. Rendered `TranscriptNoticeMessage` and `ErrorMessage` instances own
+  their optional top-level `title`; a rendered CLI row's detail is only the
+  `{type: 'cli-row'}` provenance marker.
 - `agent-switch`: the durable ownership boundary written at in-place
   handoff, carrying `{fromAgentId, toAgentId, fromModel, toModel}` and
   rendered as the shared `AgentSwitchMessage`. V4 synthesized this
@@ -471,10 +500,12 @@ Kind semantics:
   `content_start_ordinal` past the marker, so it closes the outgoing
   owner's history rather than opening the successor's, and the frozen
   projection carries it through reload, continuation, and fork.
-- `provider-row`: one finalized normalized output row (assistant,
-  thinking, every tool-use/result family, compaction summary, provider
-  error, and every explicit provider-specific message type from
-  `common/chat-types.ts`). Streaming deltas are overlay, never rows.
+- `provider-row`: one finalized normalized output row (assistant, thinking,
+  every tool-use/result family, compaction summary, provider error, and every
+  explicit provider-specific message type from `common/chat-types.ts`). An
+  `ErrorMessage` is presentation-only even though its integration provenance
+  keeps it in this row kind; every other provider row is conversational.
+  Streaming deltas are overlay, never rows.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -498,8 +529,33 @@ Kind semantics:
   `permission-resolved` is core-authored after a successful
   `respondToPermission()`, the others integration-emitted.
 
-Display filtering is a client concern keyed on `kind`; the read folds
-are specified in section 9.
+Read-fold membership is server-owned by row kind plus the presentation-only
+`ErrorMessage` subtype. Clients receive normalized messages and own only their
+rendering. Section 9 specifies every fold.
+
+### 3.3.1 Presentation-only chat rows
+
+The view-qualified HTTP surface and `garcon-cli add-row` append one durable
+notice or error without starting, steering, stopping, or otherwise mutating
+agent execution. Both presentations are stored as `notice` rows and broadcast
+through the ordinary committed-row path. They persist across restart and
+replay, update active and background transcript caches, and enter share
+snapshots, but never preview metadata or a conversational fold.
+
+The target read returns the current `transcriptViewId`; the mutation repeats
+that view plus `clientRequestId` and `clientMessageId`, runs under the shared
+chat-mutation lock and pending-ownership fence, and rejects a stale view. The
+ledger's existing view-local submission index makes an identical retry return
+the same ordinal and makes any changed payload or collision with a user input
+a typed conflict. Content is retained byte-for-byte after enforcing nonblank,
+well-formed UTF-8 up to 64 KiB. An optional title is normalized to one nonblank
+line of at most 120 Unicode code points.
+
+The ledger-private detail
+`{type: 'cli-row', clientMessageId, presentation, title}` preserves durable
+idempotency and rendering metadata. Presentation maps its title to the shared
+message's top-level `title` and exposes only `{type: 'cli-row'}` as provenance;
+private submission and presentation fields never cross the ledger boundary.
 
 ### 3.4 Session authority and the content-start boundary
 
@@ -664,9 +720,11 @@ CREATE UNIQUE INDEX transcript_submission
   scan (7.2) walks the same key order.
 - Submission idempotency is the `transcript_submission` partial unique
   index plus canonical payload comparison on conflict: an insert that
-  conflicts re-reads the existing row; identical content returns it —
-  and never re-dispatches — while different content is the typed
-  conflict. There is no index rebuild at open.
+  conflicts re-reads the existing row; an identical user submission returns
+  and never re-dispatches, while an identical presentation-only chat row
+  returns the same ordinal and broadcasts nothing. A changed payload or a
+  cross-kind ID collision is the typed conflict. There is no index rebuild at
+  open.
 
 ### 4.4 Execution model, operations, and failure handling
 
@@ -716,9 +774,9 @@ closes the sink at in-place handoff, manual reload, chat deletion, and
 shutdown; a closed sink rejects synchronously, and core may additionally
 verify object identity against the chat's single active sink. Old-owner
 or pre-reload callbacks hold only a closed object. Sinks do not survive
-restart. `runId` is ephemeral correlation metadata on `run-ended` and
-permission events only — never ledger identity, never present on content
-or session events.
+restart. `runId` is ephemeral correlation metadata on `run-ended`, permission,
+and producer notice events only — never ledger identity and never present on
+stored content, notice, or session rows.
 
 A runtime never looks a sink up. Core hands it a publisher closing over
 one binding, and that closure is the only route the runtime has to a
@@ -747,6 +805,13 @@ has ended. Where a provider drops that name on the way out - Codex's turn-item
 ledger did - the fix belongs at that emitter, not in a fallback that guesses.
 A name is meaningful only inside the chat that issued it, so a route resolves
 only when the name and the emitting chat agree.
+
+The one display-only exception does not relax content routing: an integration
+may attach a provider's session-scoped advisory to that session's sole active
+turn and publish only a `notice` through the turn's captured publisher. Core's
+active-`runId` check drops it after the turn ends, and the notice row enters no
+conversational fold. The advisory cannot publish output, session state,
+permissions, or a terminal on behalf of an unnamed operation.
 
 A route retires when its provider event source can no longer emit, not
 when its run ends: section 6 admits content after the terminal while the
@@ -792,6 +857,7 @@ interface AgentPermissionResponseCapability {
 type ProducerEvent =
   | { type: 'rows'; rows: ProducedRow[] }
   | { type: 'session'; session: EstablishedSession }
+  | { type: 'notice'; runId: string; content: string; title?: string }
   | { type: 'permission'; runId: string;
       lifecycle: Extract<PermissionLifecycle, { kind: 'requested' }>;
       decision: AgentPermissionResponseCapability }
@@ -827,11 +893,13 @@ complete empty. Reload then preserves its current view on failure, and a failed
 native-fidelity seed remains fatal to the target fork.
 
 This is the entire provider surface for transcripts: translate what the
-provider did into rows, in the order observed, and publish. No producer-event
-identity, no ordering obligations beyond observation order, no durability
-obligations, no delivery claims, and no producer acceptance capacity
-protocol. HTTP pages and WebSocket replay frames have independent bounded
-transport contracts.
+provider did into rows, optionally surface a nonblank active-run display-only
+advisory, and publish in observation order. The notice arm is not a generic
+provider-status or retry-control protocol. There is no producer-event identity,
+no ordering obligation beyond observation order, no provider durability
+obligation, no delivery claim, and no producer acceptance-capacity protocol.
+HTTP pages and WebSocket replay frames have independent bounded transport
+contracts.
 Provider-level redelivery may be deduplicated at the adapter edge when a
 real provider identity exists (Claude uuids, Codex item ids, OpenCode
 part ids); otherwise a duplicate is an honest additional immutable
@@ -905,9 +973,9 @@ event is required before any provider output that depends on a newly
 established native session, and nothing else. User input is accepted
 before a new session may exist, and resumed turns create no session row.
 
-Run correlation is ordinary in-memory execution state — an ephemeral
-`runId` held by the active execution, mandatory on `run-ended` and
-permission lifecycle events and absent elsewhere:
+Run correlation is ordinary in-memory execution state — an ephemeral `runId`
+held by the active execution, mandatory on `run-ended`, permission lifecycle,
+and producer notice events and absent from stored rows:
 
 - An accepted user interrupt immediately marks the current run stopped
   and appends `run-ended: interrupted` (`origin: 'core'`). Provider
@@ -921,18 +989,21 @@ permission lifecycle events and absent elsewhere:
 - A core-observed dispatch failure appends `run-ended: failed`
   (`origin: 'core'`), carrying the optional sanitized error detail so
   the reason survives restart.
+- A nonblank producer notice commits only when its `runId` is still active.
+  Core stores an ordinary display-only notice without run correlation; a blank
+  or stale-run notice is ignored.
 - Session facts carry no `runId` and are never rejected as stale-run
   lifecycle: a session established just before an interrupt still
   commits when its callback arrives, preserving the native ref that
   resume, the drift probe, and reload depend on. The closed sink is the
   only fence on session facts.
 
-Late content is appended normally: provider rows and session facts
-received after an interruption or after another run began commit in
-observed order, participate in rendering, search, preview, context, and
-resend boundaries, and may interleave with output from a later run. That
-is accepted. Late events cannot change processing state (the `runId`
-rule) and cannot make an old permission actionable (section 8).
+Late provider rows and session facts received after an interruption or after
+another run began commit normally in observed order. Conversational provider
+rows participate in every conversational fold and may interleave with later
+output; provider errors remain presentation-only, and session facts remain
+hidden authority. That is accepted. Late events cannot change processing state
+(the `runId` rule) or make an old permission actionable (section 8).
 
 The prior run's rows and its `run-ended` are committed before the
 scheduler starts the next queued turn — with synchronous appends this is
@@ -1029,6 +1100,10 @@ for (const row of precedingRowsNewestFirst) {
     continue;
   }
 
+  if (row.kind === 'provider-row' && row.message.type === 'error') {
+    continue;
+  }
+
   if (
     row.kind === 'provider-row' ||
     row.kind === 'permission-requested' ||
@@ -1037,17 +1112,18 @@ for (const row of precedingRowsNewestFirst) {
     break;
   }
 
-  // Ignore notices, session metadata, and permission bookkeeping.
+  // Notices, presentation-only errors, session metadata, and permission
+  // bookkeeping do not affect the scan.
 }
 ```
 
-The current input appears exactly once, as the initializer. The scan
-collects unanswered inputs back through any number of interruptions, and
-stops at the first sign the agent visibly engaged: provider output, any
-`permission-requested` row (resolution rows are ignored by the scan, so
-the boundary is the request itself, not its lifecycle state), or a run
-that ended without interruption — a visible finish or failure is the
-user's cue to decide for themselves. Collected inputs and their
+The current input appears exactly once, as the initializer. The scan collects
+unanswered inputs back through any number of interruptions, notices, and
+presentation-only errors, and stops at the first conversational provider
+output, any `permission-requested` row (resolution rows are ignored by the scan,
+so the boundary is the request itself, not its lifecycle state), or a run that
+ended without interruption — a visible finish or failure is the user's cue to
+decide for themselves. Collected inputs and their
 attachments are combined into one prompt; the integration receives one
 prompt. Rows composed into the current outgoing prompt are excluded from
 the context fold supplied for that same request, so they appear exactly
@@ -1062,9 +1138,9 @@ providers as prior context (section 9); history cannot be un-said.
 
 No interruption row is inferred or appended after a restart. Explicit
 user interruptions remain durable because they were appended when
-accepted. A crash with no stored provider output naturally leaves the
-preceding user rows eligible for the next scan; a crash after provider
-output may not. That loss is accepted (section 16).
+accepted. A crash with no stored conversational provider output naturally
+leaves the preceding user rows eligible for the next scan; a crash after
+conversational output may not. That loss is accepted (section 16).
 
 ### 7.3 Presentation
 
@@ -1073,6 +1149,8 @@ a crash the transcript simply ends and the chat is idle. Rows the next
 scan would collect carry a "will be sent with your next message"
 affordance whose removal is composer state ("Don't resend"), never a
 ledger write. Resend affordances never show while a run is active.
+Presentation-only notices and errors remain visible around those rows without
+changing their resend eligibility.
 
 V4's pending-input settlement machinery (`settledInputRequests`,
 `nativelyBoundInputRequests`, delivery-status tracking, stop-cohort
@@ -1151,13 +1229,16 @@ type PermissionLifecycle =
 ## 9. Read Folds
 
 Every read surface consumes the ledger through one explicit row-kind
-matrix. "Conversational rows" below means `user-input` rows plus
-`provider-row` rows, in ordinal order.
+matrix. "Conversational rows" below means `user-input` rows plus non-error
+`provider-row` rows, in ordinal order. A provider `ErrorMessage` remains an
+integration-owned `provider-row` for provenance and native activity but is
+presentation-only in every consumer fold.
 
 | Kind | Rendering | Search | Preview | Model context / carryover | Share snapshot | Export |
 | --- | --- | --- | --- | --- | --- | --- |
 | `user-input` | yes | yes | candidate | yes, excluding current-prompt rows | yes | yes |
-| `provider-row` | yes | yes | candidate | yes | yes | yes |
+| conversational `provider-row` | yes | yes | candidate | yes | yes | yes |
+| error `provider-row` | yes | no | no | no | yes | yes |
 | `notice` | yes | no | no | no | yes | yes |
 | `agent-switch` | yes | no | no | no | yes | yes |
 | permission rows | specialized | no | no | no | specialized | yes |
@@ -1168,9 +1249,9 @@ The native-drift operational warning is outside this matrix. It is a transient
 server event and enters no ledger page, replay, search result, preview, share,
 model context, carryover, or export.
 
-- **Rendering** shows conversational rows, notices, and specialized
-  permission rows; turn state derives from `run-ended` rows and live
-  execution state. Late content renders in observed order.
+- **Rendering** shows conversational rows, notices, provider errors, and
+  specialized permission rows; turn state derives from `run-ended` rows and
+  live execution state. Late content renders in observed order.
 - **Search** indexes conversational content only, keyed
   `(chatId, transcriptViewId, ordinal)` with an appended-through
   watermark; normal appends index only the suffix; nothing is ever
@@ -1182,12 +1263,12 @@ model context, carryover, or export.
   Index status is current-view/frontier-qualified: pending until
   acknowledgement, failed after terminal indexing rejection, and indexed
   after acknowledged repair, including valid views with no searchable rows.
-- **Preview** selects the latest conversational row; notices and
-  lifecycle state are separate UI signals, never preview text.
+- **Preview** selects the latest conversational row; notices, provider errors,
+  and lifecycle state are separate UI signals, never preview text.
 - **Model context and carryover** are the conversational fold, minus the
   rows composed into the current outgoing prompt (which appear exactly
-  once, in the prompt). History is never excluded otherwise: a message
-  the user declined to resend remains history and reaches stateless
+  once, in the prompt). Conversational history is never excluded otherwise: a
+  message the user declined to resend remains history and reaches stateless
   providers as context. The frozen projection has one display-only exception
   to the matrix: it preserves a carryover-quarantine notice so permanent prior
   loss remains visible, but that notice never enters model context.
@@ -1275,16 +1356,15 @@ One strict rule, single mode:
 > Warn when the native session's last conversation-relevant entry is strictly
 > newer than the provider watermark timestamp for that session.
 
-The provider watermark is the latest integration-emitted row for that
-session: `provider-row`, `session`, provider-origin `run-ended`, and
+The provider watermark is the latest integration-emitted native-evidence row
+for that session: `provider-row`, `session`, provider-origin `run-ended`, and
 integration-emitted permission rows. The watermark carries both row ordinal
 and timestamp: timestamp remains the native comparison value, while ordinal
-fences ledger changes whose timestamps collide. Core-authored rows — user inputs,
-notices, `permission-resolved`, and core-origin `run-ended` — are
-excluded: they do not prove native provider history was observed, and
-they must not be able to hide missed native output behind the user's own
-activity. Computing the watermark is a descending primary-key scan
-bounded by `content_start_ordinal`, using a payload predicate (for
+fences ledger changes whose timestamps collide. Rows that do not evidence
+native provider history — user inputs, notices, `permission-resolved`, and
+core-origin `run-ended` — are excluded, so they cannot hide missed native
+output behind unrelated activity. Computing the watermark is a descending
+primary-key scan bounded by `content_start_ordinal`, using a payload predicate (for
 example `json_extract`) for `run-ended` origin; no normalized column or
 index is added before measurement. Rows imported by reload carry native
 timestamps and count toward the watermark, which keeps the check quiet
@@ -1388,8 +1468,8 @@ It is never automatic and is the sole full-transcript replacement path:
    through its current tail, excluding the binding's native
    seed/carryover context by seed receipt so the inherited prefix is not
    duplicated.
-4. The frozen projection preserves conversational rows
-   (`user-input`, `provider-row`) with retained `clientMessageId`
+4. The frozen projection preserves conversational rows (`user-input` and
+   non-error `provider-row`) with retained `clientMessageId`
    (covered by the staging view's submission unique index) and every
    `agent-switch` boundary, so the record of which agent produced which
    stretch of the conversation survives reload rather than being lost
@@ -1552,13 +1632,12 @@ point that reads as unsettled can only become forkable before the user
 answers; a request confirmed after the point settles is served as a native
 fork, which is strictly better than what was offered.
 
-Two cases should never raise the question. A provider that cannot fork
-natively at all has nothing to lose against expectation, and a row core
-authored - a user input, which carries no provider identity by
-construction - resolves to the last provider row before it, which is what
-branching from your own message means anyway. Where that resolution finds
-nothing - no provider row from the current binding at or before the point
-- there is no native position to offer, and the handoff fork is taken
+Two cases should never raise the question. A provider that cannot fork natively
+at all has nothing to lose against expectation. A core-authored row or
+presentation-only provider error resolves to the last conversational provider
+row before it, which is what branching from a non-conversational row means.
+Where that resolution finds nothing — no conversational provider row from the
+current binding at or before the point — there is no native position to offer, and the handoff fork is taken
 without asking. Forking the whole chat rather than a point always has
 one: the session tip is a native position by construction, so the request
 reaches the facet even when every visible row is frozen carryover.
@@ -1691,8 +1770,12 @@ relevant-entry definition under the 10.2 obligation.
   stateful Responses API can itself desync from the rollout across a
   crash — the same accepted risk class this design carries.
 - **OpenCode**: part-id dedup at translation; provider errors emit as normal
-  `provider-row`s; real-binary scripted tier retained. Both history facets use
-  the same supported directory-scoped source and translation implementation,
+  `provider-row`s; real-binary scripted tier retained. A typed
+  `session.status` retry arm is attached only to the session's active turn and
+  emits one titled producer notice per distinct scheduled attempt; busy, idle,
+  foreign-session, duplicate-attempt, and post-terminal statuses emit nothing.
+  Both history facets use the same supported directory-scoped source and
+  translation implementation,
   through occasion-specific wrappers where needed; they remain explicitly
   declared and are invoked only for their respective occasions. A chat that
   records no native session is the only positive legacy absence; a recorded
@@ -1742,17 +1825,20 @@ relevant-entry definition under the 10.2 obligation.
 | Duplicate submission retry, same `clientMessageId`, identical content | Existing queue disposition or ledger row returned via the submission unique index; no second row; no re-dispatch. |
 | Same `clientMessageId`, different content or attachments | Typed conflict; nothing appended. |
 | Submission qualified by a stale view after reload | Rejected with the typed stale-view error; never deduplicated into the replacement view. |
+| Presentation-only chat-row retry, same `clientMessageId`, type, title, and content | Existing row address returned; no second row, broadcast, or agent work. |
+| Presentation-only chat row changes a reused ID, collides with user input, names a stale view, or races pending ownership | Typed conflict or fence failure; nothing appended or dispatched. |
 | Genesis adoption positively determines no frozen or legacy rows exist | Initializes a valid empty current view; absence is not inferred from an exception. |
 | Frozen-prefix or `legacyHistoryImport` discovery/read/parse/sanitation failure | Typed failure; no current view is created; later open retries; unrelated chats continue. |
 | Durable carryover migration quarantine | Positively known prior loss: adoption creates a usable first view with no quarantined prefix rows, one durable warning carrying the artifact reference and error code, the current session fact when present, and any successfully imported current-binding rows. The notice survives frozen-projection flows; the quarantine artifact remains available for support. |
-| Dispatch failure (start or steer rejected/thrown) | Best-effort kill; core appends `run-ended: failed` with optional sanitized error detail for a turn-starting failure; preceding inputs remain eligible for the next scan only if no provider output or non-interrupted `run-ended` intervenes. |
+| Dispatch failure (start or steer rejected/thrown) | Best-effort kill; core appends `run-ended: failed` with optional sanitized error detail for a turn-starting failure; preceding inputs remain eligible for the next scan only if no conversational provider output or non-interrupted `run-ended` intervenes. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
 | Interrupt when the run already ended | Idle no-op; nothing appended. |
 | Duplicate or stale `run-ended` (stopped or unknown `runId`) | Ignored; never becomes a row; cannot stop the current run. |
 | Late provider content or session fact from an ended run | Commits normally in observed order while the sink is open; may interleave with a later run's output; cannot change processing state or actionability. A late session fact preserves the native ref resume and reload depend on. |
+| Producer notice is blank or does not name the active run | Ignored; no row or broadcast. Provider retry behavior is unchanged because the notice is observation only. |
 | Permission event lacks its concrete operation/run correlation | Structured transcript-content-free warning and drop; no synthetic run ID, durable permission row, or conversational fallback. If the dropped fact is `requested`, its provider may remain waiting on an unanswerable decision; the warning is the diagnostic and user interrupt is the remediation. |
 | Permission response capability rejects | Core abandons the ephemeral claim; no resolved row is appended and the same live occurrence may be retried if its other fences remain valid. |
-| Crash mid-run | No `run-ended` row; restart synthesizes nothing; the transcript simply ends; preceding inputs remain scan-eligible only if no provider output intervened; accepted. |
+| Crash mid-run | No `run-ended` row; restart synthesizes nothing; the transcript simply ends; preceding inputs remain scan-eligible only if no conversational provider output intervened; accepted. |
 | Runtime writes natively after its run ended | A later active newest-history load may send a transient warning when the tail is strictly newer than the integration-emitted watermark; manual reload adopts it. |
 | Pinned OpenCode V1 reaches its context limit | Marker-routed automatic compaction summarizes and continues under the owning operation; a failed summary surfaces as that operation's visible provider failure. No unnamed continuation is routed by session. |
 | Commit failure or unknown commit outcome | No broadcast; the chat's ledger fences for writes (4.4). |
@@ -1793,14 +1879,14 @@ Every deliberate gap, in one place, so it is not "fixed" later:
    dispatch: a same-ID retry returns the row without re-dispatching, and
    recovery is the next fresh input's backward scan. Deliberate: the
    UUID deduplicates the command, not just the row.
-4. Best-effort abort means old output can arrive after an interruption
-   and interleave with a later run's output. Late content participates
-   normally in rendering, search, preview, context, and resend
-   boundaries — it can move them. None of these cases receives
-   reconciliation.
+4. Best-effort abort means old output can arrive after an interruption and
+   interleave with a later run's output. Late conversational content
+   participates normally in rendering, search, preview, context, and resend
+   boundaries — it can move them. Late errors remain presentation-only. None
+   of these cases receives reconciliation.
 5. Crashes create no inferred interruption row. A crash with no stored
-   provider output leaves the preceding inputs eligible for the next
-   resend scan; a crash after provider output may not. Accepted.
+   conversational provider output leaves the preceding inputs eligible for the
+   next resend scan; a crash after conversational output may not. Accepted.
 6. Future-turn queued entries are lost on restart, by design, with no
    rows and no markers.
 7. Resend opt-out is ephemeral: restart resets composer chips and the
@@ -1894,6 +1980,15 @@ The catalog cites this revision, but its inventory is not repeated here.
   handoff with guidance; steers and immediate inputs committed before
   dispatch/delivery; the no-redispatch rule for duplicate committed
   submissions.
+- **Presentation-only chat rows**: strict view-qualified notice/error request
+  and response contracts; exact content plus normalized title boundaries; the
+  shared submission index returning one row for an identical retry and
+  rejecting changed or cross-kind collisions without fencing; the shared
+  mutation lock excluding Reload and pending ownership; no agent execution,
+  processing, search, preview, model-context, resend, carryover, or fork side
+  effect; committed broadcast, restart, fixed-watermark replay, active and
+  background browser delivery, exact-once addressed rendering, stable composer
+  and preview metadata, and self-contained share formatting.
 - **Sink and teardown**: capability semantics — a closed sink rejects
   synchronously, no token exists, object identity may be verified
   against the single active sink; publish commits inline and no ledger
@@ -1910,18 +2005,21 @@ The catalog cites this revision, but its inventory is not repeated here.
   no-op; late provider content commits normally; a session fact
   arriving after an interrupt still commits and restores the native ref
   (resume, probe, and reload all see it); `runId` is required on
-  `run-ended` and permission events and absent on rows and session
-  events; the prior run's rows and `run-ended` commit before the next
-  queued turn starts; crash leaves no `run-ended` and restart
-  synthesizes nothing; session as sole metadata writer with the
-  registry cache repaired from the authoritative row at open; `start()`
-  returns only an opaque handle; `run-ended: failed` carries the
-  optional sanitized error detail through restart.
+  `run-ended`, permission, and producer notice events and absent from stored
+  rows and session events; an active nonblank producer notice commits once as
+  display-only history while blank and stale-run controls commit nothing; the
+  prior run's rows and `run-ended` commit before the next queued turn starts;
+  crash leaves no `run-ended` and restart synthesizes nothing; session as sole
+  metadata writer with the registry cache repaired from the authoritative row
+  at open; `start()` returns only an opaque handle; `run-ended: failed` carries
+  the optional sanitized error detail through restart. OpenCode's scripted
+  retry case proves one titled notice, one user occurrence, and successful
+  recovery through the real pinned binary.
 - **Resend scan**: pure ledger-function tests of the literal backward
   scan: the current input initializes the prompt exactly once;
-  interruption `run-ended` rows are transparent; provider rows, any
-  `permission-requested` row, and non-interrupted `run-ended` rows stop
-  the scan; notices, sessions, and permission bookkeeping are ignored;
+  interruption `run-ended` rows are transparent; conversational provider rows,
+  any `permission-requested` row, and non-interrupted `run-ended` rows stop the
+  scan; notices, provider errors, sessions, and permission bookkeeping are ignored;
   steers send only themselves but are collected by later scans; dequeued
   entries run the scan; the insert-plus-scan method admits no
   interleaving; chip removal excludes for one composition only; restart
@@ -1945,14 +2043,18 @@ The catalog cites this revision, but its inventory is not repeated here.
   `permissionOccurrenceId`. A codec reopen fixture loads an existing schema-v1
   `{requestId, incarnation}` payload as the sole public UUID, while an encode
   assertion proves the durable key remains `incarnation`.
-- **Read folds**: the section 9 matrix as executable assertions per
-  surface; search suffix-only within a live view, replaced-view entry
-  deletion ordered with commits per chat, current-view query admission;
+- **Read folds**: the section 9 matrix as executable assertions per surface;
+  ordinary, CLI, and producer advisories remain notice rows, provider errors
+  remain presentation-only provider rows, and rendered notice and error titles
+  round-trip only through their top-level field while CLI detail remains
+  provenance. Search stays suffix-only within a live view;
+  replaced-view entry deletion is ordered with commits per chat, with
+  current-view query admission;
   preview selection; share snapshots copied at publish and unaffected by
   reload and view deletion; ordinary export stripping `providerMeta` and
   session native refs with the raw support export separate; direct
-  providers receive resent inputs exactly once; late content
-  participates normally in every fold.
+  providers receive resent inputs exactly once; late conversational content
+  participates normally in every fold while late errors remain display-only.
 - **Drift check**: fixture native files; the probe obligation per provider
   (reported timestamps never exceed core append times for observed entries);
   successful active newest-history completion precedes scheduling and never
@@ -1960,8 +2062,8 @@ The catalog cites this revision, but its inventory is not repeated here.
   dispatch, timer, and startup paths schedule nothing; equal pending work
   coalesces while every changed eligibility dimension aborts, supersedes, and
   fences stale results. The integration-emitted watermark is `(ordinal, at)`
-  from the bounded descending scan with the payload predicate; core-authored
-  rows never raise it and imported rows count. Timeout, failure,
+  from the bounded descending scan with the payload predicate; rows that do not
+  evidence native provider activity never raise it, and imported rows count. Timeout, failure,
   `unavailable`, ownership change, invalid timestamps, and abort-ignoring
   probes emit nothing. A strictly newer idle tail emits only a transient
   `chat-operational-notice`, appends no ledger row, and may warn again on a
@@ -2187,18 +2289,19 @@ stabilization defects. The current case inventory and gate status live in
    `permissionOccurrenceId` separately identifies one specialized permission
    fact and confers no authority. The durable ownership revision for handoff
    recovery lives in the registry/journal, never exposed through the sink.
-4. Event correlation: `runId` is mandatory on `run-ended` and permission
-   lifecycle events and absent from content rows and session facts; late
-   provider content and session facts always commit while the sink is
-   open; a duplicate or stale `run-ended` is ignored and never stored;
-   session facts are ownership-scoped durable state fenced only by the
-   sink.
+4. Event correlation: `runId` is mandatory on `run-ended`, permission
+   lifecycle, and producer notice events and absent from stored content,
+   notice, and session rows. Late provider content and session facts always
+   commit while the sink is open; a producer notice commits only for its
+   active run; a duplicate or stale `run-ended` is ignored and never stored;
+   session facts are ownership-scoped durable state fenced only by the sink.
 5. Resend is the literal backward scan: initialize the prompt with the
    current input, collect preceding user inputs, skip interruption
-   `run-ended` rows, stop at provider output, any `permission-requested`
-   row, or any other `run-ended`; opt-out is ephemeral composer state; a
-   steer sends only itself but is collected by later scans; the
-   insert-plus-scan step is one synchronous method.
+   `run-ended` rows, notices, and provider errors, stop at conversational
+   provider output, any `permission-requested` row, or any other `run-ended`;
+   opt-out is ephemeral composer state; a steer sends only itself but is
+   collected by later scans; the insert-plus-scan step is one synchronous
+   method.
 6. Runs are ephemeral in-memory correlation: a user interrupt
    immediately appends `run-ended: interrupted` and marks the run
    stopped; provider abort is best-effort with no kill confirmation and
@@ -2223,7 +2326,11 @@ stabilization defects. The current case inventory and gate status live in
    scoped `(chatId, transcriptViewId, clientMessageId)` and enforced by
    the partial unique index; stale-view submissions are rejected with a
    typed error; `(transcriptViewId, ordinal)` is the canonical row
-   address — there is no `rowUuid` and no origin provenance.
+   address — there is no `rowUuid` and no origin provenance. The
+   presentation-only chat-row surface shares that identity and mutation lock,
+   appends no agent work, and exposes optional titles only at the top-level
+   rendered message contract; ledger-private CLI detail remains idempotency
+   metadata and provenance.
 10. `execution.start()` returns an opaque handle; the session row is the
     sole source of session metadata.
 11. Pre-V5 migration and Reload are separate capabilities.
@@ -2244,10 +2351,10 @@ stabilization defects. The current case inventory and gate status live in
     native drift check for the current binding. No other read or execution
     path schedules it. Equal pending eligibility coalesces, changed exact
     eligibility supersedes it, and every result revalidates execution
-    ownership. The integration-emitted watermark is `(ordinal, at)` —
-    core-authored inputs, notices, `permission-resolved`, and core-origin
-    `run-ended` rows never raise it — computed by a bounded descending scan
-    with a payload predicate. A newer tail emits only a transient operational
+    ownership. The integration-emitted watermark is `(ordinal, at)` — user
+    inputs, notices, `permission-resolved`, and core-origin `run-ended` rows
+    never raise it because they do not evidence native provider history. It is
+    computed by a bounded descending scan with a payload predicate. A newer tail emits only a transient operational
     warning; there is no ledger notice, persisted warning state, cache, or
     cooldown. Ownership is concurrent-exclusive: non-concurrent external use
     is the reload product case, not a violation.
@@ -2307,8 +2414,8 @@ stabilization defects. The current case inventory and gate status live in
     refuses when it is not, and the client asks the user. Core never
     reads `providerMeta` to decide, never falls back silently, and never
     raises the question for providers that cannot fork natively or for
-    core-authored rows, which resolve to the preceding provider row. A
-    fork with a native session seeds its feed from that session; a
+    core-authored and presentation-only error rows, which resolve to the
+    preceding conversational provider row. A fork with a native session seeds its feed from that session; a
     handoff fork keeps the frozen projection.
 20. The handoff boundary is a durable `agent-switch` row rather than a
     marker synthesized from carryover segments at read time, so it

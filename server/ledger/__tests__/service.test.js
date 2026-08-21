@@ -631,17 +631,19 @@ describe('TranscriptLedgerService', () => {
   });
 
   describe('producer notices', () => {
-    it('appends a titled display-only notice row for the active run', async () => {
+    it('[TLV5-L06.07-CORE-UNIT-01] accepts only active-run nonblank notices as durable display-only rows', async () => {
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
         const lease = ledger.openProducer('chat-1', 'test');
-        ledger.beginRun('chat-1', 'run-1');
+        ledger.beginRun('chat-1', 'run-2');
         const notifications = [];
         ledger.subscribe((event) => notifications.push(event));
 
+        lease.sink.publish({ type: 'notice', runId: 'run-1', content: 'stale run' });
+        lease.sink.publish({ type: 'notice', runId: 'run-2', content: '   ' });
         lease.sink.publish({
           type: 'notice',
-          runId: 'run-1',
+          runId: 'run-2',
           title: 'Provider retry',
           content: 'Model provider retrying: quota exhausted.',
         });
@@ -653,23 +655,11 @@ describe('TranscriptLedgerService', () => {
           message: 'Model provider retrying: quota exhausted.',
           detail: { title: 'Provider retry' },
         });
+        expect(rows[0]).not.toHaveProperty('runId');
         expect(ledger.conversationMessages('chat-1')).toEqual([]);
         await tick();
         expect(notifications).toHaveLength(1);
         expect(notifications[0]).toMatchObject({ type: 'rows', chatId: 'chat-1' });
-      });
-    });
-
-    it('drops notices from a stale run and blank notice content', async () => {
-      await withService(async ({ ledger }) => {
-        ledger.initializeChat('chat-1');
-        const lease = ledger.openProducer('chat-1', 'test');
-        ledger.beginRun('chat-1', 'run-2');
-
-        lease.sink.publish({ type: 'notice', runId: 'run-1', content: 'stale run' });
-        lease.sink.publish({ type: 'notice', runId: 'run-2', content: '   ' });
-
-        expect(ledger.currentRows('chat-1')).toHaveLength(0);
       });
     });
   });
