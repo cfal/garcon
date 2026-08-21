@@ -1,5 +1,5 @@
-import { reorder } from '@atlaskit/pragmatic-drag-and-drop/reorder';
-import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+import { reorder } from '@atlaskit/pragmatic-drag-and-drop/utils/reorder';
+import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 import { getReorderDestinationIndex } from '@atlaskit/pragmatic-drag-and-drop-hitbox/util/get-reorder-destination-index';
 import type { RelativeChatOrderPlacement } from '$shared/chat-order-contracts';
 

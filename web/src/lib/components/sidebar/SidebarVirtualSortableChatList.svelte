@@ -6,8 +6,9 @@
 		type Rect,
 		type Virtualizer,
 	} from '@tanstack/svelte-virtual';
-	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getSplitLayout } from '$lib/context';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
@@ -37,7 +38,6 @@
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
-	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarVirtualSortableChatListProps {

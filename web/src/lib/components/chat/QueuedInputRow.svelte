@@ -1,15 +1,13 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 	import {
 		draggable,
 		dropTargetForElements,
-	} from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import {
-		attachClosestEdge,
-		extractClosestEdge,
-		type Edge,
-	} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
+	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+	import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import type { QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 	import {

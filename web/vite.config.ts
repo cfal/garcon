@@ -3,7 +3,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import path from 'node:path';
-import { CODEMIRROR_PACKAGES } from './codemirror-packages';
+import { CODEMIRROR_PACKAGES } from './codemirror-packages.ts';
 
 function codeMirrorLanguageChunk(id: string): string | undefined {
 	if (
@@ -81,7 +81,7 @@ export default defineConfig({
 	],
 	resolve: {
 		alias: {
-			$shared: path.resolve(__dirname, '../common'),
+			$shared: path.resolve(import.meta.dirname, '../common'),
 		},
 		// CodeMirror extensions rely on instanceof checks from @codemirror/state.
 		dedupe: [...CODEMIRROR_PACKAGES],

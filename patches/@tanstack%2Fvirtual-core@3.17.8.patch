@@ -1,44 +1,18 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c54653deec86dd36ee88e638d55323254aae031b 100644
+index e470032a9572b3ced764ca02238a8c6be435a9d4..092cb91291420ace525787bdcc92f85f3977f1eb 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -218,6 +218,10 @@ class Virtualizer {
-                 }
+@@ -220,6 +220,9 @@ class Virtualizer {
                  return;
                }
-+              if (!this.isIndexInRange(index)) return;
+               if (!this.isIndexInRange(index)) return;
 +              const key = this.options.getItemKey(index);
 +              const prevNode = this.elementsCache.get(key);
 +              if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -805,6 +809,7 @@ class Virtualizer {
-       }
-       return true;
-     };
-+    this.isIndexInRange = (index) => index >= 0 && index < this.options.count;
-     this.measureElement = (node) => {
-       if (!node) {
-         this.elementsCache.forEach((cached, key2) => {
-@@ -816,6 +821,7 @@ class Virtualizer {
-         return;
-       }
-       const index = this.indexFromElement(node);
-+      if (!this.isIndexInRange(index)) return;
-       const key = this.options.getItemKey(index);
-       const prevNode = this.elementsCache.get(key);
-       if (prevNode !== node) {
-@@ -831,7 +837,7 @@ class Virtualizer {
-     };
-     this.resizeItem = (index, size) => {
-       var _a, _b;
--      if (index < 0 || index >= this.options.count) return;
-+      if (!this.isIndexInRange(index)) return;
-       let cachedSize;
-       let itemStart;
-       let key;
-@@ -865,9 +871,9 @@ class Virtualizer {
+@@ -871,9 +874,9 @@ class Virtualizer {
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -51,7 +25,7 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c54653deec86dd36ee88e638d5532325
          );
          const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
            // The callback expects a VirtualItem; build one lazily only
-@@ -990,6 +996,16 @@ class Virtualizer {
+@@ -996,6 +999,16 @@ class Virtualizer {
          align
        ];
      };
@@ -68,11 +42,23 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c54653deec86dd36ee88e638d5532325
      this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
        this._iosDeferredAdjustment = 0;
        const offset = this.getOffsetForAlignment(toOffset, align);
+diff --git a/dist/cjs/index.d.cts b/dist/cjs/index.d.cts
+index cc1001b8a14d06aa73a3a9e8f59870557ee9e7d6..89a28fe742f08751259fad20dd59adce1d6f32f3 100644
+--- a/dist/cjs/index.d.cts
++++ b/dist/cjs/index.d.cts
+@@ -170,6 +170,7 @@ export declare class Virtualizer<TScrollElement extends Element | Window, TItemE
+     isAtEnd: (threshold?: number) => boolean;
+     getOffsetForAlignment: (toOffset: number, align: ScrollAlignment, itemSize?: number) => number;
+     getOffsetForIndex: (index: number, align?: ScrollAlignment) => readonly [number, "auto"] | readonly [number, "start" | "center" | "end"] | undefined;
++    cancelScroll: () => void;
+     scrollToOffset: (toOffset: number, { align, behavior }?: ScrollToOffsetOptions) => void;
+     scrollToIndex: (index: number, { align: initialAlign, behavior, }?: ScrollToIndexOptions) => void;
+     scrollBy: (delta: number, { behavior }?: ScrollToOffsetOptions) => void;
 diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
-index 610db97bfdfb0005cf998aa7dd497951b36c27b7..fe37001f898168fa64df3888c466d1524591ce9a 100644
+index 6b43c0aea7ed9eeef75cbfb1351fcbd243913bdd..ec608eb5b9692db94ef647f8fa8fc2dc317663b1 100644
 --- a/dist/esm/index.d.ts
 +++ b/dist/esm/index.d.ts
-@@ -169,6 +169,7 @@ export declare class Virtualizer<TScrollElement extends Element | Window, TItemE
+@@ -170,6 +170,7 @@ export declare class Virtualizer<TScrollElement extends Element | Window, TItemE
      isAtEnd: (threshold?: number) => boolean;
      getOffsetForAlignment: (toOffset: number, align: ScrollAlignment, itemSize?: number) => number;
      getOffsetForIndex: (index: number, align?: ScrollAlignment) => readonly [number, "auto"] | readonly [number, "start" | "center" | "end"] | undefined;
@@ -81,46 +67,20 @@ index 610db97bfdfb0005cf998aa7dd497951b36c27b7..fe37001f898168fa64df3888c466d152
      scrollToIndex: (index: number, { align: initialAlign, behavior, }?: ScrollToIndexOptions) => void;
      scrollBy: (delta: number, { behavior }?: ScrollToOffsetOptions) => void;
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..7b31ba7ae6d4edb71ad5371fdc8ae5c7edf940f2 100644
+index 2495b26cf2c3589213546b3958eaadf2eb6b751d..c3662ceccb12ee531b96f8a0b3be961fa23207ef 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -216,6 +216,10 @@ class Virtualizer {
-                 }
+@@ -218,6 +218,9 @@ class Virtualizer {
                  return;
                }
-+              if (!this.isIndexInRange(index)) return;
+               if (!this.isIndexInRange(index)) return;
 +              const key = this.options.getItemKey(index);
 +              const prevNode = this.elementsCache.get(key);
 +              if (prevNode !== void 0 && prevNode !== node && prevNode.isConnected) return;
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -803,6 +807,7 @@ class Virtualizer {
-       }
-       return true;
-     };
-+    this.isIndexInRange = (index) => index >= 0 && index < this.options.count;
-     this.measureElement = (node) => {
-       if (!node) {
-         this.elementsCache.forEach((cached, key2) => {
-@@ -814,6 +819,7 @@ class Virtualizer {
-         return;
-       }
-       const index = this.indexFromElement(node);
-+      if (!this.isIndexInRange(index)) return;
-       const key = this.options.getItemKey(index);
-       const prevNode = this.elementsCache.get(key);
-       if (prevNode !== node) {
-@@ -829,7 +835,7 @@ class Virtualizer {
-     };
-     this.resizeItem = (index, size) => {
-       var _a, _b;
--      if (index < 0 || index >= this.options.count) return;
-+      if (!this.isIndexInRange(index)) return;
-       let cachedSize;
-       let itemStart;
-       let key;
-@@ -863,9 +869,9 @@ class Virtualizer {
+@@ -869,9 +872,9 @@ class Virtualizer {
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -133,7 +93,7 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..7b31ba7ae6d4edb71ad5371fdc8ae5c7
          );
          const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
            // The callback expects a VirtualItem; build one lazily only
-@@ -988,6 +994,16 @@ class Virtualizer {
+@@ -994,6 +997,16 @@ class Virtualizer {
          align
        ];
      };
@@ -151,15 +111,12 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..7b31ba7ae6d4edb71ad5371fdc8ae5c7
        this._iosDeferredAdjustment = 0;
        const offset = this.getOffsetForAlignment(toOffset, align);
 diff --git a/src/index.ts b/src/index.ts
-index e209208a6d1b4e0713f78deab96598819ed697ad..08a9fe60a2281585489bde39686a024388cf79f9 100644
+index dc6f1010c4d4758de9c46fb8d69209e582e47171..14bf3dbf0cb5f933ac0b04a6777494ae6a6dc72a 100644
 --- a/src/index.ts
 +++ b/src/index.ts
-@@ -489,6 +489,14 @@ export class Virtualizer<
-               return
-             }
+@@ -496,5 +496,11 @@ export class Virtualizer<
+             if (!this.isIndexInRange(index)) return
  
-+            if (!this.isIndexInRange(index)) return
-+
 +            // A delayed entry can retain an in-range index that now names another key.
 +            // The connected cache owner remains authoritative until direct measurement replaces it.
 +            const key = this.options.getItemKey(index)
@@ -169,35 +126,7 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..08a9fe60a2281585489bde39686a0243
              if (this.shouldMeasureDuringScroll(index)) {
                this.resizeItem(
                  index,
-@@ -1171,6 +1179,9 @@ export class Virtualizer<
-     },
-   )
- 
-+  private isIndexInRange = (index: number): boolean =>
-+    index >= 0 && index < this.options.count
-+
-   private getMeasurements = memo(
-     () => [this.getMeasurementOptions(), this.itemSizeCacheVersion],
-     (
-@@ -1511,6 +1522,8 @@ export class Virtualizer<
-     }
- 
-     const index = this.indexFromElement(node)
-+    if (!this.isIndexInRange(index)) return
-+
-     const key = this.options.getItemKey(index)
-     const prevNode = this.elementsCache.get(key)
- 
-@@ -1534,7 +1547,7 @@ export class Virtualizer<
-   }
- 
-   resizeItem = (index: number, size: number) => {
--    if (index < 0 || index >= this.options.count) return
-+    if (!this.isIndexInRange(index)) return
- 
-     // Fast field reads. For lanes===1 we read raw start/size from the flat
-     // typed array, avoiding a Proxy.get + VirtualItem allocation per call.
-@@ -1579,10 +1592,10 @@ export class Virtualizer<
+@@ -1597,10 +1603,10 @@ export class Virtualizer<
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -211,10 +140,9 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..08a9fe60a2281585489bde39686a0243
        const shouldAdjustScroll =
          this.scrollState?.behavior !== 'smooth' &&
          (this.shouldAdjustScrollPositionOnItemSizeChange !== undefined
-@@ -1767,6 +1780,17 @@ export class Virtualizer<
+@@ -1785,5 +1791,16 @@ export class Virtualizer<
      ] as const
    }
-
 +  cancelScroll = () => {
 +    this.scrollState = null
 +    this._intendedScrollOffset = null

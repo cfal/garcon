@@ -3,16 +3,14 @@
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 	import {
 		draggable,
 		dropTargetForElements,
-	} from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import {
-		attachClosestEdge,
-		extractClosestEdge,
-		type Edge,
-	} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
+	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+	import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { isDesktopLayoutPane, type DesktopLayoutPane } from '$lib/layout/desktop-layout.js';
 	import * as m from '$lib/paraglide/messages.js';

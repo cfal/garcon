@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { CODEMIRROR_PACKAGES } from './codemirror-packages';
+import { CODEMIRROR_PACKAGES } from './codemirror-packages.ts';
 
 // Excludes the CodeMirror package whose export map has no root entry for Vite to prebundle.
 const TEST_OPTIMIZED_DEPENDENCIES = [

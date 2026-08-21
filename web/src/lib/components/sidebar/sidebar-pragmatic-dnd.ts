@@ -1,7 +1,7 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { DropTargetRecord } from '@atlaskit/pragmatic-drag-and-drop/types';
-import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
-import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge';
+import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 
 const sidebarChatDragKind = 'sidebar-chat';
 const splitPaneChatDragKind = 'split-pane-chat';

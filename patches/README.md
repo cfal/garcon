@@ -1,24 +1,24 @@
 # Dependency Patches
 
-## `@tanstack/virtual-core@3.17.7`
+## `@tanstack/virtual-core@3.17.8`
 
-This patch carries the production change from upstream commit
+Upstream 3.17.8 includes the out-of-range stale-measurement guard from
 [`d2cf98be`](https://github.com/TanStack/virtual/commit/d2cf98beea1696c7187c06b57c9e724d1957963c),
-which ignores connected measurement elements whose stale indexes fall outside the current item
-count. The commit was merged after 3.17.7 but has not yet been published.
+so this patch retains only the behavior not yet released upstream.
 
-It also ignores a delayed ResizeObserver entry when its stale but still-valid index now resolves
-to a key owned by another connected element. The guard stays at observer ingress: direct
-`measureElement` calls must remain able to replace a connected element for the same key. The
-in-range case is covered by a framework-neutral patch contract test and should be proposed
-upstream separately from the already-merged out-of-range fix.
+It ignores a delayed ResizeObserver entry when its stale but still-valid index now resolves to a
+key owned by another connected element. The guard stays at observer ingress: direct
+`measureElement` calls must remain able to replace a connected element for the same key.
 
 The patch also compensates an already-measured, fully above-viewport item when it shrinks during
-backward scrolling. Version 3.17.7 skips every backward-scroll remeasurement adjustment; skipping
-a negative delta moves later rows backward by that exact delta even though `scrollTop` is stable.
-The negative adjustment follows the gesture, while positive growth remains uncompensated so it
-does not fight the user's scroll direction. A framework-neutral regression covers both halves.
+backward scrolling. Skipping a negative delta moves later rows backward by that exact delta even
+though `scrollTop` is stable. The negative adjustment follows the gesture, while positive growth
+remains uncompensated so it does not fight the user's scroll direction.
 
-Remove the patch once a compatible published Svelte adapter resolves a core release containing
-both stale-entry guards and the backward-shrink compensation, and the connected stale-row,
-replacement, count-shrink survivor, and backward-scroll shrink regressions pass without it.
+It also adds `cancelScroll()`, which lets user intent supersede an owned programmatic scroll by
+clearing pending reconciliation, scroll adjustments, iOS-deferred compensation, and its animation
+frame without issuing another scroll. Framework-neutral patch contract tests cover all three
+behaviors.
+
+Remove each patch behavior once a compatible Svelte adapter resolves a core release with the same
+contract and the corresponding patch tests pass unmodified against that release.

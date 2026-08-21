@@ -5,14 +5,14 @@ const dnd = vi.hoisted(() => ({
 	dropTargetOptions: null as unknown,
 }));
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/combine', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/utils/combine', () => ({
 	combine:
 		(...cleanups: Array<() => void>) =>
 		() =>
 			cleanups.forEach((cleanup) => cleanup()),
 }));
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter', () => ({
 	draggable: () => () => undefined,
 	dropTargetForElements: (options: unknown) => {
 		dnd.dropTargetOptions = options;
@@ -20,8 +20,11 @@ vi.mock('@atlaskit/pragmatic-drag-and-drop/element/adapter', () => ({
 	},
 }));
 
-vi.mock('@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge', () => ({
+vi.mock('@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge', () => ({
 	attachClosestEdge: (data: Record<string, unknown>) => data,
+}));
+
+vi.mock('@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/extract-closest-edge', () => ({
 	extractClosestEdge: (data: Record<string, unknown>) => data.closestEdge ?? null,
 }));
 

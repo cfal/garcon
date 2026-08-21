@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getLocalSettings } from '$lib/context';
 	import {
 		moveDesktopLayoutPane,

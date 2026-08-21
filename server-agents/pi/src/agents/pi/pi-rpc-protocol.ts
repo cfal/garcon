@@ -116,7 +116,7 @@ export function classifyPiSteerRejection(error: PiRpcCommandError): AgentSteerRe
   if (/extension command|cannot be queued/i.test(message)) {
     return rejectedPiSteer('invalid-input', 'Pi rejected the steering input');
   }
-  // Defensive: Pi 0.83.0 accepts steers unconditionally, so no idle rejection exists today.
+  // Defensive: Pi 0.84.2 accepts steers unconditionally, so no idle rejection exists today.
   if (/not (?:streaming|running)|no active turn/i.test(message)) {
     return rejectedPiSteer('no-active-turn', 'No active Pi turn');
   }

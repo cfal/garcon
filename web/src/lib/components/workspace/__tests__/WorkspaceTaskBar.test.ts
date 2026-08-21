@@ -197,7 +197,7 @@ describe('WorkspaceTaskBar', () => {
 			});
 			const openTerminal = screen.getByRole('menuitem', { name: 'Terminal 1' });
 
-			expect(history.querySelector('.lucide-history')).toBeTruthy();
+			expect(history.querySelector('.lucide-rotate-ccw-clock')).toBeTruthy();
 			expect(compare.querySelector('.lucide-git-compare-arrows')).toBeTruthy();
 			expect(items.indexOf(terminal)).toBeLessThan(items.indexOf(history));
 			expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));

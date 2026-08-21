@@ -2,16 +2,14 @@
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine';
 	import {
 		draggable,
 		dropTargetForElements,
-	} from '@atlaskit/pragmatic-drag-and-drop/element/adapter';
-	import {
-		attachClosestEdge,
-		type Edge,
-	} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
+	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
+	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
+	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import SidebarChatItem from './SidebarChatItem.svelte';
 	import {
 		getSidebarChatDragData,
