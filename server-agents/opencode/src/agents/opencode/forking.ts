@@ -39,17 +39,15 @@ export function createOpenCodeNativeForking(
         if (request.providerMeta) throw notSettled();
         return { kind: 'unmaterialized' };
       }
-      const anchorMessageId = request.providerMeta
-        ? await resolveAnchorMessageId(options.runtime, request, sourceSessionId)
+      const boundaryMessageId = request.providerMeta
+        ? await resolveExclusiveBoundaryMessageId(options.runtime, request, sourceSessionId)
         : null;
       const forkedSessionId = await options.runtime.forkSession(sourceSessionId, {
         projectPath: request.projectPath,
-        // Appending a character to the fixed-length ascending anchor id yields
-        // an exclusive boundary that includes the anchor message and excludes
-        // every later one, even if the provider appends concurrently; upstream
-        // validates only the "msg" prefix.
-        // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/schema/src/v1/session.ts#L17-L20
-        ...(anchorMessageId ? { messageId: `${anchorMessageId}0` } : {}),
+        // OpenCode resolves the boundary by exact identity and clones its
+        // chronological prefix.
+        // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/session.ts#L704-L706
+        ...(boundaryMessageId ? { messageId: boundaryMessageId } : {}),
       });
       try {
         return {
@@ -82,11 +80,11 @@ export function createOpenCodeNativeForking(
 
 // Locates the stored message owning the anchor's provider identity; an
 // identity the provider has not persisted refuses as not settled.
-async function resolveAnchorMessageId(
+async function resolveExclusiveBoundaryMessageId(
   runtime: OpenCodeRuntime,
   request: AgentNativeForkRequest,
   sourceSessionId: string,
-): Promise<string> {
+): Promise<string | null> {
   const entryId = typeof request.providerMeta?.entryId === 'string'
     ? request.providerMeta.entryId
     : '';
@@ -106,10 +104,13 @@ async function resolveAnchorMessageId(
     );
   });
   if (messages.length === 0) throw missingSource();
-  const anchor = messages.find((message) => ownsEntry(message, entryId));
-  const anchorMessageId = anchor?.info?.id;
-  if (typeof anchorMessageId !== 'string' || !anchorMessageId) throw notSettled();
-  return anchorMessageId;
+  const anchorIndex = messages.findIndex((message) => ownsEntry(message, entryId));
+  if (anchorIndex < 0) throw notSettled();
+  const boundaryMessage = messages[anchorIndex + 1];
+  if (!boundaryMessage) return null;
+  const boundaryMessageId = boundaryMessage.info?.id;
+  if (typeof boundaryMessageId !== 'string' || !boundaryMessageId) throw notSettled();
+  return boundaryMessageId;
 }
 
 async function retargetForkedSeedReceipt(

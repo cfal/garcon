@@ -65,12 +65,12 @@ function storedMessage(id, role, parts = []) {
 }
 
 const STORED_SOURCE_MESSAGES = [
-  storedMessage('msg_a', 'user', [{ type: 'text', text: 'first prompt' }]),
-  storedMessage('msg_b', 'assistant', [
+  storedMessage('msg_z9', 'user', [{ type: 'text', text: 'first prompt' }]),
+  storedMessage('msg_z1', 'assistant', [
     { id: 'prt_b1', type: 'text', text: 'first reply' },
   ]),
-  storedMessage('msg_c', 'user', [{ type: 'text', text: 'second prompt' }]),
-  storedMessage('msg_d', 'assistant', [
+  storedMessage('msg_a0', 'user', [{ type: 'text', text: 'second prompt' }]),
+  storedMessage('msg_a1', 'assistant', [
     { id: 'prt_d1', type: 'text', text: 'second reply' },
   ]),
 ];
@@ -105,31 +105,32 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     expect(outcome.kind).toBe('materialized');
     expect(fork.mock.calls[0][0]).toEqual({
       sessionID: 'source-session',
-      messageID: 'msg_b0',
+      messageID: 'msg_a0',
       directory: '/repo',
     });
   });
 
-  it('bounds message anchors, including a last-message anchor, past their own message', async () => {
+  it('bounds message anchors chronologically and omits the boundary at the tip', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const messages = mock(() => Promise.resolve({ data: STORED_SOURCE_MESSAGES }));
     const { forking } = createForking({ fork, messages });
 
     const atUserRow = await forking.fork(forkRequest({
-      providerMeta: { entryId: 'msg_c' },
+      providerMeta: { entryId: 'msg_a0' },
     }));
     expect(atUserRow.kind).toBe('materialized');
-    expect(fork.mock.calls[0][0]).toMatchObject({ messageID: 'msg_c0' });
+    expect(fork.mock.calls[0][0]).toEqual({
+      sessionID: 'source-session',
+      messageID: 'msg_a1',
+      directory: '/repo',
+    });
 
-    // A last-message anchor still carries a boundary, so provider messages
-    // appended between resolution and the fork call stay excluded.
     const atTip = await forking.fork(forkRequest({
       providerMeta: { entryId: 'prt_d1' },
     }));
     expect(atTip.kind).toBe('materialized');
     expect(fork.mock.calls[1][0]).toEqual({
       sessionID: 'source-session',
-      messageID: 'msg_d0',
       directory: '/repo',
     });
   });
