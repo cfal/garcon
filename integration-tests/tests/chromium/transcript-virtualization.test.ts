@@ -1101,15 +1101,17 @@ async function finishTranscriptTouchDrag(drag: TranscriptTouchDrag): Promise<voi
 async function startTranscriptMomentum(page: Page): Promise<void> {
   await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
     const browserGlobal = globalThis as typeof globalThis & {
-      __chatMomentum?: { active: boolean; frame: number };
+      __chatMomentum?: { active: boolean; frame: number; paused: boolean };
     };
     const feed = feedElement as HTMLElement;
-    const momentum = { active: true, frame: 0 };
+    const momentum = { active: true, frame: 0, paused: false };
     browserGlobal.__chatMomentum = momentum;
     const step = () => {
       if (!momentum.active) return;
-      feed.scrollTop = Math.max(0, feed.scrollTop - 8);
-      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      if (!momentum.paused) {
+        feed.scrollTop = Math.max(0, feed.scrollTop - 8);
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
       momentum.frame += 1;
       requestAnimationFrame(step);
     };
@@ -2475,6 +2477,271 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     await stopTranscriptMomentum(fixture.page).catch(() => undefined);
     if (drag) await finishTranscriptTouchDrag(drag);
     await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyPostTouchMomentumRemeasurement(fixture: ChromiumFixture): Promise<void> {
+  await fixture.context.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      get: () =>
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) '
+        + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    });
+  });
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(fixture.integration, 40, 'chromium-touch-remeasurement');
+  let drag: TranscriptTouchDrag | null = null;
+
+  try {
+    await prepareTranscript(fixture, chatId);
+    expect(await fixture.page.evaluate(() => navigator.userAgent)).toContain('iPhone');
+
+    for (const mode of ['growth', 'shrink'] as const) {
+      await scrollToPosition(fixture.page, 'middle');
+      const resizeTarget = await fixture.page.locator(FEED_SELECTOR).evaluate(
+        (feedElement, itemSelector) => {
+          const feed = feedElement as HTMLElement;
+          const viewportTop = feed.getBoundingClientRect().top;
+          const items = [...feed.querySelectorAll<HTMLElement>(itemSelector)];
+          const target = items
+            .map((item) => ({
+              distance: viewportTop - item.getBoundingClientRect().bottom,
+              item,
+            }))
+            .filter(({ distance }) => distance >= 96)
+            .sort((left, right) => left.distance - right.distance)[0];
+          if (!target) return null;
+          const targetIndex = Number(target.item.dataset.index);
+          const follower = items.find(
+            (item) => Number(item.dataset.index) === targetIndex + 1,
+          );
+          const followerKey = follower?.dataset.chatVirtualItem;
+          const targetKey = target.item.dataset.chatVirtualItem;
+          if (!followerKey || !targetKey) return null;
+          return {
+            distance: target.distance,
+            followerKey,
+            originalHeight: target.item.getBoundingClientRect().height,
+            targetKey,
+          };
+        },
+        ITEM_SELECTOR,
+      );
+      if (!resizeTarget) {
+        throw new Error(`No clipped measured row is available for ${mode}.`);
+      }
+      expect(resizeTarget.distance).toBeLessThanOrEqual(220);
+
+      if (mode === 'shrink') {
+        await fixture.page.locator(FEED_SELECTOR).evaluate(
+          async (feedElement, input) => {
+            const target = [...feedElement.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+              (item) => item.dataset.chatVirtualItem === input.targetKey,
+            );
+            if (!target) throw new Error('The shrink target was unmounted during setup.');
+            target.style.height = `${input.height}px`;
+            for (let frame = 0; frame < 4; frame += 1) {
+              await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            }
+          },
+          {
+            height: resizeTarget.originalHeight + 64,
+            itemSelector: ITEM_SELECTOR,
+            targetKey: resizeTarget.targetKey,
+          },
+        );
+      }
+
+      drag = await beginTranscriptTouchDrag(fixture.page);
+      await startTranscriptMomentum(fixture.page);
+      await finishTranscriptTouchDrag(drag);
+      drag = null;
+      const delta = mode === 'growth' ? 64 : -64;
+      const result = await fixture.page.locator(FEED_SELECTOR).evaluate(
+        async (feedElement, input) => {
+          const feed = feedElement as HTMLElement;
+          const browserGlobal = globalThis as typeof globalThis & {
+            __chatMomentum?: { active: boolean; paused: boolean };
+          };
+          const momentum = browserGlobal.__chatMomentum;
+          const content = feed.firstElementChild as HTMLElement | null;
+          const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+          const byKey = (key: string) =>
+            [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+              (item) => item.dataset.chatVirtualItem === key,
+            );
+          const targetNode = byKey(input.targetKey);
+          const followerNode = byKey(input.followerKey);
+          if (!momentum || !content || !sizer || !targetNode || !followerNode) {
+            throw new Error('The momentum resize geometry is incomplete.');
+          }
+          const frame = () =>
+            new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const transformY = (element: HTMLElement) => {
+            const transform = getComputedStyle(element).transform;
+            return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+          };
+          const sample = () => {
+            const target = byKey(input.targetKey);
+            const follower = byKey(input.followerKey);
+            if (!target || !follower) throw new Error('A resize row was unmounted.');
+            const feedTop = feed.getBoundingClientRect().top;
+            const targetRect = target.getBoundingClientRect();
+            const followerRect = follower.getBoundingClientRect();
+            return {
+              contentInlineMarginTop: content.style.marginTop,
+              contentMarginTop: Number.parseFloat(getComputedStyle(content).marginTop) || 0,
+              followerConnected: followerNode.isConnected,
+              followerSameNode: follower === followerNode,
+              followerTop: followerRect.top - feedTop,
+              followerTransformY: transformY(follower),
+              scrollTop: feed.scrollTop,
+              sizerHeight: sizer.getBoundingClientRect().height,
+              targetBottom: targetRect.bottom - feedTop,
+              targetConnected: targetNode.isConnected,
+              targetHeight: targetRect.height,
+              targetSameNode: target === targetNode,
+              targetTop: targetRect.top - feedTop,
+            };
+          };
+
+          momentum.paused = true;
+          await frame();
+          await frame();
+          const before = sample();
+          const initialInlineMarginTop = before.contentInlineMarginTop;
+          if (input.nextHeight === null) targetNode.style.removeProperty('height');
+          else targetNode.style.height = `${input.nextHeight}px`;
+
+          const measurementFrames = [];
+          let measured: ReturnType<typeof sample> | null = null;
+          for (let index = 0; index < 6; index += 1) {
+            await frame();
+            const current = sample();
+            measurementFrames.push(current);
+            if (
+              Math.abs(current.targetHeight - before.targetHeight - input.delta) <= 1
+              && Math.abs(current.followerTransformY - before.followerTransformY - input.delta) <= 1
+              && Math.abs(current.sizerHeight - before.sizerHeight - input.delta) <= 1
+            ) {
+              measured = current;
+              break;
+            }
+          }
+          if (!measured) {
+            throw new Error(`Resize geometry did not publish: ${JSON.stringify({ before, measurementFrames })}`);
+          }
+
+          const activeFrames = [measured];
+          momentum.paused = false;
+          for (let index = 0; index < 32; index += 1) {
+            await frame();
+            const current = sample();
+            activeFrames.push(current);
+            if (current.targetBottom > 1) break;
+          }
+
+          momentum.active = false;
+          const settlementFrames = [sample()];
+          for (let index = 0; index < 90; index += 1) {
+            await frame();
+            const current = sample();
+            settlementFrames.push(current);
+            if (current.contentInlineMarginTop === initialInlineMarginTop) break;
+          }
+          return {
+            activeFrames,
+            before,
+            initialInlineMarginTop,
+            measured,
+            settlementFrames,
+          };
+        },
+        {
+          delta,
+          followerKey: resizeTarget.followerKey,
+          itemSelector: ITEM_SELECTOR,
+          nextHeight: mode === 'growth' ? resizeTarget.originalHeight + 64 : null,
+          sizerSelector: SIZER_SELECTOR,
+          targetKey: resizeTarget.targetKey,
+        },
+      );
+      const diagnostic = JSON.stringify({ delta, mode, result }, null, 2);
+      expect(result.measured.targetHeight - result.before.targetHeight, diagnostic).toBeCloseTo(
+        delta,
+        0,
+      );
+      expect(
+        result.measured.followerTransformY - result.before.followerTransformY,
+        diagnostic,
+      ).toBeCloseTo(delta, 0);
+      expect(result.measured.sizerHeight - result.before.sizerHeight, diagnostic).toBeCloseTo(
+        delta,
+        0,
+      );
+      expect(
+        result.measured.contentMarginTop - result.before.contentMarginTop,
+        diagnostic,
+      ).toBeCloseTo(-delta, 0);
+      expect(result.measured.scrollTop, diagnostic).toBeCloseTo(result.before.scrollTop, 0);
+      expect(result.measured.followerTop, diagnostic).toBeCloseTo(result.before.followerTop, 0);
+      expect(result.measured.targetBottom, diagnostic).toBeCloseTo(result.before.targetBottom, 0);
+      expect(result.activeFrames.some((frame) => frame.targetBottom > 1), diagnostic).toBe(true);
+      expect(
+        result.activeFrames.flatMap((frame, index, frames) => {
+          const previous = frames[index - 1];
+          return previous && frame.followerTop < previous.followerTop - 1
+            ? [{ previous, frame }]
+            : [];
+        }),
+        diagnostic,
+      ).toEqual([]);
+      expect(
+        result.activeFrames.filter(
+          (frame) =>
+            !frame.followerConnected
+            || !frame.followerSameNode
+            || !frame.targetConnected
+            || !frame.targetSameNode
+            || Math.abs(frame.followerTop - frame.targetBottom) > 1,
+        ),
+        diagnostic,
+      ).toEqual([]);
+      const settlementMovement = result.settlementFrames.flatMap((frame, index, frames) => {
+        const previous = frames[index - 1];
+        return previous && Math.abs(frame.followerTop - previous.followerTop) > 1
+          ? [{ previous, frame }]
+          : [];
+      });
+      expect(settlementMovement, diagnostic).toEqual([]);
+      const beforeSettlement = result.settlementFrames[0];
+      const settled = result.settlementFrames.at(-1);
+      if (!beforeSettlement || !settled) throw new Error('No settlement frames were sampled.');
+      expect(settled.contentInlineMarginTop, diagnostic).toBe(result.initialInlineMarginTop);
+      expect(settled.scrollTop - beforeSettlement.scrollTop, diagnostic).toBeCloseTo(
+        -beforeSettlement.contentMarginTop,
+        0,
+      );
+      expect(settled.followerTop, diagnostic).toBeCloseTo(beforeSettlement.followerTop, 0);
+
+      await fixture.page.locator(FEED_SELECTOR).evaluate(
+        async (feedElement, input) => {
+          const target = [...feedElement.querySelectorAll<HTMLElement>(input.itemSelector)].find(
+            (item) => item.dataset.chatVirtualItem === input.targetKey,
+          );
+          target?.style.removeProperty('height');
+          for (let frame = 0; frame < 4; frame += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
+        },
+        { itemSelector: ITEM_SELECTOR, targetKey: resizeTarget.targetKey },
+      );
+    }
+    fixture.assertNoBrowserErrors();
+  } finally {
+    await stopTranscriptMomentum(fixture.page).catch(() => undefined);
+    if (drag) await finishTranscriptTouchDrag(drag);
   }
 }
 
@@ -4918,6 +5185,20 @@ describe('Chromium transcript virtualization', () => {
       async (fixture, markPhase) => {
         markPhase('continuing mobile momentum while an earlier page finishes loading');
         await verifyPostTouchMomentumPrepend(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('[TLV5-UX.06-COMPACT-TOUCH-RESIZE-01] keeps clipped row remeasurement continuous through post-touch momentum', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-post-touch-momentum-remeasurement',
+      async (fixture, markPhase) => {
+        markPhase('remeasuring a clipped row while mobile momentum remains active');
+        await verifyPostTouchMomentumRemeasurement(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
