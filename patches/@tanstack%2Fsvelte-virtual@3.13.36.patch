@@ -1,0 +1,49 @@
+diff --git a/dist/index.js b/dist/index.js
+index 4cc816a90149c4c4aa458623c02849c995874c6d..0fa16d3b9b28e27201ff3f8225e3c31afe9a9755 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,4 +1,5 @@
+ import { Virtualizer, elementScroll, observeElementOffset, observeElementRect, observeWindowOffset, observeWindowRect, windowScroll, } from '@tanstack/virtual-core';
++import { flushSync } from 'svelte';
+ import { derived, writable } from 'svelte/store';
+ export * from '@tanstack/virtual-core';
+ function createVirtualizerBase(initialOptions) {
+@@ -15,7 +16,12 @@ function createVirtualizerBase(initialOptions) {
+         originalSetOptions({
+             ...resolvedOptions,
+             onChange: (instance, sync) => {
+-                virtualizerWritable.set(instance);
++                if (sync) {
++                    flushSync(() => virtualizerWritable.set(instance));
++                }
++                else {
++                    virtualizerWritable.set(instance);
++                }
+                 resolvedOptions.onChange?.(instance, sync);
+             },
+         });
+diff --git a/src/index.ts b/src/index.ts
+index 1607d8c2c2aecbca78077f93212d72b620829f0f..9d4060b415783a1f880fd5ab09012753f8a04324 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -7,6 +7,7 @@ import {
+   observeWindowRect,
+   windowScroll,
+ } from '@tanstack/virtual-core'
++import { flushSync } from 'svelte'
+ import { derived, writable } from 'svelte/store'
+ import type { PartialKeys, VirtualizerOptions } from '@tanstack/virtual-core'
+ import type { Readable, Writable } from 'svelte/store'
+@@ -48,7 +49,11 @@ function createVirtualizerBase<
+         instance: Virtualizer<TScrollElement, TItemElement>,
+         sync: boolean,
+       ) => {
+-        virtualizerWritable.set(instance)
++        if (sync) {
++          flushSync(() => virtualizerWritable.set(instance))
++        } else {
++          virtualizerWritable.set(instance)
++        }
+         resolvedOptions.onChange?.(instance, sync)
+       },
+     })

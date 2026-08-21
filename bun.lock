@@ -293,6 +293,7 @@
   },
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.8": "patches/@tanstack%2Fvirtual-core@3.17.8.patch",
+    "@tanstack/svelte-virtual@3.13.36": "patches/@tanstack%2Fsvelte-virtual@3.13.36.patch",
   },
   "overrides": {
     "@codemirror/view": "6.43.9",
