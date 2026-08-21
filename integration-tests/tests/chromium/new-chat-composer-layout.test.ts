@@ -5,6 +5,9 @@ import {
   type ChromiumFixture,
 } from "../../support/chromium-fixture.js";
 
+const LONG_MODEL_LABEL =
+  "Integration Echo With An Extended Mobile Display Name";
+
 async function openNewChat(fixture: ChromiumFixture): Promise<Locator> {
   const response = await fixture.page.goto(fixture.integration.garcon.baseUrl, {
     waitUntil: "domcontentloaded",
@@ -46,6 +49,20 @@ describe("Chromium New Chat composer layout", () => {
       async (fixture, markPhase) => {
         markPhase("opening New Chat at phone width");
         await fixture.page.setViewportSize({ width: 390, height: 844 });
+        const directProvider = fixture.integration.directAgents.openAi.provider;
+        const modelUpdate = await fixture.page.request.put(
+          `${fixture.integration.garcon.baseUrl}/api/v1/api-providers?id=${encodeURIComponent(directProvider.providerId)}`,
+          {
+            data: {
+              endpoint: {
+                models: [
+                  { value: directProvider.model, label: LONG_MODEL_LABEL },
+                ],
+              },
+            },
+          },
+        );
+        expect(modelUpdate.ok()).toBe(true);
         const dialog = await openNewChat(fixture);
         const bottomBar = dialog.locator('[data-slot="composer-bottom-bar"]');
         await fixture.page.evaluate(() => {
@@ -150,8 +167,49 @@ describe("Chromium New Chat composer layout", () => {
           compactFits: true,
           footerFits: true,
         });
-        await doneButton.click();
+
+        markPhase("checking long model selection at phone width");
+        await modelDialog.getByRole("button", { name: "Back" }).click();
+        await modelDialog.getByRole("button", { name: "Back" }).click();
+        await modelDialog
+          .getByRole("button", { name: "Chat Completions", exact: true })
+          .click();
+        await modelDialog
+          .getByRole("button", { name: "Integration Fake OpenAI", exact: true })
+          .click();
+        await modelDialog
+          .getByRole("option", { name: LONG_MODEL_LABEL, exact: true })
+          .click();
         await modelDialog.waitFor({ state: "detached" });
+
+        const longModelTrigger = bottomBar.getByRole("button", {
+          name: `Direct (Chat Completions) / Integration Fake OpenAI / ${LONG_MODEL_LABEL}`,
+          exact: true,
+        });
+        const thinkingTrigger = bottomBar.locator(
+          '[data-slot="thinking-mode-trigger"]',
+        );
+        const [addTriggerBox, thinkingTriggerBox, longModelTriggerBox] =
+          await Promise.all([
+            bounds(addTrigger),
+            bounds(thinkingTrigger),
+            bounds(longModelTrigger),
+          ]);
+        expect(thinkingTriggerBox.y).toBeCloseTo(addTriggerBox.y, 0);
+        expect(longModelTriggerBox.y).toBeCloseTo(addTriggerBox.y, 0);
+        expect(
+          await longModelTrigger.evaluate((node) => {
+            const label = node.querySelector<HTMLElement>(
+              '[data-slot="model-selector-trigger-secondary"]',
+            );
+            return Boolean(label && label.scrollWidth > label.clientWidth);
+          }),
+        ).toBe(true);
+        expect(
+          await bottomBar.evaluate(
+            (node) => node.scrollWidth <= node.clientWidth,
+          ),
+        ).toBe(true);
 
         await fixture.page.evaluate(() => {
           document.documentElement.style.removeProperty(
@@ -166,7 +224,15 @@ describe("Chromium New Chat composer layout", () => {
           "checking model-selector collision margins at the sm boundary",
         );
         await fixture.page.setViewportSize({ width: 640, height: 900 });
-        await bottomBar.getByRole("button", { name: /Claude .* Opus/ }).click();
+        await bottomBar
+          .getByRole("button", { name: "Open expanded composer" })
+          .waitFor({ state: "visible" });
+        expect(
+          await bottomBar
+            .getByRole("button", { name: "More composer actions" })
+            .count(),
+        ).toBe(0);
+        await longModelTrigger.click();
         const modelPopover = fixture.page.locator(
           '[data-slot="popover-content"]',
         );

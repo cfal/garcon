@@ -124,15 +124,18 @@
 		}
 		return actions;
 	});
+	const composerActionsClass = $derived(
+		composerActions.length > 1 ? 'w-9 min-w-9 flex-none sm:w-19' : 'w-9 min-w-9 flex-none',
+	);
 </script>
 
-<div class="mt-1 px-2 py-1.5" data-slot="composer-bottom-bar">
+<div class="mt-1 w-full min-w-0 max-w-full px-2 py-1.5" data-slot="composer-bottom-bar">
 	<div
 		class="flex min-w-0 items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
 			? 'flex-wrap'
 			: 'flex-nowrap'}"
 	>
-		<div class="flex min-w-0 grow flex-wrap items-center gap-1 sm:gap-2">
+		<div class="flex shrink-0 flex-nowrap items-center gap-1 sm:gap-2">
 			{#if showAddMenu}
 				<ComposerAddMenu
 					disabled={addMenuDisabled || isPromptTransformPending}
@@ -209,14 +212,14 @@
 			{#if agentSettings}
 				{@render agentSettings()}
 			{/if}
-
-			{#if selectorsSide === 'left' && modelSelector}
-				{@render modelSelector()}
-			{/if}
 		</div>
 
+		{#if selectorsSide === 'left' && modelSelector}
+			{@render modelSelector()}
+		{/if}
+
 		<div
-			class="ml-auto flex min-w-0 shrink items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
+			class="ml-auto flex min-w-0 flex-1 items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
 				? 'order-first basis-full justify-between sm:order-none sm:basis-auto sm:justify-end'
 				: 'justify-end'}"
 		>
@@ -229,7 +232,7 @@
 					actions={composerActions}
 					menuLabel={m.chat_composer_more_actions()}
 					menuButtonClass="size-9 rounded-lg border border-border bg-background text-foreground ring-offset-background hover:bg-muted focus-visible:ring-offset-2"
-					class="min-w-9 flex-auto"
+					class={composerActionsClass}
 				/>
 			{/if}
 
