@@ -45,6 +45,7 @@ function snapshot(overrides: Partial<ChatSnapshotResponse> = {}): ChatSnapshotRe
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
     },
     processingPhase: 'running',
+    processingRetry: null,
     control: {
       serverInstanceId: 'instance-1',
       queue: {
@@ -111,6 +112,22 @@ describe('chat status', () => {
       `[1] ${TIMESTAMP} assistant-message`,
       'Working',
     ].join('\n'));
+  });
+
+  test('reports the provider retry wait under the running status', () => {
+    const value = formatChatStatus(snapshot({
+      processingRetry: {
+        attempt: 3,
+        message: 'Provider is overloaded',
+        nextAttemptAt: '2026-08-21T20:23:00.000Z',
+      },
+    }));
+
+    expect(value).toContain(
+      'status: running\n'
+        + 'provider retry: attempt 3, Provider is overloaded '
+        + '(next attempt 2026-08-21T20:23:00.000Z)\n',
+    );
   });
 
   test('keeps idle, queue, pause, and transcript availability separate', () => {
