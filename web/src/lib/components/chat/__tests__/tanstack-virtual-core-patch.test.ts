@@ -156,6 +156,27 @@ describe('TanStack virtual-core patch contract', () => {
 		expect(harness.virtualizer.itemSizeCache.get('survivor')).toBe(60);
 	});
 
+	it('compensates fully above-viewport shrinkage during backward scrolling', () => {
+		const harness = createVirtualizerHarness(
+			Array.from({ length: 20 }, (_, index) => `item-${index}`),
+		);
+		harness.virtualizer.getVirtualItems();
+		harness.virtualizer.resizeItem(0, 56);
+		harness.emitScrollOffset(600, true);
+		harness.emitScrollOffset(594, true);
+		expect(harness.virtualizer.scrollDirection).toBe('backward');
+		harness.scrollToFn.mockClear();
+
+		harness.virtualizer.resizeItem(0, 32);
+
+		expect(harness.scrollToFn).toHaveBeenCalledOnce();
+		expect(harness.scrollToFn.mock.calls[0]?.[1]).toMatchObject({ adjustments: -24 });
+
+		harness.scrollToFn.mockClear();
+		harness.virtualizer.resizeItem(0, 56);
+		expect(harness.scrollToFn).not.toHaveBeenCalled();
+	});
+
 	it('cancels an armed reconciliation without restoring a later user offset', () => {
 		const harness = createVirtualizerHarness(['only']);
 		harness.scrollToFn.mockClear();
