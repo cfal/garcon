@@ -30,9 +30,9 @@ describe('transcript notice contracts', () => {
         type,
         timestamp: AT,
         content: 'Synthetic CLI row.',
+        title: 'Deployment',
         detail: {
           type: 'cli-row',
-          title: 'Deployment',
           clientMessageId: 'must-not-cross-the-ledger-boundary',
           presentation: type === 'error' ? 'error' : 'notice',
         },
@@ -42,50 +42,63 @@ describe('transcript notice contracts', () => {
         type,
         timestamp: AT,
         content: 'Synthetic CLI row.',
-        detail: { type: 'cli-row', title: 'Deployment' },
+        title: 'Deployment',
+        detail: { type: 'cli-row' },
       });
     }
   });
 
-  it('round-trips a plain titled notice without any detail', () => {
-    const message = {
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Model provider retrying: quota exhausted.',
-      title: 'Provider retry',
-    };
+  it('round-trips plain titled notices and errors without provenance detail', () => {
+    for (const type of ['transcript-notice', 'error']) {
+      const message = {
+        type,
+        timestamp: AT,
+        content: 'Model provider retrying: quota exhausted.',
+        title: 'Provider retry',
+      };
 
-    const parsed = parseChatMessage(message);
+      const parsed = parseChatMessage(message);
 
-    expect(parsed?.title).toBe('Provider retry');
-    expect(parsed?.detail).toBeUndefined();
-    expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
+      expect(parsed?.title).toBe('Provider retry');
+      expect(parsed?.detail).toBeUndefined();
+      expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
 
-    expect(parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Untitled notice.',
-    })?.title).toBeUndefined();
+      expect(parseChatMessage({
+        type,
+        timestamp: AT,
+        content: 'Untitled message.',
+      })?.title).toBeUndefined();
+    }
   });
 
-  it('accepts untitled CLI detail and rejects malformed title shape', () => {
+  it('keeps CLI detail as bare provenance and drops malformed titles', () => {
     expect(parseChatMessage({
       type: 'error',
       timestamp: AT,
       content: 'Untitled error.',
       detail: { type: 'cli-row' },
     })?.detail).toEqual({ type: 'cli-row' });
+
+    const strayDetailTitle = parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Stray detail title.',
+      detail: { type: 'cli-row', title: 'Deployment' },
+    });
+    expect(strayDetailTitle?.detail).toEqual({ type: 'cli-row' });
+    expect(strayDetailTitle?.title).toBeUndefined();
+
     expect(parseChatMessage({
       type: 'error',
       timestamp: AT,
-      content: 'Malformed error.',
-      detail: { type: 'cli-row', title: '' },
-    })).toBeNull();
+      content: 'Blank title.',
+      title: '',
+    })?.title).toBeUndefined();
     expect(parseChatMessage({
       type: 'transcript-notice',
       timestamp: AT,
-      content: 'Malformed notice.',
-      detail: { type: 'cli-row', title: null },
-    })).toBeNull();
+      content: 'Non-string title.',
+      title: 42,
+    })?.title).toBeUndefined();
   });
 });

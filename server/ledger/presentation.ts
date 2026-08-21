@@ -9,23 +9,12 @@ import {
   UserMessage,
   isCarryoverMigrationQuarantineNoticeDetail,
   type ChatMessage,
-  type CliRowPresentationDetail,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
 import {
   isLedgerCliRowNoticeDetail,
-  type LedgerCliRowNoticeDetail,
   type LedgerRow,
 } from './contracts.js';
-
-function cliRowPresentationDetail(
-  detail: LedgerCliRowNoticeDetail,
-): CliRowPresentationDetail {
-  return {
-    type: 'cli-row',
-    ...(detail.title === null ? {} : { title: detail.title }),
-  };
-}
 
 export function ledgerRowsToMessages(rows: readonly LedgerRow[]): ChatMessage[] {
   return rows.flatMap((row) => {
@@ -59,10 +48,10 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return row.message;
     case 'notice': {
       if (isLedgerCliRowNoticeDetail(row.detail)) {
-        const detail = cliRowPresentationDetail(row.detail);
+        const title = row.detail.title ?? undefined;
         return row.detail.presentation === 'error'
-          ? new ErrorMessage(row.at, row.message, detail)
-          : new TranscriptNoticeMessage(row.at, row.message, detail);
+          ? new ErrorMessage(row.at, row.message, { type: 'cli-row' }, title)
+          : new TranscriptNoticeMessage(row.at, row.message, { type: 'cli-row' }, title);
       }
       return new TranscriptNoticeMessage(
         row.at,

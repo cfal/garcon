@@ -264,7 +264,8 @@ describe('transcript ledger read-fold matrix', () => {
             message: new TranscriptNoticeMessage(
               CHAT_ROW_AT,
               'presentation notice',
-              { type: 'cli-row', title: 'Presentation checkpoint' },
+              { type: 'cli-row' },
+              'Presentation checkpoint',
             ),
           },
           {
@@ -272,7 +273,8 @@ describe('transcript ledger read-fold matrix', () => {
             message: new ErrorMessage(
               CHAT_ROW_AT,
               'chat row error',
-              { type: 'cli-row', title: 'Failure checkpoint' },
+              { type: 'cli-row' },
+              'Failure checkpoint',
             ),
           },
           { ordinal: 4, message: new ErrorMessage(AT, 'provider error') },

@@ -630,6 +630,7 @@ export class ErrorMessage {
     public timestamp: string,
     public content: string,
     public detail?: CliRowPresentationDetail,
+    public title?: string,
   ) {}
 }
 
@@ -641,7 +642,6 @@ export interface CarryoverMigrationQuarantineNoticeDetail {
 
 export interface CliRowPresentationDetail {
   readonly type: 'cli-row';
-  readonly title?: string;
 }
 
 export type TranscriptNoticeDetail =
@@ -1134,20 +1134,11 @@ export function isCliRowPresentationDetail(
   value: unknown,
 ): value is CliRowPresentationDetail {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const detail = value as Record<string, unknown>;
-  return detail.type === 'cli-row'
-    && (
-      detail.title === undefined
-      || (typeof detail.title === 'string' && detail.title.length > 0)
-    );
+  return (value as Record<string, unknown>).type === 'cli-row';
 }
 
 function parseCliRowPresentationDetail(value: unknown): CliRowPresentationDetail | null {
-  if (!isCliRowPresentationDetail(value)) return null;
-  return {
-    type: 'cli-row',
-    ...(value.title === undefined ? {} : { title: value.title }),
-  };
+  return isCliRowPresentationDetail(value) ? { type: 'cli-row' } : null;
 }
 
 function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
@@ -1187,7 +1178,12 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         ? undefined
         : parseCliRowPresentationDetail(data.detail);
       if (detail === null) return null;
-      return new ErrorMessage(str(data.timestamp), str(data.content), detail);
+      return new ErrorMessage(
+        str(data.timestamp),
+        str(data.content),
+        detail,
+        typeof data.title === 'string' && data.title ? data.title : undefined,
+      );
     }
     case 'transcript-notice':
       {

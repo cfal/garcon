@@ -607,31 +607,36 @@ describe('Chromium transcript chat rows', () => {
           ordinal: entry.ordinal,
           type: entry.message.type,
           content: 'content' in entry.message ? entry.message.content : null,
+          title: 'title' in entry.message ? entry.message.title : undefined,
           detail: 'detail' in entry.message ? entry.message.detail : undefined,
         }))).toEqual([
           {
             ordinal: notice.ordinal,
             type: 'transcript-notice',
             content: noticeContent,
-            detail: { type: 'cli-row', title: noticeTitle },
+            title: noticeTitle,
+            detail: { type: 'cli-row' },
           },
           {
             ordinal: error.ordinal,
             type: 'error',
             content: errorContent,
-            detail: { type: 'cli-row', title: errorTitle },
+            title: errorTitle,
+            detail: { type: 'cli-row' },
           },
           {
             ordinal: missedNotice.ordinal,
             type: 'transcript-notice',
             content: 'browser replay notice',
-            detail: { type: 'cli-row', title: 'Replay deployment' },
+            title: 'Replay deployment',
+            detail: { type: 'cli-row' },
           },
           {
             ordinal: missedError.ordinal,
             type: 'error',
             content: 'browser replay error',
-            detail: { type: 'cli-row', title: 'Replay release validation' },
+            title: 'Replay release validation',
+            detail: { type: 'cli-row' },
           },
         ]);
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();

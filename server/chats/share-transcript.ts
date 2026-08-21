@@ -209,16 +209,20 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     };
   }
   if (message instanceof ErrorMessage) {
-    const role = isCliRowPresentationDetail(message.detail)
-      ? `CLI Error${message.detail.title === undefined ? '' : ` — ${message.detail.title}`}`
-      : 'Error';
-    return { role, timestamp: message.timestamp, content: message.content || '' };
+    const base = isCliRowPresentationDetail(message.detail) ? 'CLI Error' : 'Error';
+    return {
+      role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      timestamp: message.timestamp,
+      content: message.content || '',
+    };
   }
   if (message instanceof TranscriptNoticeMessage) {
-    const role = isCliRowPresentationDetail(message.detail)
-      ? `CLI Notice${message.detail.title === undefined ? '' : ` — ${message.detail.title}`}`
-      : 'Notice';
-    return { role, timestamp: message.timestamp, content: message.content || '' };
+    const base = isCliRowPresentationDetail(message.detail) ? 'CLI Notice' : 'Notice';
+    return {
+      role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      timestamp: message.timestamp,
+      content: message.content || '',
+    };
   }
   if (message instanceof PermissionRequestMessage) {
     const requested = formatToolUseMessage(message.requestedTool);

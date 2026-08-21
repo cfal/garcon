@@ -78,7 +78,7 @@
 		return {
 			presentation: message instanceof ErrorMessage ? 'error' : 'notice',
 			content: message.content,
-			...(message.detail.title === undefined ? {} : { title: message.detail.title }),
+			...(message.title === undefined ? {} : { title: message.title }),
 		};
 	}
 
@@ -327,13 +327,33 @@
 							{:else if message instanceof TranscriptNoticeMessage}
 								<ChatEventCard variant="info">
 									{#snippet body()}
-										<div class="text-sm whitespace-pre-wrap break-words">{message.content}</div>
+										{#if message.title}
+											<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>
+										{/if}
+										<div
+											class={[
+												'text-sm whitespace-pre-wrap break-words',
+												message.title && 'mt-1',
+											]}
+										>
+											{message.content}
+										</div>
 									{/snippet}
 								</ChatEventCard>
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
-										<div class="text-sm whitespace-pre-wrap break-words">{message.content}</div>
+										{#if message.title}
+											<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>
+										{/if}
+										<div
+											class={[
+												'text-sm whitespace-pre-wrap break-words',
+												message.title && 'mt-1',
+											]}
+										>
+											{message.content}
+										</div>
 									{/snippet}
 								</ChatEventCard>
 							{/if}

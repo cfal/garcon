@@ -149,13 +149,15 @@ describe('SharedChatPage', () => {
 				type: 'transcript-notice',
 				timestamp: '2025-01-02T03:05:00.000Z',
 				content: 'Shared notice.\nSecond line.',
-				detail: { type: 'cli-row', title: 'Deployment' },
+				title: 'Deployment',
+				detail: { type: 'cli-row' },
 			},
 			{
 				type: 'error',
 				timestamp: '2025-01-02T03:05:01.000Z',
 				content: 'Shared error.',
-				detail: { type: 'cli-row', title: 'Release validation' },
+				title: 'Release validation',
+				detail: { type: 'cli-row' },
 			},
 			{
 				type: 'transcript-notice',

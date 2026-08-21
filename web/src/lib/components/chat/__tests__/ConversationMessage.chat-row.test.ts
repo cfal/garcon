@@ -36,7 +36,8 @@ describe('ConversationMessage chat rows', () => {
 			message: new TranscriptNoticeMessage(
 				AT,
 				'Synthetic CLI notice.\nSecond line.',
-				{ type: 'cli-row', title: 'Deployment' },
+				{ type: 'cli-row' },
+				'Deployment',
 			),
 		});
 
@@ -65,7 +66,8 @@ describe('ConversationMessage chat rows', () => {
 			message: new ErrorMessage(
 				AT,
 				'Synthetic CLI error.',
-				{ type: 'cli-row', title: 'Release validation' },
+				{ type: 'cli-row' },
+				'Release validation',
 			),
 		});
 

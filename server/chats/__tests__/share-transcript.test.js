@@ -21,7 +21,8 @@ describe('shared transcript chat rows', () => {
         new TranscriptNoticeMessage(
           AT,
           'Shared notice.\nSecond line.',
-          { type: 'cli-row', title: 'Deployment' },
+          { type: 'cli-row' },
+          'Deployment',
         ),
         new ErrorMessage(AT, 'Shared error.', { type: 'cli-row' }),
         new TranscriptNoticeMessage(AT, 'Internal notice.'),

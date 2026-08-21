@@ -165,7 +165,7 @@
 		return {
 			presentation: asError ? ('error' as const) : ('notice' as const),
 			content: cliMessage.content,
-			...(cliMessage.detail.title === undefined ? {} : { title: cliMessage.detail.title }),
+			...(cliMessage.title === undefined ? {} : { title: cliMessage.title }),
 		};
 	});
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
@@ -711,8 +711,10 @@
 									<div class="min-w-0 truncate text-xs font-medium">{asNotice.title}</div>
 								{/if}
 								<div
-									class="text-sm whitespace-pre-wrap break-words"
-									class:mt-1={asNotice.title}
+									class={[
+										'text-sm whitespace-pre-wrap break-words',
+										asNotice.title && 'mt-1',
+									]}
 								>
 									{asNotice.content}
 								</div>
@@ -721,7 +723,17 @@
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}
-								<div class="text-sm whitespace-pre-wrap break-words">{formattedContent}</div>
+								{#if asError.title}
+									<div class="min-w-0 truncate text-xs font-medium">{asError.title}</div>
+								{/if}
+								<div
+									class={[
+										'text-sm whitespace-pre-wrap break-words',
+										asError.title && 'mt-1',
+									]}
+								>
+									{formattedContent}
+								</div>
 							{/snippet}
 						</ChatEventCard>
 					{:else if asCompaction}

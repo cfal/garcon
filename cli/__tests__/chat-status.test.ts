@@ -220,7 +220,8 @@ describe('chat status', () => {
           message: new TranscriptNoticeMessage(
             TIMESTAMP,
             'Deployment window opened.',
-            { type: 'cli-row', title: 'Deployment' },
+            { type: 'cli-row' },
+            'Deployment',
           ),
         }, {
           ordinal: 2,

@@ -79,6 +79,12 @@ function detailOf(message: ChatMessage): unknown {
   return 'detail' in message ? message.detail : undefined;
 }
 
+function titleOf(message: ChatMessage): string | undefined {
+  return 'title' in message && typeof message.title === 'string'
+    ? message.title
+    : undefined;
+}
+
 describe('garcon-cli add-row', () => {
   test('[TLV5-CHAT-ROW.05-SERVER-01] persists presentation-only rows without creating agent work', async () => {
     await withIntegrationFixture('garcon-cli-add-row', async (fixture) => {
@@ -160,19 +166,22 @@ describe('garcon-cli add-row', () => {
         ordinal: entry.ordinal,
         type: entry.message.type,
         content: contentOf(entry.message),
+        title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',
           content: noticeContent,
-          detail: { type: 'cli-row', title: noticeTitle },
+          title: noticeTitle,
+          detail: { type: 'cli-row' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
-          detail: { type: 'cli-row', title: errorTitle },
+          title: errorTitle,
+          detail: { type: 'cli-row' },
         },
       ]);
       expect(fixture.client.eventsSince(eventCursor).filter((event) => (
@@ -239,19 +248,22 @@ describe('garcon-cli add-row', () => {
         ordinal: entry.ordinal,
         type: entry.message.type,
         content: contentOf(entry.message),
+        title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',
           content: noticeContent,
-          detail: { type: 'cli-row', title: noticeTitle },
+          title: noticeTitle,
+          detail: { type: 'cli-row' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
-          detail: { type: 'cli-row', title: errorTitle },
+          title: errorTitle,
+          detail: { type: 'cli-row' },
         },
       ]);
 
@@ -265,19 +277,22 @@ describe('garcon-cli add-row', () => {
         ordinal: entry.ordinal,
         type: entry.message.type,
         content: contentOf(entry.message),
+        title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',
           content: noticeContent,
-          detail: { type: 'cli-row', title: noticeTitle },
+          title: noticeTitle,
+          detail: { type: 'cli-row' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
-          detail: { type: 'cli-row', title: errorTitle },
+          title: errorTitle,
+          detail: { type: 'cli-row' },
         },
       ]);
     }, { namedWorkspace: WORKSPACE });
