@@ -28,7 +28,7 @@
     "url": "https://github.com/cfal/garcon/issues"
   },
   "scripts": {
-    "setup": "bun install && bun install --cwd integration-tests",
+    "setup": "bun scripts/setup.js",
     "build": "bun scripts/build-web.js",
     "build-exe:compile": "bun scripts/build-exe.js",
     "build-exe:smoke": "bun scripts/smoke-exe.js",

@@ -104,7 +104,7 @@ bun run start
 
 Open `http://127.0.0.1:8080`. On first launch, create an account at `/setup`, then connect agents and API providers in Settings.
 
-`bun run setup` installs the root workspace and integration-test dependencies. Authentication is enabled by default.
+`bun run setup` installs the root, server, web, and integration-test dependencies. Authentication is enabled by default.
 
 ### Requirements
 
