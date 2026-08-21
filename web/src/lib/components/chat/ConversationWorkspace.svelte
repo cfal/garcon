@@ -176,11 +176,11 @@
 		get currentChatId() {
 			return lifecycle.currentChatId;
 		},
-		applyProcessingPhase: (chatId, phase) => {
-			lifecycle.applyProcessingPhase(chatId, phase);
+		applyProcessingPhase: (chatId, phase, retry) => {
+			lifecycle.applyProcessingPhase(chatId, phase, retry);
 		},
-		applyProcessingSnapshotPhase: (chatId, phase, sentAt) => {
-			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt);
+		applyProcessingSnapshotPhase: (chatId, phase, retry, sentAt) => {
+			lifecycle.applyProcessingSnapshotPhase(chatId, phase, retry, sentAt);
 		},
 		clearTurnPermissionRequests: () => conversationUi.clearTurnPermissionRequests(),
 	});

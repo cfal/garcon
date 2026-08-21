@@ -33,7 +33,7 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		connection: Pick<WsConnection, 'addMessageConsumer'>,
 		private readonly sessions: Pick<
 			ChatSessionsPort,
-			'applyProcessingEvent' | 'processingPhase' | 'reconcileProcessing'
+			'applyProcessingEvent' | 'processingPhase' | 'processingRetry' | 'reconcileProcessing'
 		>,
 	) {
 		this.#removeConsumer = connection.addMessageConsumer((data, context) =>
@@ -61,8 +61,8 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 
 		const message = parseServerWsMessage(data);
 		if (message instanceof ChatProcessingUpdatedMessage) {
-			this.sessions.applyProcessingEvent(message.chatId, message.phase);
-			this.#applyPresentationPhase(message.chatId, message.phase);
+			this.sessions.applyProcessingEvent(message.chatId, message.phase, message.retry);
+			this.#applyPresentationPhase(message.chatId, message.phase, message.retry);
 			return true;
 		}
 		if (message instanceof ReconnectStateMessage || message instanceof WsPongMessage) {
@@ -106,7 +106,12 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		const changedChatIds = new Set<string>();
 		for (const transition of transitions) {
 			changedChatIds.add(transition.chatId);
-			this.#applyPresentationSnapshotPhase(transition.chatId, transition.phase, sentAt);
+			this.#applyPresentationSnapshotPhase(
+				transition.chatId,
+				transition.phase,
+				transition.retry,
+				sentAt,
+			);
 		}
 		for (const presentation of this.#presentations) {
 			const chatId = presentation.currentChatId;
@@ -115,6 +120,7 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 				presentation,
 				chatId,
 				this.sessions.processingPhase(chatId),
+				this.sessions.processingRetry(chatId),
 				sentAt,
 			);
 		}
@@ -123,19 +129,21 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 	#applyPresentationPhase(
 		chatId: string,
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
+		retry: Parameters<ConversationLifecycleState['applyProcessingPhase']>[2],
 	): void {
 		for (const presentation of this.#presentations) {
-			this.#applyPresentation(presentation, chatId, phase);
+			this.#applyPresentation(presentation, chatId, phase, retry);
 		}
 	}
 
 	#applyPresentationSnapshotPhase(
 		chatId: string,
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
+		retry: Parameters<ConversationLifecycleState['applyProcessingPhase']>[2],
 		sentAt: number | null,
 	): void {
 		for (const presentation of this.#presentations) {
-			this.#applyPresentationSnapshot(presentation, chatId, phase, sentAt);
+			this.#applyPresentationSnapshot(presentation, chatId, phase, retry, sentAt);
 		}
 	}
 
@@ -143,9 +151,10 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		presentation: ChatProcessingPresentation,
 		chatId: string,
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
+		retry: Parameters<ConversationLifecycleState['applyProcessingPhase']>[2],
 	): void {
 		if (presentation.currentChatId !== chatId) return;
-		presentation.applyProcessingPhase(chatId, phase);
+		presentation.applyProcessingPhase(chatId, phase, retry);
 		if (phase === null) presentation.clearTurnPermissionRequests();
 	}
 
@@ -153,10 +162,11 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		presentation: ChatProcessingPresentation,
 		chatId: string,
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
+		retry: Parameters<ConversationLifecycleState['applyProcessingPhase']>[2],
 		sentAt: number | null,
 	): void {
 		if (presentation.currentChatId !== chatId) return;
-		presentation.applyProcessingSnapshotPhase(chatId, phase, sentAt);
+		presentation.applyProcessingSnapshotPhase(chatId, phase, retry, sentAt);
 		if (phase === null) presentation.clearTurnPermissionRequests();
 	}
 }

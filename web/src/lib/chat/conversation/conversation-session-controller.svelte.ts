@@ -166,6 +166,7 @@ export interface SessionControllerDeps {
 		| 'applyStartEntry'
 		| 'applyProcessingEvent'
 		| 'processingPhase'
+		| 'processingRetry'
 		| 'upsertServerChat'
 		| 'setSelectedChatId'
 		| 'renameChat'
@@ -428,7 +429,11 @@ export class ConversationSessionController {
 		}
 
 		deps.lifecycle.setCurrentChatId(chatId);
-		deps.lifecycle.applyProcessingPhase(chatId, deps.sessions.processingPhase(chatId));
+		deps.lifecycle.applyProcessingPhase(
+			chatId,
+			deps.sessions.processingPhase(chatId),
+			deps.sessions.processingRetry(chatId),
+		);
 		deps.composerState.restoreDraft(chatId);
 		void this.#queue.startControlRefresh(chatId);
 

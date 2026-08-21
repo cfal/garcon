@@ -246,7 +246,7 @@ export async function submitDraftRoute(
 			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
 			onRejected: () => {
 				deps.lifecycle.clearTurnStatus(chatId);
-				deps.sessions.applyProcessingEvent(chatId, null);
+				deps.sessions.applyProcessingEvent(chatId, null, null);
 			},
 		});
 	} finally {

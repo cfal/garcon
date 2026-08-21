@@ -22,6 +22,69 @@ describe('ConversationLifecycleState', () => {
 		});
 	});
 
+	describe('provider retry status', () => {
+		const retry = {
+			attempt: 3,
+			message: 'Provider is overloaded',
+			nextAttemptAt: null,
+		};
+
+		it('surfaces retry detail on top of the status stack while interruption stays available', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			store.applyProcessingPhase('chat-1', 'running', retry);
+
+			expect(store.loadingStatus).toMatchObject({
+				text: 'Model provider retrying (attempt 3): Provider is overloaded',
+				can_interrupt: true,
+			});
+			expect(store.loadingStatusStack).toHaveLength(2);
+		});
+
+		it('replaces the retry entry on updates and removes it on clear', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			store.applyProcessingPhase('chat-1', 'running', retry);
+			store.applyProcessingPhase('chat-1', 'running', { ...retry, attempt: 4 });
+
+			expect(store.loadingStatusStack).toHaveLength(2);
+			expect(store.loadingStatus?.text).toContain('(attempt 4)');
+
+			store.applyProcessingPhase('chat-1', 'running', null);
+
+			expect(store.loadingStatusStack).toHaveLength(1);
+			expect(store.loadingStatus).toMatchObject({ text: 'Processing' });
+		});
+
+		it('drops retry detail with the rest of the stack when the turn ends', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+			store.applyProcessingPhase('chat-1', 'running', retry);
+
+			store.applyProcessingPhase('chat-1', null, null);
+
+			expect(store.turnStatus).toBe('idle');
+			expect(store.loadingStatusStack).toEqual([]);
+		});
+
+		it('mentions the next attempt time when the provider reports one', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+
+			store.applyProcessingPhase('chat-1', 'running', {
+				attempt: 0,
+				message: 'quota exhausted',
+				nextAttemptAt: new Date().toISOString(),
+			});
+
+			expect(store.loadingStatus?.text).toMatch(
+				/^Model provider retrying: quota exhausted · Next attempt at /,
+			);
+		});
+	});
+
 	describe('turn status transitions', () => {
 		it('setTurnStatus changes the turn status', () => {
 			const store = makeStore();
@@ -78,7 +141,7 @@ describe('ConversationLifecycleState', () => {
 			store.beginTurn('chat-1');
 
 			const snapshot = store.beginStopping('chat-1', 'request-1');
-			store.applyProcessingPhase('chat-1', 'stopping');
+			store.applyProcessingPhase('chat-1', 'stopping', null);
 
 			expect(store.turnStatus).toBe('stopping');
 			expect(store.loadingStatus).toMatchObject({ text: 'Stopping', can_interrupt: false });
@@ -93,7 +156,7 @@ describe('ConversationLifecycleState', () => {
 			store.beginTurn('chat-1');
 			const snapshot = store.beginStopping('chat-1', 'request-1');
 
-			store.applyProcessingPhase('chat-1', 'running');
+			store.applyProcessingPhase('chat-1', 'running', null);
 			store.restoreStopping('chat-1', 'request-1', snapshot);
 
 			expect(store.turnStatus).toBe('running');
@@ -105,7 +168,7 @@ describe('ConversationLifecycleState', () => {
 			store.beginTurn('chat-1');
 			const snapshot = store.beginStopping('chat-1', 'request-1');
 
-			store.applyProcessingPhase('chat-1', null);
+			store.applyProcessingPhase('chat-1', null, null);
 
 			expect(store.turnStatus).toBe('idle');
 			expect(store.loadingStatus).toBeNull();

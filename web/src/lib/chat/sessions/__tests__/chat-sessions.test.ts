@@ -23,6 +23,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		isActive: processingPhase !== null,
 		isProcessing: processingPhase !== null,
 		processingPhase,
+		processingRetry: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
@@ -543,11 +544,11 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		expect(store.byId['a']?.isProcessing).toBe(false);
 
-		store.applyProcessingEvent('a', 'running');
+		store.applyProcessingEvent('a', 'running', null);
 		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['a']?.processingPhase).toBe('running');
 
-		store.applyProcessingEvent('a', null);
+		store.applyProcessingEvent('a', null, null);
 		expect(store.byId['a']?.isProcessing).toBe(false);
 	});
 
@@ -563,7 +564,7 @@ describe('ChatSessionsStore', () => {
 	it('applies an early processing event when an external chat enters the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', 'running');
+		store.applyProcessingEvent('scheduled-chat', 'running', null);
 		const ref = store.byId;
 
 		expect(store.byId).toBe(ref);
@@ -579,8 +580,8 @@ describe('ChatSessionsStore', () => {
 	it('cancels an early processing event when completion arrives before the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', 'running');
-		store.applyProcessingEvent('scheduled-chat', null);
+		store.applyProcessingEvent('scheduled-chat', 'running', null);
+		store.applyProcessingEvent('scheduled-chat', null, null);
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
 		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
@@ -589,7 +590,7 @@ describe('ChatSessionsStore', () => {
 	it('clears an early processing event when its chat is deleted', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('scheduled-chat', 'running');
+		store.applyProcessingEvent('scheduled-chat', 'running', null);
 		store.removeChat('scheduled-chat');
 		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
 
@@ -602,9 +603,58 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		const ref = store.byId;
 
-		store.applyProcessingEvent('a', null);
+		store.applyProcessingEvent('a', null, null);
 
 		expect(store.byId).toBe(ref);
+	});
+
+	it('tracks retry detail from processing events while the phase lasts', () => {
+		const retry = { attempt: 1, message: 'Provider is overloaded', nextAttemptAt: null };
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+
+		store.applyProcessingEvent('a', 'running', retry);
+		expect(store.processingRetry('a')).toEqual(retry);
+		expect(store.byId['a']?.processingRetry).toEqual(retry);
+
+		store.applyProcessingEvent('a', 'running', null);
+		expect(store.processingRetry('a')).toBeNull();
+
+		store.applyProcessingEvent('a', 'running', retry);
+		store.applyProcessingEvent('a', null, retry);
+		expect(store.processingRetry('a')).toBeNull();
+	});
+
+	it('emits a transition when only the retry detail changes in a snapshot', () => {
+		const retry = { attempt: 2, message: 'quota exhausted', nextAttemptAt: null };
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running', retry: null }]);
+
+		const transitions = store.reconcileProcessing([{ chatId: 'a', phase: 'running', retry }]);
+
+		expect(transitions).toEqual([
+			{ chatId: 'a', previousPhase: 'running', phase: 'running', retry },
+		]);
+		expect(store.processingRetry('a')).toEqual(retry);
+
+		const cleared = store.reconcileProcessing([{ chatId: 'a', phase: 'running', retry: null }]);
+		expect(cleared).toEqual([
+			{ chatId: 'a', previousPhase: 'running', phase: 'running', retry: null },
+		]);
+		expect(store.processingRetry('a')).toBeNull();
+	});
+
+	it('seeds retry detail from the server list payload for cold opens', () => {
+		const retry = { attempt: 4, message: 'upstream retrying', nextAttemptAt: null };
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'a', isActive: true, processingRetry: retry }),
+		]);
+
+		expect(store.processingRetry('a')).toEqual(retry);
+		expect(store.byId['a']?.processingRetry).toEqual(retry);
 	});
 
 	it('reconcileProcessing sets active chats to processing', () => {
@@ -617,8 +667,8 @@ describe('ChatSessionsStore', () => {
 		]);
 
 		store.reconcileProcessing([
-			{ chatId: 'a', phase: 'running' },
-			{ chatId: 'c', phase: 'stopping' },
+			{ chatId: 'a', phase: 'running', retry: null },
+			{ chatId: 'c', phase: 'stopping', retry: null },
 		]);
 
 		expect(store.byId['a']?.isProcessing).toBe(true);
@@ -634,10 +684,10 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.applyProcessingEvent('a', 'running');
-		store.applyProcessingEvent('b', 'running');
+		store.applyProcessingEvent('a', 'running', null);
+		store.applyProcessingEvent('b', 'running', null);
 
-		store.reconcileProcessing([{ chatId: 'b', phase: 'stopping' }]);
+		store.reconcileProcessing([{ chatId: 'b', phase: 'stopping', retry: null }]);
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
 		expect(store.byId['b']?.isProcessing).toBe(true);
@@ -646,8 +696,8 @@ describe('ChatSessionsStore', () => {
 	it('reconcileProcessing replaces early processing events with its authoritative snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.applyProcessingEvent('stale-chat', 'running');
-		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running' }]);
+		store.applyProcessingEvent('stale-chat', 'running', null);
+		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running', retry: null }]);
 		store.upsertFromServer([
 			makeServerSession({ id: 'stale-chat', isActive: false }),
 			makeServerSession({ id: 'active-chat', title: 'Active', isActive: false }),
@@ -664,10 +714,10 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({ id: 'a' }),
 			makeServerSession({ id: 'b', title: 'B' }),
 		]);
-		store.applyProcessingEvent('a', 'running');
+		store.applyProcessingEvent('a', 'running', null);
 
 		const ref = store.byId;
-		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running', retry: null }]);
 
 		expect(store.byId).toBe(ref);
 	});
@@ -676,7 +726,7 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.applyProcessingEvent('a', 'running');
+		store.applyProcessingEvent('a', 'running', null);
 
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated' })]);
 
@@ -688,7 +738,7 @@ describe('ChatSessionsStore', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a', isActive: true })]);
-		store.applyProcessingEvent('a', null);
+		store.applyProcessingEvent('a', null, null);
 		store.upsertFromServer([makeServerSession({ id: 'a', title: 'Updated', isActive: true })]);
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
@@ -698,7 +748,7 @@ describe('ChatSessionsStore', () => {
 	it('prunes processing authority for a known chat removed from the server list', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		store.applyProcessingEvent('a', 'running');
+		store.applyProcessingEvent('a', 'running', null);
 
 		store.upsertFromServer([]);
 		store.upsertFromServer([makeServerSession({ id: 'a', isActive: false })]);
@@ -709,7 +759,7 @@ describe('ChatSessionsStore', () => {
 	it('reconnect processing baseline governs chats arriving in later list responses', () => {
 		const store = new ChatSessionsStore();
 
-		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running' }]);
+		store.reconcileProcessing([{ chatId: 'active-chat', phase: 'running', retry: null }]);
 		store.upsertFromServer([
 			makeServerSession({ id: 'active-chat', isActive: false }),
 			makeServerSession({ id: 'stale-chat', title: 'Stale', isActive: true }),
@@ -729,7 +779,7 @@ describe('ChatSessionsStore', () => {
 		]);
 
 		// Active-chats snapshot arrives after.
-		store.reconcileProcessing([{ chatId: 'a', phase: 'running' }]);
+		store.reconcileProcessing([{ chatId: 'a', phase: 'running', retry: null }]);
 
 		expect(store.byId['a']?.isProcessing).toBe(true);
 		expect(store.byId['b']?.isProcessing).toBe(false);

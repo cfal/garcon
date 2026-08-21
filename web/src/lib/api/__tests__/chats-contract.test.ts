@@ -96,6 +96,7 @@ describe('chats API contract', () => {
 			isActive: false,
 			isProcessing: true,
 			processingPhase: 'running',
+			processingRetry: null,
 			isUnread: false,
 			canReloadFromNativeHistory: false,
 		};
@@ -133,6 +134,7 @@ describe('chats API contract', () => {
 					isActive: false,
 					isProcessing: false,
 					processingPhase: null,
+					processingRetry: null,
 					isUnread: false,
 					canReloadFromNativeHistory: false,
 				},

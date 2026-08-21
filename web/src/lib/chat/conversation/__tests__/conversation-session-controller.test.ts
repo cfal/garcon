@@ -169,6 +169,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		isArchived: false,
 		isProcessing,
 		processingPhase: isProcessing ? 'running' : null,
+		processingRetry: null,
 		isUnread: true,
 		canReloadFromNativeHistory: false,
 		status: 'running',
@@ -261,6 +262,7 @@ function chatSnapshot(
 			},
 		},
 		processingPhase: 'running',
+		processingRetry: null,
 		control: emptyControl(),
 		transientFeed: transientFeedSnapshot,
 		transcript: {
@@ -308,6 +310,7 @@ function createServerEntry(id: string) {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		processingRetry: null,
 		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
 		canReloadFromNativeHistory: false,
@@ -425,6 +428,9 @@ function createDeps(chat = createRunningChat()) {
 			applyProcessingEvent: vi.fn(),
 			processingPhase: vi.fn((chatId: string) =>
 				chatId === chat.id ? chat.processingPhase : null,
+			),
+			processingRetry: vi.fn((chatId: string) =>
+				chatId === chat.id ? chat.processingRetry : null,
 			),
 			upsertServerChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
@@ -1261,7 +1267,7 @@ describe('ConversationSessionController', () => {
 		const controller = new ConversationSessionController(deps);
 
 		const stop = controller.handleAbort();
-		lifecycle.applyProcessingPhase('chat-1', 'running');
+		lifecycle.applyProcessingPhase('chat-1', 'running', null);
 		result.resolve({
 			success: true,
 			commandType: 'agent-stop',

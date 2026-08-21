@@ -41,6 +41,7 @@ function createChat(
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		processingRetry: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
