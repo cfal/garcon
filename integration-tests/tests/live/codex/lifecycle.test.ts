@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ChatMessagesMessage } from '../../../../common/ws-events.js';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -319,6 +320,7 @@ describe('live Codex lifecycle', () => {
       ].join(' ');
       const successorMarker = liveMarker('CODEX_INTERRUPT_SUCCESSOR');
       const successorPrompt = exactReplyPrompt(successorMarker);
+      const activeCursor = fixture.client.markEvents();
       const active = await fixture.client.startChat(liveCodexStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
@@ -327,6 +329,18 @@ describe('live Codex lifecycle', () => {
       }));
 
       await waitForFile(interruptedStarted);
+      // The interrupt must land after the tool row is committed, or the resend
+      // scan folds the interrupted prompt into the successor.
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'bash-tool-use'
+            && entry.message.command.includes('.codex-interrupt-started')),
+        'live Codex interrupted shell tool use',
+        { afterIndex: activeCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
       const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
       expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([successorPrompt]);
 
@@ -377,6 +391,16 @@ describe('live Codex lifecycle', () => {
         permissionMode: 'bypassPermissions',
       }));
       await waitForFile(stoppedStarted);
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'bash-tool-use'
+            && entry.message.command.includes('.codex-stop-started')),
+        'live Codex stopped shell tool use',
+        { afterIndex: stoppedCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
       const stopCommandCursor = fixture.client.markEvents();
       const stopRequestId = crypto.randomUUID();
       const stopped = await Promise.all([
