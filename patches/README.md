@@ -13,6 +13,12 @@ to a key owned by another connected element. The guard stays at observer ingress
 in-range case is covered by a framework-neutral patch contract test and should be proposed
 upstream separately from the already-merged out-of-range fix.
 
+The patch also compensates an already-measured, fully above-viewport item when it shrinks during
+backward scrolling. Version 3.17.7 skips every backward-scroll remeasurement adjustment; skipping
+a negative delta moves later rows backward by that exact delta even though `scrollTop` is stable.
+The negative adjustment follows the gesture, while positive growth remains uncompensated so it
+does not fight the user's scroll direction. A framework-neutral regression covers both halves.
+
 Remove the patch once a compatible published Svelte adapter resolves a core release containing
-both guards and the connected stale-row, replacement, and count-shrink survivor regressions pass
-without it.
+both stale-entry guards and the backward-shrink compensation, and the connected stale-row,
+replacement, count-shrink survivor, and backward-scroll shrink regressions pass without it.
