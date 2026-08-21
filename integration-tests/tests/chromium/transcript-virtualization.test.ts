@@ -2851,6 +2851,8 @@ async function verifyPendingRowRemountMeasurement(fixture: ChromiumFixture): Pro
             || currentTarget !== remount.node
             || !currentTarget.querySelector('[data-chat-pending-remount-marker]')
           ) continue;
+          currentTarget.style.height = '40px';
+          currentTarget.style.overflow = 'hidden';
           pendingFrames.push(sample(currentTarget, currentFollower));
         }
         const replacementNode = remount.node;
