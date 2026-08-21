@@ -263,6 +263,13 @@ describeOnLinux('scripted OpenCode provider failures', () => {
 
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual([prompt]);
+      // The upstream retry wait surfaced as one durable titled notice instead
+      // of dead air, and the turn still recovered.
+      const retryNotices = messagesOfType(transcript.messages, 'transcript-notice');
+      expect(retryNotices).toHaveLength(1);
+      expect(retryNotices[0]).toMatchObject({ title: 'Provider retry' });
+      expect((retryNotices[0] as { content: string }).content)
+        .toContain('Model provider retrying');
       const native = await openCodeNativeSession(fixture, chatId);
       const rows = readOpenCodeSessionRows(native);
       expect(rows.messages.filter((row) => row.data.role === 'user')).toHaveLength(1);

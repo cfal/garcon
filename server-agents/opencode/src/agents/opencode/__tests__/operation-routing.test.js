@@ -582,6 +582,8 @@ describe('OpenCode operation routing', () => {
         error: { name: 'ProviderError', data: { message: 'old failure' } },
       },
     });
+    // A stale idle status is consumed at the session scope; only retry
+    // statuses surface anything, so it publishes nothing for either operation.
     eventStream.push({
       id: 'event-old-idle',
       type: 'session.status',
@@ -591,10 +593,6 @@ describe('OpenCode operation routing', () => {
       entry[0] === 'warn'
       && entry[1] === 'Ignoring an OpenCode event without an operation identity'
       && entry[2]?.eventId === 'event-old-error'
-    )) && diagnostics.some((entry) => (
-      entry[0] === 'debug'
-      && entry[1] === 'Ignoring an OpenCode event without an operation identity'
-      && entry[2]?.eventId === 'event-old-idle'
     )));
 
     expect(firstEvents).toHaveLength(firstEventCount);

@@ -13,6 +13,9 @@ export interface OpenCodeTurnContext {
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;
+  // Identity of the last surfaced retry notice so stream replays and repeated
+  // status frames for the same scheduled attempt append one row, not many.
+  lastRetryNoticeKey: string | null;
   providerContinuationMessageIds: Set<string>;
   recentEventIds: Set<string>;
   providerSteeringPartIds: Set<string>;
@@ -60,6 +63,7 @@ export function createOpenCodeTurnContext(
     operation,
     providerMessageId: null,
     providerPromptPartId: createOpenCodePromptPartId(),
+    lastRetryNoticeKey: null,
     providerContinuationMessageIds: new Set(),
     recentEventIds: new Set(),
     providerSteeringPartIds: new Set(),

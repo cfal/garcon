@@ -140,6 +140,54 @@ export function extractSessionId(event: SSEEvent): string | undefined {
     || (event.type?.startsWith('session.') ? props.info?.id : undefined);
 }
 
+export interface OpenCodeSessionRetryStatus {
+  readonly attempt: number;
+  readonly message: string;
+  readonly nextAttemptAt: string | null;
+}
+
+// Reads the retry arm of the typed session.status union. Retry classification
+// is upstream's decision; only the payload discriminant is inspected here.
+// https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/schema/src/session-status-event.ts#L9-L32
+export function openCodeSessionRetryStatus(event: SSEEvent): OpenCodeSessionRetryStatus | null {
+  if (event.type !== 'session.status') return null;
+  const status = event.properties?.status;
+  if (!isRecord(status) || status.type !== 'retry') return null;
+  if (typeof status.message !== 'string' || !status.message.trim()) return null;
+  const attempt = typeof status.attempt === 'number' && Number.isFinite(status.attempt)
+    ? status.attempt
+    : 0;
+  const nextAttemptAt = typeof status.next === 'number' && Number.isFinite(status.next)
+    ? new Date(status.next).toISOString()
+    : null;
+  return { attempt, message: status.message.trim(), nextAttemptAt };
+}
+
+export function openCodeRetryNoticeText(retry: OpenCodeSessionRetryStatus): string {
+  const attempt = retry.attempt > 0 ? ` (attempt ${retry.attempt})` : '';
+  const message = retry.message.replace(/\.$/, '');
+  const next = retry.nextAttemptAt ? ` Next attempt at ${retry.nextAttemptAt}.` : '';
+  return `Model provider retrying${attempt}: ${message}.${next}`;
+}
+
+export interface OpenCodeRetryNotice {
+  readonly key: string;
+  readonly title: string;
+  readonly content: string;
+}
+
+// One notice per distinct scheduled attempt: the key identifies the attempt so
+// stream replays and repeated status frames do not append duplicate rows.
+export function openCodeRetryNotice(event: SSEEvent): OpenCodeRetryNotice | null {
+  const retry = openCodeSessionRetryStatus(event);
+  if (!retry) return null;
+  return {
+    key: `${retry.attempt}:${retry.nextAttemptAt ?? ''}:${retry.message}`,
+    title: 'Provider retry',
+    content: openCodeRetryNoticeText(retry),
+  };
+}
+
 export function extractTextParts(parts: unknown): string {
   if (!Array.isArray(parts)) return '';
   return parts

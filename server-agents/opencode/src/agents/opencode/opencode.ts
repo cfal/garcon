@@ -12,6 +12,7 @@ import {
   isOpenCodeCompactionContinuationPart,
   isOpenCodeCompactionControlPart,
   openCodeAssistantTerminal,
+  openCodeRetryNotice,
   type OpenCodeAssistantTerminal,
   type SSEEvent,
 } from './sse-events.js';
@@ -751,6 +752,13 @@ export class OpenCodeRuntime {
       return;
     }
 
+    // Session status has no operation identity, so it is adopted at the session
+    // scope before route resolution would drop it.
+    if (event.type === 'session.status') {
+      this.#handleSessionStatusEvent(sessionId, event);
+      return;
+    }
+
     // Marked parts always pass through current-turn adoption so a foreign named ID cannot
     // bypass collision refusal through ordinary named resolution.
     const isCompactionPart = isOpenCodeCompactionControlPart(event)
@@ -804,6 +812,22 @@ export class OpenCodeRuntime {
     if (belongs) this.#dispatchOpenCodeEvent(event, route);
     const terminal = belongs ? openCodeAssistantTerminal(event) : null;
     if (terminal) route.turn.assistantTerminals.set(terminal.messageId, terminal);
+  }
+
+  // Surfaces a provider-announced retry wait as one durable notice row per
+  // scheduled attempt, so an upstream stall is visible instead of dead air.
+  #handleSessionStatusEvent(sessionId: string, event: SSEEvent): void {
+    const notice = openCodeRetryNotice(event);
+    const session = this.#sessions.get(sessionId);
+    if (!notice || !session || session.status !== 'running') return;
+    if (session.turn.lastRetryNoticeKey === notice.key) return;
+    session.turn.lastRetryNoticeKey = notice.key;
+    this.#publish(sessionId, session.turn.operation, {
+      type: 'notice',
+      runId: session.turn.operation.runId,
+      title: notice.title,
+      content: notice.content,
+    });
   }
 
   #handlePermissionEvent(
