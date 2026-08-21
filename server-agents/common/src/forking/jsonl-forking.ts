@@ -157,9 +157,9 @@ async function resolveProviderPoint(
     signal: request.admission.signal,
   }).catch((error) => {
     // A source file the provider has not written yet holds no native
-    // positions; refusing as not settled keeps the retry and
+    // positions; the typed source-level refusal keeps the retry and
     // handoff-consent flow instead of surfacing a raw filesystem error.
-    if (hasNodeErrorCode(error, 'ENOENT')) throw missingNativePoint();
+    if (hasNodeErrorCode(error, 'ENOENT')) throw missingNativeSource();
     throw error;
   });
   for (const message of native.messages) {
@@ -207,6 +207,15 @@ function positiveSafeInteger(value: unknown): number | null {
 
 function nonNegativeSafeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function missingNativeSource(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'The source native transcript is unavailable',
+    true,
+    { nativeForkReason: 'source-missing' },
+  );
 }
 
 function missingNativePoint(): AgentIntegrationError {

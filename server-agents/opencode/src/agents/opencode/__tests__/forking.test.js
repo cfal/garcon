@@ -157,6 +157,20 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
     expect(sessionDelete.mock.calls[0][0]).toEqual({ sessionID: 'forked-session' });
   });
 
+  it('refuses a point fork of a session with no stored messages as source-missing', async () => {
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const messages = mock(() => Promise.resolve({ error: { name: 'NotFoundError' } }));
+    const { forking } = createForking({ fork, messages });
+
+    const failure = await forking.fork(forkRequest({
+      providerMeta: { entryId: 'prt_b1' },
+    })).then(() => null, (error) => error);
+
+    expect(failure?.details).toEqual({ nativeForkReason: 'source-missing' });
+    expect(failure?.retryable).toBe(true);
+    expect(fork).not.toHaveBeenCalled();
+  });
+
   it('refuses an anchor the provider has not persisted as not settled', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const messages = mock(() => Promise.resolve({ data: STORED_SOURCE_MESSAGES }));

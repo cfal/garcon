@@ -253,14 +253,14 @@ describe('createJsonlNativeForking prefix protection', () => {
     });
   });
 
-  it('refuses a point in a source the provider has not written yet as not settled', async () => {
+  it('refuses a point in a source the provider has not written yet as source-missing', async () => {
     const fixture = await createFixture();
     await rm(fixture.sourcePath, { force: true });
 
     await expect(fixture.forking.fork(fixture.request)).rejects.toMatchObject({
       code: 'TRANSCRIPT_UNAVAILABLE',
       retryable: true,
-      details: { nativeForkReason: 'not-settled' },
+      details: { nativeForkReason: 'source-missing' },
     });
   });
 

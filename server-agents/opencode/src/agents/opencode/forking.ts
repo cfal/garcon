@@ -105,6 +105,7 @@ async function resolveAnchorMessageId(
       true,
     );
   });
+  if (messages.length === 0) throw missingSource();
   const anchor = messages.find((message) => ownsEntry(message, entryId));
   const anchorMessageId = anchor?.info?.id;
   if (typeof anchorMessageId !== 'string' || !anchorMessageId) throw notSettled();
@@ -135,6 +136,15 @@ function ownsEntry(message: OpenCodeMessage, entryId: string): boolean {
     && typeof part === 'object'
     && (part as { id?: unknown }).id === entryId
   ));
+}
+
+function missingSource(): AgentIntegrationError {
+  return new AgentIntegrationError(
+    'TRANSCRIPT_UNAVAILABLE',
+    'The OpenCode source session is unavailable',
+    true,
+    { nativeForkReason: 'source-missing' },
+  );
 }
 
 function notSettled(): AgentIntegrationError {

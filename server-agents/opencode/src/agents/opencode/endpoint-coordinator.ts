@@ -99,14 +99,14 @@ export class OpenCodeEndpointCoordinator {
       ),
     ));
     // A source session the provider cannot return has no native fork position;
-    // the typed refusal keeps the handoff-fork consent flow reachable instead
-    // of dead-ending the request in an untyped failure.
+    // the typed source-level refusal keeps the handoff-fork consent flow
+    // reachable instead of dead-ending the request in an untyped failure.
     if (isOpenCodeNotFoundResult(result)) {
       throw new AgentIntegrationError(
         'TRANSCRIPT_UNAVAILABLE',
-        'The OpenCode source session has no provider-native fork position',
+        'The OpenCode source session is unavailable',
         true,
-        { nativeForkReason: 'not-settled' },
+        { nativeForkReason: 'source-missing' },
       );
     }
     if (result?.error) {

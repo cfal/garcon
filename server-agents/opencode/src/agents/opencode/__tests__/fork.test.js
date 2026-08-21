@@ -117,7 +117,7 @@ describe('OpenCodeRuntime fork', () => {
     expect(failure?.retryable).toBe(true);
   });
 
-  it('refuses a fork of a session the provider cannot return as not settled', async () => {
+  it('refuses a fork of a session the provider cannot return as source-missing', async () => {
     const fork = mock(() => Promise.resolve({ error: { name: 'NotFoundError' } }));
     const { runtime } = createRuntimeWithClient({
       session: { fork },
@@ -126,7 +126,7 @@ describe('OpenCodeRuntime fork', () => {
     const failure = await runtime.forkSession('missing-session').then(() => null, (error) => error);
     expect(failure?.code).toBe('TRANSCRIPT_UNAVAILABLE');
     expect(failure?.retryable).toBe(true);
-    expect(failure?.details).toEqual({ nativeForkReason: 'not-settled' });
+    expect(failure?.details).toEqual({ nativeForkReason: 'source-missing' });
   });
 
   it('creates new sessions and submits the first prompt in the project directory', async () => {

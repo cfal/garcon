@@ -578,10 +578,15 @@ export class AgentRuntimeRouter {
         // A refusal means the row exists in the ledger but the provider has not written it
         // to native history yet. Reporting it lets the caller retry once it settles;
         // returning null here would silently hand back a fork with no native session.
-        if (error.details?.nativeForkReason === 'not-settled') {
+        // A missing source shares the refusal code so the handoff-consent flow
+        // applies, but names the source rather than promising the row will settle.
+        const forkReason = error.details?.nativeForkReason;
+        if (forkReason === 'not-settled' || forkReason === 'source-missing') {
           throw new DomainError(
             'TRANSCRIPT_NOT_YET_PERSISTED',
-            'The selected message is not in the agent\'s native history yet. Try again shortly.',
+            forkReason === 'source-missing'
+              ? 'The agent\'s native session for this chat is unavailable right now. Retry, or fork without it.'
+              : 'The selected message is not in the agent\'s native history yet. Try again shortly.',
             409,
             true,
           );

@@ -182,6 +182,31 @@ describe('AgentRuntimeRouter forks', () => {
     });
   });
 
+  it('names an unavailable source while keeping the consent-capable refusal code', async () => {
+    const fork = mock(async () => {
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'The source native transcript is unavailable',
+        true,
+        { nativeForkReason: 'source-missing' },
+      );
+    });
+    const { router, entry } = makeRouter(fork);
+
+    await expect(router.forkAgentSession({
+      sourceSession: entry,
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      messageOrdinal: 1,
+      providerMeta: { lineNumber: 1 },
+    })).rejects.toMatchObject({
+      code: 'TRANSCRIPT_NOT_YET_PERSISTED',
+      status: 409,
+      retryable: true,
+      message: expect.stringContaining('native session for this chat is unavailable'),
+    });
+  });
+
   it('maps a changed selected prefix to a retryable conflict', async () => {
     const fork = mock(async () => {
       throw new AgentIntegrationError(
