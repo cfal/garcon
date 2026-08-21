@@ -1,5 +1,5 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c010e750ab7c49fc844b7ff95d15f64c1154226b 100644
+index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c54653deec86dd36ee88e638d55323254aae031b 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
 @@ -218,6 +218,10 @@ class Virtualizer {
@@ -38,6 +38,19 @@ index aab0e59d80c6dac3c926c1c25c6dfbfdf8cce679..c010e750ab7c49fc844b7ff95d15f64c
        let cachedSize;
        let itemStart;
        let key;
+@@ -865,9 +871,9 @@ class Virtualizer {
+           // below — e.g. a streaming chat message growing at its bottom)
+           // changes size *below* the anchor point, so shifting scrollTop by the
+           // delta would drag the viewport downward on every growth (#1218).
+-          // Also skip during backward scroll to avoid the "items jump while
+-          // scrolling up" cascade.
+-          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
++          // During backward scroll, shrinkage compensation follows the gesture;
++          // growth remains uncompensated to avoid fighting it.
++          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0)
+         );
+         const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
+           // The callback expects a VirtualItem; build one lazily only
 @@ -990,6 +996,16 @@ class Virtualizer {
          align
        ];
@@ -68,7 +81,7 @@ index 610db97bfdfb0005cf998aa7dd497951b36c27b7..fe37001f898168fa64df3888c466d152
      scrollToIndex: (index: number, { align: initialAlign, behavior, }?: ScrollToIndexOptions) => void;
      scrollBy: (delta: number, { behavior }?: ScrollToOffsetOptions) => void;
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..ceb8dfcc4044fbc4121fd698c62511374e33bf68 100644
+index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..7b31ba7ae6d4edb71ad5371fdc8ae5c7edf940f2 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
 @@ -216,6 +216,10 @@ class Virtualizer {
@@ -107,6 +120,19 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..ceb8dfcc4044fbc4121fd698c6251137
        let cachedSize;
        let itemStart;
        let key;
+@@ -863,9 +869,9 @@ class Virtualizer {
+           // below — e.g. a streaming chat message growing at its bottom)
+           // changes size *below* the anchor point, so shifting scrollTop by the
+           // delta would drag the viewport downward on every growth (#1218).
+-          // Also skip during backward scroll to avoid the "items jump while
+-          // scrolling up" cascade.
+-          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
++          // During backward scroll, shrinkage compensation follows the gesture;
++          // growth remains uncompensated to avoid fighting it.
++          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0)
+         );
+         const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
+           // The callback expects a VirtualItem; build one lazily only
 @@ -988,6 +994,16 @@ class Virtualizer {
          align
        ];
@@ -125,7 +151,7 @@ index 015d77d5f60a174de2ca9a3777e8a842110ee6e8..ceb8dfcc4044fbc4121fd698c6251137
        this._iosDeferredAdjustment = 0;
        const offset = this.getOffsetForAlignment(toOffset, align);
 diff --git a/src/index.ts b/src/index.ts
-index e209208a6d1b4e0713f78deab96598819ed697ad..a5f3610419c2008fdcf69f3270b405b8f69595fe 100644
+index e209208a6d1b4e0713f78deab96598819ed697ad..08a9fe60a2281585489bde39686a024388cf79f9 100644
 --- a/src/index.ts
 +++ b/src/index.ts
 @@ -489,6 +489,14 @@ export class Virtualizer<
@@ -171,6 +197,20 @@ index e209208a6d1b4e0713f78deab96598819ed697ad..a5f3610419c2008fdcf69f3270b405b8
  
      // Fast field reads. For lanes===1 we read raw start/size from the flat
      // typed array, avoiding a Proxy.get + VirtualItem allocation per call.
+@@ -1579,10 +1592,10 @@ export class Virtualizer<
+           // below — e.g. a streaming chat message growing at its bottom)
+           // changes size *below* the anchor point, so shifting scrollTop by the
+           // delta would drag the viewport downward on every growth (#1218).
+-          // Also skip during backward scroll to avoid the "items jump while
+-          // scrolling up" cascade.
++          // During backward scroll, shrinkage compensation follows the gesture;
++          // growth remains uncompensated to avoid fighting it.
+           itemStart + itemSize <= scrollOffsetWithAdj &&
+-          this.scrollDirection !== 'backward'
++          (this.scrollDirection !== 'backward' || delta < 0)
+       const shouldAdjustScroll =
+         this.scrollState?.behavior !== 'smooth' &&
+         (this.shouldAdjustScrollPositionOnItemSizeChange !== undefined
 @@ -1767,6 +1780,17 @@ export class Virtualizer<
      ] as const
    }
