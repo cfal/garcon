@@ -2746,6 +2746,155 @@ async function verifyPostTouchMomentumRemeasurement(fixture: ChromiumFixture): P
   }
 }
 
+async function verifyPendingRowRemountMeasurement(fixture: ChromiumFixture): Promise<void> {
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(fixture.integration, 40, 'chromium-pending-remount');
+  await prepareTranscript(fixture, chatId);
+  await scrollToPosition(fixture.page, 'middle');
+
+  const result = await fixture.page.locator(FEED_SELECTOR).evaluate(
+    async (feedElement, itemSelector) => {
+      const feed = feedElement as HTMLElement;
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const transformY = (element: HTMLElement) => {
+        const transform = getComputedStyle(element).transform;
+        return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+      };
+      const byKey = (key: string) =>
+        [...feed.querySelectorAll<HTMLElement>(itemSelector)].find(
+          (item) => item.dataset.chatVirtualItem === key,
+        );
+      const sample = (target: HTMLElement, follower: HTMLElement) => ({
+        spacing: transformY(follower) - transformY(target),
+        targetHeight: target.getBoundingClientRect().height,
+      });
+      const items = [...feed.querySelectorAll<HTMLElement>(itemSelector)]
+        .sort((left, right) => Number(left.dataset.index) - Number(right.dataset.index));
+      const viewport = feed.getBoundingClientRect();
+      const targetNode = items.find((item, index) => {
+        const follower = items[index + 1];
+        const rect = item.getBoundingClientRect();
+        return Boolean(
+          follower
+          && Number(follower.dataset.index) === Number(item.dataset.index) + 1
+          && rect.top >= viewport.top + 120
+          && rect.bottom <= viewport.bottom - 220
+        );
+      });
+      const targetIndex = targetNode ? items.indexOf(targetNode) : -1;
+      const followerNode = targetIndex >= 0 ? items[targetIndex + 1] : undefined;
+      const targetKey = targetNode?.dataset.chatVirtualItem;
+      const followerKey = followerNode?.dataset.chatVirtualItem;
+      if (!targetNode || !followerNode || !targetKey || !followerKey) {
+        throw new Error('No consecutive visible rows are available for pending remount setup.');
+      }
+
+      targetNode.style.height = '160px';
+      targetNode.style.overflow = 'hidden';
+      const initialFrames = [];
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await frame();
+        const currentTarget = byKey(targetKey);
+        const currentFollower = byKey(followerKey);
+        if (!currentTarget || !currentFollower) continue;
+        const current = sample(currentTarget, currentFollower);
+        initialFrames.push(current);
+        if (Math.abs(current.spacing - 160) <= 1 && Math.abs(current.targetHeight - 160) <= 1) {
+          break;
+        }
+      }
+      const initial = initialFrames.at(-1);
+      if (!initial || Math.abs(initial.spacing - 160) > 1 || Math.abs(initial.targetHeight - 160) > 1) {
+        throw new Error(`The initial measurement did not settle: ${JSON.stringify(initialFrames)}`);
+      }
+
+      const returnScrollTop = feed.scrollTop;
+      const originalSetAttribute = Element.prototype.setAttribute;
+      const remount = { node: null as HTMLElement | null };
+      const patchedSetAttribute = function (
+        this: Element,
+        qualifiedName: string,
+        value: string,
+      ): void {
+        originalSetAttribute.call(this, qualifiedName, value);
+        if (
+          !(this instanceof HTMLElement)
+          || qualifiedName !== 'data-chat-virtual-item'
+          || value !== targetKey
+          || this === targetNode
+        ) return;
+        this.style.height = '40px';
+        this.style.overflow = 'hidden';
+        const marker = document.createElement('span');
+        marker.dataset.chatLayoutPending = 'true';
+        marker.dataset.chatPendingRemountMarker = '';
+        this.append(marker);
+        remount.node = this;
+      };
+      Element.prototype.setAttribute = patchedSetAttribute;
+      try {
+        feed.scrollTop = Math.max(0, feed.scrollHeight - feed.clientHeight);
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        for (let attempt = 0; attempt < 30 && targetNode.isConnected; attempt += 1) await frame();
+        if (targetNode.isConnected) throw new Error('The measured row did not unmount.');
+
+        feed.scrollTop = returnScrollTop;
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        const pendingFrames = [];
+        for (let attempt = 0; attempt < 60 && pendingFrames.length < 4; attempt += 1) {
+          await frame();
+          const currentTarget = byKey(targetKey);
+          const currentFollower = byKey(followerKey);
+          if (
+            !currentTarget
+            || !currentFollower
+            || currentTarget !== remount.node
+            || !currentTarget.querySelector('[data-chat-pending-remount-marker]')
+          ) continue;
+          pendingFrames.push(sample(currentTarget, currentFollower));
+        }
+        const replacementNode = remount.node;
+        if (pendingFrames.length < 4 || !replacementNode) {
+          throw new Error(`The pending replacement did not mount: ${JSON.stringify(pendingFrames)}`);
+        }
+
+        replacementNode.style.height = '200px';
+        replacementNode
+          .querySelector('[data-chat-pending-remount-marker]')
+          ?.removeAttribute('data-chat-layout-pending');
+        const settlementFrames = [];
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await frame();
+          const currentTarget = byKey(targetKey);
+          const currentFollower = byKey(followerKey);
+          if (!currentTarget || !currentFollower) continue;
+          const current = sample(currentTarget, currentFollower);
+          settlementFrames.push(current);
+          if (Math.abs(current.spacing - 200) <= 1 && Math.abs(current.targetHeight - 200) <= 1) {
+            break;
+          }
+        }
+        return { initialFrames, pendingFrames, settlementFrames };
+      } finally {
+        if (Element.prototype.setAttribute === patchedSetAttribute) {
+          Element.prototype.setAttribute = originalSetAttribute;
+        }
+        remount.node?.style.removeProperty('height');
+        remount.node?.style.removeProperty('overflow');
+      }
+    },
+    ITEM_SELECTOR,
+  );
+  const diagnostic = JSON.stringify(result, null, 2);
+  expect(result.pendingFrames.every((frame) => Math.abs(frame.targetHeight - 40) <= 1), diagnostic)
+    .toBe(true);
+  expect(result.pendingFrames.every((frame) => Math.abs(frame.spacing - 160) <= 1), diagnostic)
+    .toBe(true);
+  expect(result.settlementFrames.at(-1)?.targetHeight, diagnostic).toBeCloseTo(200, 0);
+  expect(result.settlementFrames.at(-1)?.spacing, diagnostic).toBeCloseTo(200, 0);
+  fixture.assertNoBrowserErrors();
+}
+
 async function verifyScrollbarDragPrepend(
   fixture: ChromiumFixture,
   viewport: { height: number; width: number },
@@ -5200,6 +5349,20 @@ describe('Chromium transcript virtualization', () => {
       async (fixture, markPhase) => {
         markPhase('remeasuring a clipped row while mobile momentum remains active');
         await verifyPostTouchMomentumRemeasurement(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('[TLV5-UX.06-COMPACT-PENDING-REMOUNT-01] retains settled row geometry while remounted content is pending', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-pending-row-remount',
+      async (fixture, markPhase) => {
+        markPhase('remounting a settled row through pending and completed layout states');
+        await verifyPendingRowRemountMeasurement(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },

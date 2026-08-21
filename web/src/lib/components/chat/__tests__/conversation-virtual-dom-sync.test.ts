@@ -1,17 +1,17 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import TanstackSvelteVirtualSyncTestHost from './TanstackSvelteVirtualSyncTestHost.svelte';
+import ConversationVirtualDomSyncTestHost from './ConversationVirtualDomSyncTestHost.svelte';
 
 interface Exposure {
 	resizeFirstRow(size: number): void;
 }
 
-describe('TanStack svelte-virtual patch contract', () => {
+describe('Conversation virtual DOM synchronization', () => {
 	afterEach(() => cleanup());
 
 	it('commits compensated measurements before resizeItem returns', async () => {
 		let exposure: Exposure | null = null;
-		render(TanstackSvelteVirtualSyncTestHost, {
+		render(ConversationVirtualDomSyncTestHost, {
 			onReady(value) {
 				exposure = value;
 			},

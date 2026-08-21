@@ -29,14 +29,3 @@ native scrolling. Framework-neutral patch contract tests cover all four behavior
 
 Remove each patch behavior once a compatible Svelte adapter resolves a core release with the same
 contract and the corresponding patch tests pass unmodified against that release.
-
-## `@tanstack/svelte-virtual@3.13.36`
-
-The virtual-core `onChange` callback marks compensated layout notifications as synchronous so the
-matching scroll or CSS correction and rendered geometry land in one paint. The Svelte adapter
-previously ignored that flag, leaving its sizer and row transforms queued until Svelte's next
-update. The patch wraps synchronous store publications in Svelte's `flushSync`, matching the
-default contract in TanStack's React adapter. Async notifications remain unchanged.
-
-Remove the patch once the Svelte adapter publishes synchronous notifications before `onChange`
-returns and the patch regression passes unmodified against that release.

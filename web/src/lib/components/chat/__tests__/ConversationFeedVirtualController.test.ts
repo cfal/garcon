@@ -48,6 +48,7 @@ import {
 	ConversationProgrammaticScrollOwnership,
 	ConversationMountedVirtualItems,
 	type ConversationVirtualAnchorSettlePort,
+	observeConversationItemLayoutSettlement,
 	positionCommittedConversationAnchor,
 	positionPendingConversationAnchor,
 	settleConversationVirtualAnchor,
@@ -625,6 +626,20 @@ describe('ConversationFeedVirtualController helpers', () => {
 		Object.defineProperty(image, 'complete', { configurable: true, value: true });
 		expect(isConversationTargetLayoutReady(row)).toBe(true);
 	});
+
+	it('publishes settlement when remounted rich content replaces its placeholder', async () => {
+		const row = document.createElement('div');
+		const pending = document.createElement('div');
+		pending.dataset.chatLayoutPending = 'true';
+		row.append(pending);
+		const settled = vi.fn();
+		const stop = observeConversationItemLayoutSettlement(row, settled);
+
+		pending.removeAttribute('data-chat-layout-pending');
+
+		await waitFor(() => expect(settled).toHaveBeenCalledOnce());
+		stop();
+	});
 });
 
 interface ControllerExposure {
@@ -729,7 +744,10 @@ describe('ConversationFeedVirtualController', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Retain first' }));
 		await waitFor(() => expect(setOptions).toHaveBeenCalledOnce());
-		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual(['rangeExtractor']);
+		expect(Object.keys(setOptions.mock.lastCall?.[0] ?? {})).toEqual([
+			'rangeExtractor',
+			'onChange',
+		]);
 		expect(exposure.instance.options.rangeExtractor).not.toBe(rangeExtractor);
 		expect(
 			exposure.instance.options.rangeExtractor({
@@ -832,7 +850,9 @@ describe('ConversationFeedVirtualController', () => {
 				exposure.instance.getVirtualItems().find((item) => item.key === readingItem.key)?.index,
 			).toBe(readingItem.index + 4),
 		);
-		const repositionedItem = exposure.instance.getVirtualItems().find((item) => item.key === readingItem.key);
+		const repositionedItem = exposure.instance
+			.getVirtualItems()
+			.find((item) => item.key === readingItem.key);
 		if (!repositionedItem) throw new Error('Expected the reading item after the prepend');
 		const expectedScrollOffset = conversationAnchorScrollOffset(
 			repositionedItem.start,
@@ -879,9 +899,7 @@ describe('ConversationFeedVirtualController', () => {
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 80;
-		expect(exposure.controller.cancelForUserIntent('earlier')).toBe(
-			'preserved-earlier-prepend',
-		);
+		expect(exposure.controller.cancelForUserIntent('earlier')).toBe('preserved-earlier-prepend');
 		expect(cancelScroll).not.toHaveBeenCalled();
 		await exposure.releaseWithheldEndItem();
 
@@ -898,9 +916,7 @@ describe('ConversationFeedVirtualController', () => {
 		scrollToIndex.mockClear();
 		scrollToOffset.mockClear();
 		viewport.scrollTop = 0;
-		expect(exposure.controller.cancelForUserIntent('earlier')).toBe(
-			'preserved-earlier-prepend',
-		);
+		expect(exposure.controller.cancelForUserIntent('earlier')).toBe('preserved-earlier-prepend');
 		await exposure.releaseWithheldEndItem();
 
 		await waitFor(() =>
@@ -1244,5 +1260,23 @@ describe('ConversationFeedVirtualController', () => {
 			expect(call).toHaveLength(3);
 			expect(call[2]).toBe(instance);
 		}
+	});
+
+	it('keeps a settled row measurement while remounted rich content is pending', async () => {
+		const { exposure } = await renderController();
+		const row = document.querySelector<HTMLDivElement>(
+			'[data-controller-sizer] [data-chat-virtual-item]',
+		);
+		if (!row) throw new Error('Expected a measured virtual row');
+		const index = Number(row.dataset.index);
+		const key = exposure.instance.options.getItemKey(index);
+		exposure.instance.itemSizeCache.set(key, 160);
+		const pending = document.createElement('span');
+		pending.dataset.chatLayoutPending = 'true';
+		row.append(pending);
+
+		ResizeObserverHarness.emit(row, 900, 40);
+
+		expect(exposure.instance.itemSizeCache.get(key)).toBe(160);
 	});
 });

@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import {
+	measureElement as measureVirtualElement,
 	observeElementRect,
 	type Rect,
 	type SvelteVirtualizer,
@@ -23,6 +24,85 @@ const MAX_ANCHOR_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const REQUIRED_END_STABLE_FRAMES = 2;
 const GEOMETRY_TOLERANCE_PX = 0.5;
+
+export function measureConversationVirtualItem(
+	element: HTMLDivElement,
+	entry: ResizeObserverEntry | undefined,
+	instance: Virtualizer<HTMLElement, HTMLDivElement>,
+): number {
+	const index = instance.indexFromElement(element);
+	const key = instance.options.getItemKey(index);
+	if (!isConversationTargetLayoutReady(element)) {
+		return instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index);
+	}
+	return measureVirtualElement(element, entry, instance);
+}
+
+export function observeConversationItemLayoutSettlement(
+	element: HTMLDivElement,
+	onSettled: () => void,
+): () => void {
+	let layoutReady = isConversationTargetLayoutReady(element);
+	const update = () => {
+		const nextLayoutReady = isConversationTargetLayoutReady(element);
+		if (!layoutReady && nextLayoutReady) onSettled();
+		layoutReady = nextLayoutReady;
+	};
+	const MutationObserverConstructor = element.ownerDocument.defaultView?.MutationObserver;
+	const observer = MutationObserverConstructor ? new MutationObserverConstructor(update) : null;
+	observer?.observe(element, {
+		attributeFilter: ['data-chat-layout-pending', 'src', 'srcset'],
+		attributes: true,
+		childList: true,
+		subtree: true,
+	});
+	element.addEventListener('load', update, true);
+	element.addEventListener('error', update, true);
+	return () => {
+		observer?.disconnect();
+		element.removeEventListener('load', update, true);
+		element.removeEventListener('error', update, true);
+	};
+}
+
+export function settleConversationVirtualItemMeasurement(
+	element: HTMLDivElement,
+	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
+): void {
+	if (!element.isConnected || !isConversationTargetLayoutReady(element)) return;
+	const index = instance.indexFromElement(element);
+	if (index < 0 || index >= instance.options.count) return;
+	if (String(instance.options.getItemKey(index)) !== element.dataset.chatVirtualItem) return;
+	instance.resizeItem(index, element.offsetHeight);
+}
+
+export function synchronizeConversationVirtualDom(
+	instance: Virtualizer<HTMLElement, HTMLDivElement>,
+	root: HTMLDivElement | null,
+): void {
+	if (!root) return;
+	root.style.height = `${instance.getTotalSize()}px`;
+	for (const item of instance.getVirtualItems()) {
+		const element = instance.elementsCache.get(item.key);
+		if (!element?.isConnected) continue;
+		element.style.transform = `translateY(${item.start - instance.options.scrollMargin}px)`;
+	}
+}
+
+export class ConversationVirtualDomSynchronizer {
+	constructor(private readonly root: () => HTMLDivElement | null) {}
+
+	onChange = (instance: Virtualizer<HTMLElement, HTMLDivElement>, sync: boolean): void => {
+		if (sync) synchronizeConversationVirtualDom(instance, this.root());
+	};
+
+	setOptions(
+		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
+		options: Parameters<SvelteVirtualizer<HTMLElement, HTMLDivElement>['setOptions']>[0],
+	): void {
+		instance.setOptions({ ...options, onChange: this.onChange });
+	}
+}
 
 export interface ConversationVirtualAnchor {
 	key: string;
