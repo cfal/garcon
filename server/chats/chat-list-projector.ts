@@ -1,6 +1,6 @@
 import type { ChatListEntry, ChatOrderGroup } from '../../common/chat-list.js';
 import type { ChatSnapshotChat } from '../../common/chat-snapshot.js';
-import type { ChatProcessingPhase } from '../../common/chat-types.js';
+import type { ChatProcessingPhase, ChatTurnRetryStatus } from '../../common/chat-types.js';
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
@@ -35,7 +35,10 @@ export interface ChatListProjectorDeps {
   registry: Pick<IChatRegistry, 'getChat'>;
   settings: ChatListProjectorSettings;
   metadata: ChatListProjectorMetadata;
-  processing: { phase(chatId: string): ChatProcessingPhase | null };
+  processing: {
+    phase(chatId: string): ChatProcessingPhase | null;
+    retry(chatId: string): ChatTurnRetryStatus | null;
+  };
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
   canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
 }
@@ -43,6 +46,7 @@ export interface ChatListProjectorDeps {
 export interface ChatSummaryProjection {
   chat: ChatSnapshotChat;
   processingPhase: ChatProcessingPhase | null;
+  processingRetry: ChatTurnRetryStatus | null;
 }
 
 export class ChatListProjector {
@@ -145,6 +149,7 @@ export class ChatListProjector {
         },
       },
       processingPhase: this.deps.processing.phase(chatId),
+      processingRetry: this.deps.processing.retry(chatId),
     };
   }
 
@@ -155,7 +160,7 @@ export class ChatListProjector {
     metadata: ChatMetadata | null,
     membership: ChatListMembershipSnapshot,
   ): ChatListEntry {
-    const { chat, processingPhase } = summary;
+    const { chat, processingPhase, processingRetry } = summary;
     const orderGroup = classifyOrderGroup(chat.id, membership);
     const title = chat.title;
     const firstPreview = extractFirstLine(metadata?.firstMessage || title);
@@ -196,6 +201,7 @@ export class ChatListProjector {
       isActive: processingPhase !== null,
       isProcessing: processingPhase !== null,
       processingPhase,
+      processingRetry,
       canReloadFromNativeHistory: chat.canReloadFromNativeHistory,
       isPinned: orderGroup === 'pinned',
       isArchived: orderGroup === 'archived',

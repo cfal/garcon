@@ -57,7 +57,7 @@ function makeDeps() {
           lastMessage: 'Latest line',
         })),
       },
-      processing: { phase: mock(() => 'running') },
+      processing: { phase: mock(() => 'running'), retry: mock(() => null) },
       canReloadFromNativeHistory: mock(() => true),
       pathCache: {
         resolveProjectPath: mock(() =>
@@ -134,6 +134,7 @@ describe('ChatListProjector', () => {
         },
       },
       processingPhase: 'running',
+      processingRetry: null,
     });
     expect(deps.pathCache.resolveProjectPath).not.toHaveBeenCalled();
     expect(deps.processing.phase).toHaveBeenCalledTimes(1);

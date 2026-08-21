@@ -629,6 +629,85 @@ describe('TranscriptLedgerService', () => {
       }]);
     });
   });
+
+  describe('run retry status', () => {
+    const RETRY = { attempt: 1, message: 'Provider is overloaded', nextAttemptAt: TS };
+
+    it('stores and clears the active run retry status without appending rows', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const events = [];
+        ledger.subscribeRunRetryStatus((event) => events.push(event));
+
+        lease.sink.publish({ type: 'retry-status', runId: 'run-1', retry: RETRY });
+        expect(ledger.runRetryStatus('chat-1')).toEqual(RETRY);
+
+        lease.sink.publish({ type: 'retry-status', runId: 'run-1', retry: null });
+        expect(ledger.runRetryStatus('chat-1')).toBeNull();
+
+        expect(events).toEqual([
+          { chatId: 'chat-1', runId: 'run-1', retry: RETRY },
+          { chatId: 'chat-1', runId: 'run-1', retry: null },
+        ]);
+        expect(ledger.currentRows('chat-1')).toHaveLength(0);
+      });
+    });
+
+    it('ignores retry statuses from a stale run and repeated identical values', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-2');
+        const events = [];
+        ledger.subscribeRunRetryStatus((event) => events.push(event));
+
+        lease.sink.publish({ type: 'retry-status', runId: 'run-1', retry: RETRY });
+        expect(ledger.runRetryStatus('chat-1')).toBeNull();
+
+        lease.sink.publish({ type: 'retry-status', runId: 'run-2', retry: RETRY });
+        lease.sink.publish({ type: 'retry-status', runId: 'run-2', retry: { ...RETRY } });
+        lease.sink.publish({ type: 'retry-status', runId: 'run-2', retry: null });
+        lease.sink.publish({ type: 'retry-status', runId: 'run-2', retry: null });
+
+        expect(events).toEqual([
+          { chatId: 'chat-1', runId: 'run-2', retry: RETRY },
+          { chatId: 'chat-1', runId: 'run-2', retry: null },
+        ]);
+      });
+    });
+
+    it('clears the retry status on any run terminal', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        lease.sink.publish({ type: 'retry-status', runId: 'run-1', retry: RETRY });
+
+        lease.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'failed' });
+        expect(ledger.runRetryStatus('chat-1')).toBeNull();
+
+        ledger.beginRun('chat-1', 'run-2');
+        lease.sink.publish({ type: 'retry-status', runId: 'run-2', retry: RETRY });
+        expect(ledger.interruptRun('chat-1')?.outcome).toBe('interrupted');
+        expect(ledger.runRetryStatus('chat-1')).toBeNull();
+      });
+    });
+
+    it('clears the retry status when a run hands off', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        lease.sink.publish({ type: 'retry-status', runId: 'run-1', retry: RETRY });
+
+        ledger.handoffRun('chat-1', 'run-1', 'run-2');
+
+        expect(ledger.runRetryStatus('chat-1')).toBeNull();
+      });
+    });
+  });
 });
 
 async function withService(run, serviceOptions = {}) {

@@ -71,11 +71,26 @@ export interface AgentRunFailureDetail {
   readonly message?: string;
 }
 
+// Transient upstream-retry detail for a running turn. Derived from a
+// provider's typed retry signal, never from matching error text; the message
+// is opaque display copy. Publishing null clears the detail, and a run
+// terminal always clears it implicitly.
+export interface AgentTurnRetryStatus {
+  readonly attempt: number;
+  readonly message: string;
+  readonly nextAttemptAt: string | null;
+}
+
 export type AgentProducerEvent =
   | { readonly type: 'rows'; readonly rows: readonly AgentProducedRow[] }
   | { readonly type: 'session'; readonly session: AgentEstablishedSession }
   | AgentPermissionRequestedEvent
   | AgentPermissionTerminalEvent
+  | {
+      readonly type: 'retry-status';
+      readonly runId: string;
+      readonly retry: AgentTurnRetryStatus | null;
+    }
   | {
       readonly type: 'run-ended';
       readonly runId: string;

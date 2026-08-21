@@ -35,6 +35,9 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
         ? 'running'
         : null;
     },
+    retry() {
+      return null;
+    },
   };
   return new ChatListProjector({
     registry,

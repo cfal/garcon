@@ -88,7 +88,7 @@ const chatsRoutes = createChatRoutes({
   registry,
   settings,
   queue,
-  processing: { phase: mock(() => null) },
+  processing: { phase: mock(() => null), retry: mock(() => null) },
   pathCache,
   metadata,
   chatViews,

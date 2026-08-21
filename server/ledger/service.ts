@@ -5,6 +5,7 @@ import type {
   AgentProducerEvent,
   AgentProducerSink,
   AgentRunFailureDetail,
+  AgentTurnRetryStatus,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
 import type { ChatRowType } from '../../common/chat-row-contracts.js';
@@ -80,6 +81,12 @@ export type TranscriptCommitEvent =
 
 export type TranscriptSessionCommitEvent = Extract<TranscriptCommitEvent, { readonly type: 'session' }>;
 
+export interface TranscriptRetryStatusEvent {
+  readonly chatId: string;
+  readonly runId: string;
+  readonly retry: AgentTurnRetryStatus | null;
+}
+
 export interface TranscriptLedgerServiceOptions {
   readonly now?: () => string;
   readonly createRunId?: () => string;
@@ -111,8 +118,10 @@ export class TranscriptLedgerService {
   readonly #onListenerError: (error: unknown) => void;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
+  readonly #retryStatusListeners = new Set<(event: TranscriptRetryStatusEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
+  readonly #runRetryStatuses = new Map<string, AgentTurnRetryStatus>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
   readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
   readonly #preparedInputs = new Map<string, InputComposition>();
@@ -133,6 +142,17 @@ export class TranscriptLedgerService {
   subscribeSessionCommitted(listener: (event: TranscriptSessionCommitEvent) => void): () => void {
     this.#sessionCommitListeners.add(listener);
     return () => this.#sessionCommitListeners.delete(listener);
+  }
+
+  // Non-durable channel: retry statuses describe the active run and never
+  // reach the store, so they are not TranscriptCommitEvents.
+  subscribeRunRetryStatus(listener: (event: TranscriptRetryStatusEvent) => void): () => void {
+    this.#retryStatusListeners.add(listener);
+    return () => this.#retryStatusListeners.delete(listener);
+  }
+
+  runRetryStatus(chatId: string): AgentTurnRetryStatus | null {
+    return this.#runRetryStatuses.get(chatId) ?? null;
   }
 
   initializeChat(
@@ -161,6 +181,7 @@ export class TranscriptLedgerService {
     }, () => {
       if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
       this.#activeRuns.delete(chatId);
+      this.#runRetryStatuses.delete(chatId);
       this.#clearChatPermissions(chatId);
     });
     this.#leases.set(chatId, lease);
@@ -178,6 +199,7 @@ export class TranscriptLedgerService {
       throw new TypeError(`Transcript run is already active for ${chatId}`);
     }
     this.#clearChatPermissions(chatId);
+    this.#runRetryStatuses.delete(chatId);
     this.#activeRuns.set(chatId, runId);
     return runId;
   }
@@ -188,6 +210,7 @@ export class TranscriptLedgerService {
       throw new TypeError(`Transcript run changed before handoff for ${chatId}`);
     }
     this.#clearChatPermissions(chatId);
+    this.#runRetryStatuses.delete(chatId);
     this.#activeRuns.set(chatId, nextRunId);
   }
 
@@ -541,6 +564,7 @@ export class TranscriptLedgerService {
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
+    this.#runRetryStatuses.clear();
     this.#activePermissions.clear();
     this.#permissionClaims.clear();
     this.#preparedInputs.clear();
@@ -558,6 +582,7 @@ export class TranscriptLedgerService {
   #clearChatState(chatId: string): void {
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
+    this.#runRetryStatuses.delete(chatId);
     this.#clearChatPermissions(chatId);
     this.#deletePreparedInputs(chatId);
   }
@@ -635,6 +660,11 @@ export class TranscriptLedgerService {
         });
         return;
       }
+      case 'retry-status': {
+        if (this.#activeRuns.get(chatId) !== event.runId) return;
+        this.#applyRetryStatus(chatId, event.runId, event.retry);
+        return;
+      }
       case 'run-ended': {
         if (this.#activeRuns.get(chatId) !== event.runId) return;
         this.#activeRuns.delete(chatId);
@@ -649,6 +679,28 @@ export class TranscriptLedgerService {
     }
   }
 
+  #applyRetryStatus(chatId: string, runId: string, retry: AgentTurnRetryStatus | null): void {
+    if (retry === null) {
+      if (!this.#runRetryStatuses.delete(chatId)) return;
+    } else {
+      const current = this.#runRetryStatuses.get(chatId);
+      if (current
+          && current.attempt === retry.attempt
+          && current.message === retry.message
+          && current.nextAttemptAt === retry.nextAttemptAt) {
+        return;
+      }
+      this.#runRetryStatuses.set(chatId, retry);
+    }
+    for (const listener of this.#retryStatusListeners) {
+      try {
+        listener({ chatId, runId, retry });
+      } catch (error) {
+        this.#onListenerError(error);
+      }
+    }
+  }
+
   #appendRunEnd(
     chatId: string,
     runId: string,
@@ -656,6 +708,7 @@ export class TranscriptLedgerService {
     origin: LedgerRunEndedRow['origin'],
     error?: AgentRunFailureDetail,
   ): LedgerRunEndedRow {
+    this.#runRetryStatuses.delete(chatId);
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
     const [row] = this.#store.append(chatId, view.viewId, [{

@@ -5,6 +5,7 @@ function makeActivity({
   runningIds = [],
   reservedIds = [],
   stoppingIds = [],
+  retryById = {},
 } = {}) {
   const running = new Set(runningIds);
   const reserved = new Set(reservedIds);
@@ -13,6 +14,7 @@ function makeActivity({
     {
       isChatRunning: mock((chatId) => running.has(chatId)),
       getRunningChatIdsSnapshot: mock(() => [...running]),
+      turnRetryStatus: mock((chatId) => retryById[chatId] ?? null),
     },
     {
       isChatTurnReserved: mock((chatId) => reserved.has(chatId)),
@@ -54,9 +56,23 @@ describe('ChatProcessingActivity', () => {
     });
 
     expect(activity.snapshot()).toEqual([
-      { chatId: 'chat-a', phase: 'running' },
-      { chatId: 'chat-shared', phase: 'stopping' },
-      { chatId: 'chat-z', phase: 'running' },
+      { chatId: 'chat-a', phase: 'running', retry: null },
+      { chatId: 'chat-shared', phase: 'stopping', retry: null },
+      { chatId: 'chat-z', phase: 'running', retry: null },
+    ]);
+  });
+
+  it('exposes retry detail only while the chat projects a phase', () => {
+    const retry = { attempt: 2, message: 'Provider is overloaded', nextAttemptAt: null };
+    const activity = makeActivity({
+      runningIds: ['running-chat'],
+      retryById: { 'running-chat': retry, 'idle-chat': retry },
+    });
+
+    expect(activity.retry('running-chat')).toEqual(retry);
+    expect(activity.retry('idle-chat')).toBeNull();
+    expect(activity.snapshot()).toEqual([
+      { chatId: 'running-chat', phase: 'running', retry },
     ]);
   });
 });
