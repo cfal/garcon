@@ -509,7 +509,7 @@ describe('queue lifecycle', () => {
       await fixture.client.enqueueNew(chatId, 'stop-b');
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running' }],
+        chats: [{ chatId, phase: 'running', retry: null }],
       });
 
       const activeAborted = heldA.expectAbort();
@@ -885,7 +885,7 @@ describe('queue lifecycle', () => {
       await heldB.received;
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running' }],
+        chats: [{ chatId, phase: 'running', retry: null }],
       });
       const interruptEvents = fixture.client.eventsSince(eventCursor);
       expect(interruptEvents.filter((event) =>

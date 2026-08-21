@@ -216,7 +216,7 @@ describe('chat lifecycle', () => {
       const reconnectWhileAIsHeld = await fixture.client.reconnectState([chatA, chatB]);
       expect(reconnectWhileAIsHeld.processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId: chatA, phase: 'running' }],
+        chats: [{ chatId: chatA, phase: 'running', retry: null }],
       });
 
       heldA.releaseEcho();

@@ -288,7 +288,7 @@ describe('provider failures', () => {
         .toBe('agent-run-failed');
       expect((await fixture.client.reconnectState([failedChat, healthyChat])).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId: healthyChat, phase: 'running' }],
+        chats: [{ chatId: healthyChat, phase: 'running', retry: null }],
       });
 
       const cursor = fixture.client.markEvents();

@@ -113,7 +113,7 @@ describe('Codex against a scripted model', () => {
       await held.requested;
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running' }],
+        chats: [{ chatId, phase: 'running', retry: null }],
       });
 
       held.release();
