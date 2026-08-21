@@ -20,6 +20,23 @@
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<link rel="manifest" href="/site.webmanifest" />
 		<title>Garcon</title>
+		<script>
+			(() => {
+				let theme = 'system';
+				try {
+					const stored = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+					if (stored?.theme === 'dark' || stored?.theme === 'light') theme = stored.theme;
+				} catch {
+					// Falls back to the system preference when persisted settings are unavailable.
+				}
+
+				const isDark =
+					theme === 'dark' ||
+					(theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+				document.documentElement.classList.toggle('dark', isDark);
+				document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
