@@ -17,7 +17,10 @@ import type {
   AgentRunCommandRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.js';
-import { FakeChatCompletionsModel } from './fake-chat-completions-model.js';
+import {
+  FakeChatCompletionsModel,
+  type ChatCompletionsFault,
+} from './fake-chat-completions-model.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
 import { waitForPersistedNativeSession } from './persisted-chat.js';
 import {
@@ -45,6 +48,21 @@ export const OPENCODE_TEST_MODEL_ID = 'fake-model';
 export const OPENCODE_TEST_MODEL = `${OPENCODE_TEST_PROVIDER}/${OPENCODE_TEST_MODEL_ID}`;
 export const OPENCODE_TEST_THINKING_MODE = 'none';
 
+// OpenCode 1.18.19 makes one initial request plus five retries for retryable failures.
+// https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/retry.ts#L31-L31
+export const OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT = 6;
+
+type HttpChatCompletionsFault = Extract<ChatCompletionsFault, { kind: 'http-error' }>;
+
+export function scriptOpenCodeRetryExhaustion(
+  model: FakeChatCompletionsModel,
+  fault: Omit<HttpChatCompletionsFault, 'retryAfterMs'>,
+): void {
+  for (let attempt = 0; attempt < OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT; attempt += 1) {
+    model.scriptFault({ ...fault, retryAfterMs: 0 });
+  }
+}
+
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
 const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
@@ -53,7 +71,7 @@ const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   values: {},
 };
 
-// OpenCode 1.18.4 schedules an @opencode-ai/plugin install for every config directory and
+// OpenCode 1.18.19 schedules an @opencode-ai/plugin install for every config directory and
 // skips reification only when node_modules exists and package.json plus package-lock.json
 // already declare the pinned plugin. Seeding these bytes keeps provider runtime offline; the
 // loopback npm registry trap turns any future attempt into an otherRequests() violation.
@@ -166,7 +184,7 @@ function assertFixtureOwnedPaths(paths: OpenCodePaths, fixtureRoot: string): voi
   }
 }
 
-// OpenCode 1.18.4 has no hermetic override for macOS managed-preference plist reads, so the
+// OpenCode 1.18.19 has no hermetic override for macOS managed-preference plist reads, so the
 // real-binary tier runs on Linux only; unit coverage remains cross-platform.
 export function assertScriptedOpenCodePlatform(platform: NodeJS.Platform = process.platform): void {
   if (platform !== 'linux') {

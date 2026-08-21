@@ -8,6 +8,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import {
+  claudeContinuationRequestText,
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
@@ -190,10 +191,10 @@ describe('scripted Claude strict steering', () => {
       expect(requests).toHaveLength(2);
       const steeredRequest = requests.at(-1);
       if (!steeredRequest) throw new Error('Claude did not make the batched steering request.');
-      expect(steeredRequest.lastUserText).toBe([
+      expect(steeredRequest.lastUserText).toBe(claudeContinuationRequestText([
         `${STEERING_PREFIX}${firstSteer}`,
         `${STEERING_PREFIX}${secondSteer}`,
-      ].join('\n'));
+      ].join('\n')));
       expect(steeredRequest.lastUserText.indexOf(firstSteer))
         .toBeLessThan(steeredRequest.lastUserText.indexOf(secondSteer));
 

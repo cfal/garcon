@@ -13,6 +13,16 @@ export interface ScriptedClaudeTestEnvironment {
   dispose(): void;
 }
 
+export function claudeContinuationRequestText(content: string): string {
+  return [
+    '<system-reminder>',
+    '<total_tokens>15000000 tokens left</total_tokens>',
+    '</system-reminder>',
+    '',
+    content,
+  ].join('\n');
+}
+
 export async function startScriptedClaudeTestEnvironment(): Promise<ScriptedClaudeTestEnvironment> {
   await access(CLAUDE_BINARY, constants.X_OK);
   const model = FakeClaudeModel.start();

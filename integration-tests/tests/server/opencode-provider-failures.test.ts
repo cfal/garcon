@@ -17,8 +17,10 @@ import {
 } from '../../support/live-agent.js';
 import {
   openCodeNativeSession,
+  OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT,
   readOpenCodeSessionRows,
   readSupervisorStates,
+  scriptOpenCodeRetryExhaustion,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
@@ -26,10 +28,9 @@ import {
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
 
-// Locks the provider-failure contract against the real binary: OpenCode publishes
-// session.error for non-retryable failures, and Garcon turns that into one visible error and
-// agent-run-failed, never a false success. Retryable 5xx failures are retried by real
-// OpenCode without a finite attempt cap, so this suite uses one 500 followed by success.
+// Locks the provider-failure contract against the real binary: OpenCode retries normalized
+// provider failures at most five times, then Garcon turns session.error into one visible error
+// and agent-run-failed, never a false success.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
@@ -44,11 +45,11 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     environment = undefined;
   });
 
-  test('reports HTTP 401 as agent-run-failed with one visible error and recovers', async () => {
+  test('exhausts HTTP 401 retries, reports one visible failure, and recovers', async () => {
     const testEnvironment = requireEnvironment();
     const recoveryReply = marker('HTTP401_RECOVERY_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
-    testEnvironment.model.scriptFault({
+    scriptOpenCodeRetryExhaustion(testEnvironment.model, {
       kind: 'http-error',
       status: 401,
       message: marker('HTTP401_FAULT'),
@@ -74,8 +75,8 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'error')).toHaveLength(1);
       expect(assistantContents(transcript.messages)).toEqual([]);
-      // A non-retryable 401 produced exactly one provider request.
-      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      expect(testEnvironment.model.requestsSince(requestCursor))
+        .toHaveLength(OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT);
       expectSingleFailedTerminal(
         fixture.client.eventsSince(cursor),
         chatId,
@@ -112,18 +113,18 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  // OpenCode 1.18.4 accepts a clean-close truncated Chat Completions stream as a complete
-  // (empty) response and retries genuine socket resets without a finite cap, so neither shape
-  // publishes session.error. The deterministic non-retryable stream failure is a provider
-  // error frame mid-stream, verified against the pinned binary.
-  test('reports an errored model stream as agent-run-failed and recovers', async () => {
+  // OpenCode 1.18.19 accepts a clean-close truncated Chat Completions stream as a complete
+  // response and retries provider error frames and genuine socket resets.
+  test('retries an errored model stream and finishes without a visible failure', async () => {
     const testEnvironment = requireEnvironment();
-    const recoveryReply = marker('STREAM_ERROR_RECOVERY_REPLY');
+    const prompt = marker('STREAM_ERROR_PROMPT');
+    const reply = marker('STREAM_ERROR_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptFault({
       kind: 'stream-error-frame',
       message: marker('STREAM_ERROR_FAULT'),
     });
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
 
     await withIntegrationFixture('opencode-errored-stream', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -131,44 +132,24 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
-        command: marker('STREAM_ERROR_PROMPT'),
-      }));
-      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
-        afterIndex: cursor,
-        timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      });
-      expect(terminal.type).toBe('agent-run-failed');
-      await fixture.client.waitForProcessing(chatId, false, {
-        afterIndex: cursor,
-        timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      });
-      const transcript = await fixture.client.getMessages(chatId);
-      expect(messagesOfType(transcript.messages, 'error')).toHaveLength(1);
-      expect(assistantContents(transcript.messages)).toEqual([]);
-      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
-
-      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
-      const recoveryCursor = fixture.client.markEvents();
-      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
-        chatId,
-        command: marker('STREAM_ERROR_RECOVERY_PROMPT'),
+        command: prompt,
       }));
       await waitForVisibleResponse({
         fixture,
         chatId,
-        turnId: recovery.turnId,
-        marker: recoveryReply,
-        afterIndex: recoveryCursor,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
       });
-      expectSingleFailedTerminal(
-        fixture.client.eventsSince(cursor),
-        chatId,
-        turn.turnId,
-      );
-      expect(messagesOfType(
-        (await fixture.client.getMessages(chatId)).messages,
-        'error',
-      )).toHaveLength(1);
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userContents(transcript.messages)).toEqual([prompt]);
+      expect(assistantContents(transcript.messages)).toEqual([reply]);
+      expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
@@ -284,7 +265,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     // The held first request belongs to the healthy chat; the second request consumes the
     // 401, so arrival order is deterministic.
     const held = testEnvironment.model.scriptHeldTurn([chatCompletionsText(healthyReply)]);
-    testEnvironment.model.scriptFault({
+    scriptOpenCodeRetryExhaustion(testEnvironment.model, {
       kind: 'http-error',
       status: 401,
       message: marker('CONCURRENT_FAULT'),

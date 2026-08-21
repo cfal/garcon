@@ -11,6 +11,7 @@ import {
   LIVE_TURN_TIMEOUT_MS,
 } from '../../support/live-agent.js';
 import {
+  scriptOpenCodeRetryExhaustion,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
@@ -287,7 +288,7 @@ describeOnLinux('scripted OpenCode queue lifecycle', () => {
     const survivorPrompt = marker('FAIL_SURVIVOR_PROMPT');
     const survivorReply = marker('FAIL_SURVIVOR_REPLY');
     const firstHeld = testEnvironment.model.scriptHeldTurn([chatCompletionsText(firstReply)]);
-    testEnvironment.model.scriptFault({
+    scriptOpenCodeRetryExhaustion(testEnvironment.model, {
       kind: 'http-error',
       status: 401,
       message: marker('FAIL_QUEUED_FAULT'),

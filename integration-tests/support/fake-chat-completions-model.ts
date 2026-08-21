@@ -35,6 +35,7 @@ export type ChatCompletionsFault =
       readonly status: number;
       readonly message: string;
       readonly code?: string;
+      readonly retryAfterMs?: number;
     }
   // Clean close before the [DONE] sentinel; some SDKs accept this as a complete response.
   | { readonly kind: 'stream-error'; readonly message: string }
@@ -418,7 +419,12 @@ export class FakeChatCompletionsModel {
             type: turn.code ? 'invalid_request_error' : 'server_error',
             ...(turn.code ? { code: turn.code } : {}),
           },
-        }, { status: turn.status });
+        }, {
+          status: turn.status,
+          ...(turn.retryAfterMs === undefined
+            ? {}
+            : { headers: { 'retry-after-ms': String(turn.retryAfterMs) } }),
+        });
       }
       if (turn.kind === 'stream-error-frame') {
         return sseErrorFrameResponse(turnChunks([], recorded), turn.message);

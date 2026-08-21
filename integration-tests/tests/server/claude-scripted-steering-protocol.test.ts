@@ -8,6 +8,7 @@ import {
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import { CLAUDE_BINARY } from '../../support/live-claude.js';
+import { claudeContinuationRequestText } from '../../support/scripted-claude.js';
 
 const STEERING_PREFIX = 'The user sent steering guidance for the active task:\n\n';
 const createdHarnesses: DirectClaudeHarness[] = [];
@@ -50,7 +51,7 @@ describe('pinned Claude steering protocol', () => {
       steerId,
     ]);
     expect(harness.model.requests().map((request) => request.lastUserText).at(-1))
-      .toBe(`${STEERING_PREFIX}${steering}`);
+      .toBe(claudeContinuationRequestText(`${STEERING_PREFIX}${steering}`));
     harness.model.assertSettled();
   }, 30_000);
 
@@ -79,10 +80,10 @@ describe('pinned Claude steering protocol', () => {
     expect(harness.messages.findIndex(commandLifecycle(firstId, 'queued'))).toBeLessThan(firstReplay);
     expect(harness.messages.findIndex(commandLifecycle(secondId, 'queued'))).toBeLessThan(firstReplay);
     expect(secondReplay).toBeGreaterThan(firstReplay);
-    expect(harness.model.requests().at(-1)?.lastUserText).toBe([
+    expect(harness.model.requests().at(-1)?.lastUserText).toBe(claudeContinuationRequestText([
       `${STEERING_PREFIX}${first}`,
       `${STEERING_PREFIX}${second}`,
-    ].join('\n'));
+    ].join('\n')));
 
     const entries = await harness.waitForNativeEntries((nativeEntries) => (
       nativeEntries.some((entry) => (
@@ -196,11 +197,12 @@ describe('pinned Claude steering protocol', () => {
     await harness.waitFor(commandLifecycle(steerId, 'completed'), 'slash steering completed');
     await harness.waitFor(providerState('idle'), 'provider idle');
 
-    expect(harness.model.requests().at(-1)?.lastUserText).toBe(`${STEERING_PREFIX}${slash}`);
+    expect(harness.model.requests().at(-1)?.lastUserText)
+      .toBe(claudeContinuationRequestText(`${STEERING_PREFIX}${slash}`));
     harness.model.assertSettled();
   }, 30_000);
 
-  test('routes bare slash input through Claude command handling', async () => {
+  test('expands bare slash input through Claude skill handling', async () => {
     const harness = await createHarness();
     const originalId = crypto.randomUUID();
     const steerId = crypto.randomUUID();
@@ -218,9 +220,10 @@ describe('pinned Claude steering protocol', () => {
     await harness.waitFor(providerState('idle'), 'provider idle');
 
     expect(harness.model.requests()).toHaveLength(2);
-    expect(harness.model.requests()[1]?.lastUserText).toContain('<command-name>/review</command-name>');
-    expect(harness.model.requests()[1]?.lastUserText).toContain(`<command-args>${bareMarker}</command-args>`);
-    expect(harness.model.requests()[1]?.lastUserText).not.toContain(STEERING_PREFIX);
+    const expandedReview = harness.model.requests()[1]?.lastUserText;
+    expect(expandedReview).toContain(`Review target: \`${bareMarker}\``);
+    expect(expandedReview).toContain('## Phase 0 — Gather the diff');
+    expect(expandedReview).not.toContain(STEERING_PREFIX);
     harness.model.assertSettled();
   }, 30_000);
 

@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export const PINNED_OPENCODE_VERSION = '1.18.4';
+export const PINNED_OPENCODE_VERSION = '1.18.19';
 const PROVIDER_OWNER_ENV = 'GARCON_TEST_OPENCODE_OWNER_GENERATION';
 
 export interface OpenCodeProcessIdentity {
