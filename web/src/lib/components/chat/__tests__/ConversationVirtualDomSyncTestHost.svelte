@@ -16,7 +16,7 @@
 	let viewport: HTMLDivElement | null = $state(null);
 	let sizer: HTMLDivElement | null = $state(null);
 	const virtualDom = new ConversationVirtualDomSynchronizer(() => sizer);
-	const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
+	const virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
 		count: 3,
 		estimateSize: () => 40,
 		getItemKey: (index) => `row-${index}`,

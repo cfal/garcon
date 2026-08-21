@@ -5358,7 +5358,7 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('[TLV5-UX.06-COMPACT-PENDING-REMOUNT-01] retains settled row geometry while remounted content is pending', async () => {
+  test('retains settled row geometry while remounted content is pending', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-pending-row-remount',
