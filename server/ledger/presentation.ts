@@ -68,6 +68,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
         row.at,
         row.message,
         isCarryoverMigrationQuarantineNoticeDetail(row.detail) ? row.detail : undefined,
+        typeof row.detail.title === 'string' && row.detail.title ? row.detail.title : undefined,
       );
     }
     case 'agent-switch':

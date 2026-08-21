@@ -9,6 +9,7 @@ import {
 import {
   ledgerRowsToMessages,
   ledgerRowsToTranscriptMessages,
+  ledgerRowToMessage,
 } from '../presentation.ts';
 
 const AT = '2026-08-15T00:00:00.000Z';
@@ -181,6 +182,21 @@ describe('transcript ledger presentation', () => {
       type: 'transcript-notice',
       content: 'Ordinary durable notice.',
     });
+    expect(rendered[2].message.title).toBeUndefined();
+    const titled = ledgerRowToMessage({
+      kind: 'notice',
+      ordinal: 13,
+      at: AT,
+      providerMeta: null,
+      message: 'Model provider retrying: quota exhausted.',
+      detail: { title: 'Provider retry' },
+    });
+    expect(titled).toBeInstanceOf(TranscriptNoticeMessage);
+    expect(titled).toMatchObject({
+      content: 'Model provider retrying: quota exhausted.',
+      title: 'Provider retry',
+    });
+    expect(titled.detail).toBeUndefined();
     expect(rendered[4].message).toBeInstanceOf(TranscriptNoticeMessage);
     expect(rendered[4].message).toMatchObject({ content: '  exact notice\n' });
     expect(rendered[4].message.detail).toEqual({

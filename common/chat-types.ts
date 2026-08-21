@@ -654,6 +654,7 @@ export class TranscriptNoticeMessage {
     public timestamp: string,
     public content: string,
     public detail?: TranscriptNoticeDetail,
+    public title?: string,
   ) {}
 }
 
@@ -1198,6 +1199,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
           str(data.timestamp),
           str(data.content),
           detail,
+          typeof data.title === 'string' && data.title ? data.title : undefined,
         );
       }
     case 'permission-request': {

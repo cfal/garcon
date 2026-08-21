@@ -707,7 +707,15 @@
 					{:else if asNotice}
 						<ChatEventCard variant="info">
 							{#snippet body()}
-								<div class="text-sm whitespace-pre-wrap break-words">{asNotice.content}</div>
+								{#if asNotice.title}
+									<div class="min-w-0 truncate text-xs font-medium">{asNotice.title}</div>
+								{/if}
+								<div
+									class="text-sm whitespace-pre-wrap break-words"
+									class:mt-1={asNotice.title}
+								>
+									{asNotice.content}
+								</div>
 							{/snippet}
 						</ChatEventCard>
 					{:else if asError}

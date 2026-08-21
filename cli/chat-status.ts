@@ -104,16 +104,21 @@ function formatMessage(entry: TranscriptMessage): string {
     : undefined;
   const textPayload = { ...payload } as Record<string, unknown>;
   delete textPayload.images;
+  delete textPayload.title;
   let content = typeof textPayload.content === 'string'
     ? redactDataUrl(textPayload.content)
     : JSON.stringify(textPayload, redactDataUrls, 2) ?? '{}';
   if (images && images.length > 0) {
     content += `\n[${images.length} image attachments omitted from text output]`;
   }
+  const plainTitle = !cliDetail && 'title' in entry.message
+      && typeof entry.message.title === 'string' && entry.message.title
+    ? ` — ${entry.message.title}`
+    : '';
   const cliLabel = cliDetail
     ? ` (CLI)${cliDetail.title === undefined ? '' : ` — ${cliDetail.title}`}`
     : '';
-  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}\n${truncateStatusText(content)}`;
+  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${plainTitle}\n${truncateStatusText(content)}`;
 }
 
 function redactDataUrls(_key: string, value: unknown): unknown {

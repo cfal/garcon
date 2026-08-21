@@ -580,6 +580,19 @@ export class TranscriptLedgerService {
         this.#notify({ type: 'rows', chatId, viewId, rows });
         return;
       }
+      case 'notice': {
+        if (this.#activeRuns.get(chatId) !== event.runId) return;
+        if (!event.content.trim()) return;
+        const rows = this.#store.append(chatId, viewId, [{
+          kind: 'notice',
+          at: this.#now(),
+          message: event.content,
+          detail: event.title === undefined ? {} : { title: event.title },
+          providerMeta: null,
+        }]);
+        this.#notify({ type: 'rows', chatId, viewId, rows });
+        return;
+      }
       case 'session': {
         if (event.session.nativeSession?.ownerId !== undefined
             && event.session.nativeSession.ownerId !== ownerAgentId) {

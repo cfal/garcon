@@ -76,6 +76,15 @@ export type AgentProducerEvent =
   | { readonly type: 'session'; readonly session: AgentEstablishedSession }
   | AgentPermissionRequestedEvent
   | AgentPermissionTerminalEvent
+  // A durable presentation-only notice about the active run, such as a
+  // provider-announced retry wait. It lands in the transcript as display-only
+  // history and never reaches agent context, resend folds, or forks.
+  | {
+      readonly type: 'notice';
+      readonly runId: string;
+      readonly content: string;
+      readonly title?: string;
+    }
   | {
       readonly type: 'run-ended';
       readonly runId: string;

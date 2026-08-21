@@ -248,6 +248,34 @@ describe('chat status', () => {
     expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI)`);
   });
 
+  test('shows a plain notice title without CLI provenance', () => {
+    const value = formatChatStatus(snapshot({
+      transcript: {
+        availability: 'available',
+        transcriptViewId: 'view-1',
+        messages: [{
+          ordinal: 1,
+          message: new TranscriptNoticeMessage(
+            TIMESTAMP,
+            'Model provider retrying: quota exhausted.',
+            undefined,
+            'Provider retry',
+          ),
+        }],
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
+        hasMore: false,
+      },
+    }));
+
+    expect(value).toContain(
+      `[1] ${TIMESTAMP} transcript-notice — Provider retry\n`
+        + 'Model provider retrying: quota exhausted.',
+    );
+    expect(value).not.toContain('(CLI)');
+  });
+
   test('passes request correlation and emits the unchanged snapshot as JSON', async () => {
     const value = snapshot();
     const before = JSON.stringify(value);

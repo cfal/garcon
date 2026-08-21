@@ -629,6 +629,50 @@ describe('TranscriptLedgerService', () => {
       }]);
     });
   });
+
+  describe('producer notices', () => {
+    it('appends a titled display-only notice row for the active run', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const notifications = [];
+        ledger.subscribe((event) => notifications.push(event));
+
+        lease.sink.publish({
+          type: 'notice',
+          runId: 'run-1',
+          title: 'Provider retry',
+          content: 'Model provider retrying: quota exhausted.',
+        });
+
+        const rows = ledger.currentRows('chat-1');
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          kind: 'notice',
+          message: 'Model provider retrying: quota exhausted.',
+          detail: { title: 'Provider retry' },
+        });
+        expect(ledger.conversationMessages('chat-1')).toEqual([]);
+        await tick();
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]).toMatchObject({ type: 'rows', chatId: 'chat-1' });
+      });
+    });
+
+    it('drops notices from a stale run and blank notice content', async () => {
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-2');
+
+        lease.sink.publish({ type: 'notice', runId: 'run-1', content: 'stale run' });
+        lease.sink.publish({ type: 'notice', runId: 'run-2', content: '   ' });
+
+        expect(ledger.currentRows('chat-1')).toHaveLength(0);
+      });
+    });
+  });
 });
 
 async function withService(run, serviceOptions = {}) {

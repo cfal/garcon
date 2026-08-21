@@ -47,6 +47,27 @@ describe('transcript notice contracts', () => {
     }
   });
 
+  it('round-trips a plain titled notice without any detail', () => {
+    const message = {
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Model provider retrying: quota exhausted.',
+      title: 'Provider retry',
+    };
+
+    const parsed = parseChatMessage(message);
+
+    expect(parsed?.title).toBe('Provider retry');
+    expect(parsed?.detail).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
+
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Untitled notice.',
+    })?.title).toBeUndefined();
+  });
+
   it('accepts untitled CLI detail and rejects malformed title shape', () => {
     expect(parseChatMessage({
       type: 'error',
