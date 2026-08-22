@@ -28,6 +28,8 @@ Environment Variables:
   GARCON_JWT_TOKEN_EXPIRY          JWT expiry for auth tokens. Default: 30d
   GARCON_PROJECT_BASE_DIR          Restricts project file access to this resolved path.
   GARCON_TERMINAL_SHELL            Shell executable for PTY sessions (non-Windows).
+  GARCON_TERMINAL_DETACHED_TTL_SECONDS
+                                     Seconds before detached PTY sessions are terminated. Default: 0.
   GARCON_MAX_REQUEST_BODY_SIZE     HTTP request body size limit (bytes). Default: 52428800
   GARCON_MAX_CONNECTIONS           Max concurrent HTTP connections. Default: 1024
   GARCON_MAX_WS_CLIENTS            Max pending websocket clients. Default: 128
@@ -45,10 +47,10 @@ Notes:
   process.stdout.write(helpText);
 }
 
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
   printHelp();
 } else {
-  const { startServer } = await import('./server.js');
+  const { startServer } = await import("./server.js");
   await startServer();
 }
 

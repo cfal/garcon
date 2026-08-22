@@ -284,11 +284,7 @@ describe("TerminalManager", () => {
 
     pty.emitExit(23);
 
-    for (const browser of [
-      displacedBrowser,
-      passiveBrowser,
-      attachedBrowser,
-    ]) {
+    for (const browser of [displacedBrowser, passiveBrowser, attachedBrowser]) {
       expect(browser.messages.at(-1)).toMatchObject({
         type: "terminal-status",
         terminal: {
@@ -445,9 +441,9 @@ describe("TerminalManager", () => {
       code: "terminal-backpressure",
       status: 429,
     });
-    expect(
-      await manager.terminate(alice, "missing-1", "terminate-1"),
-    ).toEqual(first);
+    expect(await manager.terminate(alice, "missing-1", "terminate-1")).toEqual(
+      first,
+    );
     await expect(
       manager.terminate(bob, "missing-1", "terminate-1"),
     ).resolves.toMatchObject({
@@ -476,8 +472,16 @@ describe("TerminalManager", () => {
     const firstTerminalId = firstTerminal.terminal.terminalId;
     const secondTerminalId = secondTerminal.terminal.terminalId;
 
-    const first = await manager.terminate(alice, firstTerminalId, "shared-request");
-    const second = await manager.terminate(alice, secondTerminalId, "shared-request");
+    const first = await manager.terminate(
+      alice,
+      firstTerminalId,
+      "shared-request",
+    );
+    const second = await manager.terminate(
+      alice,
+      secondTerminalId,
+      "shared-request",
+    );
 
     expect(first.terminalId).toBe(firstTerminalId);
     expect(second.terminalId).toBe(secondTerminalId);
@@ -554,6 +558,138 @@ describe("TerminalManager", () => {
       expect.objectContaining({
         terminalId: second.terminal.terminalId,
         attachmentStatus: "attached",
+      }),
+    ]);
+  });
+
+  it("terminates only expired detached terminals", async () => {
+    let now = 1_000;
+    const ptys = [];
+    const manager = new TerminalManager({
+      now: () => now,
+      detachedTerminalTtlMs: 86_400_000,
+      spawnPty: () => {
+        const pty = new FakePty();
+        ptys.push(pty);
+        return pty;
+      },
+    });
+    const alice = principal("alice");
+    const first = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const second = await manager.create(alice, {
+      requestId: "create-2",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const firstPeer = peer("socket-1");
+    const secondPeer = peer("socket-2");
+    manager.attach(alice, firstPeer, {
+      type: "terminal-attach",
+      terminalId: first.terminal.terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    manager.attach(alice, secondPeer, {
+      type: "terminal-attach",
+      terminalId: second.terminal.terminalId,
+      clientId: "client-2",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    manager.detachTerminal(alice, firstPeer, first.terminal.terminalId);
+
+    now += 86_400_000;
+    manager.pruneExpiredDetachedTerminals();
+
+    expect(ptys.map((pty) => pty.killCount)).toEqual([1, 0]);
+    expect(manager.list(alice)).toEqual([
+      expect.objectContaining({
+        terminalId: second.terminal.terminalId,
+        attachmentStatus: "attached",
+      }),
+    ]);
+    expect(firstPeer.ownedTerminalIds.has(first.terminal.terminalId)).toBe(
+      false,
+    );
+    expect(secondPeer.ownedTerminalIds.has(second.terminal.terminalId)).toBe(
+      true,
+    );
+  });
+
+  it("resets detached terminal expiry after reconnection", async () => {
+    let now = 1_000;
+    const pty = new FakePty();
+    const manager = new TerminalManager({
+      now: () => now,
+      detachedTerminalTtlMs: 86_400_000,
+      spawnPty: () => pty,
+    });
+    const alice = principal("alice");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const firstPeer = peer("socket-1");
+    const secondPeer = peer("socket-2");
+    manager.attach(alice, firstPeer, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    manager.detachTerminal(alice, firstPeer, terminalId);
+    now += 86_399_999;
+    manager.attach(alice, secondPeer, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    manager.detachTerminal(alice, secondPeer, terminalId);
+
+    manager.pruneExpiredDetachedTerminals();
+    expect(pty.killCount).toBe(0);
+    expect(manager.list(alice)).toHaveLength(1);
+
+    now += 1;
+    manager.pruneExpiredDetachedTerminals();
+    expect(pty.killCount).toBe(0);
+    expect(manager.list(alice)).toHaveLength(1);
+
+    now += 86_399_999;
+    manager.pruneExpiredDetachedTerminals();
+    expect(pty.killCount).toBe(1);
+    expect(manager.list(alice)).toEqual([]);
+  });
+
+  it("leaves detached terminals alone when the ttl is disabled", async () => {
+    let now = 1_000;
+    const pty = new FakePty();
+    const manager = new TerminalManager({
+      now: () => now,
+      detachedTerminalTtlMs: 0,
+      spawnPty: () => pty,
+    });
+    const alice = principal("alice");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+
+    now += 86_400_000;
+    manager.pruneExpiredDetachedTerminals();
+
+    expect(pty.killCount).toBe(0);
+    expect(manager.list(alice)).toEqual([
+      expect.objectContaining({
+        terminalId: created.terminal.terminalId,
+        attachmentStatus: "detached",
       }),
     ]);
   });

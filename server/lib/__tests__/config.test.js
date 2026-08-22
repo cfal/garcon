@@ -1,17 +1,20 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   getPort,
   initializeServerConfig,
   resetServerConfigForTests,
   isAuthDisabled,
   isHttpCompressionEnabled,
-} from '../../config.js';
+  getTerminalDetachedTtlSeconds,
+} from "../../config.js";
 
 const originalArgv = [...process.argv];
 const originalPort = process.env.GARCON_PORT;
 const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
+const originalTerminalDetachedTtl =
+  process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS;
 
 afterEach(() => {
   resetServerConfigForTests();
@@ -36,100 +39,133 @@ afterEach(() => {
   } else {
     process.env.GARCON_DISABLE_AUTH = originalDisableAuth;
   }
+  if (originalTerminalDetachedTtl === undefined) {
+    delete process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS;
+  } else {
+    process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS =
+      originalTerminalDetachedTtl;
+  }
 });
 
-describe('getPort', () => {
-  it('preserves env port 0 for OS-assigned binding', () => {
-    process.env.GARCON_PORT = '0';
+describe("getPort", () => {
+  it("preserves env port 0 for OS-assigned binding", () => {
+    process.env.GARCON_PORT = "0";
     process.argv = [...originalArgv];
 
     expect(getPort()).toBe(0);
   });
 
-  it('preserves CLI port 0 for OS-assigned binding', () => {
+  it("preserves CLI port 0 for OS-assigned binding", () => {
     delete process.env.GARCON_PORT;
-    process.argv = [...originalArgv, '--port', '0'];
+    process.argv = [...originalArgv, "--port", "0"];
 
     expect(getPort()).toBe(0);
   });
 
-  it('rejects missing CLI port values', () => {
+  it("rejects missing CLI port values", () => {
     delete process.env.GARCON_PORT;
-    process.argv = [...originalArgv, '--port'];
+    process.argv = [...originalArgv, "--port"];
 
-    expect(() => getPort()).toThrow('--port requires a value');
+    expect(() => getPort()).toThrow("--port requires a value");
   });
 
-  it('rejects empty CLI port values', () => {
+  it("rejects empty CLI port values", () => {
     delete process.env.GARCON_PORT;
-    process.argv = [...originalArgv, '--port', ''];
+    process.argv = [...originalArgv, "--port", ""];
 
-    expect(() => getPort()).toThrow('Invalid --port value');
+    expect(() => getPort()).toThrow("Invalid --port value");
   });
 
-  it('rejects non-integer ports', () => {
-    process.env.GARCON_PORT = '3000.5';
+  it("rejects non-integer ports", () => {
+    process.env.GARCON_PORT = "3000.5";
     process.argv = [...originalArgv];
 
-    expect(() => getPort()).toThrow('Invalid GARCON_PORT value');
+    expect(() => getPort()).toThrow("Invalid GARCON_PORT value");
   });
 
-  it('freezes initialized config against later env changes', () => {
-    process.env.GARCON_PORT = '9001';
+  it("freezes initialized config against later env changes", () => {
+    process.env.GARCON_PORT = "9001";
     process.argv = [...originalArgv];
 
     const config = initializeServerConfig();
-    process.env.GARCON_PORT = '9002';
+    process.env.GARCON_PORT = "9002";
 
     expect(Object.isFrozen(config)).toBe(true);
     expect(getPort()).toBe(9001);
   });
 
-  it('validates websocket client limits during initialization', () => {
-    process.env.GARCON_MAX_WS_CLIENTS = 'many';
+  it("validates websocket client limits during initialization", () => {
+    process.env.GARCON_MAX_WS_CLIENTS = "many";
 
-    expect(() => initializeServerConfig()).toThrow('Invalid GARCON_MAX_WS_CLIENTS value');
+    expect(() => initializeServerConfig()).toThrow(
+      "Invalid GARCON_MAX_WS_CLIENTS value",
+    );
   });
 
-  it('parses the explicit carryover rollback startup flag', () => {
-    process.argv = [...originalArgv, '--rollback-carryover-migration'];
+  it("parses the explicit carryover rollback startup flag", () => {
+    process.argv = [...originalArgv, "--rollback-carryover-migration"];
 
     expect(initializeServerConfig().rollbackCarryOverMigration).toBe(true);
   });
 
-  it('rejects negative websocket client limits during initialization', () => {
-    process.env.GARCON_MAX_WS_CLIENTS = '-1';
+  it("rejects negative websocket client limits during initialization", () => {
+    process.env.GARCON_MAX_WS_CLIENTS = "-1";
 
-    expect(() => initializeServerConfig()).toThrow('non-negative integer');
+    expect(() => initializeServerConfig()).toThrow("non-negative integer");
   });
-
 });
 
-describe('isAuthDisabled', () => {
-  it('treats empty GARCON_DISABLE_AUTH as unset so the CLI flag can apply', () => {
-    process.env.GARCON_DISABLE_AUTH = '';
-    process.argv = [...originalArgv, '--disable-auth'];
+describe("getTerminalDetachedTtlSeconds", () => {
+  it("defaults to disabled", () => {
+    delete process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS;
+    initializeServerConfig();
+
+    expect(getTerminalDetachedTtlSeconds()).toBe(0);
+  });
+
+  it("parses a one-day ttl", () => {
+    process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS = "86400";
+    initializeServerConfig();
+
+    expect(getTerminalDetachedTtlSeconds()).toBe(86_400);
+  });
+
+  it("rejects negative ttl values", () => {
+    process.env.GARCON_TERMINAL_DETACHED_TTL_SECONDS = "-1";
+
+    expect(() => initializeServerConfig()).toThrow(
+      "Invalid GARCON_TERMINAL_DETACHED_TTL_SECONDS value",
+    );
+  });
+});
+
+describe("isAuthDisabled", () => {
+  it("treats empty GARCON_DISABLE_AUTH as unset so the CLI flag can apply", () => {
+    process.env.GARCON_DISABLE_AUTH = "";
+    process.argv = [...originalArgv, "--disable-auth"];
     initializeServerConfig();
 
     expect(isAuthDisabled()).toBe(true);
   });
 });
 
-describe('isHttpCompressionEnabled', () => {
-  it('defaults to enabled', () => {
+describe("isHttpCompressionEnabled", () => {
+  it("defaults to enabled", () => {
     delete process.env.GARCON_HTTP_COMPRESSION;
     initializeServerConfig();
     expect(isHttpCompressionEnabled()).toBe(true);
   });
 
-  it('disables on false-like env values', () => {
-    process.env.GARCON_HTTP_COMPRESSION = 'false';
+  it("disables on false-like env values", () => {
+    process.env.GARCON_HTTP_COMPRESSION = "false";
     initializeServerConfig();
     expect(isHttpCompressionEnabled()).toBe(false);
   });
 
-  it('throws on invalid values', () => {
-    process.env.GARCON_HTTP_COMPRESSION = 'maybe';
-    expect(() => initializeServerConfig()).toThrow('Invalid GARCON_HTTP_COMPRESSION value');
+  it("throws on invalid values", () => {
+    process.env.GARCON_HTTP_COMPRESSION = "maybe";
+    expect(() => initializeServerConfig()).toThrow(
+      "Invalid GARCON_HTTP_COMPRESSION value",
+    );
   });
 });

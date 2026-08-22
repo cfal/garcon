@@ -10,7 +10,11 @@ import {
   type TerminalStreamServerMessage,
   type TerminalTerminateResponse,
 } from "../../common/terminal.js";
-import { getProjectBasePath, getUserShell } from "../config.js";
+import {
+  getProjectBasePath,
+  getTerminalDetachedTtlSeconds,
+  getUserShell,
+} from "../config.js";
 import { KeyedPromiseLock } from "../lib/keyed-lock.js";
 import { assertRealWithinProjectBase } from "../lib/path-boundary.js";
 import type { ServerPrincipal } from "../lib/http-route-types.js";
@@ -21,6 +25,7 @@ import { TerminalReplayBuffer } from "./terminal-replay-buffer.js";
 const logger = createLogger("terminals:manager");
 const CREATE_RESULT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OPERATIONS = 1024;
+const DETACHED_TERMINAL_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 export const MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL = 256;
 export const MAX_TERMINAL_REQUEST_RESULTS = 4096;
 
@@ -43,6 +48,7 @@ interface TerminalSession {
   attachment: TerminalAttachment | null;
   subscribers: Set<TerminalStreamPeer>;
   attachmentGeneration: number;
+  detachedAtMs: number | null;
   pendingOperations: number;
   operationChain: Promise<void>;
   pendingResize: {
@@ -88,6 +94,8 @@ type PtySpawner = (
   },
 ) => IPty;
 
+type UnrefTimer = ReturnType<typeof setInterval> & { unref?: () => void };
+
 interface TerminalManagerOptions {
   spawnPty?: PtySpawner;
   now?: () => number;
@@ -95,6 +103,8 @@ interface TerminalManagerOptions {
   replayBytes?: number;
   requestResultsPerPrincipal?: number;
   requestResultsTotal?: number;
+  detachedTerminalTtlMs?: number;
+  detachedTerminalPruneIntervalMs?: number;
 }
 
 function ptyEnvironment(): Record<string, string> {
@@ -147,8 +157,10 @@ export class TerminalManager {
   readonly #spawnPty?: PtySpawner;
   readonly #requestResultsPerPrincipal: number;
   readonly #requestResultsTotal: number;
+  readonly #detachedTerminalTtlMs: number;
   #requestResultCount = 0;
   readonly #resultCleanupTimer: ReturnType<typeof setInterval>;
+  readonly #detachedTerminalCleanupTimer: ReturnType<typeof setInterval> | null;
 
   constructor(options: TerminalManagerOptions = {}) {
     this.#now = options.now ?? Date.now;
@@ -160,11 +172,29 @@ export class TerminalManager {
       MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL;
     this.#requestResultsTotal =
       options.requestResultsTotal ?? MAX_TERMINAL_REQUEST_RESULTS;
+    this.#detachedTerminalTtlMs =
+      options.detachedTerminalTtlMs ?? getTerminalDetachedTtlSeconds() * 1000;
     this.#resultCleanupTimer = setInterval(
       () => this.#pruneRequestResults(),
       Math.max(1_000, Math.min(this.#createResultTtlMs, 60_000)),
     );
-    this.#resultCleanupTimer.unref?.();
+    (this.#resultCleanupTimer as UnrefTimer).unref?.();
+    if (this.#detachedTerminalTtlMs > 0) {
+      this.#detachedTerminalCleanupTimer = setInterval(
+        () => this.pruneExpiredDetachedTerminals(),
+        Math.max(
+          1_000,
+          Math.min(
+            options.detachedTerminalPruneIntervalMs ??
+              DETACHED_TERMINAL_PRUNE_INTERVAL_MS,
+            this.#detachedTerminalTtlMs,
+          ),
+        ),
+      );
+      (this.#detachedTerminalCleanupTimer as UnrefTimer).unref?.();
+    } else {
+      this.#detachedTerminalCleanupTimer = null;
+    }
   }
 
   list(principal: ServerPrincipal): TerminalMetadata[] {
@@ -270,6 +300,7 @@ export class TerminalManager {
         attachment: null,
         subscribers: new Set(),
         attachmentGeneration: 0,
+        detachedAtMs: this.#now(),
         pendingOperations: 0,
         operationChain: Promise.resolve(),
         pendingResize: null,
@@ -327,35 +358,11 @@ export class TerminalManager {
         );
         return response;
       }
-      session.terminating = true;
-      const finalMetadata = cloneTerminalMetadata(session.metadata);
-      for (const subscriber of session.subscribers) {
-        try {
-          subscriber.sendTerminalMessage({
-            type: "terminal-terminated",
-            terminalId,
-          });
-        } catch (error) {
-          logger.warn(
-            `terminal termination notification failed id=${terminalId} connection=${subscriber.connectionId}:`,
-            errorMessage(error),
-          );
-        }
-        subscriber.ownedTerminalIds.delete(terminalId);
-      }
-      session.subscribers.clear();
-      session.attachment = null;
-      sessions.delete(terminalId);
-      if (session.metadata.processStatus === "running") {
-        try {
-          session.pty.kill();
-        } catch (error) {
-          logger.warn(
-            `terminal kill failed id=${terminalId}:`,
-            errorMessage(error),
-          );
-        }
-      }
+      const finalMetadata = this.#terminateSession(
+        sessions,
+        session,
+        "request",
+      );
       logger.info(
         `terminal terminated id=${terminalId} principal=${principal.key}`,
       );
@@ -415,6 +422,7 @@ export class TerminalManager {
 
     session.attachment = { clientId: request.clientId, peer };
     session.attachmentGeneration += 1;
+    session.detachedAtMs = null;
     peer.ownedTerminalIds.add(session.metadata.terminalId);
     session.metadata.attachmentStatus = "attached";
     const firstSequence = session.replay.firstRetainedSequence;
@@ -500,6 +508,7 @@ export class TerminalManager {
       if (session.attachment?.peer === peer) {
         session.attachment = null;
         session.attachmentGeneration += 1;
+        session.detachedAtMs = this.#now();
         session.metadata.attachmentStatus = "detached";
       }
       if (wasSubscribed) peer.ownedTerminalIds.delete(terminalId);
@@ -518,6 +527,7 @@ export class TerminalManager {
     if (session.attachment?.peer === peer) {
       session.attachment = null;
       session.attachmentGeneration += 1;
+      session.detachedAtMs = this.#now();
       session.metadata.attachmentStatus = "detached";
     }
     peer.ownedTerminalIds.delete(terminalId);
@@ -525,6 +535,8 @@ export class TerminalManager {
 
   shutdown(): void {
     clearInterval(this.#resultCleanupTimer);
+    if (this.#detachedTerminalCleanupTimer)
+      clearInterval(this.#detachedTerminalCleanupTimer);
     for (const sessions of this.#sessionsByPrincipal.values()) {
       for (const session of sessions.values()) {
         session.terminating = true;
@@ -539,6 +551,25 @@ export class TerminalManager {
     this.#createResults.clear();
     this.#terminateResults.clear();
     this.#requestResultCount = 0;
+  }
+
+  pruneExpiredDetachedTerminals(): void {
+    if (this.#detachedTerminalTtlMs <= 0) return;
+    const now = this.#now();
+    for (const sessions of this.#sessionsByPrincipal.values()) {
+      for (const session of [...sessions.values()]) {
+        if (session.attachment !== null) continue;
+        if (session.detachedAtMs === null) continue;
+        const detachedAgeMs = now - session.detachedAtMs;
+        if (detachedAgeMs < this.#detachedTerminalTtlMs) continue;
+        this.#terminateSession(
+          sessions,
+          session,
+          "detached-ttl",
+          detachedAgeMs,
+        );
+      }
+    }
   }
 
   #sessionsFor(principalKey: string): Map<string, TerminalSession> {
@@ -626,6 +657,50 @@ export class TerminalManager {
         `terminal exited id=${session.metadata.terminalId} principal=${session.principalKey} code=${exitCode}`,
       );
     });
+  }
+
+  #terminateSession(
+    sessions: Map<string, TerminalSession>,
+    session: TerminalSession,
+    reason: "request" | "detached-ttl",
+    detachedAgeMs?: number,
+  ): TerminalMetadata {
+    session.terminating = true;
+    const terminalId = session.metadata.terminalId;
+    const finalMetadata = cloneTerminalMetadata(session.metadata);
+    for (const subscriber of session.subscribers) {
+      try {
+        subscriber.sendTerminalMessage({
+          type: "terminal-terminated",
+          terminalId,
+        });
+      } catch (error) {
+        logger.warn(
+          `terminal termination notification failed id=${terminalId} connection=${subscriber.connectionId}:`,
+          errorMessage(error),
+        );
+      }
+      subscriber.ownedTerminalIds.delete(terminalId);
+    }
+    session.subscribers.clear();
+    session.attachment = null;
+    sessions.delete(terminalId);
+    if (session.metadata.processStatus === "running") {
+      try {
+        session.pty.kill();
+      } catch (error) {
+        logger.warn(
+          `terminal kill failed id=${terminalId}:`,
+          errorMessage(error),
+        );
+      }
+    }
+    const detachedAgeLog =
+      detachedAgeMs === undefined ? "" : ` detachedAgeMs=${detachedAgeMs}`;
+    logger.info(
+      `terminal cleanup id=${terminalId} principal=${session.principalKey} reason=${reason}${detachedAgeLog}`,
+    );
+    return finalMetadata;
   }
 
   #enqueue(

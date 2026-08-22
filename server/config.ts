@@ -2,16 +2,16 @@
 // variables and CLI flags. Other server modules use getters from here instead
 // of reading process.env or process.argv directly.
 
-import path from 'path';
-import os from 'os';
+import path from "path";
+import os from "os";
 
 const CLI_VALUE_FLAGS = {
-  '--config-dir': '<directory>',
-  '--workspace-dir': '<directory>',
-  '--workspace': '<name>',
-  '--port': '<number>',
-  '--bind-address': '<hostname-or-ip>',
-  '--project-base-dir': '<directory>',
+  "--config-dir": "<directory>",
+  "--workspace-dir": "<directory>",
+  "--workspace": "<name>",
+  "--port": "<number>",
+  "--bind-address": "<hostname-or-ip>",
+  "--project-base-dir": "<directory>",
 } as const;
 
 type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
@@ -34,6 +34,7 @@ export interface ServerConfig {
   wsMaxPayloadLength: number;
   httpIdleTimeoutSeconds: number;
   maxSessions: number;
+  terminalDetachedTtlSeconds: number;
   authDisabled: boolean;
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
@@ -57,7 +58,7 @@ function currentConfig(): Readonly<ServerConfig> {
 
 function envValue(name: string): string | null {
   const value = process.env[name];
-  return value === undefined || value === '' ? null : value;
+  return value === undefined || value === "" ? null : value;
 }
 
 function cliValue(flag: CliValueFlag): string | null {
@@ -76,14 +77,14 @@ function nonEmptyValue(
   errorMessage: string,
 ): string | null {
   if (value === null) return null;
-  if (value.trim() === '') {
+  if (value.trim() === "") {
     throw new Error(errorMessage);
   }
   return value;
 }
 
 function parsePort(value: string, source: string): number {
-  if (value.trim() === '') {
+  if (value.trim() === "") {
     throw new Error(
       `Invalid ${source} value: must be an integer between 0 and 65535.`,
     );
@@ -100,9 +101,9 @@ function parsePort(value: string, source: string): number {
 function parseServerConfig(): ServerConfig {
   const configDir = parseConfigDir();
   const workspace = parseWorkspace(configDir);
-  const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
+  const maxWsClients = envInt("MAX_WS_CLIENTS", 128);
   if (maxWsClients < 1) {
-    throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
+    throw new Error("Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.");
   }
   return {
     configDir,
@@ -110,55 +111,66 @@ function parseServerConfig(): ServerConfig {
     workspaceName: workspace.workspaceName,
     port: parsePortConfig(),
     bindAddress: parseBindAddress(),
-    jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
-    testEnvironment: envValue('NODE_ENV') === 'test',
+    jwtTokenExpiry: envValue("GARCON_JWT_TOKEN_EXPIRY") ?? "30d",
+    testEnvironment: envValue("NODE_ENV") === "test",
     projectBasePath: parseProjectBasePath(),
     userShell: parseUserShell(),
-    maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 50 * 1024 * 1024),
-    maxConnections: envInt('MAX_CONNECTIONS', 1024),
+    maxRequestBodySize: envInt("MAX_REQUEST_BODY_SIZE", 50 * 1024 * 1024),
+    maxConnections: envInt("MAX_CONNECTIONS", 1024),
     maxWsClients,
-    wsIdleTimeoutSeconds: envInt('WS_IDLE_TIMEOUT_SECONDS', 60 * 16),
-    wsBackpressureLimit: envInt('WS_BACKPRESSURE_LIMIT', 2 * 1024 * 1024),
-    wsMaxPayloadLength: envInt('WS_MAX_PAYLOAD_LENGTH', 16 * 1024 * 1024),
-    httpIdleTimeoutSeconds: envInt('HTTP_IDLE_TIMEOUT_SECONDS', 60 * 2),
-    maxSessions: envInt('MAX_SESSIONS', 50),
+    wsIdleTimeoutSeconds: envInt("WS_IDLE_TIMEOUT_SECONDS", 60 * 16),
+    wsBackpressureLimit: envInt("WS_BACKPRESSURE_LIMIT", 2 * 1024 * 1024),
+    wsMaxPayloadLength: envInt("WS_MAX_PAYLOAD_LENGTH", 16 * 1024 * 1024),
+    httpIdleTimeoutSeconds: envInt("HTTP_IDLE_TIMEOUT_SECONDS", 60 * 2),
+    maxSessions: envInt("MAX_SESSIONS", 50),
+    terminalDetachedTtlSeconds: envInt("TERMINAL_DETACHED_TTL_SECONDS", 0),
     authDisabled: parseAuthDisabled(),
-    trustProxyEnabled: envBool('TRUST_PROXY', false),
-    httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
-    rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
+    trustProxyEnabled: envBool("TRUST_PROXY", false),
+    httpCompressionEnabled: envBool("HTTP_COMPRESSION", true),
+    rollbackCarryOverMigration: process.argv.includes(
+      "--rollback-carryover-migration",
+    ),
   };
 }
 
 function parseConfigDir(): string {
-  const envConfigDir = envValue('GARCON_CONFIG_DIR');
+  const envConfigDir = envValue("GARCON_CONFIG_DIR");
   if (envConfigDir !== null) return envConfigDir;
 
-  const configDir = cliValue('--config-dir');
+  const configDir = cliValue("--config-dir");
   if (configDir !== null) return configDir;
 
-  return path.join(os.homedir(), '.garcon');
+  return path.join(os.homedir(), ".garcon");
 }
 
-function parseWorkspace(configDir: string): Pick<ServerConfig, 'workspaceDir' | 'workspaceName'> {
+function parseWorkspace(
+  configDir: string,
+): Pick<ServerConfig, "workspaceDir" | "workspaceName"> {
   const workspaceDir = nonEmptyValue(
-    envValue('GARCON_WORKSPACE_DIR') ?? cliValue('--workspace-dir'),
-    'Invalid --workspace-dir value: must be a non-empty directory path.',
+    envValue("GARCON_WORKSPACE_DIR") ?? cliValue("--workspace-dir"),
+    "Invalid --workspace-dir value: must be a non-empty directory path.",
   );
   if (workspaceDir !== null) return { workspaceDir, workspaceName: null };
 
   let workspaceName: string;
-  const envWorkspace = envValue('GARCON_WORKSPACE');
+  const envWorkspace = envValue("GARCON_WORKSPACE");
   if (envWorkspace !== null) {
     workspaceName = envWorkspace;
   } else {
     const cliWorkspaceName = nonEmptyValue(
-      cliValue('--workspace'),
-      'Invalid --workspace value: must be a non-empty name.',
+      cliValue("--workspace"),
+      "Invalid --workspace value: must be a non-empty name.",
     );
-    workspaceName = cliWorkspaceName ?? 'default';
+    workspaceName = cliWorkspaceName ?? "default";
   }
-  if (workspaceName === '.' || workspaceName === '..' || /[\\/\0]/.test(workspaceName)) {
-    throw new Error('Invalid workspace name: must not contain path separators.');
+  if (
+    workspaceName === "." ||
+    workspaceName === ".." ||
+    /[\\/\0]/.test(workspaceName)
+  ) {
+    throw new Error(
+      "Invalid workspace name: must not contain path separators.",
+    );
   }
   return {
     workspaceDir: path.join(configDir, `workspace-${workspaceName}`),
@@ -167,29 +179,29 @@ function parseWorkspace(configDir: string): Pick<ServerConfig, 'workspaceDir' | 
 }
 
 function parsePortConfig(): number {
-  const envPort = envValue('GARCON_PORT');
-  if (envPort !== null) return parsePort(envPort, 'GARCON_PORT');
+  const envPort = envValue("GARCON_PORT");
+  if (envPort !== null) return parsePort(envPort, "GARCON_PORT");
 
-  const port = cliValue('--port');
-  if (port !== null) return parsePort(port, '--port');
+  const port = cliValue("--port");
+  if (port !== null) return parsePort(port, "--port");
 
   return 8080;
 }
 
 function parseBindAddress(): string {
   const bindAddress = nonEmptyValue(
-    envValue('GARCON_BIND_ADDRESS') ?? cliValue('--bind-address'),
-    'Invalid --bind-address value: must be a non-empty hostname or IP address.',
+    envValue("GARCON_BIND_ADDRESS") ?? cliValue("--bind-address"),
+    "Invalid --bind-address value: must be a non-empty hostname or IP address.",
   );
   if (bindAddress !== null) return bindAddress;
 
-  return '127.0.0.1';
+  return "127.0.0.1";
 }
 
 function parseProjectBasePath(): string {
   const projectBaseDir = nonEmptyValue(
-    envValue('GARCON_PROJECT_BASE_DIR') ?? cliValue('--project-base-dir'),
-    'Invalid --project-base-dir value: must be a non-empty directory path.',
+    envValue("GARCON_PROJECT_BASE_DIR") ?? cliValue("--project-base-dir"),
+    "Invalid --project-base-dir value: must be a non-empty directory path.",
   );
   if (projectBaseDir !== null) return path.resolve(projectBaseDir);
 
@@ -197,19 +209,19 @@ function parseProjectBasePath(): string {
 }
 
 function parseUserShell(): string {
-  return os.platform() === 'win32'
-    ? 'powershell.exe'
-    : (envValue('GARCON_TERMINAL_SHELL') ?? envValue('SHELL') ?? '/bin/bash');
+  return os.platform() === "win32"
+    ? "powershell.exe"
+    : (envValue("GARCON_TERMINAL_SHELL") ?? envValue("SHELL") ?? "/bin/bash");
 }
 
 function parseAuthDisabled(): boolean {
   if (
     process.env.GARCON_DISABLE_AUTH !== undefined &&
-    process.env.GARCON_DISABLE_AUTH.trim() !== ''
+    process.env.GARCON_DISABLE_AUTH.trim() !== ""
   ) {
-    return envBool('DISABLE_AUTH', false);
+    return envBool("DISABLE_AUTH", false);
   }
-  return process.argv.includes('--disable-auth');
+  return process.argv.includes("--disable-auth");
 }
 
 export function getConfigDir(): string {
@@ -280,6 +292,10 @@ export function getMaxSessions(): number {
   return currentConfig().maxSessions;
 }
 
+export function getTerminalDetachedTtlSeconds(): number {
+  return currentConfig().terminalDetachedTtlSeconds;
+}
+
 export function isAuthDisabled(): boolean {
   return currentConfig().authDisabled;
 }
@@ -294,9 +310,9 @@ export function isHttpCompressionEnabled(): boolean {
 
 // Parses an integer from an environment variable, returning the fallback when absent.
 function envInt(name: string, fallback: number): number {
-  const varName = 'GARCON_' + name;
+  const varName = "GARCON_" + name;
   const raw = process.env[varName];
-  if (raw === undefined || raw === '') {
+  if (raw === undefined || raw === "") {
     return fallback;
   }
   const normalized = raw.trim();
@@ -310,14 +326,14 @@ function envInt(name: string, fallback: number): number {
 }
 
 function envBool(name: string, fallback: boolean): boolean {
-  const varName = 'GARCON_' + name;
+  const varName = "GARCON_" + name;
   const raw = process.env[varName];
-  if (raw === undefined || raw === '') {
+  if (raw === undefined || raw === "") {
     return fallback;
   }
   const normalized = String(raw).trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
   throw new Error(
     `Invalid ${varName} value: ${raw}. Must be a boolean-like value.`,
   );
