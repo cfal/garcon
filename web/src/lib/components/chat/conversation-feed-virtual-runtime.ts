@@ -1,12 +1,14 @@
 import { tick } from 'svelte';
 import {
 	measureElement as measureVirtualElement,
+	observeElementOffset as observeVirtualElementOffset,
 	observeElementRect,
 	type Rect,
 	type SvelteVirtualizer,
 	type VirtualItem,
 	type Virtualizer,
 } from '@tanstack/svelte-virtual';
+import type { ConversationNativeScrollActivity } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
 import {
 	attainableConversationTargetOffset,
 	CHAT_GEOMETRY_END_THRESHOLD_PX,
@@ -24,6 +26,20 @@ const MAX_ANCHOR_SETTLE_ITERATIONS = 8;
 const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const REQUIRED_END_STABLE_FRAMES = 2;
 const GEOMETRY_TOLERANCE_PX = 0.5;
+
+export interface ConversationVirtualMeasurementPort {
+	indexFromElement(element: HTMLDivElement): number;
+	isScrolling: boolean;
+	itemSizeCache: Map<VirtualItem['key'], number>;
+	measure(): void;
+	measureElement(element: HTMLDivElement | null): void;
+	options: Pick<
+		SvelteVirtualizer<HTMLElement, HTMLDivElement>['options'],
+		'count' | 'estimateSize' | 'getItemKey'
+	>;
+	resizeItem(index: number, size: number): void;
+	scrollDirection: 'forward' | 'backward' | null;
+}
 
 export function measureConversationVirtualItem(
 	element: HTMLDivElement,
@@ -67,13 +83,165 @@ export function observeConversationItemLayoutSettlement(
 
 export function settleConversationVirtualItemMeasurement(
 	element: HTMLDivElement,
-	instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
+	instance: ConversationVirtualMeasurementPort,
 ): void {
 	if (!element.isConnected || !isConversationTargetLayoutReady(element)) return;
 	const index = instance.indexFromElement(element);
 	if (index < 0 || index >= instance.options.count) return;
 	if (String(instance.options.getItemKey(index)) !== element.dataset.chatVirtualItem) return;
 	instance.resizeItem(index, element.offsetHeight);
+}
+
+interface ConversationDeferredVirtualRemount {
+	element: HTMLDivElement;
+	key: VirtualItem['key'];
+}
+
+// Holds a remount's last exact geometry through backward user motion, then publishes
+// its new size at rest.
+export class ConversationVirtualMeasurementManager {
+	#deferredRemounts = new Map<VirtualItem['key'], ConversationDeferredVirtualRemount>();
+	#scrollDirection: 'forward' | 'backward' | null = null;
+
+	constructor(
+		private readonly nativeActivity: () => ConversationNativeScrollActivity,
+		private readonly ownsScrollPosition: () => boolean,
+	) {}
+
+	measureElement = (
+		element: HTMLDivElement,
+		entry: ResizeObserverEntry | undefined,
+		instance: Virtualizer<HTMLElement, HTMLDivElement>,
+	): number => {
+		const measurement = measureConversationVirtualItem(element, entry, instance);
+		const identity = this.#identity(element, instance);
+		if (!identity) return measurement;
+		const deferred = this.#deferredRemounts.get(identity.key);
+		const cached = instance.itemSizeCache.get(identity.key);
+		if (deferred?.element === element && cached !== undefined) {
+			const layoutReady = isConversationTargetLayoutReady(element);
+			if (!layoutReady) return cached;
+			if (this.#shouldDefer(instance)) {
+				if (measurement === cached) {
+					this.#deferredRemounts.delete(identity.key);
+					return measurement;
+				}
+				return cached;
+			}
+			this.#deferredRemounts.delete(identity.key);
+		}
+		return measurement;
+	};
+
+	observeElementOffset = (
+		instance: Virtualizer<HTMLElement, HTMLDivElement>,
+		callback: (offset: number, isScrolling: boolean) => void,
+	): (() => void) | undefined =>
+		observeVirtualElementOffset(instance, (offset, isScrolling) => {
+			callback(offset, isScrolling);
+			if (instance.scrollDirection !== null) this.#scrollDirection = instance.scrollDirection;
+			if (isScrolling || this.nativeActivity() !== 'idle') return;
+			this.#scrollDirection = null;
+			this.flush(instance);
+		});
+
+	attach(element: HTMLDivElement, instance: ConversationVirtualMeasurementPort): () => void {
+		const identity = this.#identity(element, instance);
+		if (identity && instance.itemSizeCache.has(identity.key) && this.#shouldDefer(instance)) {
+			this.#deferredRemounts.set(identity.key, { element, key: identity.key });
+		}
+		const stopObservingLayout = observeConversationItemLayoutSettlement(element, () =>
+			this.#settle(element, instance),
+		);
+		instance.measureElement(element);
+		return () => {
+			stopObservingLayout();
+			if (identity && this.#deferredRemounts.get(identity.key)?.element === element) {
+				this.#deferredRemounts.delete(identity.key);
+			}
+			instance.measureElement(null);
+		};
+	}
+
+	flush(instance: ConversationVirtualMeasurementPort): void {
+		if (instance.isScrolling || this.nativeActivity() !== 'idle' || this.ownsScrollPosition()) {
+			return;
+		}
+		const deferred = [...this.#deferredRemounts.values()];
+		this.#deferredRemounts.clear();
+		for (const remount of deferred) {
+			const identity = this.#identity(remount.element, instance);
+			if (
+				!identity ||
+				identity.key !== remount.key ||
+				!isConversationTargetLayoutReady(remount.element)
+			) {
+				continue;
+			}
+			instance.resizeItem(identity.index, remount.element.offsetHeight);
+		}
+	}
+
+	settleNativeScroll(instance: ConversationVirtualMeasurementPort): void {
+		this.#scrollDirection = null;
+		this.flush(instance);
+	}
+
+	takeProgrammaticOwnership(instance: ConversationVirtualMeasurementPort): void {
+		this.#scrollDirection = null;
+		for (const remount of [...this.#deferredRemounts.values()]) {
+			const identity = this.#identity(remount.element, instance);
+			if (!identity || identity.key !== remount.key) {
+				this.#deferredRemounts.delete(remount.key);
+				continue;
+			}
+			if (!isConversationTargetLayoutReady(remount.element)) continue;
+			this.#deferredRemounts.delete(remount.key);
+			instance.resizeItem(identity.index, remount.element.offsetHeight);
+		}
+	}
+
+	reset(instance: ConversationVirtualMeasurementPort): void {
+		this.clear();
+		instance.measure();
+	}
+
+	clear(): void {
+		this.#deferredRemounts.clear();
+		this.#scrollDirection = null;
+	}
+
+	#settle(element: HTMLDivElement, instance: ConversationVirtualMeasurementPort): void {
+		const identity = this.#identity(element, instance);
+		if (
+			identity &&
+			this.#deferredRemounts.get(identity.key)?.element === element &&
+			this.#shouldDefer(instance)
+		) {
+			return;
+		}
+		if (identity) this.#deferredRemounts.delete(identity.key);
+		settleConversationVirtualItemMeasurement(element, instance);
+	}
+
+	#shouldDefer(instance: ConversationVirtualMeasurementPort): boolean {
+		return (
+			!this.ownsScrollPosition() &&
+			(instance.isScrolling || this.nativeActivity() !== 'idle') &&
+			(instance.scrollDirection ?? this.#scrollDirection) === 'backward'
+		);
+	}
+
+	#identity(
+		element: HTMLDivElement,
+		instance: ConversationVirtualMeasurementPort,
+	): { index: number; key: VirtualItem['key'] } | null {
+		if (!element.isConnected) return null;
+		const index = instance.indexFromElement(element);
+		if (index < 0 || index >= instance.options.count) return null;
+		const key = instance.options.getItemKey(index);
+		return String(key) === element.dataset.chatVirtualItem ? { index, key } : null;
+	}
 }
 
 export function synchronizeConversationVirtualDom(

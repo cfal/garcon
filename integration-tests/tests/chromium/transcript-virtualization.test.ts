@@ -2897,6 +2897,154 @@ async function verifyPendingRowRemountMeasurement(fixture: ChromiumFixture): Pro
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyBackwardScrollRemountMeasurement(fixture: ChromiumFixture): Promise<void> {
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(fixture.integration, 40, 'chromium-backward-remount');
+  await prepareTranscript(fixture, chatId);
+  await scrollToPosition(fixture.page, 'middle');
+
+  const result = await fixture.page
+    .locator(FEED_SELECTOR)
+    .evaluate(async (feedElement, itemSelector) => {
+      const feed = feedElement as HTMLElement;
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const transformY = (element: HTMLElement) => {
+        const transform = getComputedStyle(element).transform;
+        return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+      };
+      const byKey = (key: string) =>
+        [...feed.querySelectorAll<HTMLElement>(itemSelector)].find(
+          (item) => item.dataset.chatVirtualItem === key,
+        );
+      const sample = (target: HTMLElement, follower: HTMLElement) => {
+        const feedTop = feed.getBoundingClientRect().top;
+        return {
+          followerTop: follower.getBoundingClientRect().top - feedTop,
+          scrollTop: feed.scrollTop,
+          spacing: transformY(follower) - transformY(target),
+          targetHeight: target.getBoundingClientRect().height,
+        };
+      };
+      const items = [...feed.querySelectorAll<HTMLElement>(itemSelector)].sort(
+        (left, right) => Number(left.dataset.index) - Number(right.dataset.index),
+      );
+      const viewport = feed.getBoundingClientRect();
+      const targetNode = items.find((item, index) => {
+        const follower = items[index + 1];
+        const rect = item.getBoundingClientRect();
+        return Boolean(
+          follower &&
+          Number(follower.dataset.index) === Number(item.dataset.index) + 1 &&
+          rect.top >= viewport.top + 100 &&
+          rect.bottom <= viewport.bottom - 220,
+        );
+      });
+      const targetIndex = targetNode ? items.indexOf(targetNode) : -1;
+      const followerNode = targetIndex >= 0 ? items[targetIndex + 1] : undefined;
+      const targetKey = targetNode?.dataset.chatVirtualItem;
+      const followerKey = followerNode?.dataset.chatVirtualItem;
+      if (!targetNode || !followerNode || !targetKey || !followerKey) {
+        throw new Error('No consecutive rows are available for backward-remount setup.');
+      }
+
+      targetNode.style.height = '160px';
+      targetNode.style.overflow = 'hidden';
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await frame();
+        const target = byKey(targetKey);
+        const follower = byKey(followerKey);
+        if (target && follower && Math.abs(sample(target, follower).spacing - 160) <= 1) break;
+      }
+      const initialTarget = byKey(targetKey);
+      const initialFollower = byKey(followerKey);
+      if (!initialTarget || !initialFollower) throw new Error('The measured setup row detached.');
+      const initial = sample(initialTarget, initialFollower);
+      if (Math.abs(initial.spacing - 160) > 1) {
+        throw new Error(`The measured setup row did not settle: ${JSON.stringify(initial)}`);
+      }
+
+      const originalSetAttribute = Element.prototype.setAttribute;
+      const remount = { node: null as HTMLElement | null };
+      const patchedSetAttribute = function (
+        this: Element,
+        qualifiedName: string,
+        value: string,
+      ): void {
+        originalSetAttribute.call(this, qualifiedName, value);
+        if (
+          !(this instanceof HTMLElement) ||
+          qualifiedName !== 'data-chat-virtual-item' ||
+          value !== targetKey ||
+          this === targetNode
+        )
+          return;
+        this.style.height = '40px';
+        this.style.overflow = 'hidden';
+        remount.node = this;
+      };
+      Element.prototype.setAttribute = patchedSetAttribute;
+      try {
+        const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
+        feed.scrollTop = Math.min(maximum, feed.scrollTop + feed.clientHeight * 3);
+        feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+        for (let attempt = 0; attempt < 60 && targetNode.isConnected; attempt += 1) await frame();
+        if (targetNode.isConnected) throw new Error('The measured setup row did not unmount.');
+
+        const activeFrames = [];
+        for (let attempt = 0; attempt < 180 && activeFrames.length < 4; attempt += 1) {
+          feed.scrollTop = Math.max(0, feed.scrollTop - 24);
+          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+          await frame();
+          const target = byKey(targetKey);
+          const follower = byKey(followerKey);
+          if (!target || !follower || target !== remount.node) continue;
+          target.style.height = '40px';
+          target.style.overflow = 'hidden';
+          activeFrames.push(sample(target, follower));
+        }
+        if (activeFrames.length < 4) {
+          throw new Error(
+            `The backward-scrolling replacement did not mount: ${JSON.stringify(activeFrames)}`,
+          );
+        }
+
+        const beforeSettlement = activeFrames.at(-1)!;
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        const settlementFrames = [];
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await frame();
+          const target = byKey(targetKey);
+          const follower = byKey(followerKey);
+          if (!target || !follower) continue;
+          const current = sample(target, follower);
+          settlementFrames.push(current);
+          if (Math.abs(current.spacing - 40) <= 1) break;
+        }
+        return { activeFrames, beforeSettlement, initial, settlementFrames };
+      } finally {
+        if (Element.prototype.setAttribute === patchedSetAttribute) {
+          Element.prototype.setAttribute = originalSetAttribute;
+        }
+        remount.node?.style.removeProperty('height');
+        remount.node?.style.removeProperty('overflow');
+      }
+    }, ITEM_SELECTOR);
+  const diagnostic = JSON.stringify(result, null, 2);
+  expect(
+    result.activeFrames.every((frame) => Math.abs(frame.targetHeight - 40) <= 1),
+    diagnostic,
+  ).toBe(true);
+  expect(
+    result.activeFrames.every((frame) => Math.abs(frame.spacing - 160) <= 1),
+    diagnostic,
+  ).toBe(true);
+  const settled = result.settlementFrames.at(-1);
+  expect(settled?.spacing, diagnostic).toBeCloseTo(40, 0);
+  expect(settled?.followerTop, diagnostic).toBeCloseTo(result.beforeSettlement.followerTop, 0);
+  expect(settled?.scrollTop - result.beforeSettlement.scrollTop, diagnostic).toBeCloseTo(-120, 0);
+  fixture.assertNoBrowserErrors();
+}
+
 async function verifyScrollbarDragPrepend(
   fixture: ChromiumFixture,
   viewport: { height: number; width: number },
@@ -5365,6 +5513,20 @@ describe('Chromium transcript virtualization', () => {
       async (fixture, markPhase) => {
         markPhase('remounting a settled row through pending and completed layout states');
         await verifyPendingRowRemountMeasurement(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('defers a cached row remount until backward scrolling settles', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-backward-row-remount',
+      async (fixture, markPhase) => {
+        markPhase('remounting cached geometry during backward scrolling');
+        await verifyBackwardScrollRemountMeasurement(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
