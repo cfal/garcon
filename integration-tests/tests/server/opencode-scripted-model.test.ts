@@ -54,6 +54,54 @@ describeOnLinux('OpenCode against a scripted model', () => {
     environment = undefined;
   });
 
+  test('pins the real binary default tool inventory exposed to the model', async () => {
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsText(marker('TOOL_INVENTORY_REPLY'))]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-scripted-tool-inventory', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('TOOL_INVENTORY_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      const tools = requests[0]?.body.tools;
+      if (!Array.isArray(tools)) throw new Error('OpenCode omitted its model tool inventory.');
+      const names = tools.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+        const fn = 'function' in entry ? entry.function : null;
+        if (!fn || typeof fn !== 'object' || Array.isArray(fn) || !('name' in fn)) return null;
+        return typeof fn.name === 'string' ? fn.name : null;
+      });
+      expect(names.every((name): name is string => name !== null)).toBe(true);
+      expect(names.toSorted()).toEqual([
+        'bash',
+        'edit',
+        'glob',
+        'grep',
+        'question',
+        'read',
+        'skill',
+        'task',
+        'todowrite',
+        'webfetch',
+        'write',
+      ]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('lists only the fake model, rejects a non-catalog model, and keeps all provider paths inside the fixture', async () => {
     const testEnvironment = requireEnvironment();
     testEnvironment.model.scriptTurn([chatCompletionsText(marker('ISOLATION_REPLY'))]);
@@ -258,6 +306,123 @@ describeOnLinux('OpenCode against a scripted model', () => {
       expect(terminalIndex).toBeGreaterThan(lastMessages.index);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('renders every non-blocking default built-in through the real binary', async () => {
+    const testEnvironment = requireEnvironment();
+    const webMarker = marker('WEBFETCH_BODY');
+    const subagentReply = marker('TASK_REPLY');
+    const finalReply = marker('BUILTIN_MATRIX_REPLY');
+    const webServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => new Response(webMarker, {
+        headers: { 'content-type': 'text/plain' },
+      }),
+    });
+
+    try {
+      await withIntegrationFixture('opencode-scripted-builtin-matrix', async (fixture) => {
+        const filePath = join(fixture.dirs.project, 'opencode-tool-inventory.txt');
+        const skillDirectory = join(
+          openCodePaths(fixture.dirs).globalConfig,
+          'skills',
+          'inventory',
+        );
+        await mkdir(skillDirectory, { recursive: true });
+        await writeFile(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: inventory',
+          'description: Exercises the pinned skill tool.',
+          '---',
+          'Use deterministic fixture content.',
+          '',
+        ].join('\n'));
+
+        for (const block of [
+          chatCompletionsToolUse('call_builtin_write', 'write', {
+            filePath,
+            content: 'initial\n',
+          }),
+          chatCompletionsToolUse('call_builtin_read', 'read', { filePath }),
+          chatCompletionsToolUse('call_builtin_edit', 'edit', {
+            filePath,
+            oldString: 'initial',
+            newString: 'updated',
+          }),
+          chatCompletionsToolUse('call_builtin_glob', 'glob', {
+            pattern: '**/opencode-tool-inventory.txt',
+            path: fixture.dirs.project,
+          }),
+          chatCompletionsToolUse('call_builtin_grep', 'grep', {
+            pattern: 'updated',
+            path: fixture.dirs.project,
+            include: '*.txt',
+          }),
+          chatCompletionsToolUse('call_builtin_todo', 'todowrite', {
+            todos: [{
+              content: 'Verify built-in tools',
+              status: 'completed',
+              priority: 'high',
+            }],
+          }),
+          chatCompletionsToolUse('call_builtin_skill', 'skill', { name: 'inventory' }),
+          chatCompletionsToolUse('call_builtin_webfetch', 'webfetch', {
+            url: `http://127.0.0.1:${webServer.port}/fixture`,
+            format: 'text',
+          }),
+          chatCompletionsToolUse('call_builtin_task', 'task', {
+            subagent_type: 'general',
+            description: 'Return fixture marker',
+            prompt: `Reply exactly ${subagentReply}`,
+          }),
+        ]) {
+          testEnvironment.model.scriptTurn([block]);
+        }
+        testEnvironment.model.scriptTurn([chatCompletionsText(subagentReply)]);
+        testEnvironment.model.scriptTurn([chatCompletionsText(finalReply)]);
+
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: marker('BUILTIN_MATRIX_PROMPT'),
+        }));
+        await waitForVisibleResponse({
+          fixture,
+          chatId,
+          turnId: turn.turnId,
+          marker: finalReply,
+          afterIndex: cursor,
+        });
+
+        const transcript = await fixture.client.getMessages(chatId);
+        const types = new Set(transcript.messages.map((entry) => entry.message.type));
+        const expectedTypes = [
+          'write-tool-use',
+          'read-tool-use',
+          'edit-tool-use',
+          'glob-tool-use',
+          'grep-tool-use',
+          'todo-write-tool-use',
+          'external-tool-use',
+          'web-fetch-tool-use',
+          'task-tool-use',
+        ] as const;
+        for (const type of expectedTypes) expect(types.has(type)).toBe(true);
+        expect(messagesOfType(transcript.messages, 'unknown-tool-use')).toEqual([]);
+        expect(messagesOfType(transcript.messages, 'external-tool-use')).toEqual([
+          expect.objectContaining({ name: 'skill', namespace: 'opencode' }),
+        ]);
+        expect(JSON.stringify(messagesOfType(transcript.messages, 'tool-result')))
+          .toContain(webMarker);
+        expect(await readFile(filePath, 'utf8')).toBe('updated\n');
+        testEnvironment.model.assertSettled();
+      }, withScriptedOpenCode());
+    } finally {
+      webServer.stop(true);
+    }
   }, 120_000);
 
   test('[TLV5-L07.03-OPENCODE-SCRIPTED-01] accumulates transcript and preview across a second turn', async () => {

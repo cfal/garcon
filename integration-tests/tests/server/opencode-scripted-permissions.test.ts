@@ -219,22 +219,38 @@ describeOnLinux('scripted OpenCode permissions', () => {
       expect(permission.message.permissionOccurrenceId).not.toBe('call_question_answered');
       expect(permission.message.requestedTool.questions).toEqual([
         {
-          id: 'Which mode?',
+          id: 'question-1',
           prompt: 'Which mode?',
           header: 'Mode',
           options: [
-            { id: 'Fast', label: 'Fast', description: 'Complete quickly.' },
-            { id: 'Careful', label: 'Careful', description: 'Check boundaries.' },
+            {
+              id: 'question-1-option-1',
+              label: 'Fast',
+              description: 'Complete quickly.',
+            },
+            {
+              id: 'question-1-option-2',
+              label: 'Careful',
+              description: 'Check boundaries.',
+            },
           ],
           allowMultiple: false,
         },
         {
-          id: 'Which checks?',
+          id: 'question-2',
           prompt: 'Which checks?',
           header: 'Checks',
           options: [
-            { id: 'Unit', label: 'Unit', description: 'Run unit tests.' },
-            { id: 'Integration', label: 'Integration', description: 'Run integration tests.' },
+            {
+              id: 'question-2-option-1',
+              label: 'Unit',
+              description: 'Run unit tests.',
+            },
+            {
+              id: 'question-2-option-2',
+              label: 'Integration',
+              description: 'Run integration tests.',
+            },
           ],
           allowMultiple: true,
         },
@@ -250,8 +266,11 @@ describeOnLinux('scripted OpenCode permissions', () => {
           type: 'ask-user-question-response',
           outcome: 'answered',
           answers: [
-            { questionId: 'Which mode?', selectedOptionIds: ['Careful'] },
-            { questionId: 'Which checks?', selectedOptionIds: ['Unit', 'Integration'] },
+            { questionId: 'question-1', selectedOptionIds: ['question-1-option-2'] },
+            {
+              questionId: 'question-2',
+              selectedOptionIds: ['question-2-option-1', 'question-2-option-2'],
+            },
           ],
         },
       });
