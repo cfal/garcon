@@ -2,6 +2,7 @@
 // ToolUseMessage subclasses. Owns all OpenCode-specific field extraction.
 
 import {
+  AskUserQuestionToolUseMessage,
   BashToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
@@ -20,6 +21,7 @@ import {
   ExitPlanModeToolUseMessage,
   UnknownToolUseMessage,
   type ToolUseChatMessage,
+  type AskUserQuestionPrompt,
 } from '@garcon/common/chat-types';
 import { normalizeTodoItems } from '@garcon/server-agent-common/shared/normalize-util';
 
@@ -57,6 +59,10 @@ function asNumber(v: unknown): number | undefined {
   return undefined;
 }
 
+function asBoolean(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined;
+}
+
 function asChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
   return Array.isArray(v) ? v as Array<{ path?: string; kind?: string }> : undefined;
 }
@@ -65,6 +71,43 @@ function asChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefi
 function canonicalize(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+
+export function convertOpenCodeQuestionToolUse(
+  ts: string,
+  toolId: string,
+  value: unknown,
+): AskUserQuestionToolUseMessage | null {
+  if (!Array.isArray(value)) return null;
+  const questions: AskUserQuestionPrompt[] = [];
+  for (const entry of value) {
+    const rawQuestion = asObject(entry);
+    const prompt = asString(rawQuestion.question);
+    if (!prompt) continue;
+    const options: AskUserQuestionPrompt['options'] = [];
+    if (Array.isArray(rawQuestion.options)) {
+      for (const entry of rawQuestion.options) {
+        const rawOption = asObject(entry);
+        const label = asString(rawOption.label);
+        if (!label) continue;
+        const option: AskUserQuestionPrompt['options'][number] = { id: label, label };
+        const description = asString(rawOption.description);
+        if (description !== undefined) option.description = description;
+        options.push(option);
+      }
+    }
+    const question: AskUserQuestionPrompt = {
+      id: prompt,
+      prompt,
+      options,
+      allowMultiple: asBoolean(rawQuestion.multiple) ?? false,
+    };
+    const header = asString(rawQuestion.header);
+    if (header) question.header = header;
+    questions.push(question);
+  }
+  if (questions.length === 0) return null;
+  return new AskUserQuestionToolUseMessage(ts, toolId, undefined, questions);
 }
 
 /**
@@ -171,6 +214,12 @@ export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMe
       if (plan === undefined) break;
       return new ExitPlanModeToolUseMessage(ts, toolId, plan,
         Array.isArray(input.allowedPrompts) ? input.allowedPrompts : undefined);
+    }
+
+    case 'question': {
+      const question = convertOpenCodeQuestionToolUse(ts, toolId, input.questions);
+      if (question) return question;
+      break;
     }
   }
 

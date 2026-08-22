@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { convertOpenCodeToolUse } from '../tool-use-converter.js';
 import {
+  AskUserQuestionToolUseMessage,
   BashToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
@@ -82,6 +83,54 @@ describe('convertOpenCodeToolUse', () => {
     });
     expect(msg).toBeInstanceOf(ExitPlanModeToolUseMessage);
     expect(msg.plan).toBe('Do X');
+  });
+
+  it('maps question into the generic ask-user-question tool-use type', () => {
+    const msg = convertOpenCodeToolUse(TS, {
+      tool: 'question',
+      callID: 'oc-question',
+      state: {
+        input: {
+          questions: [{
+            header: 'Mode',
+            question: 'Which mode should the task use?',
+            multiple: true,
+            options: [
+              { label: 'Fast', description: 'Complete the task quickly.' },
+              { label: 'Careful', description: 'Check every boundary.' },
+            ],
+          }],
+        },
+      },
+    });
+
+    expect(msg).toBeInstanceOf(AskUserQuestionToolUseMessage);
+    expect(msg).toEqual(new AskUserQuestionToolUseMessage(
+      TS,
+      'oc-question',
+      undefined,
+      [{
+        id: 'Which mode should the task use?',
+        prompt: 'Which mode should the task use?',
+        header: 'Mode',
+        allowMultiple: true,
+        options: [
+          { id: 'Fast', label: 'Fast', description: 'Complete the task quickly.' },
+          { id: 'Careful', label: 'Careful', description: 'Check every boundary.' },
+        ],
+      }],
+    ));
+  });
+
+  it('falls back to Unknown for malformed question input', () => {
+    const msg = convertOpenCodeToolUse(TS, {
+      tool: 'question',
+      callID: 'oc-question-malformed',
+      state: { input: { questions: [{ header: 'Missing prompt', options: [] }] } },
+    });
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('question');
   });
 
   it('falls back to Unknown for unrecognized tools', () => {

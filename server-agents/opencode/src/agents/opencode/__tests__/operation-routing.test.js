@@ -78,10 +78,13 @@ function createRuntime(sessionIds, options = {}) {
   });
   const create = mock(() => Promise.resolve({ data: { id: sessionIds.shift() } }));
   const permissionReply = mock(() => Promise.resolve({}));
+  const questionReply = mock(() => Promise.resolve({}));
+  const questionReject = mock(() => Promise.resolve({}));
   const runtime = new OpenCodeRuntime({
     createInstance: mock(() => Promise.resolve({
       client: {
         permission: { reply: permissionReply },
+        question: { reply: questionReply, reject: questionReject },
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
           create,
@@ -94,7 +97,15 @@ function createRuntime(sessionIds, options = {}) {
     })),
     ...options,
   });
-  return { create, eventStream, permissionReply, promptAsync, runtime };
+  return {
+    create,
+    eventStream,
+    permissionReply,
+    promptAsync,
+    questionReject,
+    questionReply,
+    runtime,
+  };
 }
 
 function operation(runId, events) {
@@ -357,6 +368,250 @@ describe('OpenCode operation routing', () => {
     ]]);
     expect(JSON.stringify(warnings)).not.toContain('sensitive-native-request-id');
     expect(JSON.stringify(warnings)).not.toContain('sensitive-command-must-not-be-logged');
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('logs and drops a question without an operation identity', async () => {
+    const warnings = [];
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug() {},
+        info() {},
+        warn(...args) { warnings.push(args); },
+        error() {},
+      },
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+
+    eventStream.push({
+      id: 'unowned-question-event',
+      type: 'question.asked',
+      properties: {
+        id: 'sensitive-native-question-id',
+        sessionID: 'session-1',
+        questions: [{
+          header: 'Private',
+          question: 'sensitive-question-must-not-be-logged',
+          options: [],
+        }],
+        tool: {
+          callID: 'sensitive-tool-call-id',
+          messageID: 'unowned-provider-message',
+        },
+      },
+    });
+    await waitFor(() => warnings.length === 1);
+
+    expect(events).toEqual([]);
+    expect(warnings).toEqual([[
+      'Ignoring an OpenCode event without an operation identity',
+      expect.objectContaining({
+        eventId: 'unowned-question-event',
+        eventType: 'question.asked',
+        sessionId: 'session-1',
+      }),
+    ]]);
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-native-question-id');
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-tool-call-id');
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-question-must-not-be-logged');
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes an OpenCode question and retains its capability after a failed reply', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    questionReply
+      .mockRejectedValueOnce(new Error('question reply failed'))
+      .mockResolvedValueOnce({});
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-asked',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-request',
+        sessionID: 'session-1',
+        questions: [
+          {
+            header: 'Mode',
+            question: 'Which mode?',
+            options: [
+              { label: 'Fast', description: 'Complete quickly.' },
+              { label: 'Careful', description: 'Check boundaries.' },
+            ],
+          },
+          {
+            header: 'Checks',
+            question: 'Which checks?',
+            multiple: true,
+            options: [
+              { label: 'Unit', description: 'Run unit tests.' },
+              { label: 'Integration', description: 'Run integration tests.' },
+            ],
+          },
+        ],
+        tool: { callID: 'call-question', messageID: 'assistant-a' },
+      },
+    });
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+
+    const request = events.find((event) => event.type === 'permission');
+    expect(request.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(request.lifecycle.permissionOccurrenceId).not.toBe('provider-question-request');
+    expect(request.lifecycle.requestedTool).toMatchObject({
+      type: 'ask-user-question-tool-use',
+      toolId: 'call-question',
+      questions: [
+        {
+          id: 'Which mode?',
+          prompt: 'Which mode?',
+          allowMultiple: false,
+          options: [
+            { id: 'Fast', label: 'Fast', description: 'Complete quickly.' },
+            { id: 'Careful', label: 'Careful', description: 'Check boundaries.' },
+          ],
+        },
+        {
+          id: 'Which checks?',
+          prompt: 'Which checks?',
+          allowMultiple: true,
+        },
+      ],
+    });
+
+    const decision = {
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [
+          { questionId: 'Which mode?', selectedOptionIds: ['Careful'] },
+          { questionId: 'Which checks?', selectedOptionIds: ['Unit', 'Integration'] },
+        ],
+      },
+    };
+    await expect(request.decision.respond(decision)).rejects.toThrow('question reply failed');
+    await expect(request.decision.respond(decision)).resolves.toBeUndefined();
+    expect(questionReply).toHaveBeenCalledTimes(2);
+    expect(questionReply.mock.calls[1][0]).toMatchObject({
+      requestID: 'provider-question-request',
+      answers: [['Careful'], ['Unit', 'Integration']],
+    });
+    expect(questionReject).not.toHaveBeenCalled();
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('rejects an OpenCode question when the generic question response is skipped', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-asked',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-request',
+        sessionID: 'session-1',
+        questions: [{
+          header: 'Continue',
+          question: 'Continue?',
+          options: [{ label: 'Yes', description: 'Continue.' }],
+        }],
+        tool: { callID: 'call-question', messageID: 'assistant-a' },
+      },
+    });
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+
+    const request = events.find((event) => event.type === 'permission');
+    await request.decision.respond({
+      allow: false,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'skipped',
+        reason: 'User skipped question',
+      },
+    });
+    expect(questionReject).toHaveBeenCalledTimes(1);
+    expect(questionReject.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-question-request',
+    });
+    expect(questionReply).not.toHaveBeenCalled();
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();
   });

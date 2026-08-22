@@ -1,3 +1,18 @@
+import crypto from 'node:crypto';
+import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
+import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
+import type { OpenCodeSession } from './turn-events.js';
+import type { OpenCodeOperationRoute } from './operation-routes.js';
+import {
+  OpenCodeQuestionController,
+  type OpenCodeQuestionControllerOptions,
+} from './questions.js';
+import { convertOpencodePermissionTool } from './permission-tool-converter.js';
+import {
+  throwOpenCodeResultError,
+  withOpenCodeRequestScope,
+} from './sdk-result.js';
 import type { SSEEvent } from './sse-events.js';
 
 // Source of OpenCode permission keys:
@@ -69,4 +84,169 @@ export function extractPermissionRequest(event: SSEEvent): {
       tool: props.tool || null,
     },
   };
+}
+
+interface PendingOpenCodePermission {
+  readonly permissionOccurrenceId: string;
+  readonly originalRequestId: string;
+  readonly agentSessionId: string;
+  readonly directory?: string;
+  readonly operation: AgentRuntimeOperation;
+}
+
+interface OpenCodeDecisionControllerOptions extends OpenCodeQuestionControllerOptions {
+  readonly getSession: (agentSessionId: string) => OpenCodeSession | undefined;
+  readonly failTurn: (
+    agentSessionId: string,
+    session: OpenCodeSession,
+    message: string,
+  ) => void;
+}
+
+export class OpenCodeDecisionController {
+  readonly #pending = new Set<PendingOpenCodePermission>();
+  readonly #questions: OpenCodeQuestionController;
+
+  constructor(private readonly options: OpenCodeDecisionControllerOptions) {
+    this.#questions = new OpenCodeQuestionController(options);
+  }
+
+  handle(
+    client: any,
+    event: SSEEvent,
+    sessionId: string,
+    route: OpenCodeOperationRoute,
+  ): boolean {
+    if (event.type === 'question.asked') {
+      this.#questions.handle(event, sessionId, route);
+      return true;
+    }
+    if (event.type !== 'permission.asked') return false;
+
+    const toolMessageId = event.properties?.tool?.messageID;
+    if (
+      typeof toolMessageId === 'string'
+      && !route.turn.assistantMessageIds.has(toolMessageId)
+    ) {
+      this.options.logger.warn('Ignoring an OpenCode permission for a message outside its turn', {
+        agentSessionId: sessionId,
+        eventId: event.id ?? null,
+        toolMessageId,
+      });
+      return true;
+    }
+    const permission = extractPermissionRequest(event);
+    if (!permission) return true;
+    if (route.permissionMode === 'manualBypass') {
+      this.#replyManualBypass(client, route, permission.requestId);
+      return true;
+    }
+    const permissionOccurrenceId = crypto.randomUUID();
+    const pending: PendingOpenCodePermission = {
+      permissionOccurrenceId,
+      originalRequestId: permission.requestId,
+      agentSessionId: sessionId,
+      directory: route.directory,
+      operation: route.turn.operation,
+    };
+    this.#pending.add(pending);
+    const requestedTool = convertOpencodePermissionTool(
+      new Date().toISOString(),
+      permissionOccurrenceId,
+      permission.toolInput,
+    );
+    this.options.publish(sessionId, route.turn.operation, {
+      type: 'permission',
+      runId: route.turn.operation.runId,
+      lifecycle: {
+        kind: 'requested',
+        permissionOccurrenceId,
+        requestedTool,
+        options: [],
+      },
+      decision: Object.freeze({
+        permissionOccurrenceId,
+        respond: (decision: PermissionDecisionPayload) => this.#resolve(pending, decision),
+      }),
+    });
+    return true;
+  }
+
+  cancelForSession(
+    agentSessionId: string,
+    reason: 'cancelled' | 'session-complete' | 'aborted',
+  ): void {
+    for (const pending of [...this.#pending]) {
+      if (pending.agentSessionId !== agentSessionId) continue;
+      this.#pending.delete(pending);
+      this.options.publish(agentSessionId, pending.operation, {
+        type: 'permission',
+        runId: pending.operation.runId,
+        lifecycle: {
+          kind: 'cancelled',
+          permissionOccurrenceId: pending.permissionOccurrenceId,
+          reason,
+        },
+      });
+    }
+    this.#questions.cancelForSession(agentSessionId, reason);
+  }
+
+  clear(): void {
+    this.#pending.clear();
+    this.#questions.clear();
+  }
+
+  #replyManualBypass(
+    client: any,
+    route: OpenCodeOperationRoute,
+    requestId: string,
+  ): void {
+    void this.options.runScopedRequest(
+      'OpenCode manual bypass permission reply',
+      { directory: route.directory },
+      (signal, requestScope) => client.permission.reply(
+        withOpenCodeRequestScope({ requestID: requestId, reply: 'once' }, requestScope),
+        { signal },
+      ),
+    ).then((result) => {
+      throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
+    }).catch((error) => {
+      const current = this.options.getSession(route.sessionId);
+      if (current?.status !== 'running' || current.turn !== route.turn) {
+        this.options.logger.debug('Ignoring a late OpenCode manual bypass reply failure', {
+          agentSessionId: route.sessionId,
+          error: errorMessage(error),
+        });
+        return;
+      }
+      this.options.failTurn(route.sessionId, current, errorMessage(error));
+    });
+  }
+
+  async #resolve(
+    pending: PendingOpenCodePermission,
+    decision: Pick<PermissionDecisionPayload, 'allow' | 'alwaysAllow'>,
+  ): Promise<void> {
+    if (!this.#pending.has(pending)) {
+      throw new Error('OpenCode permission occurrence is no longer pending');
+    }
+    const allow = Boolean(decision?.allow);
+    const reply = mapPermissionDecision(decision);
+    const client = await this.options.getClient();
+    const result = await this.options.runScopedRequest(
+      'OpenCode permission reply',
+      { directory: pending.directory },
+      (signal, requestScope) => client.permission.reply(
+        withOpenCodeRequestScope({
+          requestID: pending.originalRequestId,
+          reply,
+          message: allow ? undefined : 'User denied tool use',
+        }, requestScope),
+        { signal },
+      ),
+    );
+    throwOpenCodeResultError(result, 'OpenCode permission reply failed');
+    this.#pending.delete(pending);
+  }
 }

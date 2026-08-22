@@ -2,7 +2,6 @@
 
 import crypto from 'crypto';
 import { isRecord } from '@garcon/common/json';
-import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import { buildPromptBody, parseOpenCodeModel } from './prompt.js';
 import {
@@ -25,7 +24,6 @@ import {
 } from './turn-events.js';
 import { ErrorMessage } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import {
   runtimeRows,
   type AgentRuntimeEvent,
@@ -71,8 +69,7 @@ import {
   type OpenCodeOperationRoute,
 } from './operation-routes.js';
 import {
-  extractPermissionRequest,
-  mapPermissionDecision,
+  OpenCodeDecisionController,
   mapPermissionMode,
 } from './permissions.js';
 import { createOpenCodeInstance } from './server-instance.js';
@@ -106,14 +103,6 @@ const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
 interface PendingTurnWaiter {
   promise: Promise<Error | null>;
   settle: (failure: Error | null) => void;
-}
-
-interface PendingPermission {
-  permissionOccurrenceId: string;
-  originalRequestId: string;
-  agentSessionId: string;
-  directory?: string;
-  operation: OpenCodeTurnContext['operation'];
 }
 
 interface OpenCodeRuntimeOptions {
@@ -183,7 +172,7 @@ export class OpenCodeRuntime {
   #sessions = new Map<string, OpenCodeSession>();
   #pendingSessionAborts = new WeakMap<OpenCodeSession, Promise<boolean>>();
   #pendingTurnWaiters = new Map<string, PendingTurnWaiter>();
-  #pendingPermissions = new Set<PendingPermission>();
+  readonly #decisions: OpenCodeDecisionController;
   readonly steering: OpenCodeSteeringController;
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
   readonly #globalEventListener: OpenCodeGlobalEventListener;
@@ -212,6 +201,22 @@ export class OpenCodeRuntime {
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#operationRoutes = new OpenCodeOperationRoutes(this.#logger);
     this.#options = normalizeOptions(options);
+    this.#decisions = new OpenCodeDecisionController({
+      logger: this.#logger,
+      publish: (agentSessionId, operation, event) => this.#publish(
+        agentSessionId,
+        operation,
+        event,
+      ),
+      getClient: () => this.getClient(),
+      runScopedRequest: (label, scope, operation) => (
+        this.#runScopedSessionRequest(label, scope, operation)
+      ),
+      getSession: (agentSessionId) => this.#sessions.get(agentSessionId),
+      failTurn: (agentSessionId, session, message) => (
+        this.#failTurnForProviderError(agentSessionId, session, message)
+      ),
+    });
     this.#instanceCreations = new OpenCodeInstanceCreationTracker(() => this.#shuttingDown);
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
@@ -260,7 +265,7 @@ export class OpenCodeRuntime {
       this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
     }
     this.#sessions.clear();
-    this.#pendingPermissions.clear();
+    this.#decisions.clear();
     const startup = this.#initPromise;
     this.#startupAbortController?.abort(new Error('OpenCode runtime shutting down'));
     this.#closeInstance();
@@ -440,7 +445,7 @@ export class OpenCodeRuntime {
       session.status = 'completed';
       session.lastActivityAt = Date.now();
       this.#operationRoutes.cancelRequest(session.turn, failure);
-      this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
+      this.#decisions.cancelForSession(agentSessionId, 'cancelled');
       this.#rejectTurnWaiter(agentSessionId, failure);
       this.#publishFailed(agentSessionId, session.turn.operation, failure.message);
     }
@@ -454,7 +459,7 @@ export class OpenCodeRuntime {
     session.providerWorkRequiresQuiescence = true;
     session.status = 'completed';
     session.lastActivityAt = Date.now();
-    this.#cancelPendingPermissionsForSession(agentSessionId, 'cancelled');
+    this.#decisions.cancelForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
     // OpenCode stores a failed turn's provider error on its in-flight assistant
     // message, whose id the native loader uses as the error occurrence's
@@ -496,7 +501,7 @@ export class OpenCodeRuntime {
     session.providerWorkRequiresQuiescence = true;
     session.status = 'completed';
     session.lastActivityAt = Date.now();
-    this.#cancelPendingPermissionsForSession(route.sessionId, 'cancelled');
+    this.#decisions.cancelForSession(route.sessionId, 'cancelled');
     this.#rejectTurnWaiter(route.sessionId, error);
     this.#publishFailed(route.sessionId, route.turn.operation, message);
     if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
@@ -532,7 +537,7 @@ export class OpenCodeRuntime {
       this.#failTurnForProviderError(agentSessionId, session, terminal.error);
       return;
     }
-    this.#cancelPendingPermissionsForSession(agentSessionId, 'session-complete');
+    this.#decisions.cancelForSession(agentSessionId, 'session-complete');
     session.status = 'completed';
     session.lastActivityAt = Date.now();
     this.#resolveTurnWaiter(agentSessionId);
@@ -697,52 +702,6 @@ export class OpenCodeRuntime {
     }
   }
 
-  #replyManualBypassPermission(
-    client: any,
-    route: OpenCodeOperationRoute,
-    requestId: string,
-  ): void {
-    void this.#runScopedSessionRequest(
-      'OpenCode manual bypass permission reply',
-      { directory: route.directory },
-      (signal, requestScope) => client.permission.reply(
-        withOpenCodeRequestScope({ requestID: requestId, reply: 'once' }, requestScope),
-        { signal },
-      ),
-    ).then((result) => {
-      throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
-    }).catch((error) => {
-      const current = this.#sessions.get(route.sessionId);
-      if (
-        current?.status !== 'running'
-        || current.turn !== route.turn
-      ) {
-        this.#logger.debug('Ignoring a late OpenCode manual bypass reply failure', {
-          agentSessionId: route.sessionId,
-          error: errorMessage(error),
-        });
-        return;
-      }
-      this.#failTurnForProviderError(route.sessionId, current, errorMessage(error));
-    });
-  }
-
-  #cancelPendingPermissionsForSession(agentSessionId: string, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
-    for (const pending of [...this.#pendingPermissions]) {
-      if (pending.agentSessionId !== agentSessionId) continue;
-      this.#pendingPermissions.delete(pending);
-      this.#publish(agentSessionId, pending.operation, {
-        type: 'permission',
-        runId: pending.operation.runId,
-        lifecycle: {
-          kind: 'cancelled',
-          permissionOccurrenceId: pending.permissionOccurrenceId,
-          reason,
-        },
-      });
-    }
-  }
-
   #handleGlobalSSEEvent(client: any, event: SSEEvent): void {
     const sessionId = extractSessionId(event);
     if (!sessionId) {
@@ -802,10 +761,7 @@ export class OpenCodeRuntime {
 
     const session = this.#sessions.get(sessionId);
     const isCurrentTurn = session?.turn === route.turn;
-    if (event.type === 'permission.asked') {
-      this.#handlePermissionEvent(client, event, sessionId, route);
-      return;
-    }
+    if (this.#decisions.handle(client, event, sessionId, route)) return;
     if (isCurrentTurn) this.steering.observeAcknowledgement(session, event);
     const belongs = openCodeEventBelongsToTurn(route.turn, event);
     this.#operationRoutes.observe(route, event);
@@ -827,63 +783,6 @@ export class OpenCodeRuntime {
       runId: session.turn.operation.runId,
       title: notice.title,
       content: notice.content,
-    });
-  }
-
-  #handlePermissionEvent(
-    client: any,
-    event: SSEEvent,
-    sessionId: string,
-    route: OpenCodeOperationRoute,
-  ): void {
-    const toolMessageId = event.properties?.tool?.messageID;
-    if (
-      typeof toolMessageId === 'string'
-      && !route.turn.assistantMessageIds.has(toolMessageId)
-    ) {
-      // The provider stays blocked on the unanswered request; the warning is
-      // the diagnostic and user interrupt is the remediation.
-      this.#logger.warn('Ignoring an OpenCode permission for a message outside its turn', {
-        agentSessionId: sessionId,
-        eventId: event.id ?? null,
-        toolMessageId,
-      });
-      return;
-    }
-    const permission = extractPermissionRequest(event);
-    if (!permission) return;
-    if (route.permissionMode === 'manualBypass') {
-      this.#replyManualBypassPermission(client, route, permission.requestId);
-      return;
-    }
-    const permissionOccurrenceId = crypto.randomUUID();
-    const pending: PendingPermission = {
-      permissionOccurrenceId,
-      originalRequestId: permission.requestId,
-      agentSessionId: sessionId,
-      directory: route.directory,
-      operation: route.turn.operation,
-    };
-    this.#pendingPermissions.add(pending);
-    const now = new Date().toISOString();
-    const requestedTool = convertOpencodePermissionTool(
-      now,
-      permissionOccurrenceId,
-      permission.toolInput,
-    );
-    this.#publish(sessionId, route.turn.operation, {
-      type: 'permission',
-      runId: route.turn.operation.runId,
-      lifecycle: {
-        kind: 'requested',
-        permissionOccurrenceId,
-        requestedTool,
-        options: [],
-      },
-      decision: Object.freeze({
-        permissionOccurrenceId,
-        respond: (decision: PermissionDecisionPayload) => this.#resolvePermission(pending, decision),
-      }),
     });
   }
 
@@ -1410,7 +1309,7 @@ export class OpenCodeRuntime {
     session.deferredTerminal = null;
     session.lastActivityAt = Date.now();
     this.#operationRoutes.retireTurn(turn);
-    this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
+    this.#decisions.cancelForSession(agentSessionId, 'aborted');
     // The acknowledged stop is turn-terminal work: the terminal event settles
     // the core run and releases queued execution.
     this.#publishFinished(agentSessionId, turn.operation);
@@ -1433,32 +1332,6 @@ export class OpenCodeRuntime {
     return Array.from(this.#sessions.entries())
       .filter(([, session]) => session.status === 'running')
       .map(([id, session]) => ({ id, status: session.status, startedAt: session.startedAt }));
-  }
-
-  async #resolvePermission(
-    pending: PendingPermission,
-    decision: { allow: boolean; alwaysAllow?: boolean },
-  ): Promise<void> {
-    if (!this.#pendingPermissions.has(pending)) {
-      throw new Error('OpenCode permission occurrence is no longer pending');
-    }
-    const allow = Boolean(decision?.allow);
-    const reply = mapPermissionDecision(decision);
-    const client = await this.getClient();
-    const result = await this.#runScopedSessionRequest(
-      'OpenCode permission reply',
-      { directory: pending.directory },
-      (signal, requestScope) => client.permission.reply(
-        withOpenCodeRequestScope({
-          requestID: pending.originalRequestId,
-          reply,
-          message: allow ? undefined : 'User denied tool use',
-        }, requestScope),
-        { signal },
-      ),
-    );
-    throwOpenCodeResultError(result, 'OpenCode permission reply failed');
-    this.#pendingPermissions.delete(pending);
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
@@ -1545,5 +1418,6 @@ function shouldWarnForUnroutedOpenCodeEvent(eventType: string): boolean {
     || eventType === 'message.part.updated'
     || eventType === 'message.part.delta'
     || eventType === 'permission.asked'
+    || eventType === 'question.asked'
     || eventType === 'session.error';
 }
