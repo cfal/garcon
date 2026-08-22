@@ -16,9 +16,16 @@ though `scrollTop` is stable. The negative adjustment follows the gesture, while
 remains uncompensated so it does not fight the user's scroll direction.
 
 It also adds `cancelScroll()`, which lets user intent supersede an owned programmatic scroll by
-clearing pending reconciliation, scroll adjustments, iOS-deferred compensation, and its animation
-frame without issuing another scroll. Framework-neutral patch contract tests cover all three
-behaviors.
+clearing pending reconciliation, scroll adjustments, and its animation frame without issuing
+another scroll.
+
+On iOS WebKit, above-viewport row growth during touch momentum now publishes its real geometry in
+the same paint as an equal inverse margin on the virtual container. Logical offsets and ranges
+include that temporary deviation, which converts to one native scroll write after momentum settles.
+Touch provenance survives multi-touch handoff and cancellation, programmatic scroll commands take
+over the deviation, and `cancelScroll()` preserves it for user-owned settlement. This avoids both
+the uncompensated frame that moved visible rows and the mid-momentum `scrollTop` write that stops
+native scrolling. Framework-neutral patch contract tests cover all four behaviors.
 
 Remove each patch behavior once a compatible Svelte adapter resolves a core release with the same
 contract and the corresponding patch tests pass unmodified against that release.

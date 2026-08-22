@@ -24,6 +24,34 @@ const MAX_TARGET_SETTLE_ITERATIONS = 180;
 const REQUIRED_END_STABLE_FRAMES = 2;
 const GEOMETRY_TOLERANCE_PX = 0.5;
 
+export function synchronizeConversationVirtualDom(
+	instance: Virtualizer<HTMLElement, HTMLDivElement>,
+	root: HTMLDivElement | null,
+): void {
+	if (!root) return;
+	root.style.height = `${instance.getTotalSize()}px`;
+	for (const item of instance.getVirtualItems()) {
+		const element = instance.elementsCache.get(item.key);
+		if (!element?.isConnected) continue;
+		element.style.transform = `translateY(${item.start - instance.options.scrollMargin}px)`;
+	}
+}
+
+export class ConversationVirtualDomSynchronizer {
+	constructor(private readonly root: () => HTMLDivElement | null) {}
+
+	onChange = (instance: Virtualizer<HTMLElement, HTMLDivElement>, sync: boolean): void => {
+		if (sync) synchronizeConversationVirtualDom(instance, this.root());
+	};
+
+	setOptions(
+		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
+		options: Parameters<SvelteVirtualizer<HTMLElement, HTMLDivElement>['setOptions']>[0],
+	): void {
+		instance.setOptions({ ...options, onChange: this.onChange });
+	}
+}
+
 export interface ConversationVirtualAnchor {
 	key: string;
 	viewportOffset: number;

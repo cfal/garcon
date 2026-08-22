@@ -1,8 +1,21 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index e470032a9572b3ced764ca02238a8c6be435a9d4..092cb91291420ace525787bdcc92f85f3977f1eb 100644
+index e470032a9572b3ced764ca02238a8c6be435a9d4..3d8892224e7b523461b15820c95952c8ad9362ef 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -220,6 +220,9 @@ class Virtualizer {
+@@ -186,6 +186,12 @@ class Virtualizer {
+     this.scrollDirection = null;
+     this.scrollAdjustments = 0;
+     this._iosDeferredAdjustment = 0;
++    this._iosCssOffsetTarget = null;
++    this._iosCssOffsetProperty = null;
++    this._iosCssOffsetInitialValue = "";
++    this._iosCssOffsetInitialPriority = "";
++    this._iosCssOffsetAdjustment = 0;
++    this._iosUserScrollActive = false;
+     this._iosTouching = false;
+     this._iosJustTouchEnded = false;
+     this._iosTouchEndTimerId = null;
+@@ -220,6 +226,9 @@ class Virtualizer {
                  return;
                }
                if (!this.isIndexInRange(index)) return;
@@ -12,7 +25,193 @@ index e470032a9572b3ced764ca02238a8c6be435a9d4..092cb91291420ace525787bdcc92f85f
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -871,9 +874,9 @@ class Virtualizer {
+@@ -349,6 +358,70 @@ class Virtualizer {
+       var _a, _b;
+       (_b = (_a = this.options).onChange) == null ? void 0 : _b.call(_a, this, sync);
+     };
++    this._shouldDeferIosScrollAdjustment = () => isIOSWebKit() && this._iosUserScrollActive;
++    this._clearIosCssOffset = () => {
++      if (this._iosCssOffsetTarget && this._iosCssOffsetProperty) {
++        if (this._iosCssOffsetInitialValue) {
++          this._iosCssOffsetTarget.style.setProperty(
++            this._iosCssOffsetProperty,
++            this._iosCssOffsetInitialValue,
++            this._iosCssOffsetInitialPriority
++          );
++        } else {
++          this._iosCssOffsetTarget.style.removeProperty(
++            this._iosCssOffsetProperty
++          );
++        }
++      }
++      this._iosCssOffsetTarget = null;
++      this._iosCssOffsetProperty = null;
++      this._iosCssOffsetInitialValue = "";
++      this._iosCssOffsetInitialPriority = "";
++      this._iosCssOffsetAdjustment = 0;
++    };
++    this._applyIosCssOffset = () => {
++      const previousAdjustment = this._iosCssOffsetAdjustment;
++      if (this._iosDeferredAdjustment === 0) {
++        this._clearIosCssOffset();
++        return -previousAdjustment;
++      }
++      const nextTarget = this.scrollElement && "firstElementChild" in this.scrollElement ? this.scrollElement.firstElementChild : null;
++      const target = nextTarget && this.targetWindow?.HTMLElement ? nextTarget instanceof this.targetWindow.HTMLElement ? nextTarget : null : null;
++      const property = this.options.horizontal ? "margin-left" : "margin-top";
++      if (!target) {
++        this._clearIosCssOffset();
++        return -previousAdjustment;
++      }
++      if (this._iosCssOffsetTarget !== target || this._iosCssOffsetProperty !== property) {
++        this._clearIosCssOffset();
++        this._iosCssOffsetTarget = target;
++        this._iosCssOffsetProperty = property;
++        this._iosCssOffsetInitialValue = target.style.getPropertyValue(property);
++        this._iosCssOffsetInitialPriority = target.style.getPropertyPriority(property);
++      }
++      const initialValue = this._iosCssOffsetInitialValue.trim();
++      target.style.setProperty(
++        property,
++        initialValue ? `calc(${initialValue} - ${this._iosDeferredAdjustment}px)` : `${-this._iosDeferredAdjustment}px`,
++        this._iosCssOffsetInitialPriority
++      );
++      this._iosCssOffsetAdjustment = this._iosDeferredAdjustment;
++      return this._iosCssOffsetAdjustment - previousAdjustment;
++    };
++    this._discardIosCssOffset = () => {
++      this._iosDeferredAdjustment = 0;
++      this._clearIosCssOffset();
++    };
++    this._takeOverIosScroll = () => {
++      this._discardIosCssOffset();
++      if (this._iosTouching) return;
++      this._iosUserScrollActive = false;
++      this._iosJustTouchEnded = false;
++      if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
++        this.targetWindow.clearTimeout(this._iosTouchEndTimerId);
++      }
++      this._iosTouchEndTimerId = null;
++    };
+     this.maybeNotify = utils.memo(
+       () => {
+         this.calculateRange();
+@@ -372,6 +445,7 @@ class Virtualizer {
+       }
+     );
+     this.cleanup = () => {
++      this._discardIosCssOffset();
+       this.unsubs.filter(Boolean).forEach((d) => d());
+       this.unsubs = [];
+       this.observer.disconnect();
+@@ -382,7 +456,7 @@ class Virtualizer {
+       this.scrollState = null;
+       this.isScrolling = false;
+       this.scrollDirection = null;
+-      this._iosDeferredAdjustment = 0;
++      this._iosUserScrollActive = false;
+       this._iosTouching = false;
+       this._iosJustTouchEnded = false;
+       this.scrollElement = null;
+@@ -426,11 +500,18 @@ class Virtualizer {
+               offset = this._intendedScrollOffset;
+             }
+             this._intendedScrollOffset = null;
++            if (this._iosDeferredAdjustment !== 0) {
++              this._applyIosCssOffset();
++              offset += this._iosCssOffsetAdjustment;
++            }
+             this.scrollAdjustments = 0;
+             const prevOffset = this.getScrollOffset();
+             this.scrollDirection = isScrolling ? prevOffset === offset ? this.scrollDirection : prevOffset < offset ? "forward" : "backward" : null;
+             this.scrollOffset = offset;
+             this.isScrolling = isScrolling;
++            if (!isScrolling && !this._iosTouching && !this._iosJustTouchEnded) {
++              this._iosUserScrollActive = false;
++            }
+             this._flushIosDeferredIfReady();
+             if (this.scrollState) {
+               this.scheduleScrollReconcile();
+@@ -441,6 +522,7 @@ class Virtualizer {
+         if ("addEventListener" in this.scrollElement) {
+           const scrollEl = this.scrollElement;
+           const onTouchStart = () => {
++            this._iosUserScrollActive = true;
+             this._iosTouching = true;
+             this._iosJustTouchEnded = false;
+             if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+@@ -448,15 +530,20 @@ class Virtualizer {
+               this._iosTouchEndTimerId = null;
+             }
+           };
+-          const onTouchEnd = () => {
++          const onTouchEnd = (event) => {
++            if ("touches" in event && event.touches.length > 0) {
++              return;
++            }
+             this._iosTouching = false;
+             if (!isIOSWebKit() || this.targetWindow == null) {
++              this._iosUserScrollActive = false;
+               return;
+             }
+             this._iosJustTouchEnded = true;
+             this._iosTouchEndTimerId = this.targetWindow.setTimeout(() => {
+               this._iosJustTouchEnded = false;
+               this._iosTouchEndTimerId = null;
++              if (!this.isScrolling) this._iosUserScrollActive = false;
+               this._flushIosDeferredIfReady();
+             }, 150);
+           };
+@@ -470,9 +557,15 @@ class Virtualizer {
+             onTouchEnd,
+             addEventListenerOptions
+           );
++          scrollEl.addEventListener(
++            "touchcancel",
++            onTouchEnd,
++            addEventListenerOptions
++          );
+           this.unsubs.push(() => {
+             scrollEl.removeEventListener("touchstart", onTouchStart);
+             scrollEl.removeEventListener("touchend", onTouchEnd);
++            scrollEl.removeEventListener("touchcancel", onTouchEnd);
+             if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+               this.targetWindow.clearTimeout(this._iosTouchEndTimerId);
+               this._iosTouchEndTimerId = null;
+@@ -489,9 +582,10 @@ class Virtualizer {
+       if (anchor && this.scrollElement && this.options.enabled) {
+         const [key, _offset, followOnAppend, anchorDelta] = anchor;
+         if (key !== null && !followOnAppend) {
+-          if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
++          if (this._shouldDeferIosScrollAdjustment()) {
+             if (anchorDelta !== 0) {
+               this._iosDeferredAdjustment += anchorDelta;
++              this._applyIosCssOffset();
+             }
+           } else {
+             this._scrollToOffset(this.getScrollOffset(), {
+@@ -510,15 +604,14 @@ class Virtualizer {
+       if (this.isScrolling) return;
+       if (this._iosTouching) return;
+       if (this._iosJustTouchEnded) return;
+-      const cur = this.getScrollOffset();
+-      const max = this.getMaxScrollOffset();
++      if (this._iosUserScrollActive) return;
++      const cur = this.getScrollOffset() - this._iosCssOffsetAdjustment;
++      const max = this.getRawMaxScrollOffset();
+       if (cur < 0 || cur > max) return;
+-      if (this._iosDeferredAdjustment < 0 && cur >= max - 1) {
+-        this._iosDeferredAdjustment = 0;
+-        return;
+-      }
+       const delta = this._iosDeferredAdjustment;
+       this._iosDeferredAdjustment = 0;
++      this._clearIosCssOffset();
++      this.scrollOffset = Math.max(0, cur + delta);
+       this._scrollToOffset(cur, {
+         adjustments: this.scrollAdjustments += delta,
+         behavior: void 0
+@@ -871,9 +964,9 @@ class Virtualizer {
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -21,18 +220,34 @@ index e470032a9572b3ced764ca02238a8c6be435a9d4..092cb91291420ace525787bdcc92f85f
 -          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
 +          // During backward scroll, shrinkage compensation follows the gesture;
 +          // growth remains uncompensated to avoid fighting it.
-+          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0)
++          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0 || this._shouldDeferIosScrollAdjustment())
          );
          const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
            // The callback expects a VirtualItem; build one lazily only
-@@ -996,6 +999,16 @@ class Virtualizer {
+@@ -936,7 +1029,7 @@ class Virtualizer {
+       );
+       return utils.notUndefined(measurements[idx]);
+     };
+-    this.getMaxScrollOffset = () => {
++    this.getRawMaxScrollOffset = () => {
+       if (!this.scrollElement) return 0;
+       if ("scrollHeight" in this.scrollElement) {
+         return this.options.horizontal ? this.scrollElement.scrollWidth - this.scrollElement.clientWidth : this.scrollElement.scrollHeight - this.scrollElement.clientHeight;
+@@ -945,6 +1038,7 @@ class Virtualizer {
+         return this.options.horizontal ? doc.scrollWidth - this.scrollElement.innerWidth : doc.scrollHeight - this.scrollElement.innerHeight;
+       }
+     };
++    this.getMaxScrollOffset = () => this.getRawMaxScrollOffset() + this._iosCssOffsetAdjustment;
+     this.getVirtualDistanceFromEnd = () => {
+       return Math.max(
+         this.getTotalSize() - this.getSize() - this.getScrollOffset(),
+@@ -996,8 +1090,17 @@ class Virtualizer {
          align
        ];
      };
 +    this.cancelScroll = () => {
 +      this.scrollState = null;
 +      this._intendedScrollOffset = null;
-+      this._iosDeferredAdjustment = 0;
 +      this.scrollAdjustments = 0;
 +      if (this.rafId != null) {
 +        this.targetWindow?.cancelAnimationFrame(this.rafId);
@@ -40,8 +255,62 @@ index e470032a9572b3ced764ca02238a8c6be435a9d4..092cb91291420ace525787bdcc92f85f
 +      }
 +    };
      this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
-       this._iosDeferredAdjustment = 0;
+-      this._iosDeferredAdjustment = 0;
++      this._takeOverIosScroll();
        const offset = this.getOffsetForAlignment(toOffset, align);
+       const now = this.now();
+       this.scrollState = {
+@@ -1015,13 +1118,13 @@ class Virtualizer {
+       align: initialAlign = "auto",
+       behavior = "auto"
+     } = {}) => {
+-      this._iosDeferredAdjustment = 0;
+       index = Math.max(0, Math.min(index, this.options.count - 1));
+       const offsetInfo = this.getOffsetForIndex(index, initialAlign);
+       if (!offsetInfo) {
+         return;
+       }
+       const [offset, align] = offsetInfo;
++      this._takeOverIosScroll();
+       const now = this.now();
+       this.scrollState = {
+         index,
+@@ -1035,6 +1138,7 @@ class Virtualizer {
+       this.scheduleScrollReconcile();
+     };
+     this.scrollBy = (delta, { behavior = "auto" } = {}) => {
++      this._takeOverIosScroll();
+       const offset = this.getScrollOffset() + delta;
+       const now = this.now();
+       this.scrollState = {
+@@ -1125,18 +1229,21 @@ class Virtualizer {
+     };
+     this.setOptions(opts);
+   }
+-  // Returns `true` when it performed a synchronous `scrollTop` write this
+-  // tick, `false` when the delta was zero or the write was deferred (iOS).
+-  // `resizeItem` uses that to decide whether the follow-up `notify` must be
+-  // synchronous so the grown transforms commit in the same paint (#1227).
++  // Returns whether the matching scroll or CSS compensation was applied
++  // synchronously. `resizeItem` uses this to publish transforms in the same
++  // paint as the compensation (#1227).
+   applyScrollAdjustment(delta, behavior) {
+     if (delta === 0) return false;
+     if (process.env.NODE_ENV !== "production" && this.options.debug) {
+       console.info("correction", delta);
+     }
+-    if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
++    if (this._shouldDeferIosScrollAdjustment()) {
+       this._iosDeferredAdjustment += delta;
+-      return false;
++      const visualDelta = this._applyIosCssOffset();
++      if (this.scrollOffset !== null) {
++        this.scrollOffset = Math.max(0, this.scrollOffset + visualDelta);
++      }
++      return this._iosCssOffsetAdjustment === this._iosDeferredAdjustment;
+     } else {
+       this._scrollToOffset(this.getScrollOffset(), {
+         adjustments: this.scrollAdjustments += delta,
 diff --git a/dist/cjs/index.d.cts b/dist/cjs/index.d.cts
 index cc1001b8a14d06aa73a3a9e8f59870557ee9e7d6..89a28fe742f08751259fad20dd59adce1d6f32f3 100644
 --- a/dist/cjs/index.d.cts
@@ -67,10 +336,23 @@ index 6b43c0aea7ed9eeef75cbfb1351fcbd243913bdd..ec608eb5b9692db94ef647f8fa8fc2dc
      scrollToIndex: (index: number, { align: initialAlign, behavior, }?: ScrollToIndexOptions) => void;
      scrollBy: (delta: number, { behavior }?: ScrollToOffsetOptions) => void;
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 2495b26cf2c3589213546b3958eaadf2eb6b751d..c3662ceccb12ee531b96f8a0b3be961fa23207ef 100644
+index 2495b26cf2c3589213546b3958eaadf2eb6b751d..23722cbc81ec1b01d91a59060997de2b14f9a1f3 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -218,6 +218,9 @@ class Virtualizer {
+@@ -184,6 +184,12 @@ class Virtualizer {
+     this.scrollDirection = null;
+     this.scrollAdjustments = 0;
+     this._iosDeferredAdjustment = 0;
++    this._iosCssOffsetTarget = null;
++    this._iosCssOffsetProperty = null;
++    this._iosCssOffsetInitialValue = "";
++    this._iosCssOffsetInitialPriority = "";
++    this._iosCssOffsetAdjustment = 0;
++    this._iosUserScrollActive = false;
+     this._iosTouching = false;
+     this._iosJustTouchEnded = false;
+     this._iosTouchEndTimerId = null;
+@@ -218,6 +224,9 @@ class Virtualizer {
                  return;
                }
                if (!this.isIndexInRange(index)) return;
@@ -80,7 +362,193 @@ index 2495b26cf2c3589213546b3958eaadf2eb6b751d..c3662ceccb12ee531b96f8a0b3be961f
                if (this.shouldMeasureDuringScroll(index)) {
                  this.resizeItem(
                    index,
-@@ -869,9 +872,9 @@ class Virtualizer {
+@@ -347,6 +356,70 @@ class Virtualizer {
+       var _a, _b;
+       (_b = (_a = this.options).onChange) == null ? void 0 : _b.call(_a, this, sync);
+     };
++    this._shouldDeferIosScrollAdjustment = () => isIOSWebKit() && this._iosUserScrollActive;
++    this._clearIosCssOffset = () => {
++      if (this._iosCssOffsetTarget && this._iosCssOffsetProperty) {
++        if (this._iosCssOffsetInitialValue) {
++          this._iosCssOffsetTarget.style.setProperty(
++            this._iosCssOffsetProperty,
++            this._iosCssOffsetInitialValue,
++            this._iosCssOffsetInitialPriority
++          );
++        } else {
++          this._iosCssOffsetTarget.style.removeProperty(
++            this._iosCssOffsetProperty
++          );
++        }
++      }
++      this._iosCssOffsetTarget = null;
++      this._iosCssOffsetProperty = null;
++      this._iosCssOffsetInitialValue = "";
++      this._iosCssOffsetInitialPriority = "";
++      this._iosCssOffsetAdjustment = 0;
++    };
++    this._applyIosCssOffset = () => {
++      const previousAdjustment = this._iosCssOffsetAdjustment;
++      if (this._iosDeferredAdjustment === 0) {
++        this._clearIosCssOffset();
++        return -previousAdjustment;
++      }
++      const nextTarget = this.scrollElement && "firstElementChild" in this.scrollElement ? this.scrollElement.firstElementChild : null;
++      const target = nextTarget && this.targetWindow?.HTMLElement ? nextTarget instanceof this.targetWindow.HTMLElement ? nextTarget : null : null;
++      const property = this.options.horizontal ? "margin-left" : "margin-top";
++      if (!target) {
++        this._clearIosCssOffset();
++        return -previousAdjustment;
++      }
++      if (this._iosCssOffsetTarget !== target || this._iosCssOffsetProperty !== property) {
++        this._clearIosCssOffset();
++        this._iosCssOffsetTarget = target;
++        this._iosCssOffsetProperty = property;
++        this._iosCssOffsetInitialValue = target.style.getPropertyValue(property);
++        this._iosCssOffsetInitialPriority = target.style.getPropertyPriority(property);
++      }
++      const initialValue = this._iosCssOffsetInitialValue.trim();
++      target.style.setProperty(
++        property,
++        initialValue ? `calc(${initialValue} - ${this._iosDeferredAdjustment}px)` : `${-this._iosDeferredAdjustment}px`,
++        this._iosCssOffsetInitialPriority
++      );
++      this._iosCssOffsetAdjustment = this._iosDeferredAdjustment;
++      return this._iosCssOffsetAdjustment - previousAdjustment;
++    };
++    this._discardIosCssOffset = () => {
++      this._iosDeferredAdjustment = 0;
++      this._clearIosCssOffset();
++    };
++    this._takeOverIosScroll = () => {
++      this._discardIosCssOffset();
++      if (this._iosTouching) return;
++      this._iosUserScrollActive = false;
++      this._iosJustTouchEnded = false;
++      if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
++        this.targetWindow.clearTimeout(this._iosTouchEndTimerId);
++      }
++      this._iosTouchEndTimerId = null;
++    };
+     this.maybeNotify = memo(
+       () => {
+         this.calculateRange();
+@@ -370,6 +443,7 @@ class Virtualizer {
+       }
+     );
+     this.cleanup = () => {
++      this._discardIosCssOffset();
+       this.unsubs.filter(Boolean).forEach((d) => d());
+       this.unsubs = [];
+       this.observer.disconnect();
+@@ -380,7 +454,7 @@ class Virtualizer {
+       this.scrollState = null;
+       this.isScrolling = false;
+       this.scrollDirection = null;
+-      this._iosDeferredAdjustment = 0;
++      this._iosUserScrollActive = false;
+       this._iosTouching = false;
+       this._iosJustTouchEnded = false;
+       this.scrollElement = null;
+@@ -424,11 +498,18 @@ class Virtualizer {
+               offset = this._intendedScrollOffset;
+             }
+             this._intendedScrollOffset = null;
++            if (this._iosDeferredAdjustment !== 0) {
++              this._applyIosCssOffset();
++              offset += this._iosCssOffsetAdjustment;
++            }
+             this.scrollAdjustments = 0;
+             const prevOffset = this.getScrollOffset();
+             this.scrollDirection = isScrolling ? prevOffset === offset ? this.scrollDirection : prevOffset < offset ? "forward" : "backward" : null;
+             this.scrollOffset = offset;
+             this.isScrolling = isScrolling;
++            if (!isScrolling && !this._iosTouching && !this._iosJustTouchEnded) {
++              this._iosUserScrollActive = false;
++            }
+             this._flushIosDeferredIfReady();
+             if (this.scrollState) {
+               this.scheduleScrollReconcile();
+@@ -439,6 +520,7 @@ class Virtualizer {
+         if ("addEventListener" in this.scrollElement) {
+           const scrollEl = this.scrollElement;
+           const onTouchStart = () => {
++            this._iosUserScrollActive = true;
+             this._iosTouching = true;
+             this._iosJustTouchEnded = false;
+             if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+@@ -446,15 +528,20 @@ class Virtualizer {
+               this._iosTouchEndTimerId = null;
+             }
+           };
+-          const onTouchEnd = () => {
++          const onTouchEnd = (event) => {
++            if ("touches" in event && event.touches.length > 0) {
++              return;
++            }
+             this._iosTouching = false;
+             if (!isIOSWebKit() || this.targetWindow == null) {
++              this._iosUserScrollActive = false;
+               return;
+             }
+             this._iosJustTouchEnded = true;
+             this._iosTouchEndTimerId = this.targetWindow.setTimeout(() => {
+               this._iosJustTouchEnded = false;
+               this._iosTouchEndTimerId = null;
++              if (!this.isScrolling) this._iosUserScrollActive = false;
+               this._flushIosDeferredIfReady();
+             }, 150);
+           };
+@@ -468,9 +555,15 @@ class Virtualizer {
+             onTouchEnd,
+             addEventListenerOptions
+           );
++          scrollEl.addEventListener(
++            "touchcancel",
++            onTouchEnd,
++            addEventListenerOptions
++          );
+           this.unsubs.push(() => {
+             scrollEl.removeEventListener("touchstart", onTouchStart);
+             scrollEl.removeEventListener("touchend", onTouchEnd);
++            scrollEl.removeEventListener("touchcancel", onTouchEnd);
+             if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+               this.targetWindow.clearTimeout(this._iosTouchEndTimerId);
+               this._iosTouchEndTimerId = null;
+@@ -487,9 +580,10 @@ class Virtualizer {
+       if (anchor && this.scrollElement && this.options.enabled) {
+         const [key, _offset, followOnAppend, anchorDelta] = anchor;
+         if (key !== null && !followOnAppend) {
+-          if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
++          if (this._shouldDeferIosScrollAdjustment()) {
+             if (anchorDelta !== 0) {
+               this._iosDeferredAdjustment += anchorDelta;
++              this._applyIosCssOffset();
+             }
+           } else {
+             this._scrollToOffset(this.getScrollOffset(), {
+@@ -508,15 +602,14 @@ class Virtualizer {
+       if (this.isScrolling) return;
+       if (this._iosTouching) return;
+       if (this._iosJustTouchEnded) return;
+-      const cur = this.getScrollOffset();
+-      const max = this.getMaxScrollOffset();
++      if (this._iosUserScrollActive) return;
++      const cur = this.getScrollOffset() - this._iosCssOffsetAdjustment;
++      const max = this.getRawMaxScrollOffset();
+       if (cur < 0 || cur > max) return;
+-      if (this._iosDeferredAdjustment < 0 && cur >= max - 1) {
+-        this._iosDeferredAdjustment = 0;
+-        return;
+-      }
+       const delta = this._iosDeferredAdjustment;
+       this._iosDeferredAdjustment = 0;
++      this._clearIosCssOffset();
++      this.scrollOffset = Math.max(0, cur + delta);
+       this._scrollToOffset(cur, {
+         adjustments: this.scrollAdjustments += delta,
+         behavior: void 0
+@@ -869,9 +962,9 @@ class Virtualizer {
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -89,18 +557,34 @@ index 2495b26cf2c3589213546b3958eaadf2eb6b751d..c3662ceccb12ee531b96f8a0b3be961f
 -          itemStart + itemSize <= scrollOffsetWithAdj && this.scrollDirection !== "backward"
 +          // During backward scroll, shrinkage compensation follows the gesture;
 +          // growth remains uncompensated to avoid fighting it.
-+          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0)
++          itemStart + itemSize <= scrollOffsetWithAdj && (this.scrollDirection !== "backward" || delta < 0 || this._shouldDeferIosScrollAdjustment())
          );
          const shouldAdjustScroll = ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
            // The callback expects a VirtualItem; build one lazily only
-@@ -994,6 +997,16 @@ class Virtualizer {
+@@ -934,7 +1027,7 @@ class Virtualizer {
+       );
+       return notUndefined(measurements[idx]);
+     };
+-    this.getMaxScrollOffset = () => {
++    this.getRawMaxScrollOffset = () => {
+       if (!this.scrollElement) return 0;
+       if ("scrollHeight" in this.scrollElement) {
+         return this.options.horizontal ? this.scrollElement.scrollWidth - this.scrollElement.clientWidth : this.scrollElement.scrollHeight - this.scrollElement.clientHeight;
+@@ -943,6 +1036,7 @@ class Virtualizer {
+         return this.options.horizontal ? doc.scrollWidth - this.scrollElement.innerWidth : doc.scrollHeight - this.scrollElement.innerHeight;
+       }
+     };
++    this.getMaxScrollOffset = () => this.getRawMaxScrollOffset() + this._iosCssOffsetAdjustment;
+     this.getVirtualDistanceFromEnd = () => {
+       return Math.max(
+         this.getTotalSize() - this.getSize() - this.getScrollOffset(),
+@@ -994,8 +1088,17 @@ class Virtualizer {
          align
        ];
      };
 +    this.cancelScroll = () => {
 +      this.scrollState = null;
 +      this._intendedScrollOffset = null;
-+      this._iosDeferredAdjustment = 0;
 +      this.scrollAdjustments = 0;
 +      if (this.rafId != null) {
 +        this.targetWindow?.cancelAnimationFrame(this.rafId);
@@ -108,15 +592,89 @@ index 2495b26cf2c3589213546b3958eaadf2eb6b751d..c3662ceccb12ee531b96f8a0b3be961f
 +      }
 +    };
      this.scrollToOffset = (toOffset, { align = "start", behavior = "auto" } = {}) => {
-       this._iosDeferredAdjustment = 0;
+-      this._iosDeferredAdjustment = 0;
++      this._takeOverIosScroll();
        const offset = this.getOffsetForAlignment(toOffset, align);
+       const now = this.now();
+       this.scrollState = {
+@@ -1013,13 +1116,13 @@ class Virtualizer {
+       align: initialAlign = "auto",
+       behavior = "auto"
+     } = {}) => {
+-      this._iosDeferredAdjustment = 0;
+       index = Math.max(0, Math.min(index, this.options.count - 1));
+       const offsetInfo = this.getOffsetForIndex(index, initialAlign);
+       if (!offsetInfo) {
+         return;
+       }
+       const [offset, align] = offsetInfo;
++      this._takeOverIosScroll();
+       const now = this.now();
+       this.scrollState = {
+         index,
+@@ -1033,6 +1136,7 @@ class Virtualizer {
+       this.scheduleScrollReconcile();
+     };
+     this.scrollBy = (delta, { behavior = "auto" } = {}) => {
++      this._takeOverIosScroll();
+       const offset = this.getScrollOffset() + delta;
+       const now = this.now();
+       this.scrollState = {
+@@ -1123,18 +1227,21 @@ class Virtualizer {
+     };
+     this.setOptions(opts);
+   }
+-  // Returns `true` when it performed a synchronous `scrollTop` write this
+-  // tick, `false` when the delta was zero or the write was deferred (iOS).
+-  // `resizeItem` uses that to decide whether the follow-up `notify` must be
+-  // synchronous so the grown transforms commit in the same paint (#1227).
++  // Returns whether the matching scroll or CSS compensation was applied
++  // synchronously. `resizeItem` uses this to publish transforms in the same
++  // paint as the compensation (#1227).
+   applyScrollAdjustment(delta, behavior) {
+     if (delta === 0) return false;
+     if (process.env.NODE_ENV !== "production" && this.options.debug) {
+       console.info("correction", delta);
+     }
+-    if (isIOSWebKit() && (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)) {
++    if (this._shouldDeferIosScrollAdjustment()) {
+       this._iosDeferredAdjustment += delta;
+-      return false;
++      const visualDelta = this._applyIosCssOffset();
++      if (this.scrollOffset !== null) {
++        this.scrollOffset = Math.max(0, this.scrollOffset + visualDelta);
++      }
++      return this._iosCssOffsetAdjustment === this._iosDeferredAdjustment;
+     } else {
+       this._scrollToOffset(this.getScrollOffset(), {
+         adjustments: this.scrollAdjustments += delta,
 diff --git a/src/index.ts b/src/index.ts
-index dc6f1010c4d4758de9c46fb8d69209e582e47171..14bf3dbf0cb5f933ac0b04a6777494ae6a6dc72a 100644
+index dc6f1010c4d4758de9c46fb8d69209e582e47171..3a093ccfefa0a5bccd2c1271a6fa165f424ef38f 100644
 --- a/src/index.ts
 +++ b/src/index.ts
-@@ -496,5 +496,11 @@ export class Virtualizer<
+@@ -427,8 +427,17 @@ export class Virtualizer<
+   scrollAdjustments = 0
+   // Sum of size-change deltas above-viewport that were skipped during
+   // iOS momentum scroll (writing scrollTop mid-momentum cancels it).
+-  // Flushed in a single scrollTo when iOS is fully settled.
++  // Applied visually through CSS, then flushed in one scrollTo at rest.
+   private _iosDeferredAdjustment = 0
++  private _iosCssOffsetTarget: HTMLElement | null = null
++  private _iosCssOffsetProperty: 'margin-left' | 'margin-top' | null = null
++  private _iosCssOffsetInitialValue = ''
++  private _iosCssOffsetInitialPriority = ''
++  private _iosCssOffsetAdjustment = 0
++  // Tracks touch provenance through the complete drag and momentum sequence.
++  // `isScrolling` also covers programmatic scroll events, which must stay on
++  // the synchronous adjustment path.
++  private _iosUserScrollActive = false
+   // Touch state. iOS WebKit cancels momentum when scrollTop is written, so
+   // we defer adjustments not only during `isScrolling` but also through the
+   // touchstart→touchend window (active drag) and a short tail after
+@@ -495,6 +504,12 @@ export class Virtualizer<
+
              if (!this.isIndexInRange(index)) return
- 
+
 +            // A delayed entry can retain an in-range index that now names another key.
 +            // The connected cache owner remains authoritative until direct measurement replaces it.
 +            const key = this.options.getItemKey(index)
@@ -126,7 +684,270 @@ index dc6f1010c4d4758de9c46fb8d69209e582e47171..14bf3dbf0cb5f933ac0b04a6777494ae
              if (this.shouldMeasureDuringScroll(index)) {
                this.resizeItem(
                  index,
-@@ -1597,10 +1603,10 @@ export class Virtualizer<
+@@ -685,10 +700,9 @@ export class Virtualizer<
+     this.options.onChange?.(this, sync)
+   }
+
+-  // Returns `true` when it performed a synchronous `scrollTop` write this
+-  // tick, `false` when the delta was zero or the write was deferred (iOS).
+-  // `resizeItem` uses that to decide whether the follow-up `notify` must be
+-  // synchronous so the grown transforms commit in the same paint (#1227).
++  // Returns whether the matching scroll or CSS compensation was applied
++  // synchronously. `resizeItem` uses this to publish transforms in the same
++  // paint as the compensation (#1227).
+   private applyScrollAdjustment(
+     delta: number,
+     behavior?: ScrollBehavior,
+@@ -699,12 +713,13 @@ export class Virtualizer<
+       console.info('correction', delta)
+     }
+
+-    if (
+-      isIOSWebKit() &&
+-      (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)
+-    ) {
++    if (this._shouldDeferIosScrollAdjustment()) {
+       this._iosDeferredAdjustment += delta
+-      return false
++      const visualDelta = this._applyIosCssOffset()
++      if (this.scrollOffset !== null) {
++        this.scrollOffset = Math.max(0, this.scrollOffset + visualDelta)
++      }
++      return this._iosCssOffsetAdjustment === this._iosDeferredAdjustment
+     } else {
+       this._scrollToOffset(this.getScrollOffset(), {
+         adjustments: (this.scrollAdjustments += delta),
+@@ -734,6 +749,93 @@ export class Virtualizer<
+     }
+   }
+
++  private _shouldDeferIosScrollAdjustment = () =>
++    isIOSWebKit() && this._iosUserScrollActive
++
++  private _clearIosCssOffset = () => {
++    if (this._iosCssOffsetTarget && this._iosCssOffsetProperty) {
++      if (this._iosCssOffsetInitialValue) {
++        this._iosCssOffsetTarget.style.setProperty(
++          this._iosCssOffsetProperty,
++          this._iosCssOffsetInitialValue,
++          this._iosCssOffsetInitialPriority,
++        )
++      } else {
++        this._iosCssOffsetTarget.style.removeProperty(
++          this._iosCssOffsetProperty,
++        )
++      }
++    }
++    this._iosCssOffsetTarget = null
++    this._iosCssOffsetProperty = null
++    this._iosCssOffsetInitialValue = ''
++    this._iosCssOffsetInitialPriority = ''
++    this._iosCssOffsetAdjustment = 0
++  }
++
++  private _applyIosCssOffset = (): number => {
++    const previousAdjustment = this._iosCssOffsetAdjustment
++    if (this._iosDeferredAdjustment === 0) {
++      this._clearIosCssOffset()
++      return -previousAdjustment
++    }
++
++    const nextTarget =
++      this.scrollElement && 'firstElementChild' in this.scrollElement
++        ? this.scrollElement.firstElementChild
++        : null
++    const target =
++      nextTarget && this.targetWindow?.HTMLElement
++        ? nextTarget instanceof this.targetWindow.HTMLElement
++          ? nextTarget
++          : null
++        : null
++    const property = this.options.horizontal ? 'margin-left' : 'margin-top'
++    if (!target) {
++      this._clearIosCssOffset()
++      return -previousAdjustment
++    }
++    if (
++      this._iosCssOffsetTarget !== target ||
++      this._iosCssOffsetProperty !== property
++    ) {
++      this._clearIosCssOffset()
++      this._iosCssOffsetTarget = target
++      this._iosCssOffsetProperty = property
++      this._iosCssOffsetInitialValue = target.style.getPropertyValue(property)
++      this._iosCssOffsetInitialPriority =
++        target.style.getPropertyPriority(property)
++    }
++
++    const initialValue = this._iosCssOffsetInitialValue.trim()
++    target.style.setProperty(
++      property,
++      initialValue
++        ? `calc(${initialValue} - ${this._iosDeferredAdjustment}px)`
++        : `${-this._iosDeferredAdjustment}px`,
++      this._iosCssOffsetInitialPriority,
++    )
++    this._iosCssOffsetAdjustment = this._iosDeferredAdjustment
++    return this._iosCssOffsetAdjustment - previousAdjustment
++  }
++
++  private _discardIosCssOffset = () => {
++    this._iosDeferredAdjustment = 0
++    this._clearIosCssOffset()
++  }
++
++  private _takeOverIosScroll = () => {
++    this._discardIosCssOffset()
++    if (this._iosTouching) return
++
++    this._iosUserScrollActive = false
++    this._iosJustTouchEnded = false
++    if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
++      this.targetWindow.clearTimeout(this._iosTouchEndTimerId)
++    }
++    this._iosTouchEndTimerId = null
++  }
++
+   private maybeNotify = memo(
+     () => {
+       this.calculateRange()
+@@ -759,6 +861,7 @@ export class Virtualizer<
+   )
+
+   private cleanup = () => {
++    this._discardIosCssOffset()
+     this.unsubs.filter(Boolean).forEach((d) => d!())
+     this.unsubs = []
+     this.observer.disconnect()
+@@ -784,7 +887,7 @@ export class Virtualizer<
+     // (the listener unsub clears the grace timer, and with it the only
+     // pending reset of the flag), deferring every adjustment on the new
+     // element until its next touch cycle.
+-    this._iosDeferredAdjustment = 0
++    this._iosUserScrollActive = false
+     this._iosTouching = false
+     this._iosJustTouchEnded = false
+     this.scrollElement = null
+@@ -861,6 +964,11 @@ export class Virtualizer<
+           }
+           this._intendedScrollOffset = null
+
++          if (this._iosDeferredAdjustment !== 0) {
++            this._applyIosCssOffset()
++            offset += this._iosCssOffsetAdjustment
++          }
++
+           this.scrollAdjustments = 0
+           // If the offset hasn't moved, this is the echo of our own
+           // adjustment write — `applyScrollAdjustment` already folded it
+@@ -876,6 +984,13 @@ export class Virtualizer<
+             : null
+           this.scrollOffset = offset
+           this.isScrolling = isScrolling
++          if (
++            !isScrolling &&
++            !this._iosTouching &&
++            !this._iosJustTouchEnded
++          ) {
++            this._iosUserScrollActive = false
++          }
+
+           // Flush deferred iOS adjustments if we're now fully settled.
+           // "Fully settled" means: not actively scrolling, no finger on
+@@ -896,6 +1011,7 @@ export class Virtualizer<
+       if ('addEventListener' in this.scrollElement) {
+         const scrollEl = this.scrollElement as unknown as EventTarget
+         const onTouchStart = () => {
++          this._iosUserScrollActive = true
+           this._iosTouching = true
+           this._iosJustTouchEnded = false
+           if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+@@ -903,10 +1019,13 @@ export class Virtualizer<
+             this._iosTouchEndTimerId = null
+           }
+         }
+-        const onTouchEnd = () => {
++        const onTouchEnd = (event: Event) => {
++          if ('touches' in event && (event as TouchEvent).touches.length > 0) {
++            return
++          }
+           this._iosTouching = false
+           if (!isIOSWebKit() || this.targetWindow == null) {
+-            // Non-iOS: nothing more to track. Just clear the touching flag.
++            this._iosUserScrollActive = false
+             return
+           }
+           this._iosJustTouchEnded = true
+@@ -914,6 +1033,7 @@ export class Virtualizer<
+           this._iosTouchEndTimerId = this.targetWindow.setTimeout(() => {
+             this._iosJustTouchEnded = false
+             this._iosTouchEndTimerId = null
++            if (!this.isScrolling) this._iosUserScrollActive = false
+             // After the grace window, attempt to flush. The scroll event
+             // for momentum decay may have already fired before our timer.
+             this._flushIosDeferredIfReady()
+@@ -929,9 +1049,15 @@ export class Virtualizer<
+           onTouchEnd,
+           addEventListenerOptions,
+         )
++        scrollEl.addEventListener(
++          'touchcancel',
++          onTouchEnd,
++          addEventListenerOptions,
++        )
+         this.unsubs.push(() => {
+           scrollEl.removeEventListener('touchstart', onTouchStart)
+           scrollEl.removeEventListener('touchend', onTouchEnd)
++          scrollEl.removeEventListener('touchcancel', onTouchEnd)
+           if (this._iosTouchEndTimerId !== null && this.targetWindow != null) {
+             this.targetWindow.clearTimeout(this._iosTouchEndTimerId)
+             this._iosTouchEndTimerId = null
+@@ -961,12 +1087,10 @@ export class Virtualizer<
+         // the in-flight scroll. Defer the DOM sync the same way
+         // applyScrollAdjustment does — accumulate the delta and let
+         // _flushIosDeferredIfReady handle it once the scroll settles.
+-        if (
+-          isIOSWebKit() &&
+-          (this.isScrolling || this._iosTouching || this._iosJustTouchEnded)
+-        ) {
++        if (this._shouldDeferIosScrollAdjustment()) {
+           if (anchorDelta !== 0) {
+             this._iosDeferredAdjustment += anchorDelta
++            this._applyIosCssOffset()
+           }
+         } else {
+           this._scrollToOffset(this.getScrollOffset(), {
+@@ -991,24 +1115,19 @@ export class Virtualizer<
+     if (this.isScrolling) return
+     if (this._iosTouching) return
+     if (this._iosJustTouchEnded) return
++    if (this._iosUserScrollActive) return
+     // Phase 2b: Safari elastic-overscroll (rubber-band) lets scrollTop go
+     // negative or beyond scrollHeight - clientHeight. Writing scrollTop
+     // while in that zone snaps the page back to the clamped value at the
+     // end of the bounce, often discarding the user's intent. Skip the
+     // flush; the next in-bounds scroll event will retry.
+-    const cur = this.getScrollOffset()
+-    const max = this.getMaxScrollOffset()
++    const cur = this.getScrollOffset() - this._iosCssOffsetAdjustment
++    const max = this.getRawMaxScrollOffset()
+     if (cur < 0 || cur > max) return
+-    // At the end clamp the browser already absorbed a shrink above the
+-    // viewport (it clamped scrollTop onto the new bottom), so replaying our
+-    // deferred negative delta would lift the view off the bottom — drop it.
+-    // Positive deltas still replay: growth above doesn't clamp. (#1233)
+-    if (this._iosDeferredAdjustment < 0 && cur >= max - 1) {
+-      this._iosDeferredAdjustment = 0
+-      return
+-    }
+     const delta = this._iosDeferredAdjustment
+     this._iosDeferredAdjustment = 0
++    this._clearIosCssOffset()
++    this.scrollOffset = Math.max(0, cur + delta)
+     // Roll the deferred delta into the running accumulator so any resize
+     // landing between now and the resulting scroll event computes from the
+     // post-flush offset rather than the stale one.
+@@ -1597,10 +1716,12 @@ export class Virtualizer<
            // below — e.g. a streaming chat message growing at its bottom)
            // changes size *below* the anchor point, so shifting scrollTop by the
            // delta would drag the viewport downward on every growth (#1218).
@@ -136,17 +957,58 @@ index dc6f1010c4d4758de9c46fb8d69209e582e47171..14bf3dbf0cb5f933ac0b04a6777494ae
 +          // growth remains uncompensated to avoid fighting it.
            itemStart + itemSize <= scrollOffsetWithAdj &&
 -          this.scrollDirection !== 'backward'
-+          (this.scrollDirection !== 'backward' || delta < 0)
++          (this.scrollDirection !== 'backward' ||
++            delta < 0 ||
++            this._shouldDeferIosScrollAdjustment())
        const shouldAdjustScroll =
          this.scrollState?.behavior !== 'smooth' &&
          (this.shouldAdjustScrollPositionOnItemSizeChange !== undefined
-@@ -1785,5 +1791,16 @@ export class Virtualizer<
+@@ -1635,16 +1756,9 @@ export class Virtualizer<
+         adjustedSync = this.applyScrollAdjustment(delta)
+       }
+
+-      // When we just moved `scrollTop` to compensate for an above-viewport
+-      // resize, the grown item transforms must commit in the SAME frame as
+-      // that write. `applyScrollAdjustment` writes `scrollTop` synchronously
+-      // inside this ResizeObserver callback, but an async `notify` schedules
+-      // the transform render for a later commit — so the browser can paint
+-      // one frame with the new `scrollTop` and the old positions, and the
+-      // viewport visibly jumps by `delta` before snapping back (#1227). A
+-      // synchronous notify flushes the render in this same callback, so both
+-      // land in one paint. When nothing moved (or the write was deferred on
+-      // iOS), keep the cheaper async notify.
++      // Scroll or CSS compensation and the changed transforms must commit in
++      // the same paint. A synchronous notify keeps both in this callback
++      // (#1227); an uncompensated resize keeps the cheaper async notify.
+       this.notify(adjustedSync)
+     }
+   }
+@@ -1690,7 +1804,7 @@ export class Virtualizer<
+     return notUndefined(measurements[idx])
+   }
+
+-  private getMaxScrollOffset = () => {
++  private getRawMaxScrollOffset = () => {
+     if (!this.scrollElement) return 0
+
+     if ('scrollHeight' in this.scrollElement) {
+@@ -1707,6 +1821,9 @@ export class Virtualizer<
+     }
+   }
+
++  private getMaxScrollOffset = () =>
++    this.getRawMaxScrollOffset() + this._iosCssOffsetAdjustment
++
+   private getVirtualDistanceFromEnd = () => {
+     return Math.max(
+       this.getTotalSize() - this.getSize() - this.getScrollOffset(),
+@@ -1784,18 +1901,26 @@ export class Virtualizer<
+       align,
      ] as const
    }
 +  cancelScroll = () => {
 +    this.scrollState = null
 +    this._intendedScrollOffset = null
-+    this._iosDeferredAdjustment = 0
 +    this.scrollAdjustments = 0
 +    if (this.rafId != null) {
 +      this.targetWindow?.cancelAnimationFrame(this.rafId)
@@ -154,6 +1016,49 @@ index dc6f1010c4d4758de9c46fb8d69209e582e47171..14bf3dbf0cb5f933ac0b04a6777494ae
 +    }
 +  }
 +
+
    scrollToOffset = (
      toOffset: number,
      { align = 'start', behavior = 'auto' }: ScrollToOffsetOptions = {},
+   ) => {
+-    // An absolute scroll command derives its target from current
+-    // measurements, so any iOS-deferred compensation still pending is stale by
+-    // definition — the command already accounts for the measurements the delta
+-    // was compensating for. Drop it so _flushIosDeferredIfReady doesn't replay
+-    // it onto the just-established position (relative commands like scrollBy
+-    // intentionally keep the deferral, since they build on the current offset).
+-    this._iosDeferredAdjustment = 0
++    // Programmatic ownership supersedes post-touch momentum. The logical
++    // offset already includes any applied CSS deviation, so clearing the
++    // deviation before computing the target converts it in the command's one
++    // native scroll write.
++    this._takeOverIosScroll()
+
+     const offset = this.getOffsetForAlignment(toOffset, align)
+
+@@ -1821,10 +1946,6 @@ export class Virtualizer<
+       behavior = 'auto',
+     }: ScrollToIndexOptions = {},
+   ) => {
+-    // See scrollToOffset: an absolute target invalidates any pending
+-    // iOS-deferred compensation.
+-    this._iosDeferredAdjustment = 0
+-
+     index = Math.max(0, Math.min(index, this.options.count - 1))
+
+     const offsetInfo = this.getOffsetForIndex(index, initialAlign)
+@@ -1832,6 +1953,7 @@ export class Virtualizer<
+       return
+     }
+     const [offset, align] = offsetInfo
++    this._takeOverIosScroll()
+
+     const now = this.now()
+     this.scrollState = {
+@@ -1852,5 +1974,6 @@ export class Virtualizer<
+     delta: number,
+     { behavior = 'auto' }: ScrollToOffsetOptions = {},
+   ) => {
++    this._takeOverIosScroll()
+     const offset = this.getScrollOffset() + delta
+     const now = this.now()
