@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseCliArgs } from '../args.js';
+import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
 
 const CHAT_ID = '1785337200123456';
@@ -180,6 +180,17 @@ describe('parseCliArgs', () => {
 
   test('returns help without requiring submission arguments', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
+  });
+
+  test('documents presentation on conversational commands and its native-history boundary', () => {
+    expect(CLI_HELP).toContain(
+      'garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>',
+    );
+    expect(CLI_HELP).toContain(
+      '--resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>',
+    );
+    expect(CLI_HELP).toContain('Native-history\nReload');
+    expect(CLI_HELP).toContain('provider-native fork segments may drop');
   });
 
   test('parses an exact turn wait with connection options and JSON output', () => {

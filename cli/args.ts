@@ -24,8 +24,8 @@ import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
 import { argumentError } from './errors.js';
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] <prompt>
-  garcon-cli [options] --resume <chat-id> <prompt>
+  garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>
+  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <notice|error>] <message>
   garcon-cli [options] stop <chat-id>
@@ -44,6 +44,8 @@ add-row appends one durable presentation-only notice or error to chat history.
 It never sends, queues, or exposes the row to the agent.
 Message presentation is not sent as prompt text. A message title without a style
 uses notice; a style without a title displays CLI notice or CLI error.
+Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
+Reload and provider-native fork segments may drop Garcon-only presentation.
 
 List resources:
   agents

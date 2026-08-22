@@ -181,7 +181,8 @@ Conversational start, resume, and `send-async` messages may add a visual CLI hea
 `--message-title <title>` and `--message-style notice|error`. A title alone uses `notice`; a
 style alone displays `CLI notice` or `CLI error`. These values distinguish the ordinary user
 message in Garcon and are not included in the prompt sent to the agent. `--title` remains the
-chat title.
+chat title. Ordinary restart, replay, shares, and frozen forks preserve this presentation;
+explicit native-history Reload and provider-native fork segments may drop it.
 
 ```bash
 garcon-cli --workspace default --resume 1785337200123456 \

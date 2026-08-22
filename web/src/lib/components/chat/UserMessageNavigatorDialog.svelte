@@ -126,7 +126,7 @@
 						<svelte:boundary {failed}>
 							<button
 								type="button"
-								class="flex min-h-16 w-full flex-col items-stretch px-5 py-3 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+								class="flex min-h-16 w-full flex-col items-stretch justify-center px-5 py-3 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
 								onclick={() => void controller.select(item)}
 								data-user-message-navigator-row={item.id}
 							>

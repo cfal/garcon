@@ -100,6 +100,8 @@ describe('ConversationMessage actions', () => {
 		const header = container.querySelector('[data-user-message-presentation="error"]');
 		expect(header?.textContent).toContain('CLI error');
 		expect(header?.textContent).toContain('Deployment blocker');
+		expect(header?.classList.contains('bg-status-error')).toBe(true);
+		expect(header?.classList.contains('text-status-error-foreground')).toBe(true);
 		expect(container.querySelector('.user-message-context-target')?.contains(header)).toBe(true);
 		expect(container.querySelector('.cli-row-message')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();
