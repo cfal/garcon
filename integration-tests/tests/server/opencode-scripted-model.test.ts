@@ -168,6 +168,39 @@ describeOnLinux('OpenCode against a scripted model', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('does not advertise experimental plan transitions without a route carrier', async () => {
+    environment?.dispose();
+    environment = startScriptedOpenCodeTestEnvironment({ experimentalPlanMode: true });
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([
+      chatCompletionsText('SCRIPTED_OPENCODE_EXPERIMENTAL_PLAN_REPLY'),
+    ]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-scripted-plan-inventory', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_EXPERIMENTAL_PLAN_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: 'SCRIPTED_OPENCODE_EXPERIMENTAL_PLAN_REPLY',
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(modelToolNames(requests[0]?.body ?? {})).not.toContain('plan_exit');
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('lists only the fake model, rejects a non-catalog model, and keeps all provider paths inside the fixture', async () => {
     const testEnvironment = requireEnvironment();
     testEnvironment.model.scriptTurn([chatCompletionsText(marker('ISOLATION_REPLY'))]);

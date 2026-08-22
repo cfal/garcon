@@ -43,10 +43,17 @@ export const OPENCODE_PERMISSION_KEYS = Object.freeze([
   'plan_exit',
 ] as const);
 
+const OPENCODE_NATIVE_PLAN_PERMISSIONS = new Set(['plan_enter', 'plan_exit']);
+
 export function mapPermissionMode(mode: string): Array<{ permission: string; pattern: string; action: string }> {
+  // Native plan transitions create unmarked synthetic continuations that cannot be safely
+  // affiliated with an operation, so bypass mode keeps them unavailable.
   const map: Record<string, Record<string, string>> = {
     acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'allow' },
-    bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [permission, 'allow'])),
+    bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [
+      permission,
+      OPENCODE_NATIVE_PLAN_PERMISSIONS.has(permission) ? 'deny' : 'allow',
+    ])),
     manualBypass: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
     default: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
   };

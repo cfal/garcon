@@ -221,6 +221,7 @@ export interface ScriptedOpenCodeTestEnvironment {
 
 export function startScriptedOpenCodeTestEnvironment(options: {
   autoCompact?: boolean;
+  experimentalPlanMode?: boolean;
   modelId?: string;
   nestedTaskAgent?: boolean;
   proxy?: boolean;
@@ -271,6 +272,9 @@ export function startScriptedOpenCodeTestEnvironment(options: {
     };
     if (!options.autoCompact) {
       environment.OPENCODE_DISABLE_AUTOCOMPACT = '1';
+    }
+    if (options.experimentalPlanMode) {
+      environment.OPENCODE_EXPERIMENTAL_PLAN_MODE = '1';
     }
     if (options.proxy) {
       environment.GARCON_TEST_OPENCODE_PROXY_DIR = paths.proxy;

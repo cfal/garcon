@@ -276,14 +276,14 @@ describe('convertOpencodePermissionTool', () => {
 });
 
 describe('mapPermissionMode', () => {
-  it('maps bypassPermissions to allow all OpenCode permission keys', () => {
+  it('maps bypassPermissions across all OpenCode permission keys', () => {
     const rules = mapPermissionMode('bypassPermissions');
     expect(rules).toHaveLength(OPENCODE_PERMISSION_KEYS.length);
     expect(rules).toEqual(
       OPENCODE_PERMISSION_KEYS.map((permission) => ({
         permission,
         pattern: '*',
-        action: 'allow',
+        action: permission === 'plan_enter' || permission === 'plan_exit' ? 'deny' : 'allow',
       })),
     );
   });
@@ -294,6 +294,20 @@ describe('mapPermissionMode', () => {
       permission: 'external_directory',
       pattern: '*',
       action: 'allow',
+    });
+  });
+
+  it('denies native plan transitions in bypassPermissions', () => {
+    const rules = mapPermissionMode('bypassPermissions');
+    expect(rules).toContainEqual({
+      permission: 'plan_enter',
+      pattern: '*',
+      action: 'deny',
+    });
+    expect(rules).toContainEqual({
+      permission: 'plan_exit',
+      pattern: '*',
+      action: 'deny',
     });
   });
 
@@ -360,7 +374,7 @@ describe('OpenCodeRuntime permissions', () => {
       permission: OPENCODE_PERMISSION_KEYS.map((permission) => ({
         permission,
         pattern: '*',
-        action: 'allow',
+        action: permission === 'plan_enter' || permission === 'plan_exit' ? 'deny' : 'allow',
       })),
     });
   });
