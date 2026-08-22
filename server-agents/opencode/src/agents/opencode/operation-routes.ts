@@ -143,6 +143,20 @@ export class OpenCodeOperationRoutes {
     if (!this.isRegistered(route)) return false;
     const childSessionId = taskChildSessionId(event);
     if (!childSessionId || childSessionId === route.sessionId) return false;
+    return this.#bindTaskChildSession(route, childSessionId);
+  }
+
+  // Affiliates nested tasks only through a parent already bound by task-part metadata.
+  // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/tool/task.ts#L158-L195
+  bindTaskDescendantSession(event: SSEEvent): OpenCodeOperationRoute | null {
+    const created = taskChildCreation(event);
+    if (!created) return null;
+    const route = this.resolveTaskChild(created.parentSessionId);
+    if (!route || !this.#bindTaskChildSession(route, created.childSessionId)) return null;
+    return route;
+  }
+
+  #bindTaskChildSession(route: OpenCodeOperationRoute, childSessionId: string): boolean {
     const existingChildRoute = this.#byTaskChildSession.get(childSessionId);
     const existingSessionRoute = [...this.#byTurn.values()]
       .find((candidate) => candidate.sessionId === childSessionId);
@@ -319,6 +333,27 @@ function taskChildSessionId(event: SSEEvent): string | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
   const sessionId = (metadata as Record<string, unknown>).sessionId;
   return typeof sessionId === 'string' && sessionId ? sessionId : null;
+}
+
+function taskChildCreation(event: SSEEvent): {
+  childSessionId: string;
+  parentSessionId: string;
+} | null {
+  if (event.type !== 'session.created') return null;
+  const sessionId = event.properties?.sessionID;
+  const info = event.properties?.info;
+  if (!info || typeof info !== 'object' || Array.isArray(info)) return null;
+  const childSessionId = (info as Record<string, unknown>).id;
+  const parentSessionId = (info as Record<string, unknown>).parentID;
+  if (
+    typeof sessionId !== 'string'
+    || !sessionId
+    || childSessionId !== sessionId
+    || typeof parentSessionId !== 'string'
+    || !parentSessionId
+    || parentSessionId === childSessionId
+  ) return null;
+  return { childSessionId, parentSessionId };
 }
 
 function partOperationIdentity(part: Record<string, unknown>): string | null {

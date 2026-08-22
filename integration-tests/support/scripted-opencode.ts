@@ -128,17 +128,31 @@ export function openCodePaths(directories: IntegrationDirectories): OpenCodePath
   };
 }
 
-function openCodeConfig(modelBaseUrl: string, modelId: string): Record<string, unknown> {
+function openCodeConfig(
+  modelBaseUrl: string,
+  modelId: string,
+  options: { nestedTaskAgent?: boolean; subagentDepth?: number } = {},
+): Record<string, unknown> {
   const agentModel = `${OPENCODE_TEST_PROVIDER}/${modelId}`;
   return {
     formatter: false,
     lsp: false,
+    ...(options.subagentDepth === undefined ? {} : { subagent_depth: options.subagentDepth }),
     enabled_providers: [OPENCODE_TEST_PROVIDER],
     model: agentModel,
     small_model: agentModel,
     agent: {
       title: { disable: true },
       summary: { disable: true },
+      ...(options.nestedTaskAgent
+        ? {
+            'scripted-nested': {
+              mode: 'subagent',
+              description: 'Exercises deterministic nested task behavior.',
+              permission: { task: 'allow' },
+            },
+          }
+        : {}),
     },
     provider: {
       [OPENCODE_TEST_PROVIDER]: {
@@ -208,8 +222,10 @@ export interface ScriptedOpenCodeTestEnvironment {
 export function startScriptedOpenCodeTestEnvironment(options: {
   autoCompact?: boolean;
   modelId?: string;
+  nestedTaskAgent?: boolean;
   proxy?: boolean;
   platform?: NodeJS.Platform;
+  subagentDepth?: number;
 } = {}): ScriptedOpenCodeTestEnvironment {
   assertScriptedOpenCodePlatform(options.platform);
   const model = FakeChatCompletionsModel.start();
@@ -285,7 +301,10 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       ]) {
         await mkdir(directory, { recursive: true });
       }
-      await writeFile(paths.config, JSON.stringify(openCodeConfig(model.baseUrl, modelId), null, 2), {
+      await writeFile(paths.config, JSON.stringify(openCodeConfig(model.baseUrl, modelId, {
+        nestedTaskAgent: options.nestedTaskAgent,
+        subagentDepth: options.subagentDepth,
+      }), null, 2), {
         mode: 0o600,
       });
       await writeOpenCodePluginSeed(paths.globalConfig);

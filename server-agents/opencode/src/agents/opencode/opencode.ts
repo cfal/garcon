@@ -719,6 +719,7 @@ export class OpenCodeRuntime {
       return;
     }
 
+    this.#operationRoutes.bindTaskDescendantSession(event);
     const taskChildRoute = this.#operationRoutes.resolveTaskChild(sessionId);
     if (
       taskChildRoute

@@ -107,6 +107,17 @@ function taskPartEvent(childSessionId, part = {}) {
   };
 }
 
+function taskChildCreatedEvent(childSessionId, parentSessionId) {
+  return {
+    id: `event-created-${childSessionId}`,
+    type: 'session.created',
+    properties: {
+      sessionID: childSessionId,
+      info: { id: childSessionId, parentID: parentSessionId },
+    },
+  };
+}
+
 describe('OpenCodeOperationRoutes', () => {
   it('does not let a delayed prompt binding replace a newer source route', () => {
     const { routes } = createFixture();
@@ -465,6 +476,32 @@ describe('OpenCodeOperationRoutes', () => {
     expect(routes.bindTaskChildSession(second.route, taskPartEvent('child-shared'))).toBe(true);
     routes.clear();
     expect(routes.resolveTaskChild('child-shared')).toBeNull();
+  });
+
+  it('affiliates task descendants only through an already bound child parent', () => {
+    const { logger, routes } = createFixture();
+    const parent = register(routes, {
+      sessionId: 'session-1',
+      chatId: 'chat-1',
+      runId: 'run-a',
+    });
+
+    expect(routes.bindTaskDescendantSession(taskChildCreatedEvent(
+      'unaffiliated-child',
+      'session-1',
+    ))).toBeNull();
+    expect(routes.bindTaskChildSession(parent.route, taskPartEvent('child-1'))).toBe(true);
+    expect(routes.bindTaskDescendantSession(taskChildCreatedEvent(
+      'grandchild-1',
+      'child-1',
+    ))).toBe(parent.route);
+    expect(routes.bindTaskDescendantSession(taskChildCreatedEvent(
+      'great-grandchild-1',
+      'grandchild-1',
+    ))).toBe(parent.route);
+    expect(routes.resolveTaskChild('grandchild-1')).toBe(parent.route);
+    expect(routes.resolveTaskChild('great-grandchild-1')).toBe(parent.route);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('recognizes only provider-marked automatic compaction control parts', () => {
