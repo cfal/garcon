@@ -22,6 +22,7 @@ import {
 	shouldPreserveConversationVirtualEdge,
 } from './conversation-feed-viewport-geometry.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
+import { ConversationVirtualMeasurementManager } from './conversation-feed-virtual-measurement.js';
 import {
 	captureConversationVirtualAnchor,
 	type ConversationVirtualAnchor,
@@ -31,7 +32,6 @@ import {
 	ConversationPreCommitAnchorBuffer,
 	ConversationProgrammaticScrollOwnership,
 	ConversationVirtualDomSynchronizer,
-	ConversationVirtualMeasurementManager,
 	measureConversationViewportFill,
 	nextConversationLayoutFrame,
 	observeConversationRootOffset,

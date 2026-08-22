@@ -46,11 +46,8 @@ import {
 	ConversationEarlierPrependAnchorOwnership,
 	ConversationPreCommitAnchorBuffer,
 	ConversationProgrammaticScrollOwnership,
-	ConversationVirtualMeasurementManager,
-	type ConversationVirtualMeasurementPort,
 	ConversationMountedVirtualItems,
 	type ConversationVirtualAnchorSettlePort,
-	observeConversationItemLayoutSettlement,
 	positionCommittedConversationAnchor,
 	positionPendingConversationAnchor,
 	settleConversationVirtualAnchor,
@@ -97,47 +94,6 @@ function createAnchorSettleFixture(options: {
 }
 
 describe('ConversationFeedVirtualController helpers', () => {
-	it('reconciles a deferred remount when programmatic scrolling takes ownership', () => {
-		let ownsScrollPosition = false;
-		const measurementManager = new ConversationVirtualMeasurementManager(
-			() => 'coasting',
-			() => ownsScrollPosition,
-		);
-		const element = document.createElement('div');
-		element.dataset.index = '0';
-		element.dataset.chatVirtualItem = 'row';
-		Object.defineProperty(element, 'offsetHeight', { configurable: true, value: 40 });
-		document.body.append(element);
-		const resizeItem = vi.fn();
-		const instance = {
-			indexFromElement: () => 0,
-			isScrolling: true,
-			itemSizeCache: new Map([['row', 160]]),
-			measure: vi.fn(),
-			measureElement: vi.fn(),
-			options: {
-				count: 1,
-				estimateSize: () => 120,
-				getItemKey: () => 'row',
-			},
-			resizeItem,
-			scrollDirection: 'backward',
-		} satisfies ConversationVirtualMeasurementPort;
-		const detach = measurementManager.attach(element, instance);
-
-		try {
-			measurementManager.flush(instance);
-			expect(resizeItem).not.toHaveBeenCalled();
-			ownsScrollPosition = true;
-			measurementManager.takeProgrammaticOwnership(instance);
-			expect(resizeItem).toHaveBeenCalledOnce();
-			expect(resizeItem).toHaveBeenCalledWith(0, 40);
-		} finally {
-			detach();
-			element.remove();
-		}
-	});
-
 	it('invalidates superseded programmatic scroll ownership epochs', () => {
 		const ownership = new ConversationProgrammaticScrollOwnership();
 		const first = ownership.begin();
@@ -670,19 +626,6 @@ describe('ConversationFeedVirtualController helpers', () => {
 		expect(isConversationTargetLayoutReady(row)).toBe(true);
 	});
 
-	it('publishes settlement when remounted rich content replaces its placeholder', async () => {
-		const row = document.createElement('div');
-		const pending = document.createElement('div');
-		pending.dataset.chatLayoutPending = 'true';
-		row.append(pending);
-		const settled = vi.fn();
-		const stop = observeConversationItemLayoutSettlement(row, settled);
-
-		pending.removeAttribute('data-chat-layout-pending');
-
-		await waitFor(() => expect(settled).toHaveBeenCalledOnce());
-		stop();
-	});
 });
 
 interface ControllerExposure {

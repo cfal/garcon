@@ -3045,6 +3045,124 @@ async function verifyBackwardScrollRemountMeasurement(fixture: ChromiumFixture):
   fixture.assertNoBrowserErrors();
 }
 
+async function verifyUncachedRowFirstFrameMeasurement(fixture: ChromiumFixture): Promise<void> {
+  await fixture.context.addInitScript(() => {
+    const NativeResizeObserver = window.ResizeObserver;
+    window.ResizeObserver = class FrameDeferredResizeObserver implements ResizeObserver {
+      readonly #observer: ResizeObserver;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.#observer = new NativeResizeObserver((entries) => {
+          requestAnimationFrame(() => callback(entries, this));
+        });
+      }
+
+      disconnect(): void {
+        this.#observer.disconnect();
+      }
+
+      observe(target: Element, options?: ResizeObserverOptions): void {
+        this.#observer.observe(target, options);
+      }
+
+      unobserve(target: Element): void {
+        this.#observer.unobserve(target);
+      }
+    };
+  });
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(fixture.integration, 40, 'chromium-uncached-first-frame');
+  await prepareTranscript(fixture, chatId);
+  await scrollToPosition(fixture.page, 'end', false);
+
+  const result = await fixture.page.locator(FEED_SELECTOR).evaluate(
+    async (feedElement, itemSelector) => {
+      const feed = feedElement as HTMLElement;
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const transformY = (element: HTMLElement) => {
+        const transform = getComputedStyle(element).transform;
+        return transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+      };
+      const initiallyMounted = new Set(
+        [...feed.querySelectorAll<HTMLElement>(itemSelector)].flatMap((item) =>
+          item.dataset.chatVirtualItem ? [item.dataset.chatVirtualItem] : [],
+        ),
+      );
+      const forcedGeometry = document.createElement('style');
+      forcedGeometry.textContent =
+        '[data-chat-uncached-measurement-target] { height: 240px !important; overflow: hidden !important; }';
+      document.head.append(forcedGeometry);
+      const originalSetAttribute = Element.prototype.setAttribute;
+      let targetNode: HTMLElement | null = null;
+      let targetKey: string | null = null;
+      const patchedSetAttribute = function (
+        this: Element,
+        qualifiedName: string,
+        value: string,
+      ): void {
+        originalSetAttribute.call(this, qualifiedName, value);
+        if (
+          targetNode
+          || !(this instanceof HTMLElement)
+          || qualifiedName !== 'data-chat-virtual-item'
+          || this.isConnected
+          || initiallyMounted.has(value)
+          || Number(this.dataset.index) < 22
+          || Number(this.dataset.index) > 28
+        ) return;
+        targetNode = this;
+        targetKey = value;
+        this.dataset.chatUncachedMeasurementTarget = '';
+      };
+      Element.prototype.setAttribute = patchedSetAttribute;
+
+      try {
+        feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -48 }));
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          feed.scrollTop = Math.max(0, feed.scrollTop - 48);
+          feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+          await frame();
+          const target = targetNode as HTMLElement | null;
+          if (!target?.isConnected) continue;
+          const targetIndex = Number(target.dataset.index);
+          const follower = [...feed.querySelectorAll<HTMLElement>(itemSelector)].find(
+            (item) => Number(item.dataset.index) === targetIndex + 1,
+          );
+          if (!follower) {
+            throw new Error('The first uncached row mounted without its contiguous follower.');
+          }
+          const currentByKey = [...feed.querySelectorAll<HTMLElement>(itemSelector)].find(
+            (item) => item.dataset.chatVirtualItem === targetKey,
+          );
+          return {
+            sameNode: currentByKey === target,
+            scrollTop: feed.scrollTop,
+            spacing: transformY(follower) - transformY(target),
+            targetHeight: target.getBoundingClientRect().height,
+            targetIndex,
+            targetKey,
+          };
+        }
+        throw new Error('No uncached row mounted during backward scrolling.');
+      } finally {
+        if (Element.prototype.setAttribute === patchedSetAttribute) {
+          Element.prototype.setAttribute = originalSetAttribute;
+        }
+        const target = targetNode as HTMLElement | null;
+        target?.removeAttribute('data-chat-uncached-measurement-target');
+        forcedGeometry.remove();
+      }
+    },
+    ITEM_SELECTOR,
+  );
+  const diagnostic = JSON.stringify(result, null, 2);
+  expect(result.targetKey, diagnostic).not.toBeNull();
+  expect(result.sameNode, diagnostic).toBe(true);
+  expect(result.targetHeight, diagnostic).toBeCloseTo(240, 0);
+  expect(result.spacing, diagnostic).toBeCloseTo(result.targetHeight, 0);
+  fixture.assertNoBrowserErrors();
+}
+
 async function verifyScrollbarDragPrepend(
   fixture: ChromiumFixture,
   viewport: { height: number; width: number },
@@ -5527,6 +5645,20 @@ describe('Chromium transcript virtualization', () => {
       async (fixture, markPhase) => {
         markPhase('remounting cached geometry during backward scrolling');
         await verifyBackwardScrollRemountMeasurement(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('measures an uncached row before its first backward-scrolling frame', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-uncached-row-first-frame',
+      async (fixture, markPhase) => {
+        markPhase('mounting an uncached row during backward scrolling');
+        await verifyUncachedRowFirstFrameMeasurement(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
