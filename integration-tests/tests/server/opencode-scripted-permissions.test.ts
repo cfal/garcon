@@ -16,17 +16,18 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
 
-// Permission flows through the real binary: OpenCode's permission.asked events cross Garcon's
-// public boundary, user decisions execute or refuse the real shell tool, and manualBypass
-// auto-replies without surfacing a user row.
+// Permission flows through the real binary: Garcon answers OpenCode's permission and question
+// blockers while manualBypass remains automatic only for ordinary tool approval.
 let environment: ScriptedOpenCodeTestEnvironment | undefined;
 
 const describeOnLinux = process.platform === 'linux' ? describe : describe.skip;
+const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describeOnLinux('scripted OpenCode permissions', () => {
   beforeEach(() => {
@@ -157,6 +158,211 @@ describeOnLinux('scripted OpenCode permissions', () => {
       );
       expect(rejectedResult?.isError).toBe(true);
       expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('answers the question tool through the permission channel in bypass mode', async () => {
+    const testEnvironment = requireEnvironment();
+    const reply = 'SCRIPTED_OPENCODE_QUESTION_ANSWERED_REPLY';
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_answered',
+      'question',
+      {
+        questions: [
+          {
+            header: 'Mode',
+            question: 'Which mode?',
+            options: [
+              { label: 'Fast', description: 'Complete quickly.' },
+              { label: 'Careful', description: 'Check boundaries.' },
+            ],
+          },
+          {
+            header: 'Checks',
+            question: 'Which checks?',
+            multiple: true,
+            options: [
+              { label: 'Unit', description: 'Run unit tests.' },
+              { label: 'Integration', description: 'Run integration tests.' },
+            ],
+          },
+        ],
+      },
+    )]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+
+    const requestCursor = testEnvironment.model.markRequests();
+    await withIntegrationFixture('opencode-question-answer', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_QUESTION_ANSWERED_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        () => true,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (
+        permission.message.type !== 'permission-request'
+        || permission.message.requestedTool.type !== 'ask-user-question-tool-use'
+      ) {
+        throw new Error('OpenCode question permission request was not found.');
+      }
+      expect(permission.message.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+      expect(permission.message.permissionOccurrenceId).not.toBe('call_question_answered');
+      expect(permission.message.requestedTool.questions).toEqual([
+        {
+          id: 'Which mode?',
+          prompt: 'Which mode?',
+          header: 'Mode',
+          options: [
+            { id: 'Fast', label: 'Fast', description: 'Complete quickly.' },
+            { id: 'Careful', label: 'Careful', description: 'Check boundaries.' },
+          ],
+          allowMultiple: false,
+        },
+        {
+          id: 'Which checks?',
+          prompt: 'Which checks?',
+          header: 'Checks',
+          options: [
+            { id: 'Unit', label: 'Unit', description: 'Run unit tests.' },
+            { id: 'Integration', label: 'Integration', description: 'Run integration tests.' },
+          ],
+          allowMultiple: true,
+        },
+      ]);
+
+      const decision = await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        allow: true,
+        alwaysAllow: false,
+        response: {
+          type: 'ask-user-question-response',
+          outcome: 'answered',
+          answers: [
+            { questionId: 'Which mode?', selectedOptionIds: ['Careful'] },
+            { questionId: 'Which checks?', selectedOptionIds: ['Unit', 'Integration'] },
+          ],
+        },
+      });
+      expect(decision.status).toBe('accepted');
+
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.toolResults).toEqual([{
+        toolCallId: 'call_question_answered',
+        content: expect.stringContaining('"Which mode?"="Careful"'),
+      }]);
+
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'ask-user-question-tool-use')).toHaveLength(1);
+      expect(messagesOfType(transcript.messages, 'unknown-tool-use')).toEqual([]);
+      expect(messagesOfType(transcript.messages, 'permission-resolved')).toEqual([
+        expect.objectContaining({
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+          allowed: true,
+        }),
+      ]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('rejects Skip without letting manual bypass hide the question', async () => {
+    const testEnvironment = requireEnvironment();
+    const reply = 'SCRIPTED_OPENCODE_QUESTION_SKIPPED_REPLY';
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_skipped',
+      'question',
+      {
+        questions: [{
+          header: 'Continue',
+          question: 'Continue?',
+          options: [{ label: 'Yes', description: 'Continue.' }],
+        }],
+      },
+    )]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+
+    const requestCursor = testEnvironment.model.markRequests();
+    await withIntegrationFixture('opencode-question-skip', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_QUESTION_SKIPPED_PROMPT',
+        permissionMode: 'manualBypass',
+      }));
+
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        () => true,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (
+        permission.message.type !== 'permission-request'
+        || permission.message.requestedTool.type !== 'ask-user-question-tool-use'
+      ) {
+        throw new Error('OpenCode question permission request was not found.');
+      }
+      await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        allow: false,
+        alwaysAllow: false,
+        response: {
+          type: 'ask-user-question-response',
+          outcome: 'skipped',
+          reason: 'User skipped question',
+        },
+      });
+
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal.type).toBe('agent-run-finished');
+
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: 'SCRIPTED_OPENCODE_QUESTION_SKIPPED_RECOVERY_PROMPT',
+        permissionMode: 'manualBypass',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: reply,
+        afterIndex: recoveryCursor,
+      });
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'ask-user-question-tool-use')).toHaveLength(1);
+      expect(messagesOfType(transcript.messages, 'unknown-tool-use')).toEqual([]);
+      expect(messagesOfType(transcript.messages, 'permission-resolved')).toEqual([
+        expect.objectContaining({
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+          allowed: false,
+        }),
+      ]);
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
