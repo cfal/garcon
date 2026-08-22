@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -528,6 +528,94 @@ describe('SidebarVirtualSortableChatList', () => {
 		await tick();
 
 		expect(firstVirtualItem()?.style.height).toBe('46px');
+	});
+
+	it('keeps the anchored chat row visible when the layout switches while scrolled', async () => {
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(60),
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode: 'manual',
+			},
+		});
+
+		const viewport = document.querySelector<HTMLElement>(
+			'[data-testid="virtual-sidebar-viewport"]',
+		);
+		if (!viewport) throw new Error('expected viewport');
+
+		viewport.scrollTop = 2000;
+		viewport.dispatchEvent(new Event('scroll'));
+		await tick();
+
+		await view.rerender({
+			rows: makeRows(60),
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		await waitFor(() => {
+			// chat-22 spans [1936, 2024) at 88px; scrollTop 2000 is 64/88 into the
+			// row. At 46px it spans [1012, 1058) and the normalized offset is
+			// round(64/88 * 46) = 33, so the restore keeps chat-22 itself visible.
+			expect(viewport.scrollTop).toBe(1045);
+		});
+
+		// happy-dom does not emit a scroll event for programmatic writes, which
+		// the virtualizer needs to recompute its visible range.
+		viewport.dispatchEvent(new Event('scroll'));
+		await tick();
+
+		const anchoredRow = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-22"]');
+		if (!anchoredRow) throw new Error('expected anchored row to stay mounted');
+		// happy-dom bounding rects ignore transforms, so verify the rendered
+		// position arithmetically: the row spans [1012, 1058) inside the
+		// viewport window [1045, 1045 + 640).
+		expect(anchoredRow.parentElement?.style.transform).toContain('translateY(1012px)');
+	});
+
+	it('leaves the scroll offset untouched for explicit row heights', async () => {
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(60),
+			rowHeight: 88,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode: 'manual',
+			},
+		});
+
+		const viewport = document.querySelector<HTMLElement>(
+			'[data-testid="virtual-sidebar-viewport"]',
+		);
+		if (!viewport) throw new Error('expected viewport');
+
+		viewport.scrollTop = 2000;
+		viewport.dispatchEvent(new Event('scroll'));
+		await tick();
+
+		await view.rerender({
+			rows: makeRows(60),
+			rowHeight: 88,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		await waitFor(() => {
+			// Uniform row geometry is unaffected by the layout switch.
+			expect(viewport.scrollTop).toBe(2000);
+		});
 	});
 
 	it('paints chat separators from the virtual list layer', () => {

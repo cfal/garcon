@@ -14,9 +14,14 @@
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+		anchoredSidebarRowTop,
+		clamp,
+		computeSidebarSeparatorItems,
 		DEFAULT_CHAT_ROW_OVERSCAN,
 		estimateSidebarVirtualRowSize,
+		findSidebarScrollAnchor,
 		PROJECT_HEADER_ROW_HEIGHT,
+		snapCssPixel,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
 	} from './sidebar-virtual-chat-list';
@@ -24,6 +29,7 @@
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
+	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import {
 		SidebarChatReorderState,
 		type SidebarChatReorderRequest,
@@ -148,15 +154,6 @@
 		| { kind: 'blocked-row' }
 		| { kind: 'blocked-item' };
 
-	function clamp(value: number, min: number, max: number): number {
-		return Math.min(Math.max(value, min), max);
-	}
-
-	function snapCssPixel(value: number, pixelRatio: number): number {
-		const ratio = Math.max(pixelRatio, 1);
-		return Math.round(value * ratio) / ratio;
-	}
-
 	function syncSeparatorPixelRatio(): void {
 		separatorPixelRatio = window.devicePixelRatio || 1;
 	}
@@ -192,24 +189,8 @@
 	});
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
-	let separatorItems = $derived.by(() =>
-		virtualItems
-			.filter((virtualItem) => rows[virtualItem.index]?.type === 'chat')
-			.map((virtualItem) => {
-				const slotStart = virtualItem.start + virtualItem.size - CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
-				const slotEnd = virtualItem.start + virtualItem.size;
-				const preferredTop = slotStart + (CHAT_ROW_SEPARATOR_SLOT_HEIGHT - separatorLineHeight) / 2;
-				const top = clamp(
-					snapCssPixel(preferredTop, separatorPixelRatio),
-					slotStart,
-					slotEnd - separatorLineHeight,
-				);
-				return {
-					key: rows[virtualItem.index]?.key ?? virtualItem.key,
-					top,
-					height: separatorLineHeight,
-				};
-			}),
+	let separatorItems = $derived(
+		computeSidebarSeparatorItems(virtualItems, rows, separatorLineHeight, separatorPixelRatio),
 	);
 	let selectedBackgroundItem = $derived.by(() => {
 		if (isMultiSelectMode || !selectedChatId) return null;
@@ -232,14 +213,25 @@
 		return null;
 	});
 
+	let lastEstimatedLayout: SidebarChatItemLayout | undefined;
 	$effect(() => {
 		const count = rows.length;
 		const scrollElement = viewportRef;
 		const chatItemLayout = displayOptions.chatItemLayout;
+		const layoutChanged =
+			lastEstimatedLayout !== undefined && lastEstimatedLayout !== chatItemLayout;
+		lastEstimatedLayout = chatItemLayout;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		const paddingEnd = bottomPadding;
 		untrack(() => {
+			// Captured before the new estimates land so the viewport can be
+			// re-anchored on the same row at its previous intra-row offset when
+			// row heights change mid-list.
+			const anchor =
+				layoutChanged && scrollElement && explicitRowHeight === undefined
+					? findSidebarScrollAnchor($virtualizer.getVirtualItems(), scrollElement.scrollTop)
+					: null;
 			$virtualizer.setOptions({
 				count,
 				getScrollElement: () => scrollElement,
@@ -255,6 +247,10 @@
 				overscan: rowOverscan,
 				paddingEnd,
 			});
+			if (anchor && scrollElement) {
+				const anchoredTop = anchoredSidebarRowTop(rows, anchor, chatItemLayout);
+				if (anchoredTop !== null) scrollElement.scrollTop = anchoredTop;
+			}
 		});
 	});
 

@@ -1,3 +1,4 @@
+import type { VirtualItem } from '@tanstack/virtual-core';
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -55,4 +56,90 @@ export function estimateSidebarVirtualRowSize(
 	if (chatItemLayout === 'compact') return COMPACT_CHAT_ROW_HEIGHT;
 	if (chatItemLayout === 'single-line') return SINGLE_LINE_CHAT_ROW_HEIGHT;
 	return DESKTOP_CHAT_ROW_HEIGHT;
+}
+
+export function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
+}
+
+// Snaps a CSS pixel offset to the physical pixel grid of the given device ratio.
+export function snapCssPixel(value: number, pixelRatio: number): number {
+	const ratio = Math.max(pixelRatio, 1);
+	return Math.round(value * ratio) / ratio;
+}
+
+export interface SidebarChatSeparatorItem {
+	key: string | number;
+	top: number;
+	height: number;
+}
+
+// Positions the hairline separator inside each chat row's trailing separator
+// slot, snapped to the physical pixel grid.
+export function computeSidebarSeparatorItems(
+	virtualItems: VirtualItem[],
+	rows: SidebarVirtualRow[],
+	separatorLineHeight: number,
+	separatorPixelRatio: number,
+): SidebarChatSeparatorItem[] {
+	return virtualItems
+		.filter((virtualItem) => rows[virtualItem.index]?.type === 'chat')
+		.map((virtualItem) => {
+			const slotStart = virtualItem.start + virtualItem.size - CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
+			const slotEnd = virtualItem.start + virtualItem.size;
+			const preferredTop = slotStart + (CHAT_ROW_SEPARATOR_SLOT_HEIGHT - separatorLineHeight) / 2;
+			const top = clamp(
+				snapCssPixel(preferredTop, separatorPixelRatio),
+				slotStart,
+				slotEnd - separatorLineHeight,
+			);
+			return {
+				key: rows[virtualItem.index]?.key ?? virtualItem.key,
+				top,
+				height: separatorLineHeight,
+			};
+		});
+}
+
+export interface SidebarScrollAnchor {
+	key: string | number;
+	offset: number;
+	size: number;
+}
+
+// Captures which virtual row anchors the viewport so a size re-estimation can
+// keep the same row visible at the same relative intra-row position.
+export function findSidebarScrollAnchor(
+	virtualItems: VirtualItem[],
+	scrollTop: number,
+): SidebarScrollAnchor | null {
+	const item = virtualItems.find((virtualItem) => virtualItem.start + virtualItem.size > scrollTop);
+	if (!item) return null;
+	return {
+		key: item.key as string | number,
+		offset: scrollTop - item.start,
+		size: item.size,
+	};
+}
+
+// Computes the anchored row's absolute top from the full row list; the anchor
+// row typically falls outside the post-switch visible window, so it cannot be
+// resolved from the visible virtual items alone. The intra-row offset is
+// normalized by the old and new row heights so a shrinking or growing row
+// keeps the anchor row itself inside the viewport.
+export function anchoredSidebarRowTop(
+	rows: SidebarVirtualRow[],
+	anchor: SidebarScrollAnchor,
+	chatItemLayout: SidebarChatItemLayout,
+): number | null {
+	let top = 0;
+	for (const row of rows) {
+		if (row.key === anchor.key) {
+			const size = estimateSidebarVirtualRowSize(row, chatItemLayout);
+			const normalizedOffset = (anchor.offset / anchor.size) * size;
+			return top + Math.min(Math.round(normalizedOffset), size);
+		}
+		top += estimateSidebarVirtualRowSize(row, chatItemLayout);
+	}
+	return null;
 }
