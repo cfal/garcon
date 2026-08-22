@@ -12,6 +12,7 @@ import {
 } from './questions.js';
 import { convertOpencodePermissionTool } from './permission-tool-converter.js';
 import {
+  isOpenCodeNotFoundResult,
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
 } from './sdk-result.js';
@@ -206,6 +207,12 @@ export class OpenCodeDecisionController {
         { signal },
       ),
     ).then((result) => {
+      if (isOpenCodeNotFoundResult(result)) {
+        this.options.logger.debug('Ignoring an OpenCode reply for a missing permission request', {
+          agentSessionId: route.sessionId,
+        });
+        return;
+      }
       throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
     }).catch((error) => {
       const current = this.options.getSession(route.sessionId);

@@ -255,6 +255,16 @@ function diagnosticLogger() {
   };
 }
 
+function missingOpenCodeRequestResult() {
+  return {
+    error: {
+      name: 'NotFoundError',
+      data: { message: 'Question request not found' },
+    },
+    response: { status: 404 },
+  };
+}
+
 function compactionWarningCodes(warnings) {
   return warnings
     .filter(([message]) => message === 'Dropping an OpenCode compaction part')
@@ -707,6 +717,130 @@ describe('OpenCode operation routing', () => {
       sessionId: 'session-1',
     });
     await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('treats a missing unrenderable-question request as already settled', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    questionReject.mockResolvedValueOnce(missingOpenCodeRequestResult());
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-missing',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-missing',
+        sessionID: 'session-1',
+        questions: [],
+        tool: { callID: 'call-question-missing', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => (
+      diagnostics.debug.some(([message]) => (
+        message === 'Ignoring an OpenCode rejection for a missing question request'
+      ))
+      || events.some((event) => event.type === 'run-ended')
+    ));
+    expect(events.some((event) => event.type === 'run-ended')).toBe(false);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    expect(events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished' });
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('treats a missing manual-bypass permission request as already settled', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      permissionReply,
+      promptAsync,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    permissionReply.mockResolvedValueOnce(missingOpenCodeRequestResult());
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'manualBypass',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a permission request.',
+    });
+    eventStream.push({
+      id: 'event-permission-missing',
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'provider-permission-missing',
+        permission: 'bash',
+        tool: { callID: 'call-permission-missing', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => (
+      diagnostics.debug.some(([message]) => (
+        message === 'Ignoring an OpenCode reply for a missing permission request'
+      ))
+      || events.some((event) => event.type === 'run-ended')
+    ));
+    expect(events.some((event) => event.type === 'run-ended')).toBe(false);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    expect(events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished' });
     eventStream.close();
     await runtime.shutdown();
   });

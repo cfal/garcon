@@ -16,6 +16,7 @@ import type {
   OpenCodeOperationRoute,
 } from './operation-routes.js';
 import {
+  isOpenCodeNotFoundResult,
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
@@ -240,6 +241,12 @@ export class OpenCodeQuestionController {
         { signal },
       ),
     ).then((result) => {
+      if (isOpenCodeNotFoundResult(result)) {
+        this.options.logger.debug('Ignoring an OpenCode rejection for a missing question request', {
+          agentSessionId: route.sessionId,
+        });
+        return;
+      }
       throwOpenCodeResultError(result, 'OpenCode unrenderable question reject failed');
     }).catch((error) => {
       const current = this.options.getSession(route.sessionId);
