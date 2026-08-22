@@ -67,6 +67,7 @@ export class SessionCommands {
       tagsToAdd: input.tagsToAdd,
       permissionFallbackPolicy: input.permissionFallbackPolicy,
       handoff: input.handoff,
+      userMessagePresentation: input.userMessagePresentation,
     };
     const replay = await this.support.replayHttpRun(normalizedInput);
     if (replay) {

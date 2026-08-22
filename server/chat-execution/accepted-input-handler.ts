@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { CommandErrorCode } from '../../common/chat-command-contracts.ts';
+import type { UserMessagePresentation } from '../../common/chat-types.ts';
 import type {
   AgentExecutionAdmission,
   AgentSteerOptions,
@@ -74,6 +75,7 @@ export interface AcceptedInputCoordinator {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    userMessagePresentation?: UserMessagePresentation,
   ): Promise<AcceptedSteerOutcome>;
 }
 
@@ -303,6 +305,7 @@ export class AcceptedInputHandler {
         },
         input.target,
         (turnId) => input.settlement.markScheduled(input.command, turnId),
+        input.userMessagePresentation,
       );
       if (outcome.duplicate) {
         await input.settlement.settleDuplicateInput(input.command);
@@ -563,7 +566,10 @@ export class AcceptedInputHandler {
         })));
       const inserted = await this.#checkpointAfter(
         reservation,
-        this.#coordinator.admitInput(input.command.chatId, input.content, input.options),
+        this.#coordinator.admitInput(input.command.chatId, input.content, {
+          ...input.options,
+          userMessagePresentation: input.userMessagePresentation,
+        }),
       );
       if (inserted === false) {
         await input.settlement.settleDuplicateInput(input.command);

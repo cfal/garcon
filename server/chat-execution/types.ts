@@ -7,6 +7,7 @@ import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-sta
 import type {
   ChatStopIntent,
   ChatStopOutcome,
+  UserMessagePresentation,
 } from '../../common/chat-types.ts';
 import type {
   AgentGoalControlHandoff,
@@ -44,6 +45,7 @@ export type UserInputAdmissionOptions = Pick<
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   createdAt?: string;
+  userMessagePresentation?: UserMessagePresentation;
 };
 
 export class QueueEntryMutationError extends DomainError {
@@ -145,6 +147,7 @@ export interface AcceptedDirectInput {
   settlement: CommandSettlementPort;
   preparation?: DirectInputPreparation;
   dispatch?: (admission: AgentExecutionAdmission) => Promise<void>;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AcceptedDirectOperation {
@@ -212,6 +215,7 @@ export interface AcceptedSteerInput {
   transcriptViewId: string;
   target: CapturedSteerTarget;
   settlement: CommandSettlementPort;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AcceptedQueueEntrySteer extends AcceptedSteerInput {

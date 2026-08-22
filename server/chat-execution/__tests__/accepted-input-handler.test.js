@@ -235,6 +235,28 @@ describe('AcceptedInputHandler', () => {
     expect(settle.markScheduled).not.toHaveBeenCalled();
   });
 
+  test('admits direct presentation without exposing it to provider run options', async () => {
+    const presentation = { origin: 'cli', style: 'notice', title: 'Context' };
+    const { handler, m } = scaffold();
+    await handler.schedule({
+      command: command(),
+      content: 'body only',
+      options: { clientRequestId: 'request-1', turnId: 'turn-1' },
+      userMessagePresentation: presentation,
+      settlement: settlement(),
+    });
+
+    expect(m.admitInput).toHaveBeenCalledWith('chat-1', 'body only', {
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+      userMessagePresentation: presentation,
+    });
+    expect(m.runDirect.mock.calls[0][2]).toEqual({
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    });
+  });
+
   test('rolls back preparation before releasing admission on pre-schedule failure', async () => {
     const events = [];
     const registrationError = new Error('append failed');
@@ -442,6 +464,7 @@ describe('AcceptedInputHandler', () => {
       providerContent: 'focus here\n\nresolved context',
       clientMessageId: 'message-steer',
       transcriptViewId: 'view-1',
+      userMessagePresentation: { origin: 'cli', style: 'error', title: 'Stop condition' },
       target: { attempt: {}, identity: { turnId: 'turn-current' } },
       settlement: settle,
     })).resolves.toEqual({ turnId: 'turn-current', duplicate: false });
@@ -454,6 +477,7 @@ describe('AcceptedInputHandler', () => {
       expect.any(Object),
       expect.any(Object),
       expect.any(Function),
+      { origin: 'cli', style: 'error', title: 'Stop condition' },
     );
     expect(m.create).not.toHaveBeenCalled();
   });

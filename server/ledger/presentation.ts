@@ -42,6 +42,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
             ...row.detail.message.metadata,
             clientMessageId: row.detail.clientMessageId,
           },
+          row.detail.message.presentation,
         )
         : row.detail.message;
     case 'provider-row':

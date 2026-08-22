@@ -90,6 +90,7 @@ export class StartCommands {
       thinkingMode: input.thinkingMode,
       agentSettings: input.agentSettings,
       tags: input.tags ?? [],
+      userMessagePresentation: input.userMessagePresentation,
     };
   }
 
@@ -131,6 +132,7 @@ export class StartCommands {
         images: input.images.length > 0 ? input.images : undefined,
         agentSettings: input.agentSettings,
       },
+      userMessagePresentation: input.userMessagePresentation,
       settlement: this.support.settlement,
       preparation: {
         operation: 'chat-start',
@@ -289,6 +291,7 @@ function startPayload(input: NormalizedChatStart): Record<string, unknown> {
     thinkingMode: input.thinkingMode,
     agentSettings: input.agentSettings,
     tags: input.tags,
+    userMessagePresentation: input.userMessagePresentation ?? null,
   };
 }
 
@@ -311,5 +314,6 @@ function startReplayPayload(
     thinkingMode: input.thinkingMode,
     agentSettings: input.agentSettings,
     tags: input.tags ?? [],
+    userMessagePresentation: input.userMessagePresentation ?? null,
   };
 }

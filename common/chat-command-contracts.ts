@@ -16,7 +16,11 @@ import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
-import type { ChatStopOutcome } from './chat-types.js';
+import {
+  parseUserMessagePresentation,
+  type ChatStopOutcome,
+  type UserMessagePresentation,
+} from './chat-types.js';
 import {
   CommandRequestValidationError,
   optionalNonEmptyString,
@@ -155,6 +159,7 @@ export interface StartChatCommandRequest {
   command: string;
   images?: AgentCommandImage[];
   tags?: string[];
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AgentRunCommandRequest {
@@ -176,6 +181,7 @@ export interface AgentRunCommandRequest {
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
   handoff?: AgentHandoffRequest;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AgentHandoffTarget {
@@ -263,6 +269,7 @@ export interface SteerCommandRequest {
   chatId: string;
   transcriptViewId: string;
   content: string;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface SteerCommandResponse extends CommandAcceptedResponse {
@@ -450,6 +457,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
   const images = optionalImages(body.images);
   const command = contentOrImages(body, 'command', images).trim();
   const agentSettings = requiredAgentSettings(body.agentSettings, 'agentSettings');
+  const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   if (agentSettings.ownerId !== agentId) {
     throw new CommandRequestValidationError('agentSettings must be owned by agentId');
   }
@@ -469,12 +477,14 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     command,
     ...(images === undefined ? {} : { images }),
     tags: normalizeTags(Array.isArray(body.tags) ? body.tags : []),
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
 }
 
 export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequest {
   const body = requestRecord(value);
   const handoff = optionalAgentHandoffRequest(body.handoff);
+  const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   const images = optionalImages(body.images);
   const model = optionalNonEmptyString(body, 'model');
   const apiProviderId = optionalNullableString(body, 'apiProviderId');
@@ -543,6 +553,7 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
       ? { permissionFallbackPolicy }
       : {}),
     ...(handoff === undefined ? {} : { handoff }),
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
 }
 
@@ -745,13 +756,25 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
 
 export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
   const body = requestRecord(value);
+  const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
+}
+
+function parseCommandUserMessagePresentation(value: unknown): UserMessagePresentation | undefined {
+  try {
+    return parseUserMessagePresentation(value);
+  } catch (error) {
+    throw new CommandRequestValidationError(
+      error instanceof Error ? error.message : 'userMessagePresentation is invalid',
+    );
+  }
 }
 
 export function parseQueueEntrySteerCommandRequest(value: unknown): QueueEntrySteerCommandRequest {
