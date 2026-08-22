@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { OpenCodeSession } from './turn-events.js';
 import type { OpenCodeOperationRoute } from './operation-routes.js';
 import {
   OpenCodeQuestionController,
@@ -94,14 +93,7 @@ interface PendingOpenCodePermission {
   readonly operation: AgentRuntimeOperation;
 }
 
-interface OpenCodeDecisionControllerOptions extends OpenCodeQuestionControllerOptions {
-  readonly getSession: (agentSessionId: string) => OpenCodeSession | undefined;
-  readonly failTurn: (
-    agentSessionId: string,
-    session: OpenCodeSession,
-    message: string,
-  ) => void;
-}
+type OpenCodeDecisionControllerOptions = OpenCodeQuestionControllerOptions;
 
 export class OpenCodeDecisionController {
   readonly #pending = new Set<PendingOpenCodePermission>();
@@ -118,7 +110,7 @@ export class OpenCodeDecisionController {
     route: OpenCodeOperationRoute,
   ): boolean {
     if (event.type === 'question.asked') {
-      this.#questions.handle(event, sessionId, route);
+      this.#questions.handle(client, event, sessionId, route);
       return true;
     }
     if (event.type !== 'permission.asked') return false;

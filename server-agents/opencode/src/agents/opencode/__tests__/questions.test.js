@@ -89,4 +89,24 @@ describe('OpenCode questions', () => {
     expect(() => mapOpenCodeQuestionDecision(QUESTIONS, { allow: true }))
       .toThrow('missing an answered response');
   });
+
+  it.each([
+    {
+      answers: [{ questionId: 'unknown-question', selectedOptionIds: [] }],
+      expected: 'unknown question ID',
+    },
+    {
+      answers: [{ questionId: 'question-1', selectedOptionIds: ['unknown-option'] }],
+      expected: 'unknown option ID',
+    },
+  ])('refuses provider answers containing an $expected', ({ answers, expected }) => {
+    expect(() => mapOpenCodeQuestionDecision(QUESTIONS, {
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers,
+      },
+    })).toThrow(expected);
+  });
 });

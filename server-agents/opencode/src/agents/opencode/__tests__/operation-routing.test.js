@@ -627,6 +627,63 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
+  it('rejects an owned question that has no renderable prompts', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-empty',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-empty',
+        sessionID: 'session-1',
+        questions: [],
+        tool: { callID: 'call-question-empty', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => questionReject.mock.calls.length === 1);
+    expect(questionReject.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-question-empty',
+    });
+    expect(events.filter((event) => event.type === 'permission')).toEqual([]);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
   it('[TLV5-L07.03-OPENCODE-UNIT-01] publishes late named rows and permissions through the operation that produced them', async () => {
     const { eventStream, permissionReply, promptAsync, runtime } = createRuntime(['session-1']);
     const firstEvents = [];

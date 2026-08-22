@@ -5,6 +5,7 @@ import type {
 } from '@garcon/common/chat-command-contracts';
 import type { AskUserQuestionPrompt } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
+import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type {
   AgentRuntimeEvent,
   AgentRuntimeOperation,
@@ -18,6 +19,7 @@ import {
 } from './sdk-result.js';
 import type { SSEEvent } from './sse-events.js';
 import { convertOpenCodeQuestionToolUse } from './tool-use-converter.js';
+import type { OpenCodeSession } from './turn-events.js';
 
 export interface OpenCodeQuestionRequest {
   readonly requestId: string;
@@ -51,6 +53,12 @@ export interface OpenCodeQuestionControllerOptions {
     scope: OpenCodeRequestScope,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
   ) => Promise<T>;
+  readonly getSession: (agentSessionId: string) => OpenCodeSession | undefined;
+  readonly failTurn: (
+    agentSessionId: string,
+    session: OpenCodeSession,
+    message: string,
+  ) => void;
 }
 
 export function extractOpenCodeQuestionRequest(event: SSEEvent): OpenCodeQuestionRequest | null {
@@ -101,17 +109,24 @@ export function mapOpenCodeQuestionDecision(
     throw new Error('OpenCode question decision is missing an answered response');
   }
 
-  const answersByQuestion = new Map(
-    response.answers.map((answer) => [answer.questionId, answer.selectedOptionIds]),
-  );
+  const questionsById = new Map(questions.map((question) => [question.id, question]));
+  const answersByQuestion = new Map<string, string[]>();
+  for (const answer of response.answers) {
+    const question = questionsById.get(answer.questionId);
+    if (!question) throw new Error('OpenCode question decision contains an unknown question ID');
+    const optionLabels = new Map(question.options.map((option) => [option.id, option.label]));
+    const labels = answer.selectedOptionIds.map((optionId) => {
+      const label = optionLabels.get(optionId);
+      if (label === undefined) {
+        throw new Error('OpenCode question decision contains an unknown option ID');
+      }
+      return label;
+    });
+    answersByQuestion.set(answer.questionId, labels);
+  }
   return {
     kind: 'reply',
-    answers: questions.map((question) => {
-      const optionLabels = new Map(question.options.map((option) => [option.id, option.label]));
-      return (answersByQuestion.get(question.id) ?? [])
-        .map((optionId) => optionLabels.get(optionId) ?? optionId)
-        .filter(Boolean);
-    }),
+    answers: questions.map((question) => answersByQuestion.get(question.id) ?? []),
   };
 }
 
@@ -120,7 +135,12 @@ export class OpenCodeQuestionController {
 
   constructor(private readonly options: OpenCodeQuestionControllerOptions) {}
 
-  handle(event: SSEEvent, sessionId: string, route: OpenCodeOperationRoute): void {
+  handle(
+    client: any,
+    event: SSEEvent,
+    sessionId: string,
+    route: OpenCodeOperationRoute,
+  ): void {
     const toolMessageId = event.properties?.tool?.messageID;
     if (
       typeof toolMessageId !== 'string'
@@ -145,6 +165,10 @@ export class OpenCodeQuestionController {
         agentSessionId: sessionId,
         eventId: event.id ?? null,
       });
+      const requestId = typeof event.properties?.id === 'string' && event.properties.id
+        ? event.properties.id
+        : null;
+      if (requestId) this.#rejectUnrenderable(client, route, requestId);
       return;
     }
     const permissionOccurrenceId = crypto.randomUUID();
@@ -194,6 +218,33 @@ export class OpenCodeQuestionController {
 
   clear(): void {
     this.#pending.clear();
+  }
+
+  #rejectUnrenderable(
+    client: any,
+    route: OpenCodeOperationRoute,
+    requestId: string,
+  ): void {
+    void this.options.runScopedRequest(
+      'OpenCode unrenderable question reject',
+      { directory: route.directory },
+      (signal, requestScope) => client.question.reject(
+        withOpenCodeRequestScope({ requestID: requestId }, requestScope),
+        { signal },
+      ),
+    ).then((result) => {
+      throwOpenCodeResultError(result, 'OpenCode unrenderable question reject failed');
+    }).catch((error) => {
+      const current = this.options.getSession(route.sessionId);
+      if (current?.status !== 'running' || current.turn !== route.turn) {
+        this.options.logger.debug('Ignoring a late OpenCode question rejection failure', {
+          agentSessionId: route.sessionId,
+          error: errorMessage(error),
+        });
+        return;
+      }
+      this.options.failTurn(route.sessionId, current, errorMessage(error));
+    });
   }
 
   async #resolve(

@@ -387,6 +387,37 @@ describeOnLinux('scripted OpenCode permissions', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('rejects an empty question request instead of leaving the turn blocked', async () => {
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_empty',
+      'question',
+      { questions: [] },
+    )]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-question-empty', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_EMPTY_QUESTION_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal.type).toBe('agent-run-finished');
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('auto-replies once in manualBypass without emitting a user permission row', async () => {
     const testEnvironment = requireEnvironment();
     const toolMarker = marker('MANUAL_BYPASS_OUTPUT');
