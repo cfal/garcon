@@ -1189,14 +1189,21 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
   if (toolUseMessage) return toolUseMessage;
 
   switch (data.type) {
-	    case 'user-message':
-	      return new UserMessage(
-	        str(data.timestamp),
-	        str(data.content),
-	        asChatImages(data.images),
-	        parseChatMessageMetadata(data.metadata),
-	        parseUserMessagePresentation(data.presentation),
-	      );
+    case 'user-message': {
+      let presentation: UserMessagePresentation | undefined;
+      try {
+        presentation = parseUserMessagePresentation(data.presentation);
+      } catch {
+        return null;
+      }
+      return new UserMessage(
+        str(data.timestamp),
+        str(data.content),
+        asChatImages(data.images),
+        parseChatMessageMetadata(data.metadata),
+        presentation,
+      );
+    }
     case 'assistant-message':
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'thinking':
