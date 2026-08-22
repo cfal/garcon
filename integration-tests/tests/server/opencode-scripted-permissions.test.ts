@@ -675,6 +675,53 @@ describeOnLinux('scripted OpenCode permissions', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('rejects a partially unrenderable question request instead of shifting answers', async () => {
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_gap',
+      'question',
+      {
+        questions: [
+          {
+            header: 'Hidden',
+            question: '',
+            options: [{ label: 'Wrong answer', description: 'Must not receive a later answer.' }],
+          },
+          {
+            header: 'Visible',
+            question: 'SCRIPTED_OPENCODE_PERMISSION_QUESTION_GAP_VISIBLE',
+            options: [
+              { label: 'Yes', description: 'Choose yes.' },
+              { label: 'No', description: 'Choose no.' },
+            ],
+          },
+        ],
+      },
+    )]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-question-gap', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_PERMISSION_QUESTION_GAP_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal.type).toBe('agent-run-finished');
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([]);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('surfaces a task child blocker without exposing its transcript', async () => {
     const testEnvironment = requireEnvironment();
     const childReply = marker('TASK_CHILD_REPLY');

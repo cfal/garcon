@@ -112,7 +112,7 @@ export function convertOpenCodeQuestionToolUse(
   for (const [questionIndex, entry] of value.entries()) {
     const rawQuestion = asObject(entry);
     const prompt = asString(rawQuestion.question);
-    if (!prompt) continue;
+    if (!prompt) return null;
     const options: AskUserQuestionPrompt['options'] = [];
     if (Array.isArray(rawQuestion.options)) {
       for (const [optionIndex, entry] of rawQuestion.options.entries()) {

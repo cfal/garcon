@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
+  convertOpenCodeQuestionToolUse,
   convertOpenCodeToolUse,
   OPENCODE_BUILTIN_TOOL_IDS,
 } from '../tool-use-converter.js';
@@ -242,6 +243,21 @@ describe('convertOpenCodeToolUse', () => {
 
     expect(msg).toBeInstanceOf(UnknownToolUseMessage);
     expect(msg.rawName).toBe('question');
+  });
+
+  it('refuses a question array when any provider prompt is unrenderable', () => {
+    expect(convertOpenCodeQuestionToolUse(TS, 'oc-question-gap', [
+      {
+        header: 'Hidden',
+        question: '',
+        options: [{ label: 'Wrong answer' }],
+      },
+      {
+        header: 'Visible',
+        question: 'Choose safely?',
+        options: [{ label: 'Yes' }, { label: 'No' }],
+      },
+    ])).toBeNull();
   });
 
   it('maps custom and plugin tools to the explicit external tool contract', () => {
