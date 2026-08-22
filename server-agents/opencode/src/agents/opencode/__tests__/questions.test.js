@@ -6,20 +6,20 @@ import {
 
 const QUESTIONS = [
   {
-    id: 'Which mode?',
+    id: 'question-1',
     prompt: 'Which mode?',
     options: [
-      { id: 'Fast', label: 'Fast' },
-      { id: 'Careful', label: 'Careful' },
+      { id: 'question-1-option-1', label: 'Fast' },
+      { id: 'question-1-option-2', label: 'Careful' },
     ],
     allowMultiple: false,
   },
   {
-    id: 'Which checks?',
+    id: 'question-2',
     prompt: 'Which checks?',
     options: [
-      { id: 'Unit', label: 'Unit tests' },
-      { id: 'Integration', label: 'Integration tests' },
+      { id: 'question-2-option-1', label: 'Unit tests' },
+      { id: 'question-2-option-2', label: 'Integration tests' },
     ],
     allowMultiple: true,
   },
@@ -58,8 +58,11 @@ describe('OpenCode questions', () => {
         type: 'ask-user-question-response',
         outcome: 'answered',
         answers: [
-          { questionId: 'Which checks?', selectedOptionIds: ['Unit', 'Integration'] },
-          { questionId: 'Which mode?', selectedOptionIds: ['Careful'] },
+          {
+            questionId: 'question-2',
+            selectedOptionIds: ['question-2-option-1', 'question-2-option-2'],
+          },
+          { questionId: 'question-1', selectedOptionIds: ['question-1-option-2'] },
         ],
       },
     })).toEqual({

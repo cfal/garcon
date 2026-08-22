@@ -4,6 +4,7 @@
 import {
   AskUserQuestionToolUseMessage,
   BashToolUseMessage,
+  ExecToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
   WriteToolUseMessage,
@@ -19,6 +20,7 @@ import {
   WriteStdinToolUseMessage,
   EnterPlanModeToolUseMessage,
   ExitPlanModeToolUseMessage,
+  ExternalToolUseMessage,
   UnknownToolUseMessage,
   type ToolUseChatMessage,
   type AskUserQuestionPrompt,
@@ -73,6 +75,33 @@ function canonicalize(raw: unknown): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
+// Pins the built-in tool inventory shipped by OpenCode 1.18.19 so dependency
+// upgrades must reconcile every provider-owned tool with Garcon's contract.
+// https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/tool/registry.ts#L229-L249
+export const OPENCODE_BUILTIN_TOOL_IDS = Object.freeze([
+  'invalid',
+  'question',
+  'bash',
+  'read',
+  'glob',
+  'grep',
+  'edit',
+  'write',
+  'task',
+  'webfetch',
+  'todowrite',
+  'websearch',
+  'skill',
+  'apply_patch',
+  'execute',
+  'lsp',
+  'plan_exit',
+] as const);
+
+const OPENCODE_BUILTIN_TOOL_KEYS = new Set<string>(
+  OPENCODE_BUILTIN_TOOL_IDS.map(canonicalize),
+);
+
 export function convertOpenCodeQuestionToolUse(
   ts: string,
   toolId: string,
@@ -80,24 +109,27 @@ export function convertOpenCodeQuestionToolUse(
 ): AskUserQuestionToolUseMessage | null {
   if (!Array.isArray(value)) return null;
   const questions: AskUserQuestionPrompt[] = [];
-  for (const entry of value) {
+  for (const [questionIndex, entry] of value.entries()) {
     const rawQuestion = asObject(entry);
     const prompt = asString(rawQuestion.question);
     if (!prompt) continue;
     const options: AskUserQuestionPrompt['options'] = [];
     if (Array.isArray(rawQuestion.options)) {
-      for (const entry of rawQuestion.options) {
+      for (const [optionIndex, entry] of rawQuestion.options.entries()) {
         const rawOption = asObject(entry);
         const label = asString(rawOption.label);
         if (!label) continue;
-        const option: AskUserQuestionPrompt['options'][number] = { id: label, label };
+        const option: AskUserQuestionPrompt['options'][number] = {
+          id: `question-${questionIndex + 1}-option-${optionIndex + 1}`,
+          label,
+        };
         const description = asString(rawOption.description);
         if (description !== undefined) option.description = description;
         options.push(option);
       }
     }
     const question: AskUserQuestionPrompt = {
-      id: prompt,
+      id: `question-${questionIndex + 1}`,
       prompt,
       options,
       allowMultiple: asBoolean(rawQuestion.multiple) ?? false,
@@ -157,11 +189,11 @@ export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMe
       return new WriteToolUseMessage(ts, toolId, filePath, asString(input.content));
     }
 
-    case 'applypatch':
-      return new ApplyPatchToolUseMessage(ts, toolId,
-        asString(input.file_path ?? input.filePath),
-        asString(input.old_string ?? input.oldString),
-        asString(input.new_string ?? input.newString));
+    case 'applypatch': {
+      const patch = asString(input.patchText ?? input.patch_text ?? input.patch);
+      if (patch === undefined) break;
+      return new ApplyPatchToolUseMessage(ts, toolId, undefined, undefined, undefined, patch);
+    }
 
     case 'grep':
       return new GrepToolUseMessage(ts, toolId,
@@ -195,7 +227,7 @@ export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMe
         asString(input.description),
         asString(input.prompt),
         asString(input.model),
-        asString(input.resume));
+        asString(input.task_id ?? input.taskId ?? input.resume));
 
     case 'updateplan':
       return new UpdatePlanToolUseMessage(ts, toolId, normalizeTodoItems(input.items ?? input.todos));
@@ -210,9 +242,7 @@ export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMe
     case 'exitplanmode':
     case 'exitplan':
     case 'planexit': {
-      const plan = asString(input.plan);
-      if (plan === undefined) break;
-      return new ExitPlanModeToolUseMessage(ts, toolId, plan,
+      return new ExitPlanModeToolUseMessage(ts, toolId, asString(input.plan) ?? '',
         Array.isArray(input.allowedPrompts) ? input.allowedPrompts : undefined);
     }
 
@@ -221,7 +251,22 @@ export function convertOpenCodeToolUse(ts: string, part: unknown): ToolUseChatMe
       if (question) return question;
       break;
     }
+
+    case 'execute': {
+      const code = asString(input.code);
+      if (code === undefined) break;
+      return new ExecToolUseMessage(ts, toolId, code, 'javascript');
+    }
+
+    case 'skill':
+    case 'lsp':
+    case 'invalid':
+      return new ExternalToolUseMessage(ts, toolId, rawName, asInput(state.input), 'opencode');
   }
 
-  return new UnknownToolUseMessage(ts, toolId, rawName, asInput(state.input));
+  const normalizedInput = asInput(state.input);
+  if (typeof rawPart.tool !== 'string' || OPENCODE_BUILTIN_TOOL_KEYS.has(key)) {
+    return new UnknownToolUseMessage(ts, toolId, rawName, normalizedInput);
+  }
+  return new ExternalToolUseMessage(ts, toolId, rawName, normalizedInput, 'opencode');
 }
