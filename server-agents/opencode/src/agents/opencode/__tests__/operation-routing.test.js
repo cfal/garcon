@@ -182,6 +182,33 @@ function pushAssistant(eventStream, {
   });
 }
 
+function pushTaskChild(eventStream, {
+  childSessionId,
+  eventId,
+  messageId,
+  parentSessionId,
+}) {
+  eventStream.push({
+    id: eventId,
+    type: 'message.part.updated',
+    properties: {
+      sessionID: parentSessionId,
+      part: {
+        id: `part-task-${childSessionId}`,
+        messageID: messageId,
+        type: 'tool',
+        tool: 'task',
+        callID: `call-task-${childSessionId}`,
+        state: {
+          status: 'running',
+          input: { description: 'Run a deterministic child task' },
+          metadata: { sessionId: childSessionId },
+        },
+      },
+    },
+  });
+}
+
 function pushTerminal(eventStream, {
   eventId,
   messageId,
@@ -672,6 +699,177 @@ describe('OpenCode operation routing', () => {
       requestID: 'provider-question-empty',
     });
     expect(events.filter((event) => event.type === 'permission')).toEqual([]);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes a task child permission through its exact parent operation and hides child output', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      permissionReply,
+      promptAsync,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Starting a child task.',
+    });
+    pushTaskChild(eventStream, {
+      childSessionId: 'session-child',
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentSessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-child-user',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-child',
+        info: { id: 'child-user', role: 'user' },
+      },
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 6,
+      messageId: 'child-assistant',
+      parentId: 'child-user',
+      sessionId: 'session-child',
+      text: 'CHILD_OUTPUT_MUST_STAY_HIDDEN',
+    });
+    eventStream.push({
+      id: 'event-child-permission',
+      type: 'permission.asked',
+      properties: {
+        id: 'provider-child-permission',
+        sessionID: 'session-child',
+        permission: 'doom_loop',
+        patterns: ['bash'],
+        metadata: { tool: 'bash', input: { command: 'true' } },
+        tool: { callID: 'call-child-bash', messageID: 'child-assistant' },
+      },
+    });
+
+    await waitFor(() => events.some((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    )));
+    const requested = events.find((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    ));
+    expect(requested.runId).toBe('run-a');
+    await requested.decision.respond({ allow: true, alwaysAllow: false });
+    expect(permissionReply.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-child-permission',
+      reply: 'once',
+    });
+    expect(JSON.stringify(events)).not.toContain('CHILD_OUTPUT_MUST_STAY_HIDDEN');
+    expect(diagnostics.warnings).toEqual([]);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes a task child question through its exact parent operation', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Starting a child task.',
+    });
+    pushTaskChild(eventStream, {
+      childSessionId: 'session-child',
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentSessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-child-question',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-child-question',
+        sessionID: 'session-child',
+        questions: [{
+          header: 'Choice',
+          question: 'Choose one',
+          options: [{ label: 'Alpha', description: 'First choice' }],
+        }],
+        tool: { callID: 'call-child-question', messageID: 'child-assistant' },
+      },
+    });
+
+    await waitFor(() => events.some((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    )));
+    const requested = events.find((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    ));
+    expect(requested.lifecycle.requestedTool.type).toBe('ask-user-question-tool-use');
+    await requested.decision.respond({
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'question-1', selectedOptionIds: ['question-1-option-1'] }],
+      },
+    });
+    expect(questionReply.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-child-question',
+      answers: [['Alpha']],
+    });
 
     pushTerminal(eventStream, {
       eventId: 'event-terminal',

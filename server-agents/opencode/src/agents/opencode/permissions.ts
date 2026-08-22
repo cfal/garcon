@@ -2,7 +2,10 @@ import crypto from 'node:crypto';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
-import type { OpenCodeOperationRoute } from './operation-routes.js';
+import type {
+  OpenCodeOperationEventSource,
+  OpenCodeOperationRoute,
+} from './operation-routes.js';
 import {
   OpenCodeQuestionController,
   type OpenCodeQuestionControllerOptions,
@@ -106,22 +109,23 @@ export class OpenCodeDecisionController {
   handle(
     client: any,
     event: SSEEvent,
-    sessionId: string,
+    source: OpenCodeOperationEventSource,
     route: OpenCodeOperationRoute,
   ): boolean {
     if (event.type === 'question.asked') {
-      this.#questions.handle(client, event, sessionId, route);
+      this.#questions.handle(client, event, source, route);
       return true;
     }
     if (event.type !== 'permission.asked') return false;
 
     const toolMessageId = event.properties?.tool?.messageID;
     if (
-      typeof toolMessageId === 'string'
+      source.kind === 'operation'
+      && typeof toolMessageId === 'string'
       && !route.turn.assistantMessageIds.has(toolMessageId)
     ) {
       this.options.logger.warn('Ignoring an OpenCode permission for a message outside its turn', {
-        agentSessionId: sessionId,
+        agentSessionId: route.sessionId,
         eventId: event.id ?? null,
         toolMessageId,
       });
@@ -137,7 +141,7 @@ export class OpenCodeDecisionController {
     const pending: PendingOpenCodePermission = {
       permissionOccurrenceId,
       originalRequestId: permission.requestId,
-      agentSessionId: sessionId,
+      agentSessionId: route.sessionId,
       directory: route.directory,
       operation: route.turn.operation,
     };
@@ -147,7 +151,7 @@ export class OpenCodeDecisionController {
       permissionOccurrenceId,
       permission.toolInput,
     );
-    this.options.publish(sessionId, route.turn.operation, {
+    this.options.publish(route.sessionId, route.turn.operation, {
       type: 'permission',
       runId: route.turn.operation.runId,
       lifecycle: {

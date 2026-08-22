@@ -11,7 +11,10 @@ import type {
   AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { OpenCodeOperationRoute } from './operation-routes.js';
+import type {
+  OpenCodeOperationEventSource,
+  OpenCodeOperationRoute,
+} from './operation-routes.js';
 import {
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
@@ -138,16 +141,19 @@ export class OpenCodeQuestionController {
   handle(
     client: any,
     event: SSEEvent,
-    sessionId: string,
+    source: OpenCodeOperationEventSource,
     route: OpenCodeOperationRoute,
   ): void {
     const toolMessageId = event.properties?.tool?.messageID;
     if (
-      typeof toolMessageId !== 'string'
-      || !route.turn.assistantMessageIds.has(toolMessageId)
+      source.kind === 'operation'
+      && (
+        typeof toolMessageId !== 'string'
+        || !route.turn.assistantMessageIds.has(toolMessageId)
+      )
     ) {
       this.options.logger.warn('Ignoring an OpenCode question for a message outside its turn', {
-        agentSessionId: sessionId,
+        agentSessionId: route.sessionId,
         eventId: event.id ?? null,
       });
       return;
@@ -162,7 +168,8 @@ export class OpenCodeQuestionController {
       : null;
     if (!request || !requestedTool) {
       this.options.logger.warn('Ignoring a malformed OpenCode question request', {
-        agentSessionId: sessionId,
+        agentSessionId: route.sessionId,
+        sourceSessionId: source.sessionId,
         eventId: event.id ?? null,
       });
       const requestId = typeof event.properties?.id === 'string' && event.properties.id
@@ -175,13 +182,13 @@ export class OpenCodeQuestionController {
     const pending: PendingOpenCodeQuestion = {
       permissionOccurrenceId,
       originalRequestId: request.requestId,
-      agentSessionId: sessionId,
+      agentSessionId: route.sessionId,
       directory: route.directory,
       operation: route.turn.operation,
       questions: requestedTool.questions,
     };
     this.#pending.add(pending);
-    this.options.publish(sessionId, route.turn.operation, {
+    this.options.publish(route.sessionId, route.turn.operation, {
       type: 'permission',
       runId: route.turn.operation.runId,
       lifecycle: {

@@ -418,6 +418,83 @@ describeOnLinux('scripted OpenCode permissions', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
+  test('surfaces a task child blocker without exposing its transcript', async () => {
+    const testEnvironment = requireEnvironment();
+    const childReply = marker('TASK_CHILD_REPLY');
+    const finalReply = marker('TASK_PARENT_REPLY');
+    const repeatedCommand = 'printf %s SCRIPTED_OPENCODE_TASK_CHILD_COMMAND';
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_parent_task',
+      'task',
+      {
+        subagent_type: 'general',
+        description: 'Exercise a child blocker',
+        prompt: 'Run the repeated command, then return the child marker.',
+      },
+    )]);
+    testEnvironment.model.scriptTurn([
+      chatCompletionsToolUse('call_child_bash_1', 'bash', { command: repeatedCommand }),
+      chatCompletionsToolUse('call_child_bash_2', 'bash', { command: repeatedCommand }),
+      chatCompletionsToolUse('call_child_bash_3', 'bash', { command: repeatedCommand }),
+    ]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(childReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(finalReply)]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-task-child-permission', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('TASK_CHILD_PROMPT'),
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'request-permissions-tool-use'
+          && row.message.requestedTool.reason === 'DoomLoop',
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('OpenCode task child permission request was not found.');
+      }
+      const decision = await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        allow: true,
+        alwaysAllow: false,
+      });
+      expect(decision.status).toBe('accepted');
+
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: finalReply,
+        afterIndex: cursor,
+      });
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'task-tool-use')).toHaveLength(1);
+      expect(messagesOfType(transcript.messages, 'bash-tool-use')).toEqual([]);
+      expect(JSON.stringify(transcript.messages)).toContain(childReply);
+      expect(messagesOfType(transcript.messages, 'permission-resolved')).toEqual([
+        expect.objectContaining({
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+          allowed: true,
+        }),
+      ]);
+      const serverLogs = fixture.diagnostics().processRuns.flatMap((run) => run.serverLogs);
+      expect(serverLogs.filter((line) => (
+        line.includes('Ignoring an OpenCode event without an operation identity')
+      ))).toHaveLength(1);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(4);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('auto-replies once in manualBypass without emitting a user permission row', async () => {
     const testEnvironment = requireEnvironment();
     const toolMarker = marker('MANUAL_BYPASS_OUTPUT');

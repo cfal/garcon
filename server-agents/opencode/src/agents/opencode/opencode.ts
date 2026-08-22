@@ -66,6 +66,7 @@ import { convertOpenCodeEventToChatMessages } from './event-converter.js';
 import { OpenCodeSteeringController } from './steering.js';
 import {
   OpenCodeOperationRoutes,
+  type OpenCodeOperationEventSource,
   type OpenCodeOperationRoute,
 } from './operation-routes.js';
 import {
@@ -718,19 +719,36 @@ export class OpenCodeRuntime {
       return;
     }
 
+    const taskChildRoute = this.#operationRoutes.resolveTaskChild(sessionId);
+    if (
+      taskChildRoute
+      && event.type !== 'permission.asked'
+      && event.type !== 'question.asked'
+    ) {
+      this.#logger.debug('Ignoring an OpenCode task child transcript event', {
+        eventId: event.id ?? null,
+        eventType: event.type,
+        parentSessionId: taskChildRoute.sessionId,
+        childSessionId: sessionId,
+      });
+      return;
+    }
+
     // Marked parts always pass through current-turn adoption so a foreign named ID cannot
     // bypass collision refusal through ordinary named resolution.
     const isCompactionPart = isOpenCodeCompactionControlPart(event)
       || isOpenCodeCompactionContinuationPart(event);
-    const route = isCompactionPart
-      ? adoptOpenCodeCompactionPartRoute({
-          event,
-          logger: this.#logger,
-          operationRoutes: this.#operationRoutes,
-          session: this.#sessions.get(sessionId),
-          sessionId,
-        })
-      : this.#operationRoutes.resolve(sessionId, event);
+    const route = taskChildRoute ?? (
+      isCompactionPart
+        ? adoptOpenCodeCompactionPartRoute({
+            event,
+            logger: this.#logger,
+            operationRoutes: this.#operationRoutes,
+            session: this.#sessions.get(sessionId),
+            sessionId,
+          })
+        : this.#operationRoutes.resolve(sessionId, event)
+    );
     if (!route) {
       if (isCompactionPart) return;
       const part = event.properties?.part;
@@ -759,13 +777,19 @@ export class OpenCodeRuntime {
     }
     if (!acceptUniqueOpenCodeTurnEvent(route.turn, event, this.#logger)) return;
 
-    const session = this.#sessions.get(sessionId);
+    const source: OpenCodeOperationEventSource = taskChildRoute
+      ? { kind: 'task-child', sessionId }
+      : { kind: 'operation', sessionId };
+    const session = this.#sessions.get(route.sessionId);
     const isCurrentTurn = session?.turn === route.turn;
-    if (this.#decisions.handle(client, event, sessionId, route)) return;
+    if (this.#decisions.handle(client, event, source, route)) return;
     if (isCurrentTurn) this.steering.observeAcknowledgement(session, event);
     const belongs = openCodeEventBelongsToTurn(route.turn, event);
     this.#operationRoutes.observe(route, event);
-    if (belongs) this.#dispatchOpenCodeEvent(event, route);
+    if (belongs) {
+      this.#operationRoutes.bindTaskChildSession(route, event);
+      this.#dispatchOpenCodeEvent(event, route);
+    }
     const terminal = belongs ? openCodeAssistantTerminal(event) : null;
     if (terminal) route.turn.assistantTerminals.set(terminal.messageId, terminal);
   }
