@@ -343,6 +343,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       if (permission.message.type !== 'permission-request') {
         throw new Error('Interrupted OpenCode question request was not found.');
       }
+      const permissionOccurrenceId = permission.message.permissionOccurrenceId;
 
       const stopCursor = fixture.client.markEvents();
       expect(await fixture.client.stopChat({
@@ -362,7 +363,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
           && event.chatId === chatId
           && event.messages.some((entry) => entry.message.type === 'permission-cancelled'
             && entry.message.permissionOccurrenceId
-              === permission.message.permissionOccurrenceId),
+              === permissionOccurrenceId),
         'OpenCode question cancellation',
         { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
@@ -370,7 +371,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       const stopped = await fixture.client.getMessages(chatId);
       expect(messagesOfType(stopped.messages, 'permission-cancelled')).toEqual([
         expect.objectContaining({
-          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+          permissionOccurrenceId,
         }),
       ]);
       expect(messagesOfType(stopped.messages, 'permission-resolved')).toEqual([]);
