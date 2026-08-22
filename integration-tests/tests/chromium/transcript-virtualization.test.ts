@@ -3041,7 +3041,7 @@ async function verifyBackwardScrollRemountMeasurement(fixture: ChromiumFixture):
   const settled = result.settlementFrames.at(-1);
   expect(settled?.spacing, diagnostic).toBeCloseTo(40, 0);
   expect(settled?.followerTop, diagnostic).toBeCloseTo(result.beforeSettlement.followerTop, 0);
-  expect(settled?.scrollTop - result.beforeSettlement.scrollTop, diagnostic).toBeCloseTo(-120, 0);
+  expect(settled!.scrollTop - result.beforeSettlement.scrollTop, diagnostic).toBeCloseTo(-120, 0);
   fixture.assertNoBrowserErrors();
 }
 
