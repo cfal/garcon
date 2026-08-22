@@ -1,6 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
@@ -13,6 +14,7 @@ import {
 } from '../../support/integration-fixture.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
+  reloadFromNativeHistory,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -299,6 +301,260 @@ describeOnLinux('scripted OpenCode permissions', () => {
           allowed: true,
         }),
       ]);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = await fixture.client.getMessages(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(transcript.transcriptViewId);
+      expect(messagesOfType(reloaded.messages, 'ask-user-question-tool-use')).toHaveLength(1);
+      expect(messagesOfType(reloaded.messages, 'unknown-tool-use')).toEqual([]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('cancels a pending question once on interrupt and leaves the next turn clean', async () => {
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_interrupted',
+      'question',
+      {
+        questions: [{
+          header: 'Interrupt',
+          question: 'Continue this turn?',
+          options: [{ label: 'Continue', description: 'Continue the active turn.' }],
+        }],
+      },
+    )]);
+
+    await withIntegrationFixture('opencode-question-interrupt', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_QUESTION_INTERRUPT_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'ask-user-question-tool-use',
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Interrupted OpenCode question request was not found.');
+      }
+
+      const stopCursor = fixture.client.markEvents();
+      expect(await fixture.client.stopChat({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      })).toMatchObject({ outcome: 'interrupt-requested' });
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: stopCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      await fixture.client.waitForSessionStopped(chatId, {
+        afterIndex: stopCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) => entry.message.type === 'permission-cancelled'
+            && entry.message.permissionOccurrenceId
+              === permission.message.permissionOccurrenceId),
+        'OpenCode question cancellation',
+        { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+
+      const stopped = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(stopped.messages, 'permission-cancelled')).toEqual([
+        expect.objectContaining({
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        }),
+      ]);
+      expect(messagesOfType(stopped.messages, 'permission-resolved')).toEqual([]);
+
+      testEnvironment.model.reset();
+      const recoveryReply = 'SCRIPTED_OPENCODE_QUESTION_INTERRUPT_RECOVERY_REPLY';
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: 'SCRIPTED_OPENCODE_QUESTION_INTERRUPT_RECOVERY_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: recoveryReply,
+        afterIndex: recoveryCursor,
+      });
+
+      const recovered = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(recovered.messages, 'permission-cancelled')).toHaveLength(1);
+      expect(messagesOfType(recovered.messages, 'permission-resolved')).toEqual([]);
+      expect(messagesOfType(recovered.messages, 'unknown-tool-use')).toEqual([]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('delivers steering accepted during a pending question exactly once', async () => {
+    const testEnvironment = requireEnvironment();
+    const reply = 'SCRIPTED_OPENCODE_QUESTION_STEER_REPLY';
+    const steering = 'SCRIPTED_OPENCODE_QUESTION_STEER_GUIDANCE';
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_steered',
+      'question',
+      {
+        questions: [{
+          header: 'Mode',
+          question: 'Which mode?',
+          options: [{ label: 'Careful', description: 'Check each boundary.' }],
+        }],
+      },
+    )]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-question-steer', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_QUESTION_STEER_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'ask-user-question-tool-use',
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Steered OpenCode question request was not found.');
+      }
+
+      expect(await fixture.client.steer({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        chatId,
+        content: steering,
+      })).toMatchObject({ status: 'accepted', turnId: turn.turnId });
+      expect(await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        allow: true,
+        alwaysAllow: false,
+        response: {
+          type: 'ask-user-question-response',
+          outcome: 'answered',
+          answers: [{
+            questionId: 'question-1',
+            selectedOptionIds: ['question-1-option-1'],
+          }],
+        },
+      })).toMatchObject({ status: 'accepted' });
+
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]?.userTexts.filter((text) => text === steering)).toHaveLength(1);
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'permission-resolved',
+      )).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('keeps a pending question inert after restart and rejects its stale control', async () => {
+    const testEnvironment = requireEnvironment();
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse(
+      'call_question_stale',
+      'question',
+      {
+        questions: [{
+          header: 'Restart',
+          question: 'Keep this request active?',
+          options: [{ label: 'No', description: 'Leave the old request inert.' }],
+        }],
+      },
+    )]);
+
+    await withIntegrationFixture('opencode-question-restart', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: 'SCRIPTED_OPENCODE_QUESTION_RESTART_PROMPT',
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'ask-user-question-tool-use',
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Restarted OpenCode question request was not found.');
+      }
+      const beforeRestart = await fixture.client.getChatSnapshot(chatId, 0);
+      const staleControl = {
+        serverInstanceId: beforeRestart.transientFeed.serverInstanceId,
+        chatId,
+        runId: permission.runId,
+        permissionOccurrenceId: permission.permissionOccurrenceId,
+      };
+
+      await fixture.restartGarcon();
+
+      const restarted = await fixture.client.getChatSnapshot(chatId, 0);
+      expect(restarted.transientFeed.serverInstanceId).not.toBe(staleControl.serverInstanceId);
+      expect(restarted.transientFeed.rows).toEqual([]);
+      const transcript = await fixture.client.getMessages(chatId);
+      const durableRequests = messagesOfType(transcript.messages, 'permission-request');
+      expect(durableRequests).toEqual([
+        expect.objectContaining({
+          permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        }),
+      ]);
+      expect(durableRequests[0]?.requestedTool.type).toBe('ask-user-question-tool-use');
+      expect(messagesOfType(transcript.messages, 'permission-resolved')).toEqual([]);
+
+      await expect(fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.message.permissionOccurrenceId,
+        allow: false,
+        alwaysAllow: false,
+        control: staleControl,
+        response: {
+          type: 'ask-user-question-response',
+          outcome: 'skipped',
+          reason: 'The server restarted',
+        },
+      })).rejects.toMatchObject({
+        status: 409,
+        body: {
+          errorCode: 'VALIDATION_FAILED',
+          retryable: false,
+        },
+      });
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId)).messages,
+        'permission-resolved',
+      )).toEqual([]);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
