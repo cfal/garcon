@@ -3,7 +3,7 @@ import type {
   AgentEndpointSelection,
 } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import type { ChatMessage } from '@garcon/common/chat-types';
+import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 
 export interface DirectEndpointRuntime {
@@ -26,7 +26,6 @@ export interface DirectExecutionRequest {
   readonly command: string;
   readonly images?: readonly AgentAttachment[];
   readonly endpoint: DirectEndpointRuntime;
-  readonly priorContext?: readonly ChatMessage[];
   readonly operation: AgentRuntimeOperation;
 }
 
@@ -36,10 +35,12 @@ export interface DirectStartRequest extends DirectExecutionRequest {
 
 export interface DirectResumeRequest extends DirectExecutionRequest {
   readonly agentSessionId: string;
+  readonly nativeSession: AgentNativeSessionRef | null;
 }
 
 export interface DirectStartedSession {
   readonly agentSessionId: string;
+  readonly nativeSession: AgentNativeSessionRef;
 }
 
 export function assertDirectExecutionOpen(

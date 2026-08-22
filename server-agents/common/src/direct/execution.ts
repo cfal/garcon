@@ -9,6 +9,7 @@ import {
   type AgentRuntimeExecutionContext,
 } from '../execution/runtime-events.js';
 import type { AgentEstablishedSession } from '@garcon/server-agent-interface';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import { resolveAgentEndpoint } from '../execution/resolve-endpoint.js';
 import type { DirectEndpointRouterRuntime, DirectCompatibleRuntime } from './router.js';
 
@@ -25,19 +26,28 @@ implements AgentRuntimeExecution {
   ) {
     const endpoint = await this.#endpoint(request);
     let established: AgentEstablishedSession | null = null;
-    const establish = (result: { readonly agentSessionId: string }) => {
+    const establish = (result: {
+      readonly agentSessionId: string;
+      readonly nativeSession: AgentEstablishedSession['nativeSession'];
+    }) => {
       if (established) return established;
       established = {
         agentSessionId: result.agentSessionId,
-        nativeSession: null,
-        nativeSeedReceipt: null,
+        nativeSession: result.nativeSession,
+        nativeSeedReceipt: receiptForCarriedContext(
+          request.carriedContext,
+          result.agentSessionId,
+          'user-prefix',
+        ),
       };
       publish({ type: 'session', session: established });
       return established;
     };
     const result = await this.runtime.startSession({
       ...executionFields(request),
-      command: request.prompt,
+      command: request.carriedContext
+        ? `${request.carriedContext.prefix}${request.prompt}`
+        : request.prompt,
       images: request.attachments,
       endpoint,
       operation: runtimeOperation(request.runId, publish),
@@ -54,6 +64,7 @@ implements AgentRuntimeExecution {
     await this.runtime.runTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
+      nativeSession: request.nativeSession,
       command: request.prompt,
       images: request.attachments,
       endpoint,
@@ -101,10 +112,7 @@ implements AgentRuntimeExecution {
   }
 }
 
-function executionFields(
-  request: AgentRuntimeExecutionContext,
-  priorContext = request.priorContext,
-) {
+function executionFields(request: AgentRuntimeExecutionContext) {
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
@@ -115,6 +123,5 @@ function executionFields(
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
-    priorContext,
   };
 }

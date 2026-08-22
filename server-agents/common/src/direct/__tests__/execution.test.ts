@@ -3,6 +3,7 @@ import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
 import { UserMessage } from '@garcon/common/chat-types';
+import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type {
   AgentRuntimeEvent,
   AgentRuntimeOperation,
@@ -10,6 +11,13 @@ import type {
   AgentRuntimeStartRequest,
 } from '../../execution/runtime-events.js';
 import { DirectExecution } from '../execution.js';
+
+const SESSION_ID = '10000000-0000-4000-8000-000000000001';
+const NATIVE_SESSION = {
+  ownerId: 'direct-test',
+  schemaVersion: 1,
+  value: { sessionId: SESSION_ID },
+} as const;
 
 function endpoint(endpointId: string) {
   return {
@@ -51,8 +59,8 @@ function request(modelEndpointId: string): AgentRuntimeResumeRequest {
     endpoint: endpoint(modelEndpointId),
     runId: 'run-1',
     priorContext: [new UserMessage('2026-01-01T00:00:00.000Z', 'earlier')],
-    agentSessionId: 'session-1',
-    nativeSession: null,
+    agentSessionId: SESSION_ID,
+    nativeSession: NATIVE_SESSION,
     prompt: 'continue',
     attachments: [],
     admission: {
@@ -63,9 +71,10 @@ function request(modelEndpointId: string): AgentRuntimeResumeRequest {
 }
 
 describe('DirectExecution', () => {
-  test('sends frozen history as context and keeps the new prompt separate', async () => {
+  test('prefixes a new Direct session with carried context and publishes its receipt', async () => {
     const startSession = mock(async () => ({
-      agentSessionId: 'session-1',
+      agentSessionId: SESSION_ID,
+      nativeSession: NATIVE_SESSION,
     }));
     const runtime = { startSession };
     const execution = new DirectExecution(host(), runtime as never);
@@ -74,16 +83,29 @@ describe('DirectExecution', () => {
       ...base,
       carriedContext: { prefix: '<carried>history</carried>\n\n' },
     };
+    const events: AgentRuntimeEvent[] = [];
 
-    await execution.start(start, () => {});
+    await execution.start(start, (event) => events.push(event));
 
     expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
-      priorContext: start.priorContext,
-      command: 'continue',
+      command: '<carried>history</carried>\n\ncontinue',
     }));
+    expect(startSession.mock.calls[0][0]).not.toHaveProperty('priorContext');
+    expect(events).toEqual([{
+      type: 'session',
+      session: {
+        agentSessionId: SESSION_ID,
+        nativeSession: NATIVE_SESSION,
+        nativeSeedReceipt: receiptForCarriedContext(
+          start.carriedContext,
+          SESSION_ID,
+          'user-prefix',
+        ),
+      },
+    }]);
   });
 
-  test('forwards core-owned context when rebuilding a stateless request', async () => {
+  test('resumes from the exact native session without forwarding ledger context', async () => {
     const runTurn = mock(async () => {});
     const runtime = { runTurn };
     const execution = new DirectExecution(host(), runtime as never);
@@ -91,9 +113,10 @@ describe('DirectExecution', () => {
 
     await expect(execution.resume(resume, () => {})).resolves.toBeUndefined();
     expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({
-      priorContext: resume.priorContext,
+      nativeSession: NATIVE_SESSION,
       command: 'continue',
     }));
+    expect(runTurn.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
 	test('[TLV5-L07.03-DIRECT-UNIT-01] keeps each concrete request bound to the publisher that created it', async () => {
@@ -102,7 +125,7 @@ describe('DirectExecution', () => {
       startSession: mock(async (input: { operation: AgentRuntimeOperation }) => {
         operations.push(input.operation);
         if (operations.length === 2) throw new Error('replacement failed');
-        return { agentSessionId: 'session-1' };
+        return { agentSessionId: SESSION_ID, nativeSession: NATIVE_SESSION };
       }),
     };
     const execution = new DirectExecution(host(), runtime as never);
@@ -129,7 +152,8 @@ describe('DirectExecution', () => {
     const emitted: AgentRuntimeEvent[] = [];
     const runtime = {
       startSession: mock(async () => ({
-        agentSessionId: 'session-1',
+        agentSessionId: SESSION_ID,
+        nativeSession: NATIVE_SESSION,
       })),
     };
     const execution = new DirectExecution(host(), runtime as never);

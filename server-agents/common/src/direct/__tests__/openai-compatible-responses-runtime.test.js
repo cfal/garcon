@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   OpenAiCompatibleResponsesRuntime,
   buildOpenAiResponsesUserContent,
@@ -8,6 +7,10 @@ import {
   extractResponsesOutputText,
   runOpenAiResponsesSingleQuery,
 } from '../openai-compatible-responses-runtime.ts';
+import {
+  createTestDirectSessionStore,
+  removeTestDirectSessionStores,
+} from './session-store-fixture.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -33,6 +36,7 @@ function runtimeConfig(overrides = {}) {
   return {
     runtimeLabel: 'Direct (Responses)',
     defaultModel: 'fallback-model',
+    sessions: createTestDirectSessionStore(),
     getApiKey: () => 'sk-test',
     getBaseUrl: () => 'https://api.example.test/v1',
     ...overrides,
@@ -65,6 +69,7 @@ function capturedMessages(capture) {
 describe('OpenAiCompatibleResponsesRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
+    await removeTestDirectSessionStores();
   });
 
   it('builds text and image input content for the Responses API', () => {
@@ -442,6 +447,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'second',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -453,6 +459,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'third',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -468,8 +475,20 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(requestBodies.every((body) => body.stream === true && body.store === false)).toBe(true);
   });
 
-  it('hydrates an unknown session from the supplied ledger context', async () => {
-    const sessionId = 'persisted-session';
+  it('hydrates an unknown session from persisted native history', async () => {
+    const sessionId = '10000000-0000-4000-8000-000000000001';
+    const sessions = createTestDirectSessionStore();
+    await sessions.create({
+      sessionId,
+      runId: 'run-first',
+      content: 'first message',
+      attachments: [],
+    });
+    await sessions.appendAssistant({
+      sessionId,
+      runId: 'run-first',
+      content: 'first response',
+    });
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -479,20 +498,17 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       ]);
     });
 
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({ sessions }));
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
-      priorContext: [
-        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
-        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
-      ],
       operation: captureOperation('run-hydrated').operation,
     });
 

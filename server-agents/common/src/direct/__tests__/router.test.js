@@ -80,6 +80,7 @@ describe('Direct OpenAI router runtimes', () => {
         runTurn: mock(async () => {}),
         abort: mock(() => false),
         isRunning: mock(() => false),
+        forgetSession: mock(() => {}),
         getRunningSessions: mock(() => []),
         startPurgeTimer: mock(() => {}),
         shutdown: mock(() => {}),
@@ -115,6 +116,62 @@ describe('Direct OpenAI router runtimes', () => {
     expect(runtimes.get('chat_endpoint_b').startPurgeTimer).toHaveBeenCalledTimes(1);
     expect(runtimes.get('chat_endpoint_a').shutdown).toHaveBeenCalledTimes(1);
     expect(runtimes.get('chat_endpoint_b').shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('rehydrates a session whenever its endpoint route or credential changes', async () => {
+    const created = [];
+    const router = new DirectEndpointRouterRuntime({
+      label: 'Direct OpenAI',
+      protocol: 'openai-compatible',
+      createRuntime: mock(() => {
+        const runtime = {
+          startSession: mock(async () => ({
+            agentSessionId: '10000000-0000-4000-8000-000000000001',
+            nativeSession: null,
+          })),
+          runTurn: mock(async () => {}),
+          abort: mock(() => false),
+          isRunning: mock(() => false),
+          forgetSession: mock(() => {}),
+          getRunningSessions: mock(() => []),
+          startPurgeTimer: mock(() => {}),
+          shutdown: mock(() => {}),
+        };
+        created.push(runtime);
+        return runtime;
+      }),
+      runSingleQuery: mock(async () => ''),
+    });
+    const firstEndpoint = endpoint({ credential: 'first-secret' });
+    const changedEndpoint = endpoint({
+      credential: 'second-secret',
+      baseUrl: 'https://other.example.test/v1',
+    });
+    const request = {
+      chatId: 'chat-a',
+      command: 'hello',
+      projectPath: '/workspace',
+      endpoint: firstEndpoint,
+    };
+    const started = await router.startSession(request);
+
+    await router.runTurn({
+      ...request,
+      endpoint: changedEndpoint,
+      agentSessionId: started.agentSessionId,
+      nativeSession: null,
+    });
+    await router.runTurn({
+      ...request,
+      agentSessionId: started.agentSessionId,
+      nativeSession: null,
+    });
+
+    expect(created).toHaveLength(2);
+    expect(created[0].forgetSession).toHaveBeenCalledWith(started.agentSessionId);
+    expect(created[1].forgetSession).toHaveBeenCalledWith(started.agentSessionId);
+    expect(created[0].runTurn).toHaveBeenCalledTimes(1);
+    expect(created[1].runTurn).toHaveBeenCalledTimes(1);
   });
 });
 

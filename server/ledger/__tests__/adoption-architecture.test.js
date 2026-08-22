@@ -90,25 +90,16 @@ describe('transcript adoption architecture', () => {
     }
   });
 
-  it('[TLV5-ADOPT.07-DIRECT-STATIC-01] exposes a read-only Direct legacy importer without a session writer', () => {
-    const directSources = productionFiles('server-agents/common/src/direct');
-    expect(directSources.length).toBeGreaterThan(0);
-    for (const file of directSources) {
-      const source = readFileSync(file, 'utf8');
-      expect(source, file).not.toMatch(
-        /\b(?:appendFile(?:Sync)?|writeFile(?:Sync)?|appendSync|writeSync|createWriteStream|FileSink)\b|\bBun\.write\b|\.writer\s*\(/,
-      );
-      expect(source, file).not.toMatch(
-        /\b(?:open|openSync)\s*\([^\n]*['"`](?:w|wx|w\+|a|ax|a\+|ax\+)['"`]/,
-      );
-      expect(source, file).not.toContain('DirectSessionStore');
-    }
-
+  it('[TLV5-ADOPT.07-DIRECT-STATIC-01] keeps Direct native history provider-owned and disables legacy migration', () => {
+    expect(existsSync('server-agents/common/src/direct/legacy-history-import.ts')).toBe(false);
+    expect(existsSync('server-agents/common/src/direct/legacy-session-relocation.ts')).toBe(false);
     for (const { Integration } of DIRECT_REGISTRATIONS) {
       const integration = new Integration(createHost(Integration.integrationId));
-      expect(Object.keys(integration.legacyHistoryImport ?? {}), Integration.integrationId)
+      expect(integration.legacyHistoryImport, Integration.integrationId).toBeNull();
+      expect(Object.keys(integration.nativeHistoryImport ?? {}), Integration.integrationId)
         .toEqual(['load']);
-      expect(integration.nativeHistoryImport, Integration.integrationId).toBeNull();
+      expect(Object.keys(integration.nativeSessions ?? {}), Integration.integrationId)
+        .toEqual(['resolveNativeSession', 'describeSource', 'release']);
     }
   });
 

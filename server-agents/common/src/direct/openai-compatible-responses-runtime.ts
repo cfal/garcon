@@ -4,6 +4,7 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
 } from "./direct-chat-runtime-base.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
@@ -15,7 +16,6 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
-import type { ChatMessage } from '@garcon/common/chat-types';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -37,9 +37,7 @@ interface ResponsesInputMessage {
   content: ResponsesInputContent;
 }
 
-export interface OpenAiCompatibleResponsesRuntimeConfig {
-  runtimeLabel: string;
-  defaultModel: string;
+export interface OpenAiCompatibleResponsesRuntimeConfig extends DirectChatRuntimeBaseConfig {
   getApiKey: () => string;
   getBaseUrl: () => string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
@@ -288,20 +286,6 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
 
   protected buildAssistantMessage(content: string): ResponsesInputMessage {
     return { role: 'assistant', content };
-  }
-
-  protected contextMessage(message: ChatMessage): ResponsesInputMessage | null {
-    if (message.type === 'user-message') {
-      return {
-        role: 'user',
-        content: buildOpenAiResponsesUserContent(message.content, message.images?.map((image) => ({
-          kind: 'image', data: image.data, name: image.name || null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        }))),
-      };
-    }
-    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
-    return { role: 'assistant', content: JSON.stringify(message) };
   }
 
   protected async streamSession(session: DirectRuntimeSession<ResponsesInputMessage>): Promise<string> {

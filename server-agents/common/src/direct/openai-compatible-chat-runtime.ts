@@ -4,6 +4,7 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
 } from "./direct-chat-runtime-base.js";
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
@@ -14,7 +15,6 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
-import type { ChatMessage } from '@garcon/common/chat-types';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -29,9 +29,7 @@ interface ConversationMessage {
   content: string | OpenAiCompatibleContentPart[];
 }
 
-export interface OpenAiCompatibleChatRuntimeConfig {
-  runtimeLabel: string;
-  defaultModel: string;
+export interface OpenAiCompatibleChatRuntimeConfig extends DirectChatRuntimeBaseConfig {
   getApiKey: () => string;
   getBaseUrl: () => string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
@@ -196,20 +194,6 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
 
   protected buildAssistantMessage(content: string): ConversationMessage {
     return { role: 'assistant', content };
-  }
-
-  protected contextMessage(message: ChatMessage): ConversationMessage | null {
-    if (message.type === 'user-message') {
-      return {
-        role: 'user',
-        content: buildOpenAiCompatibleUserContent(message.content, message.images?.map((image) => ({
-          kind: 'image', data: image.data, name: image.name || null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        }))),
-      };
-    }
-    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
-    return { role: 'assistant', content: JSON.stringify(message) };
   }
 
   protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {
