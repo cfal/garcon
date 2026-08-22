@@ -283,7 +283,7 @@ describe('OpenCode history loader', () => {
     expect(messages[0].content).toBe('real prompt');
   });
 
-  it('restores provider failures without turning an abort into an error row', async () => {
+  it('restores terminal tools from aborted assistants without turning an abort into an error row', async () => {
     const getClient = mock(() => Promise.resolve({
       session: {
         messages: mock(() => Promise.resolve({
@@ -320,11 +320,62 @@ describe('OpenCode history loader', () => {
 
     const messages = await loadOpenCodeChatMessages('session-1', getClient);
 
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(4);
     expect(messages[0]).toBeInstanceOf(AssistantMessage);
     expect(messages[0].content).toBe('partial reply');
     expect(messages[1]).toBeInstanceOf(ErrorMessage);
     expect(messages[1].content).toBe('invalid key');
+    expect(messages[2]).toBeInstanceOf(BashToolUseMessage);
+    expect(messages[2].command).toBe('sleep 30');
+    expect(messages[3]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[3].toolId).toBe('interrupted-tool');
+    expect(JSON.stringify(messages[3].content)).toContain('User aborted the command');
+  });
+
+  it('omits pending and running tools from native history', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [{
+            info: {
+              role: 'assistant',
+              time: { created: '2026-07-04T00:00:00.000Z' },
+            },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'bash',
+                callID: 'pending-tool',
+                state: { status: 'pending', input: { command: 'pending command' } },
+              },
+              {
+                type: 'tool',
+                tool: 'bash',
+                callID: 'running-tool',
+                state: { status: 'running', input: { command: 'running command' } },
+              },
+              {
+                type: 'tool',
+                tool: 'bash',
+                callID: 'completed-tool',
+                state: {
+                  status: 'completed',
+                  input: { command: 'completed command' },
+                  output: 'completed output',
+                },
+              },
+            ],
+          }],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.toolId])).toEqual([
+      ['bash-tool-use', 'completed-tool'],
+      ['tool-result', 'completed-tool'],
+    ]);
   });
 
   it('restores a failed compaction error without exposing its internal summary', async () => {
