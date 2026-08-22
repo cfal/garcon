@@ -128,13 +128,14 @@ export function openCodePaths(directories: IntegrationDirectories): OpenCodePath
   };
 }
 
-function openCodeConfig(modelBaseUrl: string): Record<string, unknown> {
+function openCodeConfig(modelBaseUrl: string, modelId: string): Record<string, unknown> {
+  const agentModel = `${OPENCODE_TEST_PROVIDER}/${modelId}`;
   return {
     formatter: false,
     lsp: false,
     enabled_providers: [OPENCODE_TEST_PROVIDER],
-    model: OPENCODE_TEST_MODEL,
-    small_model: OPENCODE_TEST_MODEL,
+    model: agentModel,
+    small_model: agentModel,
     agent: {
       title: { disable: true },
       summary: { disable: true },
@@ -146,8 +147,8 @@ function openCodeConfig(modelBaseUrl: string): Record<string, unknown> {
         env: [],
         npm: '@ai-sdk/openai-compatible',
         models: {
-          [OPENCODE_TEST_MODEL_ID]: {
-            id: OPENCODE_TEST_MODEL_ID,
+          [modelId]: {
+            id: modelId,
             name: 'Garcon Fake Model',
             attachment: true,
             // The image input modality is what unsupportedParts() gates on;
@@ -196,6 +197,7 @@ export function assertScriptedOpenCodePlatform(platform: NodeJS.Platform = proce
 
 export interface ScriptedOpenCodeTestEnvironment {
   readonly model: FakeChatCompletionsModel;
+  readonly agentModel: string;
   resolveServerEnvironment(directories: IntegrationDirectories): Record<string, string>;
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   afterGarconStop(directories: IntegrationDirectories): Promise<void>;
@@ -205,11 +207,14 @@ export interface ScriptedOpenCodeTestEnvironment {
 
 export function startScriptedOpenCodeTestEnvironment(options: {
   autoCompact?: boolean;
+  modelId?: string;
   proxy?: boolean;
   platform?: NodeJS.Platform;
 } = {}): ScriptedOpenCodeTestEnvironment {
   assertScriptedOpenCodePlatform(options.platform);
   const model = FakeChatCompletionsModel.start();
+  const modelId = options.modelId ?? OPENCODE_TEST_MODEL_ID;
+  const agentModel = `${OPENCODE_TEST_PROVIDER}/${modelId}`;
   const preparedRoots = new Set<string>();
   const cleanedRoots = new Set<string>();
 
@@ -259,6 +264,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
 
   return {
     model,
+    agentModel,
     resolveServerEnvironment,
     async prepareWorkspace(directories) {
       preparedRoots.add(directories.root);
@@ -279,7 +285,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       ]) {
         await mkdir(directory, { recursive: true });
       }
-      await writeFile(paths.config, JSON.stringify(openCodeConfig(model.baseUrl), null, 2), {
+      await writeFile(paths.config, JSON.stringify(openCodeConfig(model.baseUrl, modelId), null, 2), {
         mode: 0o600,
       });
       await writeOpenCodePluginSeed(paths.globalConfig);
@@ -302,6 +308,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
       return {
         opencode: {
           version: OPENCODE_VERSION,
+          model: agentModel,
           configPath: paths.config,
           databasePath: paths.database,
           mode: options.proxy ? 'proxy' : 'direct',
@@ -524,6 +531,7 @@ export function scriptedOpenCodeStartRequest(input: {
   command: string;
   permissionMode?: StartChatCommandRequest['permissionMode'];
   images?: StartChatCommandRequest['images'];
+  model?: StartChatCommandRequest['model'];
 }): StartChatCommandRequest {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -531,7 +539,7 @@ export function scriptedOpenCodeStartRequest(input: {
     chatId: input.chatId,
     agentId: 'opencode',
     projectPath: input.projectPath,
-    model: OPENCODE_TEST_MODEL,
+    model: input.model ?? OPENCODE_TEST_MODEL,
     permissionMode: input.permissionMode ?? 'bypassPermissions',
     thinkingMode: OPENCODE_TEST_THINKING_MODE,
     agentSettings: OPENCODE_AGENT_SETTINGS,
@@ -544,6 +552,7 @@ export function scriptedOpenCodeRunRequest(input: {
   chatId: string;
   command: string;
   permissionMode?: AgentRunCommandRequest['permissionMode'];
+  model?: AgentRunCommandRequest['model'];
 }): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -553,7 +562,7 @@ export function scriptedOpenCodeRunRequest(input: {
     permissionMode: input.permissionMode ?? 'bypassPermissions',
     thinkingMode: OPENCODE_TEST_THINKING_MODE,
     agentSettings: OPENCODE_AGENT_SETTINGS,
-    model: OPENCODE_TEST_MODEL,
+    model: input.model ?? OPENCODE_TEST_MODEL,
   };
 }
 

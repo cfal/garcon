@@ -24,6 +24,7 @@ import {
 import {
   OPENCODE_PLUGIN_SEED_FILES,
   OPENCODE_TEST_MODEL,
+  OPENCODE_TEST_MODEL_ID,
   OPENCODE_VERSION,
   openCodeNativeSession,
   openCodePaths,
@@ -76,16 +77,9 @@ describeOnLinux('OpenCode against a scripted model', () => {
 
       const requests = testEnvironment.model.requestsSince(requestCursor);
       expect(requests).toHaveLength(1);
-      const tools = requests[0]?.body.tools;
-      if (!Array.isArray(tools)) throw new Error('OpenCode omitted its model tool inventory.');
-      const names = tools.map((entry) => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
-        const fn = 'function' in entry ? entry.function : null;
-        if (!fn || typeof fn !== 'object' || Array.isArray(fn) || !('name' in fn)) return null;
-        return typeof fn.name === 'string' ? fn.name : null;
-      });
-      expect(names.every((name): name is string => name !== null)).toBe(true);
-      expect(names.toSorted()).toEqual([
+      expect(testEnvironment.agentModel).toBe(OPENCODE_TEST_MODEL);
+      expect(requests[0]?.body.model).toBe(OPENCODE_TEST_MODEL_ID);
+      expect(modelToolNames(requests[0]?.body ?? {}).toSorted()).toEqual([
         'bash',
         'edit',
         'glob',
@@ -98,6 +92,78 @@ describeOnLinux('OpenCode against a scripted model', () => {
         'webfetch',
         'write',
       ]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('executes the conditional apply_patch inventory through the real binary', async () => {
+    environment?.dispose();
+    const modelId = 'gpt-5-scripted';
+    environment = startScriptedOpenCodeTestEnvironment({ modelId });
+    const testEnvironment = requireEnvironment();
+    const toolCallId = 'call_conditional_apply_patch';
+    const fileName = 'opencode-conditional-apply-patch.txt';
+    const patchText = [
+      '*** Begin Patch',
+      `*** Add File: ${fileName}`,
+      '+conditional inventory content',
+      '*** End Patch',
+    ].join('\n');
+    const reply = marker('CONDITIONAL_APPLY_PATCH_REPLY');
+    testEnvironment.model.scriptTurn([
+      chatCompletionsToolUse(toolCallId, 'apply_patch', { patchText }),
+    ]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+    const requestCursor = testEnvironment.model.markRequests();
+
+    await withIntegrationFixture('opencode-scripted-conditional-tools', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('CONDITIONAL_APPLY_PATCH_PROMPT'),
+        model: testEnvironment.agentModel,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.body.model).toBe(modelId);
+      expect(modelToolNames(requests[0]?.body ?? {}).toSorted()).toEqual([
+        'apply_patch',
+        'bash',
+        'glob',
+        'grep',
+        'question',
+        'read',
+        'skill',
+        'task',
+        'todowrite',
+        'webfetch',
+      ]);
+      expect(requests[1]?.toolResults).toHaveLength(1);
+      expect(requests[1]?.toolResults[0]?.toolCallId).toBe(toolCallId);
+      expect(requests[1]?.toolResults[0]?.content).toContain('Success. Updated the following files:');
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const applyPatch = messagesOfType(transcript.messages, 'apply-patch-tool-use').find(
+        (message) => message.patch === patchText,
+      );
+      if (!applyPatch) throw new Error('OpenCode apply_patch tool use was not rendered.');
+      const result = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === applyPatch.toolId,
+      );
+      expect(result?.isError).toBe(false);
+      expect(messagesOfType(transcript.messages, 'unknown-tool-use')).toEqual([]);
+      expect(await readFile(join(fixture.dirs.project, fileName), 'utf8'))
+        .toBe('conditional inventory content\n');
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
@@ -700,6 +766,21 @@ function withScriptedOpenCode(): IntegrationFixtureOptions {
     afterGarconStop: testEnvironment.afterGarconStop,
     extraDiagnostics: testEnvironment.extraDiagnostics,
   };
+}
+
+function modelToolNames(body: Record<string, unknown>): string[] {
+  if (!Array.isArray(body.tools)) throw new Error('OpenCode omitted its model tool inventory.');
+  return body.tools.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('OpenCode emitted a malformed model tool.');
+    }
+    const fn = 'function' in entry ? entry.function : null;
+    if (!fn || typeof fn !== 'object' || Array.isArray(fn) || !('name' in fn)
+      || typeof fn.name !== 'string') {
+      throw new Error('OpenCode emitted a malformed function tool.');
+    }
+    return fn.name;
+  });
 }
 
 function marker(label: string): string {
