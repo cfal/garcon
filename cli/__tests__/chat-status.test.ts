@@ -249,6 +249,32 @@ describe('chat status', () => {
     expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI)`);
   });
 
+  test('labels presented user messages without printing presentation JSON', () => {
+    const value = formatChatStatus(snapshot({
+      transcript: {
+        availability: 'available',
+        transcriptViewId: 'view-1',
+        messages: [{
+          ordinal: 1,
+          message: new UserMessage(
+            TIMESTAMP,
+            'Do not deploy.',
+            undefined,
+            undefined,
+            { origin: 'cli', style: 'error', title: 'Blocker' },
+          ),
+        }],
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
+        hasMore: false,
+      },
+    }));
+
+    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI error) — Blocker\nDo not deploy.`);
+    expect(value).not.toContain('"presentation"');
+  });
+
   test('shows a plain notice title without CLI provenance', () => {
     const value = formatChatStatus(snapshot({
       transcript: {

@@ -14,7 +14,9 @@ import {
 	estimateConversationFeedItemSize,
 } from '../conversation-feed-virtual-items.js';
 
-function userItem(index: number): ConversationFeedRenderItem {
+function userItem(
+	index: number,
+): Extract<ConversationFeedRenderItem, { kind: 'message' }> {
 	const rowId = `generation-1:${index}`;
 	return {
 		kind: 'message',
@@ -145,6 +147,22 @@ describe('conversation virtual feed model', () => {
 
 		expect(estimateConversationFeedItemSize(transcript, 0.7)).toBeCloseTo(86.8);
 		expect(estimateConversationFeedItemSize(boundary, 0.7)).toBe(44);
+	});
+
+	it('reserves header geometry for presented user messages', () => {
+		const ordinary = build([userItem(1)]).items[1]!;
+		const presentedItem = userItem(2);
+		presentedItem.message = new UserMessage(
+			'2026-08-03T00:00:00.000Z',
+			'message 2',
+			undefined,
+			undefined,
+			{ origin: 'cli', style: 'notice' },
+		);
+		const presented = build([presentedItem]).items[1]!;
+
+		expect(estimateConversationFeedItemSize(ordinary, 1)).toBe(124);
+		expect(estimateConversationFeedItemSize(presented, 1)).toBe(156);
 	});
 
 	it('includes viewport geometry and established floating permission spacing', () => {
