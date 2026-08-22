@@ -177,6 +177,18 @@ repeatable tags with `--tag review --tag delegated`; every new chat receives the
 automatically, and `cli` records creation through `garcon-cli` and nothing else. `--title` sets
 an explicit title on either a new or resumed chat.
 
+Conversational start, resume, and `send-async` messages may add a visual CLI header with
+`--message-title <title>` and `--message-style notice|error`. A title alone uses `notice`; a
+style alone displays `CLI notice` or `CLI error`. These values distinguish the ordinary user
+message in Garcon and are not included in the prompt sent to the agent. `--title` remains the
+chat title.
+
+```bash
+garcon-cli --workspace default --resume 1785337200123456 \
+  --message-title "Deployment constraint" --message-style error \
+  "Do not deploy until the migration checksum matches."
+```
+
 The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `status`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Every accepted start or resume prints an exact handle before waiting:
@@ -225,7 +237,8 @@ If the chat is busy running another turn, `send-async` reports the busy state an
 
 ```bash
 garcon-cli --workspace default send-async 1785337200123456 \
-  --allow-steer "Also update the migration test."
+  --allow-steer --message-title "New blocker" --message-style error \
+  "Also update the migration test."
 ```
 
 ```text
