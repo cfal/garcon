@@ -139,7 +139,6 @@ export class AgentRuntimeRouter {
     turnId?: string;
     commandType?: AgentExecutionCommandType;
     executionAdmission?: AgentExecutionAdmission;
-      carriedContext?: CarriedContext | null;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   } = {}): Promise<void> {
@@ -174,7 +173,7 @@ export class AgentRuntimeRouter {
     const carriedContext = await this.#createCarriedContext(
       chatId,
       entry,
-      prepared.priorContext,
+      this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
       opts.executionAdmission?.signal,
     );
     assertExecutionAdmissionOpen(opts);
@@ -183,10 +182,9 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-    const handle = await integration.execution.start({
+      const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: prepared.priorContext,
         prompt: prepared.prompt,
         attachments: prepared.attachments,
         carriedContext,
@@ -251,7 +249,6 @@ export class AgentRuntimeRouter {
       const handle = await integration.execution.resume({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: prepared.priorContext,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.prompt,
@@ -341,7 +338,6 @@ export class AgentRuntimeRouter {
     return integration.goals.submitControl({
       ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
       sink: producer.sink,
-      priorContext: this.#ledger.conversationMessages(chatId),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
@@ -397,7 +393,6 @@ export class AgentRuntimeRouter {
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: this.#ledger.conversationMessages(chatId),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
@@ -677,11 +672,11 @@ export class AgentRuntimeRouter {
     readonly dispatch: boolean;
     readonly prompt: string;
     readonly attachments: ReturnType<typeof attachments>;
-    readonly priorContext: readonly ChatMessage[];
+    readonly excludedOrdinals: ReadonlySet<number>;
   }> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
-      return { dispatch: false, prompt: '', attachments: [], priorContext: [] };
+      return { dispatch: false, prompt: '', attachments: [], excludedOrdinals: new Set() };
     }
     const promptRows = composition?.prompt ?? [];
     const prompt = promptRows.length > 0
@@ -696,7 +691,7 @@ export class AgentRuntimeRouter {
       dispatch: true,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: [...preparedAttachments],
-      priorContext: this.#ledger.conversationMessages(chatId, excluded),
+      excludedOrdinals: excluded,
     };
   }
 

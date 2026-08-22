@@ -2,7 +2,6 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   type AgentHost,
 } from '@garcon/server-agent-interface';
-import { UserMessage } from '@garcon/common/chat-types';
 import { receiptForCarriedContext } from '@garcon/common/transcript-seed';
 import type {
   AgentRuntimeEvent,
@@ -58,7 +57,6 @@ function request(modelEndpointId: string): AgentRuntimeResumeRequest {
     settings: { ownerId: 'direct-test', schemaVersion: 1, values: {} },
     endpoint: endpoint(modelEndpointId),
     runId: 'run-1',
-    priorContext: [new UserMessage('2026-01-01T00:00:00.000Z', 'earlier')],
     agentSessionId: SESSION_ID,
     nativeSession: NATIVE_SESSION,
     prompt: 'continue',

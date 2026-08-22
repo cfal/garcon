@@ -91,7 +91,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
     takePreparedInput: () => options.composition ?? null,
     conversationMessages: (chatId, excludedOrdinals) => options.conversationMessages
       ? options.conversationMessages(chatId, excludedOrdinals)
-      : options.priorContext ?? [],
+      : options.conversation ?? [],
     claimPermissionResolution: (control) => {
       permissionClaim = {
         chatId: control.chatId,

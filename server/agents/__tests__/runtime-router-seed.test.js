@@ -29,11 +29,11 @@ function makeRouter(overrides = {}) {
     tags: [],
     ...overrides.entry,
   };
-  const priorContext = overrides.priorContext ?? [
+  const conversation = overrides.conversation ?? [
     new UserMessage('2026-08-12T00:00:00.000Z', 'prior context'),
   ];
   const transcript = createRuntimeTranscriptFixture({
-    priorContext,
+    conversation,
     composition: overrides.composition,
     conversationMessages: overrides.conversationMessages,
   });
@@ -122,12 +122,13 @@ function makeRouter(overrides = {}) {
     router,
     start,
     resume,
+    submitGoalControl,
     captureTarget,
     providerTarget,
     steer,
     registry,
     events,
-    priorContext,
+    conversation,
     endpointResolver,
     transcript,
   };
@@ -143,8 +144,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await fs.rm(projectDir, { recursive: true, force: true });
   });
 
-  it('passes ledger context separately from the resolved prompt', async () => {
-    const { router, start, priorContext } = makeRouter();
+  it('resolves the prompt and derives carried context for a fresh session', async () => {
+    const { router, start } = makeRouter();
 
     await router.runAgentTurn('chat-1', 'review @notes.txt', {
       clientRequestId: 'request-1',
@@ -154,16 +155,16 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining('USER FILE BODY'),
-      priorContext,
       carriedContext: expect.objectContaining({
         prefix: expect.stringContaining('prior context'),
       }),
       runId: 'turn-1',
       sink: expect.objectContaining({ publish: expect.any(Function) }),
     }));
+    expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
-  it('excludes every composed prompt row from direct-provider context', async () => {
+  it('excludes every composed prompt row from fresh-session carried context', async () => {
     const context = [new AssistantMessage('2026-08-12T00:00:00.000Z', 'earlier answer')];
     const conversationMessages = mock((_chatId, excluded) => {
       expect([...excluded]).toEqual([2, 3]);
@@ -184,7 +185,9 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(conversationMessages).toHaveBeenCalledWith('chat-1', expect.any(Set));
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       prompt: 'unanswered\n\ncurrent',
-      priorContext: context,
+      carriedContext: expect.objectContaining({
+        prefix: expect.stringContaining('earlier answer'),
+      }),
     }));
   });
 
@@ -192,7 +195,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const createCarriedContext = mock(async (_chatId, _entry, messages) => ({
       prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
     }));
-    const { router, start, priorContext } = makeRouter({ createCarriedContext });
+    const { router, start, conversation } = makeRouter({ createCarriedContext });
 
     await router.runAgentTurn('chat-1', 'continue', {
       clientMessageId: 'message-1',
@@ -202,12 +205,56 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(createCarriedContext).toHaveBeenCalledWith(
       'chat-1',
       expect.objectContaining({ agentId: 'test' }),
-      priorContext,
+      conversation,
       undefined,
     );
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted:prior context' },
     }));
+  });
+
+  it('resumes without materializing the ledger conversation', async () => {
+    const conversationMessages = mock(() => {
+      throw new Error('resume must not scan ledger context');
+    });
+    const { router, resume } = makeRouter({
+      entry: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      },
+      conversationMessages,
+    });
+
+    await router.runAgentTurn('chat-1', 'resume', { turnId: 'turn-1' });
+
+    expect(conversationMessages).not.toHaveBeenCalled();
+    expect(resume.mock.calls[0][0]).not.toHaveProperty('priorContext');
+  });
+
+  it('submits goal control without materializing the ledger conversation', async () => {
+    const conversationMessages = mock(() => {
+      throw new Error('goal control must not scan ledger context');
+    });
+    const resume = mock(async () => ({ id: 'active-handle' }));
+    const { router, submitGoalControl } = makeRouter({
+      entry: {
+        agentSessionId: 'native-1',
+        nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+      },
+      conversationMessages,
+      resume,
+    });
+    await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
+
+    await expect(router.submitGoalControl(
+      'chat-1',
+      'update goal',
+      { turnId: 'turn-2' },
+      async () => undefined,
+    )).resolves.toBe(true);
+
+    expect(conversationMessages).not.toHaveBeenCalled();
+    expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
   it('persists one coherent endpoint selection after a lazy start', async () => {

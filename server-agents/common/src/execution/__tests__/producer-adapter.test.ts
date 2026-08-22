@@ -305,7 +305,6 @@ it('keeps a delayed callback on its own sink after a replacement takes over the 
     thinkingMode: 'medium',
     settings: { ownerId: 'test', schemaVersion: 1, values: {} },
     endpoint: null,
-    priorContext: [],
     admission: { signal: new AbortController().signal, async markStarted() {} },
     prompt: 'hello',
     attachments: [],
@@ -386,7 +385,6 @@ function createFixture(
     endpoint: null,
     runId: 'run-1',
     sink,
-    priorContext: [],
     admission: {
       signal: new AbortController().signal,
       async markStarted() {},

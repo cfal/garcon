@@ -2,8 +2,10 @@ import { describe, expect, it, mock } from 'bun:test';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
-function makeRouter(compaction) {
-  const transcript = createRuntimeTranscriptFixture();
+function makeRouter(compaction, options = {}) {
+  const transcript = createRuntimeTranscriptFixture({
+    conversationMessages: options.conversationMessages,
+  });
   const execution = {
     start: mock(async () => ({ agentSessionId: 'session-a', nativeSession: null })),
     resume: mock(async () => undefined),
@@ -64,12 +66,17 @@ createCarriedContext: async () => null,
 describe('AgentRuntimeRouter compaction', () => {
   it('calls the compaction facet when the integration provides one', async () => {
     const compact = mock(async () => undefined);
-    const { router, execution } = makeRouter({ compact });
+    const conversationMessages = mock(() => {
+      throw new Error('native compaction must not scan ledger context');
+    });
+    const { router, execution } = makeRouter({ compact }, { conversationMessages });
 
     await router.compactSession('chat-1', { instructions: 'focus on auth' });
 
     expect(compact).toHaveBeenCalledTimes(1);
     expect(compact.mock.calls[0][0]).toMatchObject({ prompt: '/compact focus on auth' });
+    expect(compact.mock.calls[0][0]).not.toHaveProperty('priorContext');
+    expect(conversationMessages).not.toHaveBeenCalled();
     expect(execution.resume).not.toHaveBeenCalled();
   });
 
