@@ -15,6 +15,7 @@ import {
   type ChatRowType,
 } from '@garcon/common/chat-row-contracts';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
+import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
   CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT,
   CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
@@ -26,7 +27,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [options] <prompt>
   garcon-cli [options] --resume <chat-id> <prompt>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] <message>
+  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <notice|error>] <message>
   garcon-cli [options] stop <chat-id>
   garcon-cli [connection options] add-row <chat-id> --type <notice|error> [--title <title>] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
@@ -41,6 +42,8 @@ Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
 add-row appends one durable presentation-only notice or error to chat history.
 It never sends, queues, or exposes the row to the agent.
+Message presentation is not sent as prompt text. A message title without a style
+uses notice; a style without a title displays CLI notice or CLI error.
 
 List resources:
   agents
@@ -62,6 +65,8 @@ Options:
   --permissions <mode>         Permission mode: ${PERMISSION_MODE_VALUES.join(', ')}
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
   --title <title>              Set a new-chat title or add-row heading
+  --message-title <title>      Add a heading to this conversational CLI user message
+  --message-style <style>      Style this CLI user message: notice or error
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
   --allow-steer                With send-async, steer the active turn when busy; never queues
@@ -103,6 +108,7 @@ interface CliInvocationBase extends CliSelectionOptions, CliConnectionOptions {
   additionalTags?: string[];
   prompt: string | null;
   readsPromptFromStdin: boolean;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface StartCliInvocation extends CliInvocationBase {
@@ -145,6 +151,7 @@ export interface SendAsyncCliCommand extends CliConnectionOptions {
   allowSteer: boolean;
   message: string | null;
   readsMessageFromStdin: boolean;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface StopCliCommand extends CliConnectionOptions {
@@ -198,6 +205,8 @@ const SINGLE_STRING_OPTIONS = [
   'permissions',
   'reasoning-effort',
   'title',
+  'message-title',
+  'message-style',
   'resume',
   'turn',
   'messages',
@@ -250,6 +259,29 @@ function parseAdditionalTags(value: ParsedOptionValue): string[] | undefined {
   }
   const tags = normalizeTags(rawTags).filter((tag) => tag !== 'cli');
   return tags.length > 0 ? tags : undefined;
+}
+
+function parseUserMessagePresentationOptions(
+  values: Record<string, ParsedOptionValue>,
+): UserMessagePresentation | undefined {
+  const rawStyle = values['message-style'];
+  if (rawStyle !== undefined && rawStyle !== 'notice' && rawStyle !== 'error') {
+    throw argumentError('--message-style must be notice or error');
+  }
+  let title: string | undefined;
+  try {
+    title = parseChatRowTitle(values['message-title']);
+  } catch (error) {
+    throw argumentError(error instanceof Error ? error.message : 'message title is invalid', {
+      cause: error,
+    });
+  }
+  if (rawStyle === undefined && title === undefined) return undefined;
+  return {
+    origin: 'cli',
+    style: rawStyle === 'error' ? 'error' : 'notice',
+    ...(title === undefined ? {} : { title }),
+  };
 }
 
 function isListResource(value: string): value is ListResource {
@@ -324,6 +356,7 @@ function parseSendAsync(
   if (message !== null && message.trim().length === 0) {
     throw argumentError('the message must not be empty');
   }
+  const userMessagePresentation = parseUserMessagePresentationOptions(values);
   return {
     kind: 'send-async',
     ...connection,
@@ -331,6 +364,7 @@ function parseSendAsync(
     allowSteer: values['allow-steer'] === true,
     message,
     readsMessageFromStdin,
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
 }
 
@@ -345,6 +379,9 @@ function parseStop(
     throw argumentError('--allow-steer cannot be used with stop');
   }
   if (values.type !== undefined) throw argumentError('--type cannot be used with stop');
+  if (values['message-title'] !== undefined || values['message-style'] !== undefined) {
+    throw argumentError('message presentation cannot be used with stop');
+  }
   if (parsed.positionals.length !== 2) {
     throw argumentError('stop requires exactly one chat ID');
   }
@@ -363,6 +400,9 @@ function parseAddRow(
   rejectControlForbiddenOptions(values, 'add-row');
   if (values['allow-steer'] !== undefined) {
     throw argumentError('--allow-steer cannot be used with add-row');
+  }
+  if (values['message-title'] !== undefined || values['message-style'] !== undefined) {
+    throw argumentError('message presentation cannot be used with add-row');
   }
   if (parsed.positionals.length !== 3) {
     throw argumentError('add-row requires a chat ID and one content argument');
@@ -409,6 +449,8 @@ const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = 
   ['resume', '--resume'],
   ['allow-steer', '--allow-steer'],
   ['type', '--type'],
+  ['message-title', '--message-title'],
+  ['message-style', '--message-style'],
 ] as const;
 
 function rejectObservationMutationOptions(
@@ -521,6 +563,8 @@ export function parseCliArgs(
         permissions: { type: 'string' },
         'reasoning-effort': { type: 'string' },
         title: { type: 'string' },
+        'message-title': { type: 'string' },
+        'message-style': { type: 'string' },
         tag: { type: 'string', multiple: true },
         resume: { type: 'string' },
         turn: { type: 'string' },
@@ -616,6 +660,8 @@ export function parseCliArgs(
     rejectListOption(values.turn, '--turn');
     rejectListOption(values.messages, '--messages');
     rejectListOption(values.type, '--type');
+    rejectListOption(values['message-title'], '--message-title');
+    rejectListOption(values['message-style'], '--message-style');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -661,6 +707,7 @@ export function parseCliArgs(
   }
   if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
+  const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);
 
   if (endpointId !== undefined && providerId === undefined) {
@@ -688,6 +735,7 @@ export function parseCliArgs(
     ...(model === undefined ? {} : { model }),
     ...(title === undefined ? {} : { title }),
     ...(additionalTags === undefined ? {} : { additionalTags }),
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
     ...modes,
     prompt,
     readsPromptFromStdin,

@@ -42,6 +42,33 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('canonicalizes conversational message presentation independently of chat title', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--title', 'Chat title',
+      '--message-title', '  Operator context  ',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      title: 'Chat title',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'notice',
+        title: 'Operator context',
+      },
+    });
+
+    expect(parseCliArgs([
+      '--resume', CHAT_ID,
+      '--message-style', 'error',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'resume',
+      userMessagePresentation: { origin: 'cli', style: 'error' },
+    });
+  });
+
   test('parses live catalog queries without submission arguments', () => {
     expect(parseCliArgs([
       'list', 'models',
@@ -283,6 +310,19 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('parses send-async message presentation', () => {
+    expect(parseCliArgs([
+      'send-async', CHAT_ID,
+      '--message-title', 'Blocker',
+      '--message-style', 'error',
+      'Do not deploy',
+    ], ENV)).toMatchObject({
+      kind: 'send-async',
+      message: 'Do not deploy',
+      userMessagePresentation: { origin: 'cli', style: 'error', title: 'Blocker' },
+    });
+  });
+
   test('parses a connection-qualified send-async with --allow-steer before or after the chat ID', () => {
     expect(parseCliArgs([
       '--workspace', 'work',
@@ -402,6 +442,10 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be notice or error' },
+    { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
+    { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
+    { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
   ])('rejects invalid control arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {

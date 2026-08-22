@@ -156,6 +156,7 @@ describe('runConsultation', () => {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Implementation review',
+      userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
       additionalTags: ['review-needed'],
     };
     const testClient = client();
@@ -166,6 +167,7 @@ describe('runConsultation', () => {
     expect(testClient.starts[0]).toMatchObject({
       chatId: CHAT_ID, agentId: 'codex', projectPath: '/repo', command: 'Implement it',
       permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['cli', 'review-needed'],
+      userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Implementation review' }]);
@@ -228,6 +230,7 @@ describe('runConsultation', () => {
       kind: 'resume', workspace: 'default', configDir: '/config', chatId: CHAT_ID,
       prompt: 'Continue', readsPromptFromStdin: false,
       title: 'Follow-up review',
+      userMessagePresentation: { origin: 'cli', style: 'error' },
       additionalTags: ['follow-up'],
     };
     const testClient = client();
@@ -239,6 +242,7 @@ describe('runConsultation', () => {
       transcriptViewId: 'view-1',
       command: 'Continue', tagsToAdd: ['follow-up'],
       permissionFallbackPolicy: 'require-explicit-bypass',
+      userMessagePresentation: { origin: 'cli', style: 'error' },
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Follow-up review' }]);
   });
