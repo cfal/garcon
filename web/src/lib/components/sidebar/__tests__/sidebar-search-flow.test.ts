@@ -173,7 +173,7 @@ describe('sidebar search dialog flow', () => {
 		expect(screen.getByTitle('/tmp/project/packages/app')).toBeTruthy();
 	});
 
-	it('toggles compact chat items from the sidebar actions menu', async () => {
+	it('switches chat item layout from the sidebar actions menu', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],
 			autoLoadSavedSearches: false,
@@ -184,16 +184,42 @@ describe('sidebar search dialog flow', () => {
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(menuTrigger);
 
-		const compactChatItems = await screen.findByRole('menuitemcheckbox', {
-			name: 'Compact chat items',
-		});
-		expect(compactChatItems.getAttribute('aria-checked')).toBe('false');
+		const defaultLayout = await screen.findByRole('menuitemradio', { name: 'Default' });
+		expect(defaultLayout.getAttribute('aria-checked')).toBe('true');
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		expect(compactLayout.getAttribute('aria-checked')).toBe('false');
 
-		await fireEvent.click(compactChatItems);
+		await fireEvent.click(compactLayout);
 
 		await waitFor(() => {
 			expect(screen.queryByText('First chat preview')).toBeNull();
 		});
+		expect(screen.getByText('First chat')).toBeTruthy();
+	});
+
+	it('renders single-line chat items from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			chats: [createChat('chat-1', 'First chat')],
+			autoLoadSavedSearches: false,
+		});
+
+		expect(screen.getByText('First chat preview')).toBeTruthy();
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		const singleLineLayout = await screen.findByRole('menuitemradio', {
+			name: 'Single-line chat items',
+		});
+		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(singleLineLayout);
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
+		});
+		expect(screen.queryByText('First chat preview')).toBeNull();
+		expect(screen.getByText('First chat')).toBeTruthy();
 	});
 
 	it('marks the sidebar to suppress activity animation when motion is reduced', () => {

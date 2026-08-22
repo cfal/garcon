@@ -1,9 +1,11 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
+import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export const DESKTOP_CHAT_ROW_HEIGHT = 88;
 export const MOBILE_CHAT_ROW_HEIGHT = 88;
 export const COMPACT_CHAT_ROW_HEIGHT = 70;
+export const SINGLE_LINE_CHAT_ROW_HEIGHT = 46;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
@@ -47,8 +49,10 @@ export interface SidebarRowModel {
 
 export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
-	compactChatItems: boolean,
+	chatItemLayout: SidebarChatItemLayout,
 ): number {
 	if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
-	return compactChatItems ? COMPACT_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT;
+	if (chatItemLayout === 'compact') return COMPACT_CHAT_ROW_HEIGHT;
+	if (chatItemLayout === 'single-line') return SINGLE_LINE_CHAT_ROW_HEIGHT;
+	return DESKTOP_CHAT_ROW_HEIGHT;
 }

@@ -35,7 +35,7 @@
 		displayOptions = {
 			groupByProject: false,
 			groupNestedProjectPaths: false,
-			compactChatItems: false,
+			chatItemLayout: 'default',
 			sortMode: 'manual',
 		},
 		collapsedProjectKeys = new Set<string>(),

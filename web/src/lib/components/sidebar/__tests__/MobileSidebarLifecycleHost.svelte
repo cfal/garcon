@@ -18,6 +18,7 @@
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 
 	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
@@ -27,7 +28,7 @@
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupByProject?: boolean;
 		sidebarGroupNestedProjectPaths?: boolean;
-		sidebarCompactChatItems?: boolean;
+		sidebarChatItemLayout?: SidebarChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -39,7 +40,7 @@
 		autoLoadSavedSearches = true,
 		sidebarGroupByProject = true,
 		sidebarGroupNestedProjectPaths = false,
-		sidebarCompactChatItems = false,
+		sidebarChatItemLayout = 'default',
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
@@ -103,21 +104,20 @@
 		get sidebarGroupNestedProjectPaths() {
 			return sidebarGroupNestedProjectPaths;
 		},
-		get sidebarCompactChatItems() {
-			return sidebarCompactChatItems;
+		get sidebarChatItemLayout() {
+			return sidebarChatItemLayout;
 		},
-		toggle(
-			key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths' | 'sidebarCompactChatItems',
-		) {
+		toggle(key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths') {
 			if (key === 'sidebarGroupByProject') {
 				sidebarGroupByProject = !sidebarGroupByProject;
 				return;
 			}
-			if (key === 'sidebarGroupNestedProjectPaths') {
-				sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-				return;
+			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+		},
+		set(key: 'sidebarChatItemLayout', value: string) {
+			if (key === 'sidebarChatItemLayout') {
+				sidebarChatItemLayout = value as SidebarChatItemLayout;
 			}
-			sidebarCompactChatItems = !sidebarCompactChatItems;
 		},
 	} as never);
 	setSidebarProjectCollapse({

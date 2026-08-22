@@ -29,6 +29,7 @@
 	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
+	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -111,7 +112,7 @@
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		groupByProject: localSettings.sidebarGroupByProject,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
-		compactChatItems: localSettings.sidebarCompactChatItems,
+		chatItemLayout: localSettings.sidebarChatItemLayout,
 		sortMode: localSettings.sidebarSortMode,
 	});
 	let transcriptSearchTarget = $derived(
@@ -378,8 +379,8 @@
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 
-	function handleToggleCompactChatItems(): void {
-		localSettings.toggle('sidebarCompactChatItems');
+	function handleSetChatItemLayout(layout: SidebarChatItemLayout): void {
+		localSettings.set('sidebarChatItemLayout', layout);
 	}
 
 	function handleToggleSortByRecent(): void {
@@ -440,7 +441,7 @@
 			{isMarkingAllRead}
 			groupByProject={displayOptions.groupByProject}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
-			compactChatItems={displayOptions.compactChatItems}
+			chatItemLayout={displayOptions.chatItemLayout}
 			sortByRecent={displayOptions.sortMode === 'recent'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
@@ -452,7 +453,7 @@
 			}}
 			onToggleGroupByProject={handleToggleGroupByProject}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
-			onToggleCompactChatItems={handleToggleCompactChatItems}
+			onSetChatItemLayout={handleSetChatItemLayout}
 			onToggleSortByRecent={handleToggleSortByRecent}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}

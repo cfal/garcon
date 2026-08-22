@@ -5,7 +5,11 @@
 		DropdownMenu,
 		DropdownMenuCheckboxItem,
 		DropdownMenuContent,
+		DropdownMenuGroup,
+		DropdownMenuGroupHeading,
 		DropdownMenuItem,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
@@ -15,9 +19,9 @@
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
-	import ListCollapse from '@lucide/svelte/icons/list-collapse';
 	import Clock from '@lucide/svelte/icons/clock';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarControlsRowProps {
@@ -26,7 +30,7 @@
 		isMarkingAllRead?: boolean;
 		groupByProject?: boolean;
 		groupNestedProjectPaths?: boolean;
-		compactChatItems?: boolean;
+		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
@@ -35,7 +39,7 @@
 		onMarkAllRead?: () => void;
 		onToggleGroupByProject?: () => void;
 		onToggleGroupNestedProjectPaths?: () => void;
-		onToggleCompactChatItems?: () => void;
+		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
@@ -48,7 +52,7 @@
 		isMarkingAllRead = false,
 		groupByProject = false,
 		groupNestedProjectPaths = false,
-		compactChatItems = false,
+		chatItemLayout = 'default',
 		sortByRecent = false,
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
@@ -57,7 +61,7 @@
 		onMarkAllRead,
 		onToggleGroupByProject,
 		onToggleGroupNestedProjectPaths,
-		onToggleCompactChatItems,
+		onSetChatItemLayout,
 		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
@@ -173,13 +177,26 @@
 					<FolderTree class="h-3.5 w-3.5" />
 					{m.settings_sidebar_group_nested_project_paths()}
 				</DropdownMenuCheckboxItem>
-				<DropdownMenuCheckboxItem
-					checked={compactChatItems}
-					onCheckedChange={() => onToggleCompactChatItems?.()}
-				>
-					<ListCollapse class="h-3.5 w-3.5" />
-					{m.settings_sidebar_compact_chat_items()}
-				</DropdownMenuCheckboxItem>
+				<DropdownMenuSeparator />
+				<DropdownMenuGroup>
+					<DropdownMenuGroupHeading>
+						{m.settings_sidebar_chat_item_layout_heading()}
+					</DropdownMenuGroupHeading>
+					<DropdownMenuRadioGroup
+						value={chatItemLayout}
+						onValueChange={(layout) => onSetChatItemLayout?.(layout as SidebarChatItemLayout)}
+					>
+						<DropdownMenuRadioItem value="default">
+							{m.settings_sidebar_chat_item_layout_default()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="compact">
+							{m.settings_sidebar_compact_chat_items()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="single-line">
+							{m.settings_sidebar_chat_item_layout_single_line()}
+						</DropdownMenuRadioItem>
+					</DropdownMenuRadioGroup>
+				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onclick={onShowScheduledPrompts}>
 					<CalendarClock class="h-3.5 w-3.5" />

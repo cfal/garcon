@@ -200,7 +200,7 @@ describe('shared sidebar chat row', () => {
 			displayOptions: {
 				groupByProject: false,
 				groupNestedProjectPaths: false,
-				compactChatItems: true,
+				chatItemLayout: 'compact',
 				sortMode: 'manual',
 			},
 		});
@@ -212,13 +212,108 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('prod')).toBeTruthy();
 	});
 
+	it('renders single-line rows with an inline timestamp badge and no metadata rows', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isPinned: true,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		const title = screen.getByText('Shared row chat');
+		expect(title.className).toContain('flex-1');
+		expect(title.className).toContain('truncate');
+		expect(screen.queryByText('Latest preview text')).toBeNull();
+		expect(screen.queryByText('Claude')).toBeNull();
+		expect(screen.queryByText('ops')).toBeNull();
+		expect(screen.queryByTitle('/very/long/workspace/projects/feature-branch/app')).toBeNull();
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
+
+		const timestampBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-timestamp-badge"]',
+		);
+		expect(timestampBadge?.textContent).toBe('3h ago');
+		expect(timestampBadge?.className).toContain('tabular-nums');
+		expect(timestampBadge?.getAttribute('title')).toBeTruthy();
+
+		const stateBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-state-badge"]',
+		);
+		expect(stateBadge?.className).toContain('relative');
+		expect(stateBadge?.className).not.toContain('bottom-0');
+		expect(stateBadge?.getAttribute('aria-hidden')).toBeNull();
+		expect(screen.getByText('Pinned').className).toContain('sr-only');
+		if (!stateBadge || !timestampBadge) throw new Error('expected badges');
+		expect(timestampBadge.compareDocumentPosition(stateBadge)).toBe(
+			Node.DOCUMENT_POSITION_FOLLOWING,
+		);
+		expect(title.compareDocumentPosition(timestampBadge)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+	});
+
+	it('shows the processing indicator instead of the timestamp badge in single-line mode', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false, isProcessing: true }),
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
+		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
+	});
+
+	it('prefers the pinned badge over the archived badge in single-line mode', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isPinned: true,
+			isArchived: true,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		expect(document.querySelectorAll('[data-slot="sidebar-chat-state-badge"]')).toHaveLength(1);
+		expect(screen.getByText('Pinned')).toBeTruthy();
+		expect(screen.queryByText('Archived')).toBeNull();
+	});
+
+	it('renders the single-line mobile row once with the inline badge', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isPinned: true,
+			isMobile: true,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
+		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
+		expect(document.querySelector('[data-slot="sidebar-chat-state-badge"]')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+	});
+
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			displayOptions: {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
-				compactChatItems: false,
+				chatItemLayout: 'default',
 				sortMode: 'manual',
 			},
 		});

@@ -177,7 +177,7 @@
 	function estimateRowSize(row: SidebarVirtualRow | undefined): number {
 		if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
 		if (rowHeight !== undefined) return rowHeight;
-		return estimateSidebarVirtualRowSize(row, displayOptions.compactChatItems);
+		return estimateSidebarVirtualRowSize(row, displayOptions.chatItemLayout);
 	}
 
 	const virtualizer = createVirtualizer<HTMLElement, HTMLElement>({
@@ -235,7 +235,7 @@
 	$effect(() => {
 		const count = rows.length;
 		const scrollElement = viewportRef;
-		const compactChatItems = displayOptions.compactChatItems;
+		const chatItemLayout = displayOptions.chatItemLayout;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		const paddingEnd = bottomPadding;
@@ -248,7 +248,7 @@
 					const row = rows[index];
 					if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
 					if (explicitRowHeight !== undefined) return explicitRowHeight;
-					return estimateSidebarVirtualRowSize(row, compactChatItems);
+					return estimateSidebarVirtualRowSize(row, chatItemLayout);
 				},
 				observeElementRect: observeSidebarElementRect,
 				initialRect: { width: 0, height: fallbackViewportHeight },

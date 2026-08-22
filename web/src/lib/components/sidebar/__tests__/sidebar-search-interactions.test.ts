@@ -401,7 +401,9 @@ describe('sidebar search interactions', () => {
 		});
 
 		const items = Array.from(
-			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+			document.querySelectorAll<HTMLElement>(
+				'[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+			),
 		);
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
@@ -414,11 +416,15 @@ describe('sidebar search interactions', () => {
 			screen.getByRole('menuitemcheckbox', { name: 'Group nested project paths' }),
 		).toBeTruthy();
 		expect(items[5]?.textContent).toContain('Group nested project paths');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[6]?.textContent).toContain('Compact chat items');
-		expect(items[7]?.textContent).toContain('Scheduled prompts');
-		expect(items[8]?.textContent).toContain('Settings');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
+		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
+		expect(items[6]?.textContent).toContain('Default');
+		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
+		expect(items[7]?.textContent).toContain('Compact chat items');
+		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
+		expect(items[8]?.textContent).toContain('Single-line chat items');
+		expect(items[9]?.textContent).toContain('Scheduled prompts');
+		expect(items[10]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
 		expect(onShowScheduledPrompts).toHaveBeenCalledOnce();
@@ -427,14 +433,14 @@ describe('sidebar search interactions', () => {
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
 		const onToggleGroupByProject = vi.fn();
 		const onToggleGroupNestedProjectPaths = vi.fn();
-		const onToggleCompactChatItems = vi.fn();
+		const onSetChatItemLayout = vi.fn();
 		const onToggleSortByRecent = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
 			groupByProject: true,
 			groupNestedProjectPaths: true,
-			compactChatItems: true,
+			chatItemLayout: 'compact',
 			sortByRecent: false,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -442,7 +448,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onToggleGroupByProject,
 			onToggleGroupNestedProjectPaths,
-			onToggleCompactChatItems,
+			onSetChatItemLayout,
 			onToggleSortByRecent,
 			onShowScheduledPrompts: vi.fn(),
 			onShowSettings: vi.fn(),
@@ -453,7 +459,9 @@ describe('sidebar search interactions', () => {
 
 		await screen.findAllByRole('menuitem');
 		const items = Array.from(
-			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+			document.querySelectorAll<HTMLElement>(
+				'[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+			),
 		);
 		expect(items[0]?.textContent).toContain('Mark all as read');
 		const sortByRecent = screen.getByRole('menuitemcheckbox', {
@@ -470,23 +478,29 @@ describe('sidebar search interactions', () => {
 		});
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
 		expect(items[3]?.textContent).toContain('Group nested project paths');
-		const compactChatItems = screen.getByRole('menuitemcheckbox', {
-			name: 'Compact chat items',
+		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
+		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[4]?.textContent).toContain('Default');
+		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
+		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
+		expect(items[5]?.textContent).toContain('Compact chat items');
+		const singleLineLayout = screen.getByRole('menuitemradio', {
+			name: 'Single-line chat items',
 		});
-		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
-		expect(items[4]?.textContent).toContain('Compact chat items');
-		expect(items[5]?.textContent).toContain('Scheduled prompts');
-		expect(items[6]?.textContent).toContain('Settings');
+		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
+		expect(items[6]?.textContent).toContain('Single-line chat items');
+		expect(items[7]?.textContent).toContain('Scheduled prompts');
+		expect(items[8]?.textContent).toContain('Settings');
 		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
 		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(groupByProject.className).toContain('pe-8');
 		expect(groupByProject.className).not.toContain('ps-8');
 
 		expect(sortByRecent).toBeTruthy();
 
-		await fireEvent.click(compactChatItems);
-		expect(onToggleCompactChatItems).toHaveBeenCalledOnce();
+		await fireEvent.click(singleLineLayout);
+		expect(onSetChatItemLayout).toHaveBeenCalledExactlyOnceWith('single-line');
 		expect(onToggleGroupByProject).not.toHaveBeenCalled();
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
 	});
@@ -584,7 +598,7 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
 	});
 
 	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {

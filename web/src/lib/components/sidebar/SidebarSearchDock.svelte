@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
+	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -10,7 +11,7 @@
 		isMarkingAllRead?: boolean;
 		groupByProject?: boolean;
 		groupNestedProjectPaths?: boolean;
-		compactChatItems?: boolean;
+		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
@@ -20,7 +21,7 @@
 		onMarkAllRead?: () => void;
 		onToggleGroupByProject?: () => void;
 		onToggleGroupNestedProjectPaths?: () => void;
-		onToggleCompactChatItems?: () => void;
+		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
@@ -35,7 +36,7 @@
 		isMarkingAllRead = false,
 		groupByProject = false,
 		groupNestedProjectPaths = false,
-		compactChatItems = false,
+		chatItemLayout = 'default',
 		sortByRecent = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
@@ -45,7 +46,7 @@
 		onMarkAllRead,
 		onToggleGroupByProject,
 		onToggleGroupNestedProjectPaths,
-		onToggleCompactChatItems,
+		onSetChatItemLayout,
 		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
@@ -67,7 +68,7 @@
 		{isMarkingAllRead}
 		{groupByProject}
 		{groupNestedProjectPaths}
-		{compactChatItems}
+		{chatItemLayout}
 		{sortByRecent}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasContentBelowControls}
@@ -76,7 +77,7 @@
 		{onMarkAllRead}
 		{onToggleGroupByProject}
 		{onToggleGroupNestedProjectPaths}
-		{onToggleCompactChatItems}
+		{onSetChatItemLayout}
 		{onToggleSortByRecent}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}

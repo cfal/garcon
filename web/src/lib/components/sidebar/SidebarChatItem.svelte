@@ -85,6 +85,7 @@
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
+	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -203,17 +204,26 @@
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-				'pointer-events-none absolute bottom-0 right-0 z-10 flex h-4 w-4 items-center justify-center rounded-full border',
+				'flex h-4 w-4 items-center justify-center rounded-full border',
+				isSingleLineLayout
+					? 'relative shrink-0'
+					: 'pointer-events-none absolute bottom-0 right-0 z-10',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
 			)}
-			aria-hidden="true"
+			aria-hidden={isSingleLineLayout ? undefined : 'true'}
+			data-slot="sidebar-chat-state-badge"
 		>
 			{#if isPinned}
 				<Pin class="size-2.5 text-sidebar-badge-pinned-foreground" />
 			{:else}
 				<Archive class="size-2.5 text-sidebar-badge-archived-foreground" />
+			{/if}
+			{#if isSingleLineLayout}
+				<span class="sr-only">
+					{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
+				</span>
 			{/if}
 		</div>
 	{/if}
@@ -252,14 +262,14 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class="relative flex-1 min-w-0">
+	<div class={cn('relative flex-1 min-w-0', isSingleLineLayout && 'flex items-center gap-1.5')}>
 		<SidebarChatSummary
 			{session}
 			{isSelected}
 			{currentTime}
 			showTimestamp={true}
 			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
-			compactChatItem={displayOptions.compactChatItems}
+			chatItemLayout={displayOptions.chatItemLayout}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
@@ -267,11 +277,18 @@
 	</div>
 {/snippet}
 
-<div class="chat-item-root group relative" bind:this={itemEl}>
+<div
+	class={cn(
+		'chat-item-root group relative',
+		isSingleLineLayout && 'flex h-full flex-col justify-center',
+	)}
+	bind:this={itemEl}
+>
 	{#if isMobile}
 		<div
 			class={cn(
 				'flex items-stretch bg-sidebar-chat-item-bg',
+				isSingleLineLayout && 'flex-1 min-h-0',
 				!isMultiSelectMode &&
 					isSelected &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -282,6 +299,7 @@
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
+					isSingleLineLayout && 'min-h-[44px]',
 				)}
 				onclick={handleItemClick}
 			>
@@ -301,7 +319,7 @@
 			{/if}
 		</div>
 	{:else}
-		<div>
+		<div class={cn(isSingleLineLayout && 'flex-1 min-h-0')}>
 			<Button
 				variant="ghost"
 				draggable={canNativeDrag ? true : undefined}
@@ -311,6 +329,9 @@
 				class={cn(
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
 					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[9px]',
+					// Reserves a gutter so the hover actions trigger cannot cover the
+					// inline timestamp/state badges, and fills the 44px single-line slot.
+					isSingleLineLayout && 'h-full min-h-[44px] pr-9',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -330,7 +351,9 @@
 			class={cn(
 				'absolute z-20',
 				!isAtCursor &&
-					'sidebar-item-menu-anchor right-1 top-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
+					'sidebar-item-menu-anchor right-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
+				!isAtCursor && !isSingleLineLayout && 'top-1',
+				!isAtCursor && isSingleLineLayout && 'top-1/2 -translate-y-1/2',
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>

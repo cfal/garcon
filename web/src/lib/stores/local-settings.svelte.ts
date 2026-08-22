@@ -27,6 +27,9 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+
+export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
+export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
 export type FileOpenPlacementPreference = DesktopPlacement | 'source' | 'other';
 export const FILE_OPEN_PLACEMENT_VALUES = [
 	'source',
@@ -111,7 +114,7 @@ export interface LocalSettingsSnapshot {
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
 	sidebarGroupNestedProjectPaths: boolean;
-	sidebarCompactChatItems: boolean;
+	sidebarChatItemLayout: SidebarChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -142,7 +145,6 @@ type BooleanLocalSettingKey =
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
-	| 'sidebarCompactChatItems'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
 
@@ -166,7 +168,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
 	sidebarGroupNestedProjectPaths: false,
-	sidebarCompactChatItems: false,
+	sidebarChatItemLayout: 'default',
 	sidebarSortMode: 'manual',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -214,6 +216,13 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 	return typeof value === 'string' && SIDEBAR_SORT_MODE_VALUES.includes(value as SidebarSortMode)
 		? (value as SidebarSortMode)
 		: DEFAULTS.sidebarSortMode;
+}
+
+function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
+	return typeof value === 'string' &&
+		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
+		? (value as SidebarChatItemLayout)
+		: DEFAULTS.sidebarChatItemLayout;
 }
 
 export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
@@ -271,10 +280,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
-		sidebarCompactChatItems: parseBoolean(
-			parsed.sidebarCompactChatItems,
-			DEFAULTS.sidebarCompactChatItems,
-		),
+		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
@@ -346,7 +352,7 @@ export class LocalSettingsStore {
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
-	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
+	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -433,7 +439,7 @@ export class LocalSettingsStore {
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
-			sidebarCompactChatItems: this.sidebarCompactChatItems,
+			sidebarChatItemLayout: this.sidebarChatItemLayout,
 			sidebarSortMode: this.sidebarSortMode,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
@@ -470,7 +476,7 @@ export class LocalSettingsStore {
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
-		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
+		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
 		this.sidebarSortMode = snap.sidebarSortMode;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;

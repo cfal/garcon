@@ -16,7 +16,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
-		expect(store.sidebarCompactChatItems).toBe(false);
+		expect(store.sidebarChatItemLayout).toBe('default');
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
@@ -28,6 +28,28 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 
 		store.destroy();
+	});
+
+	it('persists every chat item layout and defaults malformed values to default', () => {
+		const store = createLocalSettingsStore();
+
+		store.set('sidebarChatItemLayout', 'single-line');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sidebarChatItemLayout: 'single-line' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarChatItemLayout).toBe('single-line');
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarChatItemLayout: 'condensed' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarChatItemLayout).toBe('default');
+		malformed.destroy();
 	});
 
 	it('persists Ctrl+Enter steering and defaults malformed values to enabled', () => {
@@ -107,10 +129,7 @@ describe('LocalSettingsStore', () => {
 		['chat-list', 'main', 'unknown'],
 		'chat-list,main,workspace-sidebar',
 	])('falls back atomically for malformed desktop layout order %j', (desktopLayoutOrder) => {
-		localStorage.setItem(
-			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ desktopLayoutOrder }),
-		);
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ desktopLayoutOrder }));
 
 		const store = createLocalSettingsStore();
 
@@ -424,7 +443,7 @@ describe('LocalSettingsStore', () => {
 		store.set('chatMaxWidth', 'medium');
 		store.set('sidebarGroupByProject', false);
 		store.set('sidebarGroupNestedProjectPaths', true);
-		store.set('sidebarCompactChatItems', true);
+		store.set('sidebarChatItemLayout', 'compact');
 		store.set('showQuickCommitTray', false);
 		store.toggle('reduceMotion');
 
@@ -434,7 +453,7 @@ describe('LocalSettingsStore', () => {
 			chatMaxWidth: 'medium',
 			sidebarGroupByProject: false,
 			sidebarGroupNestedProjectPaths: true,
-			sidebarCompactChatItems: true,
+			sidebarChatItemLayout: 'compact',
 			showQuickCommitTray: false,
 			reduceMotion: true,
 		});
@@ -458,7 +477,7 @@ describe('LocalSettingsStore', () => {
 				overlayBackdropEffects: false,
 				sidebarGroupByProject: true,
 				sidebarGroupNestedProjectPaths: true,
-				sidebarCompactChatItems: true,
+				sidebarChatItemLayout: 'compact',
 				showQuickCommitTray: false,
 				allowDirectChats: true,
 				steerWithCtrlEnter: false,
@@ -479,15 +498,11 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.sidebarGroupByProject).toBe(true);
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
-		expect(secondStore.sidebarCompactChatItems).toBe(true);
+		expect(secondStore.sidebarChatItemLayout).toBe('compact');
 		expect(secondStore.showQuickCommitTray).toBe(false);
 		expect(secondStore.allowDirectChats).toBe(true);
 		expect(secondStore.steerWithCtrlEnter).toBe(false);
-		expect(secondStore.desktopLayoutOrder).toEqual([
-			'main',
-			'workspace-sidebar',
-			'chat-list',
-		]);
+		expect(secondStore.desktopLayoutOrder).toEqual(['main', 'workspace-sidebar', 'chat-list']);
 		expect(secondStore.textEditorOpenPlacement).toBe('source');
 		expect(secondStore.imageViewerOpenPlacement).toBe('sidebar');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('main');
