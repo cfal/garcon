@@ -89,8 +89,7 @@ export class StartCommands {
       permissionMode: input.permissionMode,
       thinkingMode: input.thinkingMode,
       agentSettings: input.agentSettings,
-      tags: input.tags ?? [],
-      userMessagePresentation: input.userMessagePresentation,
+      tags: input.tags ?? [], userMessagePresentation: input.userMessagePresentation,
     };
   }
 

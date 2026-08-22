@@ -44,8 +44,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'excludedResendOrdinals'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
-  createdAt?: string;
-  userMessagePresentation?: UserMessagePresentation;
+  createdAt?: string; userMessagePresentation?: UserMessagePresentation;
 };
 
 export class QueueEntryMutationError extends DomainError {
@@ -146,8 +145,7 @@ export interface AcceptedDirectInput {
   options: RunAgentTurnOptions;
   settlement: CommandSettlementPort;
   preparation?: DirectInputPreparation;
-  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>;
-  userMessagePresentation?: UserMessagePresentation;
+  dispatch?: (admission: AgentExecutionAdmission) => Promise<void>; userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AcceptedDirectOperation {
@@ -214,8 +212,7 @@ export interface AcceptedSteerInput {
   clientMessageId: string;
   transcriptViewId: string;
   target: CapturedSteerTarget;
-  settlement: CommandSettlementPort;
-  userMessagePresentation?: UserMessagePresentation;
+  settlement: CommandSettlementPort; userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface AcceptedQueueEntrySteer extends AcceptedSteerInput {

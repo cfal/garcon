@@ -5,7 +5,6 @@ import {
   isStopSatisfied,
   type ChatStopIntent,
   type ChatStopOutcome,
-  type UserMessagePresentation,
 } from '../../common/chat-types.ts';
 import {
   type AgentExecutionAdmission,
@@ -389,7 +388,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
-    userMessagePresentation?: UserMessagePresentation,
+    userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
   ): Promise<AcceptedSteerOutcome> {
     return this.#steerInputDelivery.deliver(
       chatId,

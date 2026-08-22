@@ -3,7 +3,6 @@ import type {
   AgentSteerResult,
 } from '@garcon/server-agent-interface';
 import type { AgentSteerOptions } from '../agents/session-types.ts';
-import type { UserMessagePresentation } from '../../common/chat-types.ts';
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
 import type { ExecutionOwnership } from './execution-ownership.ts';
 import type {
@@ -49,7 +48,7 @@ export class SteerInputDelivery {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
-    userMessagePresentation?: UserMessagePresentation,
+    userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
   ): Promise<AcceptedSteerOutcome> {
     let deliveryPrepared = false;
     let inserted = false;
