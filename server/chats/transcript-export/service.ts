@@ -58,13 +58,7 @@ export class TranscriptExportService {
         title: summary.chat.title,
         agentId: summary.chat.agentId,
         model: summary.chat.model,
-        projectPath: summary.chat.projectPath,
       },
-      transcriptViewId: snapshot.transcriptViewId,
-      lastOrdinal: snapshot.lastOrdinal,
-      generatedAt,
-      totalEntryCount: allEntries.length,
-      exclusions: request.exclusions,
       omitted: filtered.omitted,
       entries: filtered.entries,
     };

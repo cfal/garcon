@@ -4,22 +4,18 @@ import {
   textSafe,
   transcriptExportEntryFields,
   transcriptExportEntryImages,
+  transcriptExportEntryTag,
   transcriptExportEntryText,
-  transcriptExportEntryTimestamp,
   transcriptExportEntryToolId,
   transcriptExportEntryType,
+  transcriptExportEntryUserPresentation,
 } from './values.js';
 
 export function renderTranscriptExportXml(model: TranscriptExportDocumentModel): string {
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<transcript-export version="1">',
-    `  <chat id="${attribute(model.chat.id)}" title="${attribute(model.chat.title)}" agent="${attribute(model.chat.agentId)}"${model.chat.model === null ? '' : ` model="${attribute(model.chat.model)}"`} project-path="${attribute(model.chat.projectPath)}"/>`,
-    `  <capture transcript-view-id="${attribute(model.transcriptViewId)}" last-ordinal="${model.lastOrdinal}" exported-at="${attribute(model.generatedAt)}" entries="${model.entries.length}" total-entries="${model.totalEntryCount}"/>`,
-    '  <exclusions>',
-    ...model.omitted.map(({ category, count }) =>
-      `    <exclusion category="${category}" omitted="${count}"/>`),
-    '  </exclusions>',
+    `  <chat id="${attribute(model.chat.id)}" title="${attribute(model.chat.title)}" agent="${attribute(model.chat.agentId)}"${model.chat.model === null ? '' : ` model="${attribute(model.chat.model)}"`}/>`,
     '  <entries>',
   ];
 
@@ -30,13 +26,16 @@ export function renderTranscriptExportXml(model: TranscriptExportDocumentModel):
 
 function renderEntry(entry: TranscriptExportEntry): string[] {
   const type = transcriptExportEntryType(entry);
-  const tag = entryTag(type);
-  const timestamp = transcriptExportEntryTimestamp(entry);
+  const tag = transcriptExportEntryTag(type);
   const toolId = transcriptExportEntryToolId(entry);
+  const presentation = transcriptExportEntryUserPresentation(entry);
   const typeAttribute = tag === 'tool-call' || tag === 'permission'
     ? ` type="${attribute(type)}"`
     : '';
-  const attributes = ` ordinal="${entry.ordinal}" category="${entry.category}" timestamp="${attribute(timestamp)}"${typeAttribute}${toolId === null ? '' : ` tool-id="${attribute(toolId)}"`}`;
+  const presentationAttributes = presentation === null
+    ? ''
+    : ` origin="${presentation.origin}" style="${presentation.style}"${presentation.title ? ` title="${attribute(presentation.title)}"` : ''}`;
+  const attributes = ` ordinal="${entry.ordinal}"${typeAttribute}${toolId === null ? '' : ` tool-id="${attribute(toolId)}"`}${presentationAttributes}`;
   const body: string[] = [];
   const content = transcriptExportEntryText(entry);
   if (content !== null) body.push(`      <text>${text(content)}</text>`);
@@ -53,18 +52,6 @@ function renderEntry(entry: TranscriptExportEntry): string[] {
   }
   if (body.length === 0) return [`    <${tag}${attributes}/>`];
   return [`    <${tag}${attributes}>`, ...body, `    </${tag}>`];
-}
-
-function entryTag(type: string): string {
-  if (type === 'user-message') return 'user';
-  if (type === 'assistant-message') return 'assistant';
-  if (type === 'thinking') return 'reasoning';
-  if (type.endsWith('-tool-use')) return 'tool-call';
-  if (type === 'tool-result') return 'tool-result';
-  if (type === 'transcript-notice') return 'notice';
-  if (type === 'agent-switch') return 'handoff';
-  if (type.startsWith('permission-')) return 'permission';
-  return type;
 }
 
 function text(value: string): string {

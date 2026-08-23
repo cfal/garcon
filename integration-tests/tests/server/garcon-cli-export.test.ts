@@ -41,7 +41,7 @@ describe('garcon-cli export', () => {
       expect(markdown.stdout).toContain('synthetic export prompt');
       expect(markdown.stdout).toContain('echo:synthetic export prompt');
       expect(markdown.stdout).toContain('synthetic diagnostic row');
-      expect(markdown.stdout).toContain('run-ended');
+      expect(markdown.stdout).toContain('## [4] Run ended');
 
       const filtered = await runCli(fixture, [
         'export', chatId,
@@ -49,11 +49,11 @@ describe('garcon-cli export', () => {
       ]);
       expect(filtered.exitCode).toBe(0);
       expect(filtered.stderr).toBe('');
-      expect(filtered.stdout).toContain('- excluded categories: tool-calls, tool-results, diagnostics');
+      expect(filtered.stdout).toContain('> Omitted: diagnostics 2');
       expect(filtered.stdout).toContain('synthetic export prompt');
       expect(filtered.stdout).toContain('echo:synthetic export prompt');
       expect(filtered.stdout).not.toContain('synthetic diagnostic row');
-      expect(filtered.stdout).not.toContain('run-ended');
+      expect(filtered.stdout).not.toContain('## [4] Run ended');
 
       const outputPath = path.join(fixture.dirs.home, 'transcript.xml');
       const xml = await runCli(fixture, [
@@ -70,7 +70,9 @@ describe('garcon-cli export', () => {
       expect(document).toContain('<transcript-export version="1">');
       expect(document).toContain('<user ordinal="1"');
       expect(document).toContain('<assistant ordinal="3"');
-      expect(document).toContain('<exclusion category="reasoning" omitted="0"/>');
+      expect(document).not.toContain('<exclusions>');
+      expect(document).not.toContain('category=');
+      expect(document).not.toContain('timestamp=');
 
       const refused = await runCli(fixture, [
         'export', chatId, '--format', 'xml', '--output', outputPath,
@@ -146,9 +148,7 @@ describe('garcon-cli export', () => {
           '--exclude', 'tools', '--exclude', 'permissions',
         ]);
         expect(filtered.exitCode).toBe(0);
-        expect(filtered.stdout).toContain('<exclusion category="tool-calls" omitted="1"/>');
-        expect(filtered.stdout).toContain('<exclusion category="tool-results" omitted="1"/>');
-        expect(filtered.stdout).toContain('<exclusion category="permissions" omitted="2"/>');
+        expect(filtered.stdout).not.toContain('<exclusions>');
         expect(filtered.stdout).toContain(prompt);
         expect(filtered.stdout).toContain(reply);
         expect(filtered.stdout).not.toContain(command);

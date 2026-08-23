@@ -91,6 +91,8 @@ describe('TranscriptExportService', () => {
       }, signal());
       expect(response.document).not.toContain('provider-secret');
       expect(response.document).not.toContain('native-secret');
+      expect(response.document).not.toContain('/workspace/project');
+      expect(response.document).not.toContain('view-1');
     }
   });
 

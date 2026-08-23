@@ -10,24 +10,29 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
-  it('renders metadata, original ordinals, filtering disclosure, and conversation text', () => {
+  it('renders compact metadata, original ordinals, filtering disclosure, and conversation text', () => {
     const document = renderTranscriptExportMarkdown(model([
-      entry(2, 'conversation', new UserMessage(AT, 'Prompt with data:text/plain,authored')),
+      entry(2, 'conversation', new UserMessage(
+        AT,
+        'Prompt with data:text/plain,authored',
+        undefined,
+        { clientMessageId: 'private-message-id' },
+        { origin: 'cli', style: 'notice', title: 'Presentation only' },
+      )),
       entry(7, 'conversation', new AssistantMessage(AT, 'Answer')),
     ], {
-      totalEntryCount: 4,
-      exclusions: ['tool-calls'],
       omitted: [{ category: 'tool-calls', count: 2 }],
     }));
 
     expect(document).toContain('# Transcript export — Export fixture');
-    expect(document).toContain('- entries: 2 of 4');
-    expect(document).toContain('- excluded categories: tool-calls');
-    expect(document).toContain('- omitted: tool-calls 2');
-    expect(document).toContain('- entry boundary contract: XML only');
-    expect(document).toContain('## [2] User — conversation');
+    expect(document).toContain('Chat `1787505989127000` · Agent `codex` · Model `gpt-test`');
+    expect(document).toContain('> Omitted: tool-calls 2');
+    expect(document).toContain('## [2] User — CLI notice: Presentation only\n');
     expect(document).toContain('Prompt with data:text/plain,authored');
-    expect(document).toContain('## [7] Assistant — conversation');
+    expect(document).toContain('## [7] Assistant\n');
+    expect(document).not.toContain(' — conversation — ');
+    expect(document).not.toContain(AT);
+    expect(document).not.toContain('private-message-id');
     expect(document.endsWith('\n')).toBe(true);
     expect(document.endsWith('\n\n')).toBe(false);
   });
@@ -41,6 +46,28 @@ describe('Markdown transcript export', () => {
 
     expect(document).toContain('- tool id: `tool-1`');
     expect(document).toContain('`````json\n{"output":"before\\n````\\nafter"}\n`````');
+  });
+
+  it('keeps consecutive scalar fields compact and omits an unspecified model', () => {
+    const document = renderTranscriptExportMarkdown(model([{
+      kind: 'run-ended',
+      ordinal: 4,
+      category: 'diagnostics',
+      at: AT,
+      outcome: 'finished',
+      origin: 'provider',
+    }], {
+      chat: {
+        id: '1787505989127000',
+        title: 'Export fixture',
+        agentId: 'codex',
+        model: null,
+      },
+    }));
+
+    expect(document).toContain('Chat `1787505989127000` · Agent `codex`\n');
+    expect(document).not.toContain('Model');
+    expect(document).toContain('## [4] Run ended\n\n- outcome: `finished`\n- origin: `provider`');
   });
 
   it('omits image bodies and redacts data URLs only inside structured values', () => {
@@ -127,13 +154,7 @@ function model(entries, overrides = {}) {
       title: 'Export fixture',
       agentId: 'codex',
       model: 'gpt-test',
-      projectPath: '/workspace/project',
     },
-    transcriptViewId: 'view-1',
-    lastOrdinal: 9,
-    generatedAt: AT,
-    totalEntryCount: entries.length,
-    exclusions: [],
     omitted: [],
     entries,
     ...overrides,

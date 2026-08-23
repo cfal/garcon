@@ -1,4 +1,8 @@
-import type { ChatImage, ChatMessage } from '../../../common/chat-types.js';
+import type {
+  ChatImage,
+  ChatMessage,
+  UserMessagePresentation,
+} from '../../../common/chat-types.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 
 export interface TranscriptExportField {
@@ -30,8 +34,24 @@ export function transcriptExportEntryType(entry: TranscriptExportEntry): string 
   return entry.kind === 'run-ended' ? 'run-ended' : entry.message.type;
 }
 
-export function transcriptExportEntryTimestamp(entry: TranscriptExportEntry): string {
-  return entry.kind === 'run-ended' ? entry.at : entry.message.timestamp;
+export function transcriptExportEntryTag(type: string): string {
+  if (type === 'user-message') return 'user';
+  if (type === 'assistant-message') return 'assistant';
+  if (type === 'thinking') return 'reasoning';
+  if (type.endsWith('-tool-use')) return 'tool-call';
+  if (type === 'tool-result') return 'tool-result';
+  if (type === 'transcript-notice') return 'notice';
+  if (type === 'agent-switch') return 'handoff';
+  if (type.startsWith('permission-')) return 'permission';
+  return type;
+}
+
+export function transcriptExportEntryUserPresentation(
+  entry: TranscriptExportEntry,
+): UserMessagePresentation | null {
+  return entry.kind === 'message' && entry.message.type === 'user-message'
+    ? entry.message.presentation ?? null
+    : null;
 }
 
 export function transcriptExportEntryText(entry: TranscriptExportEntry): string | null {
@@ -79,6 +99,16 @@ export function transcriptExportEntryFields(
 
 function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {
   const excluded = new Set(['type', 'timestamp', 'images', 'toolId']);
+  if (message.type === 'user-message') {
+    excluded.add('metadata');
+    excluded.add('presentation');
+  }
+  if (
+    (message.type === 'error' || message.type === 'transcript-notice')
+    && message.detail?.type === 'cli-row'
+  ) {
+    excluded.add('detail');
+  }
   if (
     message.type === 'user-message'
     || message.type === 'assistant-message'

@@ -1,48 +1,46 @@
 import type { TranscriptExportDocumentModel } from './model.js';
+import type { TranscriptExportField } from './values.js';
 import {
   textSafe,
   transcriptExportEntryFields,
   transcriptExportEntryImages,
+  transcriptExportEntryTag,
   transcriptExportEntryText,
-  transcriptExportEntryTimestamp,
   transcriptExportEntryToolId,
   transcriptExportEntryType,
+  transcriptExportEntryUserPresentation,
 } from './values.js';
 
 export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentModel): string {
-  const omitted = model.omitted.map(({ category, count }) => `${category} ${count}`).join(', ');
+  const omitted = model.omitted
+    .filter(({ count }) => count > 0)
+    .map(({ category, count }) => `${category} ${count}`)
+    .join(', ');
   const lines = [
     `# Transcript export — ${singleLine(model.chat.title)}`,
     '',
-    `- chat id: \`${inline(model.chat.id)}\``,
-    `- agent: \`${inline(model.chat.agentId)}\``,
-    `- model: ${model.chat.model ? `\`${inline(model.chat.model)}\`` : 'not specified'}`,
-    `- project path: \`${inline(model.chat.projectPath)}\``,
-    `- transcript view id: \`${inline(model.transcriptViewId)}\``,
-    `- last ordinal: ${model.lastOrdinal}`,
-    `- exported at: \`${inline(model.generatedAt)}\``,
-    `- entries: ${model.entries.length} of ${model.totalEntryCount}`,
-    `- excluded categories: ${model.exclusions.length > 0 ? model.exclusions.join(', ') : 'none'}`,
-    `- omitted: ${omitted || 'none'}`,
-    '- attachment and image bodies: omitted',
-    '- entry boundary contract: XML only; Markdown content is verbatim and may resemble headings',
+    `Chat \`${inline(model.chat.id)}\` · Agent \`${inline(model.chat.agentId)}\`${model.chat.model === null ? '' : ` · Model \`${inline(model.chat.model)}\``}`,
+    ...(omitted ? ['', `> Omitted: ${omitted}`] : []),
     '',
   ];
 
   for (const entry of model.entries) {
     const type = transcriptExportEntryType(entry);
-    const timestamp = transcriptExportEntryTimestamp(entry);
-    lines.push(`## [${entry.ordinal}] ${entryLabel(type)} — ${entry.category} — ${timestamp}`, '');
+    const presentation = transcriptExportEntryUserPresentation(entry);
+    const presentationLabel = presentation === null
+      ? ''
+      : ` — CLI ${presentation.style}${presentation.title ? `: ${singleLine(presentation.title)}` : ''}`;
+    lines.push(`## [${entry.ordinal}] ${entryLabel(type)}${presentationLabel}`, '');
 
     const content = transcriptExportEntryText(entry);
     if (content !== null) lines.push(content, '');
 
+    const fields = [...transcriptExportEntryFields(entry)];
     const toolId = transcriptExportEntryToolId(entry);
-    if (toolId !== null) lines.push(...renderField('tool id', toolId, 'text'), '');
-
-    for (const field of transcriptExportEntryFields(entry)) {
-      lines.push(...renderField(field.name, field.value, field.encoding), '');
+    if (toolId !== null) {
+      fields.unshift({ name: 'tool id', value: toolId, encoding: 'text' });
     }
+    if (fields.length > 0) lines.push(...renderFields(fields), '');
 
     const images = transcriptExportEntryImages(entry);
     if (images.length > 0) {
@@ -56,6 +54,21 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
   }
 
   return `${lines.join('\n').replace(/\n+$/, '')}\n`;
+}
+
+function renderFields(
+  fields: readonly TranscriptExportField[],
+): string[] {
+  const lines: string[] = [];
+  let previousWasMultiline = false;
+  for (const field of fields) {
+    const rendered = renderField(field.name, field.value, field.encoding);
+    const isMultiline = rendered.length > 1;
+    if (lines.length > 0 && (previousWasMultiline || isMultiline)) lines.push('');
+    lines.push(...rendered);
+    previousWasMultiline = isMultiline;
+  }
+  return lines;
 }
 
 function renderField(
@@ -85,9 +98,12 @@ function longestBacktickRun(value: string): number {
 }
 
 function entryLabel(type: string): string {
-  if (type === 'user-message') return 'User';
-  if (type === 'assistant-message') return 'Assistant';
-  return type;
+  const tag = transcriptExportEntryTag(type);
+  if (tag === 'user') return 'User';
+  if (tag === 'assistant') return 'Assistant';
+  if (tag === 'tool-call') return `Tool call — ${type}`;
+  if (tag === 'permission') return `Permission — ${type.slice('permission-'.length)}`;
+  return tag.replaceAll('-', ' ').replace(/^./, (character) => character.toUpperCase());
 }
 
 function inline(value: string): string {

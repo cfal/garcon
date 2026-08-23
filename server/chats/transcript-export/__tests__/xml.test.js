@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  ErrorMessage,
+  TranscriptNoticeMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
 import { renderTranscriptExportXml } from '../xml.ts';
@@ -11,14 +13,26 @@ const AT = '2026-08-23T00:00:00.000Z';
 describe('XML transcript export', () => {
   it('uses explicit user and assistant elements with preserved ordinals', () => {
     const document = renderTranscriptExportXml(model([
-      entry(1, 'conversation', new UserMessage(AT, 'Prompt & <context>')),
+      entry(1, 'conversation', new UserMessage(
+        AT,
+        'Prompt & <context>',
+        undefined,
+        { clientMessageId: 'private-message-id' },
+        { origin: 'cli', style: 'notice', title: 'Presentation only' },
+      )),
       entry(4, 'conversation', new AssistantMessage(AT, 'Answer ]]> complete')),
     ]));
 
-    expect(document).toContain('<user ordinal="1" category="conversation"');
+    expect(document).toContain('<chat id="1787505989127000" title="Export fixture" agent="codex" model="gpt-test"/>');
+    expect(document).toContain('<user ordinal="1" origin="cli" style="notice" title="Presentation only">');
     expect(document).toContain('<text>Prompt &amp; &lt;context&gt;</text>');
-    expect(document).toContain('<assistant ordinal="4" category="conversation"');
+    expect(document).toContain('<assistant ordinal="4">');
     expect(document).toContain('<text>Answer ]]&gt; complete</text>');
+    expect(document).not.toContain('category=');
+    expect(document).not.toContain('timestamp=');
+    expect(document).not.toContain('<capture');
+    expect(document).not.toContain('<exclusions>');
+    expect(document).not.toContain('private-message-id');
     expect(document.endsWith('\n')).toBe(true);
     expect(document.endsWith('\n\n')).toBe(false);
   });
@@ -59,17 +73,40 @@ describe('XML transcript export', () => {
       }])),
       entry(3, 'tool-calls', new BashToolUseMessage(AT, 'tool-1', 'pwd')),
     ], {
-      totalEntryCount: 3,
-      exclusions: ['reasoning'],
       omitted: [{ category: 'reasoning', count: 1 }],
     }));
 
-    expect(document).toContain('<exclusion category="reasoning" omitted="1"/>');
+    expect(document).not.toContain('<exclusions>');
     expect(document).toContain('<image name="capture.png" media-type="image/png" encoded-bytes="28"/>');
-    expect(document).toContain('<tool-call ordinal="3" category="tool-calls"');
+    expect(document).toContain('<tool-call ordinal="3" type="bash-tool-use"');
     expect(document).toContain('type="bash-tool-use"');
     expect(document).toContain('tool-id="tool-1"');
     expect(document).not.toContain('data:image/png;base64,secret');
+  });
+
+  it('omits CLI provenance while retaining quarantine disclosure detail', () => {
+    const document = renderTranscriptExportXml(model([
+      entry(2, 'diagnostics', new ErrorMessage(
+        AT,
+        'Operator diagnostic',
+        { type: 'cli-row' },
+        'Synthetic blocker',
+      )),
+      entry(3, 'conversation', new TranscriptNoticeMessage(
+        AT,
+        'Earlier history could not be migrated.',
+        {
+          type: 'carryover-migration-quarantine',
+          artifactId: 'artifact-synthetic',
+          errorCode: 'MIGRATION_FAILED',
+        },
+      )),
+    ]));
+
+    expect(document).not.toContain('"type":"cli-row"');
+    expect(document).toContain('Synthetic blocker');
+    expect(document).toContain('artifact-synthetic');
+    expect(document).toContain('MIGRATION_FAILED');
   });
 
   it('preserves structured data syntax that is not a data URL', () => {
@@ -117,13 +154,7 @@ function model(entries, overrides = {}) {
       title: 'Export fixture',
       agentId: 'codex',
       model: 'gpt-test',
-      projectPath: '/workspace/project',
     },
-    transcriptViewId: 'view-1',
-    lastOrdinal: 9,
-    generatedAt: AT,
-    totalEntryCount: entries.length,
-    exclusions: [],
     omitted: [],
     entries,
     ...overrides,
