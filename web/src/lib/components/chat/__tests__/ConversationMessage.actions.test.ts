@@ -86,6 +86,28 @@ describe('ConversationMessage actions', () => {
 		expect(await screen.findByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
 	});
 
+	it('renders CLI presentation inside the ordinary user message bubble', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(
+				'2026-06-27T00:00:00.000Z',
+				'**Body** only',
+				undefined,
+				undefined,
+				{ origin: 'cli', style: 'error', title: 'Deployment blocker' },
+			),
+		});
+
+		const header = container.querySelector('[data-user-message-presentation="error"]');
+		expect(header?.textContent).toContain('CLI error');
+		expect(header?.textContent).toContain('Deployment blocker');
+		expect(header?.classList.contains('bg-status-error')).toBe(true);
+		expect(header?.classList.contains('text-status-error-foreground')).toBe(true);
+		expect(container.querySelector('.user-message-context-target')?.contains(header)).toBe(true);
+		expect(container.querySelector('.cli-row-message')).toBeNull();
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(screen.getByText('Body')).toBeTruthy();
+	});
+
 	it('renders tool rows synchronously without an await placeholder', () => {
 		render(ConversationMessageHost, {
 			message: new BashToolUseMessage('2026-06-27T00:00:00.000Z', 'tool-1', 'echo hello'),

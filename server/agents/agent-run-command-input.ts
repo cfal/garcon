@@ -4,6 +4,7 @@ import type {
   ForkRunCommandRequest,
 } from '../../common/chat-command-contracts.js';
 import type { RunAgentTurnOptions } from './session-types.js';
+import type { UserMessagePresentation } from '../../common/chat-types.js';
 
 export interface NormalizedAgentRunCommandInput {
   readonly chatId: string;
@@ -15,6 +16,7 @@ export interface NormalizedAgentRunCommandInput {
   readonly tagsToAdd?: string[];
   readonly permissionFallbackPolicy?: 'require-explicit-bypass';
   readonly handoff?: AgentHandoffRequest;
+  readonly userMessagePresentation?: UserMessagePresentation;
 }
 
 export function runOptionsForCommand(
@@ -54,5 +56,6 @@ export function agentRunCommandPayload(
     tagsToAdd: input.tagsToAdd,
     permissionFallbackPolicy: input.permissionFallbackPolicy,
     handoff: input.handoff,
+    userMessagePresentation: input.userMessagePresentation ?? null,
   };
 }

@@ -105,17 +105,25 @@ function formatMessage(entry: TranscriptMessage): string {
   const textPayload = { ...payload } as Record<string, unknown>;
   delete textPayload.images;
   delete textPayload.title;
+  delete textPayload.presentation;
   let content = typeof textPayload.content === 'string'
     ? redactDataUrl(textPayload.content)
     : JSON.stringify(textPayload, redactDataUrls, 2) ?? '{}';
   if (images && images.length > 0) {
     content += `\n[${images.length} image attachments omitted from text output]`;
   }
-  const title = 'title' in entry.message
-    && typeof entry.message.title === 'string' && entry.message.title
-    ? ` — ${entry.message.title}`
-    : '';
-  return `[${entry.ordinal}] ${timestamp} ${type}${cliDetail ? ' (CLI)' : ''}${title}\n`
+  const userPresentation = entry.message.type === 'user-message'
+    ? entry.message.presentation
+    : undefined;
+  const titleValue = userPresentation?.title
+    ?? ('title' in entry.message && typeof entry.message.title === 'string'
+      ? entry.message.title
+      : undefined);
+  const title = titleValue ? ` — ${titleValue}` : '';
+  const cliLabel = userPresentation
+    ? ` (CLI ${userPresentation.style})`
+    : cliDetail ? ' (CLI)' : '';
+  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
     + truncateStatusText(content);
 }
 

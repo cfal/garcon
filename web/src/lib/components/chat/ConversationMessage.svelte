@@ -36,6 +36,7 @@
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import CliRowMessage from './rows/CliRowMessage.svelte';
+	import UserMessagePresentationHeader from './UserMessagePresentationHeader.svelte';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
@@ -493,6 +494,9 @@
 						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
 						<div>
+							{#if asUser.presentation}
+								<UserMessagePresentationHeader presentation={asUser.presentation} />
+							{/if}
 							<div class="text-sm">
 								<Markdown
 									source={asUser.content}

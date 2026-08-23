@@ -461,6 +461,7 @@ export function sanitizeRecordedCarriedContext(input: {
       original.content.slice(receipt.codeUnitLength),
       original.images,
       original.metadata,
+      original.presentation,
     );
     return { kind: 'stripped-exact', messages: next };
   }
@@ -505,7 +506,13 @@ export function stripFirstUserSeed(messages: ChatMessage[]): ChatMessage[] {
   const stripped = stripTranscriptSeed(original.content);
   if (stripped === original.content) return messages;
   const next = messages.slice();
-  next[index] = new UserMessage(original.timestamp, stripped, original.images, original.metadata);
+  next[index] = new UserMessage(
+    original.timestamp,
+    stripped,
+    original.images,
+    original.metadata,
+    original.presentation,
+  );
   return next;
 }
 
@@ -534,6 +541,7 @@ export function boundProjectedMessage(message: ChatMessage): ChatMessage {
       message.content.slice(0, PROJECTED_BODY_MAX_CHARS),
       undefined,
       message.metadata,
+      message.presentation,
     );
   }
   if (message.type === 'assistant-message') {

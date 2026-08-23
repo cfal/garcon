@@ -8,6 +8,7 @@ import type {
   SteerCommandResponse,
 } from '@garcon/common/chat-command-contracts';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
+import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
@@ -63,7 +64,12 @@ function isSafeSteerStateFlip(error: unknown): boolean {
 // reused byte-for-byte when returning to /run, because the server's pre-schedule
 // failure replay path resets an exact failed run identity.
 export async function sendChatAsync(
-  input: { chatId: string; content: string; allowSteer: boolean },
+  input: {
+    chatId: string;
+    content: string;
+    allowSteer: boolean;
+    userMessagePresentation?: UserMessagePresentation;
+  },
   client: ChatControlClient,
   output: CliOutput,
   signal?: AbortSignal,
@@ -78,6 +84,9 @@ export async function sendChatAsync(
     chatId: input.chatId,
     transcriptViewId,
     command: input.content,
+    ...(input.userMessagePresentation === undefined
+      ? {}
+      : { userMessagePresentation: input.userMessagePresentation }),
   };
   let operation: 'run' | 'steer' = 'run';
   let lastStateFlip: GarconHttpError | undefined;
@@ -98,6 +107,9 @@ export async function sendChatAsync(
         chatId: input.chatId,
         transcriptViewId,
         content: input.content,
+        ...(input.userMessagePresentation === undefined
+          ? {}
+          : { userMessagePresentation: input.userMessagePresentation }),
       };
       const response = await client.steerChat(request, signal);
       output.sent(response.chatId, 'steer', response.turnId);

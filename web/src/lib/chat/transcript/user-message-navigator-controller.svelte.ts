@@ -1,4 +1,5 @@
 import { UserMessage } from '$shared/chat-types';
+import type { UserMessagePresentation } from '$shared/chat-types';
 import type { ChatDisplayRow, ChatLoadStatus } from './active-transcript-state.svelte.js';
 import type { TranscriptPageLoadResult } from './transcript-page-progress.js';
 
@@ -8,6 +9,7 @@ export interface UserMessageNavigatorItem {
 	content: string;
 	timestamp: string;
 	attachmentCount: number;
+	presentation?: UserMessagePresentation;
 }
 
 export interface UserMessageNavigatorTarget {
@@ -79,6 +81,9 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 						content: row.message.content,
 						timestamp: row.message.timestamp,
 						attachmentCount: row.message.images?.length ?? 0,
+						...(row.message.presentation === undefined
+							? {}
+							: { presentation: row.message.presentation }),
 					},
 				];
 			})

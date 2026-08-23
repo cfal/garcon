@@ -135,6 +135,7 @@ export function submissionFingerprint(detail: LedgerUserInputDetail): string {
   return stableJsonStringify({
     content: detail.message.content,
     images: detail.message.images ?? null,
+    presentation: detail.message.presentation ?? null,
     attachments: detail.attachments,
     steer: detail.steer,
   });

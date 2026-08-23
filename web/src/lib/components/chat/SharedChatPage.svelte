@@ -17,6 +17,7 @@
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import CliRowMessage from '$lib/components/chat/rows/CliRowMessage.svelte';
+	import UserMessagePresentationHeader from '$lib/components/chat/UserMessagePresentationHeader.svelte';
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -274,6 +275,9 @@
 									<div
 										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm"
 									>
+										{#if message.presentation}
+											<UserMessagePresentationHeader presentation={message.presentation} />
+										{/if}
 										<div class="text-sm">
 											<Markdown source={message.content} variant="user" />
 										</div>

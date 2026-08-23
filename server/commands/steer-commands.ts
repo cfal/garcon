@@ -65,6 +65,7 @@ export class SteerCommands {
         transcriptViewId: input.transcriptViewId,
         content: input.content,
         clientMessageId,
+        userMessagePresentation: input.userMessagePresentation ?? null,
       },
     };
     let outcomeTurnId = target?.identity.turnId;
@@ -137,6 +138,7 @@ export class SteerCommands {
           providerContent,
           clientMessageId,
           transcriptViewId: input.transcriptViewId,
+          userMessagePresentation: input.userMessagePresentation,
           target,
           settlement: this.support.settlement,
         });

@@ -4,6 +4,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { UserMessageNavigatorDialogController } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
+	import UserMessagePresentationHeader from './UserMessagePresentationHeader.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const LOAD_THRESHOLD_PX = 96;
@@ -125,10 +126,13 @@
 						<svelte:boundary {failed}>
 							<button
 								type="button"
-								class="flex min-h-16 w-full items-center px-5 py-3 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+								class="flex min-h-16 w-full flex-col items-stretch justify-center px-5 py-3 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
 								onclick={() => void controller.select(item)}
 								data-user-message-navigator-row={item.id}
 							>
+								{#if item.presentation}
+									<UserMessagePresentationHeader presentation={item.presentation} />
+								{/if}
 								<span
 									class="line-clamp-2 w-full whitespace-pre-wrap break-words text-sm leading-5 text-foreground"
 								>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseCliArgs } from '../args.js';
+import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
 
 const CHAT_ID = '1785337200123456';
@@ -39,6 +39,33 @@ describe('parseCliArgs', () => {
       chatId: CHAT_ID,
       prompt: null,
       readsPromptFromStdin: true,
+    });
+  });
+
+  test('canonicalizes conversational message presentation independently of chat title', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex',
+      '--model', 'gpt',
+      '--title', 'Chat title',
+      '--message-title', '  Operator context  ',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      title: 'Chat title',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'notice',
+        title: 'Operator context',
+      },
+    });
+
+    expect(parseCliArgs([
+      '--resume', CHAT_ID,
+      '--message-style', 'error',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'resume',
+      userMessagePresentation: { origin: 'cli', style: 'error' },
     });
   });
 
@@ -153,6 +180,17 @@ describe('parseCliArgs', () => {
 
   test('returns help without requiring submission arguments', () => {
     expect(parseCliArgs(['--help'], ENV)).toEqual({ kind: 'help' });
+  });
+
+  test('documents presentation on conversational commands and its native-history boundary', () => {
+    expect(CLI_HELP).toContain(
+      'garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>',
+    );
+    expect(CLI_HELP).toContain(
+      '--resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>',
+    );
+    expect(CLI_HELP).toContain('Native-history\nReload');
+    expect(CLI_HELP).toContain('provider-native fork segments may drop');
   });
 
   test('parses an exact turn wait with connection options and JSON output', () => {
@@ -283,6 +321,19 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('parses send-async message presentation', () => {
+    expect(parseCliArgs([
+      'send-async', CHAT_ID,
+      '--message-title', 'Blocker',
+      '--message-style', 'error',
+      'Do not deploy',
+    ], ENV)).toMatchObject({
+      kind: 'send-async',
+      message: 'Do not deploy',
+      userMessagePresentation: { origin: 'cli', style: 'error', title: 'Blocker' },
+    });
+  });
+
   test('parses a connection-qualified send-async with --allow-steer before or after the chat ID', () => {
     expect(parseCliArgs([
       '--workspace', 'work',
@@ -402,6 +453,10 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be notice or error' },
+    { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
+    { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
+    { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
   ])('rejects invalid control arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {
