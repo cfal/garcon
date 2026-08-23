@@ -6,9 +6,11 @@ import {
   requiredString,
 } from './command-request-validation.js';
 import { isRecord } from './json.js';
-
-export const CHAT_ROW_TYPES = ['notice', 'error'] as const;
-export type ChatRowType = (typeof CHAT_ROW_TYPES)[number];
+import {
+  CLI_PRESENTATION_STYLE_LIST,
+  isCliPresentationStyle,
+  type CliPresentationStyle,
+} from './cli-presentation.js';
 
 export const CHAT_ROW_CONTENT_MAX_BYTES = 64 * 1024;
 export const CHAT_ROW_TITLE_MAX_CODE_POINTS = 120;
@@ -27,7 +29,7 @@ export interface AddChatRowRequest {
   readonly clientMessageId: string;
   readonly chatId: string;
   readonly transcriptViewId: string;
-  readonly type: ChatRowType;
+  readonly type: CliPresentationStyle;
   readonly title?: string;
   readonly content: string;
 }
@@ -40,7 +42,7 @@ export interface AddChatRowResponse {
   readonly chatId: string;
   readonly transcriptViewId: string;
   readonly ordinal: number;
-  readonly type: ChatRowType;
+  readonly type: CliPresentationStyle;
   readonly status: 'appended' | 'duplicate';
   readonly timestamp: string;
 }
@@ -85,8 +87,10 @@ export function parseChatRowTitle(value: unknown): string | undefined {
 
 export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
   const body = requestRecord(value);
-  if (body.type !== 'notice' && body.type !== 'error') {
-    throw new CommandRequestValidationError('type must be notice or error');
+  if (!isCliPresentationStyle(body.type)) {
+    throw new CommandRequestValidationError(
+      `type must be one of: ${CLI_PRESENTATION_STYLE_LIST}`,
+    );
   }
   const title = parseChatRowTitle(body.title);
   return {
@@ -127,7 +131,7 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     || !isNonEmptyString(value.transcriptViewId)
     || !Number.isSafeInteger(value.ordinal)
     || Number(value.ordinal) < 1
-    || (value.type !== 'notice' && value.type !== 'error')
+    || !isCliPresentationStyle(value.type)
     || (value.status !== 'appended' && value.status !== 'duplicate')
     || !isNonEmptyString(value.timestamp)
   ) {

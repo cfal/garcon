@@ -19,6 +19,11 @@ import {
   str,
 } from './chat-message-coercion.js';
 import { parseChatRowTitle } from './chat-row-contracts.js';
+import {
+  CLI_PRESENTATION_STYLE_LIST,
+  isCliPresentationStyle,
+  type CliPresentationStyle,
+} from './cli-presentation.js';
 
 export interface ChatImage {
   data: string;
@@ -43,12 +48,9 @@ export interface ChatMessageMetadata {
   turnId?: string;
 }
 
-export const USER_MESSAGE_PRESENTATION_STYLES = ['notice', 'error'] as const;
-export type UserMessagePresentationStyle = typeof USER_MESSAGE_PRESENTATION_STYLES[number];
-
 export interface UserMessagePresentation {
   readonly origin: 'cli';
-  readonly style: UserMessagePresentationStyle;
+  readonly style: CliPresentationStyle;
   readonly title?: string;
 }
 
@@ -64,8 +66,10 @@ export function parseUserMessagePresentation(value: unknown): UserMessagePresent
     }
   }
   if (body.origin !== 'cli') throw new TypeError('user message presentation origin must be cli');
-  if (body.style !== 'notice' && body.style !== 'error') {
-    throw new TypeError('user message presentation style must be notice or error');
+  if (!isCliPresentationStyle(body.style)) {
+    throw new TypeError(
+      `user message presentation style must be one of: ${CLI_PRESENTATION_STYLE_LIST}`,
+    );
   }
   const title = parseChatRowTitle(body.title);
   return { origin: 'cli', style: body.style, ...(title === undefined ? {} : { title }) };

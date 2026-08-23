@@ -28,6 +28,7 @@
     "./chat-types": "./chat-types.ts",
     "./chat-view": "./chat-view.ts",
     "./client-chat-id": "./client-chat-id.ts",
+    "./cli-presentation": "./cli-presentation.ts",
     "./execution-defaults": "./execution-defaults.ts",
     "./file-contracts": "./file-contracts.ts",
     "./generation-prompts": "./generation-prompts.ts",

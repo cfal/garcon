@@ -66,7 +66,7 @@ describe('chat row contracts', () => {
 
   it('rejects unsupported chat row types', () => {
     expect(() => parseAddChatRowRequest({ ...request, type: 'alert' })).toThrow(
-      'type must be notice or error',
+        'type must be one of: notice, error',
     );
   });
 

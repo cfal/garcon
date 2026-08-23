@@ -453,7 +453,7 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be notice or error' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be one of: notice, error' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },

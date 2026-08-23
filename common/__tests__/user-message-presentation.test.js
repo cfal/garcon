@@ -18,7 +18,7 @@ describe('user message presentation', () => {
     expect(() => parseUserMessagePresentation({ origin: 'spa', style: 'notice' }))
       .toThrow('origin must be cli');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'warning' }))
-      .toThrow('style must be notice or error');
+        .toThrow('style must be one of: notice, error');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'notice', extra: true }))
       .toThrow('unsupported field');
   });

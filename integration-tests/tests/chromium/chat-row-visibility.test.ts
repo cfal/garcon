@@ -4,8 +4,8 @@ import type { BrowserContext, Page } from 'playwright';
 import type {
   AddChatRowResponse,
   ChatRowTargetResponse,
-  ChatRowType,
 } from '../../../common/chat-row-contracts.js';
+import type { CliPresentationStyle } from '../../../common/cli-presentation.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   withChromiumFixture,
@@ -157,7 +157,7 @@ async function addRow(input: {
   fixture: ChromiumFixture;
   chatId: string;
   transcriptViewId: string;
-  type: ChatRowType;
+  type: CliPresentationStyle;
   title: string;
   content: string;
   identity: string;

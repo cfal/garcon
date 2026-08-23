@@ -5,7 +5,10 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
-import type { ChatRowType } from '../../common/chat-row-contracts.js';
+import {
+  isCliPresentationStyle,
+  type CliPresentationStyle,
+} from '../../common/cli-presentation.js';
 import type { JsonObject } from '../../common/json.js';
 
 declare const transcriptViewIdBrand: unique symbol;
@@ -63,7 +66,7 @@ export interface LedgerNoticeRow extends LedgerRowBase {
 export interface LedgerCliRowNoticeDetail extends JsonObject {
   readonly type: 'cli-row';
   readonly clientMessageId: string;
-  readonly presentation: ChatRowType;
+  readonly presentation: CliPresentationStyle;
   readonly title: string | null;
 }
 
@@ -78,7 +81,7 @@ export function isLedgerCliRowNoticeDetail(
   return value.type === 'cli-row'
     && typeof value.clientMessageId === 'string'
     && value.clientMessageId.length > 0
-    && (value.presentation === 'notice' || value.presentation === 'error')
+    && isCliPresentationStyle(value.presentation)
     && (
       value.title === null
       || (typeof value.title === 'string' && value.title.length > 0)

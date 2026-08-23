@@ -12,8 +12,12 @@ import {
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
 import {
   parseChatRowTitle,
-  type ChatRowType,
 } from '@garcon/common/chat-row-contracts';
+import {
+  CLI_PRESENTATION_STYLE_LIST,
+  isCliPresentationStyle,
+  type CliPresentationStyle,
+} from '@garcon/common/cli-presentation';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
@@ -164,7 +168,7 @@ export interface StopCliCommand extends CliConnectionOptions {
 export interface AddRowCliCommand extends CliConnectionOptions {
   readonly kind: 'add-row';
   readonly chatId: ChatId;
-  readonly type: ChatRowType;
+  readonly type: CliPresentationStyle;
   readonly title?: string;
   readonly content: string | null;
   readonly readsContentFromStdin: boolean;
@@ -267,8 +271,8 @@ function parseUserMessagePresentationOptions(
   values: Record<string, ParsedOptionValue>,
 ): UserMessagePresentation | undefined {
   const rawStyle = values['message-style'];
-  if (rawStyle !== undefined && rawStyle !== 'notice' && rawStyle !== 'error') {
-    throw argumentError('--message-style must be notice or error');
+  if (rawStyle !== undefined && !isCliPresentationStyle(rawStyle)) {
+    throw argumentError(`--message-style must be one of: ${CLI_PRESENTATION_STYLE_LIST}`);
   }
   let title: string | undefined;
   try {
@@ -409,8 +413,10 @@ function parseAddRow(
   if (parsed.positionals.length !== 3) {
     throw argumentError('add-row requires a chat ID and one content argument');
   }
-  if (values.type !== 'notice' && values.type !== 'error') {
-    throw argumentError('add-row requires --type notice or --type error');
+  if (!isCliPresentationStyle(values.type)) {
+    throw argumentError(
+      `add-row requires --type ${CLI_PRESENTATION_STYLE_LIST.replace(', ', ' or --type ')}`,
+    );
   }
   let title: string | undefined;
   try {
