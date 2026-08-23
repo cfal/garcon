@@ -1,58 +1,46 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 describe('lazy transcript adoption search indexing', () => {
   test('[TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01] indexes a lazy adoption without a later commit', async () => {
+    const environment: Record<string, string> = {};
     await withIntegrationFixture('transcript-search-lazy-adoption', async (fixture) => {
       const chatId = fixture.newChatId();
       const marker = 'syntheticlazyadoptionmarker';
-      const started = await fixture.client.startDirectChat({
+      const claude = (await fixture.client.listAgentCatalog()).agents.find(
+        (agent) => agent.id === 'claude',
+      );
+      if (!claude) throw new Error('Claude integration is required for lazy adoption.');
+      await fixture.client.updateSettings({
+        features: { transcriptSearch: { enabled: true } },
+      });
+      const started = await fixture.client.startChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
         chatId,
-        content: 'synthetic setup message',
+        agentId: claude.id,
         projectPath: fixture.dirs.project,
-        agent: fixture.directAgents.openAi,
+        model: claude.defaultModel,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        agentSettings: claude.defaultSettings,
+        command: marker,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, started.turnId)).type).toBe(
         'agent-run-finished',
       );
-      const beforeNativeRequests = fixture.fakeProviders.openAi.requests().length;
+      await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: claude.id,
+      });
 
       await fixture.restartGarcon({
         beforeStart: async () => {
-          const registry = JSON.parse(
-            await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
-          ) as { sessions?: Record<string, Record<string, unknown>> };
-          const chat = registry.sessions?.[chatId];
-          const agentSessionId = chat?.agentSessionId;
-          const modelEndpointId = chat?.modelEndpointId;
-          if (typeof agentSessionId !== 'string' || typeof modelEndpointId !== 'string') {
-            throw new Error('Synthetic Direct chat was not persisted before restart.');
-          }
-          const legacySourceDirectory = join(
-            fixture.dirs.workspace,
-            'agent-data',
-            'direct-openai-compatible',
-            'openai-compatible-sessions',
-            modelEndpointId,
-          );
-          await mkdir(legacySourceDirectory, { recursive: true });
-          const legacySourcePath = join(legacySourceDirectory, `${agentSessionId}.jsonl`);
-          await writeFile(legacySourcePath, [
-            { role: 'user', content: marker, timestamp: '2026-08-17T00:00:00.000Z' },
-            { role: 'assistant', content: 'synthetic adopted response', timestamp: '2026-08-17T00:00:01.000Z' },
-          ].map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf8');
-          const settingsPath = join(fixture.dirs.workspace, 'project-settings.json');
-          const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
-          const features = settings.features && typeof settings.features === 'object'
-            ? settings.features as Record<string, unknown>
-            : {};
-          settings.features = {
-            ...features,
-            transcriptSearch: { enabled: true },
-          };
-          await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
           await rm(join(fixture.dirs.workspace, 'transcript-ledgers', chatId), {
             recursive: true,
             force: true,
@@ -80,7 +68,22 @@ describe('lazy transcript adoption search indexing', () => {
         role: 'user',
         text: marker,
       }));
-      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(beforeNativeRequests);
+    }, {
+      serverEnvironment: environment,
+      async prepareWorkspace(directories) {
+        const fakeModule = fileURLToPath(
+          new URL('../../support/fake-claude-cli.ts', import.meta.url),
+        );
+        const binaryPath = join(directories.root, 'claude');
+        await writeFile(
+          binaryPath,
+          `#!${process.execPath}\nimport ${JSON.stringify(pathToFileURL(fakeModule).href)};\n`,
+        );
+        await chmod(binaryPath, 0o755);
+        environment.CLAUDE_BINARY = binaryPath;
+        environment.CLAUDE_CONFIG_DIR = join(directories.home, '.claude-integration');
+        environment.ANTHROPIC_API_KEY = 'integration-fake-claude-key';
+      },
     });
-  });
+  }, 30_000);
 });

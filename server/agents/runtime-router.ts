@@ -13,7 +13,6 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import {
   renderCarriedContext,
-  type CarriedContext,
 } from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
@@ -47,10 +46,12 @@ import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
+import type { CarryOverCompactionResult } from '../chats/carryover-compaction.js';
 import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
+import type { TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
 } from './runtime-router-errors.js';
@@ -72,7 +73,7 @@ export interface AgentRuntimeRouterOptions {
     entry: AgentChatEntry,
     messages: readonly ChatMessage[],
     signal?: AbortSignal,
-  ): Promise<CarriedContext | null>;
+  ): Promise<CarryOverCompactionResult>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -91,6 +92,17 @@ export interface RunSingleQueryOptions {
   readonly agentSettings?: AgentSettingsEnvelope;
   readonly [key: string]: unknown;
 }
+
+type PreparedPrompt =
+  | { readonly dispatch: false }
+  | {
+      readonly dispatch: true;
+      readonly prompt: string;
+      readonly attachments: ReturnType<typeof attachments>;
+      readonly excludedOrdinals: ReadonlySet<number>;
+      readonly viewId: TranscriptViewId;
+    };
+
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
@@ -116,7 +128,10 @@ export class AgentRuntimeRouter {
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
     this.#createCarriedContext = options.createCarriedContext
-      ?? (async (_chatId, _entry, messages) => renderCarriedContext(messages));
+      ?? (async (_chatId, _entry, messages) => ({
+        context: renderCarriedContext(messages),
+        summary: null,
+      }));
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
@@ -138,8 +153,8 @@ export class AgentRuntimeRouter {
     clientMessageId?: string;
     turnId?: string;
     commandType?: AgentExecutionCommandType;
+    contextTransition?: RunAgentTurnOptions['contextTransition'];
     executionAdmission?: AgentExecutionAdmission;
-      carriedContext?: CarriedContext | null;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
   } = {}): Promise<void> {
@@ -171,25 +186,30 @@ export class AgentRuntimeRouter {
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
-    const carriedContext = await this.#createCarriedContext(
+    const carryover = await this.#createCarriedContext(
       chatId,
       entry,
-      prepared.priorContext,
+      this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
       opts.executionAdmission?.signal,
     );
-    assertExecutionAdmissionOpen(opts);
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-    const handle = await integration.execution.start({
+      assertExecutionAdmissionOpen(opts);
+      if (opts.contextTransition === 'agent-handoff' && carryover.summary) {
+        this.#ledger.appendNotice(chatId, prepared.viewId, {
+          title: 'Handoff summary',
+          content: carryover.summary,
+        });
+      }
+      const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: prepared.priorContext,
         prompt: prepared.prompt,
         attachments: prepared.attachments,
-        carriedContext,
+        carriedContext: carryover.context,
       });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
@@ -251,7 +271,6 @@ export class AgentRuntimeRouter {
       const handle = await integration.execution.resume({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: prepared.priorContext,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.prompt,
@@ -341,7 +360,6 @@ export class AgentRuntimeRouter {
     return integration.goals.submitControl({
       ...this.#executionContextV5(chatId, entry, selection, operation.turnId, opts),
       sink: producer.sink,
-      priorContext: this.#ledger.conversationMessages(chatId),
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
@@ -397,7 +415,6 @@ export class AgentRuntimeRouter {
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        priorContext: this.#ledger.conversationMessages(chatId),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
@@ -673,16 +690,13 @@ export class AgentRuntimeRouter {
     chatId: string,
     fallbackPrompt: string,
     opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images'>,
-  ): Promise<{
-    readonly dispatch: boolean;
-    readonly prompt: string;
-    readonly attachments: ReturnType<typeof attachments>;
-    readonly priorContext: readonly ChatMessage[];
-  }> {
+  ): Promise<PreparedPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
-      return { dispatch: false, prompt: '', attachments: [], priorContext: [] };
+      return { dispatch: false };
     }
+    const viewId = composition?.input.viewId ?? this.#ledger.currentView(chatId)?.viewId;
+    if (!viewId) throw new Error(`Transcript view is not initialized for ${chatId}`);
     const promptRows = composition?.prompt ?? [];
     const prompt = promptRows.length > 0
       ? promptRows.map((row) => row.detail.message.content).join('\n\n')
@@ -696,7 +710,8 @@ export class AgentRuntimeRouter {
       dispatch: true,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
       attachments: [...preparedAttachments],
-      priorContext: this.#ledger.conversationMessages(chatId, excluded),
+      excludedOrdinals: excluded,
+      viewId,
     };
   }
 

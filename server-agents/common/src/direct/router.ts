@@ -1,4 +1,5 @@
 import type { ApiProtocol } from '@garcon/common/api-providers';
+import crypto from 'node:crypto';
 import {
   AnthropicCompatibleChatRuntime,
   runAnthropicCompatibleSingleQuery,
@@ -20,12 +21,14 @@ import type {
   DirectStartedSession,
   DirectStartRequest,
 } from './runtime-types.js';
+import type { DirectSessionStore } from './session-store.js';
 
 export interface DirectCompatibleRuntime {
   startSession(request: DirectStartRequest): Promise<DirectStartedSession>;
   runTurn(request: DirectResumeRequest): Promise<void>;
   abort(agentSessionId: string): boolean;
   isRunning(agentSessionId: string): boolean;
+  forgetSession(agentSessionId: string): void;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   startPurgeTimer(): void;
   shutdown?(): void;
@@ -46,7 +49,7 @@ export class DirectEndpointRouterRuntime<
   TRuntime extends DirectCompatibleRuntime,
 > {
   readonly #runtimes = new Map<string, TRuntime>();
-  readonly #sessionEndpointIds = new Map<string, string>();
+  readonly #sessionRuntimeKeys = new Map<string, string>();
   #purgeTimersStarted = false;
 
   constructor(private readonly config: DirectEndpointRouterConfig<TRuntime>) {}
@@ -54,22 +57,24 @@ export class DirectEndpointRouterRuntime<
   async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
     const runtime = this.#runtimeFor(request.endpoint);
     const started = await runtime.startSession(request);
-    this.#sessionEndpointIds.set(
+    this.#sessionRuntimeKeys.set(
       started.agentSessionId,
-      request.endpoint.selection.endpointId,
+      directEndpointFingerprint(request.endpoint),
     );
     return started;
   }
 
   async runTurn(request: DirectResumeRequest): Promise<void> {
-    let runtime = this.#runtimeForSession(request.agentSessionId);
-    if (!runtime) {
-      runtime = this.#runtimeFor(request.endpoint);
-      this.#sessionEndpointIds.set(
-        request.agentSessionId,
-        request.endpoint.selection.endpointId,
-      );
+    const runtimeKey = directEndpointFingerprint(request.endpoint);
+    const previousRuntimeKey = this.#sessionRuntimeKeys.get(request.agentSessionId);
+    if (previousRuntimeKey && previousRuntimeKey !== runtimeKey) {
+      this.#runtimes.get(previousRuntimeKey)?.forgetSession(request.agentSessionId);
     }
+    const runtime = this.#runtimeFor(request.endpoint);
+    this.#sessionRuntimeKeys.set(
+      request.agentSessionId,
+      runtimeKey,
+    );
     await runtime.runTurn(request);
   }
 
@@ -106,13 +111,13 @@ export class DirectEndpointRouterRuntime<
     this.#purgeTimersStarted = false;
     for (const runtime of this.#runtimes.values()) runtime.shutdown?.();
     this.#runtimes.clear();
-    this.#sessionEndpointIds.clear();
+    this.#sessionRuntimeKeys.clear();
   }
 
   #runtimeForSession(agentSessionId: string): TRuntime | null {
-    const endpointId = this.#sessionEndpointIds.get(agentSessionId);
-    if (endpointId) {
-      const runtime = this.#runtimes.get(endpointId);
+    const runtimeKey = this.#sessionRuntimeKeys.get(agentSessionId);
+    if (runtimeKey) {
+      const runtime = this.#runtimes.get(runtimeKey);
       if (runtime) return runtime;
     }
     for (const runtime of this.#runtimes.values()) {
@@ -123,11 +128,11 @@ export class DirectEndpointRouterRuntime<
 
   #runtimeFor(endpoint: DirectEndpointRuntime): TRuntime {
     this.#validateEndpoint(endpoint);
-    const endpointId = endpoint.selection.endpointId;
-    const existing = this.#runtimes.get(endpointId);
+    const runtimeKey = directEndpointFingerprint(endpoint);
+    const existing = this.#runtimes.get(runtimeKey);
     if (existing) return existing;
     const runtime = this.config.createRuntime(endpoint);
-    this.#runtimes.set(endpointId, runtime);
+    this.#runtimes.set(runtimeKey, runtime);
     if (this.#purgeTimersStarted) runtime.startPurgeTimer();
     return runtime;
   }
@@ -144,6 +149,7 @@ export class DirectEndpointRouterRuntime<
 
 export interface DirectRuntimeFamilyOptions {
   readonly runtimeLabel: string;
+  readonly sessions: DirectSessionStore;
 }
 
 export function createDirectOpenAiChatRuntime(
@@ -203,6 +209,7 @@ export function buildDirectOpenAiConfig(args: DirectRuntimeFamilyOptions & {
   return {
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
     buildHeaders: (apiKey) => ({
@@ -218,6 +225,9 @@ export function buildDirectOpenAiResponsesConfig(args: DirectRuntimeFamilyOption
   return {
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
+    endpointId: args.endpoint.selection.endpointId,
+    endpointFingerprint: directEndpointFingerprint(args.endpoint),
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
     buildHeaders: (apiKey) => ({
@@ -233,7 +243,26 @@ export function buildDirectAnthropicConfig(args: DirectRuntimeFamilyOptions & {
   return {
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
+    sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,
   };
+}
+
+export function directEndpointFingerprint(endpoint: DirectEndpointRuntime): string {
+  const headers = Object.entries(endpoint.selection.headers ?? {})
+    .map(([name, value]) => [name.toLowerCase(), value] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
+  const route = {
+    endpointId: endpoint.selection.endpointId,
+    protocol: endpoint.selection.protocol,
+    baseUrl: endpoint.selection.baseUrl.replace(/\/+$/, ''),
+    headersDigest: digest(JSON.stringify(headers)),
+    credentialDigest: digest(endpoint.credential ?? ''),
+  };
+  return digest(JSON.stringify(route));
+}
+
+function digest(value: string): string {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }

@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Database } from 'bun:sqlite';
 import {
@@ -38,7 +38,6 @@ import type {
   SacsNativeForkingFacet,
   SacsNativeHistoryImportFacet,
   SacsPreparedHistorySource,
-  SacsReleasedJsonlFacet,
 } from './driver.js';
 
 const STEERING = { kind: 'steering' } as const;
@@ -197,7 +196,6 @@ function legacyHistoryImport(
 ): SacsLegacyHistoryImportFacet {
   return {
     kind: 'legacy-history-import',
-    releasedJsonl: null,
     directoryScoped: null,
     prepare: (fixture, chatId) => prepare(fixture, chatId),
   };
@@ -326,7 +324,6 @@ type OpenCodeStoredRow = Record<string, string | number | bigint | null | Uint8A
 
 const openCodeLegacyHistoryImport: SacsLegacyHistoryImportFacet = {
   kind: 'legacy-history-import',
-  releasedJsonl: null,
   directoryScoped: {
     async moveBindingToDifferentDirectory(fixture, chatId) {
       const registryPath = join(fixture.dirs.workspace, 'chats.json');
@@ -363,108 +360,32 @@ const openCodeLegacyHistoryImport: SacsLegacyHistoryImportFacet = {
 
 const openCodeNativeHistoryImport = nativeHistoryImport(prepareOpenCodeHistorySource);
 
-function directLegacyHistoryImport(input: {
-  readonly agentId: string;
-  readonly directory: string;
-  readonly context: SacsReleasedJsonlFacet['latestRequestContext'];
-}): SacsLegacyHistoryImportFacet {
-  const paths = async (fixture: IntegrationFixture, chatId: string) => {
-    const binding = await waitForPersistedChat({
+function directHistorySource(agentId: string): SacsHistorySourcePreparer {
+  return async (fixture, chatId) => {
+    const binding = await waitForPersistedNativeSession({
       directories: fixture.dirs,
       chatId,
-      select: (candidate) => (
-        candidate.agentSessionId && candidate.modelEndpointId ? candidate : null
-      ),
-      timeoutMessage: `SACS chat ${chatId} did not persist the required binding.`,
+      agentId,
     });
-    if (!binding.agentSessionId || !binding.modelEndpointId) {
-      throw new Error(`SACS Direct chat ${chatId} has no persisted session or endpoint.`);
+    if (!binding.agentSessionId) {
+      throw new Error(`SACS Direct chat ${chatId} has no persisted session.`);
     }
-    const relativePath = join(
-      input.directory,
-      binding.modelEndpointId,
+    const path = join(
+      fixture.dirs.workspace,
+      'agent-data',
+      agentId,
+      'direct-sessions-v1',
       `${binding.agentSessionId}.jsonl`,
     );
-    return {
-      legacyPath: join(fixture.dirs.workspace, relativePath),
-      relocatedPath: join(
-        fixture.dirs.workspace,
-        'agent-data',
-        input.agentId,
-        relativePath,
-      ),
-    };
+    const deadline = Date.now() + 5_000;
+    while (!await fileExists(path)) {
+      if (Date.now() >= deadline) {
+        throw new Error(`SACS Direct chat ${chatId} did not persist its native history.`);
+      }
+      await Bun.sleep(20);
+    }
+    return replaceableFile(path);
   };
-  return {
-    kind: 'legacy-history-import',
-    releasedJsonl: {
-      latestRequestContext: input.context,
-      async snapshotRelocatedSource(fixture, chatId) {
-        const { legacyPath, relocatedPath } = await paths(fixture, chatId);
-        if (await fileExists(legacyPath)) {
-          throw new Error(`SACS Direct legacy source was not relocated from ${legacyPath}.`);
-        }
-        const metadata = await stat(relocatedPath);
-        return {
-          path: relocatedPath,
-          contents: await readFile(relocatedPath, 'utf8'),
-          size: metadata.size,
-          modifiedAtMs: metadata.mtimeMs,
-        };
-      },
-    },
-    directoryScoped: null,
-    async prepare(fixture, chatId, rows) {
-      const { legacyPath, relocatedPath } = await paths(fixture, chatId);
-      const contents = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
-      await rm(
-        join(fixture.dirs.workspace, 'agent-data', input.agentId, 'migration-state.json'),
-        { force: true },
-      );
-      await rm(relocatedPath, { recursive: true, force: true });
-      await mkdir(dirname(legacyPath), { recursive: true });
-      await writeFile(legacyPath, contents, 'utf8');
-
-      const replaceActiveSource = async (nextContents: string) => {
-        const activePath = await fileExists(relocatedPath) ? relocatedPath : legacyPath;
-        const alternatePath = activePath === relocatedPath ? legacyPath : relocatedPath;
-        await rm(alternatePath, { recursive: true, force: true });
-        await mkdir(dirname(activePath), { recursive: true });
-        await writeFile(activePath, nextContents, 'utf8');
-      };
-
-      return {
-        async corrupt() {
-          await replaceActiveSource('{"role":"user","content":');
-        },
-        async empty() {
-          await replaceActiveSource('');
-        },
-        async restore() {
-          await replaceActiveSource(contents);
-        },
-        async remove() {
-          await Promise.all([
-            rm(legacyPath, { recursive: true, force: true }),
-            rm(relocatedPath, { recursive: true, force: true }),
-          ]);
-        },
-      };
-    },
-  };
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.flatMap((part) => (
-    part !== null
-    && typeof part === 'object'
-    && 'text' in part
-    && typeof part.text === 'string'
-      ? [part.text]
-      : []
-  )).join('\n');
 }
 
 function heldTurn(held: { readonly requested: Promise<unknown>; release(): void }): SacsHeldTurn {
@@ -678,16 +599,15 @@ function directDriver(
   label: string,
   selectAgent: (fixture: IntegrationFixture) => IntegrationFixture['directAgents']['openAi'],
   selectProvider: (fixture: IntegrationFixture) => DirectProviderHarness,
-  legacyHistoryImport: SacsLegacyHistoryImportFacet,
 ): SacsDriverFactory {
   return {
     id,
     label,
     steering: null,
-    nativeSessions: null,
-    nativeHistoryImport: null,
+    nativeSessions: NATIVE_SESSIONS,
+    nativeHistoryImport: nativeHistoryImport(directHistorySource(id)),
     forking: null,
-    legacyHistoryImport,
+    legacyHistoryImport: null,
     async start() {
       const holdAssistant = (fixture: IntegrationFixture, content: string): SacsHeldTurn => {
         const held = selectProvider(fixture).holdNext({});
@@ -741,12 +661,6 @@ const directOpenAiDriver = directDriver(
   'Direct OpenAI Chat Completions',
   (fixture) => fixture.directAgents.openAi,
   (fixture) => fixture.fakeProviders.openAi,
-  directLegacyHistoryImport({
-    agentId: 'direct-openai-compatible',
-    directory: 'openai-compatible-sessions',
-    context: (fixture) => fixture.fakeProviders.openAi.requests().at(-1)?.body.messages
-      .map((message) => contentText(message.content)) ?? [],
-  }),
 );
 
 const directOpenAiResponsesDriver = directDriver(
@@ -754,12 +668,6 @@ const directOpenAiResponsesDriver = directDriver(
   'Direct OpenAI Responses',
   (fixture) => fixture.directAgents.openAiResponses,
   (fixture) => fixture.fakeProviders.openAiResponses,
-  directLegacyHistoryImport({
-    agentId: 'direct-openai-responses-compatible',
-    directory: 'openai-compatible-responses-sessions',
-    context: (fixture) => fixture.fakeProviders.openAiResponses.requests().at(-1)?.body.input
-      .map((message) => contentText(message.content)) ?? [],
-  }),
 );
 
 const directAnthropicDriver = directDriver(
@@ -767,12 +675,6 @@ const directAnthropicDriver = directDriver(
   'Direct Anthropic',
   (fixture) => fixture.directAgents.anthropic,
   (fixture) => fixture.fakeProviders.anthropic,
-  directLegacyHistoryImport({
-    agentId: 'direct-anthropic-compatible',
-    directory: 'anthropic-compatible-sessions',
-    context: (fixture) => fixture.fakeProviders.anthropic.requests().at(-1)?.body.messages
-      .map((message) => contentText(message.content)) ?? [],
-  }),
 );
 
 export const sacsScriptedDriverFactories: readonly SacsDriverFactory[] = [

@@ -371,8 +371,10 @@ export async function startServer(): Promise<void> {
         entry.carryOverMigrationQuarantine ?? null,
       ),
       async createCarriedContext(chatId, entry, messages, signal) {
-        if (messages.length === 0) return null;
-        if (!carryOverCompaction) return renderCarriedContext(messages);
+        if (messages.length === 0) return { context: null, summary: null };
+        if (!carryOverCompaction) {
+          return { context: renderCarriedContext(messages), summary: null };
+        }
         return carryOverCompaction.carriedContextFor({
           chatId,
           projectPath: entry.projectPath,

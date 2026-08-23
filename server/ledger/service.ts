@@ -7,7 +7,11 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
-import type { ChatRowType } from '../../common/chat-row-contracts.js';
+import {
+  parseChatRowContent,
+  parseChatRowTitle,
+  type ChatRowType,
+} from '../../common/chat-row-contracts.js';
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
@@ -16,6 +20,7 @@ import type {
   InputComposition,
   LedgerAgentSwitchRow,
   LedgerConversationRow,
+  LedgerNoticeRow,
   LedgerPermissionRow,
   LedgerRow,
   LedgerRowDraft,
@@ -388,6 +393,25 @@ export class TranscriptLedgerService {
       });
     }
     return result;
+  }
+
+  appendNotice(
+    chatId: string,
+    viewId: TranscriptViewId,
+    input: { readonly title: string; readonly content: string },
+  ): LedgerNoticeRow {
+    const title = parseChatRowTitle(input.title);
+    if (!title) throw new TypeError('Notice title is required');
+    const [row] = this.#store.append(chatId, viewId, [{
+      kind: 'notice',
+      at: this.#now(),
+      message: parseChatRowContent(input.content),
+      detail: { title },
+      providerMeta: null,
+    }]);
+    const notice = row as LedgerNoticeRow;
+    this.#notify({ type: 'rows', chatId, viewId, rows: [notice] });
+    return notice;
   }
 
   // Records the ownership boundary as durable history. Handoff advances the content-start

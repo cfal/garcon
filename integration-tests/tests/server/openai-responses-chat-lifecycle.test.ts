@@ -21,8 +21,9 @@ describe('OpenAI Responses chat lifecycle', () => {
       expect(firstRequest.body).toEqual({
         model: 'integration-responses-echo',
         input: [{ role: 'user', content: 'responses-turn-one' }],
+        previous_response_id: null,
         stream: true,
-        store: false,
+        store: true,
       });
 
       const second = await fixture.client.runDirectChat({
@@ -33,11 +34,14 @@ describe('OpenAI Responses chat lifecycle', () => {
       expect((await fixture.client.waitForTurnTerminal(chatId, second.turnId)).type).toBe(
         'agent-run-finished',
       );
-      expect(fixture.fakeProviders.openAiResponses.requests()[1].body.input).toEqual([
-        { role: 'user', content: 'responses-turn-one' },
-        { role: 'assistant', content: 'echo:responses-turn-one' },
-        { role: 'user', content: 'responses-turn-two' },
-      ]);
+      const secondRequest = fixture.fakeProviders.openAiResponses.requests()[1];
+      expect(secondRequest.body).toEqual({
+        model: 'integration-responses-echo',
+        input: [{ role: 'user', content: 'responses-turn-two' }],
+        previous_response_id: firstRequest.responseId,
+        stream: true,
+        store: true,
+      });
 
       const beforeRestart = await fixture.client.getMessages(chatId);
       expect(userContents(beforeRestart.messages)).toEqual([
@@ -58,15 +62,105 @@ describe('OpenAI Responses chat lifecycle', () => {
       expect((await fixture.client.waitForTurnTerminal(chatId, third.turnId)).type).toBe(
         'agent-run-finished',
       );
-      expect(fixture.fakeProviders.openAiResponses.requests()[2].body.input).toEqual([
-        { role: 'user', content: 'responses-turn-one' },
-        { role: 'assistant', content: 'echo:responses-turn-one' },
-        { role: 'user', content: 'responses-turn-two' },
-        { role: 'assistant', content: 'echo:responses-turn-two' },
-        { role: 'user', content: 'responses-turn-three' },
-      ]);
+      expect(fixture.fakeProviders.openAiResponses.requests()[2].body).toEqual({
+        model: 'integration-responses-echo',
+        input: [{ role: 'user', content: 'responses-turn-three' }],
+        previous_response_id: secondRequest.responseId,
+        stream: true,
+        store: true,
+      });
       expect(fixture.fakeProviders.openAi.requests()).toEqual([]);
       expect(fixture.fakeProviders.anthropic.requests()).toEqual([]);
+    });
+  });
+
+  test('recovers an expired checkpoint once from complete local history', async () => {
+    await withIntegrationFixture('openai-responses-checkpoint-recovery', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'responses-before-expiry',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAiResponses,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+      const firstRequest = fixture.fakeProviders.openAiResponses.requests()[0];
+      expect(fixture.fakeProviders.openAiResponses.expireResponse(firstRequest.responseId)).toBe(
+        true,
+      );
+
+      const recovered = await fixture.client.runDirectChat({
+        chatId,
+        content: 'responses-after-expiry',
+        agent: fixture.directAgents.openAiResponses,
+      });
+      expect((await fixture.client.waitForTurnTerminal(chatId, recovered.turnId)).type).toBe(
+        'agent-run-finished',
+      );
+      const failedContinuation = fixture.fakeProviders.openAiResponses.requests()[1];
+      const fullRetry = fixture.fakeProviders.openAiResponses.requests()[2];
+      expect(failedContinuation.body).toMatchObject({
+        input: [{ role: 'user', content: 'responses-after-expiry' }],
+        previous_response_id: firstRequest.responseId,
+        store: true,
+      });
+      expect(fullRetry.body).toMatchObject({
+        input: [
+          { role: 'user', content: 'responses-before-expiry' },
+          { role: 'assistant', content: 'echo:responses-before-expiry' },
+          { role: 'user', content: 'responses-after-expiry' },
+        ],
+        previous_response_id: null,
+        store: true,
+      });
+
+      const following = await fixture.client.runDirectChat({
+        chatId,
+        content: 'responses-after-recovery',
+        agent: fixture.directAgents.openAiResponses,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, following.turnId);
+      expect(fixture.fakeProviders.openAiResponses.requests()[3].body).toMatchObject({
+        input: [{ role: 'user', content: 'responses-after-recovery' }],
+        previous_response_id: fullRetry.responseId,
+      });
+    });
+  });
+
+  test('starts a full-context chain after a Responses endpoint change', async () => {
+    await withIntegrationFixture('openai-responses-endpoint-change', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'responses-before-route-change',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAiResponses,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+      const changedProvider = await fixture.client.createOpenAiResponsesProvider(
+        fixture.fakeProviders.openAiResponses.baseUrl,
+      );
+
+      const changed = await fixture.client.runDirectChat({
+        chatId,
+        content: 'responses-after-route-change',
+        agent: {
+          ...fixture.directAgents.openAiResponses,
+          provider: changedProvider,
+        },
+      });
+      expect((await fixture.client.waitForTurnTerminal(chatId, changed.turnId)).type).toBe(
+        'agent-run-finished',
+      );
+      expect(fixture.fakeProviders.openAiResponses.requests()[1].body).toMatchObject({
+        input: [
+          { role: 'user', content: 'responses-before-route-change' },
+          { role: 'assistant', content: 'echo:responses-before-route-change' },
+          { role: 'user', content: 'responses-after-route-change' },
+        ],
+        previous_response_id: null,
+        store: true,
+      });
     });
   });
 

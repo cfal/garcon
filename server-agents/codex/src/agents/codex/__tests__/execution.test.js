@@ -104,7 +104,6 @@ function startRequest(overrides = {}) {
     settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
     endpoint: null,
     runId: 'run-1',
-    priorContext: [],
     admission: {
       signal: new AbortController().signal,
       markStarted: mock(() => undefined),

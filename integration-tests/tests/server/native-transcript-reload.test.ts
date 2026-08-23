@@ -451,6 +451,12 @@ describe('native transcript reload', () => {
         expectedAgentOwnershipEpoch: sourceChat.agentOwnershipEpoch,
       });
       await fixture.client.waitForTurnTerminal(chatId, direct.turnId);
+      const directReply = assistantContents(
+        (await fixture.client.getMessages(chatId)).messages,
+      ).at(-1);
+      if (!directReply?.includes(directPrompt)) {
+        throw new Error('Direct session did not render its handoff reply.');
+      }
 
       await appendFile(sourceNative.path, `${JSON.stringify({
         sessionId: sourceNative.agentSessionId,
@@ -500,7 +506,7 @@ describe('native transcript reload', () => {
         { type: 'assistant-message', content: `echo:${sourcePrompt}` },
         { type: 'agent-switch', content: null },
         { type: 'user-message', content: directPrompt },
-        { type: 'assistant-message', content: `echo:${directPrompt}` },
+        { type: 'assistant-message', content: directReply },
         { type: 'agent-switch', content: null },
         { type: 'user-message', content: currentPrompt },
         { type: 'assistant-message', content: currentReply },

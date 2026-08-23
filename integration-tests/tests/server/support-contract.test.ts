@@ -601,6 +601,54 @@ describe('integration support contracts', () => {
     }
   });
 
+  test('retains and expires stateful OpenAI Responses checkpoints', async () => {
+    const fake = FakeOpenAiResponsesServer.start({ defaultDelayMs: 0 });
+    const post = (input: string, previousResponseId: string | null) => fetch(
+      `${fake.baseUrl}/v1/responses`,
+      {
+        method: 'POST',
+        headers: fakeOpenAiRequestHeaders(),
+        body: JSON.stringify({
+          model: 'integration-responses-echo',
+          input: [{ role: 'user', content: input }],
+          previous_response_id: previousResponseId,
+          stream: true,
+          store: true,
+        }),
+      },
+    );
+    try {
+      const first = await post('first', null);
+      expect(first.status).toBe(200);
+      const firstText = await first.text();
+      const firstId = fake.requests()[0].responseId;
+      expect(firstText).toContain(firstId);
+
+      const second = await post('second', firstId);
+      expect(second.status).toBe(200);
+      await second.text();
+      const secondId = fake.requests()[1].responseId;
+      expect(fake.expireResponse(secondId)).toBe(true);
+
+      const expired = await post('third', secondId);
+      expect(expired.status).toBe(404);
+      await expect(expired.json()).resolves.toMatchObject({
+        error: {
+          code: 'previous_response_not_found',
+          param: 'previous_response_id',
+        },
+      });
+      expect(fake.diagnosticRequests()).toMatchObject([
+        { store: true, previousResponseId: null },
+        { store: true, previousResponseId: firstId },
+        { store: true, previousResponseId: secondId },
+      ]);
+      fake.assertNoProtocolViolations();
+    } finally {
+      fake.stop();
+    }
+  });
+
   test('projects ordered Claude user text and cursor-relative requests', async () => {
     const fake = FakeClaudeModel.start();
     try {

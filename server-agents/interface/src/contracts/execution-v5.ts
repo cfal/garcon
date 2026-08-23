@@ -1,6 +1,5 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { AgentExecutionAdmission, AgentRunningSession } from './execution.js';
 import type { AgentProducerSink } from './producer.js';
@@ -20,7 +19,6 @@ export interface AgentExecutionContextV5 {
   readonly endpoint: AgentEndpointSelection | null;
   readonly runId: string;
   readonly sink: AgentProducerSink;
-  readonly priorContext: readonly ChatMessage[];
   readonly admission: AgentExecutionAdmission;
 }
 

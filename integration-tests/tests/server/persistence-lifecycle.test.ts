@@ -15,6 +15,7 @@ import {
   countUserContent,
   userContents,
 } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 async function getRuntimeInstanceId(baseUrl: string): Promise<string> {
@@ -82,7 +83,7 @@ describe('persistence lifecycle', () => {
     });
   });
 
-  test('builds direct context from every conversational row and no lifecycle rows', async () => {
+  test('builds direct context from native history while retaining ledger-only rows', async () => {
     await withIntegrationFixture('direct-context-ledger-fold', async (fixture) => {
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startDirectChat({
@@ -155,12 +156,13 @@ describe('persistence lifecycle', () => {
       });
       await fixture.client.waitForTurnTerminal(chatId, next.turnId);
 
-      expect(fixture.fakeProviders.openAi.requests().at(-1)?.body.messages).toEqual([
+      const providerMessages = fixture.fakeProviders.openAi.requests().at(-1)?.body.messages;
+      expect(providerMessages).toEqual([
         { role: 'user', content: 'context-initial-user' },
         { role: 'assistant', content: 'echo:context-initial-user' },
-        { role: 'assistant', content: 'context-late-provider-output' },
         { role: 'user', content: 'context-next-user' },
       ]);
+      expect(JSON.stringify(providerMessages)).not.toContain('context-late-provider-output');
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.map((entry) => entry.message.type)).toEqual([
         'user-message',
@@ -302,9 +304,10 @@ describe('persistence lifecycle', () => {
       ]);
       expect(countUserContent(restored.messages, 'discard-on-restart')).toBe(0);
       expect(countUserContent(restored.messages, 'ephemeral-active')).toBe(1);
-      await expect(fixture.client.reloadChat(chatId)).rejects.toMatchObject({
-        response: { code: 'HISTORY_LOAD_FAILED' },
-      });
+      const reloaded = await fixture.client.reloadChat(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(restored.transcriptViewId);
+      expect(userContents(reloaded.messages)).toEqual(['ephemeral-active']);
+      expect(assistantContents(reloaded.messages)).toEqual([]);
 
       const next = await fixture.client.runDirectChat({
         chatId,
@@ -419,23 +422,27 @@ describe('persistence lifecycle', () => {
       });
       await fixture.client.waitForTurnTerminal(boundedChatId, boundedRun.turnId);
 
-      const fullRequest = fixture.fakeProviders.openAi.requests().find((request) => (
-        request.lastUserText === 'full-fork-turn'
-      ));
-      expect(fullRequest?.body.messages.map((message) => message.content)).toEqual([
+      const fullInput = expectedCarriedInput([
         'fork-a',
         'echo:fork-a',
         'fork-b',
         'echo:fork-b',
-        'full-fork-turn',
-      ]);
-      const boundedRequest = fixture.fakeProviders.openAi.requests().find((request) => (
-        request.lastUserText === 'bounded-fork-turn'
+      ], 'full-fork-turn');
+      const fullRequest = fixture.fakeProviders.openAi.requests().find((request) => (
+        request.lastUserText === fullInput
       ));
-      expect(boundedRequest?.body.messages.map((message) => message.content)).toEqual([
+      expect(fullRequest?.body.messages.map((message) => message.content)).toEqual([
+        fullInput,
+      ]);
+      const boundedInput = expectedCarriedInput([
         'fork-a',
         'echo:fork-a',
-        'bounded-fork-turn',
+      ], 'bounded-fork-turn');
+      const boundedRequest = fixture.fakeProviders.openAi.requests().find((request) => (
+        request.lastUserText === boundedInput
+      ));
+      expect(boundedRequest?.body.messages.map((message) => message.content)).toEqual([
+        boundedInput,
       ]);
       // Forking leaves the source conversation alone. It does rebuild the source view from that
       // chat's own transcript, so persisted timestamps replace the ones assigned while streaming.

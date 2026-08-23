@@ -8,6 +8,7 @@ import {
   messagesOfType,
   userContents,
 } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import {
   withIntegrationFixture,
   type IntegrationFixture,
@@ -268,10 +269,12 @@ describe('garcon-cli', () => {
         'cli-target-turn',
       ]);
       const targetRequest = await targetHeld.received;
-      expect(targetRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+      const targetInput = expectedCarriedInput([
         'cli-source-turn',
         'echo:cli-source-turn',
-        'cli-target-turn',
+      ], 'cli-target-turn');
+      expect(targetRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        targetInput,
       ]);
       expect(targetHeld.releaseText('cli-target-answer')).toBe(true);
       const handedOff = await handoffRun;
@@ -306,12 +309,14 @@ describe('garcon-cli', () => {
         'cli-return-turn',
       ]);
       const sourceRequest = await sourceHeld.received;
-      expect(sourceRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+      const returnInput = expectedCarriedInput([
         'cli-source-turn',
         'echo:cli-source-turn',
         'cli-target-turn',
         'cli-target-answer',
-        'cli-return-turn',
+      ], 'cli-return-turn');
+      expect(sourceRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        returnInput,
       ]);
       expect(sourceHeld.releaseText('cli-return-answer')).toBe(true);
       const returned = await returnRun;

@@ -5,6 +5,7 @@ import {
   countUserContent,
   userContents,
 } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -21,8 +22,12 @@ describe('fork-run lifecycle', () => {
       await fixture.client.waitForTurnTerminal(sourceChatId, source.turnId);
 
       const parentChatId = fixture.newChatId();
+      const parentInput = expectedCarriedInput([
+        'fork-race-source',
+        'echo:fork-race-source',
+      ], 'fork-race-parent');
       const heldParent = fixture.fakeProviders.openAi.holdNext({
-        lastUserText: 'fork-race-parent',
+        lastUserText: parentInput,
       });
       const parent = await fixture.client.forkRunChat({
         sourceChatId,
@@ -57,16 +62,18 @@ describe('fork-run lifecycle', () => {
       await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
 
       const composedPrompt = 'fork-race-parent\n\nfork-race-child';
+      const childInput = expectedCarriedInput([
+        'fork-race-source',
+        'echo:fork-race-source',
+      ], composedPrompt);
       const childProviderRequest = fixture.fakeProviders.openAi.requests().find(
-        (request) => request.lastUserText === composedPrompt,
+        (request) => request.lastUserText === childInput,
       );
       expect(childProviderRequest?.body.messages).toEqual([
-        { role: 'user', content: 'fork-race-source' },
-        { role: 'assistant', content: 'echo:fork-race-source' },
-        { role: 'user', content: composedPrompt },
+        { role: 'user', content: childInput },
       ]);
 
-      heldParent.releaseEcho();
+      heldParent.releaseText('echo:fork-race-parent');
       await fixture.client.waitForTurnTerminal(parentChatId, parent.turnId);
       expect(assistantContents((await fixture.client.getMessages(childChatId)).messages))
         .not.toContain('echo:fork-race-parent');
@@ -106,7 +113,13 @@ describe('fork-run lifecycle', () => {
         modelEndpointId: fixture.directAgents.openAi.provider.endpointId,
         modelProtocol: fixture.directAgents.openAi.provider.protocol,
       };
-      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'fork-target-new' });
+      const targetInput = expectedCarriedInput([
+        'fork-source-first',
+        'echo:fork-source-first',
+        'fork-source-second',
+        'echo:fork-source-second',
+      ], 'fork-target-new');
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: targetInput });
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.forkRunChat(request);
       expect(accepted).toMatchObject({
@@ -140,13 +153,9 @@ describe('fork-run lifecycle', () => {
 
       const providerRequest = await held.received;
       expect(providerRequest.body.messages).toEqual([
-        { role: 'user', content: 'fork-source-first' },
-        { role: 'assistant', content: 'echo:fork-source-first' },
-        { role: 'user', content: 'fork-source-second' },
-        { role: 'assistant', content: 'echo:fork-source-second' },
-        { role: 'user', content: 'fork-target-new' },
+        { role: 'user', content: targetInput },
       ]);
-      held.releaseEcho();
+      held.releaseText('echo:fork-target-new');
       const terminal = await fixture.client.waitForTurnTerminal(targetChatId, accepted.turnId, {
         afterIndex: cursor,
       });
@@ -203,7 +212,7 @@ describe('fork-run lifecycle', () => {
       });
       expect(target.resendCandidates).toEqual([]);
       expect(fixture.fakeProviders.openAi.requests().filter((entry) =>
-        entry.lastUserText === 'fork-target-new')).toHaveLength(1);
+        entry.lastUserText === targetInput)).toHaveLength(1);
 
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id).sort()).toEqual(

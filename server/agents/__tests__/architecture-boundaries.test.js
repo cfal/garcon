@@ -131,6 +131,22 @@ describe('agent architecture boundaries', () => {
     }
   });
 
+  test('keeps ledger conversation projection out of the universal execution contract', () => {
+    const productionSources = [
+      ...walk('server-agents').filter((file) => !file.includes('__tests__')),
+      ...walk('server/agents').filter((file) => !file.includes('__tests__')),
+    ];
+    for (const file of productionSources) {
+      expect(readFileSync(file, 'utf8'), file).not.toContain('priorContext');
+    }
+
+    const router = readFileSync('server/agents/runtime-router.ts', 'utf8');
+    expect(router.split('conversationMessages(')).toHaveLength(2);
+    expect(router.indexOf('conversationMessages(')).toBeLessThan(
+      router.indexOf('integration.execution.start('),
+    );
+  });
+
   test('discovers build contributions from package metadata', () => {
     const source = readFileSync('scripts/build-exe.js', 'utf8');
     expect(source).toContain('collectAgentBuildContributions');

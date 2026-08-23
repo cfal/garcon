@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('cross-provider fork lifecycle', () => {
@@ -22,12 +23,13 @@ describe('cross-provider fork lifecycle', () => {
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, handoff.turnId);
       const handoffRequest = fixture.fakeProviders.anthropic.requests()[0];
-      expect(handoffRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+      const handoffInput = expectedCarriedInput([
         'openai-source-turn',
         'echo:openai-source-turn',
-        'anthropic-handoff-turn',
+      ], 'anthropic-handoff-turn');
+      expect(handoffRequest.body.messages.map((message) => messageText(message.content))).toEqual([
+        handoffInput,
       ]);
-      expect(JSON.stringify(handoffRequest.body)).not.toContain('<carried-context');
 
       const targetChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });

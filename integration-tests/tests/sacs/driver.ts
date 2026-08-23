@@ -36,21 +36,6 @@ export interface SacsPreparedHistorySource {
   remove(): Promise<void>;
 }
 
-export interface SacsLegacyArtifactSnapshot {
-  readonly path: string;
-  readonly contents: string;
-  readonly size: number;
-  readonly modifiedAtMs: number;
-}
-
-export interface SacsReleasedJsonlFacet {
-  latestRequestContext(fixture: IntegrationFixture): readonly string[];
-  snapshotRelocatedSource(
-    fixture: IntegrationFixture,
-    chatId: string,
-  ): Promise<SacsLegacyArtifactSnapshot>;
-}
-
 export interface SacsDirectoryScopedHistoryFacet {
   moveBindingToDifferentDirectory(
     fixture: IntegrationFixture,
@@ -60,7 +45,6 @@ export interface SacsDirectoryScopedHistoryFacet {
 
 export interface SacsLegacyHistoryImportFacet {
   readonly kind: 'legacy-history-import';
-  readonly releasedJsonl: SacsReleasedJsonlFacet | null;
   readonly directoryScoped: SacsDirectoryScopedHistoryFacet | null;
   prepare(
     fixture: IntegrationFixture,

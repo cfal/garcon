@@ -3,7 +3,9 @@
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import {
   DirectChatRuntimeBase,
+  type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '@garcon/server-agent-common/shared/attachments';
@@ -14,7 +16,6 @@ import {
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
-import type { ChatMessage } from '@garcon/common/chat-types';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -41,9 +42,7 @@ interface AnthropicConversationMessage {
   content: AnthropicContent;
 }
 
-export interface AnthropicCompatibleChatRuntimeConfig {
-  runtimeLabel: string;
-  defaultModel: string;
+export interface AnthropicCompatibleChatRuntimeConfig extends DirectChatRuntimeBaseConfig {
   getApiKey: () => string;
   getBaseUrl: () => string;
   maxTokens?: number;
@@ -231,21 +230,9 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected contextMessage(message: ChatMessage): AnthropicConversationMessage | null {
-    if (message.type === 'user-message') {
-      return {
-        role: 'user',
-        content: buildAnthropicCompatibleUserContent(message.content, message.images?.map((image) => ({
-          kind: 'image', data: image.data, name: image.name || null,
-          mimeType: image.mimeType ?? 'application/octet-stream',
-        }))),
-      };
-    }
-    if (message.type === 'assistant-message') return { role: 'assistant', content: message.content };
-    return { role: 'assistant', content: JSON.stringify(message) };
-  }
-
-  protected async streamSession(session: DirectRuntimeSession<AnthropicConversationMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<AnthropicConversationMessage>,
+  ): Promise<DirectTurnCompletion> {
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
@@ -269,7 +256,10 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      return await readAnthropicCompatibleResponse(response, this.config.runtimeLabel);
+      return {
+        content: await readAnthropicCompatibleResponse(response, this.config.runtimeLabel),
+        checkpoint: null,
+      };
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

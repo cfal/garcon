@@ -106,6 +106,7 @@ export function acceptUniqueOpenCodeTurnEvent(
     && event.type !== 'message.part.updated'
     && event.type !== 'message.part.delta'
     && event.type !== 'permission.asked'
+    && event.type !== 'question.asked'
     && event.type !== 'session.status'
     && event.type !== 'session.error'
     && event.type !== 'session.compacted'

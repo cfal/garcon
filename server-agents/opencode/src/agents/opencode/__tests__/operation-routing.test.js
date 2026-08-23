@@ -78,10 +78,13 @@ function createRuntime(sessionIds, options = {}) {
   });
   const create = mock(() => Promise.resolve({ data: { id: sessionIds.shift() } }));
   const permissionReply = mock(() => Promise.resolve({}));
+  const questionReply = mock(() => Promise.resolve({}));
+  const questionReject = mock(() => Promise.resolve({}));
   const runtime = new OpenCodeRuntime({
     createInstance: mock(() => Promise.resolve({
       client: {
         permission: { reply: permissionReply },
+        question: { reply: questionReply, reject: questionReject },
         global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
         session: {
           create,
@@ -94,7 +97,15 @@ function createRuntime(sessionIds, options = {}) {
     })),
     ...options,
   });
-  return { create, eventStream, permissionReply, promptAsync, runtime };
+  return {
+    create,
+    eventStream,
+    permissionReply,
+    promptAsync,
+    questionReject,
+    questionReply,
+    runtime,
+  };
 }
 
 function operation(runId, events) {
@@ -171,6 +182,33 @@ function pushAssistant(eventStream, {
   });
 }
 
+function pushTaskChild(eventStream, {
+  childSessionId,
+  eventId,
+  messageId,
+  parentSessionId,
+}) {
+  eventStream.push({
+    id: eventId,
+    type: 'message.part.updated',
+    properties: {
+      sessionID: parentSessionId,
+      part: {
+        id: `part-task-${childSessionId}`,
+        messageID: messageId,
+        type: 'tool',
+        tool: 'task',
+        callID: `call-task-${childSessionId}`,
+        state: {
+          status: 'running',
+          input: { description: 'Run a deterministic child task' },
+          metadata: { sessionId: childSessionId },
+        },
+      },
+    },
+  });
+}
+
 function pushTerminal(eventStream, {
   eventId,
   messageId,
@@ -214,6 +252,16 @@ function diagnosticLogger() {
       warn(...args) { warnings.push(args); },
       error() {},
     },
+  };
+}
+
+function missingOpenCodeRequestResult() {
+  return {
+    error: {
+      name: 'NotFoundError',
+      data: { message: 'Question request not found' },
+    },
+    response: { status: 404 },
   };
 }
 
@@ -357,6 +405,613 @@ describe('OpenCode operation routing', () => {
     ]]);
     expect(JSON.stringify(warnings)).not.toContain('sensitive-native-request-id');
     expect(JSON.stringify(warnings)).not.toContain('sensitive-command-must-not-be-logged');
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('logs and drops a question without an operation identity', async () => {
+    const warnings = [];
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug() {},
+        info() {},
+        warn(...args) { warnings.push(args); },
+        error() {},
+      },
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+
+    eventStream.push({
+      id: 'unowned-question-event',
+      type: 'question.asked',
+      properties: {
+        id: 'sensitive-native-question-id',
+        sessionID: 'session-1',
+        questions: [{
+          header: 'Private',
+          question: 'sensitive-question-must-not-be-logged',
+          options: [],
+        }],
+        tool: {
+          callID: 'sensitive-tool-call-id',
+          messageID: 'unowned-provider-message',
+        },
+      },
+    });
+    await waitFor(() => warnings.length === 1);
+
+    expect(events).toEqual([]);
+    expect(warnings).toEqual([[
+      'Ignoring an OpenCode event without an operation identity',
+      expect.objectContaining({
+        eventId: 'unowned-question-event',
+        eventType: 'question.asked',
+        sessionId: 'session-1',
+      }),
+    ]]);
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-native-question-id');
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-tool-call-id');
+    expect(JSON.stringify(warnings)).not.toContain('sensitive-question-must-not-be-logged');
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes an OpenCode question and retains its capability after a failed reply', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    questionReply
+      .mockRejectedValueOnce(new Error('question reply failed'))
+      .mockResolvedValueOnce({});
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-asked',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-request',
+        sessionID: 'session-1',
+        questions: [
+          {
+            header: 'Mode',
+            question: 'Which mode?',
+            options: [
+              { label: 'Fast', description: 'Complete quickly.' },
+              { label: 'Careful', description: 'Check boundaries.' },
+            ],
+          },
+          {
+            header: 'Checks',
+            question: 'Which checks?',
+            multiple: true,
+            options: [
+              { label: 'Unit', description: 'Run unit tests.' },
+              { label: 'Integration', description: 'Run integration tests.' },
+            ],
+          },
+        ],
+        tool: { callID: 'call-question', messageID: 'assistant-a' },
+      },
+    });
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+
+    const request = events.find((event) => event.type === 'permission');
+    expect(request.lifecycle.permissionOccurrenceId).toMatch(PERMISSION_OCCURRENCE_UUID);
+    expect(request.lifecycle.permissionOccurrenceId).not.toBe('provider-question-request');
+    expect(request.lifecycle.requestedTool).toMatchObject({
+      type: 'ask-user-question-tool-use',
+      toolId: 'call-question',
+      questions: [
+        {
+          id: 'question-1',
+          prompt: 'Which mode?',
+          allowMultiple: false,
+          options: [
+            {
+              id: 'question-1-option-1',
+              label: 'Fast',
+              description: 'Complete quickly.',
+            },
+            {
+              id: 'question-1-option-2',
+              label: 'Careful',
+              description: 'Check boundaries.',
+            },
+          ],
+        },
+        {
+          id: 'question-2',
+          prompt: 'Which checks?',
+          allowMultiple: true,
+        },
+      ],
+    });
+
+    const decision = {
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [
+          { questionId: 'question-1', selectedOptionIds: ['question-1-option-2'] },
+          {
+            questionId: 'question-2',
+            selectedOptionIds: ['question-2-option-1', 'question-2-option-2'],
+          },
+        ],
+      },
+    };
+    await expect(request.decision.respond(decision)).rejects.toThrow('question reply failed');
+    await expect(request.decision.respond(decision)).resolves.toBeUndefined();
+    expect(questionReply).toHaveBeenCalledTimes(2);
+    expect(questionReply.mock.calls[1][0]).toMatchObject({
+      requestID: 'provider-question-request',
+      answers: [['Careful'], ['Unit', 'Integration']],
+    });
+    expect(questionReject).not.toHaveBeenCalled();
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('rejects an OpenCode question when the generic question response is skipped', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-asked',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-request',
+        sessionID: 'session-1',
+        questions: [{
+          header: 'Continue',
+          question: 'Continue?',
+          options: [{ label: 'Yes', description: 'Continue.' }],
+        }],
+        tool: { callID: 'call-question', messageID: 'assistant-a' },
+      },
+    });
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+
+    const request = events.find((event) => event.type === 'permission');
+    await request.decision.respond({
+      allow: false,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'skipped',
+        reason: 'User skipped question',
+      },
+    });
+    expect(questionReject).toHaveBeenCalledTimes(1);
+    expect(questionReject.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-question-request',
+    });
+    expect(questionReply).not.toHaveBeenCalled();
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('rejects an owned question that has no renderable prompts', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-empty',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-empty',
+        sessionID: 'session-1',
+        questions: [],
+        tool: { callID: 'call-question-empty', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => questionReject.mock.calls.length === 1);
+    expect(questionReject.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-question-empty',
+    });
+    expect(events.filter((event) => event.type === 'permission')).toEqual([]);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('treats a missing unrenderable-question request as already settled', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      promptAsync,
+      questionReject,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    questionReject.mockResolvedValueOnce(missingOpenCodeRequestResult());
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a question.',
+    });
+    eventStream.push({
+      id: 'event-question-missing',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-question-missing',
+        sessionID: 'session-1',
+        questions: [],
+        tool: { callID: 'call-question-missing', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => (
+      diagnostics.debug.some(([message]) => (
+        message === 'Ignoring an OpenCode rejection for a missing question request'
+      ))
+      || events.some((event) => event.type === 'run-ended')
+    ));
+    expect(events.some((event) => event.type === 'run-ended')).toBe(false);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    expect(events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished' });
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('treats a missing manual-bypass permission request as already settled', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      permissionReply,
+      promptAsync,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    permissionReply.mockResolvedValueOnce(missingOpenCodeRequestResult());
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'manualBypass',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Preparing a permission request.',
+    });
+    eventStream.push({
+      id: 'event-permission-missing',
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'session-1',
+        requestID: 'provider-permission-missing',
+        permission: 'bash',
+        tool: { callID: 'call-permission-missing', messageID: 'assistant-a' },
+      },
+    });
+
+    await waitFor(() => (
+      diagnostics.debug.some(([message]) => (
+        message === 'Ignoring an OpenCode reply for a missing permission request'
+      ))
+      || events.some((event) => event.type === 'run-ended')
+    ));
+    expect(events.some((event) => event.type === 'run-ended')).toBe(false);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    expect(events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished' });
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes a task child permission through its exact parent operation and hides child output', async () => {
+    const diagnostics = diagnosticLogger();
+    const {
+      eventStream,
+      permissionReply,
+      promptAsync,
+      runtime,
+    } = createRuntime(['session-1'], { logger: diagnostics.logger });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Starting a child task.',
+    });
+    pushTaskChild(eventStream, {
+      childSessionId: 'session-child',
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentSessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-child-user',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-child',
+        info: { id: 'child-user', role: 'user' },
+      },
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 6,
+      messageId: 'child-assistant',
+      parentId: 'child-user',
+      sessionId: 'session-child',
+      text: 'CHILD_OUTPUT_MUST_STAY_HIDDEN',
+    });
+    eventStream.push({
+      id: 'event-child-permission',
+      type: 'permission.asked',
+      properties: {
+        id: 'provider-child-permission',
+        sessionID: 'session-child',
+        permission: 'doom_loop',
+        patterns: ['bash'],
+        metadata: { tool: 'bash', input: { command: 'true' } },
+        tool: { callID: 'call-child-bash', messageID: 'child-assistant' },
+      },
+    });
+
+    await waitFor(() => events.some((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    )));
+    const requested = events.find((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    ));
+    expect(requested.runId).toBe('run-a');
+    await requested.decision.respond({ allow: true, alwaysAllow: false });
+    expect(permissionReply.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-child-permission',
+      reply: 'once',
+    });
+    expect(JSON.stringify(events)).not.toContain('CHILD_OUTPUT_MUST_STAY_HIDDEN');
+    expect(diagnostics.warnings).toEqual([]);
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('routes a task child question through its exact parent operation', async () => {
+    const {
+      eventStream,
+      promptAsync,
+      questionReply,
+      runtime,
+    } = createRuntime(['session-1']);
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+      operation: operation('run-a', events),
+    });
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    pushAssistant(eventStream, {
+      eventNumber: 2,
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+      text: 'Starting a child task.',
+    });
+    pushTaskChild(eventStream, {
+      childSessionId: 'session-child',
+      eventId: 'event-04',
+      messageId: 'assistant-a',
+      parentSessionId: 'session-1',
+    });
+    eventStream.push({
+      id: 'event-child-question',
+      type: 'question.asked',
+      properties: {
+        id: 'provider-child-question',
+        sessionID: 'session-child',
+        questions: [{
+          header: 'Choice',
+          question: 'Choose one',
+          options: [{ label: 'Alpha', description: 'First choice' }],
+        }],
+        tool: { callID: 'call-child-question', messageID: 'child-assistant' },
+      },
+    });
+
+    await waitFor(() => events.some((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    )));
+    const requested = events.find((event) => (
+      event.type === 'permission' && event.lifecycle.kind === 'requested'
+    ));
+    expect(requested.lifecycle.requestedTool.type).toBe('ask-user-question-tool-use');
+    await requested.decision.respond({
+      allow: true,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'question-1', selectedOptionIds: ['question-1-option-1'] }],
+      },
+    });
+    expect(questionReply.mock.calls[0][0]).toMatchObject({
+      requestID: 'provider-child-question',
+      answers: [['Alpha']],
+    });
+
+    pushTerminal(eventStream, {
+      eventId: 'event-terminal',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      sessionId: 'session-1',
+    });
+    await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();
   });

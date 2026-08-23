@@ -308,7 +308,6 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
 
     if (info.role === 'assistant') {
       const providerError = openCodeStoredErrorMessage(info.error);
-      const aborted = isOpenCodeStoredAbort(info.error);
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
       for (const rawPart of parts) {
         const part = asRecord(rawPart);
@@ -323,8 +322,9 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
           }
         } else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
           push(new AssistantMessage(ts, part.text), part.id);
-        } else if (part.type === 'tool' && !aborted) {
+        } else if (part.type === 'tool') {
           const state = asRecord(part.state);
+          if (state.status !== 'completed' && state.status !== 'error') continue;
           const toolUse = convertOpenCodeToolUse(ts, part);
           push(toolUse, part.id);
 

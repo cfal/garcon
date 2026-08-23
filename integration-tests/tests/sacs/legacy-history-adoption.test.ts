@@ -26,35 +26,51 @@ import type {
   SacsLegacyHistoryImportFacet,
   SacsLegacyTranscriptRow,
   SacsPreparedHistorySource,
-  SacsReleasedJsonlFacet,
 } from './driver.js';
 
 const SACS_TIMEOUT_MS = 120_000;
 const SOURCE_TIMESTAMP = '2026-08-16T00:00:00.000Z';
 
-const DIRECT_RELEASED_CASE_IDS: Readonly<Record<string, string>> = {
-  'direct-openai-compatible': '[TLV5-ADOPT.07-SACS-DIRECT-OPENAI-01]',
-  'direct-openai-responses-compatible': '[TLV5-ADOPT.07-SACS-DIRECT-RESPONSES-01]',
-  'direct-anthropic-compatible': '[TLV5-ADOPT.07-SACS-DIRECT-ANTHROPIC-01]',
-};
-const EXPECTED_RELEASED_JSONL_DRIVER_IDS = [
+const DIRECT_DRIVER_IDS = [
   'direct-openai-responses-compatible',
   'direct-openai-compatible',
   'direct-anthropic-compatible',
-];
+] as const;
+const DIRECT_NATIVE_FAILURE_CASES = [
+  {
+    failure: 'corrupt',
+    caseId: '[TLV5-ADOPT.08-SACS-DIRECT-CORRUPT-01]',
+  },
+  {
+    failure: 'missing',
+    caseId: '[TLV5-ADOPT.08-SACS-DIRECT-MISSING-01]',
+  },
+] as const;
 const EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS = process.platform === 'linux'
   ? ['opencode']
   : [];
 
-test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] registers a legacy adoption fixture for every scripted driver', () => {
-  expect(Object.keys(DIRECT_RELEASED_CASE_IDS).toSorted())
-    .toEqual(EXPECTED_RELEASED_JSONL_DRIVER_IDS.toSorted());
-  expect(sacsScriptedDriverFactories.every((driver) => driver.legacyHistoryImport !== null))
-    .toBe(true);
+test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] disables Direct legacy migration and retains native provider capabilities', () => {
+  const directDrivers = sacsScriptedDriverFactories.filter((driver) => (
+    DIRECT_DRIVER_IDS.includes(driver.id as typeof DIRECT_DRIVER_IDS[number])
+  ));
+  expect(directDrivers.map((driver) => [
+    driver.id,
+    driver.legacyHistoryImport,
+    driver.nativeHistoryImport?.kind,
+    driver.nativeSessions?.kind,
+  ])).toEqual(DIRECT_DRIVER_IDS.map((id) => [
+    id,
+    null,
+    'native-history-import',
+    'native-sessions',
+  ]));
   expect(sacsScriptedDriverFactories
-    .filter((driver) => Boolean(driver.legacyHistoryImport?.releasedJsonl))
-    .map((driver) => driver.id))
-    .toEqual(EXPECTED_RELEASED_JSONL_DRIVER_IDS);
+    .filter((driver) => !DIRECT_DRIVER_IDS.includes(
+      driver.id as typeof DIRECT_DRIVER_IDS[number],
+    ))
+    .every((driver) => driver.legacyHistoryImport !== null))
+    .toBe(true);
   expect(sacsScriptedDriverFactories
     .filter((driver) => Boolean(driver.legacyHistoryImport?.directoryScoped))
     .map((driver) => driver.id))
@@ -68,15 +84,16 @@ test('[TLV5-ADOPT.08-SACS-CAPABILITY-01] registers native import independently f
   ])).toEqual([
     ['claude', true],
     ['codex', true],
-    ['direct-openai-responses-compatible', false],
-    ['direct-openai-compatible', false],
-    ['direct-anthropic-compatible', false],
+    ['direct-openai-responses-compatible', true],
+    ['direct-openai-compatible', true],
+    ['direct-anthropic-compatible', true],
     ...(process.platform === 'linux' ? [['opencode', true]] : []),
     ['pi', true],
   ]);
 });
 
 for (const driverFactory of sacsScriptedDriverFactories) {
+  if (!driverFactory.legacyHistoryImport) continue;
   describe(`SACS legacy history adoption: ${driverFactory.label}`, () => {
     let driver: SacsDriverEnvironment | undefined;
 
@@ -344,93 +361,6 @@ for (const driverFactory of sacsScriptedDriverFactories) {
       }, SACS_TIMEOUT_MS);
     }
 
-    const directCaseId = DIRECT_RELEASED_CASE_IDS[driverFactory.id];
-    if (directCaseId) {
-      test(`${directCaseId} keeps released JSONL adoption-only and resumes from ledger context`, async () => {
-        const activeDriver = requireDriver(driver, driverFactory.label);
-        const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
-        const releasedJsonl = requireReleasedJsonlFacet(legacy, driverFactory.label);
-
-        await withIntegrationFixture(`${activeDriver.id}-sacs-direct-legacy`, async (fixture) => {
-          try {
-            const planted = await completedChat(fixture, activeDriver, 'DIRECT');
-            const source = await legacy.prepare(fixture, planted.chatId, planted.rows);
-            await restartWithPreV5Chat(fixture, planted.chatId);
-
-            const adopted = await fixture.client.getMessages(planted.chatId);
-            expect(conversationalContents(adopted.messages)).toEqual(planted.contents);
-            const adoptedView = adopted.transcriptViewId;
-            const relocatedAfterAdoption = await releasedJsonl.snapshotRelocatedSource(
-              fixture,
-              planted.chatId,
-            );
-            expect(relocatedAfterAdoption.path).toContain(
-              join('agent-data', activeDriver.id),
-            );
-            expect(relocatedAfterAdoption.contents.trim().split('\n').map((line) => JSON.parse(line)))
-              .toEqual([...planted.rows]);
-
-            const sourcePresentInput = marker(activeDriver.id, 'DIRECT_SOURCE_PRESENT');
-            const sourcePresentReply = marker(activeDriver.id, 'DIRECT_SOURCE_PRESENT_REPLY');
-            activeDriver.scriptAssistant(fixture, sourcePresentReply);
-            const sourcePresentTurn = await fixture.client.runChat(activeDriver.runRequest(fixture, {
-              chatId: planted.chatId,
-              command: sourcePresentInput,
-            }));
-            expect((await fixture.client.waitForTurnTerminal(
-              planted.chatId,
-              sourcePresentTurn.turnId,
-            )).type).toBe('agent-run-finished');
-            expect(await releasedJsonl.snapshotRelocatedSource(fixture, planted.chatId))
-              .toEqual(relocatedAfterAdoption);
-            const contentsWithPresentSource = [
-              ...planted.contents,
-              sourcePresentInput,
-              sourcePresentReply,
-            ];
-            expect(releasedJsonl.latestRequestContext(fixture)).toEqual([
-              ...planted.contents,
-              sourcePresentInput,
-            ]);
-
-            const reloadFailure = await fixture.client.reloadChat(planted.chatId).then(
-              () => null,
-              (error: unknown) => error,
-            );
-            expect(reloadFailure).toBeInstanceOf(GarconWsRequestError);
-            expect(reloadFailure).toMatchObject({ response: { code: 'HISTORY_LOAD_FAILED' } });
-            const afterReload = await fixture.client.getMessages(planted.chatId);
-            expect(afterReload.transcriptViewId).toBe(adoptedView);
-            expect(conversationalContents(afterReload.messages)).toEqual(contentsWithPresentSource);
-
-            await source.remove();
-            await fixture.restartGarcon();
-
-            const sourceFree = await fixture.client.getMessages(planted.chatId);
-            expect(sourceFree.transcriptViewId).toBe(adoptedView);
-            expect(conversationalContents(sourceFree.messages)).toEqual(contentsWithPresentSource);
-
-            const followUp = marker(activeDriver.id, 'DIRECT_SOURCE_FREE');
-            const followUpReply = marker(activeDriver.id, 'DIRECT_SOURCE_FREE_REPLY');
-            activeDriver.scriptAssistant(fixture, followUpReply);
-            const turn = await fixture.client.runChat(activeDriver.runRequest(fixture, {
-              chatId: planted.chatId,
-              command: followUp,
-            }));
-            expect((await fixture.client.waitForTurnTerminal(planted.chatId, turn.turnId)).type)
-              .toBe('agent-run-finished');
-            expect(releasedJsonl.latestRequestContext(fixture)).toEqual([
-              ...contentsWithPresentSource,
-              followUp,
-            ]);
-            activeDriver.assertSettled(fixture);
-          } finally {
-            activeDriver.reset();
-          }
-        }, activeDriver.fixtureOptions);
-      }, SACS_TIMEOUT_MS);
-    }
-
     if (driverFactory.id === 'opencode') {
       test('[TLV5-ADOPT.07-SACS-OPENCODE-SCOPED-01][TLV5-ADOPT.07-SACS-OPENCODE-NOTFOUND-01] fails a binding moved outside the recorded project directory until it returns', async () => {
         const activeDriver = requireDriver(driver, driverFactory.label);
@@ -563,6 +493,66 @@ for (const driverFactory of sacsScriptedDriverFactories) {
   });
 }
 
+for (const driverFactory of sacsScriptedDriverFactories.filter((candidate) => (
+  candidate.legacyHistoryImport === null
+))) {
+  describe(`SACS Direct native history: ${driverFactory.label}`, () => {
+    let driver: SacsDriverEnvironment | undefined;
+
+    beforeAll(async () => {
+      driver = await driverFactory.start();
+    });
+
+    afterAll(async () => {
+      await driver?.dispose();
+    });
+
+    test('[TLV5-ADOPT.08-SACS-DIRECT-RELOAD-01] reloads the exact provider-owned Direct history', async () => {
+      const activeDriver = requireDriver(driver, driverFactory.label);
+      await withIntegrationFixture(`${activeDriver.id}-sacs-native-reload`, async (fixture) => {
+        try {
+          const planted = await completedChat(fixture, activeDriver, 'NATIVE_RELOAD');
+          const before = await fixture.client.getMessages(planted.chatId);
+
+          await fixture.client.reloadChat(planted.chatId);
+
+          const reloaded = await fixture.client.getMessages(planted.chatId);
+          expect(reloaded.transcriptViewId).not.toBe(before.transcriptViewId);
+          expect(conversationalContents(reloaded.messages)).toEqual(planted.contents);
+          activeDriver.assertSettled(fixture);
+        } finally {
+          activeDriver.reset();
+        }
+      }, activeDriver.fixtureOptions);
+    }, SACS_TIMEOUT_MS);
+
+    for (const { caseId, failure } of DIRECT_NATIVE_FAILURE_CASES) {
+      test(`${caseId} preserves the view when Direct history is ${failure}`, async () => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        const nativeHistory = driverFactory.nativeHistoryImport;
+        if (!nativeHistory) throw new Error(`${driverFactory.label} has no native history facet.`);
+        await withIntegrationFixture(
+          `${activeDriver.id}-sacs-native-${failure}`,
+          async (fixture) => {
+            try {
+              const planted = await completedChat(fixture, activeDriver, `NATIVE_${failure}`);
+              const source = await nativeHistory.prepare(fixture, planted.chatId);
+              const before = await fixture.client.getMessages(planted.chatId);
+
+              await source[failure === 'missing' ? 'remove' : 'corrupt']();
+              await expectReloadFailurePreserves(fixture, planted.chatId, before);
+              activeDriver.assertSettled(fixture);
+            } finally {
+              activeDriver.reset();
+            }
+          },
+          activeDriver.fixtureOptions,
+        );
+      }, SACS_TIMEOUT_MS);
+    }
+  });
+}
+
 interface PlantedChat {
   readonly chatId: string;
   readonly contents: string[];
@@ -659,16 +649,6 @@ function requireLegacyFacet(
 ): SacsLegacyHistoryImportFacet {
   if (!facet) throw new Error(`${label} does not advertise legacy history import.`);
   return facet;
-}
-
-function requireReleasedJsonlFacet(
-  facet: SacsLegacyHistoryImportFacet,
-  label: string,
-): SacsReleasedJsonlFacet {
-  if (!facet.releasedJsonl) {
-    throw new Error(`${label} does not advertise released JSONL history controls.`);
-  }
-  return facet.releasedJsonl;
 }
 
 function requireDirectoryScopedFacet(

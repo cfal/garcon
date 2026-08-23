@@ -7,7 +7,6 @@ import type {
   AgentTranscriptSourceLocation,
 } from '@garcon/server-agent-interface';
 import type { ChatMessage } from '@garcon/common/chat-types';
-import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
@@ -20,6 +19,7 @@ import type {
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
 import type { IChatRegistry } from '../chats/store.js';
+import type { CarryOverCompactionResult } from '../chats/carryover-compaction.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { IntegrationRegistry } from './integration-registry.js';
@@ -178,7 +178,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       entry: AgentChatEntry,
       messages: readonly ChatMessage[],
       signal?: AbortSignal,
-    ): Promise<CarriedContext | null>;
+    ): Promise<CarryOverCompactionResult>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;

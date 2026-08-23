@@ -104,12 +104,12 @@ export function createCarryoverTranscript(
   // Rendered inside the same envelope as the transcript rather than beside it.
   // A second root would escape `sanitizeRecordedCarriedContext`'s rewritten-
   // envelope guard, which anchors on the prefix starting with `<carried-context`.
-  // Normalized but never clipped: the per-message bound exists to stop one chat
+  // Trimmed but never clipped: the per-message bound exists to stop one chat
   // message dominating the budget, and the summary *is* the compacted history,
   // so the budget alone governs it. An oversized one leaves the prefix over the
   // ceiling, which the compaction caller detects and falls back from.
   const summaryElement = options.summary
-    ? fitElement('    <summary>', collapseWhitespace(options.summary), '</summary>', Number.POSITIVE_INFINITY)
+    ? fitElement('    <summary>', options.summary.trim(), '</summary>', Number.POSITIVE_INFINITY)
     : '';
   const lead = summaryElement ? `${summaryElement}\n` : '';
   const turns = groupIntoTurns(projected);
@@ -144,7 +144,7 @@ export function createCarryoverTranscript(
   const fittedSummary = options.summary
     ? fitElement(
       '    <summary>',
-      collapseWhitespace(options.summary),
+      options.summary.trim(),
       '</summary>',
       Math.max(0, maxChars - frame - reserved),
     )
@@ -740,10 +740,6 @@ function isTextItem(value: unknown): value is { readonly text: string } {
 // hashes to strip a legacy seed. Frozen here for the same reason as
 // `stringifyLegacyToolResult` and `extractLegacyToolDetail`.
 function legacyCollapse(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 

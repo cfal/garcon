@@ -805,6 +805,15 @@ export class SpaDriver {
     );
   }
 
+  async waitForAssistantMessageContaining(text: string, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('[data-chat-message-type="assistant-message"]')]
+        .some((row) => row.textContent?.includes(expected)),
+      { timeout },
+      text,
+    );
+  }
+
   async waitForAriaLabel(label: string, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => [...document.querySelectorAll('[aria-label]')].some((element) =>

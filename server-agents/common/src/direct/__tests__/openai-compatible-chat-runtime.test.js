@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   OpenAiCompatibleChatRuntime,
   runOpenAiCompatibleSingleQuery,
 } from '../openai-compatible-chat-runtime.ts';
+import {
+  createTestDirectSessionStore,
+  removeTestDirectSessionStores,
+} from './session-store-fixture.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -23,16 +26,18 @@ function streamResponse(...contents) {
   });
 }
 
-function runtimeConfig() {
+function runtimeConfig(overrides = {}) {
   return {
     runtimeLabel: 'Direct (Chat Completions)',
     defaultModel: 'fallback-model',
+    sessions: createTestDirectSessionStore(),
     getApiKey: () => 'sk-test',
     getBaseUrl: () => 'https://api.example.test/v1',
+    ...overrides,
   };
 }
 
-function captureOperation(runId) {
+function captureOperation(runId, onEvent = () => undefined) {
   const events = [];
   let resolveTerminal;
   const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
@@ -42,6 +47,7 @@ function captureOperation(runId) {
     operation: {
       runId,
       publish(event) {
+        onEvent(event);
         events.push(event);
         if (event.type === 'run-ended') resolveTerminal(event);
       },
@@ -58,10 +64,23 @@ function capturedMessages(capture) {
 describe('OpenAiCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
+    await removeTestDirectSessionStores();
   });
 
-  it('hydrates an unknown session from the supplied ledger context', async () => {
-    const sessionId = 'persisted-session';
+  it('hydrates an unknown session from persisted native history', async () => {
+    const sessionId = '10000000-0000-4000-8000-000000000001';
+    const sessions = createTestDirectSessionStore();
+    await sessions.create({
+      sessionId,
+      runId: 'run-first',
+      content: 'first message',
+      attachments: [],
+    });
+    await sessions.appendAssistant({
+      sessionId,
+      runId: 'run-first',
+      content: 'first response',
+    });
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -69,21 +88,18 @@ describe('OpenAiCompatibleChatRuntime', () => {
       return streamResponse('second response');
     });
 
-    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig());
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig({ sessions }));
 
     await runtime.runTurn({
       chatId: '123',
       agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
-      priorContext: [
-        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
-        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
-      ],
       operation: captureOperation('run-hydrate').operation,
     });
 
@@ -97,18 +113,18 @@ describe('OpenAiCompatibleChatRuntime', () => {
   });
 
   it('marks direct sessions idle before emitting finished', async () => {
-    const sessionId = 'known-session';
     globalThis.fetch = mock(async () => streamResponse('done'));
     const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig());
+    let sessionId;
+    let sessionIdWhenFinished;
     let runningWhenFinished;
-    const capture = captureOperation('run-known');
-    const finished = capture.terminal.then(() => {
-        runningWhenFinished = runtime.isRunning(sessionId);
+    const capture = captureOperation('run-known', (event) => {
+      if (event.type !== 'run-ended') return;
+      sessionIdWhenFinished = sessionId;
+      runningWhenFinished = runtime.isRunning(sessionId);
     });
-
-    await runtime.runTurn({
+    const started = await runtime.startSession({
       chatId: 'chat-1',
-      agentSessionId: sessionId,
       command: 'hello',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -117,8 +133,10 @@ describe('OpenAiCompatibleChatRuntime', () => {
       claudeThinkingMode: 'auto',
       operation: capture.operation,
     });
-    await finished;
+    sessionId = started.agentSessionId;
+    await capture.terminal;
 
+    expect(sessionIdWhenFinished).toBe(started.agentSessionId);
     expect(runningWhenFinished).toBe(false);
   });
 
@@ -146,6 +164,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'second',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -157,6 +176,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'third',
       projectPath: '/tmp/project',
       model: 'selected-model',

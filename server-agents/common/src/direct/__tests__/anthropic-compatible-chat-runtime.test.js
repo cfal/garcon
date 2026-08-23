@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import { AssistantMessage, UserMessage } from '@garcon/common/chat-types';
 import {
   AnthropicCompatibleChatRuntime,
   anthropicMessagesUrl,
@@ -7,6 +6,10 @@ import {
   buildAnthropicCompatibleUserContent,
   runAnthropicCompatibleSingleQuery,
 } from '../anthropic-compatible-chat-runtime.ts';
+import {
+  createTestDirectSessionStore,
+  removeTestDirectSessionStores,
+} from './session-store-fixture.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -32,6 +35,7 @@ function runtimeConfig(overrides = {}) {
   return {
     runtimeLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
+    sessions: createTestDirectSessionStore(),
     getApiKey: () => 'sk-ant',
     getBaseUrl: () => 'https://api.example.test',
     ...overrides,
@@ -68,6 +72,7 @@ function capturedMessages(capture) {
 describe('AnthropicCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
+    await removeTestDirectSessionStores();
   });
 
   it('builds Anthropic endpoint URLs from root and v1 base URLs', () => {
@@ -229,6 +234,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'second',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -240,6 +246,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
       command: 'third',
       projectPath: '/tmp/project',
       model: 'selected-model',
@@ -255,8 +262,20 @@ describe('AnthropicCompatibleChatRuntime', () => {
     expect(requestBodies.every((body) => !Object.hasOwn(body, 'thinking'))).toBe(true);
   });
 
-  it('hydrates an unknown session from the supplied ledger context', async () => {
-    const sessionId = 'persisted-session';
+  it('hydrates an unknown session from persisted native history', async () => {
+    const sessionId = '10000000-0000-4000-8000-000000000001';
+    const sessions = createTestDirectSessionStore();
+    await sessions.create({
+      sessionId,
+      runId: 'run-first',
+      content: 'first message',
+      attachments: [],
+    });
+    await sessions.appendAssistant({
+      sessionId,
+      runId: 'run-first',
+      content: 'first response',
+    });
 
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
@@ -268,21 +287,19 @@ describe('AnthropicCompatibleChatRuntime', () => {
 
     const runtime = makeRuntime({
       defaultModel: 'fallback-model',
+      sessions,
     });
 
     await runtime.runTurn({
       chatId: 'chat-1',
       agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
       command: 'second message',
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
       thinkingMode: 'max',
       claudeThinkingMode: 'auto',
-      priorContext: [
-        new UserMessage('2026-01-01T00:00:00.000Z', 'first message'),
-        new AssistantMessage('2026-01-01T00:00:01.000Z', 'first response'),
-      ],
       operation: captureOperation('run-hydrated').operation,
     });
 

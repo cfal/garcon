@@ -23,6 +23,7 @@ import {
 } from '../../support/integration-fixture.js';
 import {
   LIVE_TURN_TIMEOUT_MS,
+  reloadFromNativeHistory,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -239,6 +240,13 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       expect(assistantContents(restored).join('\n')).not.toContain(stoppedReply);
       expect(messagesOfType(restored, 'error')).toEqual([]);
       expectAbortedToolRows(restored, command);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = (await fixture.client.getMessages(chatId)).messages;
+      expect(userContents(reloaded)).toContain(stoppedPrompt);
+      expect(assistantContents(reloaded).join('\n')).not.toContain(stoppedReply);
+      expect(messagesOfType(reloaded, 'error')).toEqual([]);
+      expectAbortedToolRows(reloaded, command);
 
       testEnvironment.model.reset();
       testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
