@@ -598,6 +598,53 @@ describe('NewChatForm', () => {
 		);
 	});
 
+	it('does not apply an old-ID expansion after reseeding', async () => {
+		stubMatchMedia(false);
+		vi.mocked(clientChatId.createClientChatId)
+			.mockReset()
+			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
+			.mockReturnValueOnce(RESEEDED_CHAT_ID);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review stale ID' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('after reseed');
+		await waitFor(() => {
+			expect(
+				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
+			).toBe(false);
+		});
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			expect.objectContaining({
+				context: expect.objectContaining({ chatId: PROSPECTIVE_CHAT_ID }),
+			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: 'after reseed' }),
+			RESEEDED_CHAT_ID,
+		);
+	});
+
 	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
