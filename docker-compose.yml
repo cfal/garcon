@@ -1,25 +1,53 @@
 services:
   garcon:
-    build: .
+    image: garcon:local
+    build:
+      context: .
+      args:
+        GARCON_UID: "${GARCON_UID:-1000}"
+        GARCON_GID: "${GARCON_GID:-1000}"
     init: true
     restart: unless-stopped
     ports:
-      - "${GARCON_PORT:-8080}:${GARCON_PORT:-8080}"
+      - "${GARCON_HOST_ADDRESS:-127.0.0.1}:${GARCON_PORT:-8080}:${GARCON_PORT:-8080}"
     volumes:
       - garcon-data:/home/garcon/.garcon
-      - ${GARCON_PROJECT_DIR:-.}:/projects
-      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/home/garcon/.claude
-      - ${CODEX_HOME:-~/.codex}:/home/garcon/.codex
-      - ${OPENCODE_CONFIG_DIR:-~/.opencode}:/home/garcon/.opencode
-      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-data:/home/garcon/.local/share/opencode
-      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-state:/home/garcon/.local/state/opencode
-      - ${OPENCODE_CONFIG_DIR:-~/.opencode}/opencode-cache:/home/garcon/.local/cache/opencode
-      - ~/.amp:/home/garcon/.amp
+      - agent-config:/home/garcon/.config
+      - agents-home:/home/garcon/.agents
+      - claude-home:/home/garcon/.claude
+      - codex-home:/home/garcon/.codex
+      - cursor-home:/home/garcon/.cursor
+      - factory-home:/home/garcon/.factory
+      - pi-home:/home/garcon/.pi
+      - opencode-data:/home/garcon/.local/share/opencode
+      - opencode-state:/home/garcon/.local/state/opencode
+      - amp-data:/home/garcon/.local/share/amp
+      - ssh-home:/home/garcon/.ssh
+      - "${GARCON_PROJECT_DIR:?Set GARCON_PROJECT_DIR to the directory containing your repositories}:/projects"
     environment:
-      - GARCON_PORT=${GARCON_PORT:-8080}
-      - GARCON_BIND_ADDRESS=0.0.0.0
-      - GARCON_PROJECT_BASE_DIR=/projects
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      GARCON_PORT: "${GARCON_PORT:-8080}"
+      GARCON_BIND_ADDRESS: 0.0.0.0
+      GARCON_PROJECT_BASE_DIR: /projects
+      ANTHROPIC_API_KEY:
+      ANTHROPIC_BASE_URL:
+      OPENAI_API_KEY:
+      OPENAI_BASE_URL:
+      CURSOR_API_KEY:
+      FACTORY_API_KEY:
+      AMP_API_KEY:
+      GH_TOKEN:
+      GITHUB_TOKEN:
 
 volumes:
   garcon-data:
+  agent-config:
+  agents-home:
+  claude-home:
+  codex-home:
+  cursor-home:
+  factory-home:
+  pi-home:
+  opencode-data:
+  opencode-state:
+  amp-data:
+  ssh-home:
