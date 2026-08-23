@@ -174,14 +174,14 @@ describe('garcon-cli add-row', () => {
           type: 'transcript-notice',
           content: noticeContent,
           title: noticeTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'notice' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
           title: errorTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'error' },
         },
       ]);
       expect(fixture.client.eventsSince(eventCursor).filter((event) => (
@@ -256,14 +256,14 @@ describe('garcon-cli add-row', () => {
           type: 'transcript-notice',
           content: noticeContent,
           title: noticeTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'notice' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
           title: errorTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'error' },
         },
       ]);
 
@@ -285,14 +285,14 @@ describe('garcon-cli add-row', () => {
           type: 'transcript-notice',
           content: noticeContent,
           title: noticeTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'notice' },
         },
         {
           ordinal: error.ordinal,
           type: 'error',
           content: errorContent,
           title: errorTitle,
-          detail: { type: 'cli-row' },
+          detail: { type: 'cli-row', style: 'error' },
         },
       ]);
     }, { namedWorkspace: WORKSPACE });

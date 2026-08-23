@@ -615,28 +615,28 @@ describe('Chromium transcript chat rows', () => {
             type: 'transcript-notice',
             content: noticeContent,
             title: noticeTitle,
-            detail: { type: 'cli-row' },
+            detail: { type: 'cli-row', style: 'notice' },
           },
           {
             ordinal: error.ordinal,
             type: 'error',
             content: errorContent,
             title: errorTitle,
-            detail: { type: 'cli-row' },
+            detail: { type: 'cli-row', style: 'error' },
           },
           {
             ordinal: missedNotice.ordinal,
             type: 'transcript-notice',
             content: 'browser replay notice',
             title: 'Replay deployment',
-            detail: { type: 'cli-row' },
+            detail: { type: 'cli-row', style: 'notice' },
           },
           {
             ordinal: missedError.ordinal,
             type: 'error',
             content: 'browser replay error',
             title: 'Replay release validation',
-            detail: { type: 'cli-row' },
+            detail: { type: 'cli-row', style: 'error' },
           },
         ]);
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();

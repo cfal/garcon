@@ -1,20 +1,19 @@
 <script lang="ts">
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import type { UserMessagePresentation } from '$shared/chat-types';
-	import * as m from '$lib/paraglide/messages.js';
+	import {
+		cliPresentationHeaderClass,
+		cliPresentationLabel,
+	} from '$lib/chat/transcript/cli-presentation-style';
 
 	let { presentation }: { presentation: UserMessagePresentation } = $props();
-	const label = $derived(
-		presentation.style === 'error' ? m.chat_message_cli_error() : m.chat_message_cli_notice(),
-	);
+	const label = $derived(cliPresentationLabel(presentation.style));
 </script>
 
 <span
 	class={[
 		'mb-1.5 flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium',
-		presentation.style === 'error'
-			? 'border-status-error-border bg-status-error text-status-error-foreground'
-			: 'border-status-info-border bg-status-info text-status-info-foreground',
+		cliPresentationHeaderClass(presentation.style),
 	]}
 	data-user-message-presentation={presentation.style}
 >

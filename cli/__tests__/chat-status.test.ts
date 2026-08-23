@@ -220,7 +220,7 @@ describe('chat status', () => {
           message: new TranscriptNoticeMessage(
             TIMESTAMP,
             'Deployment window opened.',
-            { type: 'cli-row' },
+              { type: 'cli-row', style: 'notice' },
             'Deployment',
           ),
         }, {
@@ -228,7 +228,7 @@ describe('chat status', () => {
           message: new ErrorMessage(
             TIMESTAMP,
             'Validation failed.',
-            { type: 'cli-row' },
+              { type: 'cli-row', style: 'error' },
           ),
         }, {
           ordinal: 3,
@@ -242,11 +242,11 @@ describe('chat status', () => {
     }));
 
     expect(value).toContain(
-      `[1] ${TIMESTAMP} transcript-notice (CLI) — Deployment\nDeployment window opened.`,
-    );
-    expect(value).toContain(`[2] ${TIMESTAMP} error (CLI)\nValidation failed.`);
-    expect(value).toContain(`[3] ${TIMESTAMP} error\nProvider failed.`);
-    expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI)`);
+        `[1] ${TIMESTAMP} transcript-notice (CLI notice) — Deployment\nDeployment window opened.`,
+      );
+      expect(value).toContain(`[2] ${TIMESTAMP} error (CLI error)\nValidation failed.`);
+      expect(value).toContain(`[3] ${TIMESTAMP} error\nProvider failed.`);
+      expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI error)`);
   });
 
   test('labels presented user messages without printing presentation JSON', () => {

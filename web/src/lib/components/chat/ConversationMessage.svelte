@@ -164,7 +164,7 @@
 		const cliMessage = asNotice ?? asError;
 		if (!cliMessage || !isCliRowPresentationDetail(cliMessage.detail)) return null;
 		return {
-			presentation: asError ? ('error' as const) : ('notice' as const),
+			style: cliMessage.detail.style,
 			content: cliMessage.content,
 			...(cliMessage.title === undefined ? {} : { title: cliMessage.title }),
 		};

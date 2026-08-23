@@ -22,10 +22,10 @@ describe('shared transcript chat rows', () => {
         new TranscriptNoticeMessage(
           AT,
           'Shared notice.\nSecond line.',
-          { type: 'cli-row' },
+            { type: 'cli-row', style: 'notice' },
           'Deployment',
         ),
-        new ErrorMessage(AT, 'Shared error.', { type: 'cli-row' }),
+          new ErrorMessage(AT, 'Shared error.', { type: 'cli-row', style: 'error' }),
         new TranscriptNoticeMessage(AT, 'Internal notice.'),
         new ErrorMessage(AT, 'Provider error.'),
       ],

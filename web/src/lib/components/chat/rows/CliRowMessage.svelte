@@ -1,24 +1,26 @@
 <script lang="ts">
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
-	import * as m from '$lib/paraglide/messages.js';
+	import type { CliPresentationStyle } from '@garcon/common/cli-presentation';
+	import {
+		cliPresentationCardVariant,
+		cliPresentationLabel,
+	} from '$lib/chat/transcript/cli-presentation-style';
 	import ChatEventCard from './ChatEventCard.svelte';
 
 	interface Props {
-		presentation: 'notice' | 'error';
+		style: CliPresentationStyle;
 		title?: string;
 		content: string;
 	}
 
-	let { presentation, title, content }: Props = $props();
-	const label = $derived(
-		presentation === 'error' ? m.chat_message_cli_error() : m.chat_message_cli_notice(),
-	);
+	let { style, title, content }: Props = $props();
+	const label = $derived(cliPresentationLabel(style));
 </script>
 
 <ChatEventCard
-	variant={presentation === 'error' ? 'error' : 'info'}
+	variant={cliPresentationCardVariant(style)}
 	compact
-	class="cli-row-message"
+	class="cli-row-message cli-row-message-{style}"
 >
 	{#snippet body()}
 		<div class="flex min-w-0 items-center gap-2">

@@ -122,7 +122,7 @@ function formatMessage(entry: TranscriptMessage): string {
   const title = titleValue ? ` — ${titleValue}` : '';
   const cliLabel = userPresentation
     ? ` (CLI ${userPresentation.style})`
-    : cliDetail ? ' (CLI)' : '';
+    : cliDetail ? ` (CLI ${cliDetail.style})` : '';
   return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
     + truncateStatusText(content);
 }

@@ -202,10 +202,10 @@ describe('transcript ledger presentation', () => {
       content: '  exact notice\n',
       title: 'Deployment',
     });
-    expect(rendered[4].message.detail).toEqual({ type: 'cli-row' });
+      expect(rendered[4].message.detail).toEqual({ type: 'cli-row', style: 'notice' });
     expect(rendered[5].message).toBeInstanceOf(ErrorMessage);
     expect(rendered[5].message).toMatchObject({ content: 'exact error', timestamp: AT });
-    expect(rendered[5].message.detail).toEqual({ type: 'cli-row' });
+      expect(rendered[5].message.detail).toEqual({ type: 'cli-row', style: 'error' });
     expect(rendered[5].message.title).toBeUndefined();
     expect(JSON.stringify([rendered[4].message, rendered[5].message]))
       .not.toContain('clientMessageId');

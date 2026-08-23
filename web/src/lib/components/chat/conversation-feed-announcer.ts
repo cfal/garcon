@@ -8,6 +8,7 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { cliPresentationLabel } from '$lib/chat/transcript/cli-presentation-style';
 import {
 	conversationFeedMutationKindsSince,
 	type ConversationFeedMutationClock,
@@ -129,9 +130,7 @@ export function announcementForAppendedRow(
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
 	if (message instanceof UserMessage && message.presentation) {
-		const label = message.presentation.style === 'error'
-			? m.chat_message_cli_error()
-			: m.chat_message_cli_notice();
+		const label = cliPresentationLabel(message.presentation.style);
 		const title = message.presentation.title ? `: ${message.presentation.title}` : '';
 		const body = plainAnnouncementText(String(message.content ?? ''));
 		return `${label}${title}.${body ? ` ${body}` : ''}`;

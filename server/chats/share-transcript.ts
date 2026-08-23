@@ -15,6 +15,7 @@ import {
   type TodoItem,
   type ToolUseChatMessage,
 } from '../../common/chat-types.ts';
+import type { CliPresentationStyle } from '../../common/cli-presentation.ts';
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
 
 interface TranscriptEntry {
@@ -187,11 +188,15 @@ function normalizeImages(images: UserMessage['images']): string {
   return `\n\nAttached images:\n${lines.join('\n')}`;
 }
 
+function cliPresentationName(style: CliPresentationStyle): string {
+  return `${style.charAt(0).toUpperCase()}${style.slice(1)}`;
+}
+
 function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   if (message instanceof UserMessage) {
     const presentation = message.presentation;
     const role = presentation
-      ? `User (CLI ${presentation.style === 'error' ? 'Error' : 'Notice'})${presentation.title ? ` — ${presentation.title}` : ''}`
+      ? `User (CLI ${cliPresentationName(presentation.style)})${presentation.title ? ` — ${presentation.title}` : ''}`
       : 'User';
     return {
       role,
@@ -213,7 +218,9 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     };
   }
   if (message instanceof ErrorMessage) {
-    const base = isCliRowPresentationDetail(message.detail) ? 'CLI Error' : 'Error';
+    const base = isCliRowPresentationDetail(message.detail)
+      ? `CLI ${cliPresentationName(message.detail.style)}`
+      : 'Error';
     return {
       role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
       timestamp: message.timestamp,
@@ -221,7 +228,9 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     };
   }
   if (message instanceof TranscriptNoticeMessage) {
-    const base = isCliRowPresentationDetail(message.detail) ? 'CLI Notice' : 'Notice';
+    const base = isCliRowPresentationDetail(message.detail)
+      ? `CLI ${cliPresentationName(message.detail.style)}`
+      : 'Notice';
     return {
       role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
       timestamp: message.timestamp,

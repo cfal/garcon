@@ -36,7 +36,7 @@ describe('ConversationMessage chat rows', () => {
 			message: new TranscriptNoticeMessage(
 				AT,
 				'Synthetic CLI notice.\nSecond line.',
-				{ type: 'cli-row' },
+				{ type: 'cli-row', style: 'notice' },
 				'Deployment',
 			),
 		});
@@ -54,7 +54,11 @@ describe('ConversationMessage chat rows', () => {
 
 		titled.unmount();
 		render(ConversationMessageHost, {
-			message: new TranscriptNoticeMessage(AT, 'Untitled CLI notice.', { type: 'cli-row' }),
+			message: new TranscriptNoticeMessage(
+				AT,
+				'Untitled CLI notice.',
+				{ type: 'cli-row', style: 'notice' },
+			),
 		});
 		const untitledCard = screen.getByText('CLI notice').closest('article');
 		expect(untitledCard?.className).toContain('border-status-info-border');
@@ -66,7 +70,7 @@ describe('ConversationMessage chat rows', () => {
 			message: new ErrorMessage(
 				AT,
 				'Synthetic CLI error.',
-				{ type: 'cli-row' },
+				{ type: 'cli-row', style: 'error' },
 				'Release validation',
 			),
 		});
@@ -80,7 +84,11 @@ describe('ConversationMessage chat rows', () => {
 
 		titled.unmount();
 		render(ConversationMessageHost, {
-			message: new ErrorMessage(AT, 'Untitled CLI error.', { type: 'cli-row' }),
+			message: new ErrorMessage(
+				AT,
+				'Untitled CLI error.',
+				{ type: 'cli-row', style: 'error' },
+			),
 		});
 		const untitledCard = screen.getByText('CLI error').closest('article');
 		expect(untitledCard?.className).toContain('border-status-error-border');

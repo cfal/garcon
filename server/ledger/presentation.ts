@@ -50,9 +50,10 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'notice': {
       if (isLedgerCliRowNoticeDetail(row.detail)) {
         const title = row.detail.title ?? undefined;
+        const detail = { type: 'cli-row' as const, style: row.detail.presentation };
         return row.detail.presentation === 'error'
-          ? new ErrorMessage(row.at, row.message, { type: 'cli-row' }, title)
-          : new TranscriptNoticeMessage(row.at, row.message, { type: 'cli-row' }, title);
+          ? new ErrorMessage(row.at, row.message, detail, title)
+          : new TranscriptNoticeMessage(row.at, row.message, detail, title);
       }
       return new TranscriptNoticeMessage(
         row.at,

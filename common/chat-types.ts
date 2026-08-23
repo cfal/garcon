@@ -676,6 +676,7 @@ export interface CarryoverMigrationQuarantineNoticeDetail {
 
 export interface CliRowPresentationDetail {
   readonly type: 'cli-row';
+  readonly style: CliPresentationStyle;
 }
 
 export type TranscriptNoticeDetail =
@@ -1168,11 +1169,19 @@ export function isCliRowPresentationDetail(
   value: unknown,
 ): value is CliRowPresentationDetail {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return (value as Record<string, unknown>).type === 'cli-row';
+  const detail = value as Record<string, unknown>;
+  return detail.type === 'cli-row' && isCliPresentationStyle(detail.style);
 }
 
-function parseCliRowPresentationDetail(value: unknown): CliRowPresentationDetail | null {
-  return isCliRowPresentationDetail(value) ? { type: 'cli-row' } : null;
+function parseCliRowPresentationDetail(
+  value: unknown,
+  fallbackStyle: CliPresentationStyle,
+): CliRowPresentationDetail | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const detail = value as Record<string, unknown>;
+  if (detail.type !== 'cli-row') return null;
+  const style = detail.style ?? fallbackStyle;
+  return isCliPresentationStyle(style) ? { type: 'cli-row', style } : null;
 }
 
 function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
@@ -1183,7 +1192,8 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
       errorCode: value.errorCode,
     };
   }
-  return parseCliRowPresentationDetail(value);
+  const detail = parseCliRowPresentationDetail(value, 'notice');
+  return detail?.style === 'error' ? null : detail;
 }
 
 // Constructs a typed ChatMessage class instance from raw data.
@@ -1218,8 +1228,8 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
     case 'error': {
       const detail = data.detail === undefined
         ? undefined
-        : parseCliRowPresentationDetail(data.detail);
-      if (detail === null) return null;
+        : parseCliRowPresentationDetail(data.detail, 'error');
+      if (detail === null || (detail !== undefined && detail.style !== 'error')) return null;
       return new ErrorMessage(
         str(data.timestamp),
         str(data.content),

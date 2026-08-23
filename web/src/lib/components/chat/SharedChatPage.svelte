@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import type { CliPresentationStyle } from '@garcon/common/cli-presentation';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { parseChatMessage } from '$shared/chat-types';
 	import type { ChatMessage } from '$shared/chat-types';
@@ -38,7 +39,7 @@
 	}
 
 	interface CliRowView {
-		presentation: 'notice' | 'error';
+		style: CliPresentationStyle;
 		title?: string;
 		content: string;
 	}
@@ -77,7 +78,7 @@
 			return null;
 		}
 		return {
-			presentation: message instanceof ErrorMessage ? 'error' : 'notice',
+			style: message.detail.style,
 			content: message.content,
 			...(message.title === undefined ? {} : { title: message.title }),
 		};
