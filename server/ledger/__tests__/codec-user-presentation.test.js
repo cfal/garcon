@@ -15,6 +15,8 @@ describe('transcript submission presentation fingerprint', () => {
     })));
     expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice' })))
       .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'error' })));
+    expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice' })))
+      .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'info' })));
     expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice', title: 'A' })))
       .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'notice', title: 'B' })));
   });

@@ -73,8 +73,8 @@ describe('chat row routes', () => {
       clientMessageId: 'message-1',
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
-      type: 'notice',
-      title: '  Deployment  ',
+      type: 'info',
+      title: '  Consultation status  ',
       content: '  exact content\n',
     };
 
@@ -88,7 +88,7 @@ describe('chat row routes', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(add).toHaveBeenCalledWith({
       ...body,
-      title: 'Deployment',
+      title: 'Consultation status',
     }, expect.any(AbortSignal));
     expect(await response.json()).toEqual({
       success: true,
@@ -98,7 +98,7 @@ describe('chat row routes', () => {
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
       ordinal: 4,
-      type: 'notice',
+      type: 'info',
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     });

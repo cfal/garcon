@@ -46,13 +46,21 @@ describe('ChatRowService', () => {
         request({ title: 'Different title' }),
         new AbortController().signal,
       )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', retryable: false });
-      expect(ledger.appendChatRow({
+      await expect(service.add(
+        request({ type: 'info' }),
+        new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', retryable: false });
+      const info = ledger.appendChatRow({
         chatId: CHAT_ID,
         viewId: ledger.currentView(CHAT_ID).viewId,
         clientMessageId: 'message-2',
-        type: 'notice',
-        content: 'healthy notice',
-      }).inserted).toBe(true);
+        type: 'info',
+        content: 'healthy information',
+      });
+      expect(info).toMatchObject({
+        inserted: true,
+        row: { detail: { presentation: 'info' } },
+      });
     });
   });
 

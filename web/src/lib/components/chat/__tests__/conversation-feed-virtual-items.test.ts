@@ -157,7 +157,7 @@ describe('conversation virtual feed model', () => {
 			'message 2',
 			undefined,
 			undefined,
-			{ origin: 'cli', style: 'notice' },
+			{ origin: 'cli', style: 'info' },
 		);
 		const presented = build([presentedItem]).items[1]!;
 

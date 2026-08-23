@@ -166,7 +166,7 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
-  it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps notices and every error presentation-only across ledger folds', async () => {
+  it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps every CLI row style presentation-only across ledger folds', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-row-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {
       createViewId: () => VIEW_ID,
@@ -182,6 +182,14 @@ describe('transcript ledger read-fold matrix', () => {
         attachments: [],
         clientMessageId: 'pending-input',
         steer: false,
+      });
+      const info = ledger.appendChatRow({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        clientMessageId: 'chat-row-info',
+        type: 'info',
+        title: 'Consultation checkpoint',
+        content: 'presentation information',
       });
       const notice = ledger.appendChatRow({
         chatId: CHAT_ID,
@@ -207,7 +215,7 @@ describe('transcript ledger read-fold matrix', () => {
       const rows = ledger.currentRows(CHAT_ID);
 
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 4,
+        ordinal: 5,
         at: AT,
       });
 
@@ -217,9 +225,10 @@ describe('transcript ledger read-fold matrix', () => {
         'content' in message ? message.content : null,
       ])).toEqual([
         [1, 'user-message', 'pending user input'],
-        [2, 'transcript-notice', 'presentation notice'],
-        [3, 'error', 'chat row error'],
-        [4, 'error', 'provider error'],
+        [2, 'transcript-notice', 'presentation information'],
+        [3, 'transcript-notice', 'presentation notice'],
+        [4, 'error', 'chat row error'],
+        [5, 'error', 'provider error'],
       ]);
       expect(ledger.conversationMessages(CHAT_ID)).toEqual([
         expect.objectContaining({ type: 'user-message', content: 'pending user input' }),
@@ -251,16 +260,25 @@ describe('transcript ledger read-fold matrix', () => {
         type: 'rows',
         chatId: CHAT_ID,
         viewId: VIEW_ID,
-        rows: [notice.row, error.row, rows[3]],
+        rows: [info.row, notice.row, error.row, rows[4]],
       });
 
       expect(metadataUpdates).toEqual([]);
       expect(broadcasts).toEqual([expect.objectContaining({
         firstOrdinal: 2,
-        lastOrdinal: 4,
+        lastOrdinal: 5,
         messages: [
           {
             ordinal: 2,
+            message: new TranscriptNoticeMessage(
+              CHAT_ROW_AT,
+              'presentation information',
+              { type: 'cli-row', style: 'info' },
+              'Consultation checkpoint',
+            ),
+          },
+          {
+            ordinal: 3,
             message: new TranscriptNoticeMessage(
               CHAT_ROW_AT,
               'presentation notice',
@@ -269,7 +287,7 @@ describe('transcript ledger read-fold matrix', () => {
             ),
           },
           {
-            ordinal: 3,
+            ordinal: 4,
             message: new ErrorMessage(
               CHAT_ROW_AT,
               'chat row error',
@@ -277,7 +295,7 @@ describe('transcript ledger read-fold matrix', () => {
               'Failure checkpoint',
             ),
           },
-          { ordinal: 4, message: new ErrorMessage(AT, 'provider error') },
+          { ordinal: 5, message: new ErrorMessage(AT, 'provider error') },
         ],
       })]);
     } finally {

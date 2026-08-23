@@ -216,7 +216,7 @@ describe('TranscriptLedgerStore', () => {
       viewId: view.viewId,
       at,
       message,
-      detail: chatRowDetail('chat-row-2', 'notice'),
+      detail: chatRowDetail('chat-row-2', 'info'),
     });
     expect(second).toMatchObject({ inserted: true, row: { ordinal: 2 } });
     expect(store.currentRows('chat-one')).toHaveLength(2);
@@ -229,7 +229,7 @@ describe('TranscriptLedgerStore', () => {
         kind: 'notice',
         ordinal: 2,
         message,
-        detail: { clientMessageId: 'chat-row-2', title: null },
+        detail: { clientMessageId: 'chat-row-2', presentation: 'info', title: null },
       },
     ]);
   });

@@ -186,7 +186,10 @@ async function expectRenderedRow(
     messageType: 'transcript-notice' | 'error';
     title: string;
     content: string;
-    variantClass: 'border-status-info-border' | 'border-status-error-border';
+    variantClass:
+      | 'border-status-info-border'
+      | 'border-status-error-border'
+      | 'border-status-neutral-border';
   },
 ): Promise<void> {
   const locator = rowLocator(page, row);
@@ -368,11 +371,22 @@ describe('Chromium transcript chat rows', () => {
         );
         await captureComposer(fixture.page, 'chat row draft remains stable');
 
+        const infoContent = 'browser chat row information';
         const noticeContent = 'browser chat row notice';
         const errorContent = 'browser chat row error';
+        const infoTitle = 'Browser consultation status';
         const noticeTitle = 'Browser deployment';
         const errorTitle = 'Browser release validation';
-        markPhase('publishing live notice and error chat rows');
+        markPhase('publishing live info, notice, and error chat rows');
+        const info = await addRow({
+          fixture,
+          chatId: targetChatId,
+          transcriptViewId: target.transcriptViewId,
+          type: 'info',
+          title: infoTitle,
+          content: infoContent,
+          identity: 'browser-live-info',
+        });
         const notice = await addRow({
           fixture,
           chatId: targetChatId,
@@ -391,7 +405,13 @@ describe('Chromium transcript chat rows', () => {
           content: errorContent,
           identity: 'browser-live-error',
         });
+        expect(info).toMatchObject({
+          status: 'appended',
+          transcriptViewId: target.transcriptViewId,
+          type: 'info',
+        });
         expect(notice).toMatchObject({
+          ordinal: info.ordinal + 1,
           status: 'appended',
           transcriptViewId: target.transcriptViewId,
           type: 'notice',
@@ -401,6 +421,12 @@ describe('Chromium transcript chat rows', () => {
           status: 'appended',
           transcriptViewId: target.transcriptViewId,
           type: 'error',
+        });
+        await expectRenderedRow(fixture.page, info, {
+          messageType: 'transcript-notice',
+          title: infoTitle,
+          content: infoContent,
+          variantClass: 'border-status-neutral-border',
         });
         await expectRenderedRow(fixture.page, notice, {
           messageType: 'transcript-notice',
@@ -414,14 +440,22 @@ describe('Chromium transcript chat rows', () => {
           content: errorContent,
           variantClass: 'border-status-error-border',
         });
+        await waitForTrackedContent(observerPage, infoContent);
         await waitForTrackedContent(observerPage, noticeContent);
         await waitForTrackedContent(observerPage, errorContent);
+        await waitForTrackedContent(observerPage, infoTitle);
         await waitForTrackedContent(observerPage, noticeTitle);
         await waitForTrackedContent(observerPage, errorTitle);
         await expectComposerStable(fixture.page, 'chat row draft remains stable');
 
         markPhase('restoring the warmed background transcript');
         await selectSidebarChat(observerPage, targetChatId, errorContent);
+        await expectRenderedRow(observerPage, info, {
+          messageType: 'transcript-notice',
+          title: infoTitle,
+          content: infoContent,
+          variantClass: 'border-status-neutral-border',
+        });
         await expectRenderedRow(observerPage, notice, {
           messageType: 'transcript-notice',
           title: noticeTitle,
@@ -437,10 +471,12 @@ describe('Chromium transcript chat rows', () => {
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
         expect(await chatSummaryMetadata(fixture, targetChatId)).toEqual(initialTargetSummary);
         const liveBoxes = await Promise.all([
+          rowLocator(observerPage, info).boundingBox(),
           rowLocator(observerPage, notice).boundingBox(),
           rowLocator(observerPage, error).boundingBox(),
         ]);
         expect(liveBoxes[0]?.y).toBeLessThan(liveBoxes[1]?.y ?? Number.NEGATIVE_INFINITY);
+        expect(liveBoxes[1]?.y).toBeLessThan(liveBoxes[2]?.y ?? Number.NEGATIVE_INFINITY);
 
         const activeTracker = await trackerSnapshot(fixture.page);
         const observerTracker = await trackerSnapshot(observerPage);
@@ -589,7 +625,7 @@ describe('Chromium transcript chat rows', () => {
           variantClass: 'border-status-error-border',
         });
         for (const page of [fixture.page, observerPage]) {
-          for (const row of [notice, error, missedNotice, missedError]) {
+          for (const row of [info, notice, error, missedNotice, missedError]) {
             expect(await rowLocator(page, row).count()).toBe(1);
           }
         }
@@ -601,7 +637,7 @@ describe('Chromium transcript chat rows', () => {
           limit: 200,
         });
         expect(canonical.messages.filter((entry) => (
-          [notice.ordinal, error.ordinal, missedNotice.ordinal, missedError.ordinal]
+          [info.ordinal, notice.ordinal, error.ordinal, missedNotice.ordinal, missedError.ordinal]
             .includes(entry.ordinal)
         )).map((entry) => ({
           ordinal: entry.ordinal,
@@ -610,6 +646,13 @@ describe('Chromium transcript chat rows', () => {
           title: 'title' in entry.message ? entry.message.title : undefined,
           detail: 'detail' in entry.message ? entry.message.detail : undefined,
         }))).toEqual([
+          {
+            ordinal: info.ordinal,
+            type: 'transcript-notice',
+            content: infoContent,
+            title: infoTitle,
+            detail: { type: 'cli-row', style: 'info' },
+          },
           {
             ordinal: notice.ordinal,
             type: 'transcript-notice',

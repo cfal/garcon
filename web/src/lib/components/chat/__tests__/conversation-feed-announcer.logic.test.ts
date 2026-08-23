@@ -495,6 +495,15 @@ describe('ConversationFeedAnnouncerState', () => {
 			'hello',
 		);
 		expect(
+			announcementForAppendedRow(messageRow('4', new UserMessage(
+				'',
+				'consultation complete',
+				undefined,
+				undefined,
+				{ origin: 'cli', style: 'info', title: 'Status' },
+			)), []),
+		).toBe('CLI info: Status. consultation complete');
+		expect(
 			announcementForAppendedRow(
 				{
 					kind: 'local-notice',

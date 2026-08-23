@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+import type { CliPresentationStyle } from '../../../common/cli-presentation.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
@@ -15,13 +16,13 @@ interface AddRowCliResult {
   readonly ordinal: number;
   readonly status: 'appended' | 'duplicate';
   readonly transcriptViewId: string;
-  readonly type: 'notice' | 'error';
+  readonly type: CliPresentationStyle;
 }
 
 async function runAddRow(
   fixture: IntegrationFixture,
   chatId: string,
-  type: 'notice' | 'error',
+  type: CliPresentationStyle,
   title: string,
   content: string,
 ): Promise<AddRowCliResult> {
@@ -55,7 +56,7 @@ async function runAddRow(
   expect(stdout).not.toContain(content);
   expect(stdout).not.toContain(title);
   const match = stdout.match(
-    /^chat id: (\d{16})\ntranscript view id: ([^\n]+)\nordinal: (\d+)\ntype: (notice|error)\nstatus: (appended|duplicate)\n$/,
+    /^chat id: (\d{16})\ntranscript view id: ([^\n]+)\nordinal: (\d+)\ntype: (info|notice|error)\nstatus: (appended|duplicate)\n$/,
   );
   if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5]) {
     throw new Error(`Unexpected add-row output: ${JSON.stringify(stdout)}`);
@@ -122,10 +123,13 @@ describe('garcon-cli add-row', () => {
       const controlBefore = await fixture.client.getExecutionControl(chatId);
       const providerRequestCount = fixture.fakeProviders.openAi.requests().length;
 
+      const infoContent = 'chatrowinfovisible user-only checkpoint';
       const noticeContent = 'chatrownoticevisible user-only checkpoint';
       const errorContent = 'chatrowerrorvisible user-only checkpoint';
+      const infoTitle = 'chatrowinfotitlevisible Consultation status';
       const noticeTitle = 'chatrownoticetitlevisible Deployment';
       const errorTitle = 'chatrowerrortitlevisible Release validation';
+      const info = await runAddRow(fixture, chatId, 'info', infoTitle, infoContent);
       const notice = await runAddRow(fixture, chatId, 'notice', noticeTitle, noticeContent);
       const error = await runAddRow(fixture, chatId, 'error', errorTitle, errorContent);
       await fixture.client.waitForEvent(
@@ -136,10 +140,17 @@ describe('garcon-cli add-row', () => {
         { afterIndex: eventCursor },
       );
 
+      expect(info).toEqual({
+        chatId,
+        transcriptViewId: initial.transcriptViewId,
+        ordinal: info.ordinal,
+        type: 'info',
+        status: 'appended',
+      });
       expect(notice).toEqual({
         chatId,
         transcriptViewId: initial.transcriptViewId,
-        ordinal: notice.ordinal,
+        ordinal: info.ordinal + 1,
         type: 'notice',
         status: 'appended',
       });
@@ -158,7 +169,7 @@ describe('garcon-cli add-row', () => {
       const chatRowEvents = fixture.client.eventsSince(eventCursor).flatMap((event) => (
         event.type === 'chat-messages' && event.chatId === chatId
           ? event.messages.filter((entry) => (
-              entry.ordinal === notice.ordinal || entry.ordinal === error.ordinal
+              [info.ordinal, notice.ordinal, error.ordinal].includes(entry.ordinal)
             ))
           : []
       ));
@@ -169,6 +180,13 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
+        {
+          ordinal: info.ordinal,
+          type: 'transcript-notice',
+          content: infoContent,
+          title: infoTitle,
+          detail: { type: 'cli-row', style: 'info' },
+        },
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',
@@ -195,6 +213,12 @@ describe('garcon-cli add-row', () => {
         )
       ))).toEqual([]);
 
+      const infoSearch = await fixture.client.waitForChatSearch(
+        { query: 'chatrowinfovisible', chatIds: [chatId], limit: 20 },
+        (response) => response.index.pendingChatCount === 0,
+      );
+      expect(infoSearch.results).toEqual([]);
+
       const errorSearch = await fixture.client.waitForChatSearch(
         { query: 'chatrowerrorvisible', chatIds: [chatId], limit: 20 },
         (response) => response.index.pendingChatCount === 0,
@@ -215,6 +239,11 @@ describe('garcon-cli add-row', () => {
         (response) => response.index.pendingChatCount === 0,
       );
       expect(errorTitleSearch.results).toEqual([]);
+      const infoTitleSearch = await fixture.client.waitForChatSearch(
+        { query: 'chatrowinfotitlevisible', chatIds: [chatId], limit: 20 },
+        (response) => response.index.pendingChatCount === 0,
+      );
+      expect(infoTitleSearch.results).toEqual([]);
 
       held.releaseEcho();
       expect((await fixture.client.waitForTurnTerminal(chatId, heldTurn.turnId)).type).toBe(
@@ -234,16 +263,18 @@ describe('garcon-cli add-row', () => {
         'agent-run-finished',
       );
       const providerRequestJson = JSON.stringify(contextRequest.body.messages);
+      expect(providerRequestJson).not.toContain(infoContent);
       expect(providerRequestJson).not.toContain(errorContent);
       expect(providerRequestJson).not.toContain(noticeContent);
       expect(providerRequestJson).not.toContain(errorTitle);
+      expect(providerRequestJson).not.toContain(infoTitle);
       expect(providerRequestJson).not.toContain(noticeTitle);
 
       await fixture.restartGarcon();
       const persisted = await fixture.client.getMessages(chatId, { limit: 200 });
       expect(persisted.transcriptViewId).toBe(initial.transcriptViewId);
       expect(persisted.messages.filter((entry) => (
-        entry.ordinal === notice.ordinal || entry.ordinal === error.ordinal
+        [info.ordinal, notice.ordinal, error.ordinal].includes(entry.ordinal)
       )).map((entry) => ({
         ordinal: entry.ordinal,
         type: entry.message.type,
@@ -251,6 +282,13 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
+        {
+          ordinal: info.ordinal,
+          type: 'transcript-notice',
+          content: infoContent,
+          title: infoTitle,
+          detail: { type: 'cli-row', style: 'info' },
+        },
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',
@@ -270,7 +308,7 @@ describe('garcon-cli add-row', () => {
       const replay = await fixture.client.subscribe(
         chatId,
         initial.transcriptViewId,
-        notice.ordinal - 1,
+        info.ordinal - 1,
         error.ordinal,
       );
       expect(replay.messages.map((entry) => ({
@@ -280,6 +318,13 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         detail: detailOf(entry.message),
       }))).toEqual([
+        {
+          ordinal: info.ordinal,
+          type: 'transcript-notice',
+          content: infoContent,
+          title: infoTitle,
+          detail: { type: 'cli-row', style: 'info' },
+        },
         {
           ordinal: notice.ordinal,
           type: 'transcript-notice',

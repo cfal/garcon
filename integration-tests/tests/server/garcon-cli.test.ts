@@ -188,6 +188,8 @@ describe('garcon-cli', () => {
         '--endpoint', agent.provider.endpointId,
         '--model', agent.provider.model,
         '--title', 'CLI delegated review',
+        '--message-title', 'Initial context',
+        '--message-style', 'info',
         '--tag', 'Review Needed',
         '--tag', 'delegated',
         'cli-first-turn',
@@ -212,6 +214,8 @@ describe('garcon-cli', () => {
         '--workspace', WORKSPACE,
         '--resume', chatId!,
         '--title', 'CLI follow-up review',
+        '--message-title', 'Follow-up context',
+        '--message-style', 'info',
         '--tag', 'Follow Up',
         'cli-second-turn',
       ]);
@@ -229,6 +233,24 @@ describe('garcon-cli', () => {
         'review-needed',
       ]);
       expect(chatsAfterResume.sessions[0]?.title).toBe('CLI follow-up review');
+      await fixture.restartGarcon();
+      expect(messagesOfType(
+        (await fixture.client.getMessages(chatId!)).messages,
+        'user-message',
+      )).toMatchObject([
+        {
+          content: 'cli-first-turn',
+          presentation: { origin: 'cli', style: 'info', title: 'Initial context' },
+        },
+        {
+          content: 'cli-second-turn',
+          presentation: { origin: 'cli', style: 'info', title: 'Follow-up context' },
+        },
+      ]);
+      const providerRequests = fixture.fakeProviders.openAi.requests();
+      expect(JSON.stringify(providerRequests)).not.toContain('Initial context');
+      expect(JSON.stringify(providerRequests)).not.toContain('Follow-up context');
+      expect(JSON.stringify(providerRequests)).not.toContain('"presentation"');
     }, { namedWorkspace: WORKSPACE });
   });
 
@@ -639,7 +661,10 @@ describe('garcon-cli', () => {
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-async-message' });
       const cursor = fixture.client.markEvents();
       const sent = await runCli(controlArguments(fixture, [
-        'send-async', chatId, 'cli-async-message',
+        'send-async', chatId,
+        '--message-title', 'Async context',
+        '--message-style', 'info',
+        'cli-async-message',
       ]));
 
       expect(sent.exitCode).toBe(0);
@@ -653,6 +678,15 @@ describe('garcon-cli', () => {
         { afterIndex: cursor, timeoutMs: 30_000 },
       );
       expect(committed.messages).toHaveLength(1);
+      expect(committed.messages[0]?.message).toMatchObject({
+        type: 'user-message',
+        content: 'cli-async-message',
+        presentation: { origin: 'cli', style: 'info', title: 'Async context' },
+      });
+
+      const heldRequest = await held.received;
+      expect(JSON.stringify(heldRequest.body)).not.toContain('Async context');
+      expect(JSON.stringify(heldRequest.body)).not.toContain('"presentation"');
 
       const chatsAfter = await fixture.client.listChats();
       expect(chatsAfter.sessions.find((chat) => chat.id === chatId)?.tags).not.toContain('cli');

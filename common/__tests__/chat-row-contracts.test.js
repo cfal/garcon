@@ -19,8 +19,12 @@ const request = {
 };
 
 describe('chat row contracts', () => {
-  it('[TLV5-CHAT-ROW.01-CONTRACT-01] parses both chat row types without trimming content', () => {
+  it('[TLV5-CHAT-ROW.01-CONTRACT-01] parses every chat row style without trimming content', () => {
     expect(parseAddChatRowRequest(request)).toEqual(request);
+    expect(parseAddChatRowRequest({ ...request, type: 'info' })).toEqual({
+      ...request,
+      type: 'info',
+    });
     expect(parseAddChatRowRequest({ ...request, type: 'error' })).toEqual({
       ...request,
       type: 'error',
@@ -66,7 +70,7 @@ describe('chat row contracts', () => {
 
   it('rejects unsupported chat row types', () => {
     expect(() => parseAddChatRowRequest({ ...request, type: 'alert' })).toThrow(
-        'type must be one of: notice, error',
+      'type must be one of: info, notice, error',
     );
   });
 
@@ -88,7 +92,7 @@ describe('chat row contracts', () => {
       chatId: request.chatId,
       transcriptViewId: request.transcriptViewId,
       ordinal: 7,
-      type: 'error',
+      type: 'info',
       status: 'duplicate',
       timestamp: '2026-08-18T00:00:00.000Z',
     };

@@ -14,6 +14,7 @@ import {
   parseChatRowTitle,
 } from '@garcon/common/chat-row-contracts';
 import {
+  CLI_PRESENTATION_STYLES,
   CLI_PRESENTATION_STYLE_LIST,
   isCliPresentationStyle,
   type CliPresentationStyle,
@@ -28,12 +29,12 @@ import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
 import { argumentError } from './errors.js';
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>
-  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>
+  garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error>] <prompt>
+  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error>] <prompt>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <notice|error>] <message>
+  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error>] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] add-row <chat-id> --type <notice|error> [--title <title>] <content>
+  garcon-cli [connection options] add-row <chat-id> --type <info|notice|error> [--title <title>] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
 
@@ -44,10 +45,10 @@ saved execution settings, so it may edit files or run tools. Use - as the
 message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
-add-row appends one durable presentation-only notice or error to chat history.
+add-row appends one durable presentation-only info, notice, or error to chat history.
 It never sends, queues, or exposes the row to the agent.
 Message presentation is not sent as prompt text. A message title without a style
-uses notice; a style without a title displays CLI notice or CLI error.
+uses notice; a style without a title displays CLI info, CLI notice, or CLI error.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
 
@@ -72,13 +73,13 @@ Options:
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
   --title <title>              Set a new-chat title or add-row heading
   --message-title <title>      Add a heading to this conversational CLI user message
-  --message-style <style>      Style this CLI user message: notice or error
+  --message-style <style>      Style this CLI user message: info, notice, or error
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
   --allow-steer                With send-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
-  --type <notice|error>        Durable row type for add-row
+  --type <info|notice|error>   Durable row type for add-row
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
@@ -285,7 +286,7 @@ function parseUserMessagePresentationOptions(
   if (rawStyle === undefined && title === undefined) return undefined;
   return {
     origin: 'cli',
-    style: rawStyle === 'error' ? 'error' : 'notice',
+    style: rawStyle ?? 'notice',
     ...(title === undefined ? {} : { title }),
   };
 }
@@ -415,7 +416,7 @@ function parseAddRow(
   }
   if (!isCliPresentationStyle(values.type)) {
     throw argumentError(
-      `add-row requires --type ${CLI_PRESENTATION_STYLE_LIST.replace(', ', ' or --type ')}`,
+      `add-row requires ${CLI_PRESENTATION_STYLES.map((style) => `--type ${style}`).join(' or ')}`,
     );
   }
   let title: string | undefined;

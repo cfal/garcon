@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ErrorMessage,
+  parseChatMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
@@ -10,6 +11,22 @@ const AT = '2026-08-18T12:00:00.000Z';
 
 describe('shared transcript chat rows', () => {
   it('[TLV5-CHAT-ROW.07-SHARE-UNIT-01] formats notice and error rows without losing content', () => {
+    const legacyNotice = parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Legacy shared notice.',
+      detail: { type: 'cli-row' },
+    });
+    const legacyError = parseChatMessage({
+      type: 'error',
+      timestamp: AT,
+      content: 'Legacy shared error.',
+      detail: { type: 'cli-row' },
+    });
+    expect(legacyNotice).toBeInstanceOf(TranscriptNoticeMessage);
+    expect(legacyError).toBeInstanceOf(ErrorMessage);
+    if (!legacyNotice || !legacyError) throw new Error('Legacy CLI rows did not parse.');
+
     const rendered = renderSharedChatText({
       shareToken: 'synthetic-share-token',
       chatId: 'synthetic-chat',
@@ -21,18 +38,29 @@ describe('shared transcript chat rows', () => {
       messages: [
         new TranscriptNoticeMessage(
           AT,
+          'Shared information.',
+          { type: 'cli-row', style: 'info' },
+          'Consultation status',
+        ),
+        new TranscriptNoticeMessage(
+          AT,
           'Shared notice.\nSecond line.',
-            { type: 'cli-row', style: 'notice' },
+          { type: 'cli-row', style: 'notice' },
           'Deployment',
         ),
-          new ErrorMessage(AT, 'Shared error.', { type: 'cli-row', style: 'error' }),
+        new ErrorMessage(AT, 'Shared error.', { type: 'cli-row', style: 'error' }),
+        legacyNotice,
+        legacyError,
         new TranscriptNoticeMessage(AT, 'Internal notice.'),
         new ErrorMessage(AT, 'Provider error.'),
       ],
     });
 
+    expect(rendered).toContain(`[CLI Info — Consultation status] ${AT}\nShared information.`);
     expect(rendered).toContain(`[CLI Notice — Deployment] ${AT}\nShared notice.\nSecond line.`);
     expect(rendered).toContain(`[CLI Error] ${AT}\nShared error.`);
+    expect(rendered).toContain(`[CLI Notice] ${AT}\nLegacy shared notice.`);
+    expect(rendered).toContain(`[CLI Error] ${AT}\nLegacy shared error.`);
     expect(rendered).toContain(`[Notice] ${AT}\nInternal notice.`);
     expect(rendered).toContain(`[Error] ${AT}\nProvider error.`);
   });
@@ -47,6 +75,9 @@ describe('shared transcript chat rows', () => {
       projectPath: '/synthetic/workspace',
       sharedAt: AT,
       messages: [
+        new UserMessage(AT, 'Context', undefined, undefined, {
+          origin: 'cli', style: 'info', title: 'Consultation status',
+        }),
         new UserMessage(AT, 'Body', undefined, undefined, {
           origin: 'cli', style: 'notice', title: 'Operator context',
         }),
@@ -56,6 +87,7 @@ describe('shared transcript chat rows', () => {
       ],
     });
 
+    expect(rendered).toContain(`[User (CLI Info) — Consultation status] ${AT}\nContext`);
     expect(rendered).toContain(`[User (CLI Notice) — Operator context] ${AT}\nBody`);
     expect(rendered).toContain(`[User (CLI Error)] ${AT}\nStop`);
   });

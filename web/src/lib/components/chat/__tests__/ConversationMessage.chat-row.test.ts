@@ -31,6 +31,22 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Error')).toBeTruthy();
 	});
 
+	it('renders CLI info rows with the neutral treatment', () => {
+		render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				'Synthetic CLI information.',
+				{ type: 'cli-row', style: 'info' },
+				'Consultation status',
+			),
+		});
+
+		const card = screen.getByText('Consultation status').closest('article');
+		expect(card?.className).toContain('cli-row-message-info');
+		expect(card?.className).toContain('border-status-neutral-border');
+		expect(screen.getByText('CLI info').className).toContain('sr-only');
+	});
+
 	it('renders titled and untitled CLI notices with fixed provenance and no disclosure action', () => {
 		const titled = render(ConversationMessageHost, {
 			message: new TranscriptNoticeMessage(

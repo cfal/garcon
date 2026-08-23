@@ -220,7 +220,7 @@ describe('chat status', () => {
           message: new TranscriptNoticeMessage(
             TIMESTAMP,
             'Deployment window opened.',
-              { type: 'cli-row', style: 'notice' },
+            { type: 'cli-row', style: 'notice' },
             'Deployment',
           ),
         }, {
@@ -228,25 +228,36 @@ describe('chat status', () => {
           message: new ErrorMessage(
             TIMESTAMP,
             'Validation failed.',
-              { type: 'cli-row', style: 'error' },
+            { type: 'cli-row', style: 'error' },
           ),
         }, {
           ordinal: 3,
+          message: new TranscriptNoticeMessage(
+            TIMESTAMP,
+            'Consultation complete.',
+            { type: 'cli-row', style: 'info' },
+            'Consultation status',
+          ),
+        }, {
+          ordinal: 4,
           message: new ErrorMessage(TIMESTAMP, 'Provider failed.'),
         }],
-        lastOrdinal: 3,
+        lastOrdinal: 4,
         pageOldestOrdinal: 1,
-        pageNewestOrdinal: 3,
+        pageNewestOrdinal: 4,
         hasMore: false,
       },
     }));
 
     expect(value).toContain(
-        `[1] ${TIMESTAMP} transcript-notice (CLI notice) — Deployment\nDeployment window opened.`,
-      );
-      expect(value).toContain(`[2] ${TIMESTAMP} error (CLI error)\nValidation failed.`);
-      expect(value).toContain(`[3] ${TIMESTAMP} error\nProvider failed.`);
-      expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI error)`);
+      `[1] ${TIMESTAMP} transcript-notice (CLI notice) — Deployment\nDeployment window opened.`,
+    );
+    expect(value).toContain(`[2] ${TIMESTAMP} error (CLI error)\nValidation failed.`);
+    expect(value).toContain(
+      `[3] ${TIMESTAMP} transcript-notice (CLI info) — Consultation status\nConsultation complete.`,
+    );
+    expect(value).toContain(`[4] ${TIMESTAMP} error\nProvider failed.`);
+    expect(value).not.toContain(`[4] ${TIMESTAMP} error (CLI error)`);
   });
 
   test('labels presented user messages without printing presentation JSON', () => {
@@ -261,7 +272,7 @@ describe('chat status', () => {
             'Do not deploy.',
             undefined,
             undefined,
-            { origin: 'cli', style: 'error', title: 'Blocker' },
+            { origin: 'cli', style: 'info', title: 'Context' },
           ),
         }],
         lastOrdinal: 1,
@@ -271,7 +282,7 @@ describe('chat status', () => {
       },
     }));
 
-    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI error) — Blocker\nDo not deploy.`);
+    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI info) — Context\nDo not deploy.`);
     expect(value).not.toContain('"presentation"');
   });
 

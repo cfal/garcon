@@ -184,10 +184,10 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>',
+      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error>] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      '--resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>',
+      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error>] <prompt>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
@@ -325,12 +325,12 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       'send-async', CHAT_ID,
       '--message-title', 'Blocker',
-      '--message-style', 'error',
+      '--message-style', 'info',
       'Do not deploy',
     ], ENV)).toMatchObject({
       kind: 'send-async',
       message: 'Do not deploy',
-      userMessagePresentation: { origin: 'cli', style: 'error', title: 'Blocker' },
+      userMessagePresentation: { origin: 'cli', style: 'info', title: 'Blocker' },
     });
   });
 
@@ -453,7 +453,7 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be one of: notice, error' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
@@ -496,13 +496,13 @@ describe('add-row arguments', () => {
       readsContentFromStdin: true,
     });
     expect(parseCliArgs([
-      'add-row', CHAT_ID, '--type', 'notice', '--', '--starts-with-dash',
-    ], ENV)).toMatchObject({ content: '--starts-with-dash' });
+      'add-row', CHAT_ID, '--type', 'info', '--', '--starts-with-dash',
+    ], ENV)).toMatchObject({ type: 'info', content: '--starts-with-dash' });
   });
 
   test.each([
-    [['add-row', CHAT_ID, 'content'], 'requires --type notice or --type error'],
-    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type notice or --type error'],
+    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error'],
+    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error'],
     [['add-row', CHAT_ID, '--type', 'notice', '--type', 'error', 'content'], 'only once'],
     [['add-row', CHAT_ID, '--type', 'notice'], 'requires a chat ID and one content argument'],
     [['add-row', CHAT_ID, '--type', 'notice', 'one', 'two'], 'requires a chat ID and one content argument'],

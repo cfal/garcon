@@ -178,11 +178,11 @@ automatically, and `cli` records creation through `garcon-cli` and nothing else.
 an explicit title on either a new or resumed chat.
 
 Conversational start, resume, and `send-async` messages may add a visual CLI header with
-`--message-title <title>` and `--message-style notice|error`. A title alone uses `notice`; a
-style alone displays `CLI notice` or `CLI error`. These values distinguish the ordinary user
-message in Garcon and are not included in the prompt sent to the agent. `--title` remains the
-chat title. Ordinary restart, replay, shares, and frozen forks preserve this presentation;
-explicit native-history Reload and provider-native fork segments may drop it.
+`--message-title <title>` and `--message-style info|notice|error`. A title alone uses `notice`;
+a style alone displays `CLI info`, `CLI notice`, or `CLI error`. These values distinguish the
+ordinary user message in Garcon and are not included in the prompt sent to the agent. `--title`
+remains the chat title. Ordinary restart, replay, shares, and frozen forks preserve this
+presentation; explicit native-history Reload and provider-native fork segments may drop it.
 
 ```bash
 garcon-cli --workspace default --resume 1785337200123456 \
@@ -253,6 +253,15 @@ When the chat state changes between the run and steer checks, `send-async` alter
 ```bash
 printf '%s' "Apply the patch described in /tmp/review.md" | \
   garcon-cli --workspace default send-async 1785337200123456 --allow-steer -
+```
+
+`add-row` appends a durable presentation-only row without submitting agent work. Its
+`--type info|notice|error` style and optional `--title` are visible in Garcon but excluded from
+model context and transcript search:
+
+```bash
+garcon-cli --workspace default add-row 1785337200123456 \
+  --type info --title "Consultation status" "The architecture review is complete."
 ```
 
 `stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success. If queued messages exist, stopping pauses the queue so they do not start after the interruption; resume the queue in Garcon before sending a new direct turn:

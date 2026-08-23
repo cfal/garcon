@@ -14,11 +14,13 @@ describe('user message presentation', () => {
       style: 'notice',
       title: '  Operator context  ',
     })).toEqual({ origin: 'cli', style: 'notice', title: 'Operator context' });
+    expect(parseUserMessagePresentation({ origin: 'cli', style: 'info' }))
+      .toEqual({ origin: 'cli', style: 'info' });
     expect(parseUserMessagePresentation(undefined)).toBeUndefined();
     expect(() => parseUserMessagePresentation({ origin: 'spa', style: 'notice' }))
       .toThrow('origin must be cli');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'warning' }))
-        .toThrow('style must be one of: notice, error');
+      .toThrow('style must be one of: info, notice, error');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'notice', extra: true }))
       .toThrow('unsupported field');
   });

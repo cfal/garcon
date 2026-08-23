@@ -143,8 +143,15 @@ describe('SharedChatPage', () => {
 	});
 
 	it('renders CLI provenance while retaining generic notice and error paths', async () => {
-		const chatRows = response([], 0, 4, { nextBefore: null });
+		const chatRows = response([], 0, 5, { nextBefore: null });
 		chatRows.snapshot.messages = [
+			{
+				type: 'transcript-notice',
+				timestamp: '2025-01-02T03:04:59.000Z',
+				content: 'Shared information.',
+				title: 'Consultation status',
+				detail: { type: 'cli-row', style: 'info' },
+			},
 			{
 				type: 'transcript-notice',
 				timestamp: '2025-01-02T03:05:00.000Z',
@@ -170,13 +177,17 @@ describe('SharedChatPage', () => {
 				content: 'Provider error.',
 			},
 		];
-		chatRows.page.end = 4;
+		chatRows.page.end = 5;
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(chatRows);
 
 		const { container } = render(SharedChatPageTestHost);
 
-		const noticeCard = (await screen.findByText('Deployment')).closest('article');
+		const infoCard = (await screen.findByText('Consultation status')).closest('article');
+		const noticeCard = screen.getByText('Deployment').closest('article');
 		const errorCard = screen.getByText('Release validation').closest('article');
+		expect(infoCard?.className).toContain('cli-row-message-info');
+		expect(infoCard?.className).toContain('border-status-neutral-border');
+		expect(screen.getByText('CLI info').className).toContain('sr-only');
 		expect(noticeCard?.className).toContain('cli-row-message');
 		expect(noticeCard?.className).toContain('border-status-info-border');
 		expect(screen.getByText('CLI notice').className).toContain('sr-only');
@@ -190,7 +201,7 @@ describe('SharedChatPage', () => {
 			.toContain('border-status-info-border');
 		expect(screen.getByText('Provider error.').closest('article')?.className)
 			.toContain('border-status-error-border');
-		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(2);
-		expect(screen.getByText('4 of 4 messages')).toBeTruthy();
+		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(3);
+		expect(screen.getByText('5 of 5 messages')).toBeTruthy();
 	});
 });

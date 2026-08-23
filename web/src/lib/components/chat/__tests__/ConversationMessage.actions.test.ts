@@ -93,15 +93,15 @@ describe('ConversationMessage actions', () => {
 				'**Body** only',
 				undefined,
 				undefined,
-				{ origin: 'cli', style: 'error', title: 'Deployment blocker' },
+				{ origin: 'cli', style: 'info', title: 'Deployment context' },
 			),
 		});
 
-		const header = container.querySelector('[data-user-message-presentation="error"]');
-		expect(header?.textContent).toContain('CLI error');
-		expect(header?.textContent).toContain('Deployment blocker');
-		expect(header?.classList.contains('bg-status-error')).toBe(true);
-		expect(header?.classList.contains('text-status-error-foreground')).toBe(true);
+		const header = container.querySelector('[data-user-message-presentation="info"]');
+		expect(header?.textContent).toContain('CLI info');
+		expect(header?.textContent).toContain('Deployment context');
+		expect(header?.classList.contains('bg-status-neutral')).toBe(true);
+		expect(header?.classList.contains('text-status-neutral-foreground')).toBe(true);
 		expect(container.querySelector('.user-message-context-target')?.contains(header)).toBe(true);
 		expect(container.querySelector('.cli-row-message')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();

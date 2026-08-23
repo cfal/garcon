@@ -55,6 +55,29 @@ describe('transcript ledger presentation', () => {
     ]);
   });
 
+  it('projects info chat rows as styled transcript notices', () => {
+    const rendered = ledgerRowToMessage({
+      kind: 'notice',
+      ordinal: 1,
+      at: AT,
+      providerMeta: null,
+      message: 'Consultation complete.',
+      detail: {
+        type: 'cli-row',
+        clientMessageId: 'chat-row-info',
+        presentation: 'info',
+        title: 'Consultation status',
+      },
+    });
+
+    expect(rendered).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Consultation complete.',
+      { type: 'cli-row', style: 'info' },
+      'Consultation status',
+    ));
+  });
+
   it('renders every visible row kind in ordinal order and omits internal lifecycle rows', () => {
     const rows = [
       {
@@ -202,10 +225,10 @@ describe('transcript ledger presentation', () => {
       content: '  exact notice\n',
       title: 'Deployment',
     });
-      expect(rendered[4].message.detail).toEqual({ type: 'cli-row', style: 'notice' });
+    expect(rendered[4].message.detail).toEqual({ type: 'cli-row', style: 'notice' });
     expect(rendered[5].message).toBeInstanceOf(ErrorMessage);
     expect(rendered[5].message).toMatchObject({ content: 'exact error', timestamp: AT });
-      expect(rendered[5].message.detail).toEqual({ type: 'cli-row', style: 'error' });
+    expect(rendered[5].message.detail).toEqual({ type: 'cli-row', style: 'error' });
     expect(rendered[5].message.title).toBeUndefined();
     expect(JSON.stringify([rendered[4].message, rendered[5].message]))
       .not.toContain('clientMessageId');

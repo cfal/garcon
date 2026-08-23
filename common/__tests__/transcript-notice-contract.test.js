@@ -24,8 +24,12 @@ describe('transcript notice contracts', () => {
     expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
   });
 
-  it('sanitizes CLI provenance on notice and error messages', () => {
-    for (const type of ['transcript-notice', 'error']) {
+  it('sanitizes CLI provenance on every row style', () => {
+    for (const [type, style] of [
+      ['transcript-notice', 'info'],
+      ['transcript-notice', 'notice'],
+      ['error', 'error'],
+    ]) {
       const parsed = parseChatMessage({
         type,
         timestamp: AT,
@@ -34,16 +38,17 @@ describe('transcript notice contracts', () => {
         detail: {
           type: 'cli-row',
           clientMessageId: 'must-not-cross-the-ledger-boundary',
-          presentation: type === 'error' ? 'error' : 'notice',
+          presentation: style,
+          style,
         },
       });
 
       expect(JSON.parse(JSON.stringify(parsed))).toEqual({
         type,
         timestamp: AT,
-          content: 'Synthetic CLI row.',
-          title: 'Deployment',
-          detail: { type: 'cli-row', style: type === 'error' ? 'error' : 'notice' },
+        content: 'Synthetic CLI row.',
+        title: 'Deployment',
+        detail: { type: 'cli-row', style },
       });
     }
   });
@@ -71,13 +76,13 @@ describe('transcript notice contracts', () => {
     }
   });
 
-    it('restores legacy CLI row styles and drops malformed titles', () => {
+  it('restores legacy CLI row styles and drops malformed titles', () => {
     expect(parseChatMessage({
       type: 'error',
       timestamp: AT,
       content: 'Untitled error.',
       detail: { type: 'cli-row' },
-      })?.detail).toEqual({ type: 'cli-row', style: 'error' });
+    })?.detail).toEqual({ type: 'cli-row', style: 'error' });
 
     const strayDetailTitle = parseChatMessage({
       type: 'transcript-notice',
@@ -85,21 +90,21 @@ describe('transcript notice contracts', () => {
       content: 'Stray detail title.',
       detail: { type: 'cli-row', title: 'Deployment' },
     });
-      expect(strayDetailTitle?.detail).toEqual({ type: 'cli-row', style: 'notice' });
-      expect(strayDetailTitle?.title).toBeUndefined();
+    expect(strayDetailTitle?.detail).toEqual({ type: 'cli-row', style: 'notice' });
+    expect(strayDetailTitle?.title).toBeUndefined();
 
-      expect(parseChatMessage({
-        type: 'error',
-        timestamp: AT,
-        content: 'Mismatched error.',
-        detail: { type: 'cli-row', style: 'notice' },
-      })).toBeNull();
-      expect(parseChatMessage({
-        type: 'transcript-notice',
-        timestamp: AT,
-        content: 'Mismatched notice.',
-        detail: { type: 'cli-row', style: 'error' },
-      })).toBeNull();
+    expect(parseChatMessage({
+      type: 'error',
+      timestamp: AT,
+      content: 'Mismatched error.',
+      detail: { type: 'cli-row', style: 'notice' },
+    })).toBeNull();
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Mismatched notice.',
+      detail: { type: 'cli-row', style: 'error' },
+    })).toBeNull();
 
     expect(parseChatMessage({
       type: 'error',
