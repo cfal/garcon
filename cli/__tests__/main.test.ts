@@ -15,15 +15,23 @@ const stubDiscovery = async () => ({
   workspaceDir: '/tmp/ws',
 });
 
-function capturedOutput(): { output: CliOutput; diagnostics: string[]; results: string[] } {
+function capturedOutput(): {
+  output: CliOutput;
+  diagnostics: string[];
+  results: string[];
+  documents: string[];
+} {
   const diagnostics: string[] = [];
   const results: string[] = [];
+  const documents: string[] = [];
   return {
     diagnostics,
     results,
+    documents,
     output: {
       accepted() {},
       completed() {},
+      document(content) { documents.push(content); },
       result(content) { results.push(content); },
       sent() {},
       stopped() {},
@@ -654,5 +662,34 @@ describe('main', () => {
     expect(capture.diagnostics).toEqual([
       'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying',
     ]);
+  });
+
+  test('routes transcript export documents without mixing status output into stdout', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main(['export', CHAT_ID, '--exclude', 'tools'], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async () => Response.json({
+        success: true,
+        chatId: CHAT_ID,
+        format: 'markdown',
+        transcriptViewId: 'view-1',
+        lastOrdinal: 3,
+        generatedAt: '2026-08-23T00:00:00.000Z',
+        entryCount: 1,
+        totalEntryCount: 3,
+        exclusions: ['tool-calls', 'tool-results'],
+        omitted: [
+          { category: 'tool-calls', count: 1 },
+          { category: 'tool-results', count: 1 },
+        ],
+        document: '# Transcript\n',
+      }),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.documents).toEqual(['# Transcript\n']);
+    expect(capture.results).toEqual([]);
+    expect(capture.diagnostics).toEqual([]);
   });
 });

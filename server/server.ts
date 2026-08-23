@@ -45,6 +45,7 @@ import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatRowService } from './chats/chat-row-service.js';
+import { TranscriptExportService } from './chats/transcript-export/service.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry } from './agents/index.js';
@@ -516,6 +517,10 @@ export async function startServer(): Promise<void> {
         );
       },
     });
+    const transcriptExport = new TranscriptExportService({
+      summaries: chatListProjector,
+      transcripts: transcriptReader,
+    });
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
       queue,
@@ -659,6 +664,7 @@ export async function startServer(): Promise<void> {
       commandLedger,
       transientFeeds,
       chatRows,
+      transcriptExport,
     });
 
     const chatHandler = new ChatHandler({

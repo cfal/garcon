@@ -6,6 +6,7 @@ export type CliErrorPhase =
   | 'catalog resolution'
   | 'resume admission'
   | 'chat status'
+  | 'export'
   | 'submission'
   | 'title update'
   | 'receipt polling'

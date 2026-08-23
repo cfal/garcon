@@ -190,7 +190,7 @@ garcon-cli --workspace default --resume 1785337200123456 \
   "Do not deploy until the migration checksum matches."
 ```
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `status`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `add-row`, `status`, `wait`, or `export`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Every accepted start or resume prints an exact handle before waiting:
 
@@ -215,9 +215,25 @@ garcon-cli --workspace default status 1785337200123456
 garcon-cli --workspace default status 1785337200123456 --messages 20 --json
 ```
 
-`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable interface; plain text redacts image bodies and truncates each message at 4,000 characters.
+`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable snapshot interface; plain text redacts image bodies and truncates each message at 4,000 characters. It is intentionally bounded operational state, not transcript export.
 
 Status is a one-shot, non-transactional chat observation. `status: idle` does not prove that a particular turn settled or that a just-finished message batch is already visible. Use `wait` with the exact accepted chat and turn IDs when completion identity matters, especially before retrying write-capable delegated work.
+
+Export the complete transcript at one pinned ledger watermark as Markdown or XML:
+
+```bash
+garcon-cli --workspace default export 1785337200123456
+garcon-cli --workspace default export 1785337200123456 \
+  --format xml --exclude tools --exclude reasoning --output transcript.xml
+```
+
+Without `--output`, stdout contains only the document. A file output is written privately through a sibling temporary file and published atomically; an existing path is refused unless `--force` is supplied. Markdown is intended for human and agent reading. XML is the structured format and uses explicit `<user>` and `<assistant>` elements plus typed elements for reasoning, tools, permissions, notices, handoffs, and run lifecycle rows.
+
+`--exclude` is repeatable and comma-separated. Its canonical categories are `tool-calls`, `tool-results`, `reasoning`, `permissions`, `diagnostics`, and `handoffs`; `tools` is shorthand for both tool categories. User messages, assistant messages, compaction summaries, and carryover-quarantine disclosures are never excludable. Every artifact records the canonical exclusions, omitted counts, and original ordinals, so gaps remain explicit. Exclusions apply to top-level entries: excluding tool calls does not remove a requested tool embedded in a retained permission entry.
+
+`diagnostics` includes presentation-only `add-row` notices and errors, provider errors and notices, and run lifecycle rows.
+
+Export reads Garcon's authoritative SQLite ledger through the running authenticated server. Session-native references and provider-private metadata never enter the export fold. Image bodies and structured data URLs are omitted with visible markers, while authored user and assistant text is retained. XML-illegal control characters are emitted as literal `\uXXXX` text in both formats. Sharing remains separate: Share publishes a persisted public snapshot, while export reads the current private ledger without creating or changing a share.
 
 ### One-Shot Chat Control From The CLI
 
