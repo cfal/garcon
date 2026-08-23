@@ -1,31 +1,31 @@
 <script module lang="ts">
 	let lastTextChange: ((text: string) => void) | null = null;
 
-	export function emitLastComposerEditorTextChange(text: string): void {
+	export function emitLastPromptEditorTextChange(text: string): void {
 		lastTextChange?.(text);
 	}
 
-	export function resetComposerEditorStub(): void {
+	export function resetPromptEditorStub(): void {
 		lastTextChange = null;
 	}
 </script>
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ComposerEditorSelection } from '$lib/chat/composer/composer-editor-selection.js';
+	import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
 	import {
-		composerEditorSelectionFromTextarea,
-		restoreComposerEditorSelection,
-	} from '$lib/chat/composer/composer-editor-selection.js';
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
 
 	interface Props {
 		text: string;
-		selection: ComposerEditorSelection;
+		selection: PromptEditorSelection;
 		focusRequestId: number;
 		readOnly: boolean;
 		ariaLabel: string;
 		onTextChange: (text: string) => void;
-		onSelectionChange: (selection: ComposerEditorSelection) => void;
+		onSelectionChange: (selection: PromptEditorSelection) => void;
 	}
 
 	let {
@@ -48,14 +48,14 @@
 	});
 
 	onMount(() => {
-		if (editor) restoreComposerEditorSelection(editor, selection);
+		if (editor) restorePromptEditorSelection(editor, selection);
 	});
 
 	$effect(() => {
 		const target = editor;
 		focusRequestId;
 		if (!target) return;
-		restoreComposerEditorSelection(target, selection);
+		restorePromptEditorSelection(target, selection);
 		target.focus();
 	});
 </script>
@@ -66,5 +66,5 @@
 	readonly={readOnly}
 	aria-label={ariaLabel}
 	oninput={(event) => onTextChange(event.currentTarget.value)}
-	onpointerup={(event) =>
-		onSelectionChange(composerEditorSelectionFromTextarea(event.currentTarget))}></textarea>
+	onpointerup={(event) => onSelectionChange(promptEditorSelectionFromTextarea(event.currentTarget))}
+></textarea>

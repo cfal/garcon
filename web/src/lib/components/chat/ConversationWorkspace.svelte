@@ -584,7 +584,11 @@
 		if (!isPresented) return false;
 		const targetsPresentedComposerEditor =
 			event.target instanceof Element &&
-			Boolean(event.target.closest('[data-composer-editor-dialog]'));
+			Boolean(
+				event.target.closest(
+					`[data-prompt-editor-dialog][data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
+				),
+			);
 		if (
 			(isVisible || targetsPresentedComposerEditor) &&
 			!event.repeat &&

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { ComposerEditorController } from '../composer-editor-controller.js';
+import { PromptEditorController } from '../prompt-editor-controller.js';
 import type { WorkspaceLocalShortcutOwner } from '$lib/workspace/workspace-shortcuts.js';
 
 const mounted: HTMLElement[] = [];
@@ -17,18 +17,19 @@ function parent(): HTMLDivElement {
 	return element;
 }
 
-describe('ComposerEditorController', () => {
+describe('PromptEditorController', () => {
 	it('synchronizes user and external documents without echoing external changes', async () => {
 		const localOwners: WorkspaceLocalShortcutOwner[] = [];
 		const unregisterLocalOwner = vi.fn();
 		const onTextChange = vi.fn();
 		const onSelectionChange = vi.fn();
 		const host = parent();
-		const controller = new ComposerEditorController(host, {
+		const controller = new PromptEditorController(host, {
 			initialText: 'first\nsecond',
 			initialSelection: { anchor: 8, head: 2 },
 			ariaLabel: 'Expanded composer text',
 			workspaceShortcuts: {
+				matchesGlobalShortcut: () => false,
 				registerLocalShortcutOwner: (_element, owner) => {
 					localOwners.push(owner);
 					return unregisterLocalOwner;
@@ -65,11 +66,15 @@ describe('ComposerEditorController', () => {
 
 	it('gives curated Control movement and deletion precedence over default bindings', () => {
 		const host = parent();
-		const controller = new ComposerEditorController(host, {
+		const controller = new PromptEditorController(host, {
 			initialText: 'one\ntwo\nthree',
 			initialSelection: { anchor: 6, head: 6 },
 			ariaLabel: 'Expanded composer text',
-			workspaceShortcuts: { registerLocalShortcutOwner: () => () => undefined },
+			workspaceShortcuts: {
+				matchesGlobalShortcut: (id, event) =>
+					id === 'scroll-half-page-down' && event.ctrlKey && event.key.toLowerCase() === 'd',
+				registerLocalShortcutOwner: () => () => undefined,
+			},
 			onTextChange: () => undefined,
 			onSelectionChange: () => undefined,
 		});
@@ -143,17 +148,47 @@ describe('ComposerEditorController', () => {
 			cancelable: true,
 		});
 		content.dispatchEvent(halfPageDown);
+		expect(halfPageDown.defaultPrevented).toBe(true);
+		controller.destroy();
+	});
+
+	it('leaves disabled half-page shortcuts unclaimed', () => {
+		const host = parent();
+		const controller = new PromptEditorController(host, {
+			initialText: 'one\ntwo',
+			initialSelection: { anchor: 0, head: 0 },
+			ariaLabel: 'Expanded prompt text',
+			workspaceShortcuts: {
+				matchesGlobalShortcut: () => false,
+				registerLocalShortcutOwner: () => () => undefined,
+			},
+			onTextChange: () => undefined,
+			onSelectionChange: () => undefined,
+		});
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		if (!content) throw new Error('Expected CodeMirror content');
+
+		const halfPageDown = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		content.dispatchEvent(halfPageDown);
 		expect(halfPageDown.defaultPrevented).toBe(false);
 		controller.destroy();
 	});
 
 	it('reconfigures read-only mode without remounting or moving the selection', () => {
 		const host = parent();
-		const controller = new ComposerEditorController(host, {
+		const controller = new PromptEditorController(host, {
 			initialText: 'one\ntwo',
 			initialSelection: { anchor: 5, head: 5 },
 			ariaLabel: 'Expanded composer text',
-			workspaceShortcuts: { registerLocalShortcutOwner: () => () => undefined },
+			workspaceShortcuts: {
+				matchesGlobalShortcut: () => false,
+				registerLocalShortcutOwner: () => () => undefined,
+			},
 			onTextChange: () => undefined,
 			onSelectionChange: () => undefined,
 		});

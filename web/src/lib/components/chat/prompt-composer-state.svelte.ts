@@ -12,7 +12,7 @@ import {
 } from '$lib/chat/composer/slash-commands.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import { findSnippetTrigger } from '$lib/chat/composer/snippet-trigger.js';
-import type { ComposerEditorSelection } from '$lib/chat/composer/composer-editor-selection.js';
+import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
 
 export class PromptComposerUiState {
 	showFileMenu = $state(false);
@@ -26,7 +26,7 @@ export class PromptComposerUiState {
 	composerEditorOpen = $state(false);
 	composerEditorChatId = $state<string | null>(null);
 	composerEditorFocusRequestId = $state(0);
-	composerEditorSelection = $state<ComposerEditorSelection>({ anchor: 0, head: 0 });
+	composerEditorSelection = $state<PromptEditorSelection>({ anchor: 0, head: 0 });
 
 	setFileMentionTrigger(trigger: FileMentionTrigger | null): void {
 		this.fileMentionTrigger = trigger;
@@ -65,7 +65,7 @@ export class PromptComposerUiState {
 		);
 	}
 
-	openComposerEditor(chatId: string, selection: ComposerEditorSelection): void {
+	openComposerEditor(chatId: string, selection: PromptEditorSelection): void {
 		if (this.composerEditorOpen && this.composerEditorChatId === chatId) {
 			this.composerEditorFocusRequestId += 1;
 			return;
@@ -76,7 +76,7 @@ export class PromptComposerUiState {
 		this.composerEditorOpen = true;
 	}
 
-	updateComposerEditorSelection(chatId: string, selection: ComposerEditorSelection): void {
+	updateComposerEditorSelection(chatId: string, selection: PromptEditorSelection): void {
 		if (!this.composerEditorOpen || this.composerEditorChatId !== chatId) return;
 		this.composerEditorSelection = selection;
 	}

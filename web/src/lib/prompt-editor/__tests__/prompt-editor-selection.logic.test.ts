@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-	clampComposerEditorSelection,
-	composerEditorSelectionFromTextarea,
-	restoreComposerEditorSelection,
-} from '../composer-editor-selection.js';
+	clampPromptEditorSelection,
+	promptEditorSelectionFromTextarea,
+	restorePromptEditorSelection,
+} from '../prompt-editor-selection.js';
 
 describe('composer editor selection', () => {
 	it('converts native forward and backward selections to anchor and head', () => {
 		expect(
-			composerEditorSelectionFromTextarea({
+			promptEditorSelectionFromTextarea({
 				selectionStart: 2,
 				selectionEnd: 7,
 				selectionDirection: 'forward',
 			}),
 		).toEqual({ anchor: 2, head: 7 });
 		expect(
-			composerEditorSelectionFromTextarea({
+			promptEditorSelectionFromTextarea({
 				selectionStart: 2,
 				selectionEnd: 7,
 				selectionDirection: 'backward',
@@ -24,7 +24,7 @@ describe('composer editor selection', () => {
 	});
 
 	it('clamps both ends independently', () => {
-		expect(clampComposerEditorSelection({ anchor: 12, head: -3 }, 8)).toEqual({
+		expect(clampPromptEditorSelection({ anchor: 12, head: -3 }, 8)).toEqual({
 			anchor: 8,
 			head: 0,
 		});
@@ -32,7 +32,7 @@ describe('composer editor selection', () => {
 
 	it('restores backward direction after clamping to current text', () => {
 		const setSelectionRange = vi.fn();
-		restoreComposerEditorSelection({ value: 'hello', setSelectionRange }, { anchor: 9, head: 2 });
+		restorePromptEditorSelection({ value: 'hello', setSelectionRange }, { anchor: 9, head: 2 });
 		expect(setSelectionRange).toHaveBeenCalledWith(2, 5, 'backward');
 	});
 });

@@ -1,8 +1,8 @@
 import { tick } from 'svelte';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
-import { PromptRefinementController } from '$lib/chat/composer/prompt-refinement-controller.svelte.js';
-import { promptRefinementErrorMessage } from '$lib/chat/composer/prompt-refinement-error-message.js';
+import { PromptRefinementController } from '$lib/prompt-editor/prompt-refinement-controller.svelte.js';
+import { promptRefinementErrorMessage } from '$lib/prompt-editor/prompt-refinement-error-message.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -89,20 +89,20 @@ export class NewChatPromptRefinementController {
 				this.options.form.contentRevision !== sourceRevision ||
 				this.options.form.firstMessage !== sourceText
 			) {
-				this.options.notifications.info(m.chat_composer_prompt_changed_during_refinement());
+				this.options.notifications.info(m.prompt_refinement_draft_changed());
 				await this.#focusEditor();
 				return;
 			}
 
 			const refinedPrompt = result.response.refinedPrompt;
 			if (refinedPrompt === sourceText) {
-				this.options.notifications.info(m.chat_composer_prompt_refinement_unchanged());
+				this.options.notifications.info(m.prompt_refinement_unchanged());
 				await this.#focusEditor();
 				return;
 			}
 
 			this.options.form.firstMessage = refinedPrompt;
-			this.options.notifications.info(m.chat_composer_prompt_refined());
+			this.options.notifications.info(m.prompt_refinement_refined());
 			await this.#focusEditor(refinedPrompt.length);
 		} catch (error) {
 			this.options.notifications.error(promptRefinementErrorMessage(error));

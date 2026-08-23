@@ -1,8 +1,8 @@
 import { tick } from 'svelte';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
-import { PromptRefinementController } from '$lib/chat/composer/prompt-refinement-controller.svelte.js';
-import { promptRefinementErrorMessage } from '$lib/chat/composer/prompt-refinement-error-message.js';
+import { PromptRefinementController } from '$lib/prompt-editor/prompt-refinement-controller.svelte.js';
+import { promptRefinementErrorMessage } from '$lib/prompt-editor/prompt-refinement-error-message.js';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -101,14 +101,14 @@ export class PromptComposerRefinementController {
 				this.options.composer.contentRevision !== sourceRevision ||
 				this.options.composer.inputText !== sourceText
 			) {
-				this.options.notifications.info(m.chat_composer_prompt_changed_during_refinement());
+				this.options.notifications.info(m.prompt_refinement_draft_changed());
 				await this.#focusTarget(sourceChatId);
 				return;
 			}
 
 			const refinedPrompt = result.response.refinedPrompt;
 			if (refinedPrompt === sourceText) {
-				this.options.notifications.info(m.chat_composer_prompt_refinement_unchanged());
+				this.options.notifications.info(m.prompt_refinement_unchanged());
 				await this.#focusTarget(sourceChatId);
 				return;
 			}
@@ -116,7 +116,7 @@ export class PromptComposerRefinementController {
 			const focus = this.#focusTarget(sourceChatId, refinedPrompt.length);
 			this.options.composer.inputText = refinedPrompt;
 			this.options.composer.queueDraftSave(sourceChatId, refinedPrompt);
-			this.options.notifications.info(m.chat_composer_prompt_refined());
+			this.options.notifications.info(m.prompt_refinement_refined());
 			await focus;
 		} catch (error) {
 			this.options.notifications.error(promptRefinementErrorMessage(error));

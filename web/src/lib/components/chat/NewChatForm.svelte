@@ -22,12 +22,14 @@
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
 	import {
-		composerEditorSelectionFromTextarea,
-		restoreComposerEditorSelection,
-		type ComposerEditorSelection,
-	} from '$lib/chat/composer/composer-editor-selection.js';
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+		type PromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
-	import ComposerEditorDialog from './ComposerEditorDialog.svelte';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
+	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
@@ -319,7 +321,7 @@
 	function openExpandedEditor(): void {
 		if (promptTransformPending || !textareaRef) return;
 		snippetPalette.dismiss();
-		const selection = composerEditorSelectionFromTextarea(textareaRef);
+		const selection = promptEditorSelectionFromTextarea(textareaRef);
 		textareaRef.focus({ preventScroll: true });
 		composerEditor.show(selection);
 	}
@@ -329,7 +331,7 @@
 		composerEditor.close();
 		await tick();
 		if (!textareaRef) return;
-		restoreComposerEditorSelection(textareaRef, selection);
+		restorePromptEditorSelection(textareaRef, selection);
 		autoResizeTextarea();
 		textareaRef.focus({ preventScroll: true });
 	}
@@ -339,7 +341,7 @@
 		form.firstMessage = text;
 	}
 
-	function handleExpandedSelectionChange(selection: ComposerEditorSelection): void {
+	function handleExpandedSelectionChange(selection: PromptEditorSelection): void {
 		composerEditor.updateSelection(selection);
 	}
 
@@ -852,12 +854,18 @@
 {/if}
 
 {#if composerEditor.open}
-	<ComposerEditorDialog
+	{#snippet expandedEditorHeaderStatus()}
+		<ComposerAttachmentBadge count={form.attachedImages.length} />
+	{/snippet}
+	<PromptEditorDialog
+		title={m.chat_composer_expanded_editor_title()}
+		editorLabel={m.chat_composer_expanded_editor_label()}
 		text={form.firstMessage}
 		selection={composerEditor.selection}
-		attachmentCount={form.attachedImages.length}
 		focusRequestId={composerEditor.focusRequestId}
 		readOnly={promptTransformPending}
+		surfaceId={CHAT_SURFACE_ID}
+		headerStatus={expandedEditorHeaderStatus}
 		canRefinePrompt={promptRefinement.canStart}
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}

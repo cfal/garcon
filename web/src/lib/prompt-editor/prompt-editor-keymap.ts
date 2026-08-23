@@ -13,7 +13,7 @@ import {
 } from '@codemirror/commands';
 import type { KeyBinding } from '@codemirror/view';
 
-export const COMPOSER_EDITOR_KEYMAP: readonly KeyBinding[] = [
+export const PROMPT_EDITOR_KEYMAP: readonly KeyBinding[] = [
 	{ key: 'Ctrl-a', run: cursorLineStart, shift: selectLineStart },
 	{ key: 'Ctrl-e', run: cursorLineEnd, shift: selectLineEnd },
 	{ key: 'Ctrl-p', run: cursorLineUp, shift: selectLineUp },
@@ -25,19 +25,19 @@ const EMACS_STYLE_KEYS = new Set(emacsStyleKeymap.map((binding) => binding.key))
 
 // The standard map excludes CodeMirror's broader macOS Emacs aliases; the curated map supplies
 // the approved cross-platform chords.
-export const COMPOSER_EDITOR_STANDARD_KEYMAP: readonly KeyBinding[] = standardKeymap.filter(
+export const PROMPT_EDITOR_STANDARD_KEYMAP: readonly KeyBinding[] = standardKeymap.filter(
 	(binding) => binding.mac === undefined || !EMACS_STYLE_KEYS.has(binding.mac),
 );
 
 const MOVEMENT_KEYS = new Set(['a', 'e', 'p', 'n']);
 
-type ComposerEditorShortcutEvent = Pick<
+type PromptEditorShortcutEvent = Pick<
 	KeyboardEvent,
 	'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'isComposing'
 >;
 
-export function ownsComposerEditorShortcut(
-	event: ComposerEditorShortcutEvent,
+export function ownsPromptEditorShortcut(
+	event: PromptEditorShortcutEvent,
 	composing = false,
 ): boolean {
 	if (composing || event.isComposing) return true;

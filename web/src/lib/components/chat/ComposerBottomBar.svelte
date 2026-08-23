@@ -84,9 +84,7 @@
 		permissionOptions.find((option) => option.value === selectedPermission) ?? permissionOptions[0],
 	);
 	const promptRefinementActionLabel = $derived(
-		isPromptRefinementPending
-			? m.chat_composer_cancel_prompt_refinement()
-			: m.chat_composer_refine_prompt(),
+		isPromptRefinementPending ? m.prompt_refinement_cancel() : m.prompt_refinement_refine(),
 	);
 	const sendActionLabel = $derived(isPromptTransformPending ? promptTransformStatus : sendTitle);
 	const activeThinking = $derived(

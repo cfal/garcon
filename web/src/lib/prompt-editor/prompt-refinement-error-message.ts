@@ -33,8 +33,8 @@ export function promptRefinementErrorMessage(error: unknown): string {
 		}
 	}
 	if (
-		error instanceof DOMException
-		&& (error.name === 'AbortError' || error.name === 'TimeoutError')
+		error instanceof DOMException &&
+		(error.name === 'AbortError' || error.name === 'TimeoutError')
 	) {
 		return m.prompt_refinement_error_timeout();
 	}

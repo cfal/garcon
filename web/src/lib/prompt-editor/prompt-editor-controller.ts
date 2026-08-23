@@ -16,15 +16,19 @@ import {
 	type ViewUpdate,
 } from '@codemirror/view';
 import {
-	COMPOSER_EDITOR_KEYMAP,
-	COMPOSER_EDITOR_STANDARD_KEYMAP,
-	ownsComposerEditorShortcut,
-} from './composer-editor-keymap.js';
+	PROMPT_EDITOR_KEYMAP,
+	PROMPT_EDITOR_STANDARD_KEYMAP,
+	ownsPromptEditorShortcut,
+} from './prompt-editor-keymap.js';
 import {
-	clampComposerEditorSelection,
-	type ComposerEditorSelection,
-} from './composer-editor-selection.js';
-import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	clampPromptEditorSelection,
+	type PromptEditorSelection,
+} from './prompt-editor-selection.js';
+import {
+	registerNativeWorkspaceScrollRegion,
+	scrollWorkspaceRegion,
+} from '$lib/workspace/workspace-scroll-region.js';
+import type { GlobalShortcutId } from '$lib/workspace/global-shortcuts.js';
 import type {
 	WorkspaceLocalShortcutOwner,
 	WorkspaceShortcutDispatcher,
@@ -32,17 +36,20 @@ import type {
 
 const externalDocumentSync = Annotation.define<boolean>();
 
-export interface ComposerEditorControllerOptions {
+export interface PromptEditorControllerOptions {
 	initialText: string;
-	initialSelection: ComposerEditorSelection;
+	initialSelection: PromptEditorSelection;
 	ariaLabel: string;
 	readOnly?: boolean;
-	workspaceShortcuts: Pick<WorkspaceShortcutDispatcher, 'registerLocalShortcutOwner'>;
+	workspaceShortcuts: Pick<
+		WorkspaceShortcutDispatcher,
+		'matchesGlobalShortcut' | 'registerLocalShortcutOwner'
+	>;
 	onTextChange: (text: string) => void;
-	onSelectionChange: (selection: ComposerEditorSelection) => void;
+	onSelectionChange: (selection: PromptEditorSelection) => void;
 }
 
-export class ComposerEditorController {
+export class PromptEditorController {
 	readonly #view: EditorView;
 	readonly #unregisterLocalOwner: () => void;
 	readonly #unregisterScrollRegion: () => void;
@@ -53,10 +60,10 @@ export class ComposerEditorController {
 
 	constructor(
 		parent: HTMLElement,
-		private readonly options: ComposerEditorControllerOptions,
+		private readonly options: PromptEditorControllerOptions,
 	) {
 		this.#readOnly = options.readOnly ?? false;
-		const initialSelection = clampComposerEditorSelection(
+		const initialSelection = clampPromptEditorSelection(
 			options.initialSelection,
 			options.initialText.length,
 		);
@@ -73,8 +80,13 @@ export class ComposerEditorController {
 				drawSelection(),
 				dropCursor(),
 				EditorView.lineWrapping,
-				Prec.high(keymap.of([...COMPOSER_EDITOR_KEYMAP])),
-				keymap.of([...COMPOSER_EDITOR_STANDARD_KEYMAP, ...historyKeymap]),
+				Prec.high(
+					EditorView.domEventHandlers({
+						keydown: (event, view) => this.#handleScrollShortcut(event, view),
+					}),
+				),
+				Prec.high(keymap.of([...PROMPT_EDITOR_KEYMAP])),
+				keymap.of([...PROMPT_EDITOR_STANDARD_KEYMAP, ...historyKeymap]),
 				EditorView.contentAttributes.of({
 					'aria-label': options.ariaLabel,
 					'aria-multiline': 'true',
@@ -114,7 +126,7 @@ export class ComposerEditorController {
 
 		this.#view = new EditorView({ state: editorState, parent });
 		const localOwner: WorkspaceLocalShortcutOwner = (event) =>
-			ownsComposerEditorShortcut(event, this.#view.composing);
+			ownsPromptEditorShortcut(event, this.#view.composing);
 		this.#unregisterLocalOwner = options.workspaceShortcuts.registerLocalShortcutOwner(
 			this.#view.dom,
 			localOwner,
@@ -130,9 +142,9 @@ export class ComposerEditorController {
 		this.#view.focus();
 	}
 
-	syncText(text: string, requestedSelection: ComposerEditorSelection = this.selection): void {
+	syncText(text: string, requestedSelection: PromptEditorSelection = this.selection): void {
 		if (text === this.#view.state.doc.toString()) return;
-		const selection = clampComposerEditorSelection(requestedSelection, text.length);
+		const selection = clampPromptEditorSelection(requestedSelection, text.length);
 		this.#view.dispatch({
 			changes: { from: 0, to: this.#view.state.doc.length, insert: text },
 			selection: EditorSelection.single(selection.anchor, selection.head),
@@ -152,7 +164,7 @@ export class ComposerEditorController {
 		this.#view.contentDOM.setAttribute('aria-readonly', String(readOnly));
 	}
 
-	get selection(): ComposerEditorSelection {
+	get selection(): PromptEditorSelection {
 		const selection = this.#view.state.selection.main;
 		return { anchor: selection.anchor, head: selection.head };
 	}
@@ -172,6 +184,23 @@ export class ComposerEditorController {
 			this.options.onTextChange(update.state.doc.toString());
 		}
 		if (update.docChanged || update.selectionSet) this.#emitSelection();
+	}
+
+	#handleScrollShortcut(event: KeyboardEvent, view: EditorView): boolean {
+		if (event.isComposing || view.composing) return false;
+		const direction = this.#scrollDirection(event);
+		if (!direction) return false;
+		event.preventDefault();
+		scrollWorkspaceRegion(view.scrollDOM, direction);
+		return true;
+	}
+
+	#scrollDirection(event: KeyboardEvent): 'earlier' | 'later' | null {
+		const matches = (id: GlobalShortcutId) =>
+			this.options.workspaceShortcuts.matchesGlobalShortcut(id, event);
+		if (matches('scroll-half-page-up')) return 'earlier';
+		if (matches('scroll-half-page-down')) return 'later';
+		return null;
 	}
 
 	#emitSelection(): void {

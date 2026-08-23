@@ -40,14 +40,16 @@ describe('PromptRefinementController', () => {
 		expect(await running).toEqual({ kind: 'cancelled' });
 
 		const rejecting = new PromptRefinementController({
-			refine: vi.fn((_request, options) =>
-				new Promise<RefinePromptResponse>((_resolve, reject) => {
-					options.signal?.addEventListener(
-						'abort',
-						() => reject(new DOMException('aborted', 'AbortError')),
-						{ once: true },
-					);
-				})),
+			refine: vi.fn(
+				(_request, options) =>
+					new Promise<RefinePromptResponse>((_resolve, reject) => {
+						options.signal?.addEventListener(
+							'abort',
+							() => reject(new DOMException('aborted', 'AbortError')),
+							{ once: true },
+						);
+					}),
+			),
 		});
 		const cancelledRejection = rejecting.run('draft');
 		rejecting.cancel();

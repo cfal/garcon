@@ -215,7 +215,7 @@
 		tabindex="-1"
 		aria-label="Test dialog"
 		data-workspace-surface-id={testLayerIsComposerEditor ? 'singleton:chat' : undefined}
-		data-composer-editor-dialog={testLayerIsComposerEditor ? '' : undefined}
+		data-prompt-editor-dialog={testLayerIsComposerEditor ? '' : undefined}
 	>
 		{#if testLayerIsComposerEditor}
 			<button type="button" aria-label="Composer editor chrome">Editor chrome</button>

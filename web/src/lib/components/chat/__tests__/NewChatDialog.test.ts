@@ -5,7 +5,7 @@ import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as refinementApi from '$lib/api/prompt-refinement';
 import * as settingsApi from '$lib/api/settings';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
-import { resetComposerEditorStub } from './ComposerEditorStub.svelte';
+import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }),
@@ -26,8 +26,9 @@ vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
 	return { ...actual, refinePrompt: vi.fn() };
 });
 
-vi.mock('../ComposerEditor.svelte', async () => ({
-	default: (await import('./ComposerEditorStub.svelte')).default,
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+		.default,
 }));
 
 interface DeferredRefinement {
@@ -101,7 +102,7 @@ describe('NewChatDialog', () => {
 
 	afterEach(() => {
 		cleanup();
-		resetComposerEditorStub();
+		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();

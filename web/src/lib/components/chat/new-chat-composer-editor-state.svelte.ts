@@ -1,11 +1,11 @@
-import type { ComposerEditorSelection } from '$lib/chat/composer/composer-editor-selection.js';
+import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
 
 export class NewChatComposerEditorState {
 	open = $state(false);
 	focusRequestId = $state(0);
-	selection = $state<ComposerEditorSelection>({ anchor: 0, head: 0 });
+	selection = $state<PromptEditorSelection>({ anchor: 0, head: 0 });
 
-	show(selection: ComposerEditorSelection): void {
+	show(selection: PromptEditorSelection): void {
 		this.selection = selection;
 		this.focusRequestId += 1;
 		this.open = true;
@@ -20,7 +20,7 @@ export class NewChatComposerEditorState {
 		this.selection = { anchor: 0, head: 0 };
 	}
 
-	updateSelection(selection: ComposerEditorSelection): void {
+	updateSelection(selection: PromptEditorSelection): void {
 		if (!this.open) return;
 		this.selection = selection;
 	}

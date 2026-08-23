@@ -2,8 +2,7 @@ import { refinePrompt } from '$lib/api/prompt-refinement.js';
 import type { RefinePromptResponse } from '$shared/prompt-refinement';
 
 export type PromptRefinementResult =
-	| { kind: 'refined'; response: RefinePromptResponse; generation: number }
-	| { kind: 'cancelled' };
+	{ kind: 'refined'; response: RefinePromptResponse; generation: number } | { kind: 'cancelled' };
 
 export interface PromptRefinementControllerDependencies {
 	refine?: typeof refinePrompt;
@@ -25,10 +24,7 @@ export class PromptRefinementController {
 
 		try {
 			const refine = this.dependencies.refine ?? refinePrompt;
-			const response = await refine(
-				{ draft },
-				{ signal: abortController.signal },
-			);
+			const response = await refine({ draft }, { signal: abortController.signal });
 			if (abortController.signal.aborted || generation !== this.#generation) {
 				return { kind: 'cancelled' };
 			}

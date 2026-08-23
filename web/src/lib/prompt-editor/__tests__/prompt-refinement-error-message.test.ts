@@ -30,9 +30,9 @@ describe('promptRefinementErrorMessage', () => {
 	});
 
 	it('maps client timeouts and unknown failures', () => {
-		expect(
-			promptRefinementErrorMessage(new DOMException('private', 'TimeoutError')),
-		).toContain('timed out');
+		expect(promptRefinementErrorMessage(new DOMException('private', 'TimeoutError'))).toContain(
+			'timed out',
+		);
 		expect(promptRefinementErrorMessage(new Error('private'))).toContain(
 			'The prompt could not be refined.',
 		);
