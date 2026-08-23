@@ -1763,6 +1763,7 @@ describe('ChatCommandService', () => {
 
     expect(result.status).toBe('accepted');
     expect(chats.addTags).toHaveBeenCalledWith(SOURCE_CHAT_ID, ['cli']);
+    expect(queue.runReservedTurn.mock.calls.at(-1)[2]).not.toHaveProperty('contextTransition');
   });
 
   it('commits one cross-agent handoff before scheduling the target run', async () => {
@@ -1807,6 +1808,7 @@ describe('ChatCommandService', () => {
       expect.anything(),
       input.command,
       expect.objectContaining({
+        contextTransition: 'agent-handoff',
         model: 'gpt-5.6-sol',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'max',
@@ -2428,6 +2430,7 @@ describe('ChatCommandService', () => {
       TARGET_CHAT_ID,
     )).toMatchObject({ status: 'scheduled' });
     expect(queue.releaseTranscriptSnapshot).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn.mock.calls.at(-1)[2]).not.toHaveProperty('contextTransition');
   });
 
   it('admits the fork target immediately after its ledger is built', async () => {

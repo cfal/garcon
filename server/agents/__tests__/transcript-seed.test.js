@@ -138,6 +138,19 @@ describe('transcript seed contract', () => {
     expect(context.prefix).toContain('<summary>');
   });
 
+  test('preserves summary whitespace while escaping only the carried envelope', () => {
+    const context = createCarryoverTranscript([
+      new UserMessage(TIME, 'newest request'),
+    ], CARRYOVER_INJECTION_MAX_CHARS, {
+      summary: '  Objective\n\n    Keep <path> & command indentation.  ',
+    });
+
+    expect(context.prefix).toContain(
+      '<summary>Objective\n\n    Keep &lt;path&gt; &amp; command indentation.</summary>',
+    );
+    expect(context.prefix).not.toContain('Objective Keep');
+  });
+
   test('never lets a summary displace the pinned turns it sits beside', () => {
     // A spine that fits on its own, and a summary that only fits if part of that
     // spine is dropped. Reserving just the asks left the newest turn's commands

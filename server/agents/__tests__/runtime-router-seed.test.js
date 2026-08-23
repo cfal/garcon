@@ -36,6 +36,8 @@ function makeRouter(overrides = {}) {
     conversation,
     composition: overrides.composition,
     conversationMessages: overrides.conversationMessages,
+    appendNotice: overrides.appendNotice,
+    currentView: overrides.currentView,
   });
   const start = overrides.start ?? mock(async (request) => {
     request.sink.publish({
@@ -193,9 +195,12 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
   it('derives a new session seed from the authoritative ledger context', async () => {
     const createCarriedContext = mock(async (_chatId, _entry, messages) => ({
-      prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
+      context: {
+        prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
+      },
+      summary: 'compacted prior context',
     }));
-    const { router, start, conversation } = makeRouter({ createCarriedContext });
+    const { router, start, conversation, transcript } = makeRouter({ createCarriedContext });
 
     await router.runAgentTurn('chat-1', 'continue', {
       clientMessageId: 'message-1',
@@ -211,6 +216,149 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted:prior context' },
     }));
+    expect(transcript.notices).toEqual([]);
+  });
+
+  it('appends the accepted handoff summary immediately before provider start', async () => {
+    const order = [];
+    const summary = 'Objective\n\n  Preserve this indentation.';
+    const start = mock(async (request) => {
+      order.push('provider-start');
+      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: 'start-handle' };
+    });
+    const { router, transcript } = makeRouter({
+      start,
+      appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.content}`),
+      createCarriedContext: async () => ({
+        context: { prefix: 'compacted seed' },
+        summary,
+      }),
+    });
+
+    await router.runAgentTurn('chat-1', 'continue', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+      contextTransition: 'agent-handoff',
+    });
+
+    expect(order).toEqual([`notice:${summary}`, 'provider-start']);
+    expect(transcript.notices).toEqual([expect.objectContaining({
+      kind: 'notice',
+      message: summary,
+      detail: { title: 'Handoff summary' },
+    })]);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      carriedContext: { prefix: 'compacted seed' },
+    }));
+  });
+
+  it('does not append a handoff notice for a fallback result', async () => {
+    const { router, transcript } = makeRouter({
+      createCarriedContext: async () => ({
+        context: { prefix: 'deterministic seed' },
+        summary: null,
+      }),
+    });
+
+    await router.runAgentTurn('chat-1', 'continue', {
+      turnId: 'turn-1',
+      contextTransition: 'agent-handoff',
+    });
+
+    expect(transcript.notices).toEqual([]);
+  });
+
+  it('does not duplicate a handoff notice when accepted input is replayed', async () => {
+    let takeCount = 0;
+    const composition = {
+      input: inputRow(1, 'continue'),
+      prompt: [inputRow(1, 'continue')],
+    };
+    const { router, start, transcript } = makeRouter({
+      composition: () => ({ ...composition, inserted: takeCount++ === 0 }),
+      createCarriedContext: async () => ({
+        context: { prefix: 'compacted seed' },
+        summary: 'One summary',
+      }),
+    });
+    const options = {
+      clientMessageId: 'message-1',
+      contextTransition: 'agent-handoff',
+    };
+
+    await router.runAgentTurn('chat-1', 'continue', { ...options, turnId: 'turn-1' });
+    await router.runAgentTurn('chat-1', 'continue', { ...options, turnId: 'turn-2' });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(transcript.notices).toHaveLength(1);
+  });
+
+  it('appends neither notice nor provider request when final admission closes', async () => {
+    const admission = new AbortController();
+    const { router, start, transcript } = makeRouter({
+      createCarriedContext: async () => {
+        admission.abort(new Error('handoff stopped'));
+        return { context: { prefix: 'compacted seed' }, summary: 'One summary' };
+      },
+    });
+
+    await expect(router.runAgentTurn('chat-1', 'continue', {
+      turnId: 'turn-1',
+      contextTransition: 'agent-handoff',
+      executionAdmission: { signal: admission.signal, markStarted: mock() },
+    })).rejects.toThrow('handoff stopped');
+
+    expect(start).not.toHaveBeenCalled();
+    expect(transcript.notices).toEqual([]);
+  });
+
+  it('does not invoke the provider when the handoff notice cannot commit', async () => {
+    const { router, start, transcript } = makeRouter({
+      appendNotice: () => { throw new Error('notice commit failed'); },
+      createCarriedContext: async () => ({
+        context: { prefix: 'compacted seed' },
+        summary: 'One summary',
+      }),
+    });
+
+    await expect(router.runAgentTurn('chat-1', 'continue', {
+      turnId: 'turn-1',
+      contextTransition: 'agent-handoff',
+    })).rejects.toThrow('notice commit failed');
+
+    expect(start).not.toHaveBeenCalled();
+    expect(transcript.notices).toEqual([]);
+  });
+
+  it('fails closed when the transcript view changes during handoff compaction', async () => {
+    let currentView = {
+      viewId: 'view-1',
+      status: 'current',
+      createdAt: '2026-08-12T00:00:00.000Z',
+      contentStartOrdinal: 1,
+    };
+    const { router, start, transcript } = makeRouter({
+      composition: {
+        inserted: true,
+        input: inputRow(1, 'continue'),
+        prompt: [inputRow(1, 'continue')],
+      },
+      currentView: () => currentView,
+      createCarriedContext: async () => {
+        currentView = { ...currentView, viewId: 'view-2' };
+        return { context: { prefix: 'compacted seed' }, summary: 'One summary' };
+      },
+    });
+
+    await expect(router.runAgentTurn('chat-1', 'continue', {
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+      contextTransition: 'agent-handoff',
+    })).rejects.toThrow('stale view');
+
+    expect(start).not.toHaveBeenCalled();
+    expect(transcript.notices).toEqual([]);
   });
 
   it('resumes without materializing the ledger conversation', async () => {

@@ -102,6 +102,65 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('commits and notifies one validated internal notice', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+
+      const row = ledger.appendNotice('chat-1', view.viewId, {
+        title: 'Handoff summary',
+        content: 'Objective\n\n  Preserve formatting.',
+      });
+
+      expect(row).toMatchObject({
+        kind: 'notice',
+        at: TS,
+        message: 'Objective\n\n  Preserve formatting.',
+        detail: { title: 'Handoff summary' },
+        providerMeta: null,
+      });
+      expect(ledger.currentRows('chat-1')).toEqual([row]);
+      expect(ledger.conversationMessages('chat-1')).toEqual([]);
+      expect(notifications).toEqual([]);
+      await tick();
+      expect(notifications).toEqual([expect.objectContaining({
+        type: 'rows',
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        rows: [row],
+      })]);
+    });
+  });
+
+  it('rejects an invalid internal notice before append', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+
+      expect(() => ledger.appendNotice('chat-1', view.viewId, {
+        title: 'two\nlines',
+        content: 'valid',
+      })).toThrow('single line');
+      expect(() => ledger.appendNotice('chat-1', view.viewId, {
+        title: 'Handoff summary',
+        content: '  \n\t',
+      })).toThrow('content is required');
+      expect(() => ledger.appendNotice('chat-1', view.viewId, {
+        title: 'Handoff summary',
+        content: String.fromCharCode(0xd800),
+      })).toThrow('well-formed Unicode');
+      expect(() => ledger.appendNotice('chat-1', view.viewId, {
+        title: 'Handoff summary',
+        content: 'x'.repeat(65_537),
+      })).toThrow('65536 UTF-8 bytes');
+      expect(() => ledger.appendNotice('chat-1', transcriptViewId('stale-view'), {
+        title: 'Handoff summary',
+        content: 'valid',
+      })).toThrow();
+      expect(ledger.currentRows('chat-1')).toEqual([]);
+    });
+  });
+
   it('fences an ambiguous commit without broadcasting it', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('failed-chat');

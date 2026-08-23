@@ -77,21 +77,24 @@ function spineOf(commands) {
 }
 
 function deterministic(messages = transcript()) {
-  return createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix;
+  return {
+    context: createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS),
+    summary: null,
+  };
 }
 
 describe('carryover compaction', () => {
   it('falls back rather than clipping the pinned turns', async () => {
     // A spine that fits on its own beside a summary that only fits if part of it
     // is dropped. The verbatim guarantee wins and the operator is told why.
-    const messages = spineOf(200);
+    const messages = spineOf(900);
     const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(225_000)}</summary>`,
+      respond: async () => `<summary>${'x'.repeat(65_000)}</summary>`,
     });
 
-    const context = await run(instance, messages);
+    const result = await run(instance, messages);
 
-    expect(context.prefix).toBe(deterministic(messages));
+    expect(result).toEqual(deterministic(messages));
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain('too large to carry');
   });
@@ -104,9 +107,9 @@ describe('carryover compaction', () => {
       },
     });
 
-    const context = await run(instance, messages);
+    const result = await run(instance, messages);
 
-    expect(context.prefix).toBe(deterministic(messages));
+    expect(result).toEqual(deterministic(messages));
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain('already fill');
   });
@@ -122,9 +125,9 @@ describe('carryover compaction', () => {
       },
     });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix).toBe(deterministic());
+    expect(result).toEqual(deterministic());
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain('without a permission gate');
   });
@@ -140,9 +143,9 @@ describe('carryover compaction', () => {
       },
     });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix).toBe(deterministic());
+    expect(result).toEqual(deterministic());
     expect(warnings).toHaveLength(1);
     expect(warnings[0].chatId).toBe('chat-1');
     expect(warnings[0].message).toContain('could not be resolved');
@@ -157,9 +160,9 @@ describe('carryover compaction', () => {
       },
     });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix).toBe(deterministic());
+    expect(result).toEqual(deterministic());
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain('could not be resolved');
   });
@@ -171,7 +174,7 @@ describe('carryover compaction', () => {
         throw new Error('no model should be queried');
       },
     });
-    expect((await run(off.instance)).prefix).toBe(deterministic());
+    expect(await run(off.instance)).toEqual(deterministic());
     expect(off.warnings).toEqual([]);
 
     const aborted = service({
@@ -181,8 +184,8 @@ describe('carryover compaction', () => {
         throw new Error('no model should be queried');
       },
     });
-    expect((await run(aborted.instance, transcript(), AbortSignal.abort())).prefix)
-      .toBe(deterministic());
+    expect(await run(aborted.instance, transcript(), AbortSignal.abort()))
+      .toEqual(deterministic());
     // Warning about a torn-down turn would notify a chat the user abandoned.
     expect(aborted.warnings).toEqual([]);
   });
@@ -192,38 +195,84 @@ describe('carryover compaction', () => {
       respond: async () => '<summary>objective: ship it</summary>',
     });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix).toContain('<summary>objective: ship it</summary>');
+    expect(result.summary).toBe('objective: ship it');
+    expect(result.context.prefix).toContain('<summary>objective: ship it</summary>');
     // The spine is the last three turns, rendered rather than summarized.
-    expect(context.prefix).toContain('<user>request 7</user>');
-    expect(context.prefix).toContain('<user>request 5</user>');
-    expect(context.prefix).not.toContain('<user>request 4</user>');
+    expect(result.context.prefix).toContain('<user>request 7</user>');
+    expect(result.context.prefix).toContain('<user>request 5</user>');
+    expect(result.context.prefix).not.toContain('<user>request 4</user>');
     expect(warnings).toEqual([]);
+  });
+
+  it('accepts outer framing whitespace and preserves logical summary formatting', async () => {
+    const logical = 'Objective\n\n    Keep <path> & command indentation.';
+    const { instance, warnings } = service({
+      respond: async () => ` \n<summary>\n  ${logical}\n</summary>\n\t`,
+    });
+
+    const result = await run(instance);
+
+    expect(result.summary).toBe(logical);
+    expect(result.context.prefix).toContain(
+      '<summary>Objective\n\n    Keep &lt;path&gt; &amp; command indentation.</summary>',
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it.each([
+    ['prefix prose', 'before <summary>valid</summary>'],
+    ['suffix prose', '<summary>valid</summary> after'],
+    ['attributes', '<summary role="handoff">valid</summary>'],
+    ['nested tag', '<summary>outer <summary>inner</summary></summary>'],
+    ['nested attributed tag', '<summary>outer <summary role="x">inner</summary></summary>'],
+    ['nested malformed tag', '<summary>outer <summary/ >inner</summary>'],
+    ['duplicate tags', '<summary>first</summary><summary>second</summary>'],
+    ['duplicate close', '<summary>first</summary></summary>'],
+    ['mismatched close', '<summary>valid</Summary>'],
+    ['empty body', '<summary> \n\t </summary>'],
+    ['malformed Unicode', `<summary>${String.fromCharCode(0xd800)}</summary>`],
+  ])('rejects %s instead of presenting it as an accepted summary', async (_label, response) => {
+    const { instance, warnings } = service({ respond: async () => response });
+
+    expect(await run(instance)).toEqual(deterministic());
+    expect(warnings).toHaveLength(1);
+  });
+
+  it('rejects a summary larger than the transcript notice byte limit', async () => {
+    const { instance, warnings } = service({
+      respond: async () => `<summary>${'é'.repeat(32_769)}</summary>`,
+    });
+
+    expect(await run(instance)).toEqual(deterministic());
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('65536 UTF-8 bytes');
   });
 
   it('renders one envelope so the rewritten-prefix guard can still anchor', async () => {
     const { instance } = service({ respond: async () => '<summary>objective: ship it</summary>' });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
     // A bare <summary> beside a second <carried-context> root would escape
     // sanitizeRecordedCarriedContext's startsWith('<carried-context') check.
-    expect(context.prefix).toStartWith('<carried-context version="3">');
-    expect(context.prefix.match(/<carried-context/g)).toHaveLength(1);
-    expect(context.prefix.indexOf('<summary>')).toBeGreaterThan(0);
-    expect(context.prefix.endsWith('</carried-context>\n\n')).toBeTrue();
+    expect(result.context.prefix).toStartWith('<carried-context version="3">');
+    expect(result.context.prefix.match(/<carried-context/g)).toHaveLength(1);
+    expect(result.context.prefix.indexOf('<summary>')).toBeGreaterThan(0);
+    expect(result.context.prefix.endsWith('</carried-context>\n\n')).toBeTrue();
   });
 
-  it('holds the injection ceiling when the summary lands exactly on it', async () => {
+  it('accepts a summary at the transcript notice byte limit', async () => {
     const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(CARRYOVER_INJECTION_MAX_CHARS - 200)}</summary>`,
+      respond: async () => `<summary>${'x'.repeat(65_536)}</summary>`,
     });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
-    if (warnings.length > 0) expect(warnings[0].message).toContain('too large to carry');
+    expect(result.context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
+    expect(result.summary).toHaveLength(65_536);
+    expect(warnings).toEqual([]);
   });
 
   it('stays off until the setting is explicitly enabled', async () => {
@@ -252,25 +301,24 @@ describe('carryover compaction', () => {
 
   it('falls back to the deterministic projection when output overflows', async () => {
     const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(CARRYOVER_INJECTION_MAX_CHARS)}</summary>`,
+      respond: async () => `<summary>${'x'.repeat(65_537)}</summary>`,
     });
     const messages = transcript();
 
-    const context = await run(instance, messages);
+    const result = await run(instance, messages);
 
-    expect(context.prefix)
-      .toBe(createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix);
+    expect(result).toEqual(deterministic(messages));
     expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('too large to carry');
+    expect(warnings[0].message).toContain('larger than 65536 UTF-8 bytes');
   });
 
   it('falls back and warns when the model returns no summary element', async () => {
     const { instance, warnings } = service({ respond: async () => 'here is a summary, roughly' });
 
-    const context = await run(instance);
+    const result = await run(instance);
 
-    expect(context.prefix).not.toContain('<summary>');
-    expect(warnings[0].message).toContain('no <summary> element');
+    expect(result).toEqual(deterministic());
+    expect(warnings[0].message).toContain('exactly one <summary> element');
   });
 
   it('falls back and warns when the model throws', async () => {
@@ -279,11 +327,32 @@ describe('carryover compaction', () => {
     });
     const messages = transcript();
 
-    const context = await run(instance, messages);
+    const result = await run(instance, messages);
 
-    expect(context.prefix)
-      .toBe(createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix);
+    expect(result).toEqual(deterministic(messages));
     expect(warnings[0].message).toContain('model unavailable');
+  });
+
+  it('falls back silently when the compaction query is aborted', async () => {
+    const controller = new AbortController();
+    const { instance, warnings } = service({
+      respond: async () => {
+        controller.abort(new Error('handoff stopped'));
+        throw controller.signal.reason;
+      },
+    });
+
+    expect(await run(instance, transcript(), controller.signal)).toEqual(deterministic());
+    expect(warnings).toEqual([]);
+  });
+
+  it('returns an explicit empty fallback result when there is no context', async () => {
+    const { instance } = service({
+      enabled: false,
+      respond: async () => { throw new Error('no model should be queried'); },
+    });
+
+    expect(await run(instance, [])).toEqual({ context: null, summary: null });
   });
 
   it('does not call the model when the setting is off', async () => {
@@ -294,11 +363,10 @@ describe('carryover compaction', () => {
     });
     const messages = transcript();
 
-    const context = await run(instance, messages);
+    const result = await run(instance, messages);
 
     expect(called).toBeFalse();
     expect(warnings).toEqual([]);
-    expect(context.prefix)
-      .toBe(createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS).prefix);
+    expect(result).toEqual(deterministic(messages));
   });
 });

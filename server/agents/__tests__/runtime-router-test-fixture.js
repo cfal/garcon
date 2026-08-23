@@ -11,6 +11,8 @@ export function createRuntimeTranscriptFixture(options = {}) {
   let session = options.session ?? null;
   let permissionClaim = null;
   let currentLease = null;
+  const notices = [];
+  const currentView = () => options.currentView?.() ?? view;
 
   const emit = (event) => {
     for (const listener of listeners) listener(event);
@@ -46,8 +48,8 @@ export function createRuntimeTranscriptFixture(options = {}) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    currentView: () => view,
-    currentRows: () => options.rows ?? [],
+    currentView,
+    currentRows: () => [...(options.rows ?? []), ...notices],
     currentSession: () => session,
     openProducer: (chatId) => {
       activeChatId = chatId;
@@ -88,7 +90,25 @@ export function createRuntimeTranscriptFixture(options = {}) {
       });
       return { kind: 'run-ended', outcome: 'failed', origin: 'core', error };
     },
-    takePreparedInput: () => options.composition ?? null,
+    takePreparedInput: (...args) => typeof options.composition === 'function'
+      ? options.composition(...args)
+      : options.composition ?? null,
+    appendNotice: (chatId, viewId, input) => {
+      if (viewId !== currentView()?.viewId) throw new Error('stale view');
+      options.appendNotice?.(chatId, viewId, input);
+      const row = {
+        kind: 'notice',
+        viewId,
+        ordinal: (options.rows?.length ?? 0) + notices.length + 1,
+        at: '2026-08-12T00:00:00.000Z',
+        message: input.content,
+        detail: { title: input.title },
+        providerMeta: null,
+      };
+      notices.push(row);
+      emit({ type: 'rows', chatId, viewId, rows: [row] });
+      return row;
+    },
     conversationMessages: (chatId, excludedOrdinals) => options.conversationMessages
       ? options.conversationMessages(chatId, excludedOrdinals)
       : options.conversation ?? [],
@@ -120,6 +140,7 @@ export function createRuntimeTranscriptFixture(options = {}) {
     ledger,
     adoption: { ensure: async () => view },
     get sink() { return currentLease?.sink ?? null; },
+    notices,
     activeRunId: () => activeRunId,
   };
 }

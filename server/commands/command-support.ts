@@ -520,6 +520,9 @@ export class CommandSupport {
       turnId: ledger.record.turnId ?? ids.turnId,
     };
     options.commandType = commandType;
+    if (preparation?.operation === 'agent-handoff') {
+      options.contextTransition = 'agent-handoff';
+    }
     if (input.images !== undefined) options.images = input.images;
 
     try {
