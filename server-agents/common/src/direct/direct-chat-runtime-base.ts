@@ -31,6 +31,7 @@ export interface DirectRuntimeSession<TMessage> {
   aborted: boolean;
   chatId: string;
   history: DirectSessionRecordV1[];
+  historyDirty: boolean;
   id: string;
   isFinalizing: boolean;
   isRunning: boolean;
@@ -114,6 +115,7 @@ export abstract class DirectChatRuntimeBase<
       aborted: false,
       chatId: request.chatId,
       history: [...snapshot.records],
+      historyDirty: false,
       id: sessionId,
       isFinalizing: false,
       isRunning: false,
@@ -149,11 +151,24 @@ export abstract class DirectChatRuntimeBase<
     session.operation = request.operation;
     this.#markSessionRunning(session);
     try {
+      if (session.historyDirty) {
+        const snapshot = await loadDirectSessionRequired(
+          this.#sessionsStore,
+          request.agentSessionId,
+          request.nativeSession,
+          request.executionAdmission?.signal ?? new AbortController().signal,
+        );
+        session.history = [...snapshot.records];
+        session.messages = this.#projectMessages(snapshot.records);
+        session.historyDirty = false;
+        assertDirectExecutionOpen(request);
+      }
       const user = await this.#appendUser(request);
-      assertDirectExecutionOpen(request);
       session.history.push(user);
       session.messages = this.#projectMessages(session.history);
       session.chatId = request.chatId;
+      this.#markSuccessorHistoryDirty(session);
+      assertDirectExecutionOpen(request);
       await this.#runTurnInternal(session, request);
     } catch (error) {
       this.#markSessionIdle(session);
@@ -220,6 +235,7 @@ export abstract class DirectChatRuntimeBase<
       aborted: false,
       chatId: request.chatId,
       history: [...snapshot.records],
+      historyDirty: false,
       id: request.agentSessionId,
       isFinalizing: false,
       isRunning: false,
@@ -317,6 +333,7 @@ export abstract class DirectChatRuntimeBase<
       }
       session.history.push(assistant);
       session.messages = this.#projectMessages(session.history);
+      this.#markSuccessorHistoryDirty(session);
       operation.publish({
         type: 'rows',
         rows: runtimeRows([new AssistantMessage(assistant.at, response)]),
@@ -354,5 +371,10 @@ export abstract class DirectChatRuntimeBase<
   ): void {
     this.#markSessionIdle(session);
     operation.publish({ type: 'run-ended', runId: operation.runId, outcome: 'finished' });
+  }
+
+  #markSuccessorHistoryDirty(session: DirectRuntimeSession<TMessage>): void {
+    const current = this.#sessions.get(session.id);
+    if (current && current !== session) current.historyDirty = true;
   }
 }

@@ -245,10 +245,53 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     }]);
   });
 
-  it('[TLV5-L05.03-DIRECT-UNIT-01] admits a successor immediately after best-effort abort and preserves late output', async () => {
+  it('retains an input when admission closes after its durable append', async () => {
+    const sessions = createTestDirectSessionStore();
+    const runtime = new CapturingDirectRuntime(sessions);
+    const first = capturingOperation('run-first');
+    const started = await runtime.startSession(startRequest({ operation: first.operation }));
+    await first.terminal;
+
+    const admission = new AbortController();
+    const appendUser = sessions.appendUser.bind(sessions);
+    let closeAdmission = true;
+    sessions.appendUser = async (input) => {
+      const record = await appendUser(input);
+      if (closeAdmission) {
+        closeAdmission = false;
+        admission.abort(new DOMException('Stopped', 'AbortError'));
+      }
+      return record;
+    };
+
+    await expect(runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'admitted then stopped',
+      nativeSession: started.nativeSession,
+      executionAdmission: {
+        signal: admission.signal,
+        async markStarted() {},
+      },
+      operation: { runId: 'run-stopped', publish() {} },
+    }))).rejects.toMatchObject({ name: 'AbortError' });
+
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'following message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-following', publish() {} },
+    }));
+
+    expect(runtime.captured.at(-1)?.messages).toEqual([
+      { role: 'user', content: 'first message' },
+      { role: 'assistant', content: 'OK' },
+      { role: 'user', content: 'admitted then stopped' },
+      { role: 'user', content: 'following message' },
+    ]);
+  });
+
+  it('[TLV5-L05.03-DIRECT-UNIT-01] admits a successor after abort and refreshes it after late output', async () => {
     const runtime = new CapturingDirectRuntime();
     const firstResponse = deferred();
-    runtime.responses.push(firstResponse.promise, 'second response');
+    runtime.responses.push(firstResponse.promise, 'second response', 'third response');
     const first = capturingOperation('run-first');
     const second = capturingOperation('run-second');
 
@@ -262,12 +305,25 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
     firstResponse.resolve('late first response');
     await first.terminal;
 
+    await runtime.runTurn(resumeRequest(started.agentSessionId, {
+      command: 'third message',
+      nativeSession: started.nativeSession,
+      operation: { runId: 'run-third', publish() {} },
+    }));
+
     expect([
       second.events[0].rows[0].message.content,
       first.events[0].rows[0].message.content,
     ]).toEqual([
       'second response',
       'late first response',
+    ]);
+    expect(runtime.captured.at(-1)?.messages).toEqual([
+      { role: 'user', content: 'first message' },
+      { role: 'user', content: 'second message' },
+      { role: 'assistant', content: 'second response' },
+      { role: 'assistant', content: 'late first response' },
+      { role: 'user', content: 'third message' },
     ]);
   });
 
