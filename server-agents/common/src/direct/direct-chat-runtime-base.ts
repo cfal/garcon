@@ -20,6 +20,7 @@ import {
 } from './native-session.js';
 import {
   DirectSessionStore,
+  type DirectResponsesCheckpointV1,
   type DirectSessionRecordV1,
 } from './session-store.js';
 
@@ -39,6 +40,11 @@ export interface DirectRuntimeSession<TMessage> {
   startTime: number;
   lastActivityAt: number;
   operation: AgentRuntimeOperation;
+}
+
+export interface DirectTurnCompletion {
+  readonly content: string;
+  readonly checkpoint: DirectResponsesCheckpointV1 | null;
 }
 
 export interface DirectChatRuntimeBaseConfig {
@@ -82,7 +88,9 @@ export abstract class DirectChatRuntimeBase<
 
   protected abstract buildAssistantMessage(content: string): TMessage;
 
-  protected abstract streamSession(session: DirectRuntimeSession<TMessage>): Promise<string>;
+  protected abstract streamSession(
+    session: DirectRuntimeSession<TMessage>,
+  ): Promise<DirectTurnCompletion>;
 
   async startSession(request: DirectStartRequest): Promise<DirectStartedSession> {
     assertDirectExecutionOpen(request);
@@ -278,7 +286,8 @@ export abstract class DirectChatRuntimeBase<
 
     try {
       if (request.executionAdmission) await markDirectExecutionStarted(request);
-      const response = await this.streamSession(session);
+      const completion = await this.streamSession(session);
+      const response = completion.content;
 
       if (!response.trim()) {
         this.#markSessionIdle(session);
@@ -301,6 +310,7 @@ export abstract class DirectChatRuntimeBase<
           sessionId: session.id,
           runId: operation.runId,
           content: response,
+          checkpoint: completion.checkpoint,
         });
       } catch (error) {
         throw directSessionUnavailable(error);

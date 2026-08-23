@@ -34,7 +34,10 @@ class CapturingDirectRuntime extends DirectChatRuntimeBase {
       thinkingMode: session.thinkingMode,
       messages: structuredClone(session.messages),
     });
-    return this.responses.shift() ?? 'OK';
+    return {
+      content: await (this.responses.shift() ?? 'OK'),
+      checkpoint: null,
+    };
   }
 }
 

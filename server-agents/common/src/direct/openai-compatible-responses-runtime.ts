@@ -6,16 +6,21 @@ import {
   DirectChatRuntimeBase,
   type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
-import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
   directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 import { resolveDirectExplicitEffort } from './reasoning-effort.js';
-import { isJsonResponse } from './response-media-type.js';
-import { stripThinkBlocks } from './strip-think-blocks.js';
+import {
+  isUnresolvedCheckpoint,
+  readOpenAiResponsesResponse,
+  throwResponsesHttpError,
+  type ResponsesCompletion,
+} from './openai-compatible-responses-protocol.js';
+import type { DirectResponsesCheckpointV1 } from './session-store.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -38,6 +43,8 @@ interface ResponsesInputMessage {
 }
 
 export interface OpenAiCompatibleResponsesRuntimeConfig extends DirectChatRuntimeBaseConfig {
+  endpointId: string;
+  endpointFingerprint: string;
   getApiKey: () => string;
   getBaseUrl: () => string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
@@ -83,152 +90,6 @@ export function extractOpenAiResponsesTextContent(content: ResponsesInputContent
     .join('\n');
 }
 
-interface ResponsesOutputTextPart {
-  type: 'output_text';
-  text?: string;
-}
-
-interface ResponsesOutputMessage {
-  type?: string;
-  content?: ResponsesOutputTextPart[];
-}
-
-export function extractResponsesOutputText(data: unknown): string {
-  if (!data || typeof data !== 'object') return '';
-  const response = data as {
-    output_text?: unknown;
-    output?: unknown;
-  };
-
-  if (typeof response.output_text === 'string') {
-    return response.output_text.trim();
-  }
-
-  if (!Array.isArray(response.output)) return '';
-  return response.output
-    .filter((item): item is ResponsesOutputMessage => Boolean(item) && typeof item === 'object')
-    .flatMap((item) => Array.isArray(item.content) ? item.content : [])
-    .filter((part): part is ResponsesOutputTextPart => part?.type === 'output_text')
-    .map((part) => typeof part.text === 'string' ? part.text : '')
-    .join('')
-    .trim();
-}
-
-export interface ResponsesStreamState {
-  text: string;
-  errorMessage: string | null;
-  terminal: 'completed' | 'failed' | 'incomplete' | null;
-}
-
-interface ResponsesStreamEvent {
-  type?: string;
-  delta?: unknown;
-  error?: { message?: unknown };
-  response?: {
-    error?: { message?: unknown };
-    incomplete_details?: { reason?: unknown };
-    status_details?: { error?: { message?: unknown } };
-  };
-}
-
-function responsesFailureMessage(event: ResponsesStreamEvent): string {
-  const directMessage = event.response?.error?.message;
-  if (typeof directMessage === 'string') return directMessage;
-
-  const compatibleMessage = event.response?.status_details?.error?.message;
-  if (typeof compatibleMessage === 'string') return compatibleMessage;
-
-  const incompleteReason = event.response?.incomplete_details?.reason;
-  if (typeof incompleteReason === 'string') return incompleteReason;
-
-  return `Responses stream ended with ${event.type ?? 'an unknown failure'}.`;
-}
-
-export function consumeResponsesStreamEvent(
-  state: ResponsesStreamState,
-  event: unknown,
-): void {
-  if (!event || typeof event !== 'object') return;
-  const parsed = event as ResponsesStreamEvent;
-
-  if (parsed.type === 'response.output_text.delta') {
-    if (typeof parsed.delta === 'string') state.text += parsed.delta;
-    return;
-  }
-
-  if (parsed.type === 'response.completed') {
-    state.terminal = 'completed';
-    return;
-  }
-
-  if (parsed.type === 'error') {
-    state.errorMessage = typeof parsed.error?.message === 'string'
-      ? parsed.error.message
-      : 'Responses stream returned an error.';
-    return;
-  }
-
-  if (parsed.type === 'response.failed' || parsed.type === 'response.incomplete') {
-    state.terminal = parsed.type === 'response.failed' ? 'failed' : 'incomplete';
-    state.errorMessage = responsesFailureMessage(parsed);
-  }
-}
-
-async function readOpenAiResponsesResponse(
-  response: Response,
-  runtimeLabel: string,
-): Promise<string> {
-  let text: string;
-  if (isJsonResponse(response)) {
-    const data = await response.json() as {
-      status?: unknown;
-      error?: { message?: unknown };
-      incomplete_details?: { reason?: unknown };
-      status_details?: { error?: { message?: unknown } };
-    };
-    const responseError = typeof data.error?.message === 'string'
-      ? data.error.message
-      : typeof data.status_details?.error?.message === 'string'
-        ? data.status_details.error.message
-        : null;
-    if (data.status === 'failed' || data.status === 'incomplete' || responseError) {
-      const detail = responseError
-        ?? (typeof data.incomplete_details?.reason === 'string'
-          ? data.incomplete_details.reason
-          : `Responses API returned status ${data.status}.`);
-      throw new Error(`${runtimeLabel} response error: ${detail}`);
-    }
-    text = extractResponsesOutputText(data);
-  } else {
-    if (!response.body) {
-      throw new Error(`${runtimeLabel} response did not include a stream body.`);
-    }
-
-    const state: ResponsesStreamState = {
-      text: '',
-      errorMessage: null,
-      terminal: null,
-    };
-    await readSseDataEvents(response.body, (data) => {
-      try {
-        consumeResponsesStreamEvent(state, JSON.parse(data));
-      } catch {
-        // Skips malformed chunks from partially-compatible providers.
-      }
-    });
-
-    if (state.errorMessage) {
-      throw new Error(`${runtimeLabel} stream error: ${state.errorMessage}`);
-    }
-    if (state.terminal !== 'completed') {
-      throw new Error(`${runtimeLabel} stream ended before response.completed.`);
-    }
-    text = state.text;
-  }
-
-  return stripThinkBlocks(text);
-}
-
 export async function runOpenAiResponsesSingleQuery(
   config: OpenAiCompatibleResponsesRuntimeConfig,
   prompt: string,
@@ -258,11 +119,10 @@ export async function runOpenAiResponsesSingleQuery(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
+      await throwResponsesHttpError(response, config.runtimeLabel);
     }
 
-    return await readOpenAiResponsesResponse(response, config.runtimeLabel);
+    return (await readOpenAiResponsesResponse(response, config.runtimeLabel)).text;
   } finally {
     clearTimeout(timer);
   }
@@ -288,7 +148,9 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected async streamSession(session: DirectRuntimeSession<ResponsesInputMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<ResponsesInputMessage>,
+  ): Promise<DirectTurnCompletion> {
     const apiKey = this.config.getApiKey();
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
@@ -296,27 +158,94 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
     const timer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${this.config.getBaseUrl()}/responses`, {
-        method: 'POST',
-        headers: buildHeaders(this.config, apiKey),
-        body: JSON.stringify({
-          model: session.model,
-          input: session.messages,
-          stream: true,
-          store: false,
-          ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
+      const checkpoint = compatibleCheckpoint(session, this.config);
+      const currentInput = session.messages.at(-1);
+      if (!currentInput || currentInput.role !== 'user') {
+        throw new Error(`${this.config.runtimeLabel} session is missing its current user input.`);
       }
-      return await readOpenAiResponsesResponse(response, this.config.runtimeLabel);
+      let completion: ResponsesCompletion;
+      try {
+        completion = await this.#request(
+          session,
+          checkpoint ? [currentInput] : session.messages,
+          checkpoint?.responseId ?? null,
+          apiKey,
+          reasoningEffort,
+          abortController.signal,
+        );
+      } catch (error) {
+        if (!checkpoint || !isUnresolvedCheckpoint(error)) throw error;
+        completion = await this.#request(
+          session,
+          session.messages,
+          null,
+          apiKey,
+          reasoningEffort,
+          abortController.signal,
+        );
+      }
+
+      return {
+        content: completion.text,
+        checkpoint: completion.responseId
+          ? {
+              kind: 'openai-response',
+              responseId: completion.responseId,
+              endpointId: this.config.endpointId,
+              endpointFingerprint: this.config.endpointFingerprint,
+              model: session.model,
+            }
+          : null,
+      };
     } finally {
       clearTimeout(timer);
       session.abortController = null;
     }
   }
+
+  async #request(
+    session: DirectRuntimeSession<ResponsesInputMessage>,
+    input: readonly ResponsesInputMessage[],
+    previousResponseId: string | null,
+    apiKey: string,
+    reasoningEffort: ReturnType<typeof resolveDirectExplicitEffort>,
+    signal: AbortSignal,
+  ): Promise<ResponsesCompletion> {
+    const response = await fetch(`${this.config.getBaseUrl()}/responses`, {
+      method: 'POST',
+      headers: buildHeaders(this.config, apiKey),
+      body: JSON.stringify({
+        model: session.model,
+        input,
+        previous_response_id: previousResponseId,
+        stream: true,
+        store: true,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      await throwResponsesHttpError(response, this.config.runtimeLabel);
+    }
+    return await readOpenAiResponsesResponse(response, this.config.runtimeLabel);
+  }
+}
+
+function compatibleCheckpoint(
+  session: DirectRuntimeSession<ResponsesInputMessage>,
+  config: OpenAiCompatibleResponsesRuntimeConfig,
+): DirectResponsesCheckpointV1 | null {
+  const previous = session.history.at(-2);
+  if (!previous || previous.type !== 'assistant') return null;
+  const checkpoint = previous.checkpoint;
+  if (
+    checkpoint?.kind !== 'openai-response'
+    || checkpoint.endpointId !== config.endpointId
+    || checkpoint.endpointFingerprint !== config.endpointFingerprint
+    || checkpoint.model !== session.model
+  ) {
+    return null;
+  }
+  return checkpoint;
 }

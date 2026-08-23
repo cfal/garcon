@@ -63,6 +63,8 @@ describe('transcript adoption architecture', () => {
       expect(source, relative).not.toMatch(/@garcon\/server-agent-direct-[^'"/]+\//);
       expect(source, relative).not.toMatch(/@garcon\/server-agent-direct-/);
       expect(source, relative).not.toMatch(/\.startsWith\(\s*['"`]direct-/);
+      expect(source, relative).not.toContain('previous_response_id');
+      expect(source, relative).not.toContain('previous_response_not_found');
       for (const pattern of DIRECT_PROVIDER_PATTERNS) {
         expect(source, relative).not.toMatch(pattern);
       }

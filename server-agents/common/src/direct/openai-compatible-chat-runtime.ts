@@ -6,6 +6,7 @@ import {
   DirectChatRuntimeBase,
   type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
@@ -196,7 +197,9 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<ConversationMessage>,
+  ): Promise<DirectTurnCompletion> {
     const apiKey = this.config.getApiKey();
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
@@ -221,7 +224,10 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      return await readOpenAiCompatibleResponse(response, this.config.runtimeLabel);
+      return {
+        content: await readOpenAiCompatibleResponse(response, this.config.runtimeLabel),
+        checkpoint: null,
+      };
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

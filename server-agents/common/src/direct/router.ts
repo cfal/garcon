@@ -225,6 +225,8 @@ export function buildDirectOpenAiResponsesConfig(args: DirectRuntimeFamilyOption
   return {
     runtimeLabel: args.runtimeLabel,
     defaultModel: args.endpoint.selection.model,
+    endpointId: args.endpoint.selection.endpointId,
+    endpointFingerprint: directEndpointFingerprint(args.endpoint),
     sessions: args.sessions,
     getApiKey: () => args.endpoint.credential ?? '',
     getBaseUrl: () => args.endpoint.selection.baseUrl,

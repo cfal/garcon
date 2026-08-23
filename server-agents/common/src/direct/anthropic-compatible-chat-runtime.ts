@@ -5,6 +5,7 @@ import {
   DirectChatRuntimeBase,
   type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
+  type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '@garcon/server-agent-common/shared/attachments';
@@ -229,7 +230,9 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
     return { role: 'assistant', content };
   }
 
-  protected async streamSession(session: DirectRuntimeSession<AnthropicConversationMessage>): Promise<string> {
+  protected async streamSession(
+    session: DirectRuntimeSession<AnthropicConversationMessage>,
+  ): Promise<DirectTurnCompletion> {
     const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
@@ -253,7 +256,10 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      return await readAnthropicCompatibleResponse(response, this.config.runtimeLabel);
+      return {
+        content: await readAnthropicCompatibleResponse(response, this.config.runtimeLabel),
+        checkpoint: null,
+      };
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

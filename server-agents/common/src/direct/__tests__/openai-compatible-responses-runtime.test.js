@@ -2,23 +2,33 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
   OpenAiCompatibleResponsesRuntime,
   buildOpenAiResponsesUserContent,
-  consumeResponsesStreamEvent,
   extractOpenAiResponsesTextContent,
-  extractResponsesOutputText,
   runOpenAiResponsesSingleQuery,
 } from '../openai-compatible-responses-runtime.ts';
+import {
+  consumeResponsesStreamEvent,
+  extractResponsesOutputText,
+} from '../openai-compatible-responses-protocol.ts';
 import {
   createTestDirectSessionStore,
   removeTestDirectSessionStores,
 } from './session-store-fixture.ts';
 
 const originalFetch = globalThis.fetch;
+const ENDPOINT_ID = 'endpoint-responses';
+const ENDPOINT_FINGERPRINT = 'a'.repeat(64);
 
 function streamResponse(chunks, options = {}) {
   const encoder = new TextEncoder();
   const events = options.complete === false
     ? chunks
-    : [...chunks, { type: 'response.completed', response: { status: 'completed' } }];
+    : [...chunks, {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          ...(options.responseId ? { id: options.responseId } : {}),
+        },
+      }];
   return new Response(new ReadableStream({
     start(controller) {
       for (const chunk of events) {
@@ -36,6 +46,8 @@ function runtimeConfig(overrides = {}) {
   return {
     runtimeLabel: 'Direct (Responses)',
     defaultModel: 'fallback-model',
+    endpointId: ENDPOINT_ID,
+    endpointFingerprint: ENDPOINT_FINGERPRINT,
     sessions: createTestDirectSessionStore(),
     getApiKey: () => 'sk-test',
     getBaseUrl: () => 'https://api.example.test/v1',
@@ -64,6 +76,45 @@ function capturedMessages(capture) {
   return capture.events
     .filter((event) => event.type === 'rows')
     .flatMap((event) => event.rows.map((row) => row.message));
+}
+
+function checkpoint(overrides = {}) {
+  return {
+    kind: 'openai-response',
+    responseId: 'resp-seeded',
+    endpointId: ENDPOINT_ID,
+    endpointFingerprint: ENDPOINT_FINGERPRINT,
+    model: 'selected-model',
+    ...overrides,
+  };
+}
+
+async function seedCompletedSession(sessions, overrides = {}) {
+  const sessionId = overrides.sessionId ?? '10000000-0000-4000-8000-000000000001';
+  await sessions.create({
+    sessionId,
+    runId: 'run-first',
+    content: 'first message',
+    attachments: [],
+  });
+  await sessions.appendAssistant({
+    sessionId,
+    runId: 'run-first',
+    content: 'first response',
+    checkpoint: overrides.checkpoint === undefined ? checkpoint() : overrides.checkpoint,
+  });
+  return sessionId;
+}
+
+function missingCheckpointResponse() {
+  return Response.json({
+    error: {
+      code: 'previous_response_not_found',
+      message: 'The previous response cannot be resolved.',
+      param: 'previous_response_id',
+      type: 'invalid_request_error',
+    },
+  }, { status: 404 });
 }
 
 describe('OpenAiCompatibleResponsesRuntime', () => {
@@ -100,12 +151,26 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
   });
 
   it('tracks streaming deltas, errors, and terminal state', () => {
-    const state = { text: 'hel', errorMessage: null, terminal: null };
+    const state = {
+      text: 'hel',
+      errorMessage: null,
+      errorCode: null,
+      outputAccepted: false,
+      responseId: null,
+      terminal: null,
+    };
     consumeResponsesStreamEvent(state, {
       type: 'response.output_text.delta',
       delta: 'lo',
     });
-    expect(state).toEqual({ text: 'hello', errorMessage: null, terminal: null });
+    expect(state).toEqual({
+      text: 'hello',
+      errorMessage: null,
+      errorCode: null,
+      outputAccepted: true,
+      responseId: null,
+      terminal: null,
+    });
 
     consumeResponsesStreamEvent(state, {
       type: 'response.failed',
@@ -114,6 +179,9 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(state).toEqual({
       text: 'hello',
       errorMessage: 'bad request',
+      errorCode: null,
+      outputAccepted: true,
+      responseId: null,
       terminal: 'failed',
     });
   });
@@ -340,7 +408,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     await expect(result).rejects.toThrow('Stopped');
   });
 
-  it('streams Direct Responses turns and emits assistant text', async () => {
+  it('stores first-turn SSE response IDs before emitting assistant text', async () => {
     let requestBody;
     globalThis.fetch = mock(async (_url, init) => {
       requestBody = JSON.parse(init.body);
@@ -348,13 +416,14 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
         { type: 'response.output_text.delta', delta: '<think>private</think>\n' },
         { type: 'response.output_text.delta', delta: 'hello' },
         { type: 'response.output_text.delta', delta: ' world ' },
-      ]);
+      ], { responseId: 'resp-first' });
     });
 
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
+    const config = runtimeConfig();
+    const runtime = new OpenAiCompatibleResponsesRuntime(config);
     const capture = captureOperation('run-stream');
 
-    await runtime.startSession({
+    const started = await runtime.startSession({
       chatId: 'chat-1',
       command: 'hi',
       projectPath: '/tmp/project',
@@ -370,18 +439,331 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(requestBody).toEqual({
       model: 'selected-model',
       input: [{ role: 'user', content: 'hi' }],
+      previous_response_id: null,
       stream: true,
-      store: false,
+      store: true,
     });
     expect(emitted[0].content).toBe('hello world');
+    expect((await config.sessions.load(started.agentSessionId)).records.at(-1)).toMatchObject({
+      type: 'assistant',
+      content: 'hello world',
+      checkpoint: {
+        kind: 'openai-response',
+        responseId: 'resp-first',
+        endpointId: ENDPOINT_ID,
+        endpointFingerprint: ENDPOINT_FINGERPRINT,
+        model: 'selected-model',
+      },
+    });
+  });
+
+  it('continues from the durable checkpoint with only the current input', async () => {
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      const responseNumber = requestBodies.length;
+      return streamResponse([
+        { type: 'response.output_text.delta', delta: `response ${responseNumber}` },
+      ], { responseId: `resp-${responseNumber}` });
+    });
+    const config = runtimeConfig();
+    const runtime = new OpenAiCompatibleResponsesRuntime(config);
+    const first = captureOperation('run-first');
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: first.operation,
+    });
+    await first.terminal;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
+      command: 'second message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: captureOperation('run-second').operation,
+    });
+
+    expect(requestBodies).toEqual([
+      {
+        model: 'selected-model',
+        input: [{ role: 'user', content: 'first message' }],
+        previous_response_id: null,
+        stream: true,
+        store: true,
+      },
+      {
+        model: 'selected-model',
+        input: [{ role: 'user', content: 'second message' }],
+        previous_response_id: 'resp-1',
+        stream: true,
+        store: true,
+      },
+    ]);
+    expect((await config.sessions.load(started.agentSessionId)).records.at(-1)?.checkpoint)
+      .toEqual(checkpoint({ responseId: 'resp-2' }));
+  });
+
+  it('continues from a persisted checkpoint after runtime restart', async () => {
+    const sessions = createTestDirectSessionStore();
+    const sessionId = await seedCompletedSession(sessions);
+    let requestBody;
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return streamResponse([
+        { type: 'response.output_text.delta', delta: 'resumed response' },
+      ], { responseId: 'resp-resumed' });
+    });
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({ sessions }));
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
+      command: 'resumed message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: captureOperation('run-resumed').operation,
+    });
+
+    expect(requestBody).toEqual({
+      model: 'selected-model',
+      input: [{ role: 'user', content: 'resumed message' }],
+      previous_response_id: 'resp-seeded',
+      stream: true,
+      store: true,
+    });
+  });
+
+  it('starts a full-context chain when checkpoint endpoint, fingerprint, or model changes', async () => {
+    const cases = [
+      {
+        label: 'endpoint',
+        config: { endpointId: 'endpoint-other' },
+        model: 'selected-model',
+      },
+      {
+        label: 'fingerprint',
+        config: { endpointFingerprint: 'b'.repeat(64) },
+        model: 'selected-model',
+      },
+      {
+        label: 'model',
+        config: {},
+        model: 'changed-model',
+      },
+    ];
+
+    for (const scenario of cases) {
+      const sessions = createTestDirectSessionStore();
+      const sessionId = await seedCompletedSession(sessions);
+      let requestBody;
+      globalThis.fetch = mock(async (_url, init) => {
+        requestBody = JSON.parse(init.body);
+        return streamResponse([
+          { type: 'response.output_text.delta', delta: `${scenario.label} response` },
+        ], { responseId: `resp-${scenario.label}` });
+      });
+      const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({
+        sessions,
+        ...scenario.config,
+      }));
+
+      await runtime.runTurn({
+        chatId: 'chat-1',
+        agentSessionId: sessionId,
+        nativeSession: sessions.nativeReference(sessionId),
+        command: `${scenario.label} message`,
+        projectPath: '/tmp/project',
+        model: scenario.model,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        operation: captureOperation(`run-${scenario.label}`).operation,
+      });
+
+      expect(requestBody.previous_response_id, scenario.label).toBeNull();
+      expect(requestBody.input, scenario.label).toEqual([
+        { role: 'user', content: 'first message' },
+        { role: 'assistant', content: 'first response' },
+        { role: 'user', content: `${scenario.label} message` },
+      ]);
+      runtime.shutdown();
+    }
+  });
+
+  it('retries an unresolved checkpoint once with full local history', async () => {
+    const sessions = createTestDirectSessionStore();
+    const sessionId = await seedCompletedSession(sessions);
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      if (requestBodies.length === 1) return missingCheckpointResponse();
+      return streamResponse([
+        { type: 'response.output_text.delta', delta: 'recovered response' },
+      ], { responseId: 'resp-recovered' });
+    });
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({ sessions }));
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
+      command: 'recover message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: captureOperation('run-recover').operation,
+    });
+
+    expect(requestBodies[0]).toMatchObject({
+      input: [{ role: 'user', content: 'recover message' }],
+      previous_response_id: 'resp-seeded',
+      store: true,
+    });
+    expect(requestBodies[1]).toMatchObject({
+      input: [
+        { role: 'user', content: 'first message' },
+        { role: 'assistant', content: 'first response' },
+        { role: 'user', content: 'recover message' },
+      ],
+      previous_response_id: null,
+      store: true,
+    });
+    expect((await sessions.load(sessionId)).records.at(-1)?.checkpoint)
+      .toEqual(checkpoint({ responseId: 'resp-recovered' }));
+  });
+
+  it('does not loop when full-context checkpoint recovery also fails', async () => {
+    const sessions = createTestDirectSessionStore();
+    const sessionId = await seedCompletedSession(sessions);
+    globalThis.fetch = mock(async () => missingCheckpointResponse());
+    const capture = captureOperation('run-recovery-failed');
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({ sessions }));
+
+    await expect(runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: sessionId,
+      nativeSession: sessions.nativeReference(sessionId),
+      command: 'retry once',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: capture.operation,
+    })).rejects.toThrow('previous response cannot be resolved');
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect((await sessions.load(sessionId)).records.filter((record) => record.type === 'assistant'))
+      .toHaveLength(1);
+  });
+
+  it('does not retry unrelated failures or checkpoint errors after output', async () => {
+    for (const scenario of ['unrelated', 'after-output']) {
+      const sessions = createTestDirectSessionStore();
+      const sessionId = await seedCompletedSession(sessions);
+      globalThis.fetch = scenario === 'unrelated'
+        ? mock(async () => Response.json({
+            error: { code: 'rate_limit_exceeded', message: 'rate limited' },
+          }, { status: 429 }))
+        : mock(async () => streamResponse([
+            { type: 'response.output_text.delta', delta: 'partial' },
+            {
+              type: 'error',
+              error: {
+                code: 'previous_response_not_found',
+                message: 'checkpoint disappeared after output',
+              },
+            },
+          ], { complete: false }));
+      const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig({ sessions }));
+
+      await expect(runtime.runTurn({
+        chatId: 'chat-1',
+        agentSessionId: sessionId,
+        nativeSession: sessions.nativeReference(sessionId),
+        command: `${scenario} message`,
+        projectPath: '/tmp/project',
+        model: 'selected-model',
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        operation: captureOperation(`run-${scenario}`).operation,
+      })).rejects.toThrow();
+
+      expect(globalThis.fetch, scenario).toHaveBeenCalledTimes(1);
+      const assistants = (await sessions.load(sessionId)).records.filter(
+        (record) => record.type === 'assistant',
+      );
+      expect(assistants, scenario).toHaveLength(1);
+      expect(assistants[0].checkpoint, scenario).toEqual(checkpoint());
+      runtime.shutdown();
+    }
+  });
+
+  it('falls back to full local history after a completion without an ID', async () => {
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse([
+        { type: 'response.output_text.delta', delta: `response ${requestBodies.length}` },
+      ], requestBodies.length === 1 ? {} : { responseId: 'resp-second' });
+    });
+    const config = runtimeConfig();
+    const runtime = new OpenAiCompatibleResponsesRuntime(config);
+    const first = captureOperation('run-first');
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: first.operation,
+    });
+    await first.terminal;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      nativeSession: started.nativeSession,
+      command: 'second message',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation: captureOperation('run-second').operation,
+    });
+
+    expect(requestBodies[1]).toMatchObject({
+      input: [
+        { role: 'user', content: 'first message' },
+        { role: 'assistant', content: 'response 1' },
+        { role: 'user', content: 'second message' },
+      ],
+      previous_response_id: null,
+    });
   });
 
   it('accepts a buffered JSON response for an interactive Responses session', async () => {
-    globalThis.fetch = mock(async () => Response.json({ output_text: 'session response' }));
-    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig());
+    globalThis.fetch = mock(async () => Response.json({
+      id: 'resp-json',
+      output_text: 'session response',
+    }));
+    const config = runtimeConfig();
+    const runtime = new OpenAiCompatibleResponsesRuntime(config);
     const capture = captureOperation('run-json');
 
-    await runtime.startSession({
+    const started = await runtime.startSession({
       chatId: 'chat-json',
       command: 'hi',
       projectPath: '/tmp/project',
@@ -394,6 +776,8 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
 
     await capture.terminal;
     expect(capturedMessages(capture)).toMatchObject([{ content: 'session response' }]);
+    expect((await config.sessions.load(started.agentSessionId)).records.at(-1)?.checkpoint)
+      .toEqual(checkpoint({ responseId: 'resp-json' }));
   });
 
   it('does not emit partial session output after a stream failure', async () => {
@@ -472,7 +856,11 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(requestBodies[0].reasoning).toEqual({ effort: 'high' });
     expect(requestBodies[1].reasoning).toEqual({ effort: 'low' });
     expect(requestBodies[2]).not.toHaveProperty('reasoning');
-    expect(requestBodies.every((body) => body.stream === true && body.store === false)).toBe(true);
+    expect(requestBodies.every((body) => (
+      body.stream === true
+      && body.store === true
+      && body.previous_response_id === null
+    ))).toBe(true);
   });
 
   it('hydrates an unknown session from persisted native history', async () => {
@@ -513,6 +901,8 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     });
 
     expect(requestBody.reasoning).toEqual({ effort: 'max' });
+    expect(requestBody.previous_response_id).toBeNull();
+    expect(requestBody.store).toBe(true);
     expect(requestBody.input).toEqual([
       { role: 'user', content: 'first message' },
       { role: 'assistant', content: 'first response' },

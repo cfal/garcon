@@ -5,6 +5,7 @@ import {
   buildDirectOpenAiResponsesConfig,
   createDirectOpenAiChatRuntime,
   createDirectOpenAiResponsesRuntime,
+  directEndpointFingerprint,
   DirectEndpointRouterRuntime,
 } from '../router.ts';
 
@@ -64,6 +65,34 @@ describe('buildDirectOpenAiResponsesConfig', () => {
 
     expect(config.getBaseUrl()).toBe('https://api.example.test/v1');
     expect(config.defaultModel).toBe('example-model');
+    expect(config.endpointId).toBe('example_openai');
+    expect(config.endpointFingerprint).toBe(directEndpointFingerprint(endpoint({
+      endpointId: 'example_openai',
+    })));
+  });
+
+  it('changes checkpoint compatibility across routes, headers, and credentials', () => {
+    const original = endpoint({ headers: { 'X-Route': 'one' }, credential: 'secret-one' });
+    const fingerprints = [
+      directEndpointFingerprint(original),
+      directEndpointFingerprint(endpoint({
+        baseUrl: 'https://other.example.test/v1',
+        headers: { 'X-Route': 'one' },
+        credential: 'secret-one',
+      })),
+      directEndpointFingerprint(endpoint({
+        headers: { 'X-Route': 'two' },
+        credential: 'secret-one',
+      })),
+      directEndpointFingerprint(endpoint({
+        headers: { 'X-Route': 'one' },
+        credential: 'secret-two',
+      })),
+    ];
+
+    expect(new Set(fingerprints).size).toBe(fingerprints.length);
+    expect(fingerprints.every((fingerprint) => /^[0-9a-f]{64}$/.test(fingerprint))).toBe(true);
+    expect(fingerprints.join('')).not.toContain('secret');
   });
 });
 

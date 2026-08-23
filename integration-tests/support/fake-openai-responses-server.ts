@@ -18,12 +18,14 @@ export interface FakeResponsesRequestBody {
   model: string;
   input: FakeResponsesInputMessage[];
   stream: true;
-  store: false;
+  store: boolean;
+  previous_response_id?: string | null;
   reasoning?: { effort: string };
 }
 
 export interface RecordedResponsesRequest {
   id: number;
+  responseId: string;
   body: FakeResponsesRequestBody;
   rawBody: Record<string, unknown>;
   lastUserText: string;
@@ -35,13 +37,17 @@ export interface ResponsesRequestMatcher {
   lastUserText?: string;
   lastUserTextIncludes?: string;
   model?: string;
+  previousResponseId?: string | null;
+  store?: boolean;
 }
 
 export interface ResponsesRequestDiagnostic {
   id: number;
+  responseId: string;
   model: string;
   stream: true;
-  store: false;
+  store: boolean;
+  previousResponseId: string | null;
   lastUserText: string;
   inputRoles: Array<'user' | 'assistant'>;
   effort: string | null;
@@ -88,7 +94,7 @@ class HeldResponsesController implements HeldResponsesRequest {
   #released = false;
   #abortExpected = false;
 
-  constructor() {
+  constructor(private readonly onCompleted: (request: RecordedResponsesRequest) => void) {
     void this.#received.promise.catch(() => undefined);
   }
 
@@ -117,10 +123,11 @@ class HeldResponsesController implements HeldResponsesRequest {
 
   releaseEcho(): void {
     void this.#received.promise.then(
-      (request) => this.#release(responsesTextResponse(
-        `echo:${request.lastUserText}`,
-        request,
-      )),
+      (request) => {
+        if (this.#release(responsesTextResponse(`echo:${request.lastUserText}`, request))) {
+          this.onCompleted(request);
+        }
+      },
       () => undefined,
     );
   }
@@ -128,13 +135,17 @@ class HeldResponsesController implements HeldResponsesRequest {
   releaseText(content: string): boolean {
     if (!this.#received.settled) {
       void this.#received.promise.then(
-        (request) => this.#release(responsesTextResponse(content, request)),
+        (request) => {
+          if (this.#release(responsesTextResponse(content, request))) this.onCompleted(request);
+        },
         () => undefined,
       );
       return true;
     }
     void this.#received.promise.then(
-      (request) => this.#release(responsesTextResponse(content, request)),
+      (request) => {
+        if (this.#release(responsesTextResponse(content, request))) this.onCompleted(request);
+      },
       () => undefined,
     );
     return !this.#response.settled;
@@ -177,9 +188,10 @@ class HeldResponsesController implements HeldResponsesRequest {
     ));
   }
 
-  #release(response: Response): void {
+  #release(response: Response): boolean {
     const released = this.#response.resolve(response);
     this.#released = released || this.#released;
+    return released;
   }
 }
 
@@ -206,7 +218,25 @@ function parseContent(value: unknown): FakeResponsesInputMessage['content'] | nu
 
 function parseRequestBody(value: unknown): FakeResponsesRequestBody | null {
   if (!isRecord(value) || typeof value.model !== 'string' || !value.model.trim()) return null;
-  if (value.stream !== true || value.store !== false || !Array.isArray(value.input) || !value.input.length) {
+  if (
+    value.stream !== true
+    || typeof value.store !== 'boolean'
+    || !Array.isArray(value.input)
+    || !value.input.length
+  ) {
+    return null;
+  }
+  const hasPreviousResponseId = Object.hasOwn(value, 'previous_response_id');
+  if (value.store) {
+    if (
+      !hasPreviousResponseId
+      || (value.previous_response_id !== null
+        && (typeof value.previous_response_id !== 'string'
+          || !value.previous_response_id.trim()))
+    ) {
+      return null;
+    }
+  } else if (hasPreviousResponseId) {
     return null;
   }
 
@@ -229,7 +259,8 @@ function parseRequestBody(value: unknown): FakeResponsesRequestBody | null {
     model: value.model,
     input,
     stream: true,
-    store: false,
+    store: value.store,
+    ...(value.store ? { previous_response_id: value.previous_response_id as string | null } : {}),
     ...(reasoning ? { reasoning } : {}),
   };
 }
@@ -253,7 +284,10 @@ function matches(request: RecordedResponsesRequest, matcher: ResponsesRequestMat
   return (matcher.lastUserText === undefined || request.lastUserText === matcher.lastUserText)
     && (matcher.lastUserTextIncludes === undefined
       || request.lastUserText.includes(matcher.lastUserTextIncludes))
-    && (matcher.model === undefined || request.body.model === matcher.model);
+    && (matcher.model === undefined || request.body.model === matcher.model)
+    && (matcher.store === undefined || request.body.store === matcher.store)
+    && (!Object.hasOwn(matcher, 'previousResponseId')
+      || request.body.previous_response_id === matcher.previousResponseId);
 }
 
 function deterministicChunks(content: string): string[] {
@@ -291,7 +325,7 @@ function responseEnvelope(
   status: string,
 ): Record<string, unknown> {
   return {
-    id: `resp_fake_${request.id}`,
+    id: request.responseId,
     object: 'response',
     model: request.body.model,
     status,
@@ -375,6 +409,7 @@ export class FakeOpenAiResponsesServer {
   readonly #waiters: RequestWaiter[] = [];
   readonly #activeHolds = new Set<HeldResponsesController>();
   readonly #holds = new Set<HeldResponsesController>();
+  readonly #retainedResponseIds = new Set<string>();
   #requestId = 0;
   #stopped = false;
 
@@ -396,7 +431,7 @@ export class FakeOpenAiResponsesServer {
   }
 
   holdNext(matcher: ResponsesRequestMatcher): HeldResponsesRequest {
-    const held = new HeldResponsesController();
+    const held = new HeldResponsesController((request) => this.#retain(request));
     this.#holds.add(held);
     this.#plans.push({ matcher, response: { kind: 'hold', held } });
     return held;
@@ -438,12 +473,18 @@ export class FakeOpenAiResponsesServer {
     return this.#requests.values();
   }
 
+  expireResponse(responseId: string): boolean {
+    return this.#retainedResponseIds.delete(responseId);
+  }
+
   diagnosticRequests(): readonly ResponsesRequestDiagnostic[] {
     return this.requests().map((request) => ({
       id: request.id,
+      responseId: request.responseId,
       model: request.body.model,
       stream: true,
-      store: false,
+      store: request.body.store,
+      previousResponseId: request.body.previous_response_id ?? null,
       lastUserText: request.lastUserText,
       inputRoles: request.body.input.map((message) => message.role),
       effort: request.body.reasoning?.effort ?? null,
@@ -546,8 +587,10 @@ export class FakeOpenAiResponsesServer {
       return this.#protocolViolation(`Invalid Responses request: ${JSON.stringify(rawBody)}`);
     }
 
+    const requestId = ++this.#requestId;
     const recorded: RecordedResponsesRequest = {
-      id: ++this.#requestId,
+      id: requestId,
+      responseId: `resp_fake_${requestId}`,
       body,
       rawBody,
       lastUserText: lastUserText(body.input),
@@ -559,6 +602,19 @@ export class FakeOpenAiResponsesServer {
     }, { once: true });
     this.#requests.push(recorded);
     this.#resolveRequestWaiters(recorded);
+
+    const previousResponseId = body.previous_response_id;
+    if (body.store && typeof previousResponseId === 'string'
+      && !this.#retainedResponseIds.has(previousResponseId)) {
+      return Response.json({
+        error: {
+          code: 'previous_response_not_found',
+          message: `Previous response ${previousResponseId} could not be resolved.`,
+          param: 'previous_response_id',
+          type: 'invalid_request_error',
+        },
+      }, { status: 404 });
+    }
 
     const planIndex = this.#plans.findIndex((plan) => matches(recorded, plan.matcher));
     const plan = planIndex >= 0 ? this.#plans.splice(planIndex, 1)[0].response : null;
@@ -578,21 +634,31 @@ export class FakeOpenAiResponsesServer {
     if (plan?.kind === 'failed') return responsesFailedResponse(plan.message, recorded);
     if (plan?.kind === 'incomplete') return responsesIncompleteResponse(plan.reason, recorded);
     if (plan?.kind === 'thinking-then-text') {
+      this.#retain(recorded);
       return responsesTextResponse(plan.content, recorded, true);
     }
     if (plan?.kind === 'malformed-then-text') {
+      this.#retain(recorded);
       const valid = await responsesTextResponse(plan.content, recorded).text();
       return new Response(`data: {not-json}\n\n${valid}`, {
         headers: { 'content-type': 'text/event-stream; charset=utf-8' },
       });
     }
-    if (plan?.kind === 'empty') return responsesEmptyResponse(recorded);
+    if (plan?.kind === 'empty') {
+      this.#retain(recorded);
+      return responsesEmptyResponse(recorded);
+    }
     if (plan?.kind === 'truncated-stream') return responsesTruncatedStreamResponse(recorded);
 
     if (this.#defaultDelayMs > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, this.#defaultDelayMs));
     }
+    this.#retain(recorded);
     return responsesTextResponse(`echo:${recorded.lastUserText}`, recorded);
+  }
+
+  #retain(request: RecordedResponsesRequest): void {
+    if (request.body.store) this.#retainedResponseIds.add(request.responseId);
   }
 
   #resolveRequestWaiters(request: RecordedResponsesRequest): void {
