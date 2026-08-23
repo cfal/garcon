@@ -71,6 +71,7 @@ describe('garcon-cli export', () => {
       expect(document).toContain('<user ordinal="1"');
       expect(document).toContain('<assistant ordinal="3"');
       expect(document).not.toContain('<exclusions>');
+      expect(document).not.toContain('<omitted');
       expect(document).not.toContain('category=');
       expect(document).not.toContain('timestamp=');
 
@@ -149,6 +150,9 @@ describe('garcon-cli export', () => {
         ]);
         expect(filtered.exitCode).toBe(0);
         expect(filtered.stdout).not.toContain('<exclusions>');
+        expect(filtered.stdout).toContain(
+          '<omitted tool-calls="1" tool-results="1" permissions="2"/>',
+        );
         expect(filtered.stdout).toContain(prompt);
         expect(filtered.stdout).toContain(reply);
         expect(filtered.stdout).not.toContain(command);

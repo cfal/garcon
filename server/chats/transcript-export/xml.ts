@@ -1,3 +1,4 @@
+import { TRANSCRIPT_EXPORT_CATEGORIES } from '../../../common/chat-export-contracts.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import type { TranscriptExportDocumentModel } from './model.js';
 import {
@@ -12,10 +13,19 @@ import {
 } from './values.js';
 
 export function renderTranscriptExportXml(model: TranscriptExportDocumentModel): string {
+  const omittedAttributes = TRANSCRIPT_EXPORT_CATEGORIES
+    .map((category) => ({
+      category,
+      count: model.omitted.find((omitted) => omitted.category === category)?.count ?? 0,
+    }))
+    .filter(({ count }) => count > 0)
+    .map(({ category, count }) => `${category}="${count}"`)
+    .join(' ');
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<transcript-export version="1">',
     `  <chat id="${attribute(model.chat.id)}" title="${attribute(model.chat.title)}" agent="${attribute(model.chat.agentId)}"${model.chat.model === null ? '' : ` model="${attribute(model.chat.model)}"`}/>`,
+    ...(omittedAttributes === '' ? [] : [`  <omitted ${omittedAttributes}/>`]),
     '  <entries>',
   ];
 
