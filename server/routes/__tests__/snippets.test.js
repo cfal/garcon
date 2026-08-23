@@ -76,7 +76,7 @@ describe('snippet routes', () => {
     const omittedRequest = {
       shortName: 'review',
       arguments: { type: 'default' },
-      context: { type: 'chat', chatId: 'chat-a' },
+      context: { type: 'chat', chatId: '1787471053739199' },
     };
     const result = await call(routes['/api/v1/snippets/expand'].POST, omittedRequest, 'POST');
     expect(result.response.status).toBe(200);
@@ -93,7 +93,11 @@ describe('snippet routes', () => {
     const explicitEmptyRequest = {
       shortName: 'review',
       arguments: { type: 'value', value: '' },
-      context: { type: 'chat', chatId: 'chat-a' },
+      context: {
+        type: 'new-chat',
+        chatId: '1787471053739200',
+        projectPath: '/repo',
+      },
     };
     await call(routes['/api/v1/snippets/expand'].POST, explicitEmptyRequest, 'POST');
     expect(snippets.expand).toHaveBeenLastCalledWith(explicitEmptyRequest);
@@ -112,7 +116,7 @@ describe('snippet routes', () => {
         {
           shortName: 'review',
           arguments: argumentsInput,
-          context: { type: 'chat', chatId: 'chat-a' },
+          context: { type: 'chat', chatId: '1787471053739199' },
         },
         'POST',
       );

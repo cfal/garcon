@@ -5,7 +5,7 @@
 
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
-	import { createClientChatId } from '$shared/client-chat-id';
+	import type { ChatId } from '$shared/chat-id';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
@@ -21,9 +21,7 @@
 		if (!next) appShell.closeNewChatDialog();
 	}
 
-	function handleStartChat(config: NewChatConfig) {
-		const chatId = createClientChatId();
-
+	function handleStartChat(config: NewChatConfig, chatId: ChatId) {
 		sessions.createDraft({
 			id: chatId,
 			projectPath: config.projectPath,

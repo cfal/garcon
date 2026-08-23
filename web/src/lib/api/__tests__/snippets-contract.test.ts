@@ -68,12 +68,12 @@ describe('snippets API contract', () => {
 		await expandSnippet({
 			shortName: snippet.shortName,
 			arguments: { type: 'default' },
-			context: { type: 'project', projectPath: '/repo' },
+			context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 		});
 		await expandSnippet({
 			shortName: snippet.shortName,
 			arguments: { type: 'value', value: '' },
-			context: { type: 'project', projectPath: '/repo' },
+			context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 		});
 
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
@@ -137,7 +137,7 @@ describe('snippets API contract', () => {
 			expandSnippet({
 				shortName: 'review',
 				arguments: { type: 'value', value: 'the API' },
-				context: { type: 'project', projectPath: '/repo' },
+				context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 			}),
 		).rejects.toThrow('Invalid snippet expansion response');
 	});
@@ -150,7 +150,7 @@ describe('snippets API contract', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'value', value: 'the API' },
-				context: { type: 'project', projectPath: '/repo' },
+				context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 			},
 			{ signal: controller.signal },
 		);

@@ -18,6 +18,13 @@
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 
+	interface Props {
+		snippetTemplate?: string | null;
+		onCreateDraft?: (draft: unknown) => void;
+	}
+
+	let { snippetTemplate = null, onCreateDraft = () => {} }: Props = $props();
+
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';
 	appShell.openNewChatDialog();
@@ -33,12 +40,28 @@
 	setTransientLayers(transientLayers);
 	setSnippets(
 		createSnippetsStore({
-			get: async () => ({ revision: 0, snippets: [] }),
+			get: async () => ({
+				revision: 0,
+				snippets: snippetTemplate
+					? [
+							{
+								id: 'snippet-handoff',
+								shortName: 'handoff',
+								template: snippetTemplate,
+								defaultArguments: '',
+								createdAt: '2026-01-01T00:00:00.000Z',
+								updatedAt: '2026-01-01T00:00:00.000Z',
+							},
+						]
+					: [],
+			}),
 		}),
 	);
 	setChatSessions({
 		orderedChats: [],
-		createDraft() {},
+		createDraft(draft: unknown) {
+			onCreateDraft(draft);
+		},
 	} as never);
 	setWorkspaceCoordinator({
 		focusChat: () => Promise.resolve(),

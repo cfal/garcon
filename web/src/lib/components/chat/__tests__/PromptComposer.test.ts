@@ -976,6 +976,39 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).toHaveBeenCalledTimes(1);
 	});
 
+	it('uses a new-chat expansion context for a local draft', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'draft expansion',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: '1787471053739199',
+			selectedStatus: 'draft',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await waitFor(() => expect(textarea.value).toBe('draft expansion'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'default' },
+				context: {
+					type: 'new-chat',
+					chatId: '1787471053739199',
+					projectPath: '/workspace/project',
+				},
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+	});
+
 	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
 			success: true,

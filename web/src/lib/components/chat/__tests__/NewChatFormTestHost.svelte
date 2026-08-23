@@ -12,6 +12,7 @@
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
+	import type { ChatId } from '$shared/chat-id';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -29,7 +30,7 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
-		onStartChat?: (config: NewChatConfig) => void;
+		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
 	}
 
 	let {
@@ -61,11 +62,13 @@
 
 	setNotifications(notifications);
 
+	let seedListener = () => {};
 	const appShell = {
 		projectBasePath: '/workspace',
 		isMobile: false,
 		openSnippets() {},
-		onNewChatDialogSeed() {
+		onNewChatDialogSeed(callback: () => void) {
+			seedListener = callback;
 			return () => {};
 		},
 	} as never;
@@ -221,6 +224,8 @@
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatForm {onStartChat} />
+
+<button type="button" data-testid="reseed-new-chat" onclick={() => seedListener()}>Reseed</button>
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 {#each notifications.items as notification (notification.id)}

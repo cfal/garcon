@@ -5,7 +5,7 @@ import type { ExpandSnippetRequest, ExpandSnippetResponse } from '$shared/snippe
 const request: ExpandSnippetRequest = {
 	shortName: 'review',
 	arguments: { type: 'value', value: 'the API' },
-	context: { type: 'project', projectPath: '/repo' },
+	context: { type: 'new-chat', chatId: '1787471053739199', projectPath: '/repo' },
 };
 
 const response: ExpandSnippetResponse = {
