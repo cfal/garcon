@@ -7,7 +7,7 @@ import {
   type DirectChatRuntimeBaseConfig,
   type DirectRuntimeSession,
   type DirectTurnCompletion,
-} from "./direct-chat-runtime-base.js";
+} from './direct-chat-runtime-base.js';
 import { appendTextAttachmentContext, imageAttachments } from '@garcon/server-agent-common/shared/attachments';
 import {
   directSingleQuerySignal,
@@ -163,11 +163,12 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
       if (!currentInput || currentInput.role !== 'user') {
         throw new Error(`${this.config.runtimeLabel} session is missing its current user input.`);
       }
+      const requestInput = checkpoint ? [currentInput] : session.messages;
       let completion: ResponsesCompletion;
       try {
         completion = await this.#request(
           session,
-          checkpoint ? [currentInput] : session.messages,
+          requestInput,
           checkpoint?.responseId ?? null,
           apiKey,
           reasoningEffort,
@@ -185,17 +186,18 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
         );
       }
 
+      const nextCheckpoint: DirectResponsesCheckpointV1 | null = completion.responseId
+        ? {
+            kind: 'openai-response',
+            responseId: completion.responseId,
+            endpointId: this.config.endpointId,
+            endpointFingerprint: this.config.endpointFingerprint,
+            model: session.model,
+          }
+        : null;
       return {
         content: completion.text,
-        checkpoint: completion.responseId
-          ? {
-              kind: 'openai-response',
-              responseId: completion.responseId,
-              endpointId: this.config.endpointId,
-              endpointFingerprint: this.config.endpointFingerprint,
-              model: session.model,
-            }
-          : null,
+        checkpoint: nextCheckpoint,
       };
     } finally {
       clearTimeout(timer);

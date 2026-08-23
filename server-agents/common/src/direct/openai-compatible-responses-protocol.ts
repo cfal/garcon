@@ -14,6 +14,17 @@ interface ResponsesOutputMessage {
   content?: ResponsesOutputTextPart[];
 }
 
+interface ResponsesFailureFields {
+  error?: { code?: unknown; message?: unknown };
+  incomplete_details?: { reason?: unknown };
+  status_details?: { error?: { code?: unknown; message?: unknown } };
+}
+
+interface ResponsesJsonBody extends ResponsesFailureFields {
+  id?: unknown;
+  status?: unknown;
+}
+
 export interface ResponsesCompletion {
   readonly text: string;
   readonly responseId: string | null;
@@ -32,12 +43,7 @@ interface ResponsesStreamEvent {
   type?: string;
   delta?: unknown;
   error?: { code?: unknown; message?: unknown };
-  response?: {
-    id?: unknown;
-    error?: { code?: unknown; message?: unknown };
-    incomplete_details?: { reason?: unknown };
-    status_details?: { error?: { code?: unknown; message?: unknown } };
-  };
+  response?: ResponsesFailureFields & { id?: unknown };
 }
 
 export class ResponsesRequestError extends Error {
@@ -90,23 +96,32 @@ function hasResponsesOutputText(data: unknown): boolean {
 }
 
 function responsesFailureMessage(event: ResponsesStreamEvent): string {
-  const directMessage = event.response?.error?.message;
-  if (typeof directMessage === 'string') return directMessage;
-
-  const compatibleMessage = event.response?.status_details?.error?.message;
-  if (typeof compatibleMessage === 'string') return compatibleMessage;
-
-  const incompleteReason = event.response?.incomplete_details?.reason;
-  if (typeof incompleteReason === 'string') return incompleteReason;
-
-  return `Responses stream ended with ${event.type ?? 'an unknown failure'}.`;
+  return responseErrorMessage(event.response)
+    ?? responseIncompleteReason(event.response)
+    ?? `Responses stream ended with ${event.type ?? 'an unknown failure'}.`;
 }
 
 function responsesFailureCode(event: ResponsesStreamEvent): string | null {
-  const directCode = event.response?.error?.code;
+  return responseErrorCode(event.response);
+}
+
+function responseErrorMessage(fields: ResponsesFailureFields | undefined): string | null {
+  const directMessage = fields?.error?.message;
+  if (typeof directMessage === 'string') return directMessage;
+  const compatibleMessage = fields?.status_details?.error?.message;
+  return typeof compatibleMessage === 'string' ? compatibleMessage : null;
+}
+
+function responseErrorCode(fields: ResponsesFailureFields | undefined): string | null {
+  const directCode = fields?.error?.code;
   if (typeof directCode === 'string') return directCode;
-  const compatibleCode = event.response?.status_details?.error?.code;
+  const compatibleCode = fields?.status_details?.error?.code;
   return typeof compatibleCode === 'string' ? compatibleCode : null;
+}
+
+function responseIncompleteReason(fields: ResponsesFailureFields | undefined): string | null {
+  const reason = fields?.incomplete_details?.reason;
+  return typeof reason === 'string' ? reason : null;
 }
 
 function responseId(value: unknown): string | null {
@@ -156,31 +171,15 @@ export async function readOpenAiResponsesResponse(
   let text: string;
   let completedResponseId: string | null;
   if (isJsonResponse(response)) {
-    const data = await response.json() as {
-      id?: unknown;
-      status?: unknown;
-      error?: { code?: unknown; message?: unknown };
-      incomplete_details?: { reason?: unknown };
-      status_details?: { error?: { code?: unknown; message?: unknown } };
-    };
-    const responseError = typeof data.error?.message === 'string'
-      ? data.error.message
-      : typeof data.status_details?.error?.message === 'string'
-        ? data.status_details.error.message
-        : null;
+    const data = await response.json() as ResponsesJsonBody;
+    const responseError = responseErrorMessage(data);
     if (data.status === 'failed' || data.status === 'incomplete' || responseError) {
       const detail = responseError
-        ?? (typeof data.incomplete_details?.reason === 'string'
-          ? data.incomplete_details.reason
-          : `Responses API returned status ${data.status}.`);
-      const code = typeof data.error?.code === 'string'
-        ? data.error.code
-        : typeof data.status_details?.error?.code === 'string'
-          ? data.status_details.error.code
-          : null;
+        ?? responseIncompleteReason(data)
+        ?? `Responses API returned status ${data.status}.`;
       throw new ResponsesRequestError(
         `${runtimeLabel} response error: ${detail}`,
-        code,
+        responseErrorCode(data),
         hasResponsesOutputText(data),
       );
     }
