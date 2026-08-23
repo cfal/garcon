@@ -32,6 +32,7 @@
 		focusOwner?: 'chat-list' | 'chat' | 'file' | 'terminal';
 		transientKind?: TransientLayerKind | null;
 		transientSurface?: boolean;
+		transientSurfaceId?: string;
 		onFileSave?: () => void;
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
@@ -53,6 +54,7 @@
 		focusOwner = 'chat-list',
 		transientKind = null,
 		transientSurface = false,
+		transientSurfaceId,
 		onFileSave = () => undefined,
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
@@ -225,7 +227,8 @@
 	<div
 		bind:this={transientElement}
 		{@attach localShortcutOwner && localShortcutBoundary}
-		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
+		data-workspace-surface-id={transientSurfaceId ??
+			(transientSurface ? 'file:file-session' : undefined)}
 		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
 	>
 		<button type="button" aria-label="Transient toolbar">Toolbar</button>

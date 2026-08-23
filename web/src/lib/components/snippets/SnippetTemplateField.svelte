@@ -38,7 +38,7 @@
 </script>
 
 <div
-	class="overflow-hidden rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring"
+	class="overflow-hidden rounded-md border border-input bg-background has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring"
 	class:border-destructive={invalid}
 	aria-busy={isPromptRefinementPending}
 >
