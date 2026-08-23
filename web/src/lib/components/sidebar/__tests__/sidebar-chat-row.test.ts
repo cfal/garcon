@@ -86,7 +86,8 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(title.parentElement?.className).toContain('leading-[1.3]');
 		expect(screen.getByText('3h ago').className).toContain('font-normal');
-		expect(screen.getByText('3h ago').className).not.toContain('md:group-hover:opacity-0');
+		expect(screen.getByText('3h ago').className).not.toContain('ml-auto');
+		expect(screen.getByText('3h ago').className).not.toContain('group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
@@ -238,6 +239,13 @@ describe('shared sidebar chat row', () => {
 		);
 		expect(timestampBadge?.textContent).toBe('3h ago');
 		expect(timestampBadge?.className).toContain('tabular-nums');
+		expect(timestampBadge?.className).toContain('ml-auto');
+		expect(timestampBadge?.className).toContain('group-hover:opacity-0');
+		expect(timestampBadge?.className).toContain('group-focus-within:opacity-0');
+		expect(timestampBadge?.className).toContain('mr-6');
+		expect(timestampBadge?.className).toContain(
+			'[@media(hover:hover)_and_(pointer:fine)]:mr-0',
+		);
 		expect(timestampBadge?.getAttribute('title')).toBeTruthy();
 
 		const stateBadge = document.querySelector<HTMLElement>(
@@ -248,10 +256,17 @@ describe('shared sidebar chat row', () => {
 		expect(stateBadge?.getAttribute('aria-hidden')).toBeNull();
 		expect(screen.getByText('Pinned').className).toContain('sr-only');
 		if (!stateBadge || !timestampBadge) throw new Error('expected badges');
-		expect(timestampBadge.compareDocumentPosition(stateBadge)).toBe(
+		expect(title.compareDocumentPosition(stateBadge)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
-		expect(title.compareDocumentPosition(timestampBadge)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(stateBadge.compareDocumentPosition(timestampBadge)).toBe(
+			Node.DOCUMENT_POSITION_FOLLOWING,
+		);
+		expect(stateBadge.parentElement).toBe(title.parentElement);
+		expect(timestampBadge.parentElement).toBe(title.parentElement);
+		expect(
+			document.querySelector<HTMLElement>('[data-slot="sidebar-chat-summary"]')?.className,
+		).toContain('w-full');
 
 		// The row button keeps the default-mode overlay anchor placement without
 		// reserving a right gutter, with reduced vertical padding.
@@ -261,6 +276,28 @@ describe('shared sidebar chat row', () => {
 		const menuAnchor = document.querySelector<HTMLElement>('.sidebar-item-menu-anchor');
 		expect(menuAnchor?.className).toContain('top-1/2');
 		expect(menuAnchor?.className).toContain('-translate-y-1/2');
+	});
+
+	it('does not reserve title space for an absent single-line state badge', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		const title = screen.getByText('Shared row chat');
+		const timestampBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-timestamp-badge"]',
+		);
+		expect(document.querySelector('[data-slot="sidebar-chat-state-badge"]')).toBeNull();
+		const titleRowChildren = Array.from(title.parentElement?.children ?? []);
+		expect(titleRowChildren).toHaveLength(2);
+		expect(titleRowChildren[0]).toBe(title);
+		expect(titleRowChildren[1]).toBe(timestampBadge);
 	});
 
 	it('shows the processing indicator instead of the timestamp badge in single-line mode', () => {
@@ -274,9 +311,19 @@ describe('shared sidebar chat row', () => {
 			},
 		});
 
-		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+		const processingIndicator = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-processing-indicator"]',
+		);
+		expect(processingIndicator).toBeTruthy();
 		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
-		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
+		expect(processingIndicator?.parentElement?.className).toContain('ml-auto');
+		expect(processingIndicator?.parentElement?.className).toContain('group-hover:opacity-0');
+		expect(processingIndicator?.parentElement?.className).toContain(
+			'group-focus-within:opacity-0',
+		);
+		const processingLabel = screen.getByText('Chat is processing');
+		expect(processingLabel.className).toContain('sr-only');
+		expect(processingIndicator?.contains(processingLabel)).toBe(false);
 	});
 
 	it('prefers the pinned badge over the archived badge in single-line mode', () => {
@@ -311,9 +358,39 @@ describe('shared sidebar chat row', () => {
 		});
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
-		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
-		expect(document.querySelector('[data-slot="sidebar-chat-state-badge"]')).toBeTruthy();
+		const timestampBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-timestamp-badge"]',
+		);
+		const stateBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-state-badge"]',
+		);
+		expect(timestampBadge?.className).toContain('ml-auto');
+		expect(timestampBadge?.className).not.toContain('group-hover:opacity-0');
+		expect(timestampBadge?.className).not.toContain('mr-6');
+		expect(stateBadge).toBeTruthy();
+		expect(stateBadge?.parentElement).toBe(screen.getByText('Shared row chat').parentElement);
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+	});
+
+	it('keeps the single-line status visible without a menu in desktop multi-select mode', () => {
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isMultiSelectMode: true,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'single-line',
+				sortMode: 'manual',
+			},
+		});
+
+		const timestampBadge = document.querySelector<HTMLElement>(
+			'[data-slot="sidebar-chat-timestamp-badge"]',
+		);
+		expect(timestampBadge?.className).toContain('ml-auto');
+		expect(timestampBadge?.className).not.toContain('mr-6');
+		expect(timestampBadge?.className).not.toContain('group-hover:opacity-0');
+		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {
