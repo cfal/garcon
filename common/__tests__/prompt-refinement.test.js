@@ -4,6 +4,7 @@ import {
   PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH,
   normalizeRefinePromptRequest,
   normalizeRefinePromptResponse,
+  promptRefinementTargetOutputMaxLength,
 } from '../prompt-refinement.js';
 import { SNIPPET_TEMPLATE_MAX_LENGTH } from '../snippets.js';
 
@@ -36,6 +37,12 @@ describe('prompt refinement contracts', () => {
   });
 
   it('trims only response boundaries and enforces the exact output ceiling', () => {
+    expect(promptRefinementTargetOutputMaxLength('prompt')).toBe(
+      PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH,
+    );
+    expect(promptRefinementTargetOutputMaxLength('snippet-template')).toBe(
+      SNIPPET_TEMPLATE_MAX_LENGTH,
+    );
     expect(normalizeRefinePromptResponse({
       success: true,
       refinedPrompt: '  first\n\nsecond  ',

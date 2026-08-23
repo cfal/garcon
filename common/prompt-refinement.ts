@@ -26,6 +26,12 @@ export function promptRefinementTargetMaxLength(target: PromptRefinementTarget):
     : PROMPT_REFINEMENT_DRAFT_MAX_LENGTH;
 }
 
+export function promptRefinementTargetOutputMaxLength(target: PromptRefinementTarget): number {
+  return target === 'snippet-template'
+    ? SNIPPET_TEMPLATE_MAX_LENGTH
+    : PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH;
+}
+
 export function normalizeRefinePromptRequest(value: unknown): RefinePromptRequest | null {
   if (
     !isRecord(value)
@@ -48,6 +54,8 @@ export function normalizeRefinePromptResponse(
     return null;
   }
   const refinedPrompt = value.refinedPrompt.trim();
-  if (!refinedPrompt || refinedPrompt.length > promptRefinementTargetMaxLength(target)) return null;
+  if (!refinedPrompt || refinedPrompt.length > promptRefinementTargetOutputMaxLength(target)) {
+    return null;
+  }
   return { success: true, refinedPrompt };
 }
