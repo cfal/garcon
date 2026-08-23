@@ -1,28 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type {
-  ChatMessagesMessage,
-} from '../../../../common/ws-events.js';
+import { stat } from 'node:fs/promises';
+import type { TranscriptMessage } from '../../../../common/chat-view.js';
 import {
   assistantContents,
   countUserContent,
-  messagesOfType,
   userContents,
 } from '../../../support/chat-assertions.js';
+import { withIntegrationFixture } from '../../../support/integration-fixture.js';
 import {
-  type IntegrationFixture,
-  withIntegrationFixture,
-} from '../../../support/integration-fixture.js';
-import {
-  exactReplyPrompt,
-  expectAssistantMarker,
-  expectFinished,
-  expectNoCompletionReply,
-  foldableReplyPrompt,
-  liveMarker as marker,
   LIVE_TURN_TIMEOUT_MS as TURN_TIMEOUT_MS,
-  waitForVisibleResponse as waitForVisibleClaudeResponse,
+  reloadUntilNativeAnswersPrompt,
+  reloadUntilNativeStableAfterPrompt,
+  waitForVisibleResponse,
 } from '../../../support/live-agent.js';
 import {
   liveClaudeForkRunRequest,
@@ -31,458 +20,143 @@ import {
   liveClaudeStartRequest,
 } from '../../../support/live-claude.js';
 import { createLiveClaudeProtocolProbe } from '../../../support/live-claude-protocol-probe.js';
+import {
+  type PersistedChatBinding,
+  waitForPersistedNativeSession,
+} from '../../../support/persisted-chat.js';
 
 describe('live Claude lifecycle', () => {
-  test('holds queue ownership across a background Bash continuation', async () => {
+  test('persists, resumes, and forks real turns without model-specific output', async () => {
     const serverEnvironment = await liveClaudeServerEnvironment();
-    await withIntegrationFixture('live-claude-background-continuation', async (fixture) => {
-      const chatId = fixture.newChatId();
-      const launchedMarker = marker('BACKGROUND_LAUNCHED');
-      const completedMarker = marker('BACKGROUND_COMPLETED');
-      const successorMarker = marker('BACKGROUND_SUCCESSOR');
-      const prompt = [
-        'Use the Bash tool exactly once with run_in_background set to true.',
-        `Run exactly \`sleep 20; printf done\`.`,
-        `As soon as Bash reports that the command started in the background, reply with exactly ${launchedMarker} and end that model turn.`,
-        'Do not call TaskOutput, poll, sleep in another tool, or wait synchronously.',
-        `When the background task completion notification arrives, reply with exactly ${completedMarker}.`,
-      ].join(' ');
-      const cursor = fixture.client.markEvents();
-      const first = await fixture.client.startChat(liveClaudeStartRequest({
-        chatId,
+    await withIntegrationFixture('live-claude-durable-session', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourcePrompt = 'Briefly explain why isolated test workspaces are useful.';
+      const queuedPrompt = 'Add one concise observation about reproducibility.';
+      const sourceCursor = fixture.client.markEvents();
+      const source = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId: sourceChatId,
         projectPath: fixture.dirs.project,
-        command: prompt,
+        command: sourcePrompt,
         permissionMode: 'bypassPermissions',
       }));
-
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'assistant-message'
-            && entry.message.content.includes(launchedMarker)),
-        'live Claude background launch response',
-        { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
-        type: 'agent-run-finished',
-        chatId,
-        turnId: first.turnId,
-      }));
+      await fixture.client.waitForProcessing(sourceChatId, true, {
+        afterIndex: sourceCursor,
+        timeoutMs: TURN_TIMEOUT_MS,
+      });
 
       const queueCursor = fixture.client.markEvents();
-      const successorPrompt = exactReplyPrompt(successorMarker);
-      const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
-      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([
-        successorPrompt,
-      ]);
-
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'assistant-message'
-            && entry.message.content.includes(completedMarker)),
-        'live Claude background completion response',
-        { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, first.turnId, {
-        afterIndex: cursor,
+      const queued = await fixture.client.enqueueNew(sourceChatId, queuedPrompt);
+      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([queuedPrompt]);
+      expect((await fixture.client.waitForTurnTerminal(sourceChatId, source.turnId, {
+        afterIndex: sourceCursor,
         timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
+      })).type).toBe('agent-run-finished');
 
-      const successor = await fixture.client.waitForCommittedUserInput(
-        chatId,
-        successorPrompt,
+      const queuedInput = await fixture.client.waitForCommittedUserInput(
+        sourceChatId,
+        queuedPrompt,
         { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
       );
-      expectFinished((await fixture.client.waitForTurnTerminal(
-        chatId,
-        undefined,
-        {
-          afterIndex: fixture.client.events().lastIndexOf(successor) + 1,
-          timeoutMs: TURN_TIMEOUT_MS,
-        },
-      )).type);
+      const queuedInputIndex = fixture.client.events().lastIndexOf(queuedInput);
+      if (queuedInputIndex < 0) throw new Error('Queued Claude input event was not retained.');
+      expect((await fixture.client.waitForTurnTerminal(sourceChatId, undefined, {
+        afterIndex: queuedInputIndex + 1,
+        timeoutMs: TURN_TIMEOUT_MS,
+      })).type).toBe('agent-run-finished');
+      await waitForVisibleResponse({
+        fixture,
+        chatId: sourceChatId,
+        turnId: source.turnId,
+        afterIndex: sourceCursor,
+      });
+      expect((await fixture.client.getExecutionControl(sourceChatId)).queue.entries).toEqual([]);
 
-      const transcript = await fixture.client.getMessages(chatId);
-      const contents = assistantContents(transcript.messages);
-      const launchedIndex = contents.findIndex((content) => content.includes(launchedMarker));
-      const completedIndex = contents.findIndex((content) => content.includes(completedMarker));
-      const successorIndex = contents.findIndex((content) => content.includes(successorMarker));
-      expect(launchedIndex).toBeGreaterThanOrEqual(0);
-      expect(completedIndex).toBeGreaterThan(launchedIndex);
-      expect(successorIndex).toBeGreaterThan(completedIndex);
-      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
-    }, {
-      redactSensitiveDiagnostics: true,
-      serverEnvironment,
-    });
-  });
+      const stableSource = await reloadUntilNativeStableAfterPrompt(
+        fixture,
+        sourceChatId,
+        queuedPrompt,
+      );
+      expect(userContents(stableSource.messages)).toEqual([sourcePrompt, queuedPrompt]);
 
-  test('queues consecutive turns, forks immediately, and forks the fork', async () => {
-    const serverEnvironment = await liveClaudeServerEnvironment();
-    await withIntegrationFixture('live-claude-queue-and-fork', async (fixture) => {
-      const parentChatId = fixture.newChatId();
-      const firstMarker = marker('PARENT_FIRST');
-      const secondMarker = marker('PARENT_SECOND');
-      const firstPrompt = [
-        'Use the Bash tool immediately, as your first action, to run exactly `sleep 2`.',
-        `After it succeeds, reply with exactly this text: ${firstMarker}. Copy it character for character.`,
-        'Do not run any other command.',
-      ].join(' ');
-      const secondPrompt = foldableReplyPrompt(secondMarker);
-      const firstCursor = fixture.client.markEvents();
-      const first = await fixture.client.startChat(liveClaudeStartRequest({
-        chatId: parentChatId,
-        projectPath: fixture.dirs.project,
-        command: firstPrompt,
+      const sourceNativeBeforeRestart = nativeIdentity(await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: sourceChatId,
+        agentId: 'claude',
+      }));
+      await expectPrivateFile(sourceNativeBeforeRestart.path);
+
+      await fixture.restartGarcon();
+      const resumedPrompt = 'Summarize the discussion so far in one short sentence.';
+      const resumedCursor = fixture.client.markEvents();
+      const resumed = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId: sourceChatId,
+        command: resumedPrompt,
         permissionMode: 'bypassPermissions',
       }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: sourceChatId,
+        turnId: resumed.turnId,
+        afterIndex: resumedCursor,
+      });
+      const sourceAfterResume = await reloadUntilNativeStableAfterPrompt(
+        fixture,
+        sourceChatId,
+        resumedPrompt,
+      );
+      expect(userContents(sourceAfterResume.messages)).toEqual([
+        sourcePrompt,
+        queuedPrompt,
+        resumedPrompt,
+      ]);
+      expect(assistantContents(sourceAfterResume.messages).length)
+        .toBeGreaterThan(assistantContents(stableSource.messages).length);
 
-      const queueCursor = fixture.client.markEvents();
-      const queued = await fixture.client.enqueueNew(parentChatId, secondPrompt);
-      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([secondPrompt]);
+      const sourceNativeAfterRestart = nativeIdentity(await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: sourceChatId,
+        agentId: 'claude',
+      }));
+      expect(sourceNativeAfterRestart).toEqual(sourceNativeBeforeRestart);
+
       const childChatId = fixture.newChatId();
-      const childMarker = marker('CHILD');
-      const childPrompt = [
-        'Use the Bash tool immediately, as your first action, to run exactly `sleep 2`.',
-        `After it succeeds, reply with exactly this text: ${childMarker}. Copy it character for character.`,
-        'Do not run any other command.',
-      ].join(' ');
+      const childPrompt = 'Add one concise caveat about relying on external services.';
       const childCursor = fixture.client.markEvents();
-      const childRequest = liveClaudeForkRunRequest({
-        sourceChatId: parentChatId,
+      const child = await fixture.client.forkRunChat(liveClaudeForkRunRequest({
+        sourceChatId,
         chatId: childChatId,
         command: childPrompt,
         permissionMode: 'bypassPermissions',
-      });
-      // The child inherits both parent turns, so it forks once the queue has drained;
-      // fork-while-running is covered by fork-while-running.test.ts.
-      expectFinished((await fixture.client.waitForTurnTerminal(parentChatId, first.turnId, {
-        afterIndex: firstCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
-      const secondInput = await fixture.client.waitForCommittedUserInput(
-        parentChatId,
-        secondPrompt,
-        { afterIndex: queueCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      expectFinished((await fixture.client.waitForTurnTerminal(
-        parentChatId,
-        undefined,
-        {
-          afterIndex: fixture.client.events().lastIndexOf(secondInput) + 1,
-          timeoutMs: TURN_TIMEOUT_MS,
-        },
-      )).type);
-
-      const parentAfterQueue = await fixture.client.getMessages(parentChatId);
-      const firstAssistant = parentAfterQueue.messages.find((entry) =>
-        entry.message.type === 'assistant-message'
-        && entry.message.content.includes(firstMarker));
-      if (!firstAssistant) throw new Error('Live Claude first response was not persisted.');
-
-      const child = await fixture.client.forkRunChat(childRequest);
-      const grandchildChatId = fixture.newChatId();
-      const grandchildMarker = marker('GRANDCHILD');
-      const grandchildPrompt = exactReplyPrompt(grandchildMarker);
-      const grandchildCursor = fixture.client.markEvents();
-      const grandchildRequest = liveClaudeForkRunRequest({
-        sourceChatId: childChatId,
-        chatId: grandchildChatId,
-        command: grandchildPrompt,
-      });
-      // Likewise the grandchild must inherit the child's completed turn.
-      await waitForVisibleClaudeResponse({
+      }));
+      await waitForVisibleResponse({
         fixture,
         chatId: childChatId,
         turnId: child.turnId,
-        marker: childMarker,
         afterIndex: childCursor,
       });
-      const grandchild = await fixture.client.forkRunChat(grandchildRequest);
-      await waitForVisibleClaudeResponse({
+      const childTranscript = await reloadUntilNativeAnswersPrompt(
         fixture,
-        chatId: grandchildChatId,
-        turnId: grandchild.turnId,
-        marker: grandchildMarker,
-        afterIndex: grandchildCursor,
-      });
-
-      const pointChatId = fixture.newChatId();
-      await fixture.client.forkChat({
-        sourceChatId: parentChatId,
-        chatId: pointChatId,
-        transcriptViewId: parentAfterQueue.transcriptViewId,
-        upToOrdinal: firstAssistant.ordinal,
-      });
-      const pointMarker = marker('POINT_FORK');
-      const pointPrompt = exactReplyPrompt(pointMarker);
-      const pointCursor = fixture.client.markEvents();
-      const pointTurn = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId: pointChatId,
-        command: pointPrompt,
-      }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId: pointChatId,
-        turnId: pointTurn.turnId,
-        marker: pointMarker,
-        afterIndex: pointCursor,
-      });
-
-      const parentContinuationMarker = marker('PARENT_CONTINUATION');
-      const parentContinuationPrompt = exactReplyPrompt(parentContinuationMarker);
-      const parentContinuationCursor = fixture.client.markEvents();
-      const parentContinuation = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId: parentChatId,
-        command: parentContinuationPrompt,
-      }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId: parentChatId,
-        turnId: parentContinuation.turnId,
-        marker: parentContinuationMarker,
-        afterIndex: parentContinuationCursor,
-      });
-
-      await expectIndependentClaudeGraphs(fixture, [
-        parentChatId,
-        pointChatId,
         childChatId,
-        grandchildChatId,
-      ]);
+        childPrompt,
+      );
+      expectInheritedPrefix(childTranscript.messages, sourceAfterResume.messages, childPrompt);
+      expect(countUserContent(childTranscript.messages, childPrompt)).toBe(1);
+      expect(userContents((await fixture.client.getMessages(sourceChatId)).messages))
+        .not.toContain(childPrompt);
 
-      await fixture.restartGarcon();
-      const resumedMarker = marker('GRANDCHILD_RESUMED');
-      const resumedPrompt = exactReplyPrompt(resumedMarker);
-      const resumedCursor = fixture.client.markEvents();
-      const resumed = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId: grandchildChatId,
-        command: resumedPrompt,
+      const childNative = nativeIdentity(await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId: childChatId,
+        agentId: 'claude',
       }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId: grandchildChatId,
-        turnId: resumed.turnId,
-        marker: resumedMarker,
-        afterIndex: resumedCursor,
-      });
-
-      const parent = await fixture.client.getMessages(parentChatId);
-      const pointTranscript = await fixture.client.getMessages(pointChatId);
-      const childTranscript = await fixture.client.getMessages(childChatId);
-      const grandchildTranscript = await fixture.client.getMessages(grandchildChatId);
-      expect(userContents(parent.messages)).toEqual([
-        firstPrompt,
-        secondPrompt,
-        parentContinuationPrompt,
-      ]);
-      expect(userContents(pointTranscript.messages)).toEqual([firstPrompt, pointPrompt]);
-      expectPromptsInOrder(userContents(childTranscript.messages), [
-        firstPrompt,
-        secondPrompt,
-        childPrompt,
-      ]);
-      // These are native forks, so their feeds are Claude's own record of the sessions they
-      // resume from. A fork-run dispatched while an earlier prompt is unanswered is sent as one
-      // folded prompt, so a single row can carry two of these; the order is what must hold.
-      expectPromptsInOrder(userContents(grandchildTranscript.messages), [
-        firstPrompt,
-        secondPrompt,
-        childPrompt,
-        grandchildPrompt,
-        resumedPrompt,
-      ]);
-      expectAssistantMarker(assistantContents(parent.messages), firstMarker);
-      expectAssistantMarker(assistantContents(parent.messages), secondMarker);
-      expectAssistantMarker(assistantContents(parent.messages), parentContinuationMarker);
-      expectAssistantMarker(assistantContents(pointTranscript.messages), pointMarker);
-      expect(assistantContents(pointTranscript.messages).join('\n')).not.toContain(secondMarker);
-      expectAssistantMarker(assistantContents(childTranscript.messages), childMarker);
-      expectAssistantMarker(assistantContents(grandchildTranscript.messages), grandchildMarker);
-      expectAssistantMarker(assistantContents(grandchildTranscript.messages), resumedMarker);
-      expect(userContents(grandchildTranscript.messages)).not.toContain(parentContinuationPrompt);
-      expect((await fixture.client.getExecutionControl(parentChatId)).queue.entries).toEqual([]);
+      expect(childNative.agentSessionId).not.toBe(sourceNativeAfterRestart.agentSessionId);
+      expect(childNative.path).not.toBe(sourceNativeAfterRestart.path);
+      await expectPrivateFile(childNative.path);
     }, {
       redactSensitiveDiagnostics: true,
       serverEnvironment,
     });
-  });
-
-  test('approves a real tool call, reloads its result, and resumes after restart', async () => {
-    const serverEnvironment = await liveClaudeServerEnvironment();
-    const toolMarker = marker('TOOL_OUTPUT');
-    const fixtureName = 'live-tool-input.txt';
-    const copyName = 'live-tool-copy.txt';
-    const deniedCopyName = 'live-tool-denied-copy.txt';
-    const toolCommand = `cp ${fixtureName} ${copyName} && cat ${copyName}`;
-    const deniedToolCommand = `cp ${fixtureName} ${deniedCopyName} && cat ${deniedCopyName}`;
-    await withIntegrationFixture('live-claude-permission-and-restart', async (fixture) => {
-      const chatId = fixture.newChatId();
-      const prompt = [
-        'This is a harmless integration check for Garcon command permissions.',
-        `A test fixture named ${fixtureName} already exists in the working directory.`,
-        `Use the Bash tool to copy and inspect it by running \`${toolCommand}\`, then report the contents.`,
-      ].join(' ');
-      const cursor = fixture.client.markEvents();
-      const turn = await fixture.client.startChat(liveClaudeStartRequest({
-        chatId,
-        projectPath: fixture.dirs.project,
-        command: prompt,
-      }));
-
-      const permissionRequest = await fixture.client.waitForTransientPermission(
-        chatId,
-        (row) => row.message.type === 'permission-request'
-          && row.message.requestedTool.type === 'bash-tool-use'
-          && row.message.requestedTool.command.includes(toolCommand),
-        { afterIndex: cursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      if (permissionRequest.message.type !== 'permission-request') {
-        throw new Error('Live Claude permission request was not found.');
-      }
-      const permissionOccurrenceId = permissionRequest.message.permissionOccurrenceId;
-      const decision = await fixture.client.sendPermissionDecision({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-        permissionOccurrenceId,
-        allow: true,
-        alwaysAllow: false,
-      });
-      expect(decision.status).toBe('accepted');
-
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId,
-        turnId: turn.turnId,
-        marker: toolMarker,
-        afterIndex: cursor,
-      });
-      const beforeRestart = await fixture.client.getMessages(chatId);
-      const permission = messagesOfType(beforeRestart.messages, 'permission-request').find(
-        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
-      );
-      const resolution = messagesOfType(beforeRestart.messages, 'permission-resolved').find(
-        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
-      );
-      const bash = messagesOfType(beforeRestart.messages, 'bash-tool-use').find(
-        (message) => message.command.includes(toolCommand),
-      );
-      if (!bash) throw new Error('Live Claude Bash tool use was not rendered.');
-      const result = messagesOfType(beforeRestart.messages, 'tool-result').find(
-        (message) => message.toolId === bash.toolId,
-      );
-      expect(permission?.permissionOccurrenceId).toBe(permissionOccurrenceId);
-      expect(resolution?.allowed).toBe(true);
-      expect(result?.isError).toBe(false);
-      expect(JSON.stringify(result?.content)).toContain(toolMarker);
-      const bashSeq = beforeRestart.messages.find((entry) =>
-        entry.message.type === 'bash-tool-use' && entry.message.toolId === bash.toolId)?.ordinal;
-      const resultSeq = beforeRestart.messages.find((entry) =>
-        entry.message.type === 'tool-result' && entry.message.toolId === bash.toolId)?.ordinal;
-      const responseSeq = beforeRestart.messages.find((entry) =>
-        entry.message.type === 'assistant-message'
-        && entry.message.content.includes(toolMarker))?.ordinal;
-      expect(resultSeq).toBeGreaterThan(bashSeq ?? Number.MAX_SAFE_INTEGER);
-      expect(responseSeq).toBeGreaterThan(resultSeq ?? Number.MAX_SAFE_INTEGER);
-      expect(countUserContent(beforeRestart.messages, prompt)).toBe(1);
-      expectAssistantMarker(assistantContents(beforeRestart.messages), toolMarker);
-
-      await fixture.restartGarcon();
-      const restored = await fixture.client.getMessages(chatId);
-      const restoredBash = messagesOfType(restored.messages, 'bash-tool-use').find(
-        (message) => message.command.includes(toolCommand),
-      );
-      const restoredResult = messagesOfType(restored.messages, 'tool-result').find(
-        (message) => message.toolId === restoredBash?.toolId,
-      );
-      expect(restoredBash).toBeDefined();
-      expect(restoredResult?.isError).toBe(false);
-      expect(JSON.stringify(restoredResult?.content)).toContain(toolMarker);
-      expect(restoredResult?.content).toEqual(result?.content);
-      expect(countUserContent(restored.messages, prompt)).toBe(1);
-
-      const deniedPrompt = [
-        'This is the denial half of the Garcon permission integration check.',
-        `Use the Bash tool exactly once to run \`${deniedToolCommand}\`.`,
-        'If permission is denied, do not retry the command.',
-      ].join(' ');
-      const deniedCursor = fixture.client.markEvents();
-      const deniedTurn = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId,
-        command: deniedPrompt,
-      }));
-      const deniedPermission = await fixture.client.waitForTransientPermission(
-        chatId,
-        (row) => row.message.type === 'permission-request'
-          && row.message.requestedTool.type === 'bash-tool-use'
-          && row.message.requestedTool.command.includes(deniedToolCommand),
-        { afterIndex: deniedCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      if (deniedPermission.message.type !== 'permission-request') {
-        throw new Error('Live Claude denied permission request was not found.');
-      }
-      const deniedPermissionId = deniedPermission.message.permissionOccurrenceId;
-      expect((await fixture.client.sendPermissionDecision({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-        permissionOccurrenceId: deniedPermissionId,
-        allow: false,
-        alwaysAllow: false,
-      })).status).toBe('accepted');
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, deniedTurn.turnId, {
-        afterIndex: deniedCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
-
-      const afterDenial = await fixture.client.getMessages(chatId);
-      const deniedResolution = messagesOfType(afterDenial.messages, 'permission-resolved').find(
-        (message) => message.permissionOccurrenceId === deniedPermissionId,
-      );
-      const deniedBash = messagesOfType(afterDenial.messages, 'bash-tool-use').find(
-        (message) => message.command.includes(deniedToolCommand),
-      );
-      const deniedResult = messagesOfType(afterDenial.messages, 'tool-result').find(
-        (message) => message.toolId === deniedBash?.toolId,
-      );
-      expect(deniedResolution?.allowed).toBe(false);
-      expect(deniedResult?.isError).toBe(true);
-      expect(await Bun.file(join(fixture.dirs.project, deniedCopyName)).exists()).toBe(false);
-      expect(countUserContent(afterDenial.messages, deniedPrompt)).toBe(1);
-
-      const resumedMarker = marker('TOOL_CHAT_RESUMED');
-      const resumedPrompt = exactReplyPrompt(resumedMarker);
-      const resumedCursor = fixture.client.markEvents();
-      const resumed = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId,
-        command: resumedPrompt,
-      }));
-      await waitForVisibleClaudeResponse({
-        fixture,
-        chatId,
-        turnId: resumed.turnId,
-        marker: resumedMarker,
-        afterIndex: resumedCursor,
-      });
-      const finalTranscript = await fixture.client.getMessages(chatId);
-      expect(userContents(finalTranscript.messages)).toEqual([
-        prompt,
-        deniedPrompt,
-        resumedPrompt,
-      ]);
-      expectAssistantMarker(assistantContents(finalTranscript.messages), resumedMarker);
-    }, {
-      redactSensitiveDiagnostics: true,
-      serverEnvironment,
-      prepareWorkspace: async (directories) => {
-        await writeFile(join(directories.project, fixtureName), toolMarker, 'utf8');
-      },
-    });
-  });
+  }, 300_000);
 
   test('accepts a real streaming abort result and resumes the session', async () => {
     const serverEnvironment = await liveClaudeServerEnvironment();
@@ -509,10 +183,10 @@ describe('live Claude lifecycle', () => {
       });
 
       expect(stopped.outcome).toBe('interrupt-requested');
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+      expect((await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
         afterIndex: stopCursor,
         timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
+      })).type).toBe('agent-run-finished');
       await fixture.client.waitForProcessing(chatId, false, {
         afterIndex: stopCursor,
         timeoutMs: TURN_TIMEOUT_MS,
@@ -537,8 +211,8 @@ describe('live Claude lifecycle', () => {
         && event.outcome === 'interrupt-requested'
         && event.intent === 'stop');
       expect(outcomeIndex).toBeGreaterThanOrEqual(0);
-      // Stopping is sampled from stop-in-flight state rather than emitted per stop, so a stop
-      // that settles between samples never reports it. Its ordering only binds when observed.
+      // Stopping is sampled from stop-in-flight state, so a fast settlement can skip it.
+      // Its ordering only binds when the phase was observed.
       if (stoppingIndex >= 0) expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
       expect(stopEvents).not.toContainEqual(expect.objectContaining({
         type: 'agent-run-failed',
@@ -550,14 +224,13 @@ describe('live Claude lifecycle', () => {
         chats: [],
       });
 
-      const recoveryMarker = marker('POST_STREAMING_INTERRUPT');
-      const recoveryPrompt = exactReplyPrompt(recoveryMarker);
+      const recoveryPrompt = 'Reply briefly to confirm that this session can continue.';
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(liveClaudeRunRequest({
         chatId,
         command: recoveryPrompt,
       }));
-      await waitForVisibleClaudeResponse({
+      await waitForVisibleResponse({
         fixture,
         chatId,
         turnId: recovery.turnId,
@@ -572,302 +245,40 @@ describe('live Claude lifecycle', () => {
       redactSensitiveDiagnostics: true,
       serverEnvironment,
     });
-  });
-
-  test('interrupts and stops active tool turns while preserving later delivery', async () => {
-    const serverEnvironment = await liveClaudeServerEnvironment();
-    const protocolProbe = createLiveClaudeProtocolProbe(serverEnvironment);
-    await withIntegrationFixture('live-claude-interrupt-and-send', async (fixture) => {
-      const chatId = fixture.newChatId();
-      const interruptedPrompt = [
-        'Use the Bash tool immediately, as your first action, to run exactly `sleep 30`.',
-        'Do not perform other work before the command finishes.',
-        'After it finishes, reply with exactly SHOULD_NOT_COMPLETE.',
-      ].join(' ');
-      const successorMarker = marker('INTERRUPT_SUCCESSOR');
-      const successorPrompt = exactReplyPrompt(successorMarker);
-      const activeCursor = fixture.client.markEvents();
-      const active = await fixture.client.startChat(liveClaudeStartRequest({
-        chatId,
-        projectPath: fixture.dirs.project,
-        command: interruptedPrompt,
-        permissionMode: 'bypassPermissions',
-      }));
-
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'bash-tool-use'
-            && entry.message.command.includes('sleep 30')),
-        'live Claude sleep tool use',
-        { afterIndex: activeCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      const interruptedInputUuid = await protocolProbe.waitForInputStarted();
-      const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
-      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([successorPrompt]);
-
-      const interruptCursor = fixture.client.markEvents();
-      const interrupted = await fixture.client.interruptAndSend({
-        clientRequestId: crypto.randomUUID(),
-        chatId,
-      });
-      expect(interrupted.outcome).toBe('interrupt-requested');
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
-        afterIndex: interruptCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
-      const interruptedTerminal = await protocolProbe.waitForTerminal();
-      expect(['aborted_streaming', 'aborted_tools']).toContain(interruptedTerminal.reason);
-      expect(
-        interruptedTerminal.userMessageUuid === null
-        || interruptedTerminal.userMessageUuid === interruptedInputUuid,
-      ).toBe(true);
-      expect(await protocolProbe.waitForInterruptReceipt()).toEqual({
-        cancelledCount: 0,
-        stillQueuedCount: 0,
-      });
-      const successorInput = await fixture.client.waitForCommittedUserInput(
-        chatId,
-        successorPrompt,
-        { afterIndex: interruptCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      expectFinished((await fixture.client.waitForTurnTerminal(
-        chatId,
-        undefined,
-        {
-          afterIndex: fixture.client.events().lastIndexOf(successorInput) + 1,
-          timeoutMs: TURN_TIMEOUT_MS,
-        },
-      )).type);
-
-      const transcript = await fixture.client.getMessages(chatId);
-      expect(countUserContent(transcript.messages, successorPrompt)).toBe(1);
-      expectAssistantMarker(assistantContents(transcript.messages), successorMarker);
-      expectNoCompletionReply(assistantContents(transcript.messages), 'SHOULD_NOT_COMPLETE');
-      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
-
-      const stoppedStarted = join(fixture.dirs.project, '.claude-stop-started');
-      const stoppedCommand = 'touch .claude-stop-started && sleep 30';
-      const stoppedPrompt = [
-        `Use the Bash tool immediately, as your first action, to run exactly \`${stoppedCommand}\`.`,
-        'Do not perform other work before the command finishes.',
-        'After it finishes, reply with exactly STOPPED_TURN_SHOULD_NOT_COMPLETE.',
-      ].join(' ');
-      const stoppedCursor = fixture.client.markEvents();
-      const stoppedTurn = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId,
-        command: stoppedPrompt,
-        permissionMode: 'bypassPermissions',
-      }));
-      await waitForFile(stoppedStarted);
-      await fixture.client.waitForEvent(
-        (event): event is ChatMessagesMessage =>
-          event.type === 'chat-messages'
-          && event.chatId === chatId
-          && event.messages.some((entry) =>
-            entry.message.type === 'bash-tool-use'
-            && entry.message.command.includes(stoppedCommand)),
-        'live Claude stopped Bash tool use',
-        { afterIndex: stoppedCursor, timeoutMs: TURN_TIMEOUT_MS },
-      );
-      const stoppedInputUuid = await protocolProbe.waitForInputStarted(3);
-      const stopCommandCursor = fixture.client.markEvents();
-      const stopRequestId = crypto.randomUUID();
-      const stopped = await Promise.all([
-        fixture.client.stopChat({
-          clientRequestId: stopRequestId,
-          chatId,
-        }),
-        fixture.client.stopChat({
-          clientRequestId: stopRequestId,
-          chatId,
-        }),
-      ]);
-      expect(stopped.map((response) => response.outcome)).toEqual([
-        'interrupt-requested',
-        'interrupt-requested',
-      ]);
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, stoppedTurn.turnId, {
-        afterIndex: stopCommandCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
-      await fixture.client.waitForProcessing(chatId, false, {
-        afterIndex: stopCommandCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      });
-      const stoppedTerminal = await protocolProbe.waitForTerminal(2);
-      expect(['aborted_streaming', 'aborted_tools']).toContain(stoppedTerminal.reason);
-      expect(
-        stoppedTerminal.userMessageUuid === null
-        || stoppedTerminal.userMessageUuid === stoppedInputUuid,
-      ).toBe(true);
-      expect(await protocolProbe.waitForInterruptReceipt(2)).toEqual({
-        cancelledCount: 0,
-        stillQueuedCount: 0,
-      });
-      expect(await protocolProbe.readInterruptReceipts()).toHaveLength(2);
-
-      const stopEvents = fixture.client.eventsSince(stopCommandCursor);
-      expect(stopEvents.filter((event) =>
-        event.type === 'chat-session-stopped'
-        && event.chatId === chatId
-        && event.outcome === 'interrupt-requested'
-        && event.intent === 'stop')).toHaveLength(1);
-      const stoppingIndex = stopEvents.findIndex((event) =>
-        event.type === 'chat-processing-updated'
-        && event.chatId === chatId
-        && event.phase === 'stopping');
-      const outcomeIndex = stopEvents.findIndex((event) =>
-        event.type === 'chat-session-stopped'
-        && event.chatId === chatId
-        && event.outcome === 'interrupt-requested'
-        && event.intent === 'stop');
-      const idleIndex = stopEvents.findIndex((event) =>
-        event.type === 'chat-processing-updated'
-        && event.chatId === chatId
-        && event.phase === null);
-      expect(outcomeIndex).toBeGreaterThanOrEqual(0);
-      expect(idleIndex).toBeGreaterThan(outcomeIndex);
-      if (stoppingIndex >= 0) {
-        expect(outcomeIndex).toBeGreaterThan(stoppingIndex);
-        expect(idleIndex).toBeGreaterThan(stoppingIndex);
-      }
-      expect(stopEvents).not.toContainEqual(expect.objectContaining({
-        type: 'agent-run-failed',
-        chatId,
-        turnId: stoppedTurn.turnId,
-      }));
-      expect((await fixture.client.ping()).processing).toEqual({
-        outcome: 'snapshot',
-        chats: [],
-      });
-
-      const stoppedTranscript = await fixture.client.getMessages(chatId);
-      expectNoCompletionReply(
-        assistantContents(stoppedTranscript.messages),
-        'STOPPED_TURN_SHOULD_NOT_COMPLETE',
-      );
-      const stoppedBash = messagesOfType(stoppedTranscript.messages, 'bash-tool-use')
-        .findLast((message) => message.command.includes(stoppedCommand));
-      if (!stoppedBash) throw new Error('Live Claude stopped Bash tool use was not rendered.');
-      const stoppedResult = messagesOfType(stoppedTranscript.messages, 'tool-result')
-        .find((message) => message.toolId === stoppedBash.toolId);
-      expect(stoppedResult).toBeDefined();
-      if (stoppedTerminal.reason === 'aborted_tools') {
-        expect(stoppedResult?.isError).toBe(true);
-      }
-
-      const recoveryMarker = marker('POST_INTERRUPT');
-      const recoveryPrompt = exactReplyPrompt(recoveryMarker);
-      const recoveryCursor = fixture.client.markEvents();
-      const recovery = await fixture.client.runChat(liveClaudeRunRequest({
-        chatId,
-        command: recoveryPrompt,
-      }));
-      expectFinished((await fixture.client.waitForTurnTerminal(chatId, recovery.turnId, {
-        afterIndex: recoveryCursor,
-        timeoutMs: TURN_TIMEOUT_MS,
-      })).type);
-      expectAssistantMarker(
-        assistantContents((await fixture.client.getMessages(chatId)).messages),
-        recoveryMarker,
-      );
-    }, {
-      prepareWorkspace: protocolProbe.prepareWorkspace,
-      redactSensitiveDiagnostics: true,
-      serverEnvironment,
-    });
-  });
+  }, 180_000);
 });
 
-async function waitForFile(path: string): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    if (await Bun.file(path).exists()) return;
-    await Bun.sleep(25);
-  }
-  throw new Error('Timed out waiting for the live Claude command marker.');
+function expectInheritedPrefix(
+  child: readonly TranscriptMessage[],
+  source: readonly TranscriptMessage[],
+  childPrompt: string,
+): void {
+  const childPromptEntry = child.find((entry) =>
+    entry.message.type === 'user-message' && entry.message.content === childPrompt);
+  if (!childPromptEntry) throw new Error('Forked Claude input is absent from native history.');
+  const inherited = child.filter((entry) => entry.ordinal < childPromptEntry.ordinal);
+  expect(userContents(inherited)).toEqual(userContents(source));
+  expect(assistantContents(inherited)).toEqual(assistantContents(source));
 }
 
-// A row may carry more than one prompt when a fork-run folds an unanswered one into its own,
-// so the cursor stays on a matching row rather than advancing past it.
-function expectPromptsInOrder(rows: readonly string[], prompts: readonly string[]): void {
-  let cursor = 0;
-  for (const prompt of prompts) {
-    const index = rows.findIndex((row, position) => position >= cursor && row.includes(prompt));
-    expect(index).toBeGreaterThanOrEqual(0);
-    cursor = index;
-  }
-}
-
-interface PersistedClaudeChat {
+function nativeIdentity(chat: PersistedChatBinding): {
   agentSessionId: string;
-  nativeSession: {
-    ownerId: string;
-    schemaVersion: number;
-    value: {
-      path: string;
-      agentSessionId: string;
-    };
-  };
-}
-
-interface ClaudeGraph {
-  sessionId: string;
-  uuids: Set<string>;
-}
-
-async function expectIndependentClaudeGraphs(
-  fixture: IntegrationFixture,
-  chatIds: readonly string[],
-): Promise<void> {
-  const graphs = await Promise.all(chatIds.map((chatId) =>
-    readClaudeGraph(fixture.dirs.workspace, chatId)));
-
-  for (let left = 0; left < graphs.length; left += 1) {
-    for (let right = left + 1; right < graphs.length; right += 1) {
-      const leftGraph = graphs[left]!;
-      const rightGraph = graphs[right]!;
-      expect(leftGraph.sessionId).not.toBe(rightGraph.sessionId);
-      expect([...leftGraph.uuids].some((uuid) => rightGraph.uuids.has(uuid))).toBe(false);
-    }
-  }
-}
-
-async function readClaudeGraph(workspace: string, chatId: string): Promise<ClaudeGraph> {
-  const registry = JSON.parse(
-    await readFile(join(workspace, 'chats.json'), 'utf8'),
-  ) as { sessions?: Record<string, PersistedClaudeChat> };
-  const chat = registry.sessions?.[chatId];
+  path: string;
+} {
+  const agentSessionId = chat.agentSessionId;
+  const path = chat.nativeSession?.value.path;
+  const nativeAgentSessionId = chat.nativeSession?.value.agentSessionId;
   if (
-    !chat
-    || chat.nativeSession.ownerId !== 'claude'
-    || chat.nativeSession.schemaVersion !== 1
-    || chat.nativeSession.value.agentSessionId !== chat.agentSessionId
+    !agentSessionId
+    || typeof path !== 'string'
+    || !path
+    || nativeAgentSessionId !== agentSessionId
   ) {
-    throw new Error(`Live Claude chat ${chatId} has invalid native session metadata.`);
+    throw new Error('Live Claude chat has invalid native session metadata.');
   }
+  return { agentSessionId, path };
+}
 
-  const nativePath = chat.nativeSession.value.path;
-  expect((await stat(nativePath)).mode & 0o777).toBe(0o600);
-  const rows = (await readFile(nativePath, 'utf8'))
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-  const uuidRows = rows.filter(
-    (row): row is Record<string, unknown> & { uuid: string } =>
-      typeof row.uuid === 'string',
-  );
-  const uuids = new Set(uuidRows.map((row) => row.uuid));
-  expect(uuids.size).toBe(uuidRows.length);
-  expect(uuidRows.every((row) =>
-    typeof row.sessionId !== 'string' || row.sessionId === chat.agentSessionId)).toBe(true);
-  expect(uuidRows.every((row) =>
-    row.parentUuid === null
-    || row.parentUuid === undefined
-    || (typeof row.parentUuid === 'string' && uuids.has(row.parentUuid)))).toBe(true);
-
-  return { sessionId: chat.agentSessionId, uuids };
+async function expectPrivateFile(path: string): Promise<void> {
+  expect((await stat(path)).mode & 0o777).toBe(0o600);
 }

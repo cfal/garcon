@@ -144,9 +144,11 @@ Keep the configured single-test concurrency. The suites exercise process lifecyc
 
 The deterministic lane exercises `direct-openai-compatible` and `direct-anthropic-compatible` through separate protocol fakes. Both providers are present in every fixture and remain alive across Garcon restarts. The Anthropic fake covers the Messages HTTP and SSE contract; it is not a fake Claude Code process or Claude Agent SDK. Together the fakes prove Garcon's multi-agent routing, lifecycle, queue, transcript, persistence, search, and SPA behavior without spending credentials or depending on external availability. They do not prove the native behavior of Claude, Codex, Pi, OpenCode, Factory, Amp, Cursor, or other provider binaries.
 
-Credential-backed provider suites remain isolated from the deterministic required lane and must be explicit about cost, rate limits, cleanup, and supported environments. The live Claude lane receives its testing key only in the temporary Garcon process environment. Do not weaken or replace fake-provider coverage with live-provider tests.
+Credential-backed provider suites remain isolated from the deterministic required lane and must be explicit about cost, rate limits, cleanup, and supported environments. The live Claude lane receives its DeepSeek testing key and Anthropic-compatible endpoint configuration only in the temporary Garcon process environment. Do not weaken or replace fake-provider coverage with live-provider tests.
 
-The live Claude lane covers correlated activity, consecutive queue dispatch, whole and historical forks, immediate re-forks, native graph isolation, restart/resume, permission decisions, live and reloaded tool results, interruption, stop, and post-cancellation recovery.
+Credential-backed Claude assertions may require visible assistant output, but must not require exact model text or a model-selected tool call. Exact queue, fork-point, native graph, permission, tool-result, and persistence semantics belong in the real-CLI scripted Claude tier, where model behavior is deterministic.
+
+The live Claude lane covers real Claude CLI and network transport, consecutive queue dispatch, native reload idempotence, restart/resume, whole-chat fork isolation, streaming interruption, and post-cancellation recovery.
 
 ## Change Checklist
 
