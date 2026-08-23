@@ -9,6 +9,7 @@ const runtimes = [];
 
 class CapturingDirectRuntime extends DirectChatRuntimeBase {
   captured = [];
+  onStreamSession;
   responses = [];
 
   constructor(sessions = createTestDirectSessionStore(), overrides = {}) {
@@ -30,6 +31,7 @@ class CapturingDirectRuntime extends DirectChatRuntimeBase {
   }
 
   async streamSession(session) {
+    this.onStreamSession?.(session);
     this.captured.push({
       thinkingMode: session.thinkingMode,
       messages: structuredClone(session.messages),
@@ -111,6 +113,26 @@ describe('DirectChatRuntimeBase reasoning effort lifecycle', () => {
       thinkingMode: 'high',
       messages: [{ role: 'user', content: 'first message' }],
     }]);
+  });
+
+  it('activates a durable session before starting provider work', async () => {
+    const runtime = new CapturingDirectRuntime();
+    const observed = capturingOperation('run-activation');
+    const order = [];
+    let activated;
+    runtime.onStreamSession = () => order.push('provider');
+
+    const started = await runtime.startSession(startRequest({
+      operation: observed.operation,
+      onSessionActivated(session) {
+        activated = session;
+        order.push('activation');
+      },
+    }));
+    await observed.terminal;
+
+    expect(activated).toEqual(started);
+    expect(order).toEqual(['activation', 'provider']);
   });
 
   it('replaces effort on every in-memory resume, including Default', async () => {

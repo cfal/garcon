@@ -37,7 +37,7 @@ function runtimeConfig(overrides = {}) {
   };
 }
 
-function captureOperation(runId) {
+function captureOperation(runId, onEvent = () => undefined) {
   const events = [];
   let resolveTerminal;
   const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
@@ -47,6 +47,7 @@ function captureOperation(runId) {
     operation: {
       runId,
       publish(event) {
+        onEvent(event);
         events.push(event);
         if (event.type === 'run-ended') resolveTerminal(event);
       },
@@ -114,7 +115,14 @@ describe('OpenAiCompatibleChatRuntime', () => {
   it('marks direct sessions idle before emitting finished', async () => {
     globalThis.fetch = mock(async () => streamResponse('done'));
     const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig());
-    const capture = captureOperation('run-known');
+    let sessionId;
+    let sessionIdWhenFinished;
+    let runningWhenFinished;
+    const capture = captureOperation('run-known', (event) => {
+      if (event.type !== 'run-ended') return;
+      sessionIdWhenFinished = sessionId;
+      runningWhenFinished = runtime.isRunning(sessionId);
+    });
     const started = await runtime.startSession({
       chatId: 'chat-1',
       command: 'hello',
@@ -125,9 +133,11 @@ describe('OpenAiCompatibleChatRuntime', () => {
       claudeThinkingMode: 'auto',
       operation: capture.operation,
     });
+    sessionId = started.agentSessionId;
     await capture.terminal;
 
-    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    expect(sessionIdWhenFinished).toBe(started.agentSessionId);
+    expect(runningWhenFinished).toBe(false);
   });
 
   it('forwards the current interactive effort and removes it for Default', async () => {
