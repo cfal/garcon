@@ -1748,7 +1748,7 @@
 	"snippets_template_expand": "Expand snippet text",
 	"snippets_template_editor_label": "Expanded snippet text",
 	"snippets_template_editor_title": "Snippet text",
-	"snippets_template_help": "Supports {argumentsToken}, {projectPathToken}, and {chatIdToken} replacements. {chatIdToken} requires an existing chat.",
+	"snippets_template_help": "Supports {argumentsToken}, {projectPathToken}, and {chatIdToken} replacements. {chatIdToken} works in both existing and new chats.",
 	"snippets_template_placeholder": "From {chatIdToken}, review {argumentsToken} in {projectPathToken}.",
 	"snippets_template_required": "Enter snippet text.",
 	"snippets_template_too_long": "Snippet text cannot exceed 32,000 characters.",
