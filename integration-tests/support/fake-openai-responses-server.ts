@@ -122,33 +122,17 @@ class HeldResponsesController implements HeldResponsesRequest {
   }
 
   releaseEcho(): void {
-    void this.#received.promise.then(
-      (request) => {
-        if (this.#release(responsesTextResponse(`echo:${request.lastUserText}`, request))) {
-          this.onCompleted(request);
-        }
-      },
-      () => undefined,
+    this.#releaseWhenReceived(
+      (request) => responsesTextResponse(`echo:${request.lastUserText}`, request),
     );
   }
 
   releaseText(content: string): boolean {
-    if (!this.#received.settled) {
-      void this.#received.promise.then(
-        (request) => {
-          if (this.#release(responsesTextResponse(content, request))) this.onCompleted(request);
-        },
-        () => undefined,
-      );
-      return true;
-    }
-    void this.#received.promise.then(
-      (request) => {
-        if (this.#release(responsesTextResponse(content, request))) this.onCompleted(request);
-      },
-      () => undefined,
+    const canRelease = !this.#received.settled || !this.#response.settled;
+    this.#releaseWhenReceived(
+      (request) => responsesTextResponse(content, request),
     );
-    return !this.#response.settled;
+    return canRelease;
   }
 
   releaseStreamError(message: string): boolean {
@@ -192,6 +176,15 @@ class HeldResponsesController implements HeldResponsesRequest {
     const released = this.#response.resolve(response);
     this.#released = released || this.#released;
     return released;
+  }
+
+  #releaseWhenReceived(createResponse: (request: RecordedResponsesRequest) => Response): void {
+    void this.#received.promise.then(
+      (request) => {
+        if (this.#release(createResponse(request))) this.onCompleted(request);
+      },
+      () => undefined,
+    );
   }
 }
 
