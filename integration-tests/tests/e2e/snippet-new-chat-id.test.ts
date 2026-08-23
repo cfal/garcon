@@ -45,39 +45,11 @@ describe("Lightpanda new-chat snippet expansion", () => {
         { timeout: 20_000 },
       );
 
-      const directProviderSelected = await fixture.page.evaluate(() => {
-        const dialog = document.querySelector('[role="dialog"]');
-        return [...(dialog?.querySelectorAll("button") ?? [])].some(
-          (element) => {
-            const name =
-              element.getAttribute("aria-label") ||
-              element.textContent?.trim() ||
-              "";
-            return (
-              name.includes("Direct (Chat Completions)") &&
-              name.includes("Integration Echo")
-            );
-          },
-        );
+      await app.ensureDirectModelSelected({
+        selectedAgentLabel: "Direct (Chat Completions)",
+        optionAgentLabel: "Chat Completions",
+        modelLabel: "Integration Echo",
       });
-      if (!directProviderSelected) {
-        await fixture.page.evaluate(() => {
-          const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-          const button = dialog
-            ? [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(
-                (element) =>
-                  (element.getAttribute("aria-label") ?? "").includes(" / "),
-              )
-            : null;
-          if (!button || button.disabled)
-            throw new Error("Missing new chat model selector.");
-          button.click();
-        });
-        await app.waitForButton("Chat Completions", { timeout: 30_000 });
-        await app.clickButton("Chat Completions");
-        await app.waitForButton("Integration Echo", { timeout: 30_000 });
-        await app.clickButton("Integration Echo");
-      }
 
       await app.fill(
         '[role="dialog"] input[aria-label="Project Path"]',
