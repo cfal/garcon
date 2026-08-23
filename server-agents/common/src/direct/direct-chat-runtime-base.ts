@@ -31,7 +31,7 @@ export interface DirectRuntimeSession<TMessage> {
   aborted: boolean;
   chatId: string;
   history: DirectSessionRecordV1[];
-  historyDirty: boolean;
+  historyNeedsRefresh: boolean;
   id: string;
   isFinalizing: boolean;
   isRunning: boolean;
@@ -109,23 +109,7 @@ export abstract class DirectChatRuntimeBase<
       throw error;
     }
 
-    const now = Date.now();
-    const session: DirectRuntimeSession<TMessage> = {
-      abortController: null,
-      aborted: false,
-      chatId: request.chatId,
-      history: [...snapshot.records],
-      historyDirty: false,
-      id: sessionId,
-      isFinalizing: false,
-      isRunning: false,
-      messages: this.#projectMessages(snapshot.records),
-      model: request.model || this.config.defaultModel,
-      thinkingMode: normalizeThinkingMode(request.thinkingMode),
-      startTime: now,
-      lastActivityAt: now,
-      operation: request.operation,
-    };
+    const session = this.#createRuntimeSession(sessionId, request, snapshot.records);
 
     this.#sessions.set(sessionId, session);
     const started = {
@@ -151,7 +135,7 @@ export abstract class DirectChatRuntimeBase<
     session.operation = request.operation;
     this.#markSessionRunning(session);
     try {
-      if (session.historyDirty) {
+      if (session.historyNeedsRefresh) {
         const snapshot = await loadDirectSessionRequired(
           this.#sessionsStore,
           request.agentSessionId,
@@ -160,14 +144,14 @@ export abstract class DirectChatRuntimeBase<
         );
         session.history = [...snapshot.records];
         session.messages = this.#projectMessages(snapshot.records);
-        session.historyDirty = false;
+        session.historyNeedsRefresh = false;
         assertDirectExecutionOpen(request);
       }
       const user = await this.#appendUser(request);
       session.history.push(user);
       session.messages = this.#projectMessages(session.history);
       session.chatId = request.chatId;
-      this.#markSuccessorHistoryDirty(session);
+      this.#markReplacementHistoryStale(session);
       assertDirectExecutionOpen(request);
       await this.#runTurnInternal(session, request);
     } catch (error) {
@@ -229,25 +213,37 @@ export abstract class DirectChatRuntimeBase<
       request.nativeSession,
       request.executionAdmission?.signal ?? new AbortController().signal,
     );
+    const session = this.#createRuntimeSession(
+      request.agentSessionId,
+      request,
+      snapshot.records,
+    );
+    this.#sessions.set(request.agentSessionId, session);
+    return session;
+  }
+
+  #createRuntimeSession(
+    sessionId: string,
+    request: DirectStartRequest | DirectResumeRequest,
+    records: readonly DirectSessionRecordV1[],
+  ): DirectRuntimeSession<TMessage> {
     const now = Date.now();
-    const session: DirectRuntimeSession<TMessage> = {
+    return {
       abortController: null,
       aborted: false,
       chatId: request.chatId,
-      history: [...snapshot.records],
-      historyDirty: false,
-      id: request.agentSessionId,
+      history: [...records],
+      historyNeedsRefresh: false,
+      id: sessionId,
       isFinalizing: false,
       isRunning: false,
-      messages: this.#projectMessages(snapshot.records),
+      messages: this.#projectMessages(records),
       model: request.model || this.config.defaultModel,
       thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
       operation: request.operation,
     };
-    this.#sessions.set(request.agentSessionId, session);
-    return session;
   }
 
   async #appendUser(request: DirectResumeRequest) {
@@ -268,11 +264,12 @@ export abstract class DirectChatRuntimeBase<
     const projected = records.length <= this.#maxMessagesPerSession
       ? records
       : [records[0]!, ...records.slice(-(this.#maxMessagesPerSession - 1))];
-    return projected.map((record) => (
-      record.type === 'user'
-        ? this.buildUserMessage(record.content, record.attachments)
-        : this.buildAssistantMessage(record.content)
-    ));
+    return projected.map((record) => {
+      if (record.type === 'user') {
+        return this.buildUserMessage(record.content, record.attachments);
+      }
+      return this.buildAssistantMessage(record.content);
+    });
   }
 
   #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
@@ -333,7 +330,7 @@ export abstract class DirectChatRuntimeBase<
       }
       session.history.push(assistant);
       session.messages = this.#projectMessages(session.history);
-      this.#markSuccessorHistoryDirty(session);
+      this.#markReplacementHistoryStale(session);
       operation.publish({
         type: 'rows',
         rows: runtimeRows([new AssistantMessage(assistant.at, response)]),
@@ -373,8 +370,8 @@ export abstract class DirectChatRuntimeBase<
     operation.publish({ type: 'run-ended', runId: operation.runId, outcome: 'finished' });
   }
 
-  #markSuccessorHistoryDirty(session: DirectRuntimeSession<TMessage>): void {
+  #markReplacementHistoryStale(session: DirectRuntimeSession<TMessage>): void {
     const current = this.#sessions.get(session.id);
-    if (current && current !== session) current.historyDirty = true;
+    if (current && current !== session) current.historyNeedsRefresh = true;
   }
 }

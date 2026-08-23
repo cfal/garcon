@@ -370,7 +370,7 @@ export class DirectSessionStore {
   }
 }
 
-async function openRegularFile(filePath: string, flags: number) {
+async function openRegularFile(filePath: string, flags: number): Promise<FileHandle> {
   const file = await fs.open(filePath, flags | constants.O_NOFOLLOW);
   try {
     const stats = await file.stat();
@@ -383,7 +383,7 @@ async function openRegularFile(filePath: string, flags: number) {
 }
 
 async function writeAll(
-  file: Awaited<ReturnType<typeof fs.open>>,
+  file: FileHandle,
   value: Uint8Array,
   offset: number,
 ): Promise<void> {
@@ -700,7 +700,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
+  const actual = Object.keys(value);
   return actual.length === expected.length
-    && [...expected].sort().every((key, index) => actual[index] === key);
+    && expected.every((key) => Object.hasOwn(value, key));
 }

@@ -43,11 +43,12 @@ implements AgentRuntimeExecution {
       publish({ type: 'session', session: established });
       return established;
     };
+    const command = request.carriedContext
+      ? `${request.carriedContext.prefix}${request.prompt}`
+      : request.prompt;
     const result = await this.runtime.startSession({
       ...executionFields(request),
-      command: request.carriedContext
-        ? `${request.carriedContext.prefix}${request.prompt}`
-        : request.prompt,
+      command,
       images: request.attachments,
       endpoint,
       operation: runtimeOperation(request.runId, publish),
@@ -93,7 +94,6 @@ implements AgentRuntimeExecution {
   ): Promise<void> {
     request.signal.throwIfAborted();
   }
-
 
   async #endpoint(request: AgentRuntimeExecutionContext) {
     const endpoint = await resolveAgentEndpoint(

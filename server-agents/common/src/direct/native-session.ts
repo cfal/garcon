@@ -106,15 +106,7 @@ async function loadRequired(
   sessionId: string,
   signal: AbortSignal,
 ) {
-  try {
-    const snapshot = await sessions.load(sessionId);
-    signal.throwIfAborted();
-    return snapshot;
-  } catch (error) {
-    if (signal.aborted) signal.throwIfAborted();
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw directSessionUnavailable(error);
-  }
+  return runRequiredSessionOperation(() => sessions.load(sessionId), signal);
 }
 
 async function inspectRequired(
@@ -122,10 +114,17 @@ async function inspectRequired(
   sessionId: string,
   signal: AbortSignal,
 ) {
+  return runRequiredSessionOperation(() => sessions.inspect(sessionId), signal);
+}
+
+async function runRequiredSessionOperation<T>(
+  operation: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   try {
-    const source = await sessions.inspect(sessionId);
+    const result = await operation();
     signal.throwIfAborted();
-    return source;
+    return result;
   } catch (error) {
     if (signal.aborted) signal.throwIfAborted();
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
@@ -151,13 +150,14 @@ function importedMessage(record: DirectSessionRecordV1): UserMessage | Assistant
 }
 
 export function directSessionUnavailable(cause?: unknown): AgentIntegrationError {
+  const detail = cause instanceof Error
+    ? { causeName: cause.name, causeCode: nodeErrorCode(cause) }
+    : undefined;
   return new AgentIntegrationError(
     'TRANSCRIPT_UNAVAILABLE',
     TRANSCRIPT_UNAVAILABLE_MESSAGE,
     false,
-    cause instanceof Error
-      ? { causeName: cause.name, causeCode: nodeErrorCode(cause) }
-      : undefined,
+    detail,
   );
 }
 
