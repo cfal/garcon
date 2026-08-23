@@ -13,6 +13,7 @@ import {
   PROMPT_REFINEMENT_DRAFT_MAX_LENGTH,
   PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH,
 } from '../../../common/prompt-refinement.js';
+import { SNIPPET_TEMPLATE_MAX_LENGTH } from '../../../common/snippets.js';
 import { PromptRefinementError, refinePrompt } from '../refine-prompt.js';
 
 function harness(overrides = {}) {
@@ -66,7 +67,7 @@ describe('refinePrompt', () => {
       return '  Refined prompt.  ';
     });
 
-    await expect(refinePrompt({ draft }, test)).resolves.toEqual({
+    await expect(refinePrompt({ draft, target: 'prompt' }, test)).resolves.toEqual({
       success: true,
       refinedPrompt: 'Refined prompt.',
     });
@@ -88,12 +89,53 @@ describe('refinePrompt', () => {
       return 'Done';
     });
 
-    await refinePrompt({ draft: '$& $1' }, test);
+    await refinePrompt({ draft: '$& $1', target: 'prompt' }, test);
+  });
+
+  it('adds fixed snippet constraints and accepts an unchanged token signature', async () => {
+    const test = harness();
+    const draft = '{{arguments}} at \\{{project_path}} for {{chat_id}} and {{arguments}}';
+    test.agents.runSingleQuery.mockImplementationOnce(async (prompt) => {
+      expect(prompt).toContain(draft);
+      expect(prompt).toContain('Preserve every supported template token verbatim');
+      expect(prompt).toContain('\\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}');
+      return 'Review {{arguments}} in \\{{project_path}} for {{chat_id}}, then {{arguments}}.';
+    });
+
+    await expect(
+      refinePrompt({ draft, target: 'snippet-template' }, test),
+    ).resolves.toEqual({
+      success: true,
+      refinedPrompt:
+        'Review {{arguments}} in \\{{project_path}} for {{chat_id}}, then {{arguments}}.',
+    });
+  });
+
+  it('rejects snippet outputs that alter token identity, order, count, or escaping', async () => {
+    const draft = '{{arguments}} \\{{project_path}} {{chat_id}} {{arguments}}';
+    const changedOutputs = [
+      '{{arguments}} \\{{project_path}} {{chat_id}}',
+      '{{chat_id}} \\{{project_path}} {{arguments}} {{arguments}}',
+      '{{arguments}} {{project_path}} {{chat_id}} {{arguments}}',
+      '{{arguments}} \\{{project_path}} {{chat_id}} {{arguments}} {{chat_id}}',
+    ];
+
+    for (const output of changedOutputs) {
+      const test = harness();
+      test.agents.runSingleQuery.mockResolvedValueOnce(output);
+      await expect(
+        refinePrompt({ draft, target: 'snippet-template' }, test),
+      ).rejects.toMatchObject({
+        code: 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED',
+        status: 502,
+        retryable: true,
+      });
+    }
   });
 
   it('rejects invalid input before settings or model discovery', async () => {
     const blank = harness();
-    await expect(refinePrompt({ draft: '   ' }, blank)).rejects.toMatchObject({
+    await expect(refinePrompt({ draft: '   ', target: 'prompt' }, blank)).rejects.toMatchObject({
       code: 'PROMPT_REFINEMENT_INVALID_REQUEST',
       status: 400,
     });
@@ -104,6 +146,7 @@ describe('refinePrompt', () => {
       refinePrompt(
         {
           draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
+          target: 'prompt',
         },
         oversized,
       ),
@@ -113,13 +156,30 @@ describe('refinePrompt', () => {
     });
     expect(oversized.settings.getUiSettings).not.toHaveBeenCalled();
     expect(oversized.agents.runSingleQuery).not.toHaveBeenCalled();
+
+    const oversizedSnippet = harness();
+    await expect(
+      refinePrompt(
+        {
+          draft: 'x'.repeat(SNIPPET_TEMPLATE_MAX_LENGTH + 1),
+          target: 'snippet-template',
+        },
+        oversizedSnippet,
+      ),
+    ).rejects.toMatchObject({
+      code: 'PROMPT_REFINEMENT_INPUT_TOO_LONG',
+      status: 413,
+    });
+    expect(oversizedSnippet.settings.getUiSettings).not.toHaveBeenCalled();
   });
 
   it('rejects unsafe agents before reading or rendering the custom template', async () => {
     const test = harness({ config: { customPrompt: 42 } });
     test.agents.singleQueryRunsToolsWithoutPermission.mockImplementationOnce(() => true);
 
-    await expect(refinePrompt({ draft: 'private draft' }, test)).rejects.toMatchObject({
+    await expect(
+      refinePrompt({ draft: 'private draft', target: 'prompt' }, test),
+    ).rejects.toMatchObject({
       code: 'PROMPT_REFINEMENT_UNSAFE_AGENT',
       status: 422,
     });
@@ -145,7 +205,7 @@ describe('refinePrompt', () => {
     ];
     for (const { customPrompt, draft } of cases) {
       const test = harness({ config: { customPrompt } });
-      await expect(refinePrompt({ draft }, test)).rejects.toMatchObject({
+      await expect(refinePrompt({ draft, target: 'prompt' }, test)).rejects.toMatchObject({
         code: 'PROMPT_REFINEMENT_TEMPLATE_INVALID',
         status: 409,
       });
@@ -230,7 +290,7 @@ describe('refinePrompt', () => {
       });
 
       try {
-        await refinePrompt({ draft: 'private sentinel' }, test);
+        await refinePrompt({ draft: 'private sentinel', target: 'prompt' }, test);
         throw new Error('Expected prompt refinement to fail');
       } catch (error) {
         expect(error).toBeInstanceOf(PromptRefinementError);
@@ -258,7 +318,11 @@ describe('refinePrompt', () => {
       });
     });
 
-    const running = refinePrompt({ draft: 'private draft sentinel' }, test, controller.signal);
+    const running = refinePrompt(
+      { draft: 'private draft sentinel', target: 'prompt' },
+      test,
+      controller.signal,
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     controller.abort(reason);
     await expect(running).rejects.toBe(reason);

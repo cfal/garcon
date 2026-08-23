@@ -9,6 +9,8 @@ import {
   normalizeSnippetArgumentsInput,
   normalizeSnippetDefinitionInput,
   normalizeSnippetsSnapshot,
+  hasSameSnippetTemplateTokenSignature,
+  snippetTemplateTokenSignature,
   snippetTemplateUsesArguments,
 } from '../../../common/snippets.ts';
 
@@ -253,6 +255,28 @@ describe('snippet contracts', () => {
     expect(snippetTemplateUsesArguments('{{project_path}}/{{arguments}}')).toBe(true);
     expect(snippetTemplateUsesArguments('Review \\{{arguments}}')).toBe(false);
     expect(snippetTemplateUsesArguments('{{ arguments }} {{Arguments}}')).toBe(false);
+  });
+
+  it('captures ordered active and escaped template-token signatures', () => {
+    const template = '{{arguments}} \\{{project_path}} {{arguments}} {{chat_id}}';
+    expect(snippetTemplateTokenSignature(template)).toEqual([
+      'active:arguments',
+      'escaped:project_path',
+      'active:arguments',
+      'active:chat_id',
+    ]);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      'Prefix {{arguments}} \\{{project_path}} {{arguments}} {{chat_id}} suffix',
+    )).toBe(true);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      '{{arguments}} {{project_path}} {{arguments}} {{chat_id}}',
+    )).toBe(false);
+    expect(hasSameSnippetTemplateTokenSignature(
+      template,
+      '{{arguments}} \\{{project_path}} {{chat_id}} {{arguments}}',
+    )).toBe(false);
   });
 
   it('validates expansion response identity and output shape', () => {

@@ -83,7 +83,7 @@ export class NewChatPromptRefinementController {
 		this.options.closePromptSurfaces();
 
 		try {
-			const result = await this.#request.run(sourceText);
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
 			if (result.kind !== 'refined') return;
 			if (
 				this.options.form.contentRevision !== sourceRevision ||

@@ -89,6 +89,7 @@ describe('PromptComposer prompt refinement', () => {
 		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
 		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0][0]).toEqual({
 			draft: 'Keep this draft',
+			target: 'prompt',
 		});
 		expect(textarea.readOnly).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');

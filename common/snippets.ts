@@ -41,6 +41,20 @@ export function* matchSnippetTemplateTokens(
   }
 }
 
+export function snippetTemplateTokenSignature(template: string): string[] {
+  return Array.from(
+    matchSnippetTemplateTokens(template),
+    (match) => `${match.escaped ? 'escaped' : 'active'}:${match.variable}`,
+  );
+}
+
+export function hasSameSnippetTemplateTokenSignature(first: string, second: string): boolean {
+  const firstSignature = snippetTemplateTokenSignature(first);
+  const secondSignature = snippetTemplateTokenSignature(second);
+  return firstSignature.length === secondSignature.length
+    && firstSignature.every((entry, index) => entry === secondSignature[index]);
+}
+
 function snippetTemplateUsesVariable(template: string, variable: SnippetTemplateVariable): boolean {
   for (const match of matchSnippetTemplateTokens(template)) {
     if (!match.escaped && match.variable === variable) return true;

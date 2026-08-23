@@ -38,7 +38,7 @@ describe('prompt refinement', () => {
           model: target.provider.model,
           lastUserText: expectedModelPrompt,
         });
-        const response = fixture.client.refinePrompt({ draft });
+        const response = fixture.client.refinePrompt({ draft, target: 'prompt' });
 
         expect((await held.received).lastUserText).toBe(expectedModelPrompt);
         expect(held.releaseText(`  ${refinedPrompt}  `)).toBe(true);

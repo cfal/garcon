@@ -1,5 +1,5 @@
 import { refinePrompt } from '$lib/api/prompt-refinement.js';
-import type { RefinePromptResponse } from '$shared/prompt-refinement';
+import type { RefinePromptRequest, RefinePromptResponse } from '$shared/prompt-refinement';
 
 export type PromptRefinementResult =
 	{ kind: 'refined'; response: RefinePromptResponse; generation: number } | { kind: 'cancelled' };
@@ -15,7 +15,7 @@ export class PromptRefinementController {
 
 	constructor(private readonly dependencies: PromptRefinementControllerDependencies = {}) {}
 
-	async run(draft: string): Promise<PromptRefinementResult> {
+	async run(request: RefinePromptRequest): Promise<PromptRefinementResult> {
 		if (this.pending) return { kind: 'cancelled' };
 		const generation = ++this.#generation;
 		const abortController = new AbortController();
@@ -24,7 +24,7 @@ export class PromptRefinementController {
 
 		try {
 			const refine = this.dependencies.refine ?? refinePrompt;
-			const response = await refine({ draft }, { signal: abortController.signal });
+			const response = await refine(request, { signal: abortController.signal });
 			if (abortController.signal.aborted || generation !== this.#generation) {
 				return { kind: 'cancelled' };
 			}
