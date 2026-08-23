@@ -259,8 +259,15 @@ export class DirectSessionStore {
   }
 
   async #directory(): Promise<string> {
-    this.#directoryPromise ??= this.#host.storage.directory(DIRECT_SESSION_NAMESPACE);
-    return this.#directoryPromise;
+    const pending = this.#directoryPromise
+      ?? this.#host.storage.directory(DIRECT_SESSION_NAMESPACE);
+    this.#directoryPromise = pending;
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.#directoryPromise === pending) this.#directoryPromise = null;
+      throw error;
+    }
   }
 
   async #sessionFilePath(sessionId: string): Promise<string> {

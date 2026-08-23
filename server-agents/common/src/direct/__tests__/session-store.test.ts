@@ -44,6 +44,7 @@ afterEach(async () => {
 });
 
 async function fixture(options: {
+  readonly directory?: (storageRoot: string, namespace: string) => Promise<string>;
   readonly onDirectorySync?: (directory: string) => void | Promise<void>;
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-direct-session-store-'));
@@ -56,6 +57,7 @@ async function fixture(options: {
       storage: {
         rootDirectory: storageRoot,
         async directory(namespace) {
+          if (options.directory) return options.directory(storageRoot, namespace);
           const directory = path.join(storageRoot, namespace);
           await mkdir(directory, { recursive: true });
           return directory;
@@ -305,5 +307,24 @@ describe('DirectSessionStore', () => {
 
     await store.delete(SESSION_ID);
     expect(syncs).toHaveLength(1);
+  });
+
+  test('retries storage directory resolution after a transient failure', async () => {
+    let attempts = 0;
+    const { store } = await fixture({
+      async directory(storageRoot, namespace) {
+        attempts += 1;
+        if (attempts === 1) throw new Error('injected transient directory failure');
+        const directory = path.join(storageRoot, namespace);
+        await mkdir(directory, { recursive: true });
+        return directory;
+      },
+    });
+
+    await expect(create(store)).rejects.toThrow('injected transient directory failure');
+    await expect(create(store)).resolves.toMatchObject({
+      header: { sessionId: SESSION_ID },
+    });
+    expect(attempts).toBe(2);
   });
 });
