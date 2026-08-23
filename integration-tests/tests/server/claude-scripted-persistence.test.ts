@@ -14,7 +14,11 @@ import {
 import type { GarconTestClient } from '../../support/garcon-client.js';
 import { forkAfterSourceSettles } from '../../support/fork-test-support.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { waitForVisibleResponse } from '../../support/live-agent.js';
+import {
+  LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeStableAfterPrompt,
+  waitForVisibleResponse,
+} from '../../support/live-agent.js';
 import {
   liveClaudeRunRequest,
   liveClaudeStartRequest,
@@ -232,6 +236,63 @@ describe('scripted Claude persistence', () => {
       expect(userContents((await fixture.client.getMessages(sourceChatId)).messages)).toEqual([
         sourcePrompt,
       ]);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
+  test('correlates a queued answer within each replacement transcript view', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const sourcePrompt = marker('RELOAD_CORRELATION_SOURCE_PROMPT');
+    const sourceReply = marker('RELOAD_CORRELATION_SOURCE_REPLY');
+    const queuedPrompt = marker('RELOAD_CORRELATION_QUEUED_PROMPT');
+    const queuedReply = marker('RELOAD_CORRELATION_QUEUED_REPLY');
+    const held = testEnvironment.model.scriptHeldTurn([claudeText(sourceReply)]);
+    testEnvironment.model.scriptTurn([claudeText(queuedReply)]);
+
+    await withIntegrationFixture('claude-reload-view-correlation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const sourceCursor = fixture.client.markEvents();
+      const source = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: sourcePrompt,
+        permissionMode: 'bypassPermissions',
+      }));
+      await held.requested;
+      const queueCursor = fixture.client.markEvents();
+      await fixture.client.enqueueNew(chatId, queuedPrompt);
+      held.release();
+
+      expect((await fixture.client.waitForTurnTerminal(chatId, source.turnId, {
+        afterIndex: sourceCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type).toBe('agent-run-finished');
+      const queuedInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        queuedPrompt,
+        { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(queuedInput) + 1,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type).toBe('agent-run-finished');
+
+      const live = await fixture.client.getMessages(chatId);
+      const liveQueuedPrompt = live.messages.find((entry) =>
+        entry.message.type === 'user-message' && entry.message.content === queuedPrompt);
+      if (!liveQueuedPrompt) throw new Error('Live queued prompt was not committed.');
+      const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, queuedPrompt);
+      const reloadedQueuedPrompt = reloaded.messages.find((entry) =>
+        entry.message.type === 'user-message' && entry.message.content === queuedPrompt);
+      if (!reloadedQueuedPrompt) throw new Error('Reloaded queued prompt was not imported.');
+
+      // Replacement views assign fresh ordinals, so ordinals cannot be ordered across views.
+      expect(reloadedQueuedPrompt.ordinal).not.toBe(liveQueuedPrompt.ordinal);
+      expect(userContents(reloaded.messages)).toEqual([sourcePrompt, queuedPrompt]);
+      expect(assistantContents(reloaded.messages)).toEqual([sourceReply, queuedReply]);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

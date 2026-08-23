@@ -19,13 +19,6 @@ export function exactReplyPrompt(value: string): string {
   return `Reply with exactly this text: ${value}. Copy it character for character. Do not use tools.`;
 }
 
-// A prompt that may still be unanswered when the next one is dispatched gets folded into it, so
-// it must not forbid what that successor asks for. Otherwise the merged instruction contradicts
-// itself and the answer depends on which half the model picks.
-export function foldableReplyPrompt(value: string): string {
-  return `Reply with exactly this text: ${value}. Copy it character for character.`;
-}
-
 export function expectFinished(type: string): void {
   expect(type).toBe('agent-run-finished');
 }
@@ -166,6 +159,61 @@ export async function reloadUntilNativeAnswersAfter(
       throw new Error(`Native history for ${chatId} never answered past seq ${afterSeq}`);
     }
     await Bun.sleep(POLL_INTERVAL_MS);
+  }
+}
+
+// Reload assigns fresh ordinals, so correlation across a replacement view uses user content.
+export async function reloadUntilNativeAnswersPrompt(
+  fixture: IntegrationFixture,
+  chatId: string,
+  prompt: string,
+): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
+  const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await reloadFromNativeHistory(fixture, chatId);
+    } catch (error) {
+      const providerHistoryStillFlushing = error instanceof GarconWsRequestError
+        && error.response.code === 'HISTORY_LOAD_FAILED'
+        && error.response.retryable === true;
+      if (!providerHistoryStillFlushing || Date.now() >= deadline) throw error;
+      await Bun.sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+    const page = await fixture.client.getMessages(chatId);
+    const promptEntry = page.messages.findLast((entry) =>
+      entry.message.type === 'user-message' && entry.message.content === prompt);
+    if (
+      promptEntry
+      && page.messages.some((entry) =>
+        entry.ordinal > promptEntry.ordinal && entry.message.type === 'assistant-message')
+    ) return page;
+    if (Date.now() >= deadline) {
+      throw new Error(`Native history for ${chatId} never answered the correlated prompt`);
+    }
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
+}
+
+export async function reloadUntilNativeStableAfterPrompt(
+  fixture: IntegrationFixture,
+  chatId: string,
+  prompt: string,
+): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
+  const initial = await reloadUntilNativeAnswersPrompt(fixture, chatId, prompt);
+  const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
+  let previousSignature = JSON.stringify(initial.messages);
+  let identicalReloads = 0;
+  for (;;) {
+    await Bun.sleep(POLL_INTERVAL_MS);
+    const current = await reloadUntilNativeAnswersPrompt(fixture, chatId, prompt);
+    const currentSignature = JSON.stringify(current.messages);
+    identicalReloads = currentSignature === previousSignature ? identicalReloads + 1 : 0;
+    if (identicalReloads >= 2) return current;
+    if (Date.now() >= deadline) {
+      throw new Error(`Native history for ${chatId} did not stabilize after the correlated prompt`);
+    }
+    previousSignature = currentSignature;
   }
 }
 
