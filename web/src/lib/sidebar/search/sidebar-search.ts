@@ -1,11 +1,23 @@
 // Parses sidebar search queries into structured filter specs and matches
 // chats against them. Supports free-text search across title, projectPath,
 // firstMessage, lastMessage, and tags, plus structured prefix filters:
-// tag:X, agent:Y, model:Z, project:P. The | character creates OR groups
-// within an operator, e.g. tag:a|b matches chats with tag "a" or "b".
+// tag:X, agent:Y, model:Z, project:P, and is:pinned|normal|archived.
+// The | character creates OR groups within supported operators, e.g.
+// tag:a|b matches chats with tag "a" or "b".
+
+import {
+	PERSISTED_CHAT_ORDER_GROUPS,
+	type PersistedChatOrderGroup,
+} from '$shared/chat-order-contracts';
+import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
 
 /** An OR group — values within one group match if ANY element matches. */
 type OrGroup = string[];
+
+export interface ChatOrderGroupFilter {
+	group: PersistedChatOrderGroup;
+	negated: boolean;
+}
 
 export interface ChatFilterSpec {
 	textTokens: string[];
@@ -13,6 +25,7 @@ export interface ChatFilterSpec {
 	agents: string[]; // OR across all values
 	models: string[]; // OR across all values
 	status?: 'active' | 'unread';
+	orderGroup?: ChatOrderGroupFilter;
 	project: string[]; // OR across all values
 }
 
@@ -27,6 +40,7 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
 		spec.agents.length === 0 &&
 		spec.models.length === 0 &&
 		spec.status === undefined &&
+		spec.orderGroup === undefined &&
 		spec.project.length === 0
 	);
 }
@@ -60,6 +74,12 @@ export function parseChatSearch(query: string): ChatFilterSpec {
 			if (value === 'active' || value === 'unread') {
 				spec.status = value;
 			}
+		} else if (lower.startsWith('is:')) {
+			const value = token.slice(3).trim().toLowerCase();
+			const negated = value.startsWith('!');
+			const rawGroup = negated ? value.slice(1) : value;
+			const group = PERSISTED_CHAT_ORDER_GROUPS.find((candidate) => candidate === rawGroup);
+			if (group) spec.orderGroup = { group, negated };
 		} else if (lower.startsWith('tag:')) {
 			const value = token.slice(4).trim();
 			if (!value) continue;
@@ -131,6 +151,8 @@ export interface ChatFilterTarget {
 	tags: string[];
 	isProcessing: boolean;
 	isUnread: boolean;
+	isPinned: boolean;
+	isArchived: boolean;
 	firstMessage?: string;
 	lastMessage?: string;
 }
@@ -144,6 +166,10 @@ export interface ChatFilterTarget {
 export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec): boolean {
 	if (spec.status === 'active' && !chat.isProcessing) return false;
 	if (spec.status === 'unread' && !chat.isUnread) return false;
+	if (spec.orderGroup) {
+		const group = chatOrderGroupFor(chat);
+		if ((group === spec.orderGroup.group) === spec.orderGroup.negated) return false;
+	}
 
 	// Project filter: projectPath must contain at least one value (OR)
 	if (spec.project.length > 0) {
@@ -197,6 +223,9 @@ function buildHaystack(chat: ChatFilterTarget): string {
 export function serializeChatFilter(spec: ChatFilterSpec): string {
 	const parts: string[] = [];
 	if (spec.status) parts.push(`status:${spec.status}`);
+	if (spec.orderGroup) {
+		parts.push(`is:${spec.orderGroup.negated ? '!' : ''}${spec.orderGroup.group}`);
+	}
 	for (const group of spec.tags) {
 		parts.push(`tag:${group.join('|')}`);
 	}
