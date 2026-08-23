@@ -567,23 +567,33 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('keeps the prospective ID stable across edits and rotates it on reseed', async () => {
+	it('mints the prospective ID lazily and clears it on reseed', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
 			.mockReset()
 			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
 			.mockReturnValueOnce(RESEEDED_CHAT_ID);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'expanded prompt',
+		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat);
 
-		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
-			target: { value: '/workspace/other' },
-		});
+		await fireEvent.input(messageInput, { target: { value: '/snippet review first' } });
+		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await waitFor(() => expect(messageInput.value).toBe('expanded prompt'));
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 		await fireEvent.input(messageInput, { target: { value: 'edited prompt' } });
 		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 
 		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
-		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(2);
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
 		await waitFor(() => {
 			expect(
@@ -592,13 +602,14 @@ describe('NewChatForm', () => {
 		});
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(2);
 		expect(onStartChat).toHaveBeenCalledWith(
 			expect.objectContaining({ firstMessage: 'after reseed' }),
 			RESEEDED_CHAT_ID,
 		);
 	});
 
-	it('does not apply an old-ID expansion after reseeding', async () => {
+	it('cancels an in-flight expansion on reseed', async () => {
 		stubMatchMedia(false);
 		vi.mocked(clientChatId.createClientChatId)
 			.mockReset()

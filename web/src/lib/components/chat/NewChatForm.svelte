@@ -171,7 +171,7 @@
 	function reseed(): void {
 		snippetExpansion.cancel();
 		promptRefinement.abort();
-		prospectiveChatId = createClientChatId();
+		prospectiveChatId = null;
 		composerEditor.reset();
 		snippetInteractionGeneration += 1;
 		snippetPalette.reset();
@@ -354,10 +354,15 @@
 		if (snippetExpansion.pending) textareaRef?.focus();
 	}
 
+	function ensureProspectiveChatId(): ChatId {
+		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
+		return prospectiveChatId;
+	}
+
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
-		if (projectPath && prospectiveChatId) {
-			return { type: 'new-chat' as const, chatId: prospectiveChatId, projectPath };
+		if (projectPath) {
+			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath };
 		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
 		return null;
@@ -375,7 +380,6 @@
 			return 'cancelled';
 		}
 		const sourceText = form.firstMessage;
-		const chatId = context.chatId;
 		const projectPath = context.projectPath;
 		const start = range?.start ?? textareaRef.selectionStart;
 		const end = range?.end ?? textareaRef.selectionEnd;
@@ -399,7 +403,6 @@
 				return 'cancelled';
 			}
 			if (
-				prospectiveChatId !== chatId ||
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				form.firstMessage !== sourceText
@@ -429,7 +432,6 @@
 		const context = expansionContext();
 		if (!context) return;
 		const sourceText = form.firstMessage;
-		const chatId = context.chatId;
 		const projectPath = context.projectPath;
 		try {
 			const [result] = await Promise.all([
@@ -442,7 +444,6 @@
 			]);
 			if (result.kind !== 'expanded') return;
 			if (
-				prospectiveChatId !== chatId ||
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				form.firstMessage !== sourceText
@@ -479,8 +480,7 @@
 			return;
 		}
 		const config = form.buildConfig();
-		const chatId = prospectiveChatId;
-		if (config && chatId) onStartChat(config, chatId);
+		if (config) onStartChat(config, ensureProspectiveChatId());
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
