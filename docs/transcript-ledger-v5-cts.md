@@ -346,7 +346,7 @@ routine local testing.
 | ----------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | TLV5-L10.01 | Genesis calls only `legacyHistoryImport`; Reload and native fork call only `nativeHistoryImport`. | Repository static test                    |
 | TLV5-L10.02 | Reload imports exactly the current binding and preserves the frozen prefix without duplication. | Unit, provider scripted, server black-box |
-| TLV5-L10.03 | Reload is absent without both a native source and import facet.                                 | Unit, browser behavior                    |
+| TLV5-L10.03 | Reload is exposed exactly when both a native source and import facet are available.             | Unit, browser behavior                    |
 | TLV5-L10.04 | Handoff freezes earlier native activity permanently; later owners cannot re-import it.          | Server black-box                          |
 
 ### L11 Per-Chat Failure Isolation

@@ -3705,14 +3705,14 @@ async function verifyHeldEarlierPageNativeReload(
   }
 }
 
-async function verifyDirectChatHidesNativeReload(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-no-native-reload-base');
+async function verifyDirectChatExposesNativeReload(fixture: ChromiumFixture): Promise<void> {
+  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-direct-native-reload-base');
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'no-native-reload-baseline');
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'direct-native-reload-baseline');
   await openMainWorkspaceActions(fixture.page);
   expect(await fixture.page.getByRole('menuitem', { name: 'Reload from native history' }).count())
-    .toBe(0);
+    .toBe(1);
   await fixture.page.keyboard.press('Escape');
   fixture.assertNoBrowserErrors();
 }
@@ -5093,13 +5093,13 @@ describe('Chromium transcript virtualization', () => {
     );
   }, 180_000);
 
-  test('[TLV5-L10.03-CHROMIUM-01] hides native-history reload for a direct chat', async () => {
+  test('[TLV5-L10.03-CHROMIUM-01] exposes native-history reload for a direct chat', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     await withChromiumFixture(
       'transcript-native-history-reload',
       async (fixture, markPhase) => {
         markPhase('checking the direct-chat native reload capability');
-        await verifyDirectChatHidesNativeReload(fixture);
+        await verifyDirectChatExposesNativeReload(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
