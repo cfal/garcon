@@ -502,8 +502,7 @@ export class CommandSupport {
         409,
       );
     }
-    const recoveringAcceptedCommand = ledger.kind === 'duplicate'
-      && ledger.record.status === 'accepted';
+    const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
       return this.agentTurnResultWithOptionalChat(
         ledger.record,
@@ -520,9 +519,7 @@ export class CommandSupport {
       turnId: ledger.record.turnId ?? ids.turnId,
     };
     options.commandType = commandType;
-    if (preparation?.operation === 'agent-handoff') {
-      options.contextTransition = 'agent-handoff';
-    }
+    if (preparation?.operation === 'agent-handoff') options.contextTransition = 'agent-handoff';
     if (input.images !== undefined) options.images = input.images;
 
     try {
