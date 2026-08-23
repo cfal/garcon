@@ -388,6 +388,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
   ): Promise<AcceptedSteerOutcome> {
     return this.#steerInputDelivery.deliver(
       chatId,
@@ -396,6 +397,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       options,
       target,
       afterPendingRegistered,
+      userMessagePresentation,
     );
   }
 

@@ -178,6 +178,9 @@ export async function main(
         chatId: command.chatId,
         content: message,
         allowSteer: command.allowSteer,
+        ...(command.userMessagePresentation === undefined
+          ? {}
+          : { userMessagePresentation: command.userMessagePresentation }),
       }, client, output, options.signal);
       return 0;
     }

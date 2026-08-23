@@ -18,6 +18,7 @@ import {
   parseChatMessageMetadata,
   str,
 } from './chat-message-coercion.js';
+import { parseChatRowTitle } from './chat-row-contracts.js';
 
 export interface ChatImage {
   data: string;
@@ -40,6 +41,34 @@ export interface ChatMessageMetadata {
   clientMessageId?: string;
   upstreamRequestId?: string;
   turnId?: string;
+}
+
+export const USER_MESSAGE_PRESENTATION_STYLES = ['notice', 'error'] as const;
+export type UserMessagePresentationStyle = typeof USER_MESSAGE_PRESENTATION_STYLES[number];
+
+export interface UserMessagePresentation {
+  readonly origin: 'cli';
+  readonly style: UserMessagePresentationStyle;
+  readonly title?: string;
+}
+
+export function parseUserMessagePresentation(value: unknown): UserMessagePresentation | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('user message presentation must be an object');
+  }
+  const body = value as Record<string, unknown>;
+  for (const key of Object.keys(body)) {
+    if (key !== 'origin' && key !== 'style' && key !== 'title') {
+      throw new TypeError(`user message presentation contains unsupported field: ${key}`);
+    }
+  }
+  if (body.origin !== 'cli') throw new TypeError('user message presentation origin must be cli');
+  if (body.style !== 'notice' && body.style !== 'error') {
+    throw new TypeError('user message presentation style must be notice or error');
+  }
+  const title = parseChatRowTitle(body.title);
+  return { origin: 'cli', style: body.style, ...(title === undefined ? {} : { title }) };
 }
 
 // Canonical shape for a single todo/plan item. All provider-specific
@@ -78,6 +107,7 @@ export class UserMessage {
     public content: string,
     public images?: ChatImage[],
     public metadata?: ChatMessageMetadata,
+    public presentation?: UserMessagePresentation,
   ) {}
 }
 
@@ -1159,13 +1189,21 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
   if (toolUseMessage) return toolUseMessage;
 
   switch (data.type) {
-	    case 'user-message':
-	      return new UserMessage(
-	        str(data.timestamp),
-	        str(data.content),
-	        asChatImages(data.images),
-	        parseChatMessageMetadata(data.metadata),
-	      );
+    case 'user-message': {
+      let presentation: UserMessagePresentation | undefined;
+      try {
+        presentation = parseUserMessagePresentation(data.presentation);
+      } catch {
+        return null;
+      }
+      return new UserMessage(
+        str(data.timestamp),
+        str(data.content),
+        asChatImages(data.images),
+        parseChatMessageMetadata(data.metadata),
+        presentation,
+      );
+    }
     case 'assistant-message':
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'thinking':

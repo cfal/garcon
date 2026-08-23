@@ -222,6 +222,32 @@ describe('chat command request parsers', () => {
     })).toThrow(CommandRequestValidationError);
   });
 
+  it('validates presentation on run and steer requests', () => {
+    const run = parseAgentRunCommandRequest({
+      clientRequestId: 'request-presentation',
+      clientMessageId: 'message-presentation',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+      command: 'continue',
+      userMessagePresentation: { origin: 'cli', style: 'notice', title: '  Context  ' },
+    });
+    expect(run.userMessagePresentation).toEqual({
+      origin: 'cli', style: 'notice', title: 'Context',
+    });
+    expect(parseSteerCommandRequest({
+      clientRequestId: 'request-steer-presentation',
+      clientMessageId: 'message-steer-presentation',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+      content: 'stop here',
+      userMessagePresentation: { origin: 'cli', style: 'error' },
+    }).userMessagePresentation).toEqual({ origin: 'cli', style: 'error' });
+    expect(() => parseAgentRunCommandRequest({
+      ...run,
+      userMessagePresentation: { origin: 'cli', style: 'notice', extra: true },
+    })).toThrow('unsupported field');
+  });
+
   it('parses queue steering with explicit entry concurrency preconditions', () => {
     expect(parseQueueEntrySteerCommandRequest({
       clientRequestId: ' request-steer-queue ',

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   ErrorMessage,
   TranscriptNoticeMessage,
+  UserMessage,
 } from '../../../common/chat-types.ts';
 import { renderSharedChatText } from '../share-transcript.ts';
 
@@ -34,5 +35,28 @@ describe('shared transcript chat rows', () => {
     expect(rendered).toContain(`[CLI Error] ${AT}\nShared error.`);
     expect(rendered).toContain(`[Notice] ${AT}\nInternal notice.`);
     expect(rendered).toContain(`[Error] ${AT}\nProvider error.`);
+  });
+
+  it('distinguishes presented user messages from presentation-only CLI rows', () => {
+    const rendered = renderSharedChatText({
+      shareToken: 'synthetic-share-token',
+      chatId: 'synthetic-chat',
+      title: 'Presented users',
+      agentId: 'codex',
+      model: 'gpt',
+      projectPath: '/synthetic/workspace',
+      sharedAt: AT,
+      messages: [
+        new UserMessage(AT, 'Body', undefined, undefined, {
+          origin: 'cli', style: 'notice', title: 'Operator context',
+        }),
+        new UserMessage(AT, 'Stop', undefined, undefined, {
+          origin: 'cli', style: 'error',
+        }),
+      ],
+    });
+
+    expect(rendered).toContain(`[User (CLI Notice) — Operator context] ${AT}\nBody`);
+    expect(rendered).toContain(`[User (CLI Error)] ${AT}\nStop`);
   });
 });

@@ -43,8 +43,24 @@ describe('UserMessageNavigatorDialog', () => {
 			'Oldest message',
 		]);
 		expect(rows[0]?.classList.contains('min-h-16')).toBe(true);
+		expect(rows[0]?.classList.contains('justify-center')).toBe(true);
 		expect(rows[0]?.querySelector('span')?.classList.contains('line-clamp-2')).toBe(true);
 		expect(rows[0]?.querySelector('span')?.classList.contains('break-words')).toBe(true);
+	});
+
+	it('renders presented messages with valid semantic button content', () => {
+		render(UserMessageNavigatorDialogTestHost, {
+			initialItems: [{
+				...item('generation-1:1', 'Deployment context'),
+				presentation: { origin: 'cli', style: 'notice', title: 'Operator note' },
+			}],
+		});
+
+		const row = document.querySelector<HTMLButtonElement>('[data-user-message-navigator-row]');
+		const header = row?.querySelector<HTMLElement>('[data-user-message-presentation="notice"]');
+		expect(header?.tagName).toBe('SPAN');
+		expect(header?.classList.contains('bg-status-info')).toBe(true);
+		expect(header?.textContent).toContain('Operator note');
 	});
 
 	it('renders the attachment fallback and selects the exact stable item', async () => {

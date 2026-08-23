@@ -210,6 +210,30 @@ describe('sendChatAsync', () => {
     expect(testOutput.sentRecords).toEqual([[CHAT_ID, 'new-turn', 'turn-1']]);
   });
 
+  test('preserves presentation across run and steer route switches', async () => {
+    let runCalls = 0;
+    const testClient = client({
+      async runChat() {
+        runCalls += 1;
+        if (runCalls === 1) throw busyError();
+        return acceptedTurn();
+      },
+      async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
+    });
+    const presentation = { origin: 'cli', style: 'error', title: 'Blocker' } as const;
+    await sendChatAsync({
+      chatId: CHAT_ID,
+      content: 'Message',
+      allowSteer: true,
+      userMessagePresentation: presentation,
+    }, testClient, output(), undefined, noDelayDependencies());
+
+    expect(testClient.runs).toHaveLength(2);
+    expect(testClient.runs[0]).toEqual(testClient.runs[1]);
+    expect(testClient.runs[0]?.userMessagePresentation).toEqual(presentation);
+    expect(testClient.steers[0]?.userMessagePresentation).toEqual(presentation);
+  });
+
   test('reports bounded exhaustion after run-steer-run with a second busy rejection', async () => {
     const testClient = client({
       async runChat() { throw busyError(); },

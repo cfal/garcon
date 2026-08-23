@@ -465,6 +465,7 @@ function stripExactLegacyPrefix(
     original.content.slice(prefix.length),
     original.images,
     original.metadata,
+    original.presentation,
   );
   return { messages: next, stripped: true };
 }

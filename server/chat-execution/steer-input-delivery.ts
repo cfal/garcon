@@ -48,6 +48,7 @@ export class SteerInputDelivery {
     options: AgentSteerOptions,
     target: CapturedSteerTarget,
     afterPendingRegistered: (turnId: string) => Promise<void>,
+    userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
   ): Promise<AcceptedSteerOutcome> {
     let deliveryPrepared = false;
     let inserted = false;
@@ -60,6 +61,7 @@ export class SteerInputDelivery {
         transcriptViewId: options.transcriptViewId,
         turnId: target.identity.turnId,
         commandType: 'steer',
+        userMessagePresentation,
       });
       if (!inserted) return { turnId: target.identity.turnId, duplicate: true };
       await afterPendingRegistered(target.identity.turnId);

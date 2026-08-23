@@ -128,6 +128,14 @@ export function announcementForAppendedRow(
 ): string | null {
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
+	if (message instanceof UserMessage && message.presentation) {
+		const label = message.presentation.style === 'error'
+			? m.chat_message_cli_error()
+			: m.chat_message_cli_notice();
+		const title = message.presentation.title ? `: ${message.presentation.title}` : '';
+		const body = plainAnnouncementText(String(message.content ?? ''));
+		return `${label}${title}.${body ? ` ${body}` : ''}`;
+	}
 	if (message instanceof AssistantMessage || message instanceof UserMessage) {
 		return plainAnnouncementText(String(message.content ?? '')) || null;
 	}

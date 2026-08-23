@@ -40,7 +40,7 @@ export class AcceptedInputTranscript {
     const images = normalizeChatImages(options.images);
     const result = await this.transcript.admitInput(
       chatId,
-      new UserMessage(options.createdAt ?? new Date().toISOString(), content, images),
+      new UserMessage(options.createdAt ?? new Date().toISOString(), content, images, undefined, options.userMessagePresentation),
       { ...options, clientRequestId: options.clientRequestId },
     );
     return result.inserted !== false;

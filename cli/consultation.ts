@@ -104,6 +104,9 @@ async function submitStart(
       ...selection,
       command: prompt,
       tags: startTags(invocation.additionalTags),
+      ...(invocation.userMessagePresentation === undefined
+        ? {}
+        : { userMessagePresentation: invocation.userMessagePresentation }),
     };
     try {
       return await client.startChat(request, signal);
@@ -146,6 +149,9 @@ async function submitResume(
     command: prompt,
     ...(tagsToAdd === undefined ? {} : { tagsToAdd }),
     permissionFallbackPolicy: 'require-explicit-bypass',
+    ...(invocation.userMessagePresentation === undefined
+      ? {}
+      : { userMessagePresentation: invocation.userMessagePresentation }),
   };
   const needsCatalog = invocation.model !== undefined
     || invocation.permissionMode !== undefined

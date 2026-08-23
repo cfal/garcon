@@ -20,6 +20,7 @@ import {
 } from '../../common/chat-command-contracts.js';
 import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-id.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
+import type { UserMessagePresentation } from '../../common/chat-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentExecutionCommandType,
@@ -179,6 +180,7 @@ export interface NormalizedSubmitRunInput {
   tagsToAdd?: string[];
   permissionFallbackPolicy?: 'require-explicit-bypass';
   handoff?: AgentHandoffRequest;
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
@@ -221,6 +223,7 @@ export interface NormalizedChatStart {
   thinkingMode: ThinkingMode;
   agentSettings: AgentSettingsEnvelope;
   tags: string[];
+  userMessagePresentation?: UserMessagePresentation;
 }
 
 export interface ScheduledExistingChatInput {
@@ -532,6 +535,7 @@ export class CommandSupport {
         },
         content: input.command,
         options,
+        userMessagePresentation: input.userMessagePresentation,
         settlement: this.settlement,
         preparation,
       });

@@ -4185,6 +4185,7 @@ describe('ChatCommandService', () => {
         transcriptViewId: 'view-1',
         content: input.content,
         clientMessageId: input.clientMessageId,
+        userMessagePresentation: null,
       },
     });
     await ledger.settleTerminal(accepted.record.key, 'finished', { turnId: 'turn-compact' });

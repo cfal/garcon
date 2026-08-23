@@ -189,8 +189,12 @@ function normalizeImages(images: UserMessage['images']): string {
 
 function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   if (message instanceof UserMessage) {
+    const presentation = message.presentation;
+    const role = presentation
+      ? `User (CLI ${presentation.style === 'error' ? 'Error' : 'Notice'})${presentation.title ? ` — ${presentation.title}` : ''}`
+      : 'User';
     return {
-      role: 'User',
+      role,
       timestamp: message.timestamp,
       content: `${message.content}${normalizeImages(message.images)}`.trim(),
     };
