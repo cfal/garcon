@@ -46,18 +46,15 @@
 	let displayProjectPath = $derived(formatSidebarProjectPath(projectPath));
 </script>
 
-<div
-	class={cn('relative min-w-0', isSingleLine ? 'flex-1' : 'w-full')}
-	data-slot="sidebar-chat-summary"
->
+<div class={cn('relative min-w-0', !isSingleLine && 'w-full')} data-slot="sidebar-chat-summary">
 	{#if isSingleLine}
 		<div
 			class={cn(
-				'flex min-w-0 w-full items-center gap-1.5 text-[14px] leading-[1.3]',
+				'flex min-w-0 items-center gap-1.5 text-[14px] leading-[1.3]',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
-			<span class={cn('min-w-0 flex-1 truncate', isUnread ? 'font-bold' : 'font-medium')}>
+			<span class={cn('min-w-0 truncate', isUnread ? 'font-bold' : 'font-medium')}>
 				{chatName}
 			</span>
 			{#if isUnread}

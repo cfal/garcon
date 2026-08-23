@@ -187,7 +187,11 @@
 			'overflow-hidden',
 			isActiveChat ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
 		)}
-		style={`height:calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px);`}
+		style={`height:${
+			displayOptions.chatItemLayout === 'single-line'
+				? '100%'
+				: `calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px)`
+		};`}
 		data-sidebar-virtual-row-content
 	>
 		<svelte:boundary>

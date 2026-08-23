@@ -189,20 +189,23 @@
 	});
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
+	// Single-line rows drop the separator line entirely; no trailing slot is
+	// reserved for it.
 	let separatorItems = $derived(
-		computeSidebarSeparatorItems(virtualItems, rows, separatorLineHeight, separatorPixelRatio),
+		displayOptions.chatItemLayout === 'single-line'
+			? []
+			: computeSidebarSeparatorItems(virtualItems, rows, separatorLineHeight, separatorPixelRatio),
 	);
 	let selectedBackgroundItem = $derived.by(() => {
 		if (isMultiSelectMode || !selectedChatId) return null;
+		const separatorSlot =
+			displayOptions.chatItemLayout === 'single-line' ? 0 : CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
 
 		for (const virtualItem of virtualItems) {
 			const row = rows[virtualItem.index];
 			if (!row || row.type !== 'chat' || row.chat.id !== selectedChatId) continue;
 
-			const top =
-				virtualItem.start > 0
-					? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT
-					: virtualItem.start;
+			const top = virtualItem.start > 0 ? virtualItem.start - separatorSlot : virtualItem.start;
 			return {
 				key: row.key ?? virtualItem.key,
 				top,

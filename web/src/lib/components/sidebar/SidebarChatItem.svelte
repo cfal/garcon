@@ -262,7 +262,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class={cn('relative flex-1 min-w-0', isSingleLineLayout && 'flex items-center gap-1.5')}>
+	<div class={cn('relative flex-1 min-w-0', isSingleLineLayout && 'flex items-center gap-1')}>
 		<SidebarChatSummary
 			{session}
 			{isSelected}
@@ -299,7 +299,7 @@
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
-					isSingleLineLayout && 'min-h-[44px]',
+					isSingleLineLayout && 'py-[2px]',
 				)}
 				onclick={handleItemClick}
 			>
@@ -328,10 +328,12 @@
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
-					isMultiSelectMode ? 'py-[5px] pl-1 border-l-0' : 'py-[5px] pl-[9px]',
-					// Reserves a gutter so the hover actions trigger cannot cover the
-					// inline timestamp/state badges, and fills the 44px single-line slot.
-					isSingleLineLayout && 'h-full min-h-[44px] pr-9',
+					isMultiSelectMode
+						? 'py-[5px] pl-1 border-l-0'
+						: isSingleLineLayout
+							? 'py-[2px] pl-[9px]'
+							: 'py-[5px] pl-[9px]',
+					isSingleLineLayout && 'h-full',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -353,6 +355,7 @@
 				!isAtCursor &&
 					'sidebar-item-menu-anchor right-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
 				!isAtCursor && !isSingleLineLayout && 'top-1',
+				// Centered so equal space sits above and below the hover trigger.
 				!isAtCursor && isSingleLineLayout && 'top-1/2 -translate-y-1/2',
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}

@@ -225,8 +225,8 @@ describe('shared sidebar chat row', () => {
 		});
 
 		const title = screen.getByText('Shared row chat');
-		expect(title.className).toContain('flex-1');
 		expect(title.className).toContain('truncate');
+		expect(title.className).not.toContain('flex-1');
 		expect(screen.queryByText('Latest preview text')).toBeNull();
 		expect(screen.queryByText('Claude')).toBeNull();
 		expect(screen.queryByText('ops')).toBeNull();
@@ -252,6 +252,15 @@ describe('shared sidebar chat row', () => {
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
 		expect(title.compareDocumentPosition(timestampBadge)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+		// The row button keeps the default-mode overlay anchor placement without
+		// reserving a right gutter, with reduced vertical padding.
+		const rowButton = title.closest('button');
+		expect(rowButton?.className).not.toContain('pr-9');
+		expect(rowButton?.className).toContain('py-[2px]');
+		const menuAnchor = document.querySelector<HTMLElement>('.sidebar-item-menu-anchor');
+		expect(menuAnchor?.className).toContain('top-1/2');
+		expect(menuAnchor?.className).toContain('-translate-y-1/2');
 	});
 
 	it('shows the processing indicator instead of the timestamp badge in single-line mode', () => {
