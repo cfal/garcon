@@ -37,6 +37,17 @@ describe('SnippetFormState', () => {
 		});
 	});
 
+	it('increments the template revision only when the text changes', () => {
+		const form = new SnippetFormState(() => []);
+		expect(form.templateRevision).toBe(0);
+		form.template = 'Review this';
+		expect(form.templateRevision).toBe(1);
+		form.template = 'Review this';
+		expect(form.templateRevision).toBe(1);
+		form.template = '';
+		expect(form.templateRevision).toBe(2);
+	});
+
 	it('resets new and edited forms with the correct default', () => {
 		const saved = {
 			...snippet('one', 'review'),

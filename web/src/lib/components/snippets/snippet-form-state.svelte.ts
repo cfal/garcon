@@ -11,13 +11,28 @@ import * as m from '$lib/paraglide/messages.js';
 
 export class SnippetFormState {
 	shortName = $state('');
-	template = $state('');
 	defaultArguments = $state('');
 	saving = $state(false);
 	error = $state<string | null>(null);
 	#editingId: string | null = null;
+	#template = $state('');
+	#templateRevision = $state(0);
 
 	constructor(private readonly getSnippets: () => readonly Snippet[]) {}
+
+	get template(): string {
+		return this.#template;
+	}
+
+	set template(template: string) {
+		if (template === this.#template) return;
+		this.#template = template;
+		this.#templateRevision += 1;
+	}
+
+	get templateRevision(): number {
+		return this.#templateRevision;
+	}
 
 	get shortNameError(): string | null {
 		if (!this.shortName) return m.snippets_short_name_required();

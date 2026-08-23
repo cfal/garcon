@@ -1,7 +1,8 @@
 <script lang="ts">
 	import SnippetsSection from '../SnippetsSection.svelte';
-	import { setSnippets, setTransientLayers } from '$lib/context';
+	import { setNotifications, setSnippets, setTransientLayers } from '$lib/context';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { sortSnippetsByShortName, type Snippet, type SnippetsSnapshot } from '$shared/snippets';
@@ -9,9 +10,10 @@
 	interface Props {
 		blockRefresh?: boolean;
 		blockSave?: boolean;
+		showSection?: boolean;
 	}
 
-	let { blockRefresh = false, blockSave = false }: Props = $props();
+	let { blockRefresh = false, blockSave = false, showSection = true }: Props = $props();
 
 	function entry(id: string, shortName: string, template: string, defaultArguments = ''): Snippet {
 		return {
@@ -34,6 +36,7 @@
 	let loadCount = 0;
 	let releaseRefresh: (() => void) | null = null;
 	let rejectSave: ((error: Error) => void) | null = null;
+	let createCount = $state(0);
 	const store = createSnippetsStore({
 		get: async () => {
 			loadCount += 1;
@@ -45,6 +48,7 @@
 			return current;
 		},
 		create: async (request) => {
+			createCount += 1;
 			if (blockSave) {
 				await new Promise<void>((_resolve, reject) => {
 					rejectSave = (error) => reject(error);
@@ -88,11 +92,19 @@
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
 	setTransientLayers(transientLayers);
+	const notifications = createNotificationsStore();
+	setNotifications(notifications);
 </script>
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 
-<SnippetsSection active={true} />
+{#if showSection}
+	<SnippetsSection active={true} />
+{/if}
+<div data-testid="snippet-create-count">{createCount}</div>
+<div data-testid="snippet-notifications">
+	{notifications.items.map((notification) => notification.message).join('\n')}
+</div>
 <button type="button" onclick={() => void store.refresh()} data-testid="begin-refresh">
 	Begin refresh
 </button>
