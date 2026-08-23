@@ -15,11 +15,12 @@ import {
 } from '../../../common/chat-types.js';
 import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
-import { countUserContent, userContents } from '../../support/chat-assertions.js';
 import {
-  type GarconTestClient,
-  GarconWsRequestError,
-} from '../../support/garcon-client.js';
+  assistantContents,
+  countUserContent,
+  userContents,
+} from '../../support/chat-assertions.js';
+import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
@@ -558,7 +559,7 @@ describe('reconnect and transcript stability', () => {
     });
   });
 
-  test('pages one stable view and rejects reload for a chat without native history', async () => {
+  test('pages one stable view and reloads it from Direct native history', async () => {
     await withIntegrationFixture('view-qualified-paging', async (fixture) => {
       const chatId = fixture.newChatId();
       for (const content of ['page-first', 'page-second', 'page-third']) {
@@ -604,21 +605,18 @@ describe('reconnect and transcript stability', () => {
         expect(countUserContent(reconstructed, content)).toBe(1);
       }
 
-      let reloadFailure: unknown;
-      try {
-        await fixture.client.reloadChat(chatId);
-      } catch (error) {
-        reloadFailure = error;
-      }
-      expect(reloadFailure).toBeInstanceOf(GarconWsRequestError);
-      expect((reloadFailure as GarconWsRequestError).response).toMatchObject({
-        requestType: 'chat-reload',
-        code: 'HISTORY_LOAD_FAILED',
-        retryable: false,
-        chatId,
-      });
-      expect(transcriptProjection((await fixture.client.getMessages(chatId)).messages))
-        .toEqual(transcriptProjection(reconstructed));
+      const reloaded = await fixture.client.reloadChat(chatId);
+      expect(reloaded.transcriptViewId).not.toBe(viewId);
+      expect(userContents(reloaded.messages)).toEqual([
+        'page-first',
+        'page-second',
+        'page-third',
+      ]);
+      expect(assistantContents(reloaded.messages)).toEqual([
+        'echo:page-first',
+        'echo:page-second',
+        'echo:page-third',
+      ]);
     });
   });
 

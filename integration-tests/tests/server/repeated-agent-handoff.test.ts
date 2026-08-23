@@ -6,6 +6,7 @@ import {
   assistantContents,
   userContents,
 } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
@@ -138,9 +139,10 @@ describe('repeated agent handoff lifecycle', () => {
         answer: 'recovered-chat-answer',
       });
       expectRequestConversation(request, [
-        'recoverable-handoff-source',
-        'echo:recoverable-handoff-source',
-        'recovered-chat-new-work',
+        expectedCarriedInput([
+          'recoverable-handoff-source',
+          'echo:recoverable-handoff-source',
+        ], 'recovered-chat-new-work'),
       ]);
       await expectHistory(fixture, recoverableChatId, {
         users: ['recoverable-handoff-source', 'recovered-chat-new-work'],
@@ -209,7 +211,7 @@ describe('repeated agent handoff lifecycle', () => {
     });
   });
 
-  test('preserves direct-provider ledger history through handoffs, restart, and a point fork', async () => {
+  test('preserves Direct native history through handoffs, restart, and a point fork', async () => {
     await withIntegrationFixture('repeated-agent-handoff', async (fixture) => {
       const sourceChatId = fixture.newChatId();
       const agentA = fixture.directAgents.openAi;
@@ -233,9 +235,7 @@ describe('repeated agent handoff lifecycle', () => {
         answer: bFirstAnswer,
       });
       expectRequestConversation(firstHandoff, [
-        'a-source',
-        'echo:a-source',
-        'b-first',
+        expectedCarriedInput(['a-source', 'echo:a-source'], 'b-first'),
       ]);
 
       const bFollow = await fixture.client.runDirectChat({
@@ -254,13 +254,14 @@ describe('repeated agent handoff lifecycle', () => {
         answer: 'a-return-answer',
       });
       expectRequestConversation(secondHandoff, [
-        'a-source',
-        'echo:a-source',
-        'b-first',
-        bFirstAnswer,
-        'b-follow',
-        'echo:b-follow',
-        'a-return',
+        expectedCarriedInput([
+          'a-source',
+          'echo:a-source',
+          'b-first',
+          bFirstAnswer,
+          'b-follow',
+          'echo:b-follow',
+        ], 'a-return'),
       ]);
 
       await fixture.crashAndRestartGarcon();
@@ -287,17 +288,18 @@ describe('repeated agent handoff lifecycle', () => {
         answer: 'b-return-answer',
       });
       expectRequestConversation(thirdHandoff, [
-        'a-source',
-        'echo:a-source',
-        'b-first',
-        bFirstAnswer,
-        'b-follow',
-        'echo:b-follow',
-        'a-return',
-        'a-return-answer',
-        'a-follow',
-        'echo:a-follow',
-        'b-return',
+        expectedCarriedInput([
+          'a-source',
+          'echo:a-source',
+          'b-first',
+          bFirstAnswer,
+          'b-follow',
+          'echo:b-follow',
+          'a-return',
+          'a-return-answer',
+          'a-follow',
+          'echo:a-follow',
+        ], 'b-return'),
       ]);
 
       const completeSource = await expectHistory(fixture, sourceChatId, {
@@ -333,15 +335,16 @@ describe('repeated agent handoff lifecycle', () => {
         answer: 'fork-continuation-answer',
       });
       expectRequestConversation(forkRequest, [
-        'a-source',
-        'echo:a-source',
-        'b-first',
-        bFirstAnswer,
-        'b-follow',
-        'echo:b-follow',
-        'a-return',
-        'a-return-answer',
-        'fork-continuation',
+        expectedCarriedInput([
+          'a-source',
+          'echo:a-source',
+          'b-first',
+          bFirstAnswer,
+          'b-follow',
+          'echo:b-follow',
+          'a-return',
+          'a-return-answer',
+        ], 'fork-continuation'),
       ]);
 
       const sourceContinuation = await fixture.client.runDirectChat({
@@ -492,7 +495,6 @@ function expectRequestConversation(
 ): void {
   expect(request.body.messages.map((message) => messageText(message.content))).toEqual([...expected]);
   expect(request.lastUserText).toBe(expected.at(-1) ?? '');
-  expect(JSON.stringify(request.body)).not.toContain('<carried-context');
 }
 
 function messageText(content: unknown): string {

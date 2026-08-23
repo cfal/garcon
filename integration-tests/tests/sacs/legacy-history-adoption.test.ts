@@ -36,6 +36,16 @@ const DIRECT_DRIVER_IDS = [
   'direct-openai-compatible',
   'direct-anthropic-compatible',
 ] as const;
+const DIRECT_NATIVE_FAILURE_CASES = [
+  {
+    failure: 'corrupt',
+    caseId: '[TLV5-ADOPT.08-SACS-DIRECT-CORRUPT-01]',
+  },
+  {
+    failure: 'missing',
+    caseId: '[TLV5-ADOPT.08-SACS-DIRECT-MISSING-01]',
+  },
+] as const;
 const EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS = process.platform === 'linux'
   ? ['opencode']
   : [];
@@ -516,8 +526,8 @@ for (const driverFactory of sacsScriptedDriverFactories.filter((candidate) => (
       }, activeDriver.fixtureOptions);
     }, SACS_TIMEOUT_MS);
 
-    for (const failure of ['missing', 'corrupt'] as const) {
-      test(`[TLV5-ADOPT.08-SACS-DIRECT-${failure.toUpperCase()}-01] preserves the view when Direct history is ${failure}`, async () => {
+    for (const { caseId, failure } of DIRECT_NATIVE_FAILURE_CASES) {
+      test(`${caseId} preserves the view when Direct history is ${failure}`, async () => {
         const activeDriver = requireDriver(driver, driverFactory.label);
         const nativeHistory = driverFactory.nativeHistoryImport;
         if (!nativeHistory) throw new Error(`${driverFactory.label} has no native history facet.`);

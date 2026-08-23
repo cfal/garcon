@@ -5,6 +5,7 @@
 // history as its carried context.
 import { describe, expect, test } from 'bun:test';
 import { userContents } from '../../support/chat-assertions.js';
+import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 describe('self handoff', () => {
@@ -40,12 +41,13 @@ describe('self handoff', () => {
       expect(response.chat.id).toBe(targetChatId);
 
       const request = await held.received;
-      expect(request.body.messages.map((message) => message.content)).toEqual([
+      const carriedInput = expectedCarriedInput([
         'the original request',
         'echo:the original request',
-        'continue the work',
+      ], 'continue the work');
+      expect(request.body.messages.map((message) => message.content)).toEqual([
+        carriedInput,
       ]);
-      expect(JSON.stringify(request.body)).not.toContain('<carried-context');
       expect(held.releaseText('echo:continue the work')).toBeTrue();
 
       const chats = (await client.listChats()).sessions;
