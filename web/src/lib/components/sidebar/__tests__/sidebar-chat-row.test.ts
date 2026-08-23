@@ -317,6 +317,7 @@ describe('shared sidebar chat row', () => {
 		expect(processingIndicator).toBeTruthy();
 		expect(document.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
 		expect(processingIndicator?.parentElement?.className).toContain('ml-auto');
+		expect(processingIndicator?.parentElement?.className).toContain('pr-0.5');
 		expect(processingIndicator?.parentElement?.className).toContain('group-hover:opacity-0');
 		expect(processingIndicator?.parentElement?.className).toContain(
 			'group-focus-within:opacity-0',

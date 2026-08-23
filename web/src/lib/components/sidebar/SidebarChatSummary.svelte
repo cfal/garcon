@@ -78,7 +78,7 @@
 			{#if isProcessing}
 				<span class="sr-only">{m.chat_pane_processing()}</span>
 				<span
-					class={cn('flex items-center justify-end', singleLineStatusClass)}
+					class={cn('flex items-center justify-end pr-0.5', singleLineStatusClass)}
 					aria-hidden="true"
 				>
 					<span
