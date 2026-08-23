@@ -25,7 +25,7 @@ export function createDirectNativeSessionAccess(
       signal.throwIfAborted();
       if (!chat.agentSessionId && !chat.nativeSession) return null;
       const sessionId = requiredSessionId(sessions, chat.agentSessionId, chat.nativeSession);
-      await loadRequired(sessions, sessionId, signal);
+      await inspectRequired(sessions, sessionId, signal);
       return sessions.nativeReference(sessionId);
     },
 
@@ -33,8 +33,8 @@ export function createDirectNativeSessionAccess(
       signal.throwIfAborted();
       if (!chat.agentSessionId && !chat.nativeSession) return null;
       const sessionId = requiredSessionId(sessions, chat.agentSessionId, chat.nativeSession);
-      const snapshot = await loadRequired(sessions, sessionId, signal);
-      return { kind: 'filesystem-path', value: snapshot.path };
+      const source = await inspectRequired(sessions, sessionId, signal);
+      return { kind: 'filesystem-path', value: source.path };
     },
 
     async release({ chat, signal }) {
@@ -110,6 +110,22 @@ async function loadRequired(
     const snapshot = await sessions.load(sessionId);
     signal.throwIfAborted();
     return snapshot;
+  } catch (error) {
+    if (signal.aborted) signal.throwIfAborted();
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw directSessionUnavailable(error);
+  }
+}
+
+async function inspectRequired(
+  sessions: DirectSessionStore,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  try {
+    const source = await sessions.inspect(sessionId);
+    signal.throwIfAborted();
+    return source;
   } catch (error) {
     if (signal.aborted) signal.throwIfAborted();
     if (error instanceof DOMException && error.name === 'AbortError') throw error;

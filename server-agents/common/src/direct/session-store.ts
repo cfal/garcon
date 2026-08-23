@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { constants, promises as fs } from 'node:fs';
+import { constants, promises as fs, type BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type {
@@ -11,6 +12,7 @@ import { syncDirectory } from '../lib/json-file-store.js';
 
 const DIRECT_SESSION_NAMESPACE = 'direct-sessions-v1';
 const DIRECT_SESSION_SCHEMA_VERSION = 1;
+const DIRECT_SESSION_HEADER_MAX_BYTES = 4 * 1024;
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
@@ -58,6 +60,7 @@ export interface DirectSessionSnapshot {
 export interface DirectSessionStoreOptions {
   readonly host: Pick<AgentHost, 'agentId' | 'storage'>;
   readonly now?: () => string;
+  readonly readFile?: (file: FileHandle) => Promise<Buffer>;
   readonly syncDirectory?: (directory: string) => Promise<void>;
 }
 
@@ -69,16 +72,36 @@ interface ParsedSessionFile {
   readonly ignoredTail: boolean;
 }
 
+interface DirectSessionFileIdentity {
+  readonly ctimeNs: bigint;
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly mtimeNs: bigint;
+  readonly size: bigint;
+}
+
+interface DirectSessionAppendState {
+  readonly appendOffset: number;
+  readonly assistantRunIds: Set<string>;
+  readonly identity: DirectSessionFileIdentity;
+  readonly ignoredTail: boolean;
+  readonly separator: '' | '\n';
+  readonly userRunIds: Set<string>;
+}
+
 export class DirectSessionStore {
   readonly #host: DirectSessionStoreOptions['host'];
   readonly #now: () => string;
+  readonly #readFile: (file: FileHandle) => Promise<Buffer>;
   readonly #syncDirectory: (directory: string) => Promise<void>;
   readonly #operations = new Map<string, Promise<void>>();
+  readonly #appendStates = new Map<string, DirectSessionAppendState>();
   #directoryPromise: Promise<string> | null = null;
 
   constructor(options: DirectSessionStoreOptions) {
     this.#host = options.host;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#readFile = options.readFile ?? ((file) => file.readFile());
     this.#syncDirectory = options.syncDirectory ?? syncDirectory;
   }
 
@@ -154,14 +177,25 @@ export class DirectSessionStore {
           | constants.O_NOFOLLOW,
         0o600,
       );
+      let identity: DirectSessionFileIdentity | null = null;
       try {
         await file.chmod(0o600);
         await file.writeFile(payload);
         await file.sync();
+        identity = fileIdentity(await file.stat({ bigint: true }));
       } finally {
         await file.close().catch(() => undefined);
       }
       await this.#syncDirectory(directory);
+      if (!identity) throw new Error('Direct session creation did not capture file identity');
+      this.#appendStates.set(
+        sessionId,
+        appendStateFor({
+          appendOffset: payload.byteLength,
+          identity,
+          records: [user],
+        }),
+      );
       return { header, records: [user], path: filePath };
     });
   }
@@ -173,11 +207,27 @@ export class DirectSessionStore {
       const file = await openRegularFile(filePath, constants.O_RDONLY);
       try {
         const parsed = parseSessionFile(
-          await file.readFile(),
+          await this.#readFile(file),
           this.#host.agentId,
           validatedSessionId,
         );
+        const identity = fileIdentity(await file.stat({ bigint: true }));
+        this.#appendStates.set(validatedSessionId, appendStateFor({ ...parsed, identity }));
         return { header: parsed.header, records: parsed.records, path: filePath };
+      } finally {
+        await file.close().catch(() => undefined);
+      }
+    });
+  }
+
+  async inspect(sessionId: string): Promise<{ readonly path: string }> {
+    const validatedSessionId = requireSessionId(sessionId);
+    return this.#serialized(validatedSessionId, async () => {
+      const filePath = await this.#sessionFilePath(validatedSessionId);
+      const file = await openRegularFile(filePath, constants.O_RDONLY);
+      try {
+        await validateSessionHeader(file, this.#host.agentId, validatedSessionId);
+        return { path: filePath };
       } finally {
         await file.close().catch(() => undefined);
       }
@@ -226,9 +276,13 @@ export class DirectSessionStore {
       try {
         await fs.rm(filePath);
       } catch (error) {
-        if (hasNodeErrorCode(error, 'ENOENT')) return;
+        if (hasNodeErrorCode(error, 'ENOENT')) {
+          this.#appendStates.delete(validatedSessionId);
+          return;
+        }
         throw error;
       }
+      this.#appendStates.delete(validatedSessionId);
       await this.#syncDirectory(directory);
     });
   }
@@ -239,19 +293,43 @@ export class DirectSessionStore {
       const filePath = await this.#sessionFilePath(validatedSessionId);
       const file = await openRegularFile(filePath, constants.O_RDWR);
       try {
-        const parsed = parseSessionFile(
-          await file.readFile(),
-          this.#host.agentId,
-          validatedSessionId,
-        );
-        validateSequence([...parsed.records, record]);
-        if (parsed.ignoredTail) {
-          await file.truncate(parsed.appendOffset);
+        const observedIdentity = fileIdentity(await file.stat({ bigint: true }));
+        let appendState = this.#appendStates.get(validatedSessionId);
+        if (!appendState || !sameFileIdentity(appendState.identity, observedIdentity)) {
+          const parsed = parseSessionFile(
+            await this.#readFile(file),
+            this.#host.agentId,
+            validatedSessionId,
+          );
+          appendState = appendStateFor({
+            ...parsed,
+            identity: fileIdentity(await file.stat({ bigint: true })),
+          });
+          this.#appendStates.set(validatedSessionId, appendState);
+        }
+        validateNextRecord(appendState, record);
+        if (appendState.ignoredTail) {
+          await file.truncate(appendState.appendOffset);
           await file.sync();
         }
-        const encoded = Buffer.from(`${parsed.separator}${JSON.stringify(record)}\n`, 'utf8');
-        await writeAll(file, encoded, parsed.appendOffset);
+        const encoded = Buffer.from(
+          `${appendState.separator}${JSON.stringify(record)}\n`,
+          'utf8',
+        );
+        await writeAll(file, encoded, appendState.appendOffset);
         await file.sync();
+        const userRunIds = new Set(appendState.userRunIds);
+        const assistantRunIds = new Set(appendState.assistantRunIds);
+        if (record.type === 'user') userRunIds.add(record.runId);
+        else assistantRunIds.add(record.runId);
+        this.#appendStates.set(validatedSessionId, {
+          appendOffset: appendState.appendOffset + encoded.byteLength,
+          assistantRunIds,
+          identity: fileIdentity(await file.stat({ bigint: true })),
+          ignoredTail: false,
+          separator: '',
+          userRunIds,
+        });
       } finally {
         await file.close().catch(() => undefined);
       }
@@ -493,6 +571,86 @@ function validateSequence(records: readonly DirectSessionRecordV1[]): void {
       throw new TypeError('Direct session contains a duplicate assistant run');
     }
     assistants.add(record.runId);
+  }
+}
+
+function appendStateFor(input: {
+  readonly appendOffset: number;
+  readonly identity: DirectSessionFileIdentity;
+  readonly records: readonly DirectSessionRecordV1[];
+  readonly ignoredTail?: boolean;
+  readonly separator?: '' | '\n';
+}): DirectSessionAppendState {
+  validateSequence(input.records);
+  const userRunIds = new Set<string>();
+  const assistantRunIds = new Set<string>();
+  for (const record of input.records) {
+    if (record.type === 'user') userRunIds.add(record.runId);
+    else assistantRunIds.add(record.runId);
+  }
+  return {
+    appendOffset: input.appendOffset,
+    assistantRunIds,
+    identity: input.identity,
+    ignoredTail: input.ignoredTail ?? false,
+    separator: input.separator ?? '',
+    userRunIds,
+  };
+}
+
+function validateNextRecord(
+  appendState: DirectSessionAppendState,
+  record: DirectSessionRecordV1,
+): void {
+  if (record.type === 'user') {
+    if (appendState.userRunIds.has(record.runId)) {
+      throw new TypeError('Direct session contains a duplicate user run');
+    }
+    return;
+  }
+  if (!appendState.userRunIds.has(record.runId)) {
+    throw new TypeError('Direct assistant record has no preceding user record');
+  }
+  if (appendState.assistantRunIds.has(record.runId)) {
+    throw new TypeError('Direct session contains a duplicate assistant run');
+  }
+}
+
+function fileIdentity(stats: BigIntStats): DirectSessionFileIdentity {
+  return {
+    ctimeNs: stats.ctimeNs,
+    dev: stats.dev,
+    ino: stats.ino,
+    mtimeNs: stats.mtimeNs,
+    size: stats.size,
+  };
+}
+
+function sameFileIdentity(
+  left: DirectSessionFileIdentity,
+  right: DirectSessionFileIdentity,
+): boolean {
+  return left.ctimeNs === right.ctimeNs
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.mtimeNs === right.mtimeNs
+    && left.size === right.size;
+}
+
+async function validateSessionHeader(
+  file: FileHandle,
+  expectedOwnerId: string,
+  expectedSessionId: string,
+): Promise<void> {
+  const buffer = Buffer.alloc(DIRECT_SESSION_HEADER_MAX_BYTES + 1);
+  const { bytesRead } = await file.read(buffer, 0, buffer.byteLength, 0);
+  const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
+  if (newline < 0 || newline > DIRECT_SESSION_HEADER_MAX_BYTES) {
+    throw new TypeError('Direct session header exceeds the maximum size');
+  }
+  const header = parseHeader(parseJsonLine(decodeUtf8(buffer.subarray(0, newline)), 1));
+  if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
+    throw new TypeError('Direct session header does not match the selected session');
   }
 }
 

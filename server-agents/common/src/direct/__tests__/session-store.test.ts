@@ -45,6 +45,7 @@ afterEach(async () => {
 
 async function fixture(options: {
   readonly directory?: (storageRoot: string, namespace: string) => Promise<string>;
+  readonly onFullRead?: () => void;
   readonly onDirectorySync?: (directory: string) => void | Promise<void>;
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-direct-session-store-'));
@@ -68,6 +69,10 @@ async function fixture(options: {
       },
     },
     now: () => TIMES[timeIndex++] ?? TIMES.at(-1)!,
+    async readFile(file) {
+      options.onFullRead?.();
+      return file.readFile();
+    },
     async syncDirectory(directory) {
       await options.onDirectorySync?.(directory);
     },
@@ -164,6 +169,92 @@ describe('DirectSessionStore', () => {
         { type: 'assistant', runId: 'run-2', content: 'second response', checkpoint: null },
       ],
     });
+  });
+
+  test('reuses validated append state until an explicit full load', async () => {
+    let fullReads = 0;
+    const { store } = await fixture({
+      onFullRead() {
+        fullReads += 1;
+      },
+    });
+    await create(store);
+    await store.appendAssistant({
+      sessionId: SESSION_ID,
+      runId: 'run-1',
+      content: 'first response',
+    });
+    await store.appendUser({
+      sessionId: SESSION_ID,
+      runId: 'run-2',
+      content: 'second request',
+      attachments: [],
+    });
+    await store.appendAssistant({
+      sessionId: SESSION_ID,
+      runId: 'run-2',
+      content: 'second response',
+    });
+
+    expect(fullReads).toBe(0);
+    await store.load(SESSION_ID);
+    expect(fullReads).toBe(1);
+  });
+
+  test('reparses after an external file mutation before appending', async () => {
+    let fullReads = 0;
+    const { store, file } = await fixture({
+      onFullRead() {
+        fullReads += 1;
+      },
+    });
+    await create(store);
+    await store.appendAssistant({
+      sessionId: SESSION_ID,
+      runId: 'run-1',
+      content: 'first response',
+    });
+    await appendFile(file, `${JSON.stringify({
+      type: 'user',
+      at: TIMES[2],
+      runId: 'external-run',
+      content: 'external request',
+      attachments: [],
+    })}\n`);
+
+    await store.appendAssistant({
+      sessionId: SESSION_ID,
+      runId: 'external-run',
+      content: 'external response',
+    });
+
+    expect(fullReads).toBe(1);
+    await expect(store.load(SESSION_ID)).resolves.toMatchObject({
+      records: [
+        { type: 'user', runId: 'run-1' },
+        { type: 'assistant', runId: 'run-1' },
+        { type: 'user', runId: 'external-run' },
+        { type: 'assistant', runId: 'external-run' },
+      ],
+    });
+    expect(fullReads).toBe(2);
+  });
+
+  test('inspects a bounded header without parsing session history', async () => {
+    let fullReads = 0;
+    const { store, file } = await fixture({
+      onFullRead() {
+        fullReads += 1;
+      },
+    });
+    await create(store);
+    const [header] = lines(await readFile(file, 'utf8'));
+    await writeFile(file, `${JSON.stringify(header)}\n{malformed}\n`);
+
+    await expect(store.inspect(SESSION_ID)).resolves.toEqual({ path: file });
+    expect(fullReads).toBe(0);
+    await expect(store.load(SESSION_ID)).rejects.toThrow('record 2 is malformed');
+    expect(fullReads).toBe(1);
   });
 
   test('retains a valid unterminated record and separates the next append', async () => {
@@ -288,6 +379,22 @@ describe('DirectSessionStore', () => {
     await rm(file);
     await mkdir(file);
     await expect(store.load(SESSION_ID)).rejects.toThrow('not a regular file');
+  });
+
+  test('rejects an oversized or mismatched inspected header', async () => {
+    const { store, file } = await fixture();
+    await create(store);
+    await writeFile(file, `${' '.repeat(4 * 1024 + 1)}\n`);
+    await expect(store.inspect(SESSION_ID)).rejects.toThrow('exceeds the maximum size');
+
+    await writeFile(file, `${JSON.stringify({
+      type: 'session',
+      schemaVersion: 1,
+      ownerId: 'other',
+      sessionId: SESSION_ID,
+      createdAt: TIMES[0],
+    })}\n`);
+    await expect(store.inspect(SESSION_ID)).rejects.toThrow('does not match');
   });
 
   test('deletes idempotently and syncs the containing directory only after removal', async () => {

@@ -110,7 +110,7 @@ describe('Direct native session facets', () => {
     ]);
   });
 
-  test('fails visibly for missing or corrupt selected history', async () => {
+  test('discovers a corrupt selected history but fails visibly when importing it', async () => {
     const sessions = await createSession();
     const access = createDirectNativeSessionAccess(sessions);
     const reference = sessions.nativeReference(SESSION_ID);
@@ -120,7 +120,15 @@ describe('Direct native session facets', () => {
 
     await appendFile(source.value, '{malformed}\n');
     await expect(access.resolveNativeSession({ chat: chat(reference), signal }))
-      .rejects.toMatchObject({
+      .resolves.toEqual(reference);
+    await expect((async () => {
+      for await (const _batch of createDirectNativeHistoryImport(sessions).load({
+        chat: chat(reference),
+        signal,
+      })) {
+        void _batch;
+      }
+    })()).rejects.toMatchObject({
         code: 'TRANSCRIPT_UNAVAILABLE',
         retryable: false,
         message: 'This conversation cannot be loaded because its Direct history is unavailable.',
