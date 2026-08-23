@@ -92,6 +92,17 @@ export interface RunSingleQueryOptions {
   readonly agentSettings?: AgentSettingsEnvelope;
   readonly [key: string]: unknown;
 }
+
+type PreparedPrompt =
+  | { readonly dispatch: false }
+  | {
+      readonly dispatch: true;
+      readonly prompt: string;
+      readonly attachments: ReturnType<typeof attachments>;
+      readonly excludedOrdinals: ReadonlySet<number>;
+      readonly viewId: TranscriptViewId;
+    };
+
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
@@ -679,22 +690,10 @@ export class AgentRuntimeRouter {
     chatId: string,
     fallbackPrompt: string,
     opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images'>,
-  ): Promise<{
-    readonly dispatch: boolean;
-    readonly prompt: string;
-    readonly attachments: ReturnType<typeof attachments>;
-    readonly excludedOrdinals: ReadonlySet<number>;
-    readonly viewId: TranscriptViewId;
-  }> {
+  ): Promise<PreparedPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
-      return {
-        dispatch: false,
-        prompt: '',
-        attachments: [],
-        excludedOrdinals: new Set(),
-        viewId: composition.input.viewId,
-      };
+      return { dispatch: false };
     }
     const viewId = composition?.input.viewId ?? this.#ledger.currentView(chatId)?.viewId;
     if (!viewId) throw new Error(`Transcript view is not initialized for ${chatId}`);

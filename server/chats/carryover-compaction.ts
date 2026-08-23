@@ -158,7 +158,7 @@ export class CarryOverCompactionService {
           signal: generationSignal,
         },
       );
-      const compacted = this.#validate(input.chatId, summary);
+      const compacted = this.#validateSummary(input.chatId, summary);
       if (!compacted) return fallback();
       // The summary renders inside the same envelope as the spine, so the
       // injection ceiling is enforced once, by the assembler, rather than split
@@ -202,47 +202,50 @@ export class CarryOverCompactionService {
     );
   }
 
-  #validate(chatId: string, raw: string): string | null {
+  #validateSummary(chatId: string, raw: string): string | null {
     if (!raw.isWellFormed()) {
-      this.deps.warn(
+      return this.#rejectSummary(
         chatId,
-        'Agent-switch compaction returned malformed Unicode. The full transcript was carried over instead. Consider a different compaction model in Settings.',
+        'Agent-switch compaction returned malformed Unicode',
       );
-      return null;
     }
 
     const framed = raw.trim();
     if (!framed.startsWith(SUMMARY_OPEN) || !framed.endsWith(SUMMARY_CLOSE)) {
-      this.deps.warn(
+      return this.#rejectSummary(
         chatId,
-        'Agent-switch compaction must return exactly one <summary> element. The full transcript was carried over instead. Consider a different compaction model in Settings.',
+        'Agent-switch compaction must return exactly one <summary> element',
       );
-      return null;
     }
 
     const inner = framed.slice(SUMMARY_OPEN.length, -SUMMARY_CLOSE.length).trim();
     if (!inner) {
-      this.deps.warn(
+      return this.#rejectSummary(
         chatId,
-        'Agent-switch compaction returned an empty <summary>. The full transcript was carried over instead. Consider a different compaction model in Settings.',
+        'Agent-switch compaction returned an empty <summary>',
       );
-      return null;
     }
     if (/<\/?summary(?=[\s/>])/u.test(inner)) {
-      this.deps.warn(
+      return this.#rejectSummary(
         chatId,
-        'Agent-switch compaction returned more than one <summary> element. The full transcript was carried over instead. Consider a different compaction model in Settings.',
+        'Agent-switch compaction returned more than one <summary> element',
       );
-      return null;
     }
     if (utf8Encoder.encode(inner).byteLength > CHAT_ROW_CONTENT_MAX_BYTES) {
-      this.deps.warn(
+      return this.#rejectSummary(
         chatId,
-        `Agent-switch compaction returned a summary larger than ${CHAT_ROW_CONTENT_MAX_BYTES} UTF-8 bytes. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
+        `Agent-switch compaction returned a summary larger than ${CHAT_ROW_CONTENT_MAX_BYTES} UTF-8 bytes`,
       );
-      return null;
     }
     return inner;
+  }
+
+  #rejectSummary(chatId: string, reason: string): null {
+    this.deps.warn(
+      chatId,
+      `${reason}. The full transcript was carried over instead. Consider a different compaction model in Settings.`,
+    );
+    return null;
   }
 
   async #selection(signal: AbortSignal) {
@@ -262,11 +265,11 @@ export class CarryOverCompactionService {
 // Splits on the same boundary the assembler pins, so the summary and the spine
 // describe disjoint halves of the transcript.
 function spineStart(messages: readonly ChatMessage[]): number {
-  let boundaries = 0;
+  let userTurns = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index].type !== 'user-message') continue;
-    boundaries += 1;
-    if (boundaries === RECENT_TURNS_VERBATIM) return index;
+    userTurns += 1;
+    if (userTurns === RECENT_TURNS_VERBATIM) return index;
   }
   return 0;
 }
