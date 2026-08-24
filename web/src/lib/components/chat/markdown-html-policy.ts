@@ -2,6 +2,8 @@ import { Lexer, type MarkedExtension, type TokenizerExtension } from 'marked';
 
 // Shares svelte-markdown's Marked range so this regex tracks the active lexer.
 const INLINE_HTML_TAG = Lexer.rules.inline.gfm.tag;
+// Mirrors Marked's inline comment alternative and omits block EOF/tail matching so
+// unterminated comments and same-line trailing text remain visible.
 const HTML_COMMENT = /^ {0,3}<!--(?:-?>|[\s\S]*?-->)/;
 
 const literalHtmlTextTokenizer: TokenizerExtension = {

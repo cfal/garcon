@@ -79,6 +79,23 @@ describe('createLiteralHtmlMarkdownExtension', () => {
 		expect(types).not.toContain('html');
 	});
 
+	it('autolinks bare URLs between literal anchor tags', () => {
+		const { marked, tokens } = lex('<a href="https://safe.example">https://example.com</a>');
+		const types = collectTokens(marked, tokens).map((token) => token.type);
+
+		expect(types).toContain('link');
+		expect(types).not.toContain('html');
+	});
+
+	it('parses former raw block bodies as ordinary Markdown', () => {
+		const { marked, tokens } = lex('<pre>\nx = a*b*c\n</pre>');
+		const types = collectTokens(marked, tokens).map((token) => token.type);
+
+		expect(tokens[0]?.type).toBe('paragraph');
+		expect(types).toContain('em');
+		expect(types).not.toContain('html');
+	});
+
 	it('preserves autolink, code, and escape tokenization', () => {
 		const { marked, tokens } = lex(
 			'<https://example.com> <user@example.com> `Promise<void>` \\<void>\n\n```ts\nPromise<void>\n```',
