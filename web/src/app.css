@@ -1041,3 +1041,9 @@
 .composer-thinking-active [data-slot='chat-processing-status'] {
 	border-color: var(--composer-thinking-status-border);
 }
+.cli-collapsible-body-collapsed {
+	max-height: 10rem;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
+	mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
+}

@@ -1,6 +1,11 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CliRowMessage, ErrorMessage, TranscriptNoticeMessage } from '$shared/chat-types';
+import {
+	CliRowMessage,
+	ErrorMessage,
+	TranscriptNoticeMessage,
+	UserMessage,
+} from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
@@ -166,5 +171,82 @@ describe('ConversationMessage chat rows', () => {
 		expect(markdown?.className).not.toContain('text-foreground');
 		expect(screen.getByText('Deployment complete.').tagName).toBe('STRONG');
 		expect(markdown?.querySelector('br')).toBeTruthy();
+	});
+
+	it('collapses opted-in CLI rows and expands them locally', async () => {
+		render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'Long CLI content',
+				{ style: 'notice' },
+				'plain',
+				undefined,
+				'collapsed',
+			),
+		});
+
+		const button = screen.getByRole('button', { name: 'Show more' });
+		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
+			'cli-collapsible-body-collapsed',
+		);
+		await fireEvent.click(button);
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('expands a collapsed CLI body before focus can remain inside clipped content', async () => {
+		render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'[Focused link](https://example.com)',
+				{ style: 'info' },
+				'markdown',
+				undefined,
+				'collapsed',
+			),
+		});
+
+		await fireEvent.focusIn(screen.getByRole('link', { name: 'Focused link' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('forces CLI rows expanded when the dedicated preference is enabled', () => {
+		render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'Long CLI content',
+				{ style: 'error' },
+				'plain',
+				undefined,
+				'collapsed',
+			),
+			alwaysExpandCliMessages: true,
+		});
+
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+		expect(
+			screen.getByText('Long CLI content').closest('.cli-collapsible-body-collapsed'),
+		).toBeNull();
+	});
+
+	it('collapses styleless CLI user messages without changing the bubble style', async () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'Long user content', undefined, undefined, {
+				origin: 'cli',
+				disclosure: 'collapsed',
+			}),
+		});
+
+		expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
+		expect(container.querySelector('[data-user-message-presentation]')).toBeNull();
+		expect(screen.queryByText('CLI notice')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
 	});
 });

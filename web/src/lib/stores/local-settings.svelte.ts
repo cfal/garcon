@@ -99,6 +99,7 @@ export interface LocalSettingsSnapshot {
 	colorblindMode: boolean;
 	overlayBackdropEffects: boolean;
 	autoExpandTools: boolean;
+	alwaysExpandCliMessages: boolean;
 	showThinking: boolean;
 	allowDirectChats: boolean;
 	reduceMotion: boolean;
@@ -134,6 +135,7 @@ type BooleanLocalSettingKey =
 	| 'colorblindMode'
 	| 'overlayBackdropEffects'
 	| 'autoExpandTools'
+	| 'alwaysExpandCliMessages'
 	| 'showThinking'
 	| 'allowDirectChats'
 	| 'reduceMotion'
@@ -153,6 +155,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	colorblindMode: false,
 	overlayBackdropEffects: true,
 	autoExpandTools: false,
+	alwaysExpandCliMessages: false,
 	showThinking: true,
 	allowDirectChats: false,
 	reduceMotion: false,
@@ -256,6 +259,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.overlayBackdropEffects,
 		),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
+		alwaysExpandCliMessages: parseBoolean(
+			parsed.alwaysExpandCliMessages,
+			DEFAULTS.alwaysExpandCliMessages,
+		),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
@@ -337,6 +344,7 @@ export class LocalSettingsStore {
 	colorblindMode = $state(DEFAULTS.colorblindMode);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
+	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
 	showThinking = $state(DEFAULTS.showThinking);
 	allowDirectChats = $state(DEFAULTS.allowDirectChats);
 	reduceMotion = $state(DEFAULTS.reduceMotion);
@@ -424,6 +432,7 @@ export class LocalSettingsStore {
 			colorblindMode: this.colorblindMode,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			autoExpandTools: this.autoExpandTools,
+			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
 			showThinking: this.showThinking,
 			allowDirectChats: this.allowDirectChats,
 			reduceMotion: this.reduceMotion,
@@ -461,6 +470,7 @@ export class LocalSettingsStore {
 		this.colorblindMode = snap.colorblindMode;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.autoExpandTools = snap.autoExpandTools;
+		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
 		this.showThinking = snap.showThinking;
 		this.allowDirectChats = snap.allowDirectChats;
 		this.reduceMotion = snap.reduceMotion;

@@ -97,6 +97,7 @@ describe('TranscriptLedgerService', () => {
             type: 'cli-row',
             presentation: { style: 'error' },
             format: 'plain',
+            disclosure: 'expanded',
             title: 'Release validation',
           },
         }],

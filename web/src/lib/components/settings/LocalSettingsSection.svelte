@@ -210,6 +210,12 @@
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),
 			)}
+			{@render settingRow(
+				m.settings_chat_always_expand_cli_messages(),
+				ls.alwaysExpandCliMessages,
+				() => ls.toggle('alwaysExpandCliMessages'),
+				{ description: m.settings_chat_always_expand_cli_messages_description() },
+			)}
 			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
 				ls.toggle('showThinking'),
 			)}

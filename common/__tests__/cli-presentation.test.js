@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   coerceDurableCliPresentation,
+  coerceDurableCliBodyDisclosure,
+  isCliBodyDisclosure,
   isCliPresentation,
   normalizeCliHexColor,
 } from '../cli-presentation.ts';
@@ -12,6 +14,13 @@ describe('CLI presentation', () => {
     expect(normalizeCliHexColor('fff')).toBeNull();
     expect(normalizeCliHexColor('#1234567')).toBeNull();
     expect(normalizeCliHexColor('red')).toBeNull();
+  });
+
+  it('validates and safely defaults durable body disclosure', () => {
+    expect(isCliBodyDisclosure('collapsed')).toBe(true);
+    expect(isCliBodyDisclosure('hidden')).toBe(false);
+    expect(coerceDurableCliBodyDisclosure('collapsed')).toBe('collapsed');
+    expect(coerceDurableCliBodyDisclosure(undefined)).toBe('expanded');
   });
 
   it('accepts only valid preset and discriminated custom presentations', () => {

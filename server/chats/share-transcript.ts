@@ -196,7 +196,7 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   if (message instanceof UserMessage) {
     const presentation = message.presentation;
     const role = presentation
-      ? `User (CLI ${cliPresentationName(presentation.style)})${presentation.title ? ` — ${presentation.title}` : ''}`
+      ? `User (CLI${presentation.style ? ` ${cliPresentationName(presentation.style)}` : ''})${presentation.title ? ` — ${presentation.title}` : ''}`
       : 'User';
     return {
       role,

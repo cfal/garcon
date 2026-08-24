@@ -303,6 +303,32 @@ describe('chat status', () => {
     expect(value).not.toContain('"presentation"');
   });
 
+  test('labels a styleless collapsible CLI user message without inventing a style', () => {
+    const value = formatChatStatus(snapshot({
+      transcript: {
+        availability: 'available',
+        transcriptViewId: 'view-1',
+        messages: [{
+          ordinal: 1,
+          message: new UserMessage(
+            TIMESTAMP,
+            'Collapsed context.',
+            undefined,
+            undefined,
+            { origin: 'cli', disclosure: 'collapsed' },
+          ),
+        }],
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
+        hasMore: false,
+      },
+    }));
+
+    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI)\nCollapsed context.`);
+    expect(value).not.toContain('CLI undefined');
+  });
+
   test('shows a plain notice title without CLI provenance', () => {
     const value = formatChatStatus(snapshot({
       transcript: {

@@ -44,7 +44,7 @@ function renderEntry(entry: TranscriptExportEntry): string[] {
     : '';
   const presentationAttributes = presentation === null
     ? ''
-    : ` origin="${presentation.origin}" style="${presentation.style}"${presentation.title ? ` title="${attribute(presentation.title)}"` : ''}`;
+    : ` origin="${presentation.origin}"${presentation.style ? ` style="${presentation.style}"` : ''}${presentation.title ? ` title="${attribute(presentation.title)}"` : ''}`;
   const attributes = ` ordinal="${entry.ordinal}"${typeAttribute}${toolId === null ? '' : ` tool-id="${attribute(toolId)}"`}${presentationAttributes}`;
   const body: string[] = [];
   const content = transcriptExportEntryText(entry);

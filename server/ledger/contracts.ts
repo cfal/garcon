@@ -11,8 +11,10 @@ import type {
   UserMessage,
 } from '../../common/chat-types.js';
 import {
+  isCliBodyDisclosure,
   isCliPresentation,
   isCliRowFormat,
+  type CliBodyDisclosure,
   type CliPresentation,
   type CliRowFormat,
 } from '../../common/cli-presentation.js';
@@ -75,6 +77,7 @@ export interface LedgerCliRowNoticeDetail extends JsonObject {
   readonly clientMessageId: string;
   readonly presentation: CliPresentation;
   readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly title: string | null;
 }
 
@@ -91,6 +94,7 @@ export function isLedgerCliRowNoticeDetail(
     && value.clientMessageId.length > 0
     && isCliPresentation(value.presentation)
     && isCliRowFormat(value.format)
+    && isCliBodyDisclosure(value.disclosure)
     && (
       value.title === null
       || (typeof value.title === 'string' && value.title.length > 0)

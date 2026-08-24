@@ -18,6 +18,7 @@
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/rows/CliRow.svelte';
 	import CliPresentationHeader from '$lib/components/chat/rows/CliPresentationHeader.svelte';
+	import CliCollapsibleBody from '$lib/components/chat/rows/CliCollapsibleBody.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { cn } from '$lib/utils/cn';
 	import { getAppTitle } from '$lib/context';
@@ -256,26 +257,31 @@
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">
 									<div
-									class={cn(
-										'mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm',
-										userPresentation && cliPresentationSurfaceClass(userPresentation.style),
-									)}
+										class={cn(
+											'mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm',
+											userPresentation?.style &&
+												cliPresentationSurfaceClass(userPresentation.style),
+										)}
 										data-user-message-presentation={userPresentation?.style}
 										style:--cli-presentation-accent-light={customUserStyle?.lightAccent}
 										style:--cli-presentation-accent-dark={customUserStyle?.darkAccent}
 									>
-										{#if userPresentation}
+										{#if userPresentation?.style}
 											<CliPresentationHeader
 												style={userPresentation.style}
 												title={userPresentation.title}
 											/>
 										{/if}
-										<div class={userPresentation ? 'mt-1 text-sm' : 'text-sm'}>
-											<Markdown
-												source={message.content}
-												variant={userPresentation ? 'presented' : 'user'}
-											/>
-										</div>
+										<CliCollapsibleBody disclosure={userPresentation?.disclosure}>
+											{#snippet children()}
+												<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+													<Markdown
+														source={message.content}
+														variant={userPresentation?.style ? 'presented' : 'user'}
+													/>
+												</div>
+											{/snippet}
+										</CliCollapsibleBody>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
 												{#each message.images as image, imageIndex (imageIndex)}

@@ -7,8 +7,10 @@ import {
 } from './command-request-validation.js';
 import { isRecord } from './json.js';
 import {
+  isCliBodyDisclosure,
   isCliPresentation,
   isCliRowFormat,
+  type CliBodyDisclosure,
   type CliPresentation,
   type CliRowFormat,
 } from './cli-presentation.js';
@@ -32,6 +34,7 @@ export interface AddChatRowRequest {
   readonly transcriptViewId: string;
   readonly presentation: CliPresentation;
   readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly title?: string;
   readonly content: string;
 }
@@ -46,6 +49,7 @@ export interface AddChatRowResponse {
   readonly ordinal: number;
   readonly presentation: CliPresentation;
   readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly status: 'appended' | 'duplicate';
   readonly timestamp: string;
 }
@@ -96,6 +100,9 @@ export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
   if (!isCliRowFormat(body.format)) {
     throw new CommandRequestValidationError('format must be plain or markdown');
   }
+  if (!isCliBodyDisclosure(body.disclosure)) {
+    throw new CommandRequestValidationError('disclosure must be expanded or collapsed');
+  }
   const title = parseChatRowTitle(body.title);
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
@@ -104,6 +111,7 @@ export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     presentation: body.presentation,
     format: body.format,
+    disclosure: body.disclosure,
     ...(title === undefined ? {} : { title }),
     content: parseChatRowContent(body.content),
   };
@@ -138,6 +146,7 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     || Number(value.ordinal) < 1
     || !isCliPresentation(value.presentation)
     || !isCliRowFormat(value.format)
+    || !isCliBodyDisclosure(value.disclosure)
     || (value.status !== 'appended' && value.status !== 'duplicate')
     || !isNonEmptyString(value.timestamp)
   ) {
@@ -153,6 +162,7 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     ordinal: Number(value.ordinal),
     presentation: value.presentation,
     format: value.format,
+    disclosure: value.disclosure,
     status: value.status,
     timestamp: value.timestamp,
   };

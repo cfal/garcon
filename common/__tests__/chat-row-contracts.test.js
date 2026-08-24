@@ -16,6 +16,7 @@ const request = {
   transcriptViewId: 'view-1',
   presentation: { style: 'notice' },
   format: 'plain',
+  disclosure: 'expanded',
   content: '  retained exactly\n',
 };
 
@@ -95,6 +96,8 @@ describe('chat row contracts', () => {
     })).toThrow('presentation is invalid');
     expect(() => parseAddChatRowRequest({ ...request, format: 'html' }))
       .toThrow('format must be plain or markdown');
+    expect(() => parseAddChatRowRequest({ ...request, disclosure: 'hidden' }))
+      .toThrow('disclosure must be expanded or collapsed');
   });
 
   it('parses target and mutation responses strictly', () => {
@@ -117,6 +120,7 @@ describe('chat row contracts', () => {
       ordinal: 7,
       presentation: { style: 'info' },
       format: 'markdown',
+      disclosure: 'collapsed',
       status: 'duplicate',
       timestamp: '2026-08-18T00:00:00.000Z',
     };

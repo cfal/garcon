@@ -210,6 +210,12 @@ describe('TranscriptLedgerStore', () => {
       viewId: view.viewId,
       at,
       message,
+      detail: chatRowDetail('chat-row-1', 'notice', 'Deployment', 'plain', 'collapsed'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message,
       detail: chatRowDetail('chat-row-1', {
         style: 'custom',
         customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
@@ -304,6 +310,7 @@ describe('TranscriptLedgerStore', () => {
       detail: {
         presentation: { style: 'error' },
         format: 'plain',
+        disclosure: 'expanded',
       },
     });
     expect(() => decodeLedgerRow(storedRow({ ...valid, title: undefined })))
@@ -1090,12 +1097,19 @@ function userDraft(clientMessageId, content) {
   return { kind: 'user-input', at, detail: inputDetail(clientMessageId, content) };
 }
 
-function chatRowDetail(clientMessageId, presentation, title = null, format = 'plain') {
+function chatRowDetail(
+  clientMessageId,
+  presentation,
+  title = null,
+  format = 'plain',
+  disclosure = 'expanded',
+) {
   return {
     type: 'cli-row',
     clientMessageId,
     presentation: typeof presentation === 'string' ? { style: presentation } : presentation,
     format,
+    disclosure,
     title,
   };
 }

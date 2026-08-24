@@ -98,11 +98,16 @@ describe('shared transcript chat rows', () => {
         new UserMessage(AT, 'Stop', undefined, undefined, {
           origin: 'cli', style: 'error',
         }),
+        new UserMessage(AT, 'Collapsed body', undefined, undefined, {
+          origin: 'cli', disclosure: 'collapsed',
+        }),
       ],
     });
 
     expect(rendered).toContain(`[User (CLI Info) — Consultation status] ${AT}\nContext`);
     expect(rendered).toContain(`[User (CLI Notice) — Operator context] ${AT}\nBody`);
     expect(rendered).toContain(`[User (CLI Error)] ${AT}\nStop`);
+    expect(rendered).toContain(`[User (CLI)] ${AT}\nCollapsed body`);
+    expect(rendered).not.toContain('CLI Undefined');
   });
 });

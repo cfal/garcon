@@ -127,6 +127,7 @@ function addChatRowResponse(init?: RequestInit): Response {
     ordinal: 7,
     presentation: body.presentation,
     format: body.format,
+    disclosure: body.disclosure,
     status: 'appended',
     timestamp: '2026-08-18T12:00:00.000Z',
   });
@@ -422,6 +423,7 @@ describe('main', () => {
       transcriptViewId: 'view-1',
       presentation: { style: 'error' },
       format: 'plain',
+      disclosure: 'expanded',
       title: 'Release validation',
       content: 'Synthetic failure detail.',
     });
@@ -432,6 +434,7 @@ describe('main', () => {
         'ordinal: 7',
         'type: error',
         'format: plain',
+        'disclosure: expanded',
         'status: appended',
       ].join('\n'),
     ]);

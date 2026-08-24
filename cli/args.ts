@@ -19,6 +19,7 @@ import {
   isCliPresentationStyle,
   normalizeCliHexColor,
   type CliCustomStyle,
+  type CliBodyDisclosure,
   type CliPresentation,
   type CliRowFormat,
 } from '@garcon/common/cli-presentation';
@@ -46,12 +47,12 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>
-  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>
+  garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] <message>
+  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] <content>
+  garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
@@ -69,6 +70,7 @@ export writes the complete untruncated transcript as Markdown or XML. Exclusions
 apply to top-level entries; tool calls embedded in permission entries remain.
 Message presentation is not sent as prompt text. A message title without a style
 uses notice; a style without a title displays its CLI label. --color selects custom styling.
+--collapsible starts the CLI-authored body collapsed without requiring a style.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
 
@@ -102,6 +104,7 @@ Options:
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
   --markdown                   Render add-row content as Markdown
+  --collapsible                Start this CLI-authored content collapsed
   --format <markdown|xml>      Transcript export format (default: markdown)
   --exclude <category>         Export exclusion; repeatable or comma-separated:
                                ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}; tools excludes calls and results
@@ -198,6 +201,7 @@ export interface AddRowCliCommand extends CliConnectionOptions {
   readonly chatId: ChatId;
   readonly presentation: CliPresentation;
   readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly title?: string;
   readonly content: string | null;
   readonly readsContentFromStdin: boolean;
@@ -317,6 +321,7 @@ function parseUserMessagePresentationOptions(
     throw argumentError(`--message-style must be one of: ${CLI_PRESENTATION_STYLE_LIST}`);
   }
   const customStyle = parseCliColorOption(values.color);
+  const collapsible = values.collapsible === true;
   if (customStyle && rawStyle !== undefined && rawStyle !== 'custom') {
     throw argumentError('--color cannot be combined with a preset --message-style');
   }
@@ -328,7 +333,10 @@ function parseUserMessagePresentationOptions(
       cause: error,
     });
   }
-  if (rawStyle === undefined && title === undefined && !customStyle) return undefined;
+  if (rawStyle === undefined && title === undefined && !customStyle && !collapsible) return undefined;
+  if (rawStyle === undefined && title === undefined && !customStyle) {
+    return { origin: 'cli', disclosure: 'collapsed' };
+  }
   let presentation: CliPresentation;
   if (customStyle) {
     presentation = { style: 'custom', customStyle };
@@ -342,6 +350,7 @@ function parseUserMessagePresentationOptions(
     origin: 'cli',
     ...presentation,
     ...(title === undefined ? {} : { title }),
+    ...(collapsible ? { disclosure: 'collapsed' as const } : {}),
   };
 }
 
@@ -463,6 +472,7 @@ function parseStop(
     values['message-title'] !== undefined
     || values['message-style'] !== undefined
     || values.color !== undefined
+    || values.collapsible !== undefined
   ) {
     throw argumentError('message presentation cannot be used with stop');
   }
@@ -530,6 +540,7 @@ function parseAddRow(
     chatId: parseControlChatId(parsed.positionals[1]!, 'add-row'),
     presentation,
     format: values.markdown === true ? 'markdown' : 'plain',
+    disclosure: values.collapsible === true ? 'collapsed' : 'expanded',
     ...(title === undefined ? {} : { title }),
     content: readsContentFromStdin ? null : argument,
     readsContentFromStdin,
@@ -554,6 +565,7 @@ const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = 
   ['message-title', '--message-title'],
   ['message-style', '--message-style'],
   ['color', '--color'],
+  ['collapsible', '--collapsible'],
   ['markdown', '--markdown'],
 ] as const;
 
@@ -759,6 +771,7 @@ export function parseCliArgs(
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         markdown: { type: 'boolean' },
+        collapsible: { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
         version: { type: 'boolean' },
@@ -855,6 +868,7 @@ export function parseCliArgs(
     rejectListOption(values['message-style'], '--message-style');
     rejectListOption(values.color, '--color');
     rejectListOption(values.markdown, '--markdown');
+    rejectListOption(values.collapsible, '--collapsible');
     rejectListOption(values.format, '--format');
     rejectListOption(values.exclude, '--exclude');
     rejectListOption(values.output, '--output');

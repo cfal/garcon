@@ -40,6 +40,7 @@ describe('ChatRowService', () => {
           clientMessageId: 'message-1',
           presentation: { style: 'error' },
           format: 'plain',
+          disclosure: 'expanded',
           title: 'Release validation',
         },
       }]);
@@ -58,11 +59,14 @@ describe('ChatRowService', () => {
         clientMessageId: 'message-2',
         presentation: { style: 'info' },
         format: 'markdown',
+        disclosure: 'expanded',
         content: 'healthy information',
       });
       expect(info).toMatchObject({
         inserted: true,
-        row: { detail: { presentation: { style: 'info' }, format: 'markdown' } },
+        row: {
+          detail: { presentation: { style: 'info' }, format: 'markdown', disclosure: 'expanded' },
+        },
       });
     });
   });
@@ -195,6 +199,7 @@ function request(overrides = {}) {
     transcriptViewId: 'view-1',
     presentation: { style: 'error' },
     format: 'plain',
+    disclosure: 'expanded',
     title: 'Release validation',
     content: 'durable error',
     ...overrides,

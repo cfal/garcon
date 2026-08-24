@@ -18,15 +18,21 @@ import {
   parseChatMessageMetadata,
   str,
 } from './chat-message-coercion.js';
-import { parseChatRowTitle } from './chat-row-contracts.js';
 import {
+  coerceDurableCliBodyDisclosure,
   coerceDurableCliPresentation,
-  isCliPresentation,
   isCliRowFormat,
+  type CliBodyDisclosure,
   type CliPresentation,
   type CliPresentationStyle,
   type CliRowFormat,
 } from './cli-presentation.js';
+import {
+  parseUserMessagePresentation,
+  type UserMessagePresentation,
+} from './user-message-presentation.js';
+export { parseUserMessagePresentation } from './user-message-presentation.js';
+export type { UserMessagePresentation } from './user-message-presentation.js';
 
 export interface ChatImage {
   data: string;
@@ -49,34 +55,6 @@ export interface ChatMessageMetadata {
   clientMessageId?: string;
   upstreamRequestId?: string;
   turnId?: string;
-}
-
-export type UserMessagePresentation = CliPresentation & {
-  readonly origin: 'cli';
-  readonly title?: string;
-};
-
-export function parseUserMessagePresentation(value: unknown): UserMessagePresentation | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError('user message presentation must be an object');
-  }
-  const body = value as Record<string, unknown>;
-  for (const key of Object.keys(body)) {
-    if (key !== 'origin' && key !== 'style' && key !== 'customStyle' && key !== 'title') {
-      throw new TypeError(`user message presentation contains unsupported field: ${key}`);
-    }
-  }
-  if (body.origin !== 'cli') throw new TypeError('user message presentation origin must be cli');
-  const presentation = {
-    style: body.style,
-    ...(body.customStyle === undefined ? {} : { customStyle: body.customStyle }),
-  };
-  if (!isCliPresentation(presentation)) {
-    throw new TypeError('user message presentation is invalid');
-  }
-  const title = parseChatRowTitle(body.title);
-  return { origin: 'cli', ...presentation, ...(title === undefined ? {} : { title }) };
 }
 
 // Canonical shape for a single todo/plan item. All provider-specific
@@ -693,6 +671,7 @@ export class CliRowMessage {
     public presentation: CliPresentation,
     public format: CliRowFormat,
     public title?: string,
+    public disclosure: CliBodyDisclosure = 'expanded',
   ) {}
 }
 
@@ -1186,6 +1165,7 @@ function parseDurableCliRow(
     coerceDurableCliPresentation(data.presentation, fallbackStyle),
     isCliRowFormat(data.format) ? data.format : 'plain',
     typeof data.title === 'string' && data.title ? data.title : undefined,
+    coerceDurableCliBodyDisclosure(data.disclosure),
   );
 }
 

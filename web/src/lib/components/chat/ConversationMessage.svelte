@@ -37,6 +37,7 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import CliRow from './rows/CliRow.svelte';
 	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
+	import CliCollapsibleBody from './rows/CliCollapsibleBody.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
@@ -157,7 +158,7 @@
 	const asUser = $derived(message instanceof UserMessage ? message : null);
 	const userMessagePresentation = $derived(asUser?.presentation ?? null);
 	const userMessageSurfaceClass = $derived(
-		userMessagePresentation
+		userMessagePresentation?.style
 			? cliPresentationSurfaceClass(userMessagePresentation.style)
 			: '',
 	);
@@ -499,27 +500,38 @@
 						bind:ref={messageMenuTriggerRef}
 						class={cn(
 							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
-							!userMessagePresentation && 'data-[state=open]:bg-user-bubble-selected',
+							!userMessagePresentation?.style && 'data-[state=open]:bg-user-bubble-selected',
 							userMessageSurfaceClass,
 						)}
 						data-user-message-presentation={userMessagePresentation?.style}
 					>
 						<div>
-							{#if userMessagePresentation}
+							{#if userMessagePresentation?.style}
 								<CliPresentationHeader
 									style={userMessagePresentation.style}
 									title={userMessagePresentation.title}
 								/>
 							{/if}
-							<div class={userMessagePresentation ? 'mt-1 text-sm' : 'text-sm'}>
-								<Markdown
-									source={asUser.content}
-									variant={userMessagePresentation ? 'presented' : 'user'}
-									fileLinkBasePath={projectBasePath}
-									onLinkNavigate={handleLinkNavigate}
-									{acquireTransientActivity}
-								/>
-							</div>
+							<CliCollapsibleBody
+								disclosure={userMessagePresentation?.disclosure}
+								alwaysExpanded={localSettings.alwaysExpandCliMessages}
+								expanded={disclosureState?.open('cli-body', 'body', false)}
+								onExpandedChange={disclosureState
+									? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
+									: undefined}
+							>
+								{#snippet children()}
+									<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+										<Markdown
+											source={asUser.content}
+											variant={userMessagePresentation?.style ? 'presented' : 'user'}
+											fileLinkBasePath={projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+											{acquireTransientActivity}
+										/>
+									</div>
+								{/snippet}
+							</CliCollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
 									{#each asUser.images as img, idx (idx)}
@@ -726,6 +738,8 @@
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
 							{acquireTransientActivity}
+							alwaysExpanded={localSettings.alwaysExpandCliMessages}
+							{disclosureState}
 						/>
 					{:else if asNotice}
 						<ChatEventCard variant="info">

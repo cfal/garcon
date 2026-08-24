@@ -68,6 +68,7 @@ describe('transcript ledger presentation', () => {
         clientMessageId: 'chat-row-info',
         presentation: { style: 'info' },
         format: 'markdown',
+        disclosure: 'collapsed',
         title: 'Consultation status',
       },
     });
@@ -78,6 +79,7 @@ describe('transcript ledger presentation', () => {
       { style: 'info' },
       'markdown',
       'Consultation status',
+      'collapsed',
     ));
   });
 
@@ -133,6 +135,7 @@ describe('transcript ledger presentation', () => {
           clientMessageId: 'chat-row-notice',
           presentation: { style: 'notice' },
           format: 'plain',
+          disclosure: 'expanded',
           title: 'Deployment',
         },
       },
@@ -147,6 +150,7 @@ describe('transcript ledger presentation', () => {
           clientMessageId: 'chat-row-error',
           presentation: { style: 'error' },
           format: 'plain',
+          disclosure: 'expanded',
           title: null,
         },
       },

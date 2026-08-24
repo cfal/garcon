@@ -46,6 +46,7 @@ export async function runAddRow(
     transcriptViewId: target.transcriptViewId,
     presentation: command.presentation,
     format: command.format,
+    disclosure: command.disclosure,
     ...(command.title === undefined ? {} : { title: command.title }),
     content: validatedContent,
   }, signal);
@@ -55,6 +56,7 @@ export async function runAddRow(
     `ordinal: ${response.ordinal}`,
     `type: ${response.presentation.style}`,
     `format: ${response.format}`,
+    `disclosure: ${response.disclosure}`,
     `status: ${response.status}`,
   ].join('\n'));
 }

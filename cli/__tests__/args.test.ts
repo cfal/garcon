@@ -62,10 +62,15 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       '--resume', CHAT_ID,
       '--message-style', 'error',
+      '--collapsible',
       'prompt',
     ], ENV)).toMatchObject({
       kind: 'resume',
-      userMessagePresentation: { origin: 'cli', style: 'error' },
+      userMessagePresentation: { origin: 'cli', style: 'error', disclosure: 'collapsed' },
+    });
+    expect(parseCliArgs(['send-async', CHAT_ID, '--collapsible', 'prompt'], ENV)).toMatchObject({
+      kind: 'send-async',
+      userMessagePresentation: { origin: 'cli', disclosure: 'collapsed' },
     });
   });
 
@@ -210,10 +215,10 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>',
+      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>',
+      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
@@ -309,6 +314,7 @@ describe('parseCliArgs', () => {
     { args: ['status', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with status' },
     { args: ['status', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with status' },
     { args: ['status', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with status' },
+    { args: ['status', CHAT_ID, '--collapsible'], message: '--collapsible cannot be used with status' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--messages', '1'], message: '--messages cannot be used with wait' },
     { args: ['list', 'agents', '--messages', '1'], message: '--messages cannot be used with list' },
     { args: ['stop', CHAT_ID, '--messages', '1'], message: '--messages cannot be used with stop' },
@@ -328,6 +334,7 @@ describe('parseCliArgs', () => {
     { args: ['wait', CHAT_ID, '--turn', 'one', '--turn', 'two'], message: 'only once' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--cwd', '.'], message: '--cwd cannot be used with wait' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--allow-steer'], message: '--allow-steer cannot be used with wait' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--collapsible'], message: '--collapsible cannot be used with wait' },
     { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
     { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
     { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
@@ -486,8 +493,10 @@ describe('parseCliArgs', () => {
     { args: ['send-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
     { args: ['send-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with send-async' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--collapsible'], message: 'message presentation cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
+    { args: ['list', 'agents', '--collapsible'], message: '--collapsible cannot be used with list' },
   ])('rejects invalid control arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {
@@ -514,16 +523,19 @@ describe('add-row arguments', () => {
       chatId: CHAT_ID,
       presentation: { style: 'notice' },
       format: 'plain',
+      disclosure: 'expanded',
       title: 'Deployment',
       content: '  exact content\n',
       readsContentFromStdin: false,
     });
     expect(parseCliArgs([
       'add-row', CHAT_ID, '-', '--type', 'error', '--title', 'Release validation',
+      '--collapsible',
     ], ENV)).toMatchObject({
       kind: 'add-row',
       presentation: { style: 'error' },
       format: 'plain',
+      disclosure: 'collapsed',
       title: 'Release validation',
       content: null,
       readsContentFromStdin: true,
@@ -621,6 +633,7 @@ describe('export arguments', () => {
     [['export', CHAT_ID, '--output', '-'], 'omit --output'],
     [['export', CHAT_ID, '--force'], '--force requires --output'],
     [['export', CHAT_ID, '--json'], '--json cannot be used with export'],
+    [['export', CHAT_ID, '--collapsible'], '--collapsible cannot be used with export'],
     [['status', CHAT_ID, '--format', 'xml'], '--format cannot be used with status'],
     [['wait', CHAT_ID, '--turn', 'turn-1', '--exclude', 'tools'], '--exclude cannot be used with wait'],
     [['list', 'agents', '--output', 'file'], '--output cannot be used with list'],

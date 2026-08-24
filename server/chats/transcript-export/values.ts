@@ -113,6 +113,7 @@ function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {
     excluded.add('content');
     excluded.add('presentation');
     excluded.add('title');
+    excluded.add('disclosure');
   }
   if (
     message.type === 'user-message'

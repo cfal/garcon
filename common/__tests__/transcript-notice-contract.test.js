@@ -46,6 +46,7 @@ describe('transcript notice contracts', () => {
         content: 'Synthetic CLI row.',
         presentation: { style },
         format: 'plain',
+        disclosure: 'expanded',
         title: 'Deployment',
       });
     }
@@ -68,6 +69,7 @@ describe('transcript notice contracts', () => {
         presentation,
         format: 'markdown',
         title: 'Deployment',
+        disclosure: 'collapsed',
       };
       expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
     }

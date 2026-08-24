@@ -402,6 +402,7 @@ export class GarconClient {
         && response.transcriptViewId === submitted.transcriptViewId
         && stableJsonStringify(response.presentation) === stableJsonStringify(submitted.presentation)
         && response.format === submitted.format
+        && response.disclosure === submitted.disclosure
       ),
       ambiguityDescription: `the add-row command for chat ${request.chatId}`,
     }, signal);

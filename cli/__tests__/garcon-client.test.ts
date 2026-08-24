@@ -759,6 +759,7 @@ describe('GarconClient add-row', () => {
     transcriptViewId: 'view-1',
     presentation: { style: 'error' as const },
     format: 'plain' as const,
+    disclosure: 'collapsed' as const,
     title: 'Release validation',
     content: 'durable error',
   };
@@ -830,6 +831,7 @@ describe('GarconClient add-row', () => {
           },
         },
         format: customRequest.format,
+        disclosure: customRequest.disclosure,
         status: 'appended',
         timestamp: '2026-08-23T00:00:00.000Z',
       }),

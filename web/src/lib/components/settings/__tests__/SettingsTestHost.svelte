@@ -193,6 +193,7 @@
 			return desktopLayoutOrder;
 		},
 		autoExpandTools: false,
+		alwaysExpandCliMessages: false,
 		showThinking: true,
 		allowDirectChats: false,
 		reduceMotion: false,

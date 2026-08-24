@@ -131,8 +131,8 @@
 								type="button"
 								class={cn(
 									'flex min-h-16 w-full flex-col items-stretch justify-center px-5 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6',
-									!item.presentation && 'hover:bg-accent',
-									item.presentation && cliPresentationSurfaceClass(item.presentation.style),
+									!item.presentation?.style && 'hover:bg-accent',
+									item.presentation?.style && cliPresentationSurfaceClass(item.presentation.style),
 								)}
 								onclick={() => void controller.select(item)}
 								data-user-message-navigator-row={item.id}
@@ -140,7 +140,7 @@
 								style:--cli-presentation-accent-light={customStyle?.lightAccent}
 								style:--cli-presentation-accent-dark={customStyle?.darkAccent}
 							>
-								{#if item.presentation}
+								{#if item.presentation?.style}
 									<CliPresentationHeader
 										style={item.presentation.style}
 										title={item.presentation.title}
@@ -149,7 +149,7 @@
 								<span
 									class={cn(
 										'line-clamp-2 w-full whitespace-pre-wrap break-words text-sm leading-5',
-										item.presentation ? 'mt-1 text-inherit' : 'text-foreground',
+										item.presentation?.style ? 'mt-1 text-inherit' : 'text-foreground',
 									)}
 								>
 									{item.content.trim() || m.chat_user_message_navigator_attachment_only()}

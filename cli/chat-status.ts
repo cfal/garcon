@@ -119,7 +119,7 @@ function formatMessage(entry: TranscriptMessage): string {
       : undefined);
   const title = titleValue ? ` — ${titleValue}` : '';
   const cliLabel = userPresentation
-    ? ` (CLI ${userPresentation.style})`
+    ? ` (CLI${userPresentation.style ? ` ${userPresentation.style}` : ''})`
     : entry.message instanceof CliRowMessage
       ? ` (CLI ${entry.message.presentation.style})`
       : '';

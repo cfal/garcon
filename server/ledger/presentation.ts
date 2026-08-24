@@ -55,6 +55,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
           row.detail.presentation,
           row.detail.format,
           row.detail.title ?? undefined,
+          row.detail.disclosure,
         );
       }
       return new TranscriptNoticeMessage(

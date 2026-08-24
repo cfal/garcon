@@ -25,6 +25,7 @@
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
+		alwaysExpandCliMessages?: boolean;
 	}
 
 	let {
@@ -39,8 +40,14 @@
 		onForkChat,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
+		alwaysExpandCliMessages = false,
 	}: Props = $props();
-	const initialHost = untrack(() => ({ projectBasePath, chatProjectPath, isMobile }));
+	const initialHost = untrack(() => ({
+		projectBasePath,
+		chatProjectPath,
+		isMobile,
+		alwaysExpandCliMessages,
+	}));
 
 	const chatSessions = createChatSessionsStore();
 	chatSessions.createDraft({
@@ -82,6 +89,7 @@
 
 	const localSettings = createLocalSettingsStore();
 	localSettings.autoExpandTools = false;
+	localSettings.alwaysExpandCliMessages = initialHost.alwaysExpandCliMessages;
 	localSettings.showQuickCommitTray = true;
 	setLocalSettings(localSettings);
 	onDestroy(() => localSettings.destroy());

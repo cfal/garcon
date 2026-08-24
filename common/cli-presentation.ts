@@ -20,6 +20,9 @@ export type CliPresentation =
 export const CLI_ROW_FORMATS = ['plain', 'markdown'] as const;
 export type CliRowFormat = (typeof CLI_ROW_FORMATS)[number];
 
+export const CLI_BODY_DISCLOSURES = ['expanded', 'collapsed'] as const;
+export type CliBodyDisclosure = (typeof CLI_BODY_DISCLOSURES)[number];
+
 const normalizedHexColor = /^#[0-9a-f]{6}$/;
 const cliHexColorInput = /^#?([0-9a-fA-F]{6})$/;
 
@@ -59,6 +62,14 @@ export function isCliPresentation(value: unknown): value is CliPresentation {
 
 export function isCliRowFormat(value: unknown): value is CliRowFormat {
   return (CLI_ROW_FORMATS as readonly unknown[]).includes(value);
+}
+
+export function isCliBodyDisclosure(value: unknown): value is CliBodyDisclosure {
+  return (CLI_BODY_DISCLOSURES as readonly unknown[]).includes(value);
+}
+
+export function coerceDurableCliBodyDisclosure(value: unknown): CliBodyDisclosure {
+  return isCliBodyDisclosure(value) ? value : 'expanded';
 }
 
 export function coerceDurableCliPresentation(

@@ -11,6 +11,21 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
+  it('labels styleless collapsible CLI user messages without inventing a style', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new UserMessage(
+        AT,
+        'Collapsed body',
+        undefined,
+        undefined,
+        { origin: 'cli', disclosure: 'collapsed' },
+      )),
+    ]));
+
+    expect(document).toContain('## [1] User — CLI\n');
+    expect(document).not.toContain('CLI undefined');
+  });
+
   it('renders compact metadata, original ordinals, filtering disclosure, and conversation text', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(2, 'conversation', new UserMessage(
@@ -45,6 +60,7 @@ describe('Markdown transcript export', () => {
     expect(document).toContain('**Styled operator note**');
     expect(document).toContain('- format: `markdown`');
     expect(document).not.toContain('lightAccent');
+    expect(document).not.toContain('disclosure');
     expect(document).not.toContain(' — conversation — ');
     expect(document).not.toContain(AT);
     expect(document).not.toContain('private-message-id');

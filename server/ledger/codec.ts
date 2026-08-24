@@ -7,6 +7,7 @@ import {
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import { isRecord, stableJsonStringify, type JsonObject } from '../../common/json.js';
 import {
+  coerceDurableCliBodyDisclosure,
   coerceDurableCliPresentation,
   isCliRowFormat,
 } from '../../common/cli-presentation.js';
@@ -152,6 +153,7 @@ export function cliRowFingerprint(
   return stableJsonStringify({
     presentation: detail.presentation,
     format: detail.format,
+    disclosure: detail.disclosure,
     title: detail.title,
     content: message,
   });
@@ -201,6 +203,7 @@ export function parseLedgerCliRowNoticeDetail(
     clientMessageId: detail.clientMessageId,
     presentation: coerceDurableCliPresentation(detail.presentation),
     format: isCliRowFormat(detail.format) ? detail.format : 'plain',
+    disclosure: coerceDurableCliBodyDisclosure(detail.disclosure),
     title: detail.title,
   };
 }

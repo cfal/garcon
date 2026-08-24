@@ -12,6 +12,21 @@ import { renderTranscriptExportXml } from '../xml.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('XML transcript export', () => {
+  it('marks styleless collapsible CLI user messages without an empty style attribute', () => {
+    const document = renderTranscriptExportXml(model([
+      entry(1, 'conversation', new UserMessage(
+        AT,
+        'Collapsed body',
+        undefined,
+        undefined,
+        { origin: 'cli', disclosure: 'collapsed' },
+      )),
+    ]));
+
+    expect(document).toContain('<user ordinal="1" origin="cli">');
+    expect(document).not.toContain('style="undefined"');
+  });
+
   it('uses explicit user and assistant elements with preserved ordinals', () => {
     const document = renderTranscriptExportXml(model([
       entry(1, 'conversation', new UserMessage(
@@ -150,6 +165,7 @@ describe('XML transcript export', () => {
     expect(document).toContain('<text>Operator diagnostic</text>');
     expect(document).toContain('<field name="format">markdown</field>');
     expect(document).not.toContain('<field name="presentation"');
+    expect(document).not.toContain('disclosure');
     expect(document).toContain('artifact-synthetic');
     expect(document).toContain('MIGRATION_FAILED');
   });

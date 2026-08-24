@@ -11,6 +11,7 @@ const command: AddRowCliCommand = {
   chatId: '1787000000000000',
   presentation: { style: 'info' },
   format: 'markdown',
+  disclosure: 'collapsed',
   title: 'Consultation status',
   content: '  durable information\n',
   readsContentFromStdin: false,
@@ -58,6 +59,7 @@ describe('runAddRow', () => {
       transcriptViewId: 'view-1',
       presentation: { style: 'info' },
       format: 'markdown',
+      disclosure: 'collapsed',
       title: command.title,
       content: command.content,
     });
@@ -68,6 +70,7 @@ describe('runAddRow', () => {
         'ordinal: 9',
         'type: info',
         'format: markdown',
+        'disclosure: collapsed',
         'status: appended',
       ].join('\n'),
     ]);

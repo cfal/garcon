@@ -64,6 +64,7 @@ describe('chat row routes', () => {
       ordinal: 4,
       presentation: input.presentation,
       format: input.format,
+      disclosure: input.disclosure,
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     }));
@@ -76,6 +77,7 @@ describe('chat row routes', () => {
       transcriptViewId: 'view-1',
       presentation: { style: 'info' },
       format: 'markdown',
+      disclosure: 'collapsed',
       title: '  Consultation status  ',
       content: '  exact content\n',
     };
@@ -102,6 +104,7 @@ describe('chat row routes', () => {
       ordinal: 4,
       presentation: { style: 'info' },
       format: 'markdown',
+      disclosure: 'collapsed',
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     });

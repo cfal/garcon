@@ -56,6 +56,7 @@ export class ChatRowService {
         clientMessageId: input.clientMessageId,
         presentation: input.presentation,
         format: input.format,
+        disclosure: input.disclosure,
         title: input.title,
         content: input.content,
       }));
@@ -69,6 +70,7 @@ export class ChatRowService {
         ordinal: result.row.ordinal,
         presentation: result.row.detail.presentation,
         format: result.row.detail.format,
+        disclosure: result.row.detail.disclosure,
         status: result.inserted ? 'appended' : 'duplicate',
         timestamp: result.row.at,
       };

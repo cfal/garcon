@@ -184,6 +184,9 @@ Conversational start, resume, and `send-async` messages may add a visual CLI hea
 ordinary user message in Garcon and are not included in the prompt sent to the agent. `--title`
 remains the chat title. Ordinary restart, replay, shares, and frozen forks preserve this
 presentation; explicit native-history Reload and provider-native fork segments may drop it.
+Pass `--collapsible` to start the message body collapsed. This can be used without a title or
+style. Viewers can expand it locally. In regular chat views, the separate “Always expand CLI
+messages” preference forces the complete body open; public shares preserve the caller's default.
 
 ```bash
 garcon-cli --workspace default --resume 1785337200123456 \
@@ -276,11 +279,11 @@ printf '%s' "Apply the patch described in /tmp/review.md" | \
 `--type info|notice|error` preset or `--color <light[,dark]>` custom style and optional `--title`
 are visible in Garcon but excluded from model context and transcript search. Pass `--markdown`
 to render the row body as Markdown. One custom color applies to both themes; a second selects the
-dark-theme accent:
+dark-theme accent. Pass `--collapsible` to start the row body collapsed:
 
 ```bash
 garcon-cli --workspace default add-row 1785337200123456 \
-  --color 7c3aed,c4b5fd --markdown --title "Consultation status" \
+  --color 7c3aed,c4b5fd --markdown --collapsible --title "Consultation status" \
   "**The architecture review is complete.**"
 ```
 

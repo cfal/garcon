@@ -130,7 +130,7 @@ export function announcementForAppendedRow(
 ): string | null {
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
-	if (message instanceof UserMessage && message.presentation) {
+	if (message instanceof UserMessage && message.presentation?.style) {
 		const label = cliPresentationLabel(message.presentation.style);
 		const title = message.presentation.title ? `: ${message.presentation.title}` : '';
 		const body = plainAnnouncementText(String(message.content ?? ''));

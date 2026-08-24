@@ -29,7 +29,7 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
     const presentation = transcriptExportEntryCliPresentation(entry);
     const presentationLabel = presentation === null
       ? ''
-      : ` — CLI ${presentation.style}${presentation.title ? `: ${singleLine(presentation.title)}` : ''}`;
+      : ` — CLI${presentation.style ? ` ${presentation.style}` : ''}${presentation.title ? `: ${singleLine(presentation.title)}` : ''}`;
     lines.push(`## [${entry.ordinal}] ${entryLabel(type)}${presentationLabel}`, '');
 
     const content = transcriptExportEntryText(entry);

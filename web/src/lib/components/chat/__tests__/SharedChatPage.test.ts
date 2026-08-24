@@ -152,6 +152,7 @@ describe('SharedChatPage', () => {
 				title: 'Consultation status',
 				presentation: { style: 'info' },
 				format: 'plain',
+				disclosure: 'collapsed',
 			},
 			{
 				type: 'transcript-notice',
@@ -200,6 +201,10 @@ describe('SharedChatPage', () => {
 		const customCard = (await screen.findByText('Shared custom deployment.')).closest('article');
 		expect(infoCard?.className).toContain('cli-row-message-info');
 		expect(infoCard?.className).toContain('border-status-neutral-border');
+		const disclosure = screen.getByRole('button', { name: 'Show more' });
+		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(disclosure);
+		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
 		expect(screen.getByText('CLI info').className).toContain('sr-only');
 		expect(noticeCard?.className).toContain('cli-row-message');
 		expect(noticeCard?.className).toContain('border-status-info-border');
