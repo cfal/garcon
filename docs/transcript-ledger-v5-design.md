@@ -11,12 +11,15 @@ retain durable ordinals and the role or typed entry shape, but omit repeated
 per-entry timestamps and semantic categories because ordinal order and the
 heading or XML tag already carry the information needed to follow the chat.
 Markdown uses one compact identity line and, only when rows were removed, one
-omission summary. XML keeps minimal chat identity and omits capture and filter
-metadata; the authenticated typed response remains the machine contract for
-the pinned view, canonical exclusions, and omitted counts. Transport-only user
-message identity and CLI-row provenance are not rendered; compact CLI-authored
-presentation labels remain because they distinguish operator notices and errors
-from ordinary prompts.
+omission summary. XML keeps minimal chat identity, omits capture and requested
+exclusion metadata, and includes one compact `<omitted .../>` element with
+positive counts in canonical category order only when rows were removed. The
+revision supersedes revision 23's artifact-level disclosure: the authenticated
+typed response remains the machine contract for the pinned view, canonical
+exclusions, and omitted counts. Transport-only user message identity and
+CLI-row provenance are not rendered; compact CLI-authored presentation labels
+remain because they distinguish operator notices and errors from ordinary
+prompts.
 
 Revision 23 adds an authenticated ordinary user-export surface over the
 authoritative ledger. Export captures one pinned current-view watermark,
@@ -1321,11 +1324,14 @@ model context, carryover, or export.
   carryover-quarantine disclosures have the non-excludable `conversation`
   category. Original ordinals are never renumbered. The typed response records
   canonical exclusions plus per-category omitted row counts; Markdown carries
-  only a compact summary of nonzero omissions, while XML omits filter metadata
-  because the caller supplied the filter. Rendered entries omit repeated
-  category and timestamp labels: ordinal order and the Markdown heading or XML
-  tag/type define the flow. Filtering applies to top-level entries, so a
-  retained permission request still contains its requested-tool description.
+  only a compact summary of nonzero omissions. XML omits requested exclusions
+  but, when at least one count is positive, emits one compact `<omitted .../>`
+  element immediately before `<entries>`; its positive count attributes follow
+  canonical category order and zero counts are absent. Rendered entries omit
+  repeated category and timestamp labels: ordinal order and the Markdown
+  heading or XML tag/type define the flow. Filtering applies to top-level
+  entries, so a retained permission request still contains its requested-tool
+  description.
   `garcon-cli status --messages` stays a bounded, lossy operational snapshot;
   Share stays a self-contained public snapshot copied at publish and never
   enters this export path.
@@ -2433,10 +2439,12 @@ stabilization defects. The current case inventory and gate status live in
 17. Export privacy: authenticated ordinary user export captures a pinned
     current-view watermark, strips `providerMeta`, excludes session rows and
     their native refs, and preserves original ordinals. The typed response
-    discloses semantic filtering; Markdown carries only nonzero omission counts
-    and XML carries no filter metadata. Entry roles and types replace redundant
-    rendered category and timestamp labels. A raw support export for explicit
-    diagnostics is separate.
+    discloses semantic filtering; Markdown carries only nonzero omission counts,
+    and XML carries them only in an optional compact `<omitted .../>` element
+    whose positive attributes follow canonical category order. XML carries no
+    requested exclusions or zero counts. Entry roles and types replace
+    redundant rendered category and timestamp labels. A raw support export for
+    explicit diagnostics is separate.
 18. The storage engine is SQLite via `bun:sqlite`: one database per chat
     holding the current view and transient staging; `transcript_views`
     is the sole current-view authority under a one-current partial
