@@ -113,8 +113,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  // OpenCode 1.18.19 accepts a clean-close truncated Chat Completions stream as a complete
-  // response and retries provider error frames and genuine socket resets.
+  // OpenCode 1.18.22 retries provider error frames and genuine socket resets.
   test('retries an errored model stream and finishes without a visible failure', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('STREAM_ERROR_PROMPT');
@@ -154,14 +153,20 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  test('pins OpenCode clean-close truncation as an empty success and recovers', async () => {
+  // OpenCode 1.18.22 continues the prompt loop after an unknown stream finish, so a
+  // clean-close truncated Chat Completions stream is recovered by the next response
+  // instead of ending the turn as an empty success.
+  // https://github.com/anomalyco/opencode/commit/57fa34f23599f65dd1027f9caac31e6c576ce644
+  test('continues after a clean-close truncation and completes from the next response', async () => {
     const testEnvironment = requireEnvironment();
-    const recoveryReply = marker('TRUNCATION_RECOVERY_REPLY');
+    const prompt = marker('TRUNCATION_PROMPT');
+    const continuationReply = marker('TRUNCATION_CONTINUATION_REPLY');
     const requestCursor = testEnvironment.model.markRequests();
     testEnvironment.model.scriptFault({
       kind: 'stream-error',
       message: marker('TRUNCATION_FAULT'),
     });
+    testEnvironment.model.scriptTurn([chatCompletionsText(continuationReply)]);
 
     await withIntegrationFixture('opencode-clean-close-truncation', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -169,8 +174,15 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
         chatId,
         projectPath: fixture.dirs.project,
-        command: marker('TRUNCATION_PROMPT'),
+        command: prompt,
       }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: continuationReply,
+        afterIndex: cursor,
+      });
       const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -181,33 +193,16 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       const transcript = await fixture.client.getMessages(chatId);
-      expect(assistantContents(transcript.messages)).toEqual([]);
+      expect(userContents(transcript.messages)).toEqual([prompt]);
+      expect(assistantContents(transcript.messages)).toEqual([continuationReply]);
       expect(messagesOfType(transcript.messages, 'error')).toEqual([]);
-      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(1);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
       const terminals = fixture.client.eventsSince(cursor).filter((event) =>
         (event.type === 'agent-run-failed' || event.type === 'agent-run-finished')
         && event.chatId === chatId
         && event.turnId === turn.turnId);
       expect(terminals).toHaveLength(1);
       expect(terminals[0]?.type).toBe('agent-run-finished');
-
-      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
-      const recoveryCursor = fixture.client.markEvents();
-      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
-        chatId,
-        command: marker('TRUNCATION_RECOVERY_PROMPT'),
-      }));
-      await waitForVisibleResponse({
-        fixture,
-        chatId,
-        turnId: recovery.turnId,
-        marker: recoveryReply,
-        afterIndex: recoveryCursor,
-      });
-      expect(messagesOfType(
-        (await fixture.client.getMessages(chatId)).messages,
-        'error',
-      )).toEqual([]);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

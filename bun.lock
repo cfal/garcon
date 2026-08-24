@@ -192,7 +192,7 @@
         "@garcon/common": "workspace:*",
         "@garcon/server-agent-common": "workspace:*",
         "@garcon/server-agent-interface": "workspace:*",
-        "@opencode-ai/sdk": "1.18.19",
+        "@opencode-ai/sdk": "1.18.22",
       },
       "devDependencies": {
         "@types/bun": "^1.4.0",
@@ -619,7 +619,7 @@
 
     "@openai/codex-win32-x64": ["@openai/codex@0.149.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-qKbwSOOO/fdhQ5MlXE2fts6taPxRPZ/zqeC+eqHD72hLRymV9rFCUbUxOCquognUPRPvS/2/kRCV0UVhoDd3yQ=="],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.19", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-AnszRg7cJ3PA6/06mkqdTJDKn9NJuV26AJMWbKEgRsznbJvrhf3PT8UhQQOhyKQYCygx9ZOxyKMIPVOQdMSS1A=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.18.22", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-fRZ2r6nqdLBXfs7j531aibrqCC9tpbL2tmz3ThnwtLa3bMNUozEVAOPnZjh86JcTBDhNtACt5CNgKDZ1Pve1NA=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
 
