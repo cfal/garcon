@@ -46,12 +46,17 @@ export function transcriptExportEntryTag(type: string): string {
   return type;
 }
 
-export function transcriptExportEntryUserPresentation(
+export function transcriptExportEntryCliPresentation(
   entry: TranscriptExportEntry,
 ): UserMessagePresentation | null {
-  return entry.kind === 'message' && entry.message.type === 'user-message'
-    ? entry.message.presentation ?? null
-    : null;
+  if (entry.kind !== 'message') return null;
+  if (entry.message.type === 'user-message') return entry.message.presentation ?? null;
+  if (entry.message.type !== 'cli-row') return null;
+  return {
+    origin: 'cli',
+    ...entry.message.presentation,
+    ...(entry.message.title === undefined ? {} : { title: entry.message.title }),
+  };
 }
 
 export function transcriptExportEntryText(entry: TranscriptExportEntry): string | null {
@@ -62,6 +67,7 @@ export function transcriptExportEntryText(entry: TranscriptExportEntry): string 
     case 'thinking':
     case 'error':
     case 'transcript-notice':
+    case 'cli-row':
       return textSafe(entry.message.content);
     case 'compaction':
       return textSafe(entry.message.summary);
@@ -103,11 +109,10 @@ function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {
     excluded.add('metadata');
     excluded.add('presentation');
   }
-  if (
-    (message.type === 'error' || message.type === 'transcript-notice')
-    && message.detail?.type === 'cli-row'
-  ) {
-    excluded.add('detail');
+  if (message.type === 'cli-row') {
+    excluded.add('content');
+    excluded.add('presentation');
+    excluded.add('title');
   }
   if (
     message.type === 'user-message'

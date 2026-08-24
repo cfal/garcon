@@ -8,7 +8,7 @@ import {
   transcriptExportEntryText,
   transcriptExportEntryToolId,
   transcriptExportEntryType,
-  transcriptExportEntryUserPresentation,
+  transcriptExportEntryCliPresentation,
 } from './values.js';
 
 export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentModel): string {
@@ -26,7 +26,7 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
 
   for (const entry of model.entries) {
     const type = transcriptExportEntryType(entry);
-    const presentation = transcriptExportEntryUserPresentation(entry);
+    const presentation = transcriptExportEntryCliPresentation(entry);
     const presentationLabel = presentation === null
       ? ''
       : ` — CLI ${presentation.style}${presentation.title ? `: ${singleLine(presentation.title)}` : ''}`;
@@ -103,6 +103,7 @@ function entryLabel(type: string): string {
   if (tag === 'assistant') return 'Assistant';
   if (tag === 'tool-call') return `Tool call — ${type}`;
   if (tag === 'permission') return `Permission — ${type.slice('permission-'.length)}`;
+  if (tag === 'cli-row') return 'CLI row';
   return tag.replaceAll('-', ' ').replace(/^./, (character) => character.toUpperCase());
 }
 

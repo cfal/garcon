@@ -99,6 +99,7 @@ export function exportCategoryForMessage(message: ChatMessage): TranscriptExport
     case 'permission-expired':
       return 'permissions';
     case 'error':
+    case 'cli-row':
       return 'diagnostics';
     case 'transcript-notice':
       return isCarryoverMigrationQuarantineNoticeDetail(message.detail)

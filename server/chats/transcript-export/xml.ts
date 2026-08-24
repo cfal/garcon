@@ -9,7 +9,7 @@ import {
   transcriptExportEntryText,
   transcriptExportEntryToolId,
   transcriptExportEntryType,
-  transcriptExportEntryUserPresentation,
+  transcriptExportEntryCliPresentation,
 } from './values.js';
 
 export function renderTranscriptExportXml(model: TranscriptExportDocumentModel): string {
@@ -38,7 +38,7 @@ function renderEntry(entry: TranscriptExportEntry): string[] {
   const type = transcriptExportEntryType(entry);
   const tag = transcriptExportEntryTag(type);
   const toolId = transcriptExportEntryToolId(entry);
-  const presentation = transcriptExportEntryUserPresentation(entry);
+  const presentation = transcriptExportEntryCliPresentation(entry);
   const typeAttribute = tag === 'tool-call' || tag === 'permission'
     ? ` type="${attribute(type)}"`
     : '';

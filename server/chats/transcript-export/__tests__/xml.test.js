@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   ErrorMessage,
   TranscriptNoticeMessage,
   UserMessage,
@@ -125,12 +126,13 @@ describe('XML transcript export', () => {
     expect(document).not.toContain('data:image/png;base64,secret');
   });
 
-  it('omits CLI provenance while retaining quarantine disclosure detail', () => {
+  it('renders compact CLI presentation while retaining quarantine disclosure detail', () => {
     const document = renderTranscriptExportXml(model([
-      entry(2, 'diagnostics', new ErrorMessage(
+      entry(2, 'diagnostics', new CliRowMessage(
         AT,
         'Operator diagnostic',
-        { type: 'cli-row' },
+        { style: 'error' },
+        'markdown',
         'Synthetic blocker',
       )),
       entry(3, 'conversation', new TranscriptNoticeMessage(
@@ -144,8 +146,10 @@ describe('XML transcript export', () => {
       )),
     ]));
 
-    expect(document).not.toContain('"type":"cli-row"');
-    expect(document).toContain('Synthetic blocker');
+    expect(document).toContain('<cli-row ordinal="2" origin="cli" style="error" title="Synthetic blocker">');
+    expect(document).toContain('<text>Operator diagnostic</text>');
+    expect(document).toContain('<field name="format">markdown</field>');
+    expect(document).not.toContain('<field name="presentation"');
     expect(document).toContain('artifact-synthetic');
     expect(document).toContain('MIGRATION_FAILED');
   });

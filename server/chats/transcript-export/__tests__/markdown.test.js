@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   ToolResultMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
@@ -20,6 +21,16 @@ describe('Markdown transcript export', () => {
         { origin: 'cli', style: 'notice', title: 'Presentation only' },
       )),
       entry(7, 'conversation', new AssistantMessage(AT, 'Answer')),
+      entry(9, 'diagnostics', new CliRowMessage(
+        AT,
+        '**Styled operator note**',
+        {
+          style: 'custom',
+          customStyle: { lightAccent: '#123456', darkAccent: '#abcdef' },
+        },
+        'markdown',
+        'Automation checkpoint',
+      )),
     ], {
       omitted: [{ category: 'tool-calls', count: 2 }],
     }));
@@ -30,6 +41,10 @@ describe('Markdown transcript export', () => {
     expect(document).toContain('## [2] User — CLI notice: Presentation only\n');
     expect(document).toContain('Prompt with data:text/plain,authored');
     expect(document).toContain('## [7] Assistant\n');
+    expect(document).toContain('## [9] CLI row — CLI custom: Automation checkpoint\n');
+    expect(document).toContain('**Styled operator note**');
+    expect(document).toContain('- format: `markdown`');
+    expect(document).not.toContain('lightAccent');
     expect(document).not.toContain(' — conversation — ');
     expect(document).not.toContain(AT);
     expect(document).not.toContain('private-message-id');

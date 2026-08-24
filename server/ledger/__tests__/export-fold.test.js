@@ -3,6 +3,7 @@ import {
   AgentSwitchMessage,
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   CompactionMessage,
   ErrorMessage,
   PermissionExpiredMessage,
@@ -35,6 +36,12 @@ describe('transcript export fold', () => {
     expect(exportCategoryForMessage(new PermissionExpiredMessage(AT, 'permission-1')))
       .toBe('permissions');
     expect(exportCategoryForMessage(new ErrorMessage(AT, 'failed'))).toBe('diagnostics');
+    expect(exportCategoryForMessage(new CliRowMessage(
+      AT,
+      'operator note',
+      { style: 'notice' },
+      'plain',
+    ))).toBe('diagnostics');
     expect(exportCategoryForMessage(new TranscriptNoticeMessage(AT, 'notice')))
       .toBe('diagnostics');
     expect(exportCategoryForMessage(new AgentSwitchMessage(AT, 'claude', 'codex')))
