@@ -15,6 +15,11 @@ describe('user message presentation', () => {
     })).toEqual({ origin: 'cli', style: 'notice', title: 'Operator context' });
     expect(parseUserMessagePresentation({ origin: 'cli', style: 'info' }))
       .toEqual({ origin: 'cli', style: 'info' });
+    expect(parseUserMessagePresentation({
+      origin: 'cli',
+      style: 'notice',
+      disclosure: 'expanded',
+    })).toEqual({ origin: 'cli', style: 'notice' });
     expect(parseUserMessagePresentation({ origin: 'cli', disclosure: 'collapsed' }))
       .toEqual({ origin: 'cli', disclosure: 'collapsed' });
     expect(parseUserMessagePresentation({
@@ -42,6 +47,16 @@ describe('user message presentation', () => {
       .toThrow('unsupported field');
     expect(() => parseUserMessagePresentation({ origin: 'cli' }))
       .toThrow('styleless user message presentation must be collapsed');
+    expect(() => parseUserMessagePresentation({
+      origin: 'cli',
+      title: 'Heading',
+      disclosure: 'collapsed',
+    })).toThrow('styleless user message presentation cannot carry a title or custom style');
+    expect(() => parseUserMessagePresentation({
+      origin: 'cli',
+      customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      disclosure: 'collapsed',
+    })).toThrow('styleless user message presentation cannot carry a title or custom style');
   });
 
   it('round-trips presentation as a first-class user message field', () => {

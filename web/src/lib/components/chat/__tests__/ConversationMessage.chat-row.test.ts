@@ -7,6 +7,7 @@ import {
 	UserMessage,
 } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
+import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
 
@@ -187,10 +188,36 @@ describe('ConversationMessage chat rows', () => {
 
 		const button = screen.getByRole('button', { name: 'Show more' });
 		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(button.classList).toContain('min-h-6');
 		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
 			'cli-collapsible-body-collapsed',
 		);
 		await fireEvent.click(button);
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('preserves CLI row expansion across remounts through the feed disclosure state', async () => {
+		const itemState = new ConversationFeedItemState();
+		const disclosureState = itemState.disclosurePort('cli-row-1');
+		const message = new CliRowMessage(
+			AT,
+			'Long CLI content',
+			{ style: 'notice' },
+			'plain',
+			undefined,
+			'collapsed',
+		);
+		const first = render(ConversationMessageHost, { message, disclosureState });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+		first.unmount();
+
+		render(ConversationMessageHost, { message, disclosureState });
 		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
 			'true',
 		);

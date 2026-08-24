@@ -2,7 +2,6 @@ import { parseChatRowTitle } from './chat-row-contracts.js';
 import {
   isCliBodyDisclosure,
   isCliPresentation,
-  type CliBodyDisclosure,
   type CliPresentation,
 } from './cli-presentation.js';
 
@@ -10,7 +9,7 @@ export type UserMessagePresentation =
   | ({
     readonly origin: 'cli';
     readonly title?: string;
-    readonly disclosure?: CliBodyDisclosure;
+    readonly disclosure?: 'collapsed';
   } & CliPresentation)
   | {
     readonly origin: 'cli';
@@ -42,8 +41,11 @@ export function parseUserMessagePresentation(value: unknown): UserMessagePresent
   };
   const title = parseChatRowTitle(body.title);
   if (body.style === undefined) {
-    if (body.customStyle !== undefined || title !== undefined || disclosure !== 'collapsed') {
+    if (disclosure !== 'collapsed') {
       throw new TypeError('styleless user message presentation must be collapsed');
+    }
+    if (body.customStyle !== undefined || title !== undefined) {
+      throw new TypeError('styleless user message presentation cannot carry a title or custom style');
     }
     return { origin: 'cli', disclosure };
   }
@@ -52,6 +54,6 @@ export function parseUserMessagePresentation(value: unknown): UserMessagePresent
     origin: 'cli',
     ...presentation,
     ...(title === undefined ? {} : { title }),
-    ...(disclosure === undefined ? {} : { disclosure }),
+    ...(disclosure === 'collapsed' ? { disclosure } : {}),
   };
 }

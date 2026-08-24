@@ -10,6 +10,7 @@
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
+	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 
 	type OpenAutoInput = FileOpenRequest;
 
@@ -26,6 +27,7 @@
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		alwaysExpandCliMessages?: boolean;
+		disclosureState?: ConversationDisclosureStatePort;
 	}
 
 	let {
@@ -41,6 +43,7 @@
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 		alwaysExpandCliMessages = false,
+		disclosureState,
 	}: Props = $props();
 	const initialHost = untrack(() => ({
 		projectBasePath,
@@ -104,4 +107,5 @@
 	{onForkChat}
 	{onGenerateTitleFromMessage}
 	{canForkAtMessageNow}
+	{disclosureState}
 />

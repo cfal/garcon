@@ -51,7 +51,7 @@
 	</div>
 	<button
 		type="button"
-		class="mt-1 rounded-sm text-xs font-medium text-inherit underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+		class="-mx-1 mt-1 inline-flex min-h-6 items-center rounded-sm px-1 text-xs font-medium text-inherit underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
 		aria-expanded={bodyExpanded}
 		aria-controls={bodyId}
 		onclick={toggle}
