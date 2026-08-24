@@ -178,15 +178,16 @@ automatically, and `cli` records creation through `garcon-cli` and nothing else.
 an explicit title on either a new or resumed chat.
 
 Conversational start, resume, and `send-async` messages may add a visual CLI header with
-`--message-title <title>` and `--message-style info|notice|error`. A title alone uses `notice`;
-a style alone displays `CLI info`, `CLI notice`, or `CLI error`. These values distinguish the
+`--message-title <title>` and `--message-style info|notice|error|custom`. A title alone uses
+`notice`; a preset style alone displays its corresponding CLI label. Custom presentation uses
+`--color <light[,dark]>`; one six-digit hex value applies to both themes. These values distinguish the
 ordinary user message in Garcon and are not included in the prompt sent to the agent. `--title`
 remains the chat title. Ordinary restart, replay, shares, and frozen forks preserve this
 presentation; explicit native-history Reload and provider-native fork segments may drop it.
 
 ```bash
 garcon-cli --workspace default --resume 1785337200123456 \
-  --message-title "Deployment constraint" --message-style error \
+  --message-title "Deployment constraint" --color 0ea5e9,7dd3fc \
   "Do not deploy until the migration checksum matches."
 ```
 
@@ -256,12 +257,15 @@ printf '%s' "Apply the patch described in /tmp/review.md" | \
 ```
 
 `add-row` appends a durable presentation-only row without submitting agent work. Its
-`--type info|notice|error` style and optional `--title` are visible in Garcon but excluded from
-model context and transcript search:
+`--type info|notice|error` preset or `--color <light[,dark]>` custom style and optional `--title`
+are visible in Garcon but excluded from model context and transcript search. Pass `--markdown`
+to render the row body as Markdown. One custom color applies to both themes; a second selects the
+dark-theme accent:
 
 ```bash
 garcon-cli --workspace default add-row 1785337200123456 \
-  --type info --title "Consultation status" "The architecture review is complete."
+  --color 7c3aed,c4b5fd --markdown --title "Consultation status" \
+  "**The architecture review is complete.**"
 ```
 
 `stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success. If queued messages exist, stopping pauses the queue so they do not start after the interruption; resume the queue in Garcon before sending a new direct turn:

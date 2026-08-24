@@ -189,7 +189,7 @@ describe('garcon-cli', () => {
         '--model', agent.provider.model,
         '--title', 'CLI delegated review',
         '--message-title', 'Initial context',
-        '--message-style', 'info',
+        '--color', '7C3AED,c4b5fd',
         '--tag', 'Review Needed',
         '--tag', 'delegated',
         'cli-first-turn',
@@ -240,7 +240,12 @@ describe('garcon-cli', () => {
       )).toMatchObject([
         {
           content: 'cli-first-turn',
-          presentation: { origin: 'cli', style: 'info', title: 'Initial context' },
+          presentation: {
+            origin: 'cli',
+            style: 'custom',
+            customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+            title: 'Initial context',
+          },
         },
         {
           content: 'cli-second-turn',
@@ -663,7 +668,7 @@ describe('garcon-cli', () => {
       const sent = await runCli(controlArguments(fixture, [
         'send-async', chatId,
         '--message-title', 'Async context',
-        '--message-style', 'info',
+        '--color', '0EA5E9,7dd3fc',
         'cli-async-message',
       ]));
 
@@ -681,7 +686,12 @@ describe('garcon-cli', () => {
       expect(committed.messages[0]?.message).toMatchObject({
         type: 'user-message',
         content: 'cli-async-message',
-        presentation: { origin: 'cli', style: 'info', title: 'Async context' },
+        presentation: {
+          origin: 'cli',
+          style: 'custom',
+          customStyle: { lightAccent: '#0ea5e9', darkAccent: '#7dd3fc' },
+          title: 'Async context',
+        },
       });
 
       const heldRequest = await held.received;

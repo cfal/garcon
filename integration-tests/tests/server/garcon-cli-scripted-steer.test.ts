@@ -76,7 +76,7 @@ describe('scripted Codex CLI steering', () => {
         '--workspace', WORKSPACE,
         'send-async', chatId, '--allow-steer',
         '--message-title', 'Steer context',
-        '--message-style', 'info',
+        '--color', '0EA5E9,7dd3fc',
         steerPrompt,
       ]);
 
@@ -109,7 +109,12 @@ describe('scripted Codex CLI steering', () => {
       expect(transcript.messages.find((entry) => (
         entry.message.type === 'user-message' && entry.message.content === steerPrompt
       ))?.message).toMatchObject({
-        presentation: { origin: 'cli', style: 'info', title: 'Steer context' },
+        presentation: {
+          origin: 'cli',
+          style: 'custom',
+          customStyle: { lightAccent: '#0ea5e9', darkAccent: '#7dd3fc' },
+          title: 'Steer context',
+        },
       });
       testEnvironment.model.assertSettled();
     }, {
