@@ -9,15 +9,17 @@
 		ThinkingMessage,
 		ErrorMessage,
 		TranscriptNoticeMessage,
+		CliRowMessage,
 		isToolUseMessage,
-		isCliRowPresentationDetail,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
-	import CliRowMessage from '$lib/components/chat/rows/CliRowMessage.svelte';
-	import UserMessagePresentationHeader from '$lib/components/chat/UserMessagePresentationHeader.svelte';
+	import CliRow from '$lib/components/chat/rows/CliRow.svelte';
+	import CliPresentationHeader from '$lib/components/chat/rows/CliPresentationHeader.svelte';
+	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { cn } from '$lib/utils/cn';
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -35,12 +37,6 @@
 	interface SharedMessageEntry {
 		index: number;
 		message: ChatMessage;
-	}
-
-	interface CliRowView {
-		presentation: 'notice' | 'error';
-		title?: string;
-		content: string;
 	}
 
 	let messages = $state<SharedMessageEntry[]>([]);
@@ -67,20 +63,6 @@
 				}
 			})
 			.filter((entry): entry is SharedMessageEntry => entry !== null);
-	}
-
-	function cliRowView(message: ChatMessage): CliRowView | null {
-		if (
-			!(message instanceof TranscriptNoticeMessage || message instanceof ErrorMessage) ||
-			!isCliRowPresentationDetail(message.detail)
-		) {
-			return null;
-		}
-		return {
-			presentation: message instanceof ErrorMessage ? 'error' : 'notice',
-			content: message.content,
-			...(message.title === undefined ? {} : { title: message.title }),
-		};
 	}
 
 	onMount(() => {
@@ -262,7 +244,8 @@
 				{/if}
 				{#each messages as entry (entry.index)}
 					{@const message = entry.message}
-					{@const cliRow = cliRowView(message)}
+					{@const userPresentation = message instanceof UserMessage ? message.presentation : undefined}
+					{@const customUserStyle = userPresentation?.style === 'custom' ? userPresentation.customStyle : null}
 					<svelte:boundary>
 						{#snippet failed(error)}
 							<MessageRenderFallback {error} />
@@ -273,17 +256,29 @@
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">
 									<div
-										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm"
+									class={cn(
+										'mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm',
+										userPresentation && cliPresentationSurfaceClass(userPresentation.style),
+									)}
+										data-user-message-presentation={userPresentation?.style}
+										style:--cli-presentation-accent-light={customUserStyle?.lightAccent}
+										style:--cli-presentation-accent-dark={customUserStyle?.darkAccent}
 									>
-										{#if message.presentation}
-											<UserMessagePresentationHeader presentation={message.presentation} />
+										{#if userPresentation}
+											<CliPresentationHeader
+												style={userPresentation.style}
+												title={userPresentation.title}
+											/>
 										{/if}
-										<div class="text-sm">
-											<Markdown source={message.content} variant="user" />
+										<div class={userPresentation ? 'mt-1 text-sm' : 'text-sm'}>
+											<Markdown
+												source={message.content}
+												variant={userPresentation ? 'presented' : 'user'}
+											/>
 										</div>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
-												{#each message.images as image, imageIndex (image.name || imageIndex)}
+												{#each message.images as image, imageIndex (imageIndex)}
 													<img
 														src={image.data}
 														alt={image.name}
@@ -326,8 +321,8 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
-							{:else if cliRow}
-								<CliRowMessage {...cliRow} />
+							{:else if message instanceof CliRowMessage}
+								<CliRow {message} />
 							{:else if message instanceof TranscriptNoticeMessage}
 								<ChatEventCard variant="info">
 									{#snippet body()}
@@ -347,15 +342,7 @@
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}
-										{#if message.title}
-											<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>
-										{/if}
-										<div
-											class={[
-												'text-sm whitespace-pre-wrap break-words',
-												message.title && 'mt-1',
-											]}
-										>
+										<div class="text-sm whitespace-pre-wrap break-words">
 											{message.content}
 										</div>
 									{/snippet}

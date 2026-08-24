@@ -61,6 +61,7 @@ export type {
 	UnknownToolUseMessage,
 	ToolResultMessage,
 	ErrorMessage,
+	CliRowMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	PermissionCancelledMessage,

@@ -100,6 +100,58 @@ function validSnapshot(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe('GarconClient', () => {
+  test('fetches and validates a correlated transcript export', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validExport());
+      },
+    });
+
+    await expect(client.getTranscriptExport({
+      chatId: runRequest.chatId,
+      format: 'xml',
+      exclusions: ['tool-calls', 'reasoning'],
+    })).resolves.toMatchObject({ format: 'xml', entryCount: 1 });
+    expect(requestedUrl).toBe(
+      `${connection.baseUrl}/api/v1/chats/export?chatId=${runRequest.chatId}&format=xml&exclude=tool-calls&exclude=reasoning`,
+    );
+  });
+
+  test('rejects malformed and uncorrelated transcript exports', async () => {
+    for (const response of [
+      { ...validExport(), document: 'missing newline' },
+      { ...validExport(), chatId: '1785337200123457' },
+      { ...validExport(), exclusions: [], omitted: [] },
+    ]) {
+      const client = new GarconClient({ ...connection, fetch: async () => Response.json(response) });
+      await expect(client.getTranscriptExport({
+        chatId: runRequest.chatId,
+        format: 'xml',
+        exclusions: ['tool-calls', 'reasoning'],
+      })).rejects.toBeInstanceOf(Error);
+    }
+  });
+
+  test('maps export validation failures to an argument-level exit', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Invalid filter',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 400 }),
+    });
+    await expect(client.getTranscriptExport({
+      chatId: runRequest.chatId,
+      format: 'markdown',
+      exclusions: [],
+    })).rejects.toMatchObject({ phase: 'export', exitCode: 2 });
+  });
+
   test('fetches and validates a correlated chat snapshot', async () => {
     let request: { url: string; method: string | undefined; authorization: string | null } | undefined;
     const client = new GarconClient({
@@ -680,13 +732,33 @@ describe('GarconClient', () => {
   });
 });
 
+function validExport(): Record<string, unknown> {
+  return {
+    success: true,
+    chatId: runRequest.chatId,
+    format: 'xml',
+    transcriptViewId: 'view-1',
+    lastOrdinal: 3,
+    generatedAt: '2026-08-23T00:00:00.000Z',
+    entryCount: 1,
+    totalEntryCount: 3,
+    exclusions: ['tool-calls', 'reasoning'],
+    omitted: [
+      { category: 'tool-calls', count: 1 },
+      { category: 'reasoning', count: 1 },
+    ],
+    document: '<?xml version="1.0"?>\n',
+  };
+}
+
 describe('GarconClient add-row', () => {
   const addRequest = {
     clientRequestId: 'row-request',
     clientMessageId: 'row-message',
     chatId: runRequest.chatId,
     transcriptViewId: 'view-1',
-    type: 'error' as const,
+    presentation: { style: 'error' as const },
+    format: 'plain' as const,
     title: 'Release validation',
     content: 'durable error',
   };
@@ -725,6 +797,48 @@ describe('GarconClient add-row', () => {
       status: 'appended',
     });
     expect(seen[1]?.body).toBe(JSON.stringify(addRequest));
+  });
+
+  test('correlates custom presentation independently of object key order', async () => {
+    const customRequest = {
+      ...addRequest,
+      presentation: {
+        style: 'custom' as const,
+        customStyle: {
+          lightAccent: '#7c3aed' as const,
+          darkAccent: '#c4b5fd' as const,
+        },
+      },
+      format: 'markdown' as const,
+      content: '**complete**',
+    };
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        commandType: 'chat-row-add',
+        clientRequestId: customRequest.clientRequestId,
+        clientMessageId: customRequest.clientMessageId,
+        chatId: customRequest.chatId,
+        transcriptViewId: customRequest.transcriptViewId,
+        ordinal: 4,
+        presentation: {
+          style: 'custom',
+          customStyle: {
+            darkAccent: '#c4b5fd',
+            lightAccent: '#7c3aed',
+          },
+        },
+        format: customRequest.format,
+        status: 'appended',
+        timestamp: '2026-08-23T00:00:00.000Z',
+      }),
+    });
+
+    await expect(client.addChatRow(customRequest)).resolves.toMatchObject({
+      ordinal: 4,
+      presentation: customRequest.presentation,
+    });
   });
 
   test('retries an ambiguous mutation with the byte-identical request body', async () => {

@@ -14,16 +14,36 @@ const request = {
   clientMessageId: 'message-1',
   chatId: '1787000000000000',
   transcriptViewId: 'view-1',
-  type: 'notice',
+  presentation: { style: 'notice' },
+  format: 'plain',
   content: '  retained exactly\n',
 };
 
 describe('chat row contracts', () => {
-  it('[TLV5-CHAT-ROW.01-CONTRACT-01] parses both chat row types without trimming content', () => {
+  it('[TLV5-CHAT-ROW.01-CONTRACT-01] parses every chat row style without trimming content', () => {
     expect(parseAddChatRowRequest(request)).toEqual(request);
-    expect(parseAddChatRowRequest({ ...request, type: 'error' })).toEqual({
+    expect(parseAddChatRowRequest({ ...request, presentation: { style: 'info' } })).toEqual({
       ...request,
-      type: 'error',
+      presentation: { style: 'info' },
+    });
+    expect(parseAddChatRowRequest({ ...request, presentation: { style: 'error' } })).toEqual({
+      ...request,
+      presentation: { style: 'error' },
+    });
+    expect(parseAddChatRowRequest({
+      ...request,
+      presentation: {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      },
+      format: 'markdown',
+    })).toEqual({
+      ...request,
+      presentation: {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      },
+      format: 'markdown',
     });
   });
 
@@ -64,10 +84,17 @@ describe('chat row contracts', () => {
     expect(() => parseChatRowContent(' \n\t ')).toThrow();
   });
 
-  it('rejects unsupported chat row types', () => {
-    expect(() => parseAddChatRowRequest({ ...request, type: 'alert' })).toThrow(
-      'type must be notice or error',
-    );
+  it('rejects invalid presentations and formats', () => {
+    expect(() => parseAddChatRowRequest({
+      ...request,
+      presentation: { style: 'custom' },
+    })).toThrow('presentation is invalid');
+    expect(() => parseAddChatRowRequest({
+      ...request,
+      presentation: { style: 'notice', customStyle: {} },
+    })).toThrow('presentation is invalid');
+    expect(() => parseAddChatRowRequest({ ...request, format: 'html' }))
+      .toThrow('format must be plain or markdown');
   });
 
   it('parses target and mutation responses strictly', () => {
@@ -88,7 +115,8 @@ describe('chat row contracts', () => {
       chatId: request.chatId,
       transcriptViewId: request.transcriptViewId,
       ordinal: 7,
-      type: 'error',
+      presentation: { style: 'info' },
+      format: 'markdown',
       status: 'duplicate',
       timestamp: '2026-08-18T00:00:00.000Z',
     };

@@ -220,7 +220,7 @@ describe('sendChatAsync', () => {
       },
       async steerChat() { throw steerError('STEER_TURN_UNAVAILABLE'); },
     });
-    const presentation = { origin: 'cli', style: 'error', title: 'Blocker' } as const;
+    const presentation = { origin: 'cli', style: 'info', title: 'Context' } as const;
     await sendChatAsync({
       chatId: CHAT_ID,
       content: 'Message',

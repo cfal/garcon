@@ -213,14 +213,16 @@ describe('TranscriptReloadService', () => {
         chatId: 'chat-1',
         viewId: currentView.viewId,
         clientMessageId: 'current-notice',
-        type: 'notice',
+        presentation: { style: 'notice' },
+        format: 'plain',
         content: 'current notice',
       });
       ledger.appendChatRow({
         chatId: 'chat-1',
         viewId: currentView.viewId,
         clientMessageId: 'current-error',
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         content: 'current error',
       });
       lease.sink.publish({
@@ -249,7 +251,8 @@ describe('TranscriptReloadService', () => {
           detail: {
             type: 'cli-row',
             clientMessageId: 'frozen-notice',
-            presentation: 'notice',
+            presentation: { style: 'notice' },
+            format: 'plain',
             title: null,
           },
         },
@@ -261,7 +264,8 @@ describe('TranscriptReloadService', () => {
           detail: {
             type: 'cli-row',
             clientMessageId: 'frozen-error',
-            presentation: 'error',
+            presentation: { style: 'error' },
+            format: 'plain',
             title: null,
           },
         },

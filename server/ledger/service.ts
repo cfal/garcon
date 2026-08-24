@@ -10,9 +10,9 @@ import type { AgentAttachment } from '../../common/agent-execution.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
-  type ChatRowType,
 } from '../../common/chat-row-contracts.js';
 import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
+import type { CliPresentation, CliRowFormat } from '../../common/cli-presentation.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type {
@@ -369,7 +369,8 @@ export class TranscriptLedgerService {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
     readonly clientMessageId: string;
-    readonly type: ChatRowType;
+    readonly presentation: CliPresentation;
+    readonly format: CliRowFormat;
     readonly title?: string;
     readonly content: string;
   }): AppendChatRowResult {
@@ -380,7 +381,8 @@ export class TranscriptLedgerService {
       detail: {
         type: 'cli-row',
         clientMessageId: input.clientMessageId,
-        presentation: input.type,
+        presentation: input.presentation,
+        format: input.format,
         title: input.title ?? null,
       },
     });

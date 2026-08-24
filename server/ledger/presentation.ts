@@ -1,6 +1,6 @@
 import {
   AgentSwitchMessage,
-  ErrorMessage,
+  CliRowMessage,
   PermissionCancelledMessage,
   PermissionExpiredMessage,
   PermissionRequestMessage,
@@ -49,10 +49,13 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return row.message;
     case 'notice': {
       if (isLedgerCliRowNoticeDetail(row.detail)) {
-        const title = row.detail.title ?? undefined;
-        return row.detail.presentation === 'error'
-          ? new ErrorMessage(row.at, row.message, { type: 'cli-row' }, title)
-          : new TranscriptNoticeMessage(row.at, row.message, { type: 'cli-row' }, title);
+        return new CliRowMessage(
+          row.at,
+          row.message,
+          row.detail.presentation,
+          row.detail.format,
+          row.detail.title ?? undefined,
+        );
       }
       return new TranscriptNoticeMessage(
         row.at,

@@ -19,6 +19,7 @@ import {
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import { stableJsonStringify } from '@garcon/common/json';
 import {
   parseChatSnapshotResponse,
   type ChatSnapshotResponse,
@@ -29,6 +30,12 @@ import type {
 } from '@garcon/common/chat-title-contracts';
 import type { ModelCatalogResponse } from '@garcon/common/model-catalog';
 import type { RemoteSettingsSnapshot } from '@garcon/common/settings';
+import {
+  parseTranscriptExportResponse,
+  type TranscriptExportCategory,
+  type TranscriptExportFormat,
+  type TranscriptExportResponse,
+} from '@garcon/common/chat-export-contracts';
 import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
@@ -36,6 +43,7 @@ import { probeRuntime, type RuntimeConnection } from './discovery.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
+const EXPORT_REQUEST_TIMEOUT_MS = 120_000;
 const SUBMISSION_ATTEMPTS = 3;
 const MAX_RETRY_AFTER_MS = 5_000;
 
@@ -61,7 +69,7 @@ export class GarconHttpError extends CliError {
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
         || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
-        || ((phase === 'catalog resolution' || phase === 'title update') && status === 400)
+        || ((phase === 'catalog resolution' || phase === 'title update' || phase === 'export') && status === 400)
         ? 2
         : 3,
     );
@@ -278,6 +286,43 @@ export class GarconClient {
     return snapshot;
   }
 
+  async getTranscriptExport(
+    request: {
+      readonly chatId: string;
+      readonly format: TranscriptExportFormat;
+      readonly exclusions: readonly TranscriptExportCategory[];
+    },
+    signal?: AbortSignal,
+  ): Promise<TranscriptExportResponse> {
+    const query = new URLSearchParams({ chatId: request.chatId, format: request.format });
+    for (const category of request.exclusions) query.append('exclude', category);
+    const value = await this.#request(
+      'export',
+      'GET',
+      `/api/v1/chats/export?${query.toString()}`,
+      undefined,
+      signal,
+      EXPORT_REQUEST_TIMEOUT_MS,
+    );
+    let response: TranscriptExportResponse;
+    try {
+      response = parseTranscriptExportResponse(value);
+    } catch (error) {
+      throw new CliError('export', 'server returned an invalid transcript export', 3, {
+        cause: error,
+      });
+    }
+    if (
+      response.chatId !== request.chatId
+      || response.format !== request.format
+      || response.exclusions.length !== request.exclusions.length
+      || response.exclusions.some((category, index) => category !== request.exclusions[index])
+    ) {
+      throw new CliError('export', 'server returned an uncorrelated transcript export', 3);
+    }
+    return response;
+  }
+
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse> {
     return this.#submitTurn('/api/v1/chats/start', 'chat-start', request, signal, isAmbiguousSubmissionError);
   }
@@ -355,7 +400,8 @@ export class GarconClient {
         && response.clientMessageId === submitted.clientMessageId
         && response.chatId === submitted.chatId
         && response.transcriptViewId === submitted.transcriptViewId
-        && response.type === submitted.type
+        && stableJsonStringify(response.presentation) === stableJsonStringify(submitted.presentation)
+        && response.format === submitted.format
       ),
       ambiguityDescription: `the add-row command for chat ${request.chatId}`,
     }, signal);

@@ -19,6 +19,14 @@ import {
   str,
 } from './chat-message-coercion.js';
 import { parseChatRowTitle } from './chat-row-contracts.js';
+import {
+  coerceDurableCliPresentation,
+  isCliPresentation,
+  isCliRowFormat,
+  type CliPresentation,
+  type CliPresentationStyle,
+  type CliRowFormat,
+} from './cli-presentation.js';
 
 export interface ChatImage {
   data: string;
@@ -43,14 +51,10 @@ export interface ChatMessageMetadata {
   turnId?: string;
 }
 
-export const USER_MESSAGE_PRESENTATION_STYLES = ['notice', 'error'] as const;
-export type UserMessagePresentationStyle = typeof USER_MESSAGE_PRESENTATION_STYLES[number];
-
-export interface UserMessagePresentation {
+export type UserMessagePresentation = CliPresentation & {
   readonly origin: 'cli';
-  readonly style: UserMessagePresentationStyle;
   readonly title?: string;
-}
+};
 
 export function parseUserMessagePresentation(value: unknown): UserMessagePresentation | undefined {
   if (value === undefined) return undefined;
@@ -59,16 +63,20 @@ export function parseUserMessagePresentation(value: unknown): UserMessagePresent
   }
   const body = value as Record<string, unknown>;
   for (const key of Object.keys(body)) {
-    if (key !== 'origin' && key !== 'style' && key !== 'title') {
+    if (key !== 'origin' && key !== 'style' && key !== 'customStyle' && key !== 'title') {
       throw new TypeError(`user message presentation contains unsupported field: ${key}`);
     }
   }
   if (body.origin !== 'cli') throw new TypeError('user message presentation origin must be cli');
-  if (body.style !== 'notice' && body.style !== 'error') {
-    throw new TypeError('user message presentation style must be notice or error');
+  const presentation = {
+    style: body.style,
+    ...(body.customStyle === undefined ? {} : { customStyle: body.customStyle }),
+  };
+  if (!isCliPresentation(presentation)) {
+    throw new TypeError('user message presentation is invalid');
   }
   const title = parseChatRowTitle(body.title);
-  return { origin: 'cli', style: body.style, ...(title === undefined ? {} : { title }) };
+  return { origin: 'cli', ...presentation, ...(title === undefined ? {} : { title }) };
 }
 
 // Canonical shape for a single todo/plan item. All provider-specific
@@ -656,12 +664,7 @@ export class ToolResultMessage {
 
 export class ErrorMessage {
   readonly type = 'error' as const;
-  constructor(
-    public timestamp: string,
-    public content: string,
-    public detail?: CliRowPresentationDetail,
-    public title?: string,
-  ) {}
+  constructor(public timestamp: string, public content: string) {}
 }
 
 export interface CarryoverMigrationQuarantineNoticeDetail {
@@ -670,13 +673,7 @@ export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly errorCode: string;
 }
 
-export interface CliRowPresentationDetail {
-  readonly type: 'cli-row';
-}
-
-export type TranscriptNoticeDetail =
-  | CarryoverMigrationQuarantineNoticeDetail
-  | CliRowPresentationDetail;
+export type TranscriptNoticeDetail = CarryoverMigrationQuarantineNoticeDetail;
 
 export class TranscriptNoticeMessage {
   readonly type = 'transcript-notice' as const;
@@ -684,6 +681,17 @@ export class TranscriptNoticeMessage {
     public timestamp: string,
     public content: string,
     public detail?: TranscriptNoticeDetail,
+    public title?: string,
+  ) {}
+}
+
+export class CliRowMessage {
+  readonly type = 'cli-row' as const;
+  constructor(
+    public timestamp: string,
+    public content: string,
+    public presentation: CliPresentation,
+    public format: CliRowFormat,
     public title?: string,
   ) {}
 }
@@ -804,6 +812,7 @@ export type ChatMessage =
   | ToolResultMessage
   | ErrorMessage
   | TranscriptNoticeMessage
+  | CliRowMessage
   | PermissionRequestMessage
   | PermissionResolvedMessage
   | PermissionCancelledMessage
@@ -1160,15 +1169,24 @@ export function isCarryoverMigrationQuarantineNoticeDetail(
     && detail.errorCode.length > 0;
 }
 
-export function isCliRowPresentationDetail(
-  value: unknown,
-): value is CliRowPresentationDetail {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return (value as Record<string, unknown>).type === 'cli-row';
+function isLegacyCliRowDetail(value: unknown): value is Record<string, unknown> {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>).type === 'cli-row';
 }
 
-function parseCliRowPresentationDetail(value: unknown): CliRowPresentationDetail | null {
-  return isCliRowPresentationDetail(value) ? { type: 'cli-row' } : null;
+function parseDurableCliRow(
+  data: Record<string, unknown>,
+  fallbackStyle: CliPresentationStyle = 'notice',
+): CliRowMessage {
+  return new CliRowMessage(
+    str(data.timestamp),
+    str(data.content),
+    coerceDurableCliPresentation(data.presentation, fallbackStyle),
+    isCliRowFormat(data.format) ? data.format : 'plain',
+    typeof data.title === 'string' && data.title ? data.title : undefined,
+  );
 }
 
 function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
@@ -1179,7 +1197,7 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
       errorCode: value.errorCode,
     };
   }
-  return parseCliRowPresentationDetail(value);
+  return null;
 }
 
 // Constructs a typed ChatMessage class instance from raw data.
@@ -1194,7 +1212,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       try {
         presentation = parseUserMessagePresentation(data.presentation);
       } catch {
-        return null;
+        presentation = undefined;
       }
       return new UserMessage(
         str(data.timestamp),
@@ -1211,23 +1229,14 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
 
     case 'tool-result':
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
-    case 'error': {
-      const detail = data.detail === undefined
-        ? undefined
-        : parseCliRowPresentationDetail(data.detail);
-      if (detail === null) return null;
-      return new ErrorMessage(
-        str(data.timestamp),
-        str(data.content),
-        detail,
-        typeof data.title === 'string' && data.title ? data.title : undefined,
-      );
-    }
+    case 'error':
+      return isLegacyCliRowDetail(data.detail)
+        ? parseDurableCliRow(data, 'error')
+        : new ErrorMessage(str(data.timestamp), str(data.content));
     case 'transcript-notice':
       {
-        const detail = data.detail === undefined
-          ? undefined
-          : parseTranscriptNoticeDetail(data.detail);
+        if (isLegacyCliRowDetail(data.detail)) return parseDurableCliRow(data, 'notice');
+        const detail = data.detail === undefined ? undefined : parseTranscriptNoticeDetail(data.detail);
         if (detail === null) return null;
         return new TranscriptNoticeMessage(
           str(data.timestamp),
@@ -1236,6 +1245,8 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
           typeof data.title === 'string' && data.title ? data.title : undefined,
         );
       }
+    case 'cli-row':
+      return parseDurableCliRow(data);
     case 'permission-request': {
       const permissionOccurrenceId = str(data.permissionOccurrenceId);
       const requestedToolData = asRecord(data.requestedTool);

@@ -27,7 +27,8 @@ describe('ChatRowService', () => {
         commandType: 'chat-row-add',
         status: 'appended',
         ordinal: 1,
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         timestamp: AT,
       });
       expect(retry).toMatchObject({ status: 'duplicate', ordinal: 1, timestamp: AT });
@@ -37,7 +38,8 @@ describe('ChatRowService', () => {
         detail: {
           type: 'cli-row',
           clientMessageId: 'message-1',
-          presentation: 'error',
+          presentation: { style: 'error' },
+          format: 'plain',
           title: 'Release validation',
         },
       }]);
@@ -46,13 +48,22 @@ describe('ChatRowService', () => {
         request({ title: 'Different title' }),
         new AbortController().signal,
       )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', retryable: false });
-      expect(ledger.appendChatRow({
+      await expect(service.add(
+        request({ presentation: { style: 'info' } }),
+        new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', retryable: false });
+      const info = ledger.appendChatRow({
         chatId: CHAT_ID,
         viewId: ledger.currentView(CHAT_ID).viewId,
         clientMessageId: 'message-2',
-        type: 'notice',
-        content: 'healthy notice',
-      }).inserted).toBe(true);
+        presentation: { style: 'info' },
+        format: 'markdown',
+        content: 'healthy information',
+      });
+      expect(info).toMatchObject({
+        inserted: true,
+        row: { detail: { presentation: { style: 'info' }, format: 'markdown' } },
+      });
     });
   });
 
@@ -182,7 +193,8 @@ function request(overrides = {}) {
     clientMessageId: 'message-1',
     chatId: CHAT_ID,
     transcriptViewId: 'view-1',
-    type: 'error',
+    presentation: { style: 'error' },
+    format: 'plain',
     title: 'Release validation',
     content: 'durable error',
     ...overrides,

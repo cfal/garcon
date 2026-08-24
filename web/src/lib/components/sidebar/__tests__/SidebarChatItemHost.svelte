@@ -11,6 +11,7 @@
 		isPinned?: boolean;
 		isArchived?: boolean;
 		isMobile?: boolean;
+		isMultiSelectMode?: boolean;
 		enableNativeDrag?: boolean;
 		displayOptions?: SidebarDisplayOptions;
 		onTagClick?: (tag: string) => void;
@@ -30,6 +31,7 @@
 		isPinned = false,
 		isArchived = false,
 		isMobile = false,
+		isMultiSelectMode = false,
 		enableNativeDrag = true,
 		displayOptions = {
 			groupByProject: false,
@@ -79,6 +81,7 @@
 	{isPinned}
 	{isArchived}
 	{isMobile}
+	{isMultiSelectMode}
 	{enableNativeDrag}
 	{displayOptions}
 	onChatSelect={() => {}}

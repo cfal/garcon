@@ -4,8 +4,18 @@ import type {
   AgentPermissionLifecycle,
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
-import type { ChatMessage, ErrorMessage, UserMessage } from '../../common/chat-types.js';
-import type { ChatRowType } from '../../common/chat-row-contracts.js';
+import type {
+  ChatMessage,
+  CliRowMessage,
+  ErrorMessage,
+  UserMessage,
+} from '../../common/chat-types.js';
+import {
+  isCliPresentation,
+  isCliRowFormat,
+  type CliPresentation,
+  type CliRowFormat,
+} from '../../common/cli-presentation.js';
 import type { JsonObject } from '../../common/json.js';
 
 declare const transcriptViewIdBrand: unique symbol;
@@ -51,7 +61,7 @@ export interface LedgerProviderRow extends LedgerRowBase {
 }
 
 export interface LedgerConversationalProviderRow extends LedgerProviderRow {
-  readonly message: Exclude<ChatMessage, ErrorMessage>;
+  readonly message: Exclude<ChatMessage, ErrorMessage | CliRowMessage>;
 }
 
 export interface LedgerNoticeRow extends LedgerRowBase {
@@ -63,7 +73,8 @@ export interface LedgerNoticeRow extends LedgerRowBase {
 export interface LedgerCliRowNoticeDetail extends JsonObject {
   readonly type: 'cli-row';
   readonly clientMessageId: string;
-  readonly presentation: ChatRowType;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
   readonly title: string | null;
 }
 
@@ -78,7 +89,8 @@ export function isLedgerCliRowNoticeDetail(
   return value.type === 'cli-row'
     && typeof value.clientMessageId === 'string'
     && value.clientMessageId.length > 0
-    && (value.presentation === 'notice' || value.presentation === 'error')
+    && isCliPresentation(value.presentation)
+    && isCliRowFormat(value.format)
     && (
       value.title === null
       || (typeof value.title === 'string' && value.title.length > 0)
@@ -136,7 +148,8 @@ export type LedgerRow =
 export type LedgerConversationRow = LedgerUserInputRow | LedgerConversationalProviderRow;
 
 export function isPresentationOnlyProviderRow(row: LedgerRow): boolean {
-  return row.kind === 'provider-row' && row.message.type === 'error';
+  return row.kind === 'provider-row'
+    && (row.message.type === 'error' || row.message.type === 'cli-row');
 }
 
 export function isConversationalLedgerRow(row: LedgerRow): row is LedgerConversationRow {

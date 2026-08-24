@@ -178,19 +178,20 @@ automatically, and `cli` records creation through `garcon-cli` and nothing else.
 an explicit title on either a new or resumed chat.
 
 Conversational start, resume, and `send-async` messages may add a visual CLI header with
-`--message-title <title>` and `--message-style notice|error`. A title alone uses `notice`; a
-style alone displays `CLI notice` or `CLI error`. These values distinguish the ordinary user
-message in Garcon and are not included in the prompt sent to the agent. `--title` remains the
-chat title. Ordinary restart, replay, shares, and frozen forks preserve this presentation;
-explicit native-history Reload and provider-native fork segments may drop it.
+`--message-title <title>` and `--message-style info|notice|error|custom`. A title alone uses
+`notice`; a preset style alone displays its corresponding CLI label. Custom presentation uses
+`--color <light[,dark]>`; one six-digit hex value applies to both themes. These values distinguish the
+ordinary user message in Garcon and are not included in the prompt sent to the agent. `--title`
+remains the chat title. Ordinary restart, replay, shares, and frozen forks preserve this
+presentation; explicit native-history Reload and provider-native fork segments may drop it.
 
 ```bash
 garcon-cli --workspace default --resume 1785337200123456 \
-  --message-title "Deployment constraint" --message-style error \
+  --message-title "Deployment constraint" --color 0ea5e9,7dd3fc \
   "Do not deploy until the migration checksum matches."
 ```
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `status`, or `wait`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `add-row`, `status`, `wait`, or `export`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Every accepted start or resume prints an exact handle before waiting:
 
@@ -215,9 +216,25 @@ garcon-cli --workspace default status 1785337200123456
 garcon-cli --workspace default status 1785337200123456 --messages 20 --json
 ```
 
-`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable interface; plain text redacts image bodies and truncates each message at 4,000 characters.
+`status` returns the current processing phase, execution control, pending inputs, and the latest 10 normalized transcript messages by default. `--messages` accepts `0` through `200`; zero skips transcript loading for a lightweight execution-state check. A temporarily unavailable transcript is reported inside an otherwise successful snapshot. JSON is the stable machine-readable snapshot interface; plain text redacts image bodies and truncates each message at 4,000 characters. It is intentionally bounded operational state, not transcript export.
 
 Status is a one-shot, non-transactional chat observation. `status: idle` does not prove that a particular turn settled or that a just-finished message batch is already visible. Use `wait` with the exact accepted chat and turn IDs when completion identity matters, especially before retrying write-capable delegated work.
+
+Export the complete transcript at one pinned ledger watermark as Markdown or XML:
+
+```bash
+garcon-cli --workspace default export 1785337200123456
+garcon-cli --workspace default export 1785337200123456 \
+  --format xml --exclude tools --exclude reasoning --output transcript.xml
+```
+
+Without `--output`, stdout contains only the document. A file output is written privately through a sibling temporary file and published atomically; an existing path is refused unless `--force` is supplied. Markdown is intended for human and agent reading. Its entry headings contain only the durable ordinal and role or type; CLI-authored presentation labels remain on user entries because they distinguish operator notices and errors from ordinary prompts. Verbatim Markdown content may resemble an entry heading, so use XML when authoritative structure matters. XML uses explicit `<user>` and `<assistant>` elements plus typed elements for reasoning, tools, permissions, notices, handoffs, and run lifecycle rows; tags and types make repeated category and timestamp attributes unnecessary.
+
+`--exclude` is repeatable and comma-separated. Its canonical categories are `tool-calls`, `tool-results`, `reasoning`, `permissions`, `diagnostics`, and `handoffs`; `tools` is shorthand for both tool categories. User messages, assistant messages, compaction summaries, and carryover-quarantine disclosures are never excludable. The typed response and file-output confirmation report canonical exclusions and omitted counts. Markdown includes one compact summary when rows were omitted; XML includes one compact `<omitted>` element with positive counts only when rows were omitted. Both artifacts preserve original ordinals, so filtered gaps remain visible. Exclusions apply to top-level entries: excluding tool calls does not remove a requested tool embedded in a retained permission entry.
+
+`diagnostics` includes presentation-only `add-row` notices and errors, provider errors and notices, and run lifecycle rows.
+
+Export reads Garcon's authoritative SQLite ledger through the running authenticated server. Session-native references and provider-private metadata never enter the export fold. Image bodies and structured data URLs are omitted with visible markers, while authored user and assistant text is retained. XML-illegal control characters are emitted as literal `\uXXXX` text in both formats. Sharing remains separate: Share publishes a persisted public snapshot, while export reads the current private ledger without creating or changing a share.
 
 ### One-Shot Chat Control From The CLI
 
@@ -253,6 +270,18 @@ When the chat state changes between the run and steer checks, `send-async` alter
 ```bash
 printf '%s' "Apply the patch described in /tmp/review.md" | \
   garcon-cli --workspace default send-async 1785337200123456 --allow-steer -
+```
+
+`add-row` appends a durable presentation-only row without submitting agent work. Its
+`--type info|notice|error` preset or `--color <light[,dark]>` custom style and optional `--title`
+are visible in Garcon but excluded from model context and transcript search. Pass `--markdown`
+to render the row body as Markdown. One custom color applies to both themes; a second selects the
+dark-theme accent:
+
+```bash
+garcon-cli --workspace default add-row 1785337200123456 \
+  --color 7c3aed,c4b5fd --markdown --title "Consultation status" \
+  "**The architecture review is complete.**"
 ```
 
 `stop` interrupts the active turn through the same REST command the SPA Stop button uses, and treats an already-idle chat as success. If queued messages exist, stopping pauses the queue so they do not start after the interruption; resume the queue in Garcon before sending a new direct turn:
