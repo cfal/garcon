@@ -22,12 +22,14 @@
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
 	import {
-		composerEditorSelectionFromTextarea,
-		restoreComposerEditorSelection,
-		type ComposerEditorSelection,
-	} from '$lib/chat/composer/composer-editor-selection.js';
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+		type PromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
-	import ComposerEditorDialog from './ComposerEditorDialog.svelte';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
+	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
@@ -66,6 +68,8 @@
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
+	import { createClientChatId } from '$shared/client-chat-id';
+	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -74,7 +78,7 @@
 
 	interface Props {
 		prefill?: string;
-		onStartChat: (config: NewChatConfig) => void;
+		onStartChat: (config: NewChatConfig, chatId: ChatId) => void;
 		onCancel?: () => void;
 	}
 
@@ -124,6 +128,7 @@
 
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
+	let prospectiveChatId = $state<ChatId | null>(null);
 	const allKnownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
 	);
@@ -166,6 +171,7 @@
 	function reseed(): void {
 		snippetExpansion.cancel();
 		promptRefinement.abort();
+		prospectiveChatId = null;
 		composerEditor.reset();
 		snippetInteractionGeneration += 1;
 		snippetPalette.reset();
@@ -319,7 +325,7 @@
 	function openExpandedEditor(): void {
 		if (promptTransformPending || !textareaRef) return;
 		snippetPalette.dismiss();
-		const selection = composerEditorSelectionFromTextarea(textareaRef);
+		const selection = promptEditorSelectionFromTextarea(textareaRef);
 		textareaRef.focus({ preventScroll: true });
 		composerEditor.show(selection);
 	}
@@ -329,7 +335,7 @@
 		composerEditor.close();
 		await tick();
 		if (!textareaRef) return;
-		restoreComposerEditorSelection(textareaRef, selection);
+		restorePromptEditorSelection(textareaRef, selection);
 		autoResizeTextarea();
 		textareaRef.focus({ preventScroll: true });
 	}
@@ -339,7 +345,7 @@
 		form.firstMessage = text;
 	}
 
-	function handleExpandedSelectionChange(selection: ComposerEditorSelection): void {
+	function handleExpandedSelectionChange(selection: PromptEditorSelection): void {
 		composerEditor.updateSelection(selection);
 	}
 
@@ -348,9 +354,16 @@
 		if (snippetExpansion.pending) textareaRef?.focus();
 	}
 
+	function ensureProspectiveChatId(): ChatId {
+		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
+		return prospectiveChatId;
+	}
+
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
-		if (projectPath) return { type: 'project' as const, projectPath };
+		if (projectPath) {
+			return { type: 'new-chat' as const, chatId: ensureProspectiveChatId(), projectPath };
+		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
 		return null;
 	}
@@ -467,7 +480,7 @@
 			return;
 		}
 		const config = form.buildConfig();
-		if (config) onStartChat(config);
+		if (config) onStartChat(config, ensureProspectiveChatId());
 	}
 
 	function handleKeyDown(e: KeyboardEvent): void {
@@ -495,6 +508,7 @@
 	}
 
 	function cancelForm(): void {
+		snippetExpansion.cancel();
 		promptRefinement.abort();
 		composerEditor.close();
 		onCancel?.();
@@ -852,12 +866,18 @@
 {/if}
 
 {#if composerEditor.open}
-	<ComposerEditorDialog
+	{#snippet expandedEditorHeaderStatus()}
+		<ComposerAttachmentBadge count={form.attachedImages.length} />
+	{/snippet}
+	<PromptEditorDialog
+		title={m.chat_composer_expanded_editor_title()}
+		editorLabel={m.chat_composer_expanded_editor_label()}
 		text={form.firstMessage}
 		selection={composerEditor.selection}
-		attachmentCount={form.attachedImages.length}
 		focusRequestId={composerEditor.focusRequestId}
 		readOnly={promptTransformPending}
+		surfaceId={CHAT_SURFACE_ID}
+		headerStatus={expandedEditorHeaderStatus}
 		canRefinePrompt={promptRefinement.canStart}
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}

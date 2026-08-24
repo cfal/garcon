@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import ComposerEditorDialog from './ComposerEditorDialog.svelte';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import { getChatSessions, getComposerState, getLocalSettings } from '$lib/context';
+	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
+	import * as m from '$lib/paraglide/messages.js';
+	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
 	import { PromptComposerEditorController } from './prompt-composer-editor-controller.js';
 	import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
@@ -90,12 +93,18 @@
 
 {#if ui.composerEditorOpen && ui.composerEditorChatId}
 	{@const editorChatId = ui.composerEditorChatId}
-	<ComposerEditorDialog
+	{#snippet expandedEditorHeaderStatus()}
+		<ComposerAttachmentBadge count={composer.images.length} />
+	{/snippet}
+	<PromptEditorDialog
+		title={m.chat_composer_expanded_editor_title()}
+		editorLabel={m.chat_composer_expanded_editor_label()}
 		text={composer.inputText}
 		selection={ui.composerEditorSelection}
-		attachmentCount={composer.images.length}
 		focusRequestId={ui.composerEditorFocusRequestId}
 		readOnly={promptTransformPending}
+		surfaceId={CHAT_SURFACE_ID}
+		headerStatus={expandedEditorHeaderStatus}
 		{canRefinePrompt}
 		{isPromptRefinementPending}
 		onTextChange={(text) => controller.updateText(editorChatId, text)}

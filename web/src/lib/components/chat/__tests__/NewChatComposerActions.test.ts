@@ -7,9 +7,9 @@ import * as refinementApi from '$lib/api/prompt-refinement';
 import * as settingsApi from '$lib/api/settings';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import {
-	emitLastComposerEditorTextChange,
-	resetComposerEditorStub,
-} from './ComposerEditorStub.svelte';
+	emitLastPromptEditorTextChange,
+	resetPromptEditorStub,
+} from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
@@ -33,8 +33,9 @@ vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
 	return { ...actual, refinePrompt: vi.fn() };
 });
 
-vi.mock('../ComposerEditor.svelte', async () => ({
-	default: (await import('./ComposerEditorStub.svelte')).default,
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+		.default,
 }));
 
 interface DeferredRefinement {
@@ -150,7 +151,7 @@ describe('NewChatForm composer actions', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
-		resetComposerEditorStub();
+		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
@@ -213,7 +214,7 @@ describe('NewChatForm composer actions', () => {
 
 		await fireEvent.click(
 			within(screen.getByRole('dialog')).getByRole('button', {
-				name: 'Close expanded composer',
+				name: 'Close expanded editor',
 			}),
 		);
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -291,10 +292,10 @@ describe('NewChatForm composer actions', () => {
 		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
 		expect(editor.readOnly).toBe(true);
 		expect(messageInput.readOnly).toBe(true);
-		emitLastComposerEditorTextChange('Synthetic expanded mutation');
+		emitLastPromptEditorTextChange('Synthetic expanded mutation');
 		expect(messageInput.value).toBe('Expanded source');
 
-		await fireEvent.click(within(dialog).getByRole('button', { name: 'Close expanded composer' }));
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Close expanded editor' }));
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		expect((options?.signal as AbortSignal).aborted).toBe(false);
 		expect(screen.getByRole('button', { name: 'Cancel prompt refinement' })).toBeTruthy();

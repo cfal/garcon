@@ -9,6 +9,9 @@ import { SnippetStore } from '../store.ts';
 
 const createdDirs = [];
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+const REGISTERED_CHAT_ID = '1787471053739199';
+const PROSPECTIVE_CHAT_ID = '1787471053739200';
+const MISSING_CHAT_ID = '1787471053739201';
 
 async function serviceFixture() {
   const dir = path.join(os.tmpdir(), `garcon-snippet-service-${randomUUID()}`);
@@ -17,11 +20,13 @@ async function serviceFixture() {
   const store = new SnippetStore(dir);
   await store.init();
   const events = [];
+  const chatLookups = [];
   const service = new SnippetService({
     store,
     chats: {
       getChat(id) {
-        return id === 'chat-a' ? { projectPath: '/registered/repo' } : null;
+        chatLookups.push(id);
+        return id === REGISTERED_CHAT_ID ? { projectPath: '/registered/repo' } : null;
       },
     },
     projectPaths: {
@@ -33,7 +38,7 @@ async function serviceFixture() {
     now: () => new Date('2026-01-01T00:00:00.000Z'),
   });
   service.onInvalidated((reason) => events.push(reason));
-  return { service, events };
+  return { service, events, chatLookups };
 }
 
 describe('snippet service', () => {
@@ -72,8 +77,8 @@ describe('snippet service', () => {
     expect(events).toEqual(['created', 'updated', 'removed']);
   });
 
-  it('expands chat and project contexts without emitting invalidations', async () => {
-    const { service, events } = await serviceFixture();
+  it('expands registered and prospective chat contexts without emitting invalidations', async () => {
+    const { service, events, chatLookups } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
       snippet: {
@@ -87,7 +92,11 @@ describe('snippet service', () => {
       await service.expand({
         shortName: 'review',
         arguments: { type: 'value', value: 'contracts' },
-        context: { type: 'chat', chatId: 'chat-a' },
+        context: {
+          type: 'chat',
+          chatId: REGISTERED_CHAT_ID,
+          projectPath: '/ignored',
+        },
       }),
     ).toMatchObject({
       snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
@@ -98,12 +107,17 @@ describe('snippet service', () => {
       await service.expand({
         shortName: 'review',
         arguments: { type: 'value', value: 'routes' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).toMatchObject({
       contextProjectPath: '/draft/repo',
       expandedText: 'Review routes in /canonical/draft/repo',
     });
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
     expect(events).toEqual([]);
   });
 
@@ -122,7 +136,11 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'review',
         arguments: { type: 'default' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).resolves.toMatchObject({
       expandedText: '{{project_path}} changes / {{project_path}} changes / /canonical/draft/repo',
@@ -131,14 +149,22 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'review',
         arguments: { type: 'value', value: '' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).resolves.toMatchObject({ expandedText: ' /  / /canonical/draft/repo' });
     await expect(
       service.expand({
         shortName: 'review',
         arguments: { type: 'value', value: '  ' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).resolves.toMatchObject({
       expandedText: '   /    / /canonical/draft/repo',
@@ -170,7 +196,11 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'large',
         arguments: { type: 'default' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).rejects.toMatchObject({
       code: 'SNIPPET_EXPANSION_TOO_LONG',
@@ -178,8 +208,8 @@ describe('snippet service', () => {
     });
   });
 
-  it('expands chat IDs only when an existing chat supplies the context', async () => {
-    const { service } = await serviceFixture();
+  it('expands the supplied ID for both registered and prospective chats', async () => {
+    const { service, chatLookups } = await serviceFixture();
     await service.create({
       expectedRevision: 0,
       snippet: {
@@ -193,18 +223,25 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'handoff',
         arguments: { type: 'value', value: 'the review' },
-        context: { type: 'chat', chatId: 'chat-a' },
+        context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
       }),
     ).resolves.toMatchObject({
-      expandedText: 'Reply to chat-a about the review',
+      expandedText: `Reply to ${REGISTERED_CHAT_ID} about the review`,
     });
     await expect(
       service.expand({
         shortName: 'handoff',
         arguments: { type: 'value', value: 'the review' },
-        context: { type: 'project', projectPath: '/draft/repo' },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
-    ).rejects.toMatchObject({ code: 'SNIPPET_CHAT_ID_REQUIRED', status: 422 });
+    ).resolves.toMatchObject({
+      expandedText: `Reply to ${PROSPECTIVE_CHAT_ID} about the review`,
+    });
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
   });
 
   it('rejects missing chats and unknown snippets', async () => {
@@ -213,7 +250,7 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'missing',
         arguments: { type: 'value', value: '' },
-        context: { type: 'chat', chatId: 'chat-a' },
+        context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_NOT_FOUND', status: 404 });
     await service.create({
@@ -228,7 +265,7 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'review',
         arguments: { type: 'value', value: '' },
-        context: { type: 'chat', chatId: 'missing' },
+        context: { type: 'chat', chatId: MISSING_CHAT_ID },
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_CHAT_NOT_FOUND', status: 404 });
   });

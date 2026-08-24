@@ -3,6 +3,7 @@ import {
   access,
   appendFile,
   readFile,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -44,6 +45,8 @@ import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 interface PersistedClaudeChatRecord {
   agentSessionId: string | null;
   nativeSession: {
+    ownerId: string;
+    schemaVersion: number;
     value: {
       path: string;
       agentSessionId: string;
@@ -54,11 +57,18 @@ interface PersistedClaudeChatRecord {
 interface PersistedClaudeChat extends PersistedClaudeChatRecord {
   agentSessionId: string;
   nativeSession: {
+    ownerId: string;
+    schemaVersion: number;
     value: {
       path: string;
       agentSessionId: string;
     };
   };
+}
+
+interface ClaudeGraph {
+  sessionId: string;
+  uuids: Set<string>;
 }
 
 describe('scripted Claude fork lifecycle matrix', () => {
@@ -415,6 +425,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
         sourceReply,
         childReply,
       ]));
+      await expectIndependentClaudeGraphs(fixture.dirs.workspace, [
+        sourceChatId,
+        forkChatId,
+        reforkChatId,
+      ]);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
@@ -828,4 +843,42 @@ async function readClaudeEntries(path: string): Promise<Record<string, unknown>[
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function expectIndependentClaudeGraphs(
+  workspace: string,
+  chatIds: readonly string[],
+): Promise<void> {
+  const graphs = await Promise.all(chatIds.map((chatId) => readClaudeGraph(workspace, chatId)));
+  for (let left = 0; left < graphs.length; left += 1) {
+    for (let right = left + 1; right < graphs.length; right += 1) {
+      const leftGraph = graphs[left]!;
+      const rightGraph = graphs[right]!;
+      expect(leftGraph.sessionId).not.toBe(rightGraph.sessionId);
+      expect([...leftGraph.uuids].some((uuid) => rightGraph.uuids.has(uuid))).toBe(false);
+    }
+  }
+}
+
+async function readClaudeGraph(workspace: string, chatId: string): Promise<ClaudeGraph> {
+  const chat = await readClaudeChat(workspace, chatId);
+  expect(chat.nativeSession.ownerId).toBe('claude');
+  expect(chat.nativeSession.schemaVersion).toBe(1);
+  expect(chat.nativeSession.value.agentSessionId).toBe(chat.agentSessionId);
+  expect((await stat(chat.nativeSession.value.path)).mode & 0o777).toBe(0o600);
+
+  const entries = await readClaudeEntries(chat.nativeSession.value.path);
+  const uuidEntries = entries.filter(
+    (entry): entry is Record<string, unknown> & { uuid: string } =>
+      typeof entry.uuid === 'string',
+  );
+  const uuids = new Set(uuidEntries.map((entry) => entry.uuid));
+  expect(uuids.size).toBe(uuidEntries.length);
+  expect(uuidEntries.every((entry) =>
+    typeof entry.sessionId !== 'string' || entry.sessionId === chat.agentSessionId)).toBe(true);
+  expect(uuidEntries.every((entry) =>
+    entry.parentUuid === null
+    || entry.parentUuid === undefined
+    || (typeof entry.parentUuid === 'string' && uuids.has(entry.parentUuid)))).toBe(true);
+  return { sessionId: chat.agentSessionId, uuids };
 }

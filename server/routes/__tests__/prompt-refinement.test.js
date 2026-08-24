@@ -46,7 +46,7 @@ describe('prompt refinement routes', () => {
     const handler = routes['/api/v1/prompts/refine'].POST;
     expect(isNoAuthHandler(handler)).toBe(false);
 
-    const result = await post(routes, { draft: 'rough request' });
+    const result = await post(routes, { draft: 'rough request', target: 'prompt' });
     expect(result.response.status).toBe(200);
     expect(result.body).toEqual({ success: true, refinedPrompt: 'Refined request' });
     expect(deps.agents.runSingleQuery).toHaveBeenCalledTimes(1);
@@ -55,7 +55,7 @@ describe('prompt refinement routes', () => {
   it('returns structured validation and provider errors without raw details', async () => {
     const deps = dependencies();
     const routes = createPromptRefinementRoutes(deps);
-    const invalid = await post(routes, { draft: ' ' });
+    const invalid = await post(routes, { draft: ' ', target: 'prompt' });
     expect(invalid.response.status).toBe(400);
     expect(invalid.body).toMatchObject({
       success: false,
@@ -65,6 +65,7 @@ describe('prompt refinement routes', () => {
 
     const oversized = await post(routes, {
       draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
+      target: 'prompt',
     });
     expect(oversized.response.status).toBe(413);
     expect(oversized.body).toMatchObject({
@@ -74,7 +75,7 @@ describe('prompt refinement routes', () => {
     });
 
     deps.agents.runSingleQuery.mockRejectedValueOnce(new Error('private provider detail'));
-    const failed = await post(routes, { draft: 'rough request' });
+    const failed = await post(routes, { draft: 'rough request', target: 'prompt' });
     expect(failed.response.status).toBe(502);
     expect(failed.body).toMatchObject({
       success: false,

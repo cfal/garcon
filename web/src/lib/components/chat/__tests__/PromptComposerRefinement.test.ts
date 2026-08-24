@@ -7,17 +7,18 @@ import { ApiError } from '$lib/api/client';
 import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import {
-	emitLastComposerEditorTextChange,
-	resetComposerEditorStub,
-} from './ComposerEditorStub.svelte';
+	emitLastPromptEditorTextChange,
+	resetPromptEditorStub,
+} from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
 vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/prompt-refinement')>();
 	return { ...actual, refinePrompt: vi.fn() };
 });
 
-vi.mock('../ComposerEditor.svelte', async () => ({
-	default: (await import('./ComposerEditorStub.svelte')).default,
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+		.default,
 }));
 
 interface DeferredRefinement {
@@ -49,7 +50,7 @@ async function settleExpandedDialogOpen(): Promise<void> {
 describe('PromptComposer prompt refinement', () => {
 	afterEach(() => {
 		cleanup();
-		resetComposerEditorStub();
+		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		localStorage.clear();
 	});
@@ -88,6 +89,7 @@ describe('PromptComposer prompt refinement', () => {
 		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
 		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0][0]).toEqual({
 			draft: 'Keep this draft',
+			target: 'prompt',
 		});
 		expect(textarea.readOnly).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');
@@ -212,22 +214,28 @@ describe('PromptComposer prompt refinement', () => {
 	it('locks the expanded editor, keeps Close independent, and applies after closing', async () => {
 		const pending = deferredRefinement();
 		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
-		render(PromptComposerTestHost, { selectedChatId: 'chat-refine-expanded-close' });
+		const { container } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-refine-expanded-close',
+		});
 		const textarea = await typeDraft('Expanded source');
+		await fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+			target: { files: [new File(['image'], 'kept.png', { type: 'image/png' })] },
+		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
 		const editor = (await screen.findByRole('textbox', {
 			name: 'Expanded composer text',
 		})) as HTMLTextAreaElement;
 		await settleExpandedDialogOpen();
 		const dialog = screen.getByRole('dialog');
+		expect(within(dialog).getByTitle('Attached files: 1')).toBeTruthy();
 		const refine = within(dialog).getByRole('button', { name: 'Refine prompt' });
-		const close = within(dialog).getByRole('button', { name: 'Close expanded composer' });
+		const close = within(dialog).getByRole('button', { name: 'Close expanded editor' });
 		expect(refine.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
 		await fireEvent.click(refine);
 		expect(editor.readOnly).toBe(true);
 		expect(textarea.readOnly).toBe(true);
-		emitLastComposerEditorTextChange('Synthetic expanded mutation');
+		emitLastPromptEditorTextChange('Synthetic expanded mutation');
 		expect(textarea.value).toBe('Expanded source');
 		expect((close as HTMLButtonElement).disabled).toBe(false);
 		await fireEvent.click(close);
@@ -256,7 +264,7 @@ describe('PromptComposer prompt refinement', () => {
 		await settleExpandedDialogOpen();
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.click(within(dialog).getByRole('button', { name: 'Refine prompt' }));
-		await fireEvent.click(within(dialog).getByRole('button', { name: 'Close expanded composer' }));
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Close expanded editor' }));
 
 		await waitFor(() => expect(document.activeElement).toBe(textarea));
 		expect(screen.queryByRole('dialog')).toBeNull();

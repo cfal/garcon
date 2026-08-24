@@ -26,6 +26,8 @@ export function promptRefinementErrorMessage(error: unknown): string {
 				return m.prompt_refinement_error_empty_response();
 			case 'PROMPT_REFINEMENT_OUTPUT_TOO_LONG':
 				return m.prompt_refinement_error_output_too_large();
+			case 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED':
+				return m.prompt_refinement_error_token_signature_changed();
 			case 'PROMPT_REFINEMENT_TIMEOUT':
 				return m.prompt_refinement_error_timeout();
 			case 'RATE_LIMITED':
@@ -33,8 +35,8 @@ export function promptRefinementErrorMessage(error: unknown): string {
 		}
 	}
 	if (
-		error instanceof DOMException
-		&& (error.name === 'AbortError' || error.name === 'TimeoutError')
+		error instanceof DOMException &&
+		(error.name === 'AbortError' || error.name === 'TimeoutError')
 	) {
 		return m.prompt_refinement_error_timeout();
 	}

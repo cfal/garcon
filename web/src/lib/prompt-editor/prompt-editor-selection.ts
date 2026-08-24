@@ -1,18 +1,18 @@
-export interface ComposerEditorSelection {
+export interface PromptEditorSelection {
 	anchor: number;
 	head: number;
 }
 
-type ComposerSelectionReader = Pick<
+type TextareaSelectionReader = Pick<
 	HTMLTextAreaElement,
 	'selectionStart' | 'selectionEnd' | 'selectionDirection'
 >;
 
-type ComposerSelectionWriter = Pick<HTMLTextAreaElement, 'value' | 'setSelectionRange'>;
+type TextareaSelectionWriter = Pick<HTMLTextAreaElement, 'value' | 'setSelectionRange'>;
 
-export function composerEditorSelectionFromTextarea(
-	textarea: ComposerSelectionReader,
-): ComposerEditorSelection {
+export function promptEditorSelectionFromTextarea(
+	textarea: TextareaSelectionReader,
+): PromptEditorSelection {
 	const start = textarea.selectionStart;
 	const end = textarea.selectionEnd;
 	return textarea.selectionDirection === 'backward'
@@ -20,21 +20,21 @@ export function composerEditorSelectionFromTextarea(
 		: { anchor: start, head: end };
 }
 
-export function clampComposerEditorSelection(
-	selection: ComposerEditorSelection,
+export function clampPromptEditorSelection(
+	selection: PromptEditorSelection,
 	documentLength: number,
-): ComposerEditorSelection {
+): PromptEditorSelection {
 	return {
 		anchor: Math.max(0, Math.min(selection.anchor, documentLength)),
 		head: Math.max(0, Math.min(selection.head, documentLength)),
 	};
 }
 
-export function restoreComposerEditorSelection(
-	textarea: ComposerSelectionWriter,
-	selection: ComposerEditorSelection,
+export function restorePromptEditorSelection(
+	textarea: TextareaSelectionWriter,
+	selection: PromptEditorSelection,
 ): void {
-	const clamped = clampComposerEditorSelection(selection, textarea.value.length);
+	const clamped = clampPromptEditorSelection(selection, textarea.value.length);
 	textarea.setSelectionRange(
 		Math.min(clamped.anchor, clamped.head),
 		Math.max(clamped.anchor, clamped.head),

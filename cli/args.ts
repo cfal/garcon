@@ -29,6 +29,15 @@ import {
   CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
 } from '@garcon/common/chat-snapshot';
 import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
+import {
+  TRANSCRIPT_EXPORT_CATEGORIES,
+  TRANSCRIPT_EXPORT_CATEGORY_ALIASES,
+  canonicalTranscriptExportCategories,
+  isTranscriptExportCategory,
+  isTranscriptExportFormat,
+  type TranscriptExportCategory,
+  type TranscriptExportFormat,
+} from '@garcon/common/chat-export-contracts';
 import { argumentError } from './errors.js';
 
 export const CLI_HELP = `Usage:
@@ -40,6 +49,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
+  garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
@@ -50,6 +60,8 @@ Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
 add-row appends one durable presentation-only CLI row to chat history.
 It never sends, queues, or exposes the row to the agent.
+export writes the complete untruncated transcript as Markdown or XML. Exclusions
+apply to top-level entries; tool calls embedded in permission entries remain.
 Message presentation is not sent as prompt text. A message title without a style
 uses notice; a style without a title displays its CLI label. --color selects custom styling.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
@@ -85,12 +97,17 @@ Options:
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
   --markdown                   Render add-row content as Markdown
+  --format <markdown|xml>      Transcript export format (default: markdown)
+  --exclude <category>         Export exclusion; repeatable or comma-separated:
+                               ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}; tools excludes calls and results
+  --output <path>              Write export atomically to a file instead of stdout
+  --force                      Replace an existing export output file
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, or wait.
+Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, or export.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -195,6 +212,15 @@ export interface StatusCliCommand extends CliConnectionOptions {
   json: boolean;
 }
 
+export interface ExportCliCommand extends CliConnectionOptions {
+  readonly kind: 'export';
+  readonly chatId: ChatId;
+  readonly format: TranscriptExportFormat;
+  readonly exclusions: readonly TranscriptExportCategory[];
+  readonly outputPath?: string;
+  readonly force: boolean;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
@@ -204,6 +230,7 @@ export type ParsedCliCommand =
   | AddRowCliCommand
   | StatusCliCommand
   | WaitCliCommand
+  | ExportCliCommand
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -225,6 +252,8 @@ const SINGLE_STRING_OPTIONS = [
   'turn',
   'messages',
   'type',
+  'format',
+  'output',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -360,6 +389,10 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['json', '--json'],
   ['turn', '--turn'],
   ['messages', '--messages'],
+  ['format', '--format'],
+  ['exclude', '--exclude'],
+  ['output', '--output'],
+  ['force', '--force'],
 ] as const;
 
 function rejectControlForbiddenOptions(
@@ -502,7 +535,7 @@ function parseAddRow(
   };
 }
 
-type ObservationCommandKind = 'status' | 'wait';
+type ObservationCommandKind = 'status' | 'wait' | 'export';
 
 const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
@@ -538,6 +571,7 @@ function parseWait(
   connection: CliConnectionOptions,
 ): WaitCliCommand {
   rejectObservationMutationOptions(values, 'wait');
+  rejectExportOptions(values, 'wait');
   if (values.messages !== undefined) {
     throw argumentError('--messages cannot be used with wait');
   }
@@ -591,6 +625,7 @@ function parseStatus(
   connection: CliConnectionOptions,
 ): StatusCliCommand {
   rejectObservationMutationOptions(values, 'status');
+  rejectExportOptions(values, 'status');
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
   if (parsed.positionals.length !== 2) {
     throw argumentError('status requires exactly one chat ID');
@@ -608,6 +643,82 @@ function parseStatus(
     messageLimit: parseStatusMessageLimit(values.messages),
     json: values.json === true,
   };
+}
+
+function rejectExportOptions(
+  values: Record<string, ParsedOptionValue>,
+  command: Exclude<ObservationCommandKind, 'export'>,
+): void {
+  for (const [key, flag] of [
+    ['format', '--format'],
+    ['exclude', '--exclude'],
+    ['output', '--output'],
+    ['force', '--force'],
+  ] as const) {
+    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
+  }
+}
+
+function parseExport(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ExportCliCommand {
+  rejectObservationMutationOptions(values, 'export');
+  if (values.json !== undefined) throw argumentError('--json cannot be used with export');
+  if (values.turn !== undefined) throw argumentError('--turn cannot be used with export');
+  if (values.messages !== undefined) throw argumentError('--messages cannot be used with export');
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('export requires exactly one chat ID');
+  }
+  let chatId: ChatId;
+  try {
+    chatId = parseChatId(parsed.positionals[1]!);
+  } catch (error) {
+    throw argumentError('export requires a valid Garcon chat ID', { cause: error });
+  }
+  const rawFormat = values.format ?? 'markdown';
+  if (!isTranscriptExportFormat(rawFormat)) {
+    throw argumentError('--format must be markdown or xml');
+  }
+  const outputPath = nonEmptyOption(values.output as string | undefined, '--output');
+  if (outputPath === '-') {
+    throw argumentError('omit --output to write the transcript export to stdout');
+  }
+  const force = values.force === true;
+  if (force && outputPath === undefined) throw argumentError('--force requires --output');
+  return {
+    kind: 'export',
+    ...connection,
+    chatId,
+    format: rawFormat,
+    exclusions: parseExportExclusions(values.exclude),
+    ...(outputPath === undefined ? {} : { outputPath }),
+    force,
+  };
+}
+
+function parseExportExclusions(value: ParsedOptionValue): TranscriptExportCategory[] {
+  if (value === undefined) return [];
+  const selected: TranscriptExportCategory[] = [];
+  for (const option of value as string[]) {
+    for (const rawToken of option.split(',')) {
+      const token = rawToken.trim();
+      if (token.length === 0) throw argumentError('--exclude must not contain an empty category');
+      if (Object.hasOwn(TRANSCRIPT_EXPORT_CATEGORY_ALIASES, token)) {
+        selected.push(...TRANSCRIPT_EXPORT_CATEGORY_ALIASES[
+          token as keyof typeof TRANSCRIPT_EXPORT_CATEGORY_ALIASES
+        ]);
+      } else if (isTranscriptExportCategory(token)) {
+        selected.push(token);
+      } else {
+        throw argumentError(
+          `--exclude must be one of: ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}, tools`,
+        );
+      }
+    }
+  }
+  return canonicalTranscriptExportCategories(selected);
 }
 
 export function parseCliArgs(
@@ -641,6 +752,10 @@ export function parseCliArgs(
         turn: { type: 'string' },
         messages: { type: 'string' },
         type: { type: 'string' },
+        format: { type: 'string' },
+        exclude: { type: 'string', multiple: true },
+        output: { type: 'string' },
+        force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         markdown: { type: 'boolean' },
         json: { type: 'boolean' },
@@ -715,6 +830,9 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'status')) {
     return parseStatus(parsed, values, connection);
   }
+  if (startsReservedCommand(tokens, 'export')) {
+    return parseExport(parsed, values, connection);
+  }
 
   if (startsReservedCommand(tokens, 'list')) {
     const resource = parsed.positionals[1] ?? '';
@@ -736,6 +854,10 @@ export function parseCliArgs(
     rejectListOption(values['message-style'], '--message-style');
     rejectListOption(values.color, '--color');
     rejectListOption(values.markdown, '--markdown');
+    rejectListOption(values.format, '--format');
+    rejectListOption(values.exclude, '--exclude');
+    rejectListOption(values.output, '--output');
+    rejectListOption(values.force, '--force');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -781,6 +903,10 @@ export function parseCliArgs(
   }
   if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
   if (values.markdown !== undefined) throw argumentError('--markdown can only be used with add-row');
+  if (values.format !== undefined) throw argumentError('--format can only be used with export');
+  if (values.exclude !== undefined) throw argumentError('--exclude can only be used with export');
+  if (values.output !== undefined) throw argumentError('--output can only be used with export');
+  if (values.force !== undefined) throw argumentError('--force can only be used with export');
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);

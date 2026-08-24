@@ -1,10 +1,10 @@
 import { tick } from 'svelte';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import {
-	composerEditorSelectionFromTextarea,
-	restoreComposerEditorSelection,
-	type ComposerEditorSelection,
-} from '$lib/chat/composer/composer-editor-selection.js';
+	promptEditorSelectionFromTextarea,
+	restorePromptEditorSelection,
+	type PromptEditorSelection,
+} from '$lib/prompt-editor/prompt-editor-selection.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
 interface PromptComposerEditorControllerOptions {
@@ -45,7 +45,7 @@ export class PromptComposerEditorController {
 		ui.closeFileMenu();
 		ui.closeSlashMenu();
 		ui.snippetPalette.dismiss();
-		const selection = composerEditorSelectionFromTextarea(textarea);
+		const selection = promptEditorSelectionFromTextarea(textarea);
 		textarea.focus({ preventScroll: true });
 		ui.openComposerEditor(chatId, selection);
 		return true;
@@ -74,7 +74,7 @@ export class PromptComposerEditorController {
 		this.options.composer.queueDraftSave(chatId, text);
 	}
 
-	updateSelection(chatId: string, selection: ComposerEditorSelection): void {
+	updateSelection(chatId: string, selection: PromptEditorSelection): void {
 		this.options.ui.updateComposerEditorSelection(chatId, selection);
 	}
 
@@ -85,14 +85,14 @@ export class PromptComposerEditorController {
 		if (restoreFocus && chatId) void this.#restoreComposer(chatId, selection);
 	}
 
-	async #restoreComposer(chatId: string, selection: ComposerEditorSelection): Promise<void> {
+	async #restoreComposer(chatId: string, selection: PromptEditorSelection): Promise<void> {
 		await tick();
 		if (this.#destroyed) return;
 		const textarea = this.options.textarea;
 		if (this.options.selectedChatId !== chatId || !textarea || !this.options.isVisible) return;
 		textarea.focus({ preventScroll: true });
-		restoreComposerEditorSelection(textarea, selection);
-		const restoredSelection = composerEditorSelectionFromTextarea(textarea);
+		restorePromptEditorSelection(textarea, selection);
+		const restoredSelection = promptEditorSelectionFromTextarea(textarea);
 		if (!this.options.promptTransformPending) {
 			this.options.ui.updateTriggers(
 				this.options.composer.inputText,

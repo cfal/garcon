@@ -8,7 +8,7 @@ import type { CliOutput } from './output.js';
 
 const STATUS_MESSAGE_TEXT_LIMIT = 4_000;
 const DATA_URL_OMISSION = '[data URL omitted from text output]';
-const TRUNCATION_MARKER = '... [truncated; use --json for the complete snapshot]';
+const TRUNCATION_MARKER = '... [truncated; use export for the complete transcript]';
 
 export interface ChatStatusClient {
   getChatSnapshot(

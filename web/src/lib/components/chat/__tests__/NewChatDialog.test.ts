@@ -4,8 +4,11 @@ import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as refinementApi from '$lib/api/prompt-refinement';
 import * as settingsApi from '$lib/api/settings';
+import * as snippetsApi from '$lib/api/snippets';
+import * as navigation from '$lib/chat/actions/chat-navigation.js';
+import * as clientChatId from '$shared/client-chat-id';
 import NewChatDialogTestHost from './NewChatDialogTestHost.svelte';
-import { resetComposerEditorStub } from './ComposerEditorStub.svelte';
+import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }),
@@ -26,9 +29,21 @@ vi.mock('$lib/api/prompt-refinement', async (importOriginal) => {
 	return { ...actual, refinePrompt: vi.fn() };
 });
 
-vi.mock('../ComposerEditor.svelte', async () => ({
-	default: (await import('./ComposerEditorStub.svelte')).default,
-}));
+	vi.mock('$lib/api/snippets', async (importOriginal) => {
+		const actual = await importOriginal<typeof import('$lib/api/snippets')>();
+		return { ...actual, expandSnippet: vi.fn() };
+});
+
+vi.mock('$lib/chat/actions/chat-navigation.js', () => ({ gotoChat: vi.fn() }));
+
+	vi.mock('$shared/client-chat-id', () => ({
+		createClientChatId: vi.fn(() => '1787471053739199'),
+	}));
+
+	vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+		default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+			.default,
+	}));
 
 interface DeferredRefinement {
 	promise: Promise<RefinePromptResponse>;
@@ -97,14 +112,71 @@ describe('NewChatDialog', () => {
 			})),
 		);
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValue(makeSnapshot());
+		vi.mocked(navigation.gotoChat).mockResolvedValue(undefined);
 	});
 
 	afterEach(() => {
 		cleanup();
-		resetComposerEditorStub();
+		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
+		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
+	});
+
+	it('uses one prospective ID for expansion, draft creation, and navigation', async () => {
+		const onCreateDraft = vi.fn();
+		vi.mocked(snippetsApi.expandSnippet).mockImplementationOnce(async (request) => {
+			if (request.context.type !== 'new-chat') throw new Error('Expected new-chat context');
+			return {
+				success: true,
+				snippetId: 'snippet-handoff',
+				snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+				shortName: 'handoff',
+				contextProjectPath: request.context.projectPath,
+				expandedText: `Continue chat ${request.context.chatId}`,
+			};
+		});
+		render(NewChatDialogTestHost, {
+			snippetTemplate: 'Continue chat {{chat_id}}',
+			onCreateDraft,
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const messageInput = screen.getByPlaceholderText(
+			'How can I help you today?',
+		) as HTMLTextAreaElement;
+		await fireEvent.input(messageInput, { target: { value: '/s handoff' } });
+		await waitFor(() => {
+			expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(
+				false,
+			);
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+		await waitFor(() => expect(messageInput.value).toBe('Continue chat 1787471053739199'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+
+		await waitFor(() => expect(onCreateDraft).toHaveBeenCalledTimes(1));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			expect.objectContaining({
+				context: {
+					type: 'new-chat',
+					chatId: '1787471053739199',
+					projectPath: '/workspace',
+				},
+			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(onCreateDraft).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: '1787471053739199',
+				startup: expect.objectContaining({ firstMessage: 'Continue chat 1787471053739199' }),
+			}),
+		);
+		expect(navigation.gotoChat).toHaveBeenCalledWith('1787471053739199');
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 	});
 
 	it('keeps the small-screen dialog within the safe viewport', async () => {

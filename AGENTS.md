@@ -399,7 +399,7 @@ Integration coverage is mandatory when correctness crosses server, HTTP/WebSocke
 
 A bug or flake first observed in a live suite or in production may only be closed by a change that reproduces it deterministically: extend the scripted-model fakes, add a scripted scenario, or add an interleaving test. Adjusting the failing test to tolerate the behavior is not a fix. New provider-behavior coverage goes on the scripted-model tier, not on the protocol-level fakes.
 
-- Always use Haiku for Claude integration tests and `gpt-5.4-nano` for Codex integration tests.
+- Use the configured DeepSeek Anthropic-compatible endpoint for credential-backed Claude tests and `gpt-5.4-nano` for Codex integration tests.
 - Always use the lowest supported reasoning effort in integration tests.
 - Keep credential-backed agent suites under `test:live:*`, outside routine test commands.
 - Never run live-agent tests locally unless actively changing those tests; rely on the PR CI live-provider gate otherwise.

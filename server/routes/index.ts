@@ -18,6 +18,7 @@ import { createRuntimeRoutes } from './runtime.js';
 import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
+import { createChatExportRoutes } from './chat-export.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -46,6 +47,7 @@ import type { CommandLedger } from '../commands/command-ledger.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type { ChatRowService } from '../chats/chat-row-service.js';
+import type { TranscriptExportService } from '../chats/transcript-export/service.js';
 
 export default function createAllRoutes({
   registry,
@@ -75,6 +77,7 @@ export default function createAllRoutes({
   commandLedger,
   transientFeeds,
   chatRows,
+  transcriptExport,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -103,6 +106,7 @@ export default function createAllRoutes({
   commandLedger: CommandLedger;
   transientFeeds: ChatTransientFeedStore;
   chatRows: ChatRowService;
+  transcriptExport: TranscriptExportService;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeState),
@@ -114,6 +118,7 @@ export default function createAllRoutes({
       transientFeeds,
     }),
     ...createChatRowRoutes(chatRows),
+    ...createChatExportRoutes(transcriptExport),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

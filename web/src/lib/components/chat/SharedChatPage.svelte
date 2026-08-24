@@ -278,7 +278,7 @@
 										</div>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
-												{#each message.images as image, imageIndex (image.name || imageIndex)}
+												{#each message.images as image, imageIndex (imageIndex)}
 													<img
 														src={image.data}
 														alt={image.name}

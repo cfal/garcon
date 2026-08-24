@@ -76,6 +76,30 @@ export class SpaDriver {
     });
   }
 
+  async ensureDirectModelSelected(input: {
+    selectedAgentLabel: string;
+    optionAgentLabel: string;
+    modelLabel: string;
+  }): Promise<void> {
+    const directProviderSelected = await this.#page.evaluate(
+      ({ selectedAgentLabel, modelLabel }) => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
+          const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return name.includes(selectedAgentLabel) && name.includes(modelLabel);
+        });
+      },
+      { selectedAgentLabel: input.selectedAgentLabel, modelLabel: input.modelLabel },
+    );
+    if (directProviderSelected) return;
+
+    await this.#clickNewChatModelSelector();
+    await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
+    await this.clickButton(input.optionAgentLabel);
+    await this.waitForButton(input.modelLabel, { timeout: 30_000 });
+    await this.clickButton(input.modelLabel);
+  }
+
   async #startDirectChat<TRequest>(input: {
     content: string;
     projectPath?: string;
@@ -99,23 +123,7 @@ export class SpaDriver {
       ) === true,
       { timeout: 20_000 },
     );
-    const directProviderSelected = await this.#page.evaluate(
-      ({ selectedAgentLabel, modelLabel }) => {
-        const dialog = document.querySelector('[role="dialog"]');
-        return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
-          const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-          return name.includes(selectedAgentLabel) && name.includes(modelLabel);
-        });
-      },
-      { selectedAgentLabel: input.selectedAgentLabel, modelLabel: input.modelLabel },
-    );
-    if (!directProviderSelected) {
-      await this.#clickNewChatModelSelector();
-      await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
-      await this.clickButton(input.optionAgentLabel);
-      await this.waitForButton(input.modelLabel, { timeout: 30_000 });
-      await this.clickButton(input.modelLabel);
-    }
+    await this.ensureDirectModelSelected(input);
 
     const requestedProjectPath = input.projectPath ?? this.#integration.dirs.project;
     const projectPath = await this.#page.$eval(

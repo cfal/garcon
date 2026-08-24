@@ -5,6 +5,7 @@ import { runCatalogQuery } from './catalog-query.js';
 import { sendChatAsync, stopChat } from './chat-control.js';
 import { runAddRow, validateAddRowContent } from './chat-row.js';
 import { runChatStatus } from './chat-status.js';
+import { runChatExport } from './chat-export.js';
 import { runChatWait } from './chat-wait.js';
 import { runConsultation } from './consultation.js';
 import { discoverRuntime } from './discovery.js';
@@ -125,6 +126,9 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
   if (command?.kind === 'add-row') {
     return 'terminal interrupted; the add-row command may have reached Garcon; inspect the chat before retrying';
   }
+  if (command?.kind === 'export') {
+    return 'terminal interrupted; no transcript export was written';
+  }
   return command !== undefined && (command.kind === 'send-async' || command.kind === 'stop')
     ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
     : 'terminal interrupted; no Garcon agent was stopped';
@@ -159,6 +163,11 @@ export async function main(
     if (command.kind === 'status') {
       const client = await connectedClient(command, options);
       await runChatStatus(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'export') {
+      const client = await connectedClient(command, options);
+      await runChatExport(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {

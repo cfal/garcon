@@ -5,6 +5,11 @@ import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
+import * as clientChatId from '$shared/client-chat-id';
+import { parseChatId } from '$shared/chat-id';
+
+const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
+const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -23,6 +28,10 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
 	return { ...actual, expandSnippet: vi.fn() };
 });
+
+vi.mock('$shared/client-chat-id', () => ({
+	createClientChatId: vi.fn(() => '1787471053739199'),
+}));
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -159,6 +168,8 @@ describe('NewChatForm', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
+		vi.mocked(clientChatId.createClientChatId).mockReset();
+		vi.mocked(clientChatId.createClientChatId).mockReturnValue(PROSPECTIVE_CHAT_ID);
 	});
 
 	it('does not submit on Enter on mobile (Enter inserts a newline)', async () => {
@@ -182,6 +193,7 @@ describe('NewChatForm', () => {
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 
 		expect(onStartChat).toHaveBeenCalledTimes(1);
+		expect(onStartChat.mock.calls[0]?.[1]).toBe(PROSPECTIVE_CHAT_ID);
 	});
 
 	it('shows a centered spinner and hides the composer until settings load', async () => {
@@ -538,13 +550,110 @@ describe('NewChatForm', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'value', value: 'the API' },
-				context: { type: 'project', projectPath: '/workspace/project' },
+				context: {
+					type: 'new-chat',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		expect(onStartChat).toHaveBeenCalledTimes(1);
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: 'Review the API in /workspace/project' }),
+			PROSPECTIVE_CHAT_ID,
+		);
+	});
+
+	it('mints the prospective ID lazily and clears it on reseed', async () => {
+		stubMatchMedia(false);
+		vi.mocked(clientChatId.createClientChatId)
+			.mockReset()
+			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
+			.mockReturnValueOnce(RESEEDED_CHAT_ID);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'expanded prompt',
+		});
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+
+		await fireEvent.input(messageInput, { target: { value: '/snippet review first' } });
+		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await waitFor(() => expect(messageInput.value).toBe('expanded prompt'));
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
+		await fireEvent.input(messageInput, { target: { value: 'edited prompt' } });
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
+
+		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
+		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
+		await waitFor(() => {
+			expect(
+				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
+			).toBe(false);
+		});
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(2);
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: 'after reseed' }),
+			RESEEDED_CHAT_ID,
+		);
+	});
+
+	it('cancels an in-flight expansion on reseed', async () => {
+		stubMatchMedia(false);
+		vi.mocked(clientChatId.createClientChatId)
+			.mockReset()
+			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
+			.mockReturnValueOnce(RESEEDED_CHAT_ID);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review stale ID' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+		await fireEvent.input(messageInput, { target: { value: 'after reseed' } });
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('after reseed');
+		await waitFor(() => {
+			expect(
+				(screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled,
+			).toBe(false);
+		});
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			expect.objectContaining({
+				context: expect.objectContaining({ chatId: PROSPECTIVE_CHAT_ID }),
+			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: 'after reseed' }),
+			RESEEDED_CHAT_ID,
+		);
 	});
 
 	it('distinguishes omitted slash arguments from an explicit empty value', async () => {
@@ -571,7 +680,11 @@ describe('NewChatForm', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'default' },
-				context: { type: 'project', projectPath: '/workspace/project' },
+				context: {
+					type: 'new-chat',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
@@ -580,7 +693,11 @@ describe('NewChatForm', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'value', value: '' },
-				context: { type: 'project', projectPath: '/workspace/project' },
+				context: {
+					type: 'new-chat',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
@@ -616,7 +733,11 @@ describe('NewChatForm', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'value', value: '' },
-				context: { type: 'project', projectPath: '/workspace/project' },
+				context: {
+					type: 'new-chat',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
@@ -651,7 +772,11 @@ describe('NewChatForm', () => {
 			{
 				shortName: 'review',
 				arguments: { type: 'value', value: 'saved default' },
-				context: { type: 'project', projectPath: '/workspace/project' },
+				context: {
+					type: 'new-chat',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);

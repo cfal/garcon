@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import {
-	emitLastComposerEditorTextChange,
-	resetComposerEditorStub,
-} from './ComposerEditorStub.svelte';
+	emitLastPromptEditorTextChange,
+	resetPromptEditorStub,
+} from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
@@ -17,8 +17,9 @@ vi.mock('$lib/api/snippets', async (importOriginal) => {
 	return { ...actual, expandSnippet: vi.fn() };
 });
 
-vi.mock('../ComposerEditor.svelte', async () => ({
-	default: (await import('./ComposerEditorStub.svelte')).default,
+vi.mock('$lib/components/prompt-editor/PromptEditor.svelte', async () => ({
+	default: (await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'))
+		.default,
 }));
 
 function nextAnimationFrame(): Promise<void> {
@@ -68,7 +69,7 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 describe('PromptComposer focus', () => {
 	afterEach(() => {
 		cleanup();
-		resetComposerEditorStub();
+		resetPromptEditorStub();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
@@ -205,7 +206,7 @@ describe('PromptComposer focus', () => {
 		});
 		const editor = await screen.findByRole('textbox', { name: 'Expanded composer text' });
 		await waitFor(() => expect(document.activeElement).toBe(editor));
-		screen.getByRole('button', { name: 'Close expanded composer' }).focus();
+		screen.getByRole('button', { name: 'Close expanded editor' }).focus();
 
 		await rerender({
 			selectedChatId: 'chat-expanded-request',
@@ -216,7 +217,7 @@ describe('PromptComposer focus', () => {
 		expect(screen.getAllByRole('dialog')).toHaveLength(1);
 		await waitFor(() => expect(document.activeElement).toBe(editor));
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Close expanded composer' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close expanded editor' }));
 		await rerender({
 			selectedChatId: 'chat-expanded-request',
 			isVisible: true,
@@ -255,7 +256,7 @@ describe('PromptComposer focus', () => {
 		await rerender({ selectedChatId: secondChatId });
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		await fireEvent.input(textarea, { target: { value: 'second draft' } });
-		emitLastComposerEditorTextChange('stale first-chat write');
+		emitLastPromptEditorTextChange('stale first-chat write');
 
 		expect(textarea.value).toBe('second draft');
 		await waitFor(() =>
@@ -973,6 +974,39 @@ describe('PromptComposer focus', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		expect(onsubmit).toHaveBeenCalledTimes(1);
+	});
+
+	it('uses a new-chat expansion context for a local draft', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'draft expansion',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: '1787471053739199',
+			selectedStatus: 'draft',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await waitFor(() => expect(textarea.value).toBe('draft expansion'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'default' },
+				context: {
+					type: 'new-chat',
+					chatId: '1787471053739199',
+					projectPath: '/workspace/project',
+				},
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it('distinguishes omitted slash arguments from an explicit empty value', async () => {

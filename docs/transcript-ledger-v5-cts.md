@@ -1,20 +1,21 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 22 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 24 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
 review state, the PR #529 compaction repair, the revision 20 OpenCode
 legacy-absence correction, and the revision 21 OpenCode native-fidelity fork.
 The revision 22 active-run producer-notice correction is proposed by PR #538
-and has no merge anchor yet.
+and has no merge anchor yet. Revision 23 adds ordinary user transcript export;
+revision 24 makes its rendered artifacts transcript-first and succinct.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 22, SHA-256
-  `c934e94c04aab8e65d9804d773862ad4b00f2af3d3966214bfab3c99129b4f3b`
+- `docs/transcript-ledger-v5-design.md`, revision 24, SHA-256
+  `1b3bb0c862441da3aab17da39f4e138e34e935b0874dbaa8af3a729213f3d17c`
 
-Current inventory: 375 discovered stable IDs, validated by
+Current inventory: 377 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -636,11 +637,14 @@ useful but do not replace this cross-surface matrix.
 | Share               | rendering snapshot fixed at publish                                       | Native reload integration and share-store tests | Covered                 |
 | Fork lookup         | provider metadata passed unread to owner                                  | Fork units and scripted fork matrices           | Covered                 |
 | Command attribution | committed assistant output before terminal settlement                     | Server event-wiring tests                       | Covered                 |
-| User export         | no product surface exists                                                 | Design-bound future obligation                  | Not applicable          |
+| User export         | pinned row-level fold; no session/provider metadata; response-disclosed filters; succinct artifacts | Core export matrix, renderer/route units, and CLI server test | Covered |
 | Support export      | no product surface exists                                                 | Design-bound future obligation                  | Not applicable          |
 
 `TLV5-L01.02-CORE-MATRIX-01` is the canonical executable table. A new ledger
 row kind must extend its fixture and every exact surface projection.
+`TLV5-L01.02-CORE-EXPORT-01` applies that same all-kind fixture to ordinary
+user export, including session exclusion, terminal inclusion, category
+classification, durable ordinals, and provider-metadata privacy.
 `TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01` is the required subtype companion:
 it proves that CLI rows of every style and integration-owned `ErrorMessage` rows
 remain presentation-only even though the latter retains `provider-row` kind.
@@ -807,7 +811,9 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.04-STORE-UNIT-01      | `server/ledger/__tests__/native-activity.test.js`: the provider watermark is qualified by both ordinal and timestamp | L09.04 |
 | TLV5-L09.05-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: a newer tail emits repeatable transient warnings without mutating the ledger or retaining completed state | L09.05 |
 | TLV5-L09.05-SERVER-01          | `integration-tests/tests/server/native-transcript-reload.test.ts`: external rows remain absent through transient warning delivery and enter the transcript only through explicit Reload | L09.05, L08.04 |
+| TLV5-L01.02-CORE-EXPORT-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: the canonical all-kind fixture projects exact user-export membership, categories, durable ordinals, session exclusion, terminal inclusion, and provider-metadata privacy | L01.02 |
 | TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
+| TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |
 | TLV5-PERM.05-CORE-UNIT-01      | `server/ledger/__tests__/permission-occurrence.test.js`: `applies a delayed cancellation only to its exact reused occurrence`                             | PERM.05                     |

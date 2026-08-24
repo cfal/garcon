@@ -15,7 +15,8 @@ describe('promptRefinementErrorMessage', () => {
 			['PROMPT_REFINEMENT_AGENT_UNAVAILABLE', 'refinement agent is unavailable'],
 			['PROMPT_REFINEMENT_UNSUPPORTED_EFFORT', 'cannot use this effort'],
 			['PROMPT_REFINEMENT_EMPTY_RESPONSE', 'returned no text'],
-			['PROMPT_REFINEMENT_OUTPUT_TOO_LONG', 'too long for the composer'],
+			['PROMPT_REFINEMENT_OUTPUT_TOO_LONG', 'too long for this editor'],
+			['PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED', 'changed a snippet variable'],
 			['PROMPT_REFINEMENT_TIMEOUT', 'timed out'],
 			['RATE_LIMITED', 'being used too quickly'],
 		] as const;
@@ -30,9 +31,9 @@ describe('promptRefinementErrorMessage', () => {
 	});
 
 	it('maps client timeouts and unknown failures', () => {
-		expect(
-			promptRefinementErrorMessage(new DOMException('private', 'TimeoutError')),
-		).toContain('timed out');
+		expect(promptRefinementErrorMessage(new DOMException('private', 'TimeoutError'))).toContain(
+			'timed out',
+		);
 		expect(promptRefinementErrorMessage(new Error('private'))).toContain(
 			'The prompt could not be refined.',
 		);

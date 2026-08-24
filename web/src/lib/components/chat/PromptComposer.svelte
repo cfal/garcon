@@ -420,7 +420,7 @@
 		const projectPath = chat?.projectPath.trim();
 		if (!chat || !projectPath) return null;
 		return chat.status === 'draft'
-			? { type: 'project', projectPath }
+			? { type: 'new-chat', chatId: chat.id, projectPath }
 			: { type: 'chat', chatId: chat.id };
 	}
 

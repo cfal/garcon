@@ -12,6 +12,7 @@ import {
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
+import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 import { TranscriptLedgerService } from '../service.ts';
@@ -161,6 +162,41 @@ describe('transcript ledger read-fold matrix', () => {
         lastOrdinal: 15,
         messages: rendered,
       })]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('[TLV5-L01.02-CORE-EXPORT-01] projects every durable row kind through the user-export fold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-ledger-export-matrix-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => AT });
+    try {
+      ledger.initializeChat(CHAT_ID);
+      const entries = foldRowsForExport(store.append(CHAT_ID, VIEW_ID, allRowKindDrafts()));
+
+      expect(entries.map((entry) => [entry.ordinal, entry.kind, entry.category])).toEqual([
+        [1, 'message', 'conversation'],
+        [2, 'message', 'conversation'],
+        [3, 'message', 'diagnostics'],
+        [4, 'message', 'conversation'],
+        [5, 'message', 'handoffs'],
+        [6, 'message', 'permissions'],
+        [7, 'message', 'permissions'],
+        [8, 'message', 'permissions'],
+        [9, 'message', 'permissions'],
+        [10, 'message', 'permissions'],
+        [12, 'run-ended', 'diagnostics'],
+        [13, 'message', 'conversation'],
+        [14, 'message', 'conversation'],
+        [15, 'message', 'conversation'],
+      ]);
+      expect(entries.some((entry) => entry.ordinal === 11)).toBe(false);
+      expect(JSON.stringify(entries)).not.toContain('providerOccurrence');
     } finally {
       ledger.close();
       await rm(root, { recursive: true, force: true });

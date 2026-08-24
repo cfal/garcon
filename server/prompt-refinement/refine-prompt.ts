@@ -14,10 +14,12 @@ import {
 import {
   normalizeRefinePromptRequest,
   normalizeRefinePromptResponse,
-  PROMPT_REFINEMENT_DRAFT_MAX_LENGTH,
+  isPromptRefinementTarget,
+  promptRefinementTargetMaxLength,
   type RefinePromptRequest,
   type RefinePromptResponse,
 } from '../../common/prompt-refinement.js';
+import { hasSameSnippetTemplateTokenSignature } from '../../common/snippets.js';
 import { isRecord } from '../../common/json.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -33,6 +35,11 @@ import type { SettingsStore } from '../settings/store.js';
 
 const logger = createLogger('prompt-refinement');
 const RENDERED_PROMPT_MAX_LENGTH = 512_000;
+const SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT = [
+  'The draft is a Garcon snippet template. Preserve every supported template token verbatim, in the same order and with the same count.',
+  'Supported tokens are {{arguments}}, {{project_path}}, and {{chat_id}}, including their escaped forms \\{{arguments}}, \\{{project_path}}, and \\{{chat_id}}.',
+  'Do not add, remove, reorder, escape, or unescape these tokens.',
+].join(' ');
 
 type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_INVALID_REQUEST'
@@ -46,6 +53,7 @@ type PromptRefinementErrorCode =
   | 'PROMPT_REFINEMENT_UNSUPPORTED_EFFORT'
   | 'PROMPT_REFINEMENT_EMPTY_RESPONSE'
   | 'PROMPT_REFINEMENT_OUTPUT_TOO_LONG'
+  | 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED'
   | 'PROMPT_REFINEMENT_TIMEOUT'
   | 'PROMPT_REFINEMENT_FAILED';
 
@@ -114,6 +122,12 @@ function renderTemplate(template: string, draft: string): string {
     );
   }
   return template.replaceAll(PROMPT_REFINEMENT_USER_PROMPT_TOKEN, () => draft);
+}
+
+function templateForTarget(template: string, target: RefinePromptRequest['target']): string {
+  return target === 'snippet-template'
+    ? `${template}\n\n${SNIPPET_TEMPLATE_REFINEMENT_CONSTRAINT}`
+    : template;
 }
 
 function classifyPromptRefinementError(error: unknown): PromptRefinementError {
@@ -190,7 +204,8 @@ export async function refinePrompt(
   if (
     isRecord(request) &&
     typeof request.draft === 'string' &&
-    request.draft.length > PROMPT_REFINEMENT_DRAFT_MAX_LENGTH
+    isPromptRefinementTarget(request.target) &&
+    request.draft.length > promptRefinementTargetMaxLength(request.target)
   ) {
     throw new PromptRefinementError(
       'PROMPT_REFINEMENT_INPUT_TOO_LONG',
@@ -237,7 +252,10 @@ export async function refinePrompt(
     }
 
     generationSignal.throwIfAborted();
-    const prompt = renderTemplate(configuredTemplate(persisted), input.draft);
+    const prompt = renderTemplate(
+      templateForTarget(configuredTemplate(persisted), input.target),
+      input.draft,
+    );
     const temporaryDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'garcon-prompt-refinement-'),
     );
@@ -260,10 +278,10 @@ export async function refinePrompt(
       await fs.rm(temporaryDirectory, { recursive: true, force: true });
     }
 
-    const response = normalizeRefinePromptResponse({
-      success: true,
-      refinedPrompt: output,
-    });
+    const response = normalizeRefinePromptResponse(
+      { success: true, refinedPrompt: output },
+      input.target,
+    );
     if (!output.trim()) {
       throw new PromptRefinementError(
         'PROMPT_REFINEMENT_EMPTY_RESPONSE',
@@ -275,7 +293,18 @@ export async function refinePrompt(
     if (!response) {
       throw new PromptRefinementError(
         'PROMPT_REFINEMENT_OUTPUT_TOO_LONG',
-        'The prompt refinement model returned more text than the composer supports.',
+        'The prompt refinement model returned more text than the editor supports.',
+        502,
+        true,
+      );
+    }
+    if (
+      input.target === 'snippet-template'
+      && !hasSameSnippetTemplateTokenSignature(input.draft, response.refinedPrompt)
+    ) {
+      throw new PromptRefinementError(
+        'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED',
+        'The prompt refinement model changed the snippet template token structure.',
         502,
         true,
       );
@@ -285,6 +314,7 @@ export async function refinePrompt(
       agentId: selection.agentId,
       model: selection.model,
       thinkingMode: selection.thinkingMode,
+      target: input.target,
       durationMs: Math.round(performance.now() - startedAt),
       outcome: 'success',
     });
@@ -301,6 +331,9 @@ export async function refinePrompt(
       agentId: selection?.agentId ?? 'unresolved',
       model: selection?.model ?? 'unresolved',
       thinkingMode: selection?.thinkingMode ?? 'none',
+      target: isRecord(request) && isPromptRefinementTarget(request.target)
+        ? request.target
+        : 'invalid',
       durationMs: Math.round(performance.now() - startedAt),
       outcome,
     });

@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
+import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 import KeyboardShortcutsHost from './KeyboardShortcutsHost.svelte';
 
 function createMockAppShell() {
@@ -607,6 +608,81 @@ describe('KeyboardShortcuts', () => {
 		expect(onLocalKeydown).toHaveBeenCalledOnce();
 		expect(escape.defaultPrevented).toBe(false);
 		expect(screen.getByRole('dialog')).toBeTruthy();
+	});
+
+	it('leaves global shortcuts to a main-inert modal without a surface owner', () => {
+		const appShell = createMockAppShell();
+		const onToggleCommandMenu = vi.fn();
+		const onTransientScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			transientKind: 'application-dialog',
+			onTransientScroll,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		const events = [
+			new KeyboardEvent('keydown', {
+				key: 'p',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: ',',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: 'n',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+			new KeyboardEvent('keydown', {
+				key: 'd',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		];
+
+		for (const event of events) input.dispatchEvent(event);
+
+		expect(events.every((event) => !event.defaultPrevented)).toBe(true);
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.openSettings).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+		expect(onTransientScroll).not.toHaveBeenCalled();
+	});
+
+	it('stops local handlers after scrolling a Chat-owned main-inert modal', () => {
+		const onTransientScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			transientKind: 'application-dialog',
+			transientSurfaceId: CHAT_SURFACE_ID,
+			onTransientScroll,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		const localHandler = vi.fn();
+		input.addEventListener('keydown', localHandler);
+		const event = new KeyboardEvent('keydown', {
+			key: 'd',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		input.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(onTransientScroll).toHaveBeenCalledOnce();
+		expect(onTransientScroll).toHaveBeenCalledWith('later');
+		expect(localHandler).not.toHaveBeenCalled();
 	});
 
 	it('does not navigate chat items while a workspace surface owns focus', () => {

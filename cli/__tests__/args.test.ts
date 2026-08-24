@@ -581,3 +581,58 @@ describe('add-row arguments', () => {
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'add-row is documented' });
   });
 });
+
+describe('export arguments', () => {
+  test('parses formats, repeatable exclusions, aliases, and file output canonically', () => {
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'export', CHAT_ID,
+      '--format', 'xml',
+      '--exclude', 'handoffs,tools',
+      '--exclude', 'reasoning,tool-calls',
+      '--output', './transcript.xml',
+      '--force',
+    ], ENV)).toEqual({
+      kind: 'export',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      format: 'xml',
+      exclusions: ['tool-calls', 'tool-results', 'reasoning', 'handoffs'],
+      outputPath: './transcript.xml',
+      force: true,
+    });
+    expect(parseCliArgs(['export', CHAT_ID], ENV)).toMatchObject({
+      kind: 'export',
+      format: 'markdown',
+      exclusions: [],
+      force: false,
+    });
+  });
+
+  test.each([
+    [['export'], 'exactly one chat ID'],
+    [['export', 'bad'], 'valid Garcon chat ID'],
+    [['export', CHAT_ID, '--format', 'json'], '--format must be markdown or xml'],
+    [['export', CHAT_ID, '--format', 'xml', '--format', 'markdown'], 'only once'],
+    [['export', CHAT_ID, '--exclude', 'unknown'], '--exclude must be one of'],
+    [['export', CHAT_ID, '--exclude', 'toString'], '--exclude must be one of'],
+    [['export', CHAT_ID, '--exclude', 'tools,,reasoning'], 'empty category'],
+    [['export', CHAT_ID, '--output', '-'], 'omit --output'],
+    [['export', CHAT_ID, '--force'], '--force requires --output'],
+    [['export', CHAT_ID, '--json'], '--json cannot be used with export'],
+    [['status', CHAT_ID, '--format', 'xml'], '--format cannot be used with status'],
+    [['wait', CHAT_ID, '--turn', 'turn-1', '--exclude', 'tools'], '--exclude cannot be used with wait'],
+    [['list', 'agents', '--output', 'file'], '--output cannot be used with list'],
+    [['send-async', CHAT_ID, '--force', 'message'], '--force cannot be used with send-async'],
+    [['--agent', 'codex', '--model', 'gpt', '--format', 'xml', 'prompt'], '--format can only be used with export'],
+  ])('rejects invalid export arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('treats an option-terminated export token as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--', 'export', 'the', 'results',
+    ], ENV)).toMatchObject({ kind: 'start', prompt: 'export the results' });
+  });
+});

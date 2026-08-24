@@ -4,7 +4,6 @@ import { promises as fs } from 'fs';
 import {
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
-  snippetTemplateUsesChatId,
   type CreateSnippetRequest,
   type ExpandSnippetRequest,
   type ExpandSnippetResponse,
@@ -163,14 +162,6 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     }
     const argumentsText =
       input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
-    const chatId = input.context.type === 'chat' ? input.context.chatId : null;
-    if (chatId === null && snippetTemplateUsesChatId(snippet.template)) {
-      throw new SnippetDomainError(
-        'SNIPPET_CHAT_ID_REQUIRED',
-        'The {{chat_id}} placeholder requires an existing chat',
-        422,
-      );
-    }
     const { contextProjectPath, resolvedProjectPath } = await this.#resolveProjectPath(
       input.context,
     );
@@ -179,7 +170,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       expandedText = expandSnippetTemplate(snippet.template, {
         arguments: argumentsText,
         projectPath: resolvedProjectPath,
-        chatId: chatId ?? '',
+        chatId: input.context.chatId,
       });
     } catch (error) {
       if (error instanceof SnippetExpansionError) {
@@ -207,7 +198,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     contextProjectPath: string;
     resolvedProjectPath: string;
   }> {
-    if (context.type === 'project') {
+    if (context.type === 'new-chat') {
       return {
         contextProjectPath: context.projectPath,
         resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath),

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   claudeText,
@@ -135,6 +136,140 @@ describe('scripted Claude permissions', () => {
         entry.message.type === 'permission-resolved'
         && entry.message.permissionOccurrenceId === permissionOccurrenceId
         && entry.message.allowed)).toBe(true);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
+  test('executes an allowed Bash command and records its successful result', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = marker('ALLOWED_BASH_PROMPT');
+    const output = marker('ALLOWED_BASH_OUTPUT');
+    const reply = marker('ALLOWED_BASH_REPLY');
+    const outputName = '.claude-scripted-allowed-bash';
+    const command = `printf %s ${output} > ${outputName} && cat ${outputName}`;
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_allowed_bash', 'Bash', { command }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-allowed-bash', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command === command,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Scripted Bash permission request was not found.');
+      }
+      const permissionOccurrenceId = permission.message.permissionOccurrenceId;
+
+      expect((await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId,
+        allow: true,
+        alwaysAllow: false,
+      })).status).toBe('accepted');
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const resolution = messagesOfType(transcript.messages, 'permission-resolved').find(
+        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
+      );
+      const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+        (message) => message.command === command,
+      );
+      const result = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === bash?.toolId,
+      );
+      expect(resolution?.allowed).toBe(true);
+      expect(result?.isError).toBe(false);
+      expect(JSON.stringify(result?.content)).toContain(output);
+      expect(await Bun.file(join(fixture.dirs.project, outputName)).text()).toBe(output);
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 60_000);
+
+  test('records a denied Bash result without executing the command', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const prompt = marker('DENIED_BASH_PROMPT');
+    const reply = marker('DENIED_BASH_REPLY');
+    const outputName = '.claude-scripted-denied-bash';
+    const command = `touch ${outputName}`;
+    testEnvironment.model.scriptTurn([
+      claudeToolUse('toolu_denied_bash', 'Bash', { command }),
+    ]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withIntegrationFixture('claude-scripted-denied-bash', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command === command,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Scripted Bash permission request was not found.');
+      }
+      const permissionOccurrenceId = permission.message.permissionOccurrenceId;
+
+      expect((await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId,
+        allow: false,
+        alwaysAllow: false,
+      })).status).toBe('accepted');
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const resolution = messagesOfType(transcript.messages, 'permission-resolved').find(
+        (message) => message.permissionOccurrenceId === permissionOccurrenceId,
+      );
+      const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+        (message) => message.command === command,
+      );
+      const result = messagesOfType(transcript.messages, 'tool-result').find(
+        (message) => message.toolId === bash?.toolId,
+      );
+      expect(resolution?.allowed).toBe(false);
+      expect(result?.isError).toBe(true);
+      expect(await Bun.file(join(fixture.dirs.project, outputName)).exists()).toBe(false);
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

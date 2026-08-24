@@ -1,3 +1,5 @@
+import { parseChatId } from './chat-id.js';
+
 export const SNIPPET_MAX_COUNT = 100;
 export const SNIPPET_SHORT_NAME_MAX_LENGTH = 64;
 export const SNIPPET_TEMPLATE_MAX_LENGTH = 32_000;
@@ -41,6 +43,20 @@ export function* matchSnippetTemplateTokens(
   }
 }
 
+export function snippetTemplateTokenSignature(template: string): string[] {
+  return Array.from(
+    matchSnippetTemplateTokens(template),
+    (match) => `${match.escaped ? 'escaped' : 'active'}:${match.variable}`,
+  );
+}
+
+export function hasSameSnippetTemplateTokenSignature(first: string, second: string): boolean {
+  const firstSignature = snippetTemplateTokenSignature(first);
+  const secondSignature = snippetTemplateTokenSignature(second);
+  return firstSignature.length === secondSignature.length
+    && firstSignature.every((entry, index) => entry === secondSignature[index]);
+}
+
 function snippetTemplateUsesVariable(template: string, variable: SnippetTemplateVariable): boolean {
   for (const match of matchSnippetTemplateTokens(template)) {
     if (!match.escaped && match.variable === variable) return true;
@@ -69,7 +85,6 @@ export const SNIPPET_ERROR_CODES = {
   limitReached: 'SNIPPET_LIMIT_REACHED',
   expansionTooLong: 'SNIPPET_EXPANSION_TOO_LONG',
   chatNotFound: 'SNIPPET_CHAT_NOT_FOUND',
-  chatIdRequired: 'SNIPPET_CHAT_ID_REQUIRED',
   projectPathRequired: 'SNIPPET_PROJECT_PATH_REQUIRED',
   projectPathOutsideBase: 'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
   projectPathNotFound: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
@@ -119,7 +134,8 @@ export interface SnippetsMutationResponse {
 }
 
 export type SnippetExpansionContext =
-  { type: 'chat'; chatId: string } | { type: 'project'; projectPath: string };
+  // Registered chats resolve their authoritative project path from the server registry.
+  { type: 'chat'; chatId: string } | { type: 'new-chat'; chatId: string; projectPath: string };
 
 export type SnippetArgumentsInput = { type: 'default' } | { type: 'value'; value: string };
 
@@ -284,24 +300,32 @@ export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequ
     return null;
   }
   if (context.type === 'chat') {
-    const chatId = requiredString(context.chatId);
-    return chatId
-      ? {
-          shortName: raw.shortName,
-          arguments: argumentsInput,
-          context: { type: 'chat', chatId },
-        }
-      : null;
+    try {
+      return {
+        shortName: raw.shortName,
+        arguments: argumentsInput,
+        context: { type: 'chat', chatId: parseChatId(context.chatId) },
+      };
+    } catch {
+      return null;
+    }
   }
-  if (context.type === 'project') {
+  if (context.type === 'new-chat') {
     const projectPath = requiredString(context.projectPath);
-    return projectPath
-      ? {
-          shortName: raw.shortName,
-          arguments: argumentsInput,
-          context: { type: 'project', projectPath },
-        }
-      : null;
+    if (!projectPath) return null;
+    try {
+      return {
+        shortName: raw.shortName,
+        arguments: argumentsInput,
+        context: {
+          type: 'new-chat',
+          chatId: parseChatId(context.chatId),
+          projectPath,
+        },
+      };
+    } catch {
+      return null;
+    }
   }
   return null;
 }

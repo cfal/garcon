@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { assistantContents } from '../../support/chat-assertions.js';
 import {
   claudeText,
   claudeToolUse,
@@ -32,6 +34,8 @@ describe('scripted Claude background settlement', () => {
     const prompt = marker('BG_SETTLE_PROMPT');
     const launched = marker('BG_SETTLE_LAUNCHED');
     const finished = marker('BG_SETTLE_FINISHED');
+    const successorPrompt = marker('BG_SETTLE_SUCCESSOR_PROMPT');
+    const successorReply = marker('BG_SETTLE_SUCCESSOR_REPLY');
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_bg_settle', 'Bash', {
         command: 'sleep 1',
@@ -45,6 +49,7 @@ describe('scripted Claude background settlement', () => {
       expect(messages).toContain('<task-notification>');
       return [claudeText(finished)];
     });
+    testEnvironment.model.scriptTurn([claudeText(successorReply)]);
 
     await withIntegrationFixture('claude-scripted-background-settle', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -55,6 +60,27 @@ describe('scripted Claude background settlement', () => {
         command: prompt,
         permissionMode: 'bypassPermissions',
       }));
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage =>
+          event.type === 'chat-messages'
+          && event.chatId === chatId
+          && event.messages.some((entry) =>
+            entry.message.type === 'assistant-message'
+            && entry.message.content.includes(launched)),
+        'scripted Claude background launch response',
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expect(fixture.client.eventsSince(cursor)).not.toContainEqual(expect.objectContaining({
+        type: 'agent-run-finished',
+        chatId,
+        turnId: turn.turnId,
+      }));
+
+      const queueCursor = fixture.client.markEvents();
+      const queued = await fixture.client.enqueueNew(chatId, successorPrompt);
+      expect(queued.control.queue.entries.map((entry) => entry.content)).toEqual([
+        successorPrompt,
+      ]);
       await waitForVisibleResponse({
         fixture,
         chatId,
@@ -66,6 +92,23 @@ describe('scripted Claude background settlement', () => {
         afterIndex: cursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       })).type);
+      const successorInput = await fixture.client.waitForCommittedUserInput(
+        chatId,
+        successorPrompt,
+        { afterIndex: queueCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expectFinished((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: fixture.client.events().lastIndexOf(successorInput) + 1,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).type);
+      const assistant = assistantContents((await fixture.client.getMessages(chatId)).messages);
+      const launchedIndex = assistant.findIndex((content) => content.includes(launched));
+      const finishedIndex = assistant.findIndex((content) => content.includes(finished));
+      const successorIndex = assistant.findIndex((content) => content.includes(successorReply));
+      expect(launchedIndex).toBeGreaterThanOrEqual(0);
+      expect(finishedIndex).toBeGreaterThan(launchedIndex);
+      expect(successorIndex).toBeGreaterThan(finishedIndex);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
         chats: [],
