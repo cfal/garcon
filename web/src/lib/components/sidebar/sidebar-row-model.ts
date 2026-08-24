@@ -1,4 +1,5 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
+import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type {
 	SidebarChatOrderMap,
@@ -28,12 +29,6 @@ function emptyOrderMap(): SidebarChatOrderMap {
 	return { pinned: [], normal: [], archived: [] };
 }
 
-function listForChat(chat: ChatSessionRecord): PersistedChatOrderGroup {
-	if (chat.isPinned) return 'pinned';
-	if (chat.isArchived) return 'archived';
-	return 'normal';
-}
-
 export function sidebarProjectKey(projectPath: string): string {
 	return projectPath ? `path:${projectPath}` : unknownProjectKey;
 }
@@ -46,7 +41,7 @@ export function partitionSidebarChats(chats: ChatSessionRecord[]): PartitionedCh
 	};
 
 	for (const chat of chats) {
-		byId[listForChat(chat)].set(chat.id, chat);
+		byId[chatOrderGroupFor(chat)].set(chat.id, chat);
 	}
 
 	return { byId, hasPinned: byId.pinned.size > 0 };
@@ -55,7 +50,7 @@ export function partitionSidebarChats(chats: ChatSessionRecord[]): PartitionedCh
 export function buildSidebarChatOrderMap(chats: ChatSessionRecord[]): SidebarChatOrderMap {
 	const orders = emptyOrderMap();
 	for (const chat of chats) {
-		orders[listForChat(chat)].push(chat.id);
+		orders[chatOrderGroupFor(chat)].push(chat.id);
 	}
 	return orders;
 }

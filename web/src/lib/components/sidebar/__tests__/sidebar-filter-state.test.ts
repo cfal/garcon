@@ -129,4 +129,21 @@ describe('SidebarFilterState', () => {
 			status: 'unread',
 		});
 	});
+
+	it('preserves chat order group search filters when merging', () => {
+		const chats = [
+			makeChat({ id: 'chat-1', orderGroup: 'normal' }),
+			makeChat({ id: 'chat-2', orderGroup: 'archived', isArchived: true }),
+		];
+		const state = new SidebarFilterState({
+			get chats() {
+				return chats;
+			},
+		});
+
+		state.searchQuery = 'is:!archived';
+
+		expect(state.currentFilter.orderGroup).toEqual({ group: 'archived', negated: true });
+		expect(state.filteredChats.map((chat) => chat.id)).toEqual(['chat-1']);
+	});
 });

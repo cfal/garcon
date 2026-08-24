@@ -218,6 +218,23 @@ describe('SidebarSearchStore', () => {
 			expect(store.filteredChats.map((chat) => chat.id)).toEqual(['c1']);
 		});
 
+		it('filters by chat order group', () => {
+			const chats = [
+				makeChat({ id: 'pinned', orderGroup: 'pinned', isPinned: true }),
+				makeChat({ id: 'normal' }),
+				makeChat({ id: 'archived', orderGroup: 'archived', isArchived: true }),
+			];
+			const { store } = createStore(chats);
+
+			store.applyQuery('is:pinned');
+
+			expect(store.filteredChats.map((chat) => chat.id)).toEqual(['pinned']);
+
+			store.openSearchDialog();
+			store.updateDraftQuery('is:!archived');
+			expect(store.dialogFilteredChats.map((chat) => chat.id)).toEqual(['pinned', 'normal']);
+		});
+
 		it('searches transcripts within structured filter candidates', async () => {
 			const chats = [
 				makeChat({ id: 'c1', title: 'Alpha', tags: ['ops'] }),
@@ -267,6 +284,38 @@ describe('SidebarSearchStore', () => {
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1']);
 			expect(store.transcriptSearchResultsByChatId.get('c1')?.snippets[0]?.text).toContain(
 				'needle',
+			);
+		});
+
+		it('searches transcripts within is: filter candidates', async () => {
+			const chats = [
+				makeChat({ id: 'pinned', orderGroup: 'pinned', isPinned: true }),
+				makeChat({ id: 'normal' }),
+				makeChat({ id: 'archived', orderGroup: 'archived', isArchived: true }),
+			];
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValue({
+					query: 'needle is:!archived',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 2,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				});
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+
+			await store.refreshTranscriptSearch('needle is:!archived');
+
+			expect(searchChatTranscripts).toHaveBeenCalledWith(
+				expect.objectContaining({
+					textTokens: ['needle'],
+					chatIds: ['pinned', 'normal'],
+				}),
+				expect.any(Object),
 			);
 		});
 
@@ -743,6 +792,8 @@ describe('SidebarSearchStore', () => {
 				{ lastActivityAt: '2026-03-27T09:00:00.000Z' },
 				{ isProcessing: true },
 				{ isUnread: true },
+				{ isPinned: true },
+				{ isArchived: true },
 				{ tags: ['ops'] },
 			];
 

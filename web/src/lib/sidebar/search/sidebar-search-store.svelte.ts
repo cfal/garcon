@@ -589,6 +589,8 @@ export function transcriptSearchFacetSignature(chats: ChatSessionRecord[]): stri
 			chat.lastActivityAt,
 			chat.isProcessing,
 			chat.isUnread,
+			chat.isPinned,
+			chat.isArchived,
 			chat.tags,
 		]),
 	);
