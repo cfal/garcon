@@ -508,7 +508,7 @@
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (img.name || idx)}
+									{#each asUser.images as img, idx (idx)}
 										{#if isImageAttachment(img)}
 											<img
 												src={img.data}

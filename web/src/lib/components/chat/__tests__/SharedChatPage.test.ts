@@ -193,4 +193,27 @@ describe('SharedChatPage', () => {
 		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(2);
 		expect(screen.getByText('4 of 4 messages')).toBeTruthy();
 	});
+
+	it('renders attachments with duplicate filenames', async () => {
+		const chatRows = response([], 0, 1, { nextBefore: null });
+		chatRows.snapshot.messages = [
+			{
+				type: 'user-message',
+				timestamp: '2025-01-02T03:05:00.000Z',
+				content: 'Two screenshots',
+				images: [
+					{ name: 'image.png', data: 'data:image/png;base64,one' },
+					{ name: 'image.png', data: 'data:image/png;base64,two' },
+				],
+			},
+		];
+		chatRows.page.end = 1;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(chatRows);
+
+		const { container } = render(SharedChatPageTestHost);
+
+		await screen.findByText('Two screenshots');
+		expect(container.querySelectorAll('img')).toHaveLength(2);
+		expect(screen.queryByText(/Failed to render message/)).toBeNull();
+	});
 });
