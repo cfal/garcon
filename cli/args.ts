@@ -14,7 +14,7 @@ import {
   parseChatRowTitle,
 } from '@garcon/common/chat-row-contracts';
 import {
-  CLI_PRESENTATION_STYLES,
+  CLI_PRESET_PRESENTATION_STYLES,
   CLI_PRESENTATION_STYLE_LIST,
   isCliPresentationStyle,
   normalizeCliHexColor,
@@ -39,6 +39,11 @@ import {
   type TranscriptExportFormat,
 } from '@garcon/common/chat-export-contracts';
 import { argumentError } from './errors.js';
+
+const ADD_ROW_PRESENTATION_REQUIREMENT = [
+  ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
+  '--color',
+].join(' or ');
 
 export const CLI_HELP = `Usage:
   garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>
@@ -488,9 +493,7 @@ function parseAddRow(
     throw argumentError('add-row requires a chat ID and one content argument');
   }
   if (values.type !== undefined && !isCliPresentationStyle(values.type)) {
-    throw argumentError(
-      `add-row requires ${CLI_PRESENTATION_STYLES.map((style) => `--type ${style}`).join(' or ')}`,
-    );
+    throw argumentError(`add-row requires ${ADD_ROW_PRESENTATION_REQUIREMENT}`);
   }
   const customStyle = parseCliColorOption(values.color);
   if (customStyle && values.type !== undefined && values.type !== 'custom') {
@@ -504,9 +507,7 @@ function parseAddRow(
       throw argumentError('--type custom requires --color');
     }
     if (values.type === undefined) {
-      throw argumentError(
-        `add-row requires ${CLI_PRESENTATION_STYLES.map((style) => `--type ${style}`).join(' or ')} or --color`,
-      );
+      throw argumentError(`add-row requires ${ADD_ROW_PRESENTATION_REQUIREMENT}`);
     }
     presentation = { style: values.type };
   }

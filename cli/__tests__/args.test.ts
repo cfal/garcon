@@ -551,8 +551,8 @@ describe('add-row arguments', () => {
   });
 
   test.each([
-    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error or --type custom or --color'],
-    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error or --type custom'],
+    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error or --color'],
+    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error or --color'],
     [['add-row', CHAT_ID, '--type', 'custom', 'content'], 'requires --color'],
     [['add-row', CHAT_ID, '--type', 'error', '--color', '7c3aed', 'content'], 'preset --type'],
     [['add-row', CHAT_ID, '--color', '7c3aed,', 'content'], 'six-digit hex colors'],

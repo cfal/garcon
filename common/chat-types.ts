@@ -1180,11 +1180,10 @@ function parseDurableCliRow(
   data: Record<string, unknown>,
   fallbackStyle: CliPresentationStyle = 'notice',
 ): CliRowMessage {
-  const legacyDetail = isLegacyCliRowDetail(data.detail) ? data.detail : undefined;
   return new CliRowMessage(
     str(data.timestamp),
     str(data.content),
-    coerceDurableCliPresentation(data.presentation ?? legacyDetail?.style, fallbackStyle),
+    coerceDurableCliPresentation(data.presentation, fallbackStyle),
     isCliRowFormat(data.format) ? data.format : 'plain',
     typeof data.title === 'string' && data.title ? data.title : undefined,
   );

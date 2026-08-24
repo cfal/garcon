@@ -26,7 +26,6 @@ describe('transcript notice contracts', () => {
 
   it('upgrades legacy CLI provenance into explicit row messages', () => {
     for (const [type, style] of [
-      ['transcript-notice', 'info'],
       ['transcript-notice', 'notice'],
       ['error', 'error'],
     ]) {
@@ -37,9 +36,6 @@ describe('transcript notice contracts', () => {
         title: 'Deployment',
         detail: {
           type: 'cli-row',
-          clientMessageId: 'must-not-cross-the-ledger-boundary',
-          presentation: style,
-          style,
         },
       });
 
@@ -93,19 +89,6 @@ describe('transcript notice contracts', () => {
     });
     expect(strayDetailTitle?.presentation).toEqual({ style: 'notice' });
     expect(strayDetailTitle?.title).toBeUndefined();
-
-    expect(parseChatMessage({
-      type: 'error',
-      timestamp: AT,
-      content: 'Mismatched error.',
-      detail: { type: 'cli-row', style: 'notice' },
-    })?.presentation).toEqual({ style: 'notice' });
-    expect(parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Mismatched notice.',
-      detail: { type: 'cli-row', style: 'error' },
-    })?.presentation).toEqual({ style: 'error' });
 
     expect(parseChatMessage({
       type: 'cli-row',
