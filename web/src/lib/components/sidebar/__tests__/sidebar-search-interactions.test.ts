@@ -335,6 +335,17 @@ describe('sidebar search interactions', () => {
 		expect(screen.getByRole('dialog')).toBeTruthy();
 	});
 
+	it('documents chat order group filters and their negated form', async () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [createChat('chat-1', 'First chat')],
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Search help' }));
+
+		expect(screen.getByText('is:X')).toBeTruthy();
+		expect(screen.getByText(/is:!pinned/)).toBeTruthy();
+	});
+
 	it('omits the saved-search pill container when there are no saved searches', async () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
