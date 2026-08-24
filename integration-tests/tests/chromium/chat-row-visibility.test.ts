@@ -6,7 +6,11 @@ import type {
   ChatRowTargetResponse,
 } from '../../../common/chat-row-contracts.js';
 import type { UserMessagePresentation } from '../../../common/chat-types.js';
-import type { CliPresentation, CliRowFormat } from '../../../common/cli-presentation.js';
+import type {
+  CliBodyDisclosure,
+  CliPresentation,
+  CliRowFormat,
+} from '../../../common/cli-presentation.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   withChromiumFixture,
@@ -165,6 +169,7 @@ async function addRow(input: {
   transcriptViewId: string;
   presentation: CliPresentation;
   format?: CliRowFormat;
+  disclosure?: CliBodyDisclosure;
   title: string;
   content: string;
   identity: string;
@@ -176,6 +181,7 @@ async function addRow(input: {
     transcriptViewId: input.transcriptViewId,
     presentation: input.presentation,
     format: input.format ?? 'plain',
+    disclosure: input.disclosure ?? 'expanded',
     title: input.title,
     content: input.content,
   });
@@ -203,6 +209,7 @@ async function expectRenderedRow(
       darkAccent: string;
     };
     markdownStrongText?: string;
+    collapsed?: boolean;
   },
 ): Promise<void> {
   const locator = rowLocator(page, row);
@@ -230,7 +237,14 @@ async function expectRenderedRow(
     await card.locator('strong').getByText(expected.markdownStrongText, { exact: true }).waitFor();
   }
   expect(await card.locator('svg[aria-hidden="true"]').count()).toBe(1);
-  expect(await card.locator('button').count()).toBe(0);
+  const disclosureButton = card.getByRole('button', {
+    name: expected.collapsed ? 'Show more' : 'Show less',
+  });
+  if (expected.collapsed) {
+    expect(await disclosureButton.getAttribute('aria-expanded')).toBe('false');
+  } else {
+    expect(await card.locator('button').count()).toBe(0);
+  }
   expect(await locator.getByText('Error', { exact: true }).count()).toBe(0);
 }
 
@@ -450,7 +464,10 @@ describe('Chromium transcript chat rows', () => {
         const infoContent = 'browser chat row information';
         const noticeContent = 'browser chat row notice';
         const errorContent = 'browser chat row error';
-        const customContent = '**browser custom deployment**';
+        const customContent = [
+          '**browser custom deployment**',
+          ...Array.from({ length: 18 }, (_, index) => `collapsed detail ${index + 1}`),
+        ].join('\n\n');
         const customRenderedContent = 'browser custom deployment';
         const infoTitle = 'Browser consultation status';
         const noticeTitle = 'Browser deployment';
@@ -496,6 +513,7 @@ describe('Chromium transcript chat rows', () => {
             },
           },
           format: 'markdown',
+          disclosure: 'collapsed',
           title: customTitle,
           content: customContent,
           identity: 'browser-live-custom',
@@ -532,6 +550,7 @@ describe('Chromium transcript chat rows', () => {
             },
           },
           format: 'markdown',
+          disclosure: 'collapsed',
         });
         await expectRenderedRow(fixture.page, info, {
           messageType: 'cli-row',
@@ -561,6 +580,20 @@ describe('Chromium transcript chat rows', () => {
             darkAccent: '#c4b5fd',
           },
           markdownStrongText: customRenderedContent,
+          collapsed: true,
+        });
+        const collapsedBodyBox = await rowLocator(fixture.page, custom)
+          .locator('.cli-collapsible-body-collapsed')
+          .boundingBox();
+        expect(collapsedBodyBox).not.toBeNull();
+        expect(collapsedBodyBox!.height).toBeLessThanOrEqual(160);
+        await rowLocator(fixture.page, custom)
+          .getByRole('button', { name: 'Show more' })
+          .evaluate((button: HTMLButtonElement) => button.click());
+        await rowLocator(fixture.page, custom).getByRole('button', { name: 'Show less' }).waitFor();
+        await fixture.page.waitForFunction(() => {
+          const feed = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+          return Boolean(feed && Math.abs(feed.scrollHeight - feed.clientHeight - feed.scrollTop) <= 1);
         });
         expect(await cardColors(fixture.page, custom)).not.toEqual(
           await cardColors(fixture.page, info),
@@ -568,7 +601,7 @@ describe('Chromium transcript chat rows', () => {
         await waitForTrackedContent(observerPage, infoContent);
         await waitForTrackedContent(observerPage, noticeContent);
         await waitForTrackedContent(observerPage, errorContent);
-        await waitForTrackedContent(observerPage, customContent);
+        await waitForTrackedContent(observerPage, customRenderedContent);
         await waitForTrackedContent(observerPage, infoTitle);
         await waitForTrackedContent(observerPage, noticeTitle);
         await waitForTrackedContent(observerPage, errorTitle);
@@ -605,6 +638,7 @@ describe('Chromium transcript chat rows', () => {
             darkAccent: '#c4b5fd',
           },
           markdownStrongText: customRenderedContent,
+          collapsed: true,
         });
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
         expect(await chatSummaryMetadata(fixture, targetChatId)).toEqual(initialTargetSummary);
@@ -658,6 +692,7 @@ describe('Chromium transcript chat rows', () => {
                   clientMessageId: 'browser-replay-notice-message',
                   presentation: { style: 'notice' },
                   format: 'plain',
+                  disclosure: 'expanded',
                   title: 'Replay deployment',
                 },
               });
@@ -670,6 +705,7 @@ describe('Chromium transcript chat rows', () => {
                   clientMessageId: 'browser-replay-error-message',
                   presentation: { style: 'error' },
                   format: 'plain',
+                  disclosure: 'expanded',
                   title: 'Replay release validation',
                 },
               });
@@ -683,6 +719,7 @@ describe('Chromium transcript chat rows', () => {
                 ordinal: noticeResult.row.ordinal,
                 presentation: noticeResult.row.detail.presentation,
                 format: noticeResult.row.detail.format,
+                disclosure: noticeResult.row.detail.disclosure,
                 status: 'appended',
                 timestamp: noticeResult.row.at,
               };
@@ -696,6 +733,7 @@ describe('Chromium transcript chat rows', () => {
                 ordinal: errorResult.row.ordinal,
                 presentation: errorResult.row.detail.presentation,
                 format: errorResult.row.detail.format,
+                disclosure: errorResult.row.detail.disclosure,
                 status: 'appended',
                 timestamp: errorResult.row.at,
               };
@@ -797,6 +835,7 @@ describe('Chromium transcript chat rows', () => {
           title: 'title' in entry.message ? entry.message.title : undefined,
           presentation: 'presentation' in entry.message ? entry.message.presentation : undefined,
           format: 'format' in entry.message ? entry.message.format : undefined,
+          disclosure: 'disclosure' in entry.message ? entry.message.disclosure : undefined,
         }))).toEqual([
           {
             ordinal: info.ordinal,
@@ -805,6 +844,7 @@ describe('Chromium transcript chat rows', () => {
             title: infoTitle,
             presentation: { style: 'info' },
             format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: notice.ordinal,
@@ -813,6 +853,7 @@ describe('Chromium transcript chat rows', () => {
             title: noticeTitle,
             presentation: { style: 'notice' },
             format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: error.ordinal,
@@ -821,6 +862,7 @@ describe('Chromium transcript chat rows', () => {
             title: errorTitle,
             presentation: { style: 'error' },
             format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: custom.ordinal,
@@ -835,6 +877,7 @@ describe('Chromium transcript chat rows', () => {
               },
             },
             format: 'markdown',
+            disclosure: 'collapsed',
           },
           {
             ordinal: missedNotice.ordinal,
@@ -843,6 +886,7 @@ describe('Chromium transcript chat rows', () => {
             title: 'Replay deployment',
             presentation: { style: 'notice' },
             format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: missedError.ordinal,
@@ -851,6 +895,7 @@ describe('Chromium transcript chat rows', () => {
             title: 'Replay release validation',
             presentation: { style: 'error' },
             format: 'plain',
+            disclosure: 'expanded',
           },
         ]);
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();

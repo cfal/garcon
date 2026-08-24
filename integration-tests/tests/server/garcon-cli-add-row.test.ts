@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import type { CliPresentationStyle } from '../../../common/cli-presentation.js';
+import type { CliBodyDisclosure, CliPresentationStyle } from '../../../common/cli-presentation.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import {
@@ -18,6 +18,7 @@ interface AddRowCliResult {
   readonly transcriptViewId: string;
   readonly type: CliPresentationStyle;
   readonly format: 'plain' | 'markdown';
+  readonly disclosure: CliBodyDisclosure;
 }
 
 async function runAddRow(
@@ -26,7 +27,7 @@ async function runAddRow(
   type: CliPresentationStyle,
   title: string,
   content: string,
-  options: { readonly color?: string; readonly markdown?: boolean } = {},
+  options: { readonly color?: string; readonly markdown?: boolean; readonly collapsible?: boolean } = {},
 ): Promise<AddRowCliResult> {
   const child = Bun.spawn({
     cmd: [
@@ -40,6 +41,7 @@ async function runAddRow(
       '--title', title,
       ...(options.color ? ['--color', options.color] : []),
       ...(options.markdown ? ['--markdown'] : []),
+      ...(options.collapsible ? ['--collapsible'] : []),
       content,
     ],
     cwd: REPO_ROOT,
@@ -60,9 +62,9 @@ async function runAddRow(
   expect(stdout).not.toContain(content);
   expect(stdout).not.toContain(title);
   const match = stdout.match(
-    /^chat id: (\d{16})\ntranscript view id: ([^\n]+)\nordinal: (\d+)\ntype: (info|notice|error|custom)\nformat: (plain|markdown)\nstatus: (appended|duplicate)\n$/,
+    /^chat id: (\d{16})\ntranscript view id: ([^\n]+)\nordinal: (\d+)\ntype: (info|notice|error|custom)\nformat: (plain|markdown)\ndisclosure: (expanded|collapsed)\nstatus: (appended|duplicate)\n$/,
   );
-  if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5] || !match[6]) {
+  if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5] || !match[6] || !match[7]) {
     throw new Error(`Unexpected add-row output: ${JSON.stringify(stdout)}`);
   }
   return {
@@ -71,7 +73,8 @@ async function runAddRow(
     ordinal: Number(match[3]),
     type: match[4] as AddRowCliResult['type'],
     format: match[5] as AddRowCliResult['format'],
-    status: match[6] as AddRowCliResult['status'],
+    disclosure: match[6] as AddRowCliResult['disclosure'],
+    status: match[7] as AddRowCliResult['status'],
   };
 }
 
@@ -116,6 +119,10 @@ function presentationOf(message: ChatMessage): unknown {
 
 function formatOf(message: ChatMessage): unknown {
   return 'format' in message ? message.format : undefined;
+}
+
+function disclosureOf(message: ChatMessage): unknown {
+  return 'disclosure' in message ? message.disclosure : undefined;
 }
 
 function titleOf(message: ChatMessage): string | undefined {
@@ -178,7 +185,7 @@ describe('garcon-cli add-row', () => {
         'custom',
         customTitle,
         customContent,
-        { color: '7C3AED,c4b5fd', markdown: true },
+        { color: '7C3AED,c4b5fd', markdown: true, collapsible: true },
       );
       await fixture.client.waitForEvent(
         (event): event is ChatMessagesMessage => event.type === 'chat-messages'
@@ -194,6 +201,7 @@ describe('garcon-cli add-row', () => {
         ordinal: info.ordinal,
         type: 'info',
         format: 'plain',
+        disclosure: 'expanded',
         status: 'appended',
       });
       expect(notice).toEqual({
@@ -202,6 +210,7 @@ describe('garcon-cli add-row', () => {
         ordinal: info.ordinal + 1,
         type: 'notice',
         format: 'plain',
+        disclosure: 'expanded',
         status: 'appended',
       });
       expect(error).toEqual({
@@ -210,6 +219,7 @@ describe('garcon-cli add-row', () => {
         ordinal: notice.ordinal + 1,
         type: 'error',
         format: 'plain',
+        disclosure: 'expanded',
         status: 'appended',
       });
       expect(custom).toEqual({
@@ -218,6 +228,7 @@ describe('garcon-cli add-row', () => {
         ordinal: error.ordinal + 1,
         type: 'custom',
         format: 'markdown',
+        disclosure: 'collapsed',
         status: 'appended',
       });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(providerRequestCount);
@@ -239,6 +250,7 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         presentation: presentationOf(entry.message),
         format: formatOf(entry.message),
+        disclosure: disclosureOf(entry.message),
       }))).toEqual([
         {
           ordinal: info.ordinal,
@@ -247,6 +259,7 @@ describe('garcon-cli add-row', () => {
           title: infoTitle,
           presentation: { style: 'info' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: notice.ordinal,
@@ -255,6 +268,7 @@ describe('garcon-cli add-row', () => {
           title: noticeTitle,
           presentation: { style: 'notice' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: error.ordinal,
@@ -263,6 +277,7 @@ describe('garcon-cli add-row', () => {
           title: errorTitle,
           presentation: { style: 'error' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: custom.ordinal,
@@ -274,6 +289,7 @@ describe('garcon-cli add-row', () => {
             customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
           },
           format: 'markdown',
+          disclosure: 'collapsed',
         },
       ]);
       expect(fixture.client.eventsSince(eventCursor).filter((event) => (
@@ -363,6 +379,7 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         presentation: presentationOf(entry.message),
         format: formatOf(entry.message),
+        disclosure: disclosureOf(entry.message),
       }))).toEqual([
         {
           ordinal: info.ordinal,
@@ -371,6 +388,7 @@ describe('garcon-cli add-row', () => {
           title: infoTitle,
           presentation: { style: 'info' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: notice.ordinal,
@@ -379,6 +397,7 @@ describe('garcon-cli add-row', () => {
           title: noticeTitle,
           presentation: { style: 'notice' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: error.ordinal,
@@ -387,6 +406,7 @@ describe('garcon-cli add-row', () => {
           title: errorTitle,
           presentation: { style: 'error' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: custom.ordinal,
@@ -398,6 +418,7 @@ describe('garcon-cli add-row', () => {
             customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
           },
           format: 'markdown',
+          disclosure: 'collapsed',
         },
       ]);
 
@@ -420,6 +441,7 @@ describe('garcon-cli add-row', () => {
         title: titleOf(entry.message),
         presentation: presentationOf(entry.message),
         format: formatOf(entry.message),
+        disclosure: disclosureOf(entry.message),
       }))).toEqual([
         {
           ordinal: info.ordinal,
@@ -428,6 +450,7 @@ describe('garcon-cli add-row', () => {
           title: infoTitle,
           presentation: { style: 'info' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: notice.ordinal,
@@ -436,6 +459,7 @@ describe('garcon-cli add-row', () => {
           title: noticeTitle,
           presentation: { style: 'notice' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: error.ordinal,
@@ -444,6 +468,7 @@ describe('garcon-cli add-row', () => {
           title: errorTitle,
           presentation: { style: 'error' },
           format: 'plain',
+          disclosure: 'expanded',
         },
         {
           ordinal: custom.ordinal,
@@ -455,6 +480,7 @@ describe('garcon-cli add-row', () => {
             customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
           },
           format: 'markdown',
+          disclosure: 'collapsed',
         },
       ]);
     }, { namedWorkspace: WORKSPACE });

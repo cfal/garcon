@@ -77,6 +77,7 @@ describe('scripted Codex CLI steering', () => {
         'send-async', chatId, '--allow-steer',
         '--message-title', 'Steer context',
         '--color', '0EA5E9,7dd3fc',
+        '--collapsible',
         steerPrompt,
       ]);
 
@@ -114,6 +115,7 @@ describe('scripted Codex CLI steering', () => {
           style: 'custom',
           customStyle: { lightAccent: '#0ea5e9', darkAccent: '#7dd3fc' },
           title: 'Steer context',
+          disclosure: 'collapsed',
         },
       });
       testEnvironment.model.assertSettled();

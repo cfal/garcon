@@ -190,6 +190,7 @@ describe('garcon-cli', () => {
         '--title', 'CLI delegated review',
         '--message-title', 'Initial context',
         '--color', '7C3AED,c4b5fd',
+        '--collapsible',
         '--tag', 'Review Needed',
         '--tag', 'delegated',
         'cli-first-turn',
@@ -216,6 +217,7 @@ describe('garcon-cli', () => {
         '--title', 'CLI follow-up review',
         '--message-title', 'Follow-up context',
         '--message-style', 'info',
+        '--collapsible',
         '--tag', 'Follow Up',
         'cli-second-turn',
       ]);
@@ -245,11 +247,17 @@ describe('garcon-cli', () => {
             style: 'custom',
             customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
             title: 'Initial context',
+            disclosure: 'collapsed',
           },
         },
         {
           content: 'cli-second-turn',
-          presentation: { origin: 'cli', style: 'info', title: 'Follow-up context' },
+          presentation: {
+            origin: 'cli',
+            style: 'info',
+            title: 'Follow-up context',
+            disclosure: 'collapsed',
+          },
         },
       ]);
       const providerRequests = fixture.fakeProviders.openAi.requests();
@@ -667,8 +675,7 @@ describe('garcon-cli', () => {
       const cursor = fixture.client.markEvents();
       const sent = await runCli(controlArguments(fixture, [
         'send-async', chatId,
-        '--message-title', 'Async context',
-        '--color', '0EA5E9,7dd3fc',
+        '--collapsible',
         'cli-async-message',
       ]));
 
@@ -688,14 +695,11 @@ describe('garcon-cli', () => {
         content: 'cli-async-message',
         presentation: {
           origin: 'cli',
-          style: 'custom',
-          customStyle: { lightAccent: '#0ea5e9', darkAccent: '#7dd3fc' },
-          title: 'Async context',
+          disclosure: 'collapsed',
         },
       });
 
       const heldRequest = await held.received;
-      expect(JSON.stringify(heldRequest.body)).not.toContain('Async context');
       expect(JSON.stringify(heldRequest.body)).not.toContain('"presentation"');
 
       const chatsAfter = await fixture.client.listChats();
