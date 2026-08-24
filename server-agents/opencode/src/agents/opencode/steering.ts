@@ -91,7 +91,7 @@ export class OpenCodeSteeringController {
 
     const turn = captured.turn;
     const partId = createOpenCodePromptPartId();
-    const promptBody = buildPromptBody(request.input, session.model, partId);
+    const promptBody = buildPromptBody(request.input, session.model, partId, [], session.thinkingVariant);
     let acknowledge!: () => void;
     const acknowledgement = new Promise<void>((resolve) => {
       acknowledge = resolve;

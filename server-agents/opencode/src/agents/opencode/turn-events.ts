@@ -35,6 +35,8 @@ export interface OpenCodeSession {
   aborting?: boolean;
   chatId: string;
   model?: string;
+  // The variant the current turn submitted, so steering joins the same effort.
+  thinkingVariant?: string;
   permissionMode: PermissionMode;
   directory?: string;
   startedAt: string;

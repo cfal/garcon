@@ -60,4 +60,15 @@ describe('buildPromptBody', () => {
     expect(body.parts).toHaveLength(1);
     expect(body.parts[0]).toMatchObject({ type: 'text', text: 'hello' });
   });
+
+  it('carries the resolved thinking variant next to the model', () => {
+    const body = buildPromptBody('hello', 'anthropic/claude-sonnet-4-6', 'prt_1', [], 'high');
+    expect(body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4-6' });
+    expect(body.variant).toBe('high');
+  });
+
+  it('omits the variant field when no thinking variant resolved', () => {
+    const body = buildPromptBody('hello', 'anthropic/claude-sonnet-4-6', 'prt_1', [], undefined);
+    expect('variant' in body).toBe(false);
+  });
 });

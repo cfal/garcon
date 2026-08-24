@@ -39,7 +39,8 @@ const OPENCODE_DESCRIPTOR = {
   label: 'OpenCode',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES,
+  // OpenCode expresses effort as per-model variant names; no variant maps to ultra.
+  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'ultra'),
   supportsImages: true,
   supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,

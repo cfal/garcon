@@ -31,7 +31,7 @@ import {
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type { OpenCodeConfig } from '../../config.js';
-import { normalizeThinkingMode } from '@garcon/common/chat-modes';
+import { normalizeThinkingMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertOpenCodeExecutionOpen,
   markOpenCodeExecutionStarted,
@@ -46,7 +46,6 @@ import {
   type OpenCodeRequestScope,
 } from './sdk-result.js';
 import {
-  AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
   AgentIntegrationError,
   type AgentLogger,
 } from '@garcon/server-agent-interface';
@@ -64,6 +63,7 @@ import {
 } from './request-control.js';
 import { convertOpenCodeEventToChatMessages } from './event-converter.js';
 import { OpenCodeSteeringController } from './steering.js';
+import { resolveOpenCodeThinkingVariant } from './thinking-variant.js';
 import {
   OpenCodeOperationRoutes,
   type OpenCodeOperationEventSource,
@@ -839,6 +839,15 @@ export class OpenCodeRuntime {
     return this.#modelCache?.models ?? [];
   }
 
+  // Effort maps to the model's declared variants; unknown models pass the mode
+  // through because the catalog may simply be cold.
+  #resolveThinkingVariant(model: string | undefined, thinkingMode: ThinkingMode | undefined): string | undefined {
+    const declared = model
+      ? this.#cachedModels().find((entry) => entry.value === model)?.thinkingModes
+      : undefined;
+    return resolveOpenCodeThinkingVariant(thinkingMode, declared);
+  }
+
   #isModelCacheFresh(): boolean {
     if (!this.#modelCache) return false;
     return this.#now() - this.#modelCache.fetchedAt < this.#options.modelCacheTtlMs;
@@ -1043,7 +1052,6 @@ export class OpenCodeRuntime {
       thinkingMode,
       operation,
     } = request;
-    void thinkingMode;
     const scope = createOpenCodeRequestScope(projectPath);
 
     await this.#ensureOpenCodeServer();
@@ -1067,10 +1075,12 @@ export class OpenCodeRuntime {
     }
 
     const turn = createOpenCodeTurnContext(operation);
+    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
       model,
+      thinkingVariant,
       permissionMode,
       directory: scope.directory,
       startedAt: new Date().toISOString(),
@@ -1116,7 +1126,13 @@ export class OpenCodeRuntime {
       throw error;
     }
 
-    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId, images ?? []);
+    const promptBody = buildPromptBody(
+      command,
+      model,
+      turn.providerPromptPartId,
+      images ?? [],
+      thinkingVariant,
+    );
 
     const promptRequest = this.#runScopedTurnRequest(
       scope,
@@ -1150,7 +1166,6 @@ export class OpenCodeRuntime {
       thinkingMode,
       operation,
     } = request;
-    void thinkingMode;
     const pendingSession = this.#sessions.get(agentSessionId);
     if (pendingSession) await this.#quiesceSessionBeforeTurn(agentSessionId, pendingSession);
     const session = this.#sessions.get(agentSessionId);
@@ -1168,6 +1183,7 @@ export class OpenCodeRuntime {
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     const waiter = this.#createTurnWaiter(agentSessionId);
+    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
     if (session) {
       session.status = 'running';
       session.aborting = false;
@@ -1175,6 +1191,7 @@ export class OpenCodeRuntime {
       session.deferredTerminal = null;
       session.chatId = chatId;
       session.model = model;
+      session.thinkingVariant = thinkingVariant;
       session.permissionMode = permissionMode;
       session.directory = scope.directory;
       session.lastActivityAt = Date.now();
@@ -1184,6 +1201,7 @@ export class OpenCodeRuntime {
         status: 'running',
         chatId,
         model,
+        thinkingVariant,
         permissionMode,
         directory: scope.directory,
         startedAt: new Date().toISOString(),
@@ -1203,7 +1221,13 @@ export class OpenCodeRuntime {
       permissionMode,
       scope.directory,
     );
-    const promptBody = buildPromptBody(command, model, turn.providerPromptPartId, images ?? []);
+    const promptBody = buildPromptBody(
+      command,
+      model,
+      turn.providerPromptPartId,
+      images ?? [],
+      thinkingVariant,
+    );
 
     try {
       await this.#globalEventListener.start(scope.directory);
@@ -1361,14 +1385,6 @@ export class OpenCodeRuntime {
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
     const thinkingMode = normalizeThinkingMode(options.thinkingMode);
-    if (thinkingMode !== 'none') {
-      throw new AgentIntegrationError(
-        'OPERATION_UNSUPPORTED',
-        `opencode does not support explicit one-shot effort ${thinkingMode}.`,
-        false,
-        AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
-      );
-    }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);
     const requestTimeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
@@ -1397,6 +1413,8 @@ export class OpenCodeRuntime {
           tools: { '*': false },
         };
         if (parsedModel) body.model = parsedModel;
+        const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
+        if (thinkingVariant) body.variant = thinkingVariant;
 
         const promptResult: any = await this.#runScopedSessionRequest<any>(
           'OpenCode prompt',

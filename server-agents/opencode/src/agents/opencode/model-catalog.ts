@@ -1,9 +1,12 @@
 import { isRecord } from '@garcon/common/json';
+import type { ThinkingMode } from '@garcon/common/chat-modes';
+import { thinkingModesFromVariants } from './thinking-variant.js';
 
 export interface OpenCodeModelOption {
   value: string;
   label: string;
   supportsImages?: boolean;
+  thinkingModes?: readonly ThinkingMode[];
 }
 
 // The server computes capabilities.input from config modalities and the
@@ -43,10 +46,12 @@ export function modelsFromProviders(providers: any[]): OpenCodeModelOption[] {
       if (!isRecord(model)) continue;
       const modelId = typeof model.id === 'string' ? model.id : modelKey;
       const supportsImages = modelSupportsImages(model);
+      const thinkingModes = thinkingModesFromVariants(model.variants);
       models.push({
         value: `${providerId}/${modelId}`,
         label: `${providerName}: ${typeof model.name === 'string' ? model.name : modelId}`,
         ...(supportsImages === undefined ? {} : { supportsImages }),
+        ...(thinkingModes === undefined ? {} : { thinkingModes }),
       });
     }
   }

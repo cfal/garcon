@@ -25,6 +25,7 @@ export function buildPromptBody(
   model: string | undefined,
   partId: string,
   attachments: readonly AgentAttachment[] = [],
+  thinkingVariant?: string,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     parts: [
@@ -46,5 +47,6 @@ export function buildPromptBody(
   };
   const parsedModel = parseOpenCodeModel(model);
   if (parsedModel) body.model = parsedModel;
+  if (thinkingVariant) body.variant = thinkingVariant;
   return body;
 }
