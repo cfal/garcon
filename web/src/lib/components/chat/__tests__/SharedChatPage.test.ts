@@ -143,7 +143,7 @@ describe('SharedChatPage', () => {
 	});
 
 	it('renders CLI provenance while retaining generic notice and error paths', async () => {
-		const chatRows = response([], 0, 5, { nextBefore: null });
+		const chatRows = response([], 0, 6, { nextBefore: null });
 		chatRows.snapshot.messages = [
 			{
 				type: 'transcript-notice',
@@ -176,8 +176,19 @@ describe('SharedChatPage', () => {
 				timestamp: '2025-01-02T03:05:03.000Z',
 				content: 'Provider error.',
 			},
+			{
+				type: 'cli-row',
+				timestamp: '2025-01-02T03:05:04.000Z',
+				content: '**Shared custom deployment.**',
+				title: 'Custom deployment',
+				presentation: {
+					style: 'custom',
+					customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+				},
+				format: 'markdown',
+			},
 		];
-		chatRows.page.end = 5;
+		chatRows.page.end = 6;
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(chatRows);
 
 		const { container } = render(SharedChatPageTestHost);
@@ -185,6 +196,7 @@ describe('SharedChatPage', () => {
 		const infoCard = (await screen.findByText('Consultation status')).closest('article');
 		const noticeCard = screen.getByText('Deployment').closest('article');
 		const errorCard = screen.getByText('Release validation').closest('article');
+		const customCard = (await screen.findByText('Shared custom deployment.')).closest('article');
 		expect(infoCard?.className).toContain('cli-row-message-info');
 		expect(infoCard?.className).toContain('border-status-neutral-border');
 		expect(screen.getByText('CLI info').className).toContain('sr-only');
@@ -201,7 +213,43 @@ describe('SharedChatPage', () => {
 			.toContain('border-status-info-border');
 		expect(screen.getByText('Provider error.').closest('article')?.className)
 			.toContain('border-status-error-border');
-		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(3);
-		expect(screen.getByText('5 of 5 messages')).toBeTruthy();
+		expect(customCard?.className).toContain('cli-row-message-custom');
+		expect(customCard?.className).toContain('cli-presentation-custom');
+		expect(customCard?.querySelector('strong')?.textContent).toBe('Shared custom deployment.');
+		expect(customCard?.parentElement?.style.getPropertyValue('--cli-presentation-accent-light'))
+			.toBe('#7c3aed');
+		expect(customCard?.parentElement?.style.getPropertyValue('--cli-presentation-accent-dark'))
+			.toBe('#c4b5fd');
+		expect(container.querySelectorAll('article.cli-row-message')).toHaveLength(4);
+		expect(screen.getByText('6 of 6 messages')).toBeTruthy();
+	});
+
+	it('styles the complete shared CLI user message surface', async () => {
+		const shared = response([], 0, 1, { nextBefore: null });
+		shared.snapshot.messages = [{
+			type: 'user-message',
+			timestamp: '2025-01-02T03:04:59.000Z',
+			content: '**Shared deployment.**',
+			presentation: {
+				origin: 'cli',
+				style: 'custom',
+				customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+				title: 'Deployment context',
+			},
+		}];
+		shared.page.end = 1;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(shared);
+
+		const { container } = render(SharedChatPageTestHost);
+		await screen.findByText('Shared deployment.');
+
+		const bubble = container.querySelector<HTMLElement>(
+			'[data-user-message-presentation="custom"]',
+		);
+		expect(bubble?.classList.contains('cli-presentation-custom')).toBe(true);
+		expect(bubble?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
+		expect(bubble?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
+		expect(screen.getByText('CLI custom').className).toContain('sr-only');
+		expect(screen.getByText('Deployment context')).toBeTruthy();
 	});
 });

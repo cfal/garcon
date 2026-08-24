@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   ErrorMessage,
   TranscriptNoticeMessage,
   UserMessage,
@@ -187,7 +188,8 @@ describe('transcript ledger read-fold matrix', () => {
         chatId: CHAT_ID,
         viewId: view.viewId,
         clientMessageId: 'chat-row-info',
-        type: 'info',
+        presentation: { style: 'info' },
+        format: 'plain',
         title: 'Consultation checkpoint',
         content: 'presentation information',
       });
@@ -195,7 +197,8 @@ describe('transcript ledger read-fold matrix', () => {
         chatId: CHAT_ID,
         viewId: view.viewId,
         clientMessageId: 'chat-row-notice',
-        type: 'notice',
+        presentation: { style: 'notice' },
+        format: 'markdown',
         title: 'Presentation checkpoint',
         content: 'presentation notice',
       });
@@ -203,7 +206,8 @@ describe('transcript ledger read-fold matrix', () => {
         chatId: CHAT_ID,
         viewId: view.viewId,
         clientMessageId: 'chat-row-error',
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         title: 'Failure checkpoint',
         content: 'chat row error',
       });
@@ -225,9 +229,9 @@ describe('transcript ledger read-fold matrix', () => {
         'content' in message ? message.content : null,
       ])).toEqual([
         [1, 'user-message', 'pending user input'],
-        [2, 'transcript-notice', 'presentation information'],
-        [3, 'transcript-notice', 'presentation notice'],
-        [4, 'error', 'chat row error'],
+        [2, 'cli-row', 'presentation information'],
+        [3, 'cli-row', 'presentation notice'],
+        [4, 'cli-row', 'chat row error'],
         [5, 'error', 'provider error'],
       ]);
       expect(ledger.conversationMessages(CHAT_ID)).toEqual([
@@ -270,28 +274,31 @@ describe('transcript ledger read-fold matrix', () => {
         messages: [
           {
             ordinal: 2,
-            message: new TranscriptNoticeMessage(
+            message: new CliRowMessage(
               CHAT_ROW_AT,
               'presentation information',
-              { type: 'cli-row', style: 'info' },
+              { style: 'info' },
+              'plain',
               'Consultation checkpoint',
             ),
           },
           {
             ordinal: 3,
-            message: new TranscriptNoticeMessage(
+            message: new CliRowMessage(
               CHAT_ROW_AT,
               'presentation notice',
-              { type: 'cli-row', style: 'notice' },
+              { style: 'notice' },
+              'markdown',
               'Presentation checkpoint',
             ),
           },
           {
             ordinal: 4,
-            message: new ErrorMessage(
+            message: new CliRowMessage(
               CHAT_ROW_AT,
               'chat row error',
-              { type: 'cli-row', style: 'error' },
+              { style: 'error' },
+              'plain',
               'Failure checkpoint',
             ),
           },

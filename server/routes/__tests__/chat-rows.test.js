@@ -62,7 +62,8 @@ describe('chat row routes', () => {
       chatId: input.chatId,
       transcriptViewId: input.transcriptViewId,
       ordinal: 4,
-      type: input.type,
+      presentation: input.presentation,
+      format: input.format,
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     }));
@@ -73,7 +74,8 @@ describe('chat row routes', () => {
       clientMessageId: 'message-1',
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
-      type: 'info',
+      presentation: { style: 'info' },
+      format: 'markdown',
       title: '  Consultation status  ',
       content: '  exact content\n',
     };
@@ -98,7 +100,8 @@ describe('chat row routes', () => {
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
       ordinal: 4,
-      type: 'info',
+      presentation: { style: 'info' },
+      format: 'markdown',
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     });

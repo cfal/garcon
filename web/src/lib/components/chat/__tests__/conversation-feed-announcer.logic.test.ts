@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	AssistantMessage,
 	BashToolUseMessage,
+	CliRowMessage,
 	ExternalToolUseMessage,
 	McpToolUseMessage,
 	PermissionRequestMessage,
@@ -503,6 +504,15 @@ describe('ConversationFeedAnnouncerState', () => {
 				{ origin: 'cli', style: 'info', title: 'Status' },
 			)), []),
 		).toBe('CLI info: Status. consultation complete');
+		expect(
+			announcementForAppendedRow(messageRow('5', new CliRowMessage(
+				'',
+				'**deployment complete**',
+				{ style: 'notice' },
+				'markdown',
+				'Deploy',
+			)), []),
+		).toBe('CLI notice: Deploy. deployment complete');
 		expect(
 			announcementForAppendedRow(
 				{

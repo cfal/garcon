@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
 	AssistantMessage,
+	CliRowMessage,
 	ErrorMessage,
 	ToolResultMessage,
 	TranscriptNoticeMessage,
@@ -217,47 +218,63 @@ describe('chat status', () => {
         transcriptViewId: 'view-1',
         messages: [{
           ordinal: 1,
-          message: new TranscriptNoticeMessage(
+          message: new CliRowMessage(
             TIMESTAMP,
             'Deployment window opened.',
-            { type: 'cli-row', style: 'notice' },
+            { style: 'notice' },
+            'plain',
             'Deployment',
           ),
         }, {
           ordinal: 2,
-          message: new ErrorMessage(
+          message: new CliRowMessage(
             TIMESTAMP,
             'Validation failed.',
-            { type: 'cli-row', style: 'error' },
+            { style: 'error' },
+            'plain',
           ),
         }, {
           ordinal: 3,
-          message: new TranscriptNoticeMessage(
+          message: new CliRowMessage(
             TIMESTAMP,
             'Consultation complete.',
-            { type: 'cli-row', style: 'info' },
+            { style: 'info' },
+            'markdown',
             'Consultation status',
           ),
         }, {
           ordinal: 4,
           message: new ErrorMessage(TIMESTAMP, 'Provider failed.'),
+        }, {
+          ordinal: 5,
+          message: new CliRowMessage(
+            TIMESTAMP,
+            '**Custom.**',
+            {
+              style: 'custom',
+              customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+            },
+            'markdown',
+            'Custom status',
+          ),
         }],
-        lastOrdinal: 4,
+        lastOrdinal: 5,
         pageOldestOrdinal: 1,
-        pageNewestOrdinal: 4,
+        pageNewestOrdinal: 5,
         hasMore: false,
       },
     }));
 
     expect(value).toContain(
-      `[1] ${TIMESTAMP} transcript-notice (CLI notice) — Deployment\nDeployment window opened.`,
+      `[1] ${TIMESTAMP} cli-row (CLI notice) — Deployment\nDeployment window opened.`,
     );
-    expect(value).toContain(`[2] ${TIMESTAMP} error (CLI error)\nValidation failed.`);
+    expect(value).toContain(`[2] ${TIMESTAMP} cli-row (CLI error)\nValidation failed.`);
     expect(value).toContain(
-      `[3] ${TIMESTAMP} transcript-notice (CLI info) — Consultation status\nConsultation complete.`,
+      `[3] ${TIMESTAMP} cli-row (CLI info) — Consultation status\nConsultation complete.`,
     );
     expect(value).toContain(`[4] ${TIMESTAMP} error\nProvider failed.`);
     expect(value).not.toContain(`[4] ${TIMESTAMP} error (CLI error)`);
+    expect(value).toContain(`[5] ${TIMESTAMP} cli-row (CLI custom) — Custom status\n**Custom.**`);
   });
 
   test('labels presented user messages without printing presentation JSON', () => {

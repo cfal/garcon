@@ -9,7 +9,8 @@ const command: AddRowCliCommand = {
   workspace: 'default',
   configDir: '/tmp/config',
   chatId: '1787000000000000',
-  type: 'info',
+  presentation: { style: 'info' },
+  format: 'markdown',
   title: 'Consultation status',
   content: '  durable information\n',
   readsContentFromStdin: false,
@@ -55,7 +56,8 @@ describe('runAddRow', () => {
       clientMessageId: 'message-1',
       chatId: command.chatId,
       transcriptViewId: 'view-1',
-      type: 'info',
+      presentation: { style: 'info' },
+      format: 'markdown',
       title: command.title,
       content: command.content,
     });
@@ -65,6 +67,7 @@ describe('runAddRow', () => {
         'transcript view id: view-1',
         'ordinal: 9',
         'type: info',
+        'format: markdown',
         'status: appended',
       ].join('\n'),
     ]);

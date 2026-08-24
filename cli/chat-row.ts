@@ -44,7 +44,8 @@ export async function runAddRow(
     clientMessageId,
     chatId: target.chatId,
     transcriptViewId: target.transcriptViewId,
-    type: command.type,
+    presentation: command.presentation,
+    format: command.format,
     ...(command.title === undefined ? {} : { title: command.title }),
     content: validatedContent,
   }, signal);
@@ -52,7 +53,8 @@ export async function runAddRow(
     `chat id: ${response.chatId}`,
     `transcript view id: ${response.transcriptViewId}`,
     `ordinal: ${response.ordinal}`,
-    `type: ${response.type}`,
+    `type: ${response.presentation.style}`,
+    `format: ${response.format}`,
     `status: ${response.status}`,
   ].join('\n'));
 }

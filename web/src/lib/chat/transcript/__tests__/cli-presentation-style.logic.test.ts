@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
-	cliPresentationCardVariant,
-	cliPresentationHeaderClass,
 	cliPresentationLabel,
+	cliPresentationSurfaceClass,
 } from '../cli-presentation-style';
+import { chatEventCardSurfaceClass } from '../chat-event-card-style';
 
 describe('CLI presentation styles', () => {
 	it('maps every style to a distinct label and semantic treatment', () => {
 		expect(cliPresentationLabel('info')).toBe('CLI info');
-		expect(cliPresentationCardVariant('info')).toBe('neutral');
-		expect(cliPresentationHeaderClass('info')).toContain('status-neutral');
+		expect(cliPresentationSurfaceClass('info')).toBe(chatEventCardSurfaceClass('neutral'));
 
 		expect(cliPresentationLabel('notice')).toBe('CLI notice');
-		expect(cliPresentationCardVariant('notice')).toBe('info');
-		expect(cliPresentationHeaderClass('notice')).toContain('status-info');
+		expect(cliPresentationSurfaceClass('notice')).toBe(chatEventCardSurfaceClass('info'));
 
 		expect(cliPresentationLabel('error')).toBe('CLI error');
-		expect(cliPresentationCardVariant('error')).toBe('error');
-		expect(cliPresentationHeaderClass('error')).toContain('status-error');
+		expect(cliPresentationSurfaceClass('error')).toBe(chatEventCardSurfaceClass('error'));
+
+		expect(cliPresentationLabel('custom')).toBe('CLI custom');
+		expect(cliPresentationSurfaceClass('custom')).toBe('cli-presentation-custom');
 	});
 });

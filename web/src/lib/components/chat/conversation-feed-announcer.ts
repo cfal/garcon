@@ -1,5 +1,6 @@
 import {
 	AssistantMessage,
+	CliRowMessage,
 	ExternalToolUseMessage,
 	McpToolUseMessage,
 	PermissionRequestMessage,
@@ -133,6 +134,12 @@ export function announcementForAppendedRow(
 		const label = cliPresentationLabel(message.presentation.style);
 		const title = message.presentation.title ? `: ${message.presentation.title}` : '';
 		const body = plainAnnouncementText(String(message.content ?? ''));
+		return `${label}${title}.${body ? ` ${body}` : ''}`;
+	}
+	if (message instanceof CliRowMessage) {
+		const label = cliPresentationLabel(message.presentation.style);
+		const title = message.title ? `: ${message.title}` : '';
+		const body = plainAnnouncementText(message.content);
 		return `${label}${title}.${body ? ` ${body}` : ''}`;
 	}
 	if (message instanceof AssistantMessage || message instanceof UserMessage) {

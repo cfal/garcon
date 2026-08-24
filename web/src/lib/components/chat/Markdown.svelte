@@ -33,7 +33,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
-	type MarkdownVariant = 'assistant' | 'user' | 'thinking';
+	type MarkdownVariant = 'assistant' | 'user' | 'user-presented' | 'thinking';
 
 	export interface MarkdownLinkNavigateEvent {
 		rawHref: string;
@@ -75,6 +75,13 @@ Supports visual variants for assistant, user, and thinking contexts.
 			blockquote:
 				'my-2 border-l-4 border-primary-foreground/40 pl-4 italic text-primary-foreground/90',
 		},
+		'user-presented': {
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-inherit prose-headings:text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit',
+			link: 'text-inherit underline opacity-90 hover:opacity-100',
+			code: 'rounded-md border border-current/30 bg-current/10 px-1.5 py-0.5 font-mono text-[0.9em] text-inherit',
+			blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',
+		},
 		thinking: {
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
@@ -99,7 +106,9 @@ Supports visual variants for assistant, user, and thinking contexts.
 
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
-	const markdownOptions = $derived(variant === 'user' ? { breaks: true } : undefined);
+	const markdownOptions = $derived(
+		variant === 'user' || variant === 'user-presented' ? { breaks: true } : undefined,
+	);
 
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();

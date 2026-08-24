@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  CliRowMessage,
   ErrorMessage,
   parseChatMessage,
   TranscriptNoticeMessage,
@@ -23,8 +24,8 @@ describe('shared transcript chat rows', () => {
       content: 'Legacy shared error.',
       detail: { type: 'cli-row' },
     });
-    expect(legacyNotice).toBeInstanceOf(TranscriptNoticeMessage);
-    expect(legacyError).toBeInstanceOf(ErrorMessage);
+    expect(legacyNotice).toBeInstanceOf(CliRowMessage);
+    expect(legacyError).toBeInstanceOf(CliRowMessage);
     if (!legacyNotice || !legacyError) throw new Error('Legacy CLI rows did not parse.');
 
     const rendered = renderSharedChatText({
@@ -36,19 +37,31 @@ describe('shared transcript chat rows', () => {
       projectPath: '/synthetic/workspace',
       sharedAt: AT,
       messages: [
-        new TranscriptNoticeMessage(
+        new CliRowMessage(
           AT,
           'Shared information.',
-          { type: 'cli-row', style: 'info' },
+          { style: 'info' },
+          'markdown',
           'Consultation status',
         ),
-        new TranscriptNoticeMessage(
+        new CliRowMessage(
           AT,
           'Shared notice.\nSecond line.',
-          { type: 'cli-row', style: 'notice' },
+          { style: 'notice' },
+          'plain',
           'Deployment',
         ),
-        new ErrorMessage(AT, 'Shared error.', { type: 'cli-row', style: 'error' }),
+        new CliRowMessage(AT, 'Shared error.', { style: 'error' }, 'plain'),
+        new CliRowMessage(
+          AT,
+          '**Shared custom.**',
+          {
+            style: 'custom',
+            customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+          },
+          'markdown',
+          'Custom deployment',
+        ),
         legacyNotice,
         legacyError,
         new TranscriptNoticeMessage(AT, 'Internal notice.'),
@@ -59,6 +72,7 @@ describe('shared transcript chat rows', () => {
     expect(rendered).toContain(`[CLI Info — Consultation status] ${AT}\nShared information.`);
     expect(rendered).toContain(`[CLI Notice — Deployment] ${AT}\nShared notice.\nSecond line.`);
     expect(rendered).toContain(`[CLI Error] ${AT}\nShared error.`);
+    expect(rendered).toContain(`[CLI Custom — Custom deployment] ${AT}\n**Shared custom.**`);
     expect(rendered).toContain(`[CLI Notice] ${AT}\nLegacy shared notice.`);
     expect(rendered).toContain(`[CLI Error] ${AT}\nLegacy shared error.`);
     expect(rendered).toContain(`[Notice] ${AT}\nInternal notice.`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseChatMessage } from '../chat-types.ts';
+import { CliRowMessage, ErrorMessage, parseChatMessage } from '../chat-types.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
 
@@ -24,7 +24,7 @@ describe('transcript notice contracts', () => {
     expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
   });
 
-  it('sanitizes CLI provenance on every row style', () => {
+  it('upgrades legacy CLI provenance into explicit row messages', () => {
     for (const [type, style] of [
       ['transcript-notice', 'info'],
       ['transcript-notice', 'notice'],
@@ -43,46 +43,47 @@ describe('transcript notice contracts', () => {
         },
       });
 
+      expect(parsed).toBeInstanceOf(CliRowMessage);
       expect(JSON.parse(JSON.stringify(parsed))).toEqual({
-        type,
+        type: 'cli-row',
         timestamp: AT,
         content: 'Synthetic CLI row.',
+        presentation: { style },
+        format: 'plain',
         title: 'Deployment',
-        detail: { type: 'cli-row', style },
       });
     }
   });
 
-  it('round-trips plain titled notices and errors without provenance detail', () => {
-    for (const type of ['transcript-notice', 'error']) {
+  it('round-trips explicit preset and custom CLI rows', () => {
+    for (const presentation of [
+      { style: 'info' },
+      { style: 'notice' },
+      { style: 'error' },
+      {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      },
+    ]) {
       const message = {
-        type,
+        type: 'cli-row',
         timestamp: AT,
-        content: 'Model provider retrying: quota exhausted.',
-        title: 'Provider retry',
+        content: '**Deployment complete.**',
+        presentation,
+        format: 'markdown',
+        title: 'Deployment',
       };
-
-      const parsed = parseChatMessage(message);
-
-      expect(parsed?.title).toBe('Provider retry');
-      expect(parsed?.detail).toBeUndefined();
-      expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
-
-      expect(parseChatMessage({
-        type,
-        timestamp: AT,
-        content: 'Untitled message.',
-      })?.title).toBeUndefined();
+      expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
     }
   });
 
-  it('restores legacy CLI row styles and drops malformed titles', () => {
+  it('restores legacy defaults and safely normalizes malformed durable presentation', () => {
     expect(parseChatMessage({
       type: 'error',
       timestamp: AT,
       content: 'Untitled error.',
       detail: { type: 'cli-row' },
-    })?.detail).toEqual({ type: 'cli-row', style: 'error' });
+    })?.presentation).toEqual({ style: 'error' });
 
     const strayDetailTitle = parseChatMessage({
       type: 'transcript-notice',
@@ -90,7 +91,7 @@ describe('transcript notice contracts', () => {
       content: 'Stray detail title.',
       detail: { type: 'cli-row', title: 'Deployment' },
     });
-    expect(strayDetailTitle?.detail).toEqual({ type: 'cli-row', style: 'notice' });
+    expect(strayDetailTitle?.presentation).toEqual({ style: 'notice' });
     expect(strayDetailTitle?.title).toBeUndefined();
 
     expect(parseChatMessage({
@@ -98,25 +99,23 @@ describe('transcript notice contracts', () => {
       timestamp: AT,
       content: 'Mismatched error.',
       detail: { type: 'cli-row', style: 'notice' },
-    })).toBeNull();
+    })?.presentation).toEqual({ style: 'notice' });
     expect(parseChatMessage({
       type: 'transcript-notice',
       timestamp: AT,
       content: 'Mismatched notice.',
       detail: { type: 'cli-row', style: 'error' },
-    })).toBeNull();
+    })?.presentation).toEqual({ style: 'error' });
 
     expect(parseChatMessage({
-      type: 'error',
+      type: 'cli-row',
       timestamp: AT,
-      content: 'Blank title.',
-      title: '',
-    })?.title).toBeUndefined();
-    expect(parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Non-string title.',
-      title: 42,
-    })?.title).toBeUndefined();
+      content: 'Malformed custom.',
+      presentation: { style: 'custom', customStyle: { lightAccent: 'red' } },
+      format: 'html',
+    })).toEqual(new CliRowMessage(AT, 'Malformed custom.', { style: 'notice' }, 'plain'));
+
+    expect(parseChatMessage({ type: 'error', timestamp: AT, content: 'Provider failed.' }))
+      .toEqual(new ErrorMessage(AT, 'Provider failed.'));
   });
 });

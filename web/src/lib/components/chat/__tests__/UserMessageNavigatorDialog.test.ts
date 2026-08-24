@@ -1,8 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserMessageNavigatorItem } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import UserMessageNavigatorDialogTestHost from './UserMessageNavigatorDialogTestHost.svelte';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 function item(id: string, content: string): UserMessageNavigatorItem {
 	return {
@@ -57,10 +60,14 @@ describe('UserMessageNavigatorDialog', () => {
 		});
 
 		const row = document.querySelector<HTMLButtonElement>('[data-user-message-navigator-row]');
-		const header = row?.querySelector<HTMLElement>('[data-user-message-presentation="notice"]');
-		expect(header?.tagName).toBe('SPAN');
-		expect(header?.classList.contains('bg-status-info')).toBe(true);
-		expect(header?.textContent).toContain('Operator note');
+		expect(row?.dataset.userMessagePresentation).toBe('notice');
+		expect(row?.classList.contains('bg-status-info/20')).toBe(true);
+		expect(row?.classList.contains('hover:bg-accent')).toBe(false);
+		expect(appCss).toMatch(
+			/\[data-user-message-navigator-row\]\[data-user-message-presentation\]:hover:not\(:focus-visible\)/,
+		);
+		expect(row?.textContent).toContain('Operator note');
+		expect(screen.getByText('CLI notice').className).toContain('sr-only');
 	});
 
 	it('renders the attachment fallback and selects the exact stable item', async () => {

@@ -92,6 +92,8 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
     case 'error':
     case 'compaction':
       return [{ kind: 'provider-row', at, message, providerMeta: null }];
+    case 'cli-row':
+      return [];
     case 'agent-switch':
       return [{
         kind: 'agent-switch',

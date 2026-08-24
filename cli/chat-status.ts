@@ -1,6 +1,6 @@
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type { TranscriptMessage } from '@garcon/common/chat-view';
-import { isCliRowPresentationDetail } from '@garcon/common/chat-types';
+import { CliRowMessage } from '@garcon/common/chat-types';
 import type { StatusCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
@@ -97,8 +97,6 @@ export function formatChatStatus(snapshot: ChatSnapshotResponse): string {
 
 function formatMessage(entry: TranscriptMessage): string {
   const { type, timestamp, ...payload } = entry.message;
-  const messageDetail = 'detail' in entry.message ? entry.message.detail : undefined;
-  const cliDetail = isCliRowPresentationDetail(messageDetail) ? messageDetail : null;
   const images = 'images' in payload && Array.isArray(payload.images)
     ? payload.images
     : undefined;
@@ -122,7 +120,9 @@ function formatMessage(entry: TranscriptMessage): string {
   const title = titleValue ? ` — ${titleValue}` : '';
   const cliLabel = userPresentation
     ? ` (CLI ${userPresentation.style})`
-    : cliDetail ? ` (CLI ${cliDetail.style})` : '';
+    : entry.message instanceof CliRowMessage
+      ? ` (CLI ${entry.message.presentation.style})`
+      : '';
   return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
     + truncateStatusText(content);
 }

@@ -117,7 +117,8 @@ function addChatRowResponse(init?: RequestInit): Response {
     chatId: body.chatId,
     transcriptViewId: body.transcriptViewId,
     ordinal: 7,
-    type: body.type,
+    presentation: body.presentation,
+    format: body.format,
     status: 'appended',
     timestamp: '2026-08-18T12:00:00.000Z',
   });
@@ -411,7 +412,8 @@ describe('main', () => {
     expect(requests[1]!.body).toMatchObject({
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
-      type: 'error',
+      presentation: { style: 'error' },
+      format: 'plain',
       title: 'Release validation',
       content: 'Synthetic failure detail.',
     });
@@ -421,6 +423,7 @@ describe('main', () => {
         'transcript view id: view-1',
         'ordinal: 7',
         'type: error',
+        'format: plain',
         'status: appended',
       ].join('\n'),
     ]);

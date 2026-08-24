@@ -19,6 +19,7 @@ import {
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import type { ChatListResponse } from '@garcon/common/chat-list';
+import { stableJsonStringify } from '@garcon/common/json';
 import {
   parseChatSnapshotResponse,
   type ChatSnapshotResponse,
@@ -355,7 +356,8 @@ export class GarconClient {
         && response.clientMessageId === submitted.clientMessageId
         && response.chatId === submitted.chatId
         && response.transcriptViewId === submitted.transcriptViewId
-        && response.type === submitted.type
+        && stableJsonStringify(response.presentation) === stableJsonStringify(submitted.presentation)
+        && response.format === submitted.format
       ),
       ambiguityDescription: `the add-row command for chat ${request.chatId}`,
     }, signal);

@@ -86,7 +86,7 @@ describe('ConversationMessage actions', () => {
 		expect(await screen.findByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
 	});
 
-	it('renders CLI presentation inside the ordinary user message bubble', () => {
+	it('styles the complete presented user message without changing ordinary bubbles', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage(
 				'2026-06-27T00:00:00.000Z',
@@ -97,15 +97,45 @@ describe('ConversationMessage actions', () => {
 			),
 		});
 
-		const header = container.querySelector('[data-user-message-presentation="info"]');
-		expect(header?.textContent).toContain('CLI info');
-		expect(header?.textContent).toContain('Deployment context');
-		expect(header?.classList.contains('bg-status-neutral')).toBe(true);
-		expect(header?.classList.contains('text-status-neutral-foreground')).toBe(true);
-		expect(container.querySelector('.user-message-context-target')?.contains(header)).toBe(true);
+		const bubble = container.querySelector<HTMLElement>(
+			'[data-user-message-presentation="info"]',
+		);
+		expect(bubble?.textContent).toContain('CLI info');
+		expect(bubble?.textContent).toContain('Deployment context');
+		expect(bubble?.classList.contains('bg-status-neutral/25')).toBe(true);
+		expect(bubble?.classList.contains('text-status-neutral-foreground')).toBe(true);
+		expect(bubble?.className).not.toContain('data-[state=open]:bg-user-bubble-selected');
+		expect(screen.getByText('CLI info').className).toContain('sr-only');
 		expect(container.querySelector('.cli-row-message')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();
 		expect(screen.getByText('Body')).toBeTruthy();
+	});
+
+	it('styles a complete custom user message with both theme accents', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(
+				'2026-06-27T00:00:00.000Z',
+				'Custom body',
+				undefined,
+				undefined,
+				{
+					origin: 'cli',
+					style: 'custom',
+					customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+					title: 'Custom context',
+				},
+			),
+		});
+
+		const bubble = container.querySelector<HTMLElement>(
+			'[data-user-message-presentation="custom"]',
+		);
+		expect(bubble?.classList.contains('cli-presentation-custom')).toBe(true);
+		const row = bubble?.closest<HTMLElement>('.user-message-row');
+		expect(row?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
+		expect(row?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
+		expect(bubble?.textContent).toContain('Custom context');
+		expect(bubble?.textContent).toContain('Custom body');
 	});
 
 	it('renders tool rows synchronously without an await placeholder', () => {

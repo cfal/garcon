@@ -69,6 +69,32 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('normalizes custom presentation accents for new and resumed messages', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--color', '7C3AED', 'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#7c3aed' },
+      },
+    });
+    expect(parseCliArgs([
+      '--resume', CHAT_ID,
+      '--message-style', 'custom',
+      '--color', '#0EA5E9,c4b5fd',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'resume',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'custom',
+        customStyle: { lightAccent: '#0ea5e9', darkAccent: '#c4b5fd' },
+      },
+    });
+  });
+
   test('parses live catalog queries without submission arguments', () => {
     expect(parseCliArgs([
       'list', 'models',
@@ -184,13 +210,14 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error>] <prompt>',
+      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error>] <prompt>',
+      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] <prompt>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
+    expect(CLI_HELP).toContain('--color selects custom styling');
   });
 
   test('parses an exact turn wait with connection options and JSON output', () => {
@@ -453,7 +480,11 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error, custom' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'custom', 'message'], message: 'requires --color' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'error', '--color', '7c3aed', 'message'], message: 'preset --message-style' },
+    { args: ['send-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
+    { args: ['send-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with send-async' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
@@ -481,7 +512,8 @@ describe('add-row arguments', () => {
       workspace: 'review',
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
-      type: 'notice',
+      presentation: { style: 'notice' },
+      format: 'plain',
       title: 'Deployment',
       content: '  exact content\n',
       readsContentFromStdin: false,
@@ -490,19 +522,40 @@ describe('add-row arguments', () => {
       'add-row', CHAT_ID, '-', '--type', 'error', '--title', 'Release validation',
     ], ENV)).toMatchObject({
       kind: 'add-row',
-      type: 'error',
+      presentation: { style: 'error' },
+      format: 'plain',
       title: 'Release validation',
       content: null,
       readsContentFromStdin: true,
     });
     expect(parseCliArgs([
       'add-row', CHAT_ID, '--type', 'info', '--', '--starts-with-dash',
-    ], ENV)).toMatchObject({ type: 'info', content: '--starts-with-dash' });
+    ], ENV)).toMatchObject({
+      presentation: { style: 'info' },
+      format: 'plain',
+      content: '--starts-with-dash',
+    });
+    expect(parseCliArgs([
+      'add-row', CHAT_ID,
+      '--color', '7C3AED,c4b5fd',
+      '--markdown',
+      '## Complete',
+    ], ENV)).toMatchObject({
+      presentation: {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      },
+      format: 'markdown',
+      content: '## Complete',
+    });
   });
 
   test.each([
-    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error'],
-    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error'],
+    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error or --type custom or --color'],
+    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error or --type custom'],
+    [['add-row', CHAT_ID, '--type', 'custom', 'content'], 'requires --color'],
+    [['add-row', CHAT_ID, '--type', 'error', '--color', '7c3aed', 'content'], 'preset --type'],
+    [['add-row', CHAT_ID, '--color', '7c3aed,', 'content'], 'six-digit hex colors'],
     [['add-row', CHAT_ID, '--type', 'notice', '--type', 'error', 'content'], 'only once'],
     [['add-row', CHAT_ID, '--type', 'notice'], 'requires a chat ID and one content argument'],
     [['add-row', CHAT_ID, '--type', 'notice', 'one', 'two'], 'requires a chat ID and one content argument'],

@@ -682,6 +682,18 @@
 	--status-error-border: 30 50% 40%;
 }
 
+/* Must stay unlayered so custom accents override card and user-bubble utilities. */
+.cli-presentation-custom {
+	--cli-presentation-accent: var(--cli-presentation-accent-light);
+	border-color: color-mix(in oklab, var(--cli-presentation-accent) 45%, hsl(var(--border)));
+	background-color: color-mix(in oklab, var(--cli-presentation-accent) 12%, hsl(var(--card)));
+	color: hsl(var(--foreground));
+}
+
+.dark .cli-presentation-custom {
+	--cli-presentation-accent: var(--cli-presentation-accent-dark);
+}
+
 @layer components {
 	.transient-backdrop {
 		background-color: hsl(var(--transient-backdrop-color) / var(--transient-backdrop-opacity));
@@ -844,6 +856,15 @@
 
 	.chat-message-context-target[data-state='open'] {
 		border-radius: 0.75rem;
+		box-shadow: inset 0 0 0 9999px
+			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
+	}
+
+	[data-user-message-navigator-row][data-user-message-presentation] {
+		transition: box-shadow 140ms ease;
+	}
+
+	[data-user-message-navigator-row][data-user-message-presentation]:hover:not(:focus-visible) {
 		box-shadow: inset 0 0 0 9999px
 			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
 	}

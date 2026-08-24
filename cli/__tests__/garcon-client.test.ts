@@ -686,7 +686,8 @@ describe('GarconClient add-row', () => {
     clientMessageId: 'row-message',
     chatId: runRequest.chatId,
     transcriptViewId: 'view-1',
-    type: 'error' as const,
+    presentation: { style: 'error' as const },
+    format: 'plain' as const,
     title: 'Release validation',
     content: 'durable error',
   };
@@ -725,6 +726,48 @@ describe('GarconClient add-row', () => {
       status: 'appended',
     });
     expect(seen[1]?.body).toBe(JSON.stringify(addRequest));
+  });
+
+  test('correlates custom presentation independently of object key order', async () => {
+    const customRequest = {
+      ...addRequest,
+      presentation: {
+        style: 'custom' as const,
+        customStyle: {
+          lightAccent: '#7c3aed' as const,
+          darkAccent: '#c4b5fd' as const,
+        },
+      },
+      format: 'markdown' as const,
+      content: '**complete**',
+    };
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: true,
+        commandType: 'chat-row-add',
+        clientRequestId: customRequest.clientRequestId,
+        clientMessageId: customRequest.clientMessageId,
+        chatId: customRequest.chatId,
+        transcriptViewId: customRequest.transcriptViewId,
+        ordinal: 4,
+        presentation: {
+          style: 'custom',
+          customStyle: {
+            darkAccent: '#c4b5fd',
+            lightAccent: '#7c3aed',
+          },
+        },
+        format: customRequest.format,
+        status: 'appended',
+        timestamp: '2026-08-23T00:00:00.000Z',
+      }),
+    });
+
+    await expect(client.addChatRow(customRequest)).resolves.toMatchObject({
+      ordinal: 4,
+      presentation: customRequest.presentation,
+    });
   });
 
   test('retries an ambiguous mutation with the byte-identical request body', async () => {

@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ErrorMessage, TranscriptNoticeMessage } from '$shared/chat-types';
+import { CliRowMessage, ErrorMessage, TranscriptNoticeMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
@@ -33,10 +33,11 @@ describe('ConversationMessage chat rows', () => {
 
 	it('renders CLI info rows with the neutral treatment', () => {
 		render(ConversationMessageHost, {
-			message: new TranscriptNoticeMessage(
+			message: new CliRowMessage(
 				AT,
 				'Synthetic CLI information.',
-				{ type: 'cli-row', style: 'info' },
+				{ style: 'info' },
+				'plain',
 				'Consultation status',
 			),
 		});
@@ -49,10 +50,11 @@ describe('ConversationMessage chat rows', () => {
 
 	it('renders titled and untitled CLI notices with fixed provenance and no disclosure action', () => {
 		const titled = render(ConversationMessageHost, {
-			message: new TranscriptNoticeMessage(
+			message: new CliRowMessage(
 				AT,
 				'Synthetic CLI notice.\nSecond line.',
-				{ type: 'cli-row', style: 'notice' },
+				{ style: 'notice' },
+				'plain',
 				'Deployment',
 			),
 		});
@@ -69,24 +71,38 @@ describe('ConversationMessage chat rows', () => {
 		expect(titled.container.textContent).not.toContain('Error');
 
 		titled.unmount();
-		render(ConversationMessageHost, {
-			message: new TranscriptNoticeMessage(
+		const untitled = render(ConversationMessageHost, {
+			message: new CliRowMessage(
 				AT,
 				'Untitled CLI notice.',
-				{ type: 'cli-row', style: 'notice' },
+				{ style: 'notice' },
+				'plain',
 			),
 		});
 		const untitledCard = screen.getByText('CLI notice').closest('article');
 		expect(untitledCard?.className).toContain('border-status-info-border');
 		expect(untitledCard?.querySelector('button')).toBeNull();
+
+		untitled.unmount();
+		render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'Empty-title CLI notice.',
+				{ style: 'notice' },
+				'plain',
+				'',
+			),
+		});
+		expect(screen.getByText('CLI notice').closest('article')).toBeTruthy();
 	});
 
 	it('renders titled and untitled CLI errors without the provider-error header', () => {
 		const titled = render(ConversationMessageHost, {
-			message: new ErrorMessage(
+			message: new CliRowMessage(
 				AT,
 				'Synthetic CLI error.',
-				{ type: 'cli-row', style: 'error' },
+				{ style: 'error' },
+				'plain',
 				'Release validation',
 			),
 		});
@@ -100,14 +116,37 @@ describe('ConversationMessage chat rows', () => {
 
 		titled.unmount();
 		render(ConversationMessageHost, {
-			message: new ErrorMessage(
+			message: new CliRowMessage(
 				AT,
 				'Untitled CLI error.',
-				{ type: 'cli-row', style: 'error' },
+				{ style: 'error' },
+				'plain',
 			),
 		});
 		const untitledCard = screen.getByText('CLI error').closest('article');
 		expect(untitledCard?.className).toContain('border-status-error-border');
 		expect(screen.queryByText('Error')).toBeNull();
+	});
+
+	it('renders Markdown and custom theme accents without changing preset rows', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'**Deployment complete.**',
+				{
+					style: 'custom',
+					customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+				},
+				'markdown',
+				'Deployment',
+			),
+		});
+
+		const card = screen.getByText('Deployment').closest('article');
+		expect(card?.className).toContain('cli-presentation-custom');
+		expect(screen.getByText('Deployment complete.').tagName).toBe('STRONG');
+		const scope = container.querySelector<HTMLElement>('[style*="--cli-presentation-accent-light"]');
+		expect(scope?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
+		expect(scope?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
 	});
 });

@@ -7,9 +7,10 @@ import {
 } from './command-request-validation.js';
 import { isRecord } from './json.js';
 import {
-  CLI_PRESENTATION_STYLE_LIST,
-  isCliPresentationStyle,
-  type CliPresentationStyle,
+  isCliPresentation,
+  isCliRowFormat,
+  type CliPresentation,
+  type CliRowFormat,
 } from './cli-presentation.js';
 
 export const CHAT_ROW_CONTENT_MAX_BYTES = 64 * 1024;
@@ -29,7 +30,8 @@ export interface AddChatRowRequest {
   readonly clientMessageId: string;
   readonly chatId: string;
   readonly transcriptViewId: string;
-  readonly type: CliPresentationStyle;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
   readonly title?: string;
   readonly content: string;
 }
@@ -42,7 +44,8 @@ export interface AddChatRowResponse {
   readonly chatId: string;
   readonly transcriptViewId: string;
   readonly ordinal: number;
-  readonly type: CliPresentationStyle;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
   readonly status: 'appended' | 'duplicate';
   readonly timestamp: string;
 }
@@ -87,10 +90,11 @@ export function parseChatRowTitle(value: unknown): string | undefined {
 
 export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
   const body = requestRecord(value);
-  if (!isCliPresentationStyle(body.type)) {
-    throw new CommandRequestValidationError(
-      `type must be one of: ${CLI_PRESENTATION_STYLE_LIST}`,
-    );
+  if (!isCliPresentation(body.presentation)) {
+    throw new CommandRequestValidationError('presentation is invalid');
+  }
+  if (!isCliRowFormat(body.format)) {
+    throw new CommandRequestValidationError('format must be plain or markdown');
   }
   const title = parseChatRowTitle(body.title);
   return {
@@ -98,7 +102,8 @@ export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
-    type: body.type,
+    presentation: body.presentation,
+    format: body.format,
     ...(title === undefined ? {} : { title }),
     content: parseChatRowContent(body.content),
   };
@@ -131,7 +136,8 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     || !isNonEmptyString(value.transcriptViewId)
     || !Number.isSafeInteger(value.ordinal)
     || Number(value.ordinal) < 1
-    || !isCliPresentationStyle(value.type)
+    || !isCliPresentation(value.presentation)
+    || !isCliRowFormat(value.format)
     || (value.status !== 'appended' && value.status !== 'duplicate')
     || !isNonEmptyString(value.timestamp)
   ) {
@@ -145,7 +151,8 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     chatId: value.chatId,
     transcriptViewId: value.transcriptViewId,
     ordinal: Number(value.ordinal),
-    type: value.type,
+    presentation: value.presentation,
+    format: value.format,
     status: value.status,
     timestamp: value.timestamp,
   };

@@ -1,5 +1,6 @@
 import {
   AssistantMessage,
+  CliRowMessage,
   ErrorMessage,
   PermissionCancelledMessage,
   PermissionRequestMessage,
@@ -9,7 +10,6 @@ import {
   ToolResultMessage,
   TranscriptNoticeMessage,
   UserMessage,
-  isCliRowPresentationDetail,
   parseChatMessage,
   type ChatMessage,
   type TodoItem,
@@ -217,22 +217,23 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
       content: stringifyStructured(message.content),
     };
   }
-  if (message instanceof ErrorMessage) {
-    const base = isCliRowPresentationDetail(message.detail)
-      ? `CLI ${cliPresentationName(message.detail.style)}`
-      : 'Error';
+  if (message instanceof CliRowMessage) {
     return {
-      role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      role: `CLI ${cliPresentationName(message.presentation.style)}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      timestamp: message.timestamp,
+      content: message.content || '',
+    };
+  }
+  if (message instanceof ErrorMessage) {
+    return {
+      role: 'Error',
       timestamp: message.timestamp,
       content: message.content || '',
     };
   }
   if (message instanceof TranscriptNoticeMessage) {
-    const base = isCliRowPresentationDetail(message.detail)
-      ? `CLI ${cliPresentationName(message.detail.style)}`
-      : 'Notice';
     return {
-      role: `${base}${message.title === undefined ? '' : ` — ${message.title}`}`,
+      role: `Notice${message.title === undefined ? '' : ` — ${message.title}`}`,
       timestamp: message.timestamp,
       content: message.content || '',
     };

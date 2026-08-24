@@ -158,6 +158,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'thinking':
       return joinBounded(MAX_BODY_CHARS, [message.content], budget);
     case 'error':
+    case 'cli-row':
       return '';
     case 'compaction':
       return joinBounded(MAX_BODY_CHARS, [message.summary], budget);
