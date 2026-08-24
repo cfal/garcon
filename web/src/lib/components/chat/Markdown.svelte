@@ -12,13 +12,17 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	} from '@humanspeak/svelte-markdown';
 	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
 	import MathRenderer from './MathRenderer.svelte';
+	import { createLiteralHtmlMarkdownExtension } from './markdown-html-policy';
 
 	interface MathRenderers extends Renderers {
 		inlineKatex: RendererComponent;
 		blockKatex: RendererComponent;
 	}
 
-	const markdownExtensions = [markedKatex({ singleDollarInline: true })];
+	const markdownExtensions = [
+		markedKatex({ singleDollarInline: true }),
+		createLiteralHtmlMarkdownExtension(),
+	];
 	const safeRenderers: Partial<MathRenderers> = {
 		...defaultRenderers,
 		html: buildUnsupportedHTML(),

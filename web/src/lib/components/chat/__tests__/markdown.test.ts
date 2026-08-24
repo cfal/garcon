@@ -99,6 +99,92 @@ describe('Markdown', () => {
 		expect(lineBreak).toBeFalsy();
 	});
 
+	describe('literal HTML policy', () => {
+		it.each([
+			['Promise<void>', 'Promise<void>'],
+			['Vec<Vec<u8>>', 'Vec<Vec<u8>>'],
+			['# Result<T>', 'Result<T>'],
+			['- Promise<void>', 'Promise<void>'],
+			['> Promise<void>', 'Promise<void>'],
+			['[Promise<void>](https://example.com)', 'Promise<void>'],
+			['| Type |\n| --- |\n| Promise<void> |', 'Promise<void>'],
+		])('preserves angle-bracket types in %s', (source, expectedText) => {
+			const { container } = render(Markdown, { source });
+
+			expect(container.textContent).toContain(expectedText);
+			expect(container.querySelector('void, t, u8')).toBeNull();
+		});
+
+		it.each(['assistant', 'user'] as const)(
+			'keeps raw HTML and XML visible and inert for the %s variant',
+			(variant) => {
+				const source = '<config>\n  <item name="primary" />\n</config>';
+				const { container } = render(Markdown, { source, variant });
+
+				expect(container.textContent).toContain('<config>');
+				expect(container.textContent).toContain('<item name="primary" />');
+				expect(container.textContent).toContain('</config>');
+				expect(container.querySelector('config, item')).toBeNull();
+			},
+		);
+
+		it('never creates elements or event attributes from hostile HTML', () => {
+			const source = [
+				'<script>alert(1)</script>',
+				'<img src=x onerror=alert(1)>',
+				'<iframe src="javascript:alert(1)"></iframe>',
+				'<svg onload=alert(1)></svg>',
+				'<!-- c --><img src=x onerror=alert(1)>',
+				'<!-- c --><unknowntag onclick="alert(1)">x</unknowntag>',
+			].join('\n');
+			const { container } = render(Markdown, { source });
+
+			expect(container.textContent).toContain('<script>alert(1)</script>');
+			expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
+			expect(
+				container.querySelectorAll('script, img, iframe, svg, object, embed, unknowntag'),
+			).toHaveLength(0);
+			expect(
+				[...container.querySelectorAll('*')].flatMap((element) =>
+					[...element.attributes].filter((attribute) => attribute.name.startsWith('on')),
+				),
+			).toHaveLength(0);
+		});
+
+		it('keeps HTML comments hidden', () => {
+			const { container } = render(Markdown, {
+				source: '<!-- template guidance -->Visible Promise<void>',
+			});
+
+			expect(container.textContent).toContain('Visible Promise<void>');
+			expect(container.textContent).not.toContain('template guidance');
+			expect(container.querySelector('void')).toBeNull();
+		});
+
+		it('renders unterminated HTML comments as literal text', () => {
+			const { container } = render(Markdown, {
+				source: '<!-- template guidance\n\nVisible Promise<void>',
+			});
+
+			expect(container.textContent).toContain('<!-- template guidance');
+			expect(container.textContent).toContain('Visible Promise<void>');
+			expect(container.querySelector('void')).toBeNull();
+		});
+
+		it('preserves code and autolink behavior', () => {
+			const { container } = render(Markdown, {
+				source:
+					'Visit <https://example.com> or <user@example.com>. Use `Promise<void>`.\n\n```ts\nPromise<void>\n```',
+			});
+
+			expect(container.querySelectorAll('a')).toHaveLength(2);
+			expect(container.querySelector('code')?.textContent).toBe('Promise<void>');
+			expect(container.querySelector('.markdown-code-block code')?.textContent).toBe(
+				'Promise<void>',
+			);
+		});
+	});
+
 	describe('math rendering', () => {
 		it('renders both supported inline delimiter forms', async () => {
 			const { container } = render(Markdown, {
