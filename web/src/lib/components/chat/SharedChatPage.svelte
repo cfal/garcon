@@ -273,7 +273,7 @@
 										<div class={userPresentation ? 'mt-1 text-sm' : 'text-sm'}>
 											<Markdown
 												source={message.content}
-												variant={userPresentation ? 'user-presented' : 'user'}
+												variant={userPresentation ? 'presented' : 'user'}
 											/>
 										</div>
 										{#if message.images && message.images.length > 0}

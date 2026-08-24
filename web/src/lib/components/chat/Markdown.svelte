@@ -1,7 +1,7 @@
 <!--
 @component
 Renders markdown content with syntax-highlighted code blocks.
-Supports visual variants for assistant, user, and thinking contexts.
+Supports visual variants for assistant, user, presented, and thinking contexts.
 -->
 <script module lang="ts">
 	import {
@@ -33,7 +33,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
-	type MarkdownVariant = 'assistant' | 'user' | 'user-presented' | 'thinking';
+	type MarkdownVariant = 'assistant' | 'user' | 'presented' | 'thinking';
 
 	export interface MarkdownLinkNavigateEvent {
 		rawHref: string;
@@ -75,7 +75,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 			blockquote:
 				'my-2 border-l-4 border-primary-foreground/40 pl-4 italic text-primary-foreground/90',
 		},
-		'user-presented': {
+		presented: {
 			container:
 				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-inherit prose-headings:text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit',
 			link: 'text-inherit underline opacity-90 hover:opacity-100',
@@ -107,7 +107,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
 	const markdownOptions = $derived(
-		variant === 'user' || variant === 'user-presented' ? { breaks: true } : undefined,
+		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
 	);
 
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {

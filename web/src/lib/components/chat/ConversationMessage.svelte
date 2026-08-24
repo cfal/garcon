@@ -514,7 +514,7 @@
 							<div class={userMessagePresentation ? 'mt-1 text-sm' : 'text-sm'}>
 								<Markdown
 									source={asUser.content}
-									variant={userMessagePresentation ? 'user-presented' : 'user'}
+									variant={userMessagePresentation ? 'presented' : 'user'}
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
 									{acquireTransientActivity}

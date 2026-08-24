@@ -149,4 +149,22 @@ describe('ConversationMessage chat rows', () => {
 		expect(scope?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
 		expect(scope?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
 	});
+
+	it('renders preset Markdown with inherited color and preserved line breaks', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new CliRowMessage(
+				AT,
+				'**Deployment complete.**\nVerification passed.',
+				{ style: 'notice' },
+				'markdown',
+				'Deployment',
+			),
+		});
+
+		const markdown = container.querySelector('.markdown-body');
+		expect(markdown?.className).toContain('text-inherit');
+		expect(markdown?.className).not.toContain('text-foreground');
+		expect(screen.getByText('Deployment complete.').tagName).toBe('STRONG');
+		expect(markdown?.querySelector('br')).toBeTruthy();
+	});
 });

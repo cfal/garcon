@@ -146,11 +146,12 @@ describe('SharedChatPage', () => {
 		const chatRows = response([], 0, 6, { nextBefore: null });
 		chatRows.snapshot.messages = [
 			{
-				type: 'transcript-notice',
+				type: 'cli-row',
 				timestamp: '2025-01-02T03:04:59.000Z',
 				content: 'Shared information.',
 				title: 'Consultation status',
-				detail: { type: 'cli-row', style: 'info' },
+				presentation: { style: 'info' },
+				format: 'plain',
 			},
 			{
 				type: 'transcript-notice',

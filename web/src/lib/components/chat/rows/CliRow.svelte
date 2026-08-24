@@ -47,7 +47,7 @@
 				<div class="mt-1 text-sm">
 					<Markdown
 						source={message.content}
-						variant="assistant"
+						variant="presented"
 						fileLinkBasePath={fileLinkBasePath ?? undefined}
 						{onLinkNavigate}
 						{acquireTransientActivity}
