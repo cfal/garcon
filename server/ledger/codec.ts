@@ -6,6 +6,11 @@ import {
 } from '../../common/chat-types.js';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import { isRecord, stableJsonStringify, type JsonObject } from '../../common/json.js';
+import {
+  coerceDurableCliBodyDisclosure,
+  coerceDurableCliPresentation,
+  isCliRowFormat,
+} from '../../common/cli-presentation.js';
 import { parseNativeSeedReceipt } from '../../common/transcript-seed.js';
 import type {
   AgentEstablishedSession,
@@ -146,7 +151,9 @@ export function cliRowFingerprint(
   detail: LedgerCliRowNoticeDetail,
 ): string {
   return stableJsonStringify({
-    type: detail.presentation,
+    presentation: detail.presentation,
+    format: detail.format,
+    disclosure: detail.disclosure,
     title: detail.title,
     content: message,
   });
@@ -181,10 +188,24 @@ export function parseLedgerCliRowNoticeDetail(
   detail: JsonObject,
 ): LedgerCliRowNoticeDetail | null {
   if (detail.type !== 'cli-row') return null;
-  if (!isLedgerCliRowNoticeDetail(detail)) {
+  if (
+    typeof detail.clientMessageId !== 'string'
+    || detail.clientMessageId.length === 0
+    || (
+      detail.title !== null
+      && !(typeof detail.title === 'string' && detail.title.length > 0)
+    )
+  ) {
     throw new TypeError('Stored chat row detail is invalid');
   }
-  return detail;
+  return {
+    type: 'cli-row',
+    clientMessageId: detail.clientMessageId,
+    presentation: coerceDurableCliPresentation(detail.presentation),
+    format: isCliRowFormat(detail.format) ? detail.format : 'plain',
+    disclosure: coerceDurableCliBodyDisclosure(detail.disclosure),
+    title: detail.title,
+  };
 }
 
 function parsePayload(value: string): StoredPayload {

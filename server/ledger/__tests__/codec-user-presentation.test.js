@@ -9,13 +9,24 @@ describe('transcript submission presentation fingerprint', () => {
     steer: false,
   });
 
-  it('conflicts on presentation presence, style, and title', () => {
+  it('conflicts on presentation presence, style, custom accents, and title', () => {
     expect(submissionFingerprint(detail(undefined))).not.toBe(submissionFingerprint(detail({
       origin: 'cli', style: 'notice',
     })));
     expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice' })))
       .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'error' })));
+    expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice' })))
+      .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'info' })));
     expect(submissionFingerprint(detail({ origin: 'cli', style: 'notice', title: 'A' })))
       .not.toBe(submissionFingerprint(detail({ origin: 'cli', style: 'notice', title: 'B' })));
+    expect(submissionFingerprint(detail({
+      origin: 'cli',
+      style: 'custom',
+      customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+    }))).not.toBe(submissionFingerprint(detail({
+      origin: 'cli',
+      style: 'custom',
+      customStyle: { lightAccent: '#0ea5e9', darkAccent: '#c4b5fd' },
+    })));
   });
 });

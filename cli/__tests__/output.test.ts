@@ -56,6 +56,17 @@ describe('createCliOutput', () => {
     expect(stderr.chunks).toEqual([]);
   });
 
+  test('writes transcript documents without modifying their bytes', () => {
+    const stdout = writer();
+    const stderr = writer();
+    const output = createCliOutput(stdout, stderr);
+
+    output.document('# Transcript\n\nContent\n');
+
+    expect(stdout.chunks).toEqual(['# Transcript\n\nContent\n']);
+    expect(stderr.chunks).toEqual([]);
+  });
+
   test('prints the stable async delivery block for new-turn and steer', () => {
     const stdout = writer();
     const stderr = writer();

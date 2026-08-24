@@ -262,7 +262,7 @@
 {/snippet}
 
 {#snippet chatSummary()}
-	<div class={cn('relative flex-1 min-w-0', isSingleLineLayout && 'flex items-center gap-1')}>
+	<div class="relative flex-1 min-w-0">
 		<SidebarChatSummary
 			{session}
 			{isSelected}
@@ -270,10 +270,14 @@
 			showTimestamp={true}
 			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
 			chatItemLayout={displayOptions.chatItemLayout}
+			titleBadge={isSingleLineLayout ? stateBadge : undefined}
+			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
-		{@render stateBadge()}
+		{#if !isSingleLineLayout}
+			{@render stateBadge()}
+		{/if}
 	</div>
 {/snippet}
 

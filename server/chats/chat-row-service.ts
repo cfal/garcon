@@ -54,7 +54,9 @@ export class ChatRowService {
         chatId: input.chatId,
         viewId: transcriptViewId(input.transcriptViewId),
         clientMessageId: input.clientMessageId,
-        type: input.type,
+        presentation: input.presentation,
+        format: input.format,
+        disclosure: input.disclosure,
         title: input.title,
         content: input.content,
       }));
@@ -66,7 +68,9 @@ export class ChatRowService {
         chatId: input.chatId,
         transcriptViewId: result.row.viewId,
         ordinal: result.row.ordinal,
-        type: result.row.detail.presentation,
+        presentation: result.row.detail.presentation,
+        format: result.row.detail.format,
+        disclosure: result.row.detail.disclosure,
         status: result.inserted ? 'appended' : 'duplicate',
         timestamp: result.row.at,
       };

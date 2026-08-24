@@ -1,10 +1,37 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 22 integrated design. Supersedes
+Status: revision 24 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 24 makes ordinary export artifacts transcript-first. Both renderers
+retain durable ordinals and the role or typed entry shape, but omit repeated
+per-entry timestamps and semantic categories because ordinal order and the
+heading or XML tag already carry the information needed to follow the chat.
+Markdown uses one compact identity line and, only when rows were removed, one
+omission summary. XML keeps minimal chat identity, omits capture and requested
+exclusion metadata, and includes one compact `<omitted .../>` element with
+positive counts in canonical category order only when rows were removed. The
+revision supersedes revision 23's artifact-level disclosure: the authenticated
+typed response remains the machine contract for the pinned view, canonical
+exclusions, and omitted counts. Transport-only user message identity and
+CLI-row provenance are not rendered; compact CLI-authored presentation labels
+remain because they distinguish operator notices and errors from ordinary
+prompts.
+
+Revision 23 adds an authenticated ordinary user-export surface over the
+authoritative ledger. Export captures one pinned current-view watermark,
+projects every row required by the section 9 Export column, preserves durable
+ordinals, excludes support-only `session` rows and `providerMeta` by
+construction, and renders Markdown or XML on the server. Optional semantic
+filters may remove tool calls, tool results, reasoning, permissions,
+diagnostics, or handoffs; user and assistant content, compaction summaries,
+and carryover-quarantine disclosures form a non-excludable spine. Every
+artifact records its canonical exclusions and omitted counts. The bounded
+`status --messages` operational snapshot and the persisted public Share
+artifact remain separate surfaces.
 
 Revision 22 reconciles presentation-only transcript rows across core,
 integrations, and shared rendering. The already-shipped `add-row` surface
@@ -1278,15 +1305,36 @@ model context, carryover, or export.
   `common/share-types.ts`); the share never reads the ledger again and
   is unaffected by reload or deletion of views. Share revocation policy
   is unchanged.
-- **Export privacy**: ordinary user export includes durable rows but
-  strips storage-private metadata — `providerMeta` and session rows'
-  native refs/paths; a raw support export for explicit diagnostics may
-  include everything. This is boundary hygiene, not protocol. It binds
-  whoever builds an export surface; no such surface exists, and no
-  helper anticipates one. Every read that leaves the server today —
-  transcript, share, preview, search — leaves as `ChatMessage`s, which
-  carry neither, so the rule is satisfied by construction until that
-  changes.
+- **Ordinary user export** captures the current view through one pinned
+  watermark and folds raw ledger rows into export entries. It includes
+  `user-input`, every rendered `provider-row`, `notice`, `agent-switch`,
+  permission lifecycle, and `run-ended`; it excludes support-only `session`
+  rows. Entry objects contain the durable ordinal and projected message or
+  sanitized terminal detail, never `providerMeta`, so storage-private metadata
+  and native refs/paths are unreachable to renderers by construction. A raw
+  support export for explicit diagnostics remains a separate future surface.
+  Markdown and XML are rendered on the server; XML uses explicit user and
+  assistant elements plus typed structural entries. Image bodies and
+  structured data URLs are omitted with visible markers, while authored
+  conversational text is retained. CLI-authored user presentation remains as a
+  compact label or typed attributes; transport identity does not.
+- **Export filtering** is a semantic fold over six closed categories:
+  `tool-calls`, `tool-results`, `reasoning`, `permissions`, `diagnostics`, and
+  `handoffs`. User input, assistant text, compaction summaries, and
+  carryover-quarantine disclosures have the non-excludable `conversation`
+  category. Original ordinals are never renumbered. The typed response records
+  canonical exclusions plus per-category omitted row counts; Markdown carries
+  only a compact summary of nonzero omissions. XML omits requested exclusions
+  but, when at least one count is positive, emits one compact `<omitted .../>`
+  element immediately before `<entries>`; its positive count attributes follow
+  canonical category order and zero counts are absent. Rendered entries omit
+  repeated category and timestamp labels: ordinal order and the Markdown
+  heading or XML tag/type define the flow. Filtering applies to top-level
+  entries, so a retained permission request still contains its requested-tool
+  description.
+  `garcon-cli status --messages` stays a bounded, lossy operational snapshot;
+  Share stays a self-contained public snapshot copied at publish and never
+  enters this export path.
 
 Because future queued inputs are not transcript rows, the ordinary
 conversational fold is already correct for direct-provider context; no
@@ -2388,10 +2436,15 @@ stabilization defects. The current case inventory and gate status live in
     (zero busy frames), with an empty future-turn queue; the pending
     fence blocks admission and publication only, and reads stay
     available.
-17. Export privacy: ordinary user export strips `providerMeta` and
-    session rows' native refs; a raw support export for explicit
-    diagnostics is separate. The rule binds an export surface when one is
-    built; V5 ships none.
+17. Export privacy: authenticated ordinary user export captures a pinned
+    current-view watermark, strips `providerMeta`, excludes session rows and
+    their native refs, and preserves original ordinals. The typed response
+    discloses semantic filtering; Markdown carries only nonzero omission counts,
+    and XML carries them only in an optional compact `<omitted .../>` element
+    whose positive attributes follow canonical category order. XML carries no
+    requested exclusions or zero counts. Entry roles and types replace
+    redundant rendered category and timestamp labels. A raw support export for
+    explicit diagnostics is separate.
 18. The storage engine is SQLite via `bun:sqlite`: one database per chat
     holding the current view and transient staging; `transcript_views`
     is the sole current-view authority under a one-current partial

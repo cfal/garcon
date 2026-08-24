@@ -82,6 +82,46 @@ describe('parseChatSearch', () => {
 		expect(spec.textTokens).toEqual(['hello']);
 	});
 
+	it.each([
+		['is:pinned', 'pinned', false],
+		['is:archived', 'archived', false],
+		['is:normal', 'normal', false],
+		['is:!pinned', 'pinned', true],
+		['is:!archived', 'archived', true],
+		['is:!normal', 'normal', true],
+	] as const)('parses %s', (query, group, negated) => {
+		const spec = parseChatSearch(query);
+		expect(spec.orderGroup).toEqual({ group, negated });
+		expect(spec.textTokens).toEqual([]);
+	});
+
+	it('parses is: case-insensitively', () => {
+		expect(parseChatSearch('IS:!PINNED').orderGroup).toEqual({
+			group: 'pinned',
+			negated: true,
+		});
+	});
+
+	it('keeps the last valid is: filter', () => {
+		expect(parseChatSearch('is:pinned is:!archived').orderGroup).toEqual({
+			group: 'archived',
+			negated: true,
+		});
+	});
+
+	it('ignores invalid is: values without replacing a valid filter', () => {
+		const spec = parseChatSearch('is:pinned is:bogus is: hello');
+		expect(spec.orderGroup).toEqual({ group: 'pinned', negated: false });
+		expect(spec.textTokens).toEqual(['hello']);
+	});
+
+	it('combines is: with independent filters', () => {
+		const spec = parseChatSearch('is:!archived status:unread tag:ops');
+		expect(spec.orderGroup).toEqual({ group: 'archived', negated: true });
+		expect(spec.status).toBe('unread');
+		expect(spec.tags).toEqual([['ops']]);
+	});
+
 	it('parses tag:a|b as an OR group', () => {
 		const spec = parseChatSearch('tag:a|b');
 		expect(spec.tags).toEqual([['a', 'b']]);
@@ -141,6 +181,11 @@ describe('serializeChatFilter', () => {
 		const serialized = serializeChatFilter(spec);
 		const reparsed = parseChatSearch(serialized);
 		expect(reparsed).toEqual(spec);
+	});
+
+	it.each(['is:pinned', 'is:!normal'])('round-trips %s', (query) => {
+		const spec = parseChatSearch(query);
+		expect(parseChatSearch(serializeChatFilter(spec))).toEqual(spec);
 	});
 
 	it('serializes OR groups with pipe syntax', () => {
@@ -292,6 +337,8 @@ describe('matchesChatFilter project', () => {
 		tags: [],
 		isProcessing: false,
 		isUnread: false,
+		isPinned: false,
+		isArchived: false,
 	};
 
 	it('matches when projectPath contains the value', () => {
@@ -335,6 +382,65 @@ describe('matchesChatFilter project', () => {
 	});
 });
 
+describe('matchesChatFilter is: filters', () => {
+	const chats = {
+		pinned: {
+			title: 'Pinned',
+			projectPath: '/workspace/test',
+			agentId: 'claude',
+			model: 'sonnet',
+			tags: [],
+			isProcessing: false,
+			isUnread: false,
+			isPinned: true,
+			isArchived: false,
+		},
+		normal: {
+			title: 'Normal',
+			projectPath: '/workspace/test',
+			agentId: 'claude',
+			model: 'sonnet',
+			tags: [],
+			isProcessing: false,
+			isUnread: false,
+			isPinned: false,
+			isArchived: false,
+		},
+		archived: {
+			title: 'Archived',
+			projectPath: '/workspace/test',
+			agentId: 'claude',
+			model: 'sonnet',
+			tags: [],
+			isProcessing: false,
+			isUnread: false,
+			isPinned: false,
+			isArchived: true,
+		},
+	};
+
+	it.each([
+		['is:pinned', ['pinned']],
+		['is:archived', ['archived']],
+		['is:normal', ['normal']],
+		['is:!pinned', ['normal', 'archived']],
+		['is:!archived', ['pinned', 'normal']],
+		['is:!normal', ['pinned', 'archived']],
+	] as const)('matches the expected groups for %s', (query, expected) => {
+		const spec = parseChatSearch(query);
+		const matches = Object.entries(chats)
+			.filter(([, chat]) => matchesChatFilter(chat, spec))
+			.map(([group]) => group);
+		expect(matches).toEqual(expected);
+	});
+
+	it('uses pinned precedence if target flags overlap', () => {
+		const chat = { ...chats.archived, isPinned: true };
+		expect(matchesChatFilter(chat, parseChatSearch('is:pinned'))).toBe(true);
+		expect(matchesChatFilter(chat, parseChatSearch('is:archived'))).toBe(false);
+	});
+});
+
 describe('matchesChatFilter OR groups', () => {
 	const chat = {
 		title: 'Test',
@@ -344,6 +450,8 @@ describe('matchesChatFilter OR groups', () => {
 		tags: ['ops', 'dev'] as string[],
 		isProcessing: false,
 		isUnread: false,
+		isPinned: false,
+		isArchived: false,
 	};
 
 	it('matches when OR group has any matching tag', () => {

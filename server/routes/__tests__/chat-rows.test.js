@@ -62,7 +62,9 @@ describe('chat row routes', () => {
       chatId: input.chatId,
       transcriptViewId: input.transcriptViewId,
       ordinal: 4,
-      type: input.type,
+      presentation: input.presentation,
+      format: input.format,
+      disclosure: input.disclosure,
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     }));
@@ -73,8 +75,10 @@ describe('chat row routes', () => {
       clientMessageId: 'message-1',
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
-      type: 'notice',
-      title: '  Deployment  ',
+      presentation: { style: 'info' },
+      format: 'markdown',
+      disclosure: 'collapsed',
+      title: '  Consultation status  ',
       content: '  exact content\n',
     };
 
@@ -88,7 +92,7 @@ describe('chat row routes', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(add).toHaveBeenCalledWith({
       ...body,
-      title: 'Deployment',
+      title: 'Consultation status',
     }, expect.any(AbortSignal));
     expect(await response.json()).toEqual({
       success: true,
@@ -98,7 +102,9 @@ describe('chat row routes', () => {
       chatId: CHAT_ID,
       transcriptViewId: 'view-1',
       ordinal: 4,
-      type: 'notice',
+      presentation: { style: 'info' },
+      format: 'markdown',
+      disclosure: 'collapsed',
       status: 'appended',
       timestamp: '2026-08-18T00:00:00.000Z',
     });

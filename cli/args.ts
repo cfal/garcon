@@ -12,8 +12,17 @@ import {
 import { parseChatId, type ChatId } from '@garcon/common/chat-id';
 import {
   parseChatRowTitle,
-  type ChatRowType,
 } from '@garcon/common/chat-row-contracts';
+import {
+  CLI_PRESET_PRESENTATION_STYLES,
+  CLI_PRESENTATION_STYLE_LIST,
+  isCliPresentationStyle,
+  normalizeCliHexColor,
+  type CliCustomStyle,
+  type CliBodyDisclosure,
+  type CliPresentation,
+  type CliRowFormat,
+} from '@garcon/common/cli-presentation';
 import { isCommandCorrelationIdWithinLimit } from '@garcon/common/chat-command-contracts';
 import type { UserMessagePresentation } from '@garcon/common/chat-types';
 import {
@@ -21,17 +30,32 @@ import {
   CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT,
 } from '@garcon/common/chat-snapshot';
 import { normalizeTags, normalizeTagSlug } from '@garcon/common/tags';
+import {
+  TRANSCRIPT_EXPORT_CATEGORIES,
+  TRANSCRIPT_EXPORT_CATEGORY_ALIASES,
+  canonicalTranscriptExportCategories,
+  isTranscriptExportCategory,
+  isTranscriptExportFormat,
+  type TranscriptExportCategory,
+  type TranscriptExportFormat,
+} from '@garcon/common/chat-export-contracts';
 import { argumentError } from './errors.js';
 
+const ADD_ROW_PRESENTATION_REQUIREMENT = [
+  ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
+  '--color',
+].join(' or ');
+
 export const CLI_HELP = `Usage:
-  garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>
-  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>
+  garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] list <resource>
-  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <notice|error>] <message>
+  garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
   garcon-cli [options] stop <chat-id>
-  garcon-cli [connection options] add-row <chat-id> --type <notice|error> [--title <title>] <content>
+  garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
+  garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
@@ -40,10 +64,13 @@ saved execution settings, so it may edit files or run tools. Use - as the
 message to read UTF-8 text from stdin. stop uses the same command as the SPA
 Stop button and interrupts the active turn. If queued messages exist, stop
 pauses the queue; resume it in Garcon before sending a new direct turn.
-add-row appends one durable presentation-only notice or error to chat history.
+add-row appends one durable presentation-only CLI row to chat history.
 It never sends, queues, or exposes the row to the agent.
+export writes the complete untruncated transcript as Markdown or XML. Exclusions
+apply to top-level entries; tool calls embedded in permission entries remain.
 Message presentation is not sent as prompt text. A message title without a style
-uses notice; a style without a title displays CLI notice or CLI error.
+uses notice; a style without a title displays its CLI label. --color selects custom styling.
+--collapsible starts the CLI-authored body collapsed without requiring a style.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
 
@@ -68,19 +95,27 @@ Options:
   --reasoning-effort <mode>    Reasoning effort: ${THINKING_MODE_VALUES.join(', ')}
   --title <title>              Set a new-chat title or add-row heading
   --message-title <title>      Add a heading to this conversational CLI user message
-  --message-style <style>      Style this CLI user message: notice or error
+  --message-style <style>      Style this CLI user message: info, notice, error, or custom
+  --color <light[,dark]>       Custom six-digit hex accent; one value applies to both themes
   --tag <name>                 Add a tag; repeatable. New chats always receive cli
   --resume <chat-id>           Resume an existing chat
   --allow-steer                With send-async, steer the active turn when busy; never queues
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
-  --type <notice|error>        Durable row type for add-row
+  --type <style>               Add-row style: info, notice, error, or custom
+  --markdown                   Render add-row content as Markdown
+  --collapsible                Start this CLI-authored content collapsed
+  --format <markdown|xml>      Transcript export format (default: markdown)
+  --exclude <category>         Export exclusion; repeatable or comma-separated:
+                               ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}; tools excludes calls and results
+  --output <path>              Write export atomically to a file instead of stdout
+  --force                      Replace an existing export output file
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, or wait.
+Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, or export.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -164,7 +199,9 @@ export interface StopCliCommand extends CliConnectionOptions {
 export interface AddRowCliCommand extends CliConnectionOptions {
   readonly kind: 'add-row';
   readonly chatId: ChatId;
-  readonly type: ChatRowType;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly title?: string;
   readonly content: string | null;
   readonly readsContentFromStdin: boolean;
@@ -184,6 +221,15 @@ export interface StatusCliCommand extends CliConnectionOptions {
   json: boolean;
 }
 
+export interface ExportCliCommand extends CliConnectionOptions {
+  readonly kind: 'export';
+  readonly chatId: ChatId;
+  readonly format: TranscriptExportFormat;
+  readonly exclusions: readonly TranscriptExportCategory[];
+  readonly outputPath?: string;
+  readonly force: boolean;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
@@ -193,6 +239,7 @@ export type ParsedCliCommand =
   | AddRowCliCommand
   | StatusCliCommand
   | WaitCliCommand
+  | ExportCliCommand
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -209,10 +256,13 @@ const SINGLE_STRING_OPTIONS = [
   'title',
   'message-title',
   'message-style',
+  'color',
   'resume',
   'turn',
   'messages',
   'type',
+  'format',
+  'output',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -267,8 +317,13 @@ function parseUserMessagePresentationOptions(
   values: Record<string, ParsedOptionValue>,
 ): UserMessagePresentation | undefined {
   const rawStyle = values['message-style'];
-  if (rawStyle !== undefined && rawStyle !== 'notice' && rawStyle !== 'error') {
-    throw argumentError('--message-style must be notice or error');
+  if (rawStyle !== undefined && !isCliPresentationStyle(rawStyle)) {
+    throw argumentError(`--message-style must be one of: ${CLI_PRESENTATION_STYLE_LIST}`);
+  }
+  const customStyle = parseCliColorOption(values.color);
+  const collapsible = values.collapsible === true;
+  if (customStyle && rawStyle !== undefined && rawStyle !== 'custom') {
+    throw argumentError('--color cannot be combined with a preset --message-style');
   }
   let title: string | undefined;
   try {
@@ -278,12 +333,39 @@ function parseUserMessagePresentationOptions(
       cause: error,
     });
   }
-  if (rawStyle === undefined && title === undefined) return undefined;
+  if (rawStyle === undefined && title === undefined && !customStyle && !collapsible) return undefined;
+  if (rawStyle === undefined && title === undefined && !customStyle) {
+    return { origin: 'cli', disclosure: 'collapsed' };
+  }
+  let presentation: CliPresentation;
+  if (customStyle) {
+    presentation = { style: 'custom', customStyle };
+  } else {
+    if (rawStyle === 'custom') {
+      throw argumentError('--message-style custom requires --color');
+    }
+    presentation = { style: rawStyle ?? 'notice' };
+  }
   return {
     origin: 'cli',
-    style: rawStyle === 'error' ? 'error' : 'notice',
+    ...presentation,
     ...(title === undefined ? {} : { title }),
+    ...(collapsible ? { disclosure: 'collapsed' as const } : {}),
   };
+}
+
+function parseCliColorOption(value: ParsedOptionValue): CliCustomStyle | undefined {
+  if (value === undefined) return undefined;
+  const parts = (value as string).split(',');
+  if (parts.length < 1 || parts.length > 2 || parts.some((part) => part.length === 0)) {
+    throw argumentError('--color must be one or two six-digit hex colors separated by a comma');
+  }
+  const lightAccent = normalizeCliHexColor(parts[0]!);
+  const darkAccent = normalizeCliHexColor(parts[1] ?? parts[0]!);
+  if (!lightAccent || !darkAccent) {
+    throw argumentError('--color must be one or two six-digit hex colors separated by a comma');
+  }
+  return { lightAccent, darkAccent };
 }
 
 function isListResource(value: string): value is ListResource {
@@ -321,6 +403,10 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['json', '--json'],
   ['turn', '--turn'],
   ['messages', '--messages'],
+  ['format', '--format'],
+  ['exclude', '--exclude'],
+  ['output', '--output'],
+  ['force', '--force'],
 ] as const;
 
 function rejectControlForbiddenOptions(
@@ -348,6 +434,7 @@ function parseSendAsync(
   rejectControlForbiddenOptions(values, 'send-async');
   if (values.title !== undefined) throw argumentError('--title cannot be used with send-async');
   if (values.type !== undefined) throw argumentError('--type cannot be used with send-async');
+  if (values.markdown !== undefined) throw argumentError('--markdown cannot be used with send-async');
   if (parsed.positionals.length !== 3) {
     throw argumentError('send-async requires a chat ID and one message');
   }
@@ -381,9 +468,15 @@ function parseStop(
     throw argumentError('--allow-steer cannot be used with stop');
   }
   if (values.type !== undefined) throw argumentError('--type cannot be used with stop');
-  if (values['message-title'] !== undefined || values['message-style'] !== undefined) {
+  if (
+    values['message-title'] !== undefined
+    || values['message-style'] !== undefined
+    || values.color !== undefined
+    || values.collapsible !== undefined
+  ) {
     throw argumentError('message presentation cannot be used with stop');
   }
+  if (values.markdown !== undefined) throw argumentError('--markdown cannot be used with stop');
   if (parsed.positionals.length !== 2) {
     throw argumentError('stop requires exactly one chat ID');
   }
@@ -409,8 +502,24 @@ function parseAddRow(
   if (parsed.positionals.length !== 3) {
     throw argumentError('add-row requires a chat ID and one content argument');
   }
-  if (values.type !== 'notice' && values.type !== 'error') {
-    throw argumentError('add-row requires --type notice or --type error');
+  if (values.type !== undefined && !isCliPresentationStyle(values.type)) {
+    throw argumentError(`add-row requires ${ADD_ROW_PRESENTATION_REQUIREMENT}`);
+  }
+  const customStyle = parseCliColorOption(values.color);
+  if (customStyle && values.type !== undefined && values.type !== 'custom') {
+    throw argumentError('--color cannot be combined with a preset --type');
+  }
+  let presentation: CliPresentation;
+  if (customStyle) {
+    presentation = { style: 'custom', customStyle };
+  } else {
+    if (values.type === 'custom') {
+      throw argumentError('--type custom requires --color');
+    }
+    if (values.type === undefined) {
+      throw argumentError(`add-row requires ${ADD_ROW_PRESENTATION_REQUIREMENT}`);
+    }
+    presentation = { style: values.type };
   }
   let title: string | undefined;
   try {
@@ -429,14 +538,16 @@ function parseAddRow(
     kind: 'add-row',
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'add-row'),
-    type: values.type,
+    presentation,
+    format: values.markdown === true ? 'markdown' : 'plain',
+    disclosure: values.collapsible === true ? 'collapsed' : 'expanded',
     ...(title === undefined ? {} : { title }),
     content: readsContentFromStdin ? null : argument,
     readsContentFromStdin,
   };
 }
 
-type ObservationCommandKind = 'status' | 'wait';
+type ObservationCommandKind = 'status' | 'wait' | 'export';
 
 const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
@@ -453,6 +564,9 @@ const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = 
   ['type', '--type'],
   ['message-title', '--message-title'],
   ['message-style', '--message-style'],
+  ['color', '--color'],
+  ['collapsible', '--collapsible'],
+  ['markdown', '--markdown'],
 ] as const;
 
 function rejectObservationMutationOptions(
@@ -470,6 +584,7 @@ function parseWait(
   connection: CliConnectionOptions,
 ): WaitCliCommand {
   rejectObservationMutationOptions(values, 'wait');
+  rejectExportOptions(values, 'wait');
   if (values.messages !== undefined) {
     throw argumentError('--messages cannot be used with wait');
   }
@@ -523,6 +638,7 @@ function parseStatus(
   connection: CliConnectionOptions,
 ): StatusCliCommand {
   rejectObservationMutationOptions(values, 'status');
+  rejectExportOptions(values, 'status');
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
   if (parsed.positionals.length !== 2) {
     throw argumentError('status requires exactly one chat ID');
@@ -540,6 +656,82 @@ function parseStatus(
     messageLimit: parseStatusMessageLimit(values.messages),
     json: values.json === true,
   };
+}
+
+function rejectExportOptions(
+  values: Record<string, ParsedOptionValue>,
+  command: Exclude<ObservationCommandKind, 'export'>,
+): void {
+  for (const [key, flag] of [
+    ['format', '--format'],
+    ['exclude', '--exclude'],
+    ['output', '--output'],
+    ['force', '--force'],
+  ] as const) {
+    if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
+  }
+}
+
+function parseExport(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): ExportCliCommand {
+  rejectObservationMutationOptions(values, 'export');
+  if (values.json !== undefined) throw argumentError('--json cannot be used with export');
+  if (values.turn !== undefined) throw argumentError('--turn cannot be used with export');
+  if (values.messages !== undefined) throw argumentError('--messages cannot be used with export');
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('export requires exactly one chat ID');
+  }
+  let chatId: ChatId;
+  try {
+    chatId = parseChatId(parsed.positionals[1]!);
+  } catch (error) {
+    throw argumentError('export requires a valid Garcon chat ID', { cause: error });
+  }
+  const rawFormat = values.format ?? 'markdown';
+  if (!isTranscriptExportFormat(rawFormat)) {
+    throw argumentError('--format must be markdown or xml');
+  }
+  const outputPath = nonEmptyOption(values.output as string | undefined, '--output');
+  if (outputPath === '-') {
+    throw argumentError('omit --output to write the transcript export to stdout');
+  }
+  const force = values.force === true;
+  if (force && outputPath === undefined) throw argumentError('--force requires --output');
+  return {
+    kind: 'export',
+    ...connection,
+    chatId,
+    format: rawFormat,
+    exclusions: parseExportExclusions(values.exclude),
+    ...(outputPath === undefined ? {} : { outputPath }),
+    force,
+  };
+}
+
+function parseExportExclusions(value: ParsedOptionValue): TranscriptExportCategory[] {
+  if (value === undefined) return [];
+  const selected: TranscriptExportCategory[] = [];
+  for (const option of value as string[]) {
+    for (const rawToken of option.split(',')) {
+      const token = rawToken.trim();
+      if (token.length === 0) throw argumentError('--exclude must not contain an empty category');
+      if (Object.hasOwn(TRANSCRIPT_EXPORT_CATEGORY_ALIASES, token)) {
+        selected.push(...TRANSCRIPT_EXPORT_CATEGORY_ALIASES[
+          token as keyof typeof TRANSCRIPT_EXPORT_CATEGORY_ALIASES
+        ]);
+      } else if (isTranscriptExportCategory(token)) {
+        selected.push(token);
+      } else {
+        throw argumentError(
+          `--exclude must be one of: ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}, tools`,
+        );
+      }
+    }
+  }
+  return canonicalTranscriptExportCategories(selected);
 }
 
 export function parseCliArgs(
@@ -567,12 +759,19 @@ export function parseCliArgs(
         title: { type: 'string' },
         'message-title': { type: 'string' },
         'message-style': { type: 'string' },
+        color: { type: 'string' },
         tag: { type: 'string', multiple: true },
         resume: { type: 'string' },
         turn: { type: 'string' },
         messages: { type: 'string' },
         type: { type: 'string' },
+        format: { type: 'string' },
+        exclude: { type: 'string', multiple: true },
+        output: { type: 'string' },
+        force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
+        markdown: { type: 'boolean' },
+        collapsible: { type: 'boolean' },
         json: { type: 'boolean' },
         help: { type: 'boolean' },
         version: { type: 'boolean' },
@@ -645,6 +844,9 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'status')) {
     return parseStatus(parsed, values, connection);
   }
+  if (startsReservedCommand(tokens, 'export')) {
+    return parseExport(parsed, values, connection);
+  }
 
   if (startsReservedCommand(tokens, 'list')) {
     const resource = parsed.positionals[1] ?? '';
@@ -664,6 +866,13 @@ export function parseCliArgs(
     rejectListOption(values.type, '--type');
     rejectListOption(values['message-title'], '--message-title');
     rejectListOption(values['message-style'], '--message-style');
+    rejectListOption(values.color, '--color');
+    rejectListOption(values.markdown, '--markdown');
+    rejectListOption(values.collapsible, '--collapsible');
+    rejectListOption(values.format, '--format');
+    rejectListOption(values.exclude, '--exclude');
+    rejectListOption(values.output, '--output');
+    rejectListOption(values.force, '--force');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -708,6 +917,11 @@ export function parseCliArgs(
     throw argumentError('--allow-steer can only be used with send-async');
   }
   if (values.type !== undefined) throw argumentError('--type can only be used with add-row');
+  if (values.markdown !== undefined) throw argumentError('--markdown can only be used with add-row');
+  if (values.format !== undefined) throw argumentError('--format can only be used with export');
+  if (values.exclude !== undefined) throw argumentError('--exclude can only be used with export');
+  if (values.output !== undefined) throw argumentError('--output can only be used with export');
+  if (values.force !== undefined) throw argumentError('--force can only be used with export');
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  ErrorMessage,
   parseChatMessage,
   parseUserMessagePresentation,
   UserMessage,
@@ -14,13 +13,50 @@ describe('user message presentation', () => {
       style: 'notice',
       title: '  Operator context  ',
     })).toEqual({ origin: 'cli', style: 'notice', title: 'Operator context' });
+    expect(parseUserMessagePresentation({ origin: 'cli', style: 'info' }))
+      .toEqual({ origin: 'cli', style: 'info' });
+    expect(parseUserMessagePresentation({
+      origin: 'cli',
+      style: 'notice',
+      disclosure: 'expanded',
+    })).toEqual({ origin: 'cli', style: 'notice' });
+    expect(parseUserMessagePresentation({ origin: 'cli', disclosure: 'collapsed' }))
+      .toEqual({ origin: 'cli', disclosure: 'collapsed' });
+    expect(parseUserMessagePresentation({
+      origin: 'cli',
+      style: 'custom',
+      customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+    })).toEqual({
+      origin: 'cli',
+      style: 'custom',
+      customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+    });
     expect(parseUserMessagePresentation(undefined)).toBeUndefined();
     expect(() => parseUserMessagePresentation({ origin: 'spa', style: 'notice' }))
       .toThrow('origin must be cli');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'warning' }))
-      .toThrow('style must be notice or error');
+      .toThrow('presentation is invalid');
+    expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'custom' }))
+      .toThrow('presentation is invalid');
+    expect(() => parseUserMessagePresentation({
+      origin: 'cli',
+      style: 'custom',
+      customStyle: { lightAccent: '#7C3AED', darkAccent: '#c4b5fd' },
+    })).toThrow('presentation is invalid');
     expect(() => parseUserMessagePresentation({ origin: 'cli', style: 'notice', extra: true }))
       .toThrow('unsupported field');
+    expect(() => parseUserMessagePresentation({ origin: 'cli' }))
+      .toThrow('styleless user message presentation must be collapsed');
+    expect(() => parseUserMessagePresentation({
+      origin: 'cli',
+      title: 'Heading',
+      disclosure: 'collapsed',
+    })).toThrow('styleless user message presentation cannot carry a title or custom style');
+    expect(() => parseUserMessagePresentation({
+      origin: 'cli',
+      customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      disclosure: 'collapsed',
+    })).toThrow('styleless user message presentation cannot carry a title or custom style');
   });
 
   it('round-trips presentation as a first-class user message field', () => {
@@ -37,6 +73,20 @@ describe('user message presentation', () => {
       undefined,
       { origin: 'cli', style: 'error', title: 'Blocker' },
     ));
+
+    const styleless = parseChatMessage({
+      type: 'user-message',
+      timestamp: '2026-08-22T00:00:00.000Z',
+      content: 'Collapsed body',
+      presentation: { origin: 'cli', disclosure: 'collapsed' },
+    });
+    expect(styleless).toEqual(new UserMessage(
+      '2026-08-22T00:00:00.000Z',
+      'Collapsed body',
+      undefined,
+      undefined,
+      { origin: 'cli', disclosure: 'collapsed' },
+    ));
   });
 
   it('degrades malformed serialized presentation without throwing', () => {
@@ -47,7 +97,13 @@ describe('user message presentation', () => {
       presentation: { origin: 'cli', style: 'notice', title: 'invalid\ntitle' },
     };
 
-    expect(parseChatMessage(message)).toBeNull();
-    expect(parseTranscriptMessage({ ordinal: 1, message })?.message).toBeInstanceOf(ErrorMessage);
+    expect(parseChatMessage(message)).toEqual(new UserMessage(
+      '2026-08-22T00:00:00.000Z',
+      'Body only',
+    ));
+    expect(parseTranscriptMessage({ ordinal: 1, message })?.message).toEqual(new UserMessage(
+      '2026-08-22T00:00:00.000Z',
+      'Body only',
+    ));
   });
 });

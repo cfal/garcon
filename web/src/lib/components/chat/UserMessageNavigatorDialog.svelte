@@ -4,7 +4,9 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { UserMessageNavigatorDialogController } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
-	import UserMessagePresentationHeader from './UserMessagePresentationHeader.svelte';
+	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
+	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const LOAD_THRESHOLD_PX = 96;
@@ -123,18 +125,32 @@
 			{:else}
 				<div class="divide-y divide-border">
 					{#each controller.items as item (item.id)}
+						{@const customStyle = item.presentation?.style === 'custom' ? item.presentation.customStyle : null}
 						<svelte:boundary {failed}>
 							<button
 								type="button"
-								class="flex min-h-16 w-full flex-col items-stretch justify-center px-5 py-3 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+								class={cn(
+									'flex min-h-16 w-full flex-col items-stretch justify-center px-5 py-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6',
+									!item.presentation?.style && 'hover:bg-accent',
+									item.presentation?.style && cliPresentationSurfaceClass(item.presentation.style),
+								)}
 								onclick={() => void controller.select(item)}
 								data-user-message-navigator-row={item.id}
+								data-user-message-presentation={item.presentation?.style}
+								style:--cli-presentation-accent-light={customStyle?.lightAccent}
+								style:--cli-presentation-accent-dark={customStyle?.darkAccent}
 							>
-								{#if item.presentation}
-									<UserMessagePresentationHeader presentation={item.presentation} />
+								{#if item.presentation?.style}
+									<CliPresentationHeader
+										style={item.presentation.style}
+										title={item.presentation.title}
+									/>
 								{/if}
 								<span
-									class="line-clamp-2 w-full whitespace-pre-wrap break-words text-sm leading-5 text-foreground"
+									class={cn(
+										'line-clamp-2 w-full whitespace-pre-wrap break-words text-sm leading-5',
+										item.presentation?.style ? 'mt-1 text-inherit' : 'text-foreground',
+									)}
 								>
 									{item.content.trim() || m.chat_user_message_navigator_attachment_only()}
 								</span>

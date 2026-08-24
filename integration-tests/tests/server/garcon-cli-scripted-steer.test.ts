@@ -74,7 +74,11 @@ describe('scripted Codex CLI steering', () => {
       const steered = await runCli([
         '--config-dir', fixture.dirs.config,
         '--workspace', WORKSPACE,
-        'send-async', chatId, '--allow-steer', steerPrompt,
+        'send-async', chatId, '--allow-steer',
+        '--message-title', 'Steer context',
+        '--color', '0EA5E9,7dd3fc',
+        '--collapsible',
+        steerPrompt,
       ]);
 
       expect(steered.exitCode).toBe(0);
@@ -96,11 +100,24 @@ describe('scripted Codex CLI steering', () => {
       const steeredRequest = requests.at(-1);
       if (!steeredRequest) throw new Error('Codex did not make a steered model request.');
       expect(steeredRequest.lastUserText).toContain(steerPrompt);
+      expect(JSON.stringify(steeredRequest.body)).not.toContain('Steer context');
+      expect(JSON.stringify(steeredRequest.body)).not.toContain('"presentation"');
       expect(requests.filter((request) => request.lastUserText.includes(steerPrompt)))
         .toHaveLength(1);
 
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual([firstPrompt, steerPrompt]);
+      expect(transcript.messages.find((entry) => (
+        entry.message.type === 'user-message' && entry.message.content === steerPrompt
+      ))?.message).toMatchObject({
+        presentation: {
+          origin: 'cli',
+          style: 'custom',
+          customStyle: { lightAccent: '#0ea5e9', darkAccent: '#7dd3fc' },
+          title: 'Steer context',
+          disclosure: 'collapsed',
+        },
+      });
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,

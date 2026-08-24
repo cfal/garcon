@@ -7,12 +7,12 @@
 		isToolUseMessage,
 		ErrorMessage,
 		TranscriptNoticeMessage,
+		CliRowMessage,
 		PermissionRequestMessage,
 		CompactionMessage,
 		AgentSwitchMessage,
 		ToolResultMessage,
 		AskUserQuestionToolUseMessage,
-		isCliRowPresentationDetail,
 	} from '$shared/chat-types';
 	import type {
 		ChatMessage,
@@ -35,8 +35,10 @@
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import CliRowMessage from './rows/CliRowMessage.svelte';
-	import UserMessagePresentationHeader from './UserMessagePresentationHeader.svelte';
+	import CliRow from './rows/CliRow.svelte';
+	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
+	import CliCollapsibleBody from './rows/CliCollapsibleBody.svelte';
+	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
@@ -154,21 +156,24 @@
 	const cssType = $derived(getCssType(message));
 
 	const asUser = $derived(message instanceof UserMessage ? message : null);
+	const userMessagePresentation = $derived(asUser?.presentation ?? null);
+	const userMessageSurfaceClass = $derived(
+		userMessagePresentation?.style
+			? cliPresentationSurfaceClass(userMessagePresentation.style)
+			: '',
+	);
+	const userMessageCustomStyle = $derived(
+		userMessagePresentation?.style === 'custom'
+			? userMessagePresentation.customStyle
+			: null,
+	);
 	const asAssistant = $derived(message instanceof AssistantMessage ? message : null);
 	const asThinking = $derived(message instanceof ThinkingMessage ? message : null);
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asToolResult = $derived(message instanceof ToolResultMessage ? message : null);
 	const asNotice = $derived(message instanceof TranscriptNoticeMessage ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
-	const asCliRow = $derived.by(() => {
-		const cliMessage = asNotice ?? asError;
-		if (!cliMessage || !isCliRowPresentationDetail(cliMessage.detail)) return null;
-		return {
-			presentation: asError ? ('error' as const) : ('notice' as const),
-			content: cliMessage.content,
-			...(cliMessage.title === undefined ? {} : { title: cliMessage.title }),
-		};
-	});
+	const asCliRow = $derived(message instanceof CliRowMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
 	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
 	const asPermissionRequest = $derived(
@@ -189,7 +194,7 @@
 	});
 	function ignorePermissionDecision(): void {}
 
-	const showNonAssistantHeader = $derived(Boolean(asError && !asCliRow));
+	const showNonAssistantHeader = $derived(Boolean(asError));
 
 	function getFormattedContent(): string {
 		if (message instanceof AssistantMessage || message instanceof ErrorMessage) {
@@ -487,28 +492,49 @@
 			<div
 				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
 				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
+				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
+				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
 			>
 				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
-						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						class={cn(
+							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
+							!userMessagePresentation?.style && 'data-[state=open]:bg-user-bubble-selected',
+							userMessageSurfaceClass,
+						)}
+						data-user-message-presentation={userMessagePresentation?.style}
 					>
 						<div>
-							{#if asUser.presentation}
-								<UserMessagePresentationHeader presentation={asUser.presentation} />
-							{/if}
-							<div class="text-sm">
-								<Markdown
-									source={asUser.content}
-									variant="user"
-									fileLinkBasePath={projectBasePath}
-									onLinkNavigate={handleLinkNavigate}
-									{acquireTransientActivity}
+							{#if userMessagePresentation?.style}
+								<CliPresentationHeader
+									style={userMessagePresentation.style}
+									title={userMessagePresentation.title}
 								/>
-							</div>
+							{/if}
+							<CliCollapsibleBody
+								disclosure={userMessagePresentation?.disclosure}
+								alwaysExpanded={localSettings.alwaysExpandCliMessages}
+								expanded={disclosureState?.open('cli-body', 'body', false)}
+								onExpandedChange={disclosureState
+									? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
+									: undefined}
+							>
+								{#snippet children()}
+									<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+										<Markdown
+											source={asUser.content}
+											variant={userMessagePresentation?.style ? 'presented' : 'user'}
+											fileLinkBasePath={projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+											{acquireTransientActivity}
+										/>
+									</div>
+								{/snippet}
+							</CliCollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (img.name || idx)}
+									{#each asUser.images as img, idx (idx)}
 										{#if isImageAttachment(img)}
 											<img
 												src={img.data}
@@ -707,7 +733,14 @@
 							</ContextMenuContent>
 						</ContextMenu>
 					{:else if asCliRow}
-						<CliRowMessage {...asCliRow} />
+						<CliRow
+							message={asCliRow}
+							fileLinkBasePath={projectBasePath}
+							onLinkNavigate={handleLinkNavigate}
+							{acquireTransientActivity}
+							alwaysExpanded={localSettings.alwaysExpandCliMessages}
+							{disclosureState}
+						/>
 					{:else if asNotice}
 						<ChatEventCard variant="info">
 							{#snippet body()}
@@ -727,15 +760,7 @@
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}
-								{#if asError.title}
-									<div class="min-w-0 truncate text-xs font-medium">{asError.title}</div>
-								{/if}
-								<div
-									class={[
-										'text-sm whitespace-pre-wrap break-words',
-										asError.title && 'mt-1',
-									]}
-								>
+								<div class="text-sm whitespace-pre-wrap break-words">
 									{formattedContent}
 								</div>
 							{/snippet}

@@ -203,6 +203,27 @@ describe('TranscriptLedgerStore', () => {
     expect(() => store.appendChatRow('chat-one', {
       viewId: view.viewId,
       at,
+      message,
+      detail: chatRowDetail('chat-row-1', 'notice', 'Deployment', 'markdown'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message,
+      detail: chatRowDetail('chat-row-1', 'notice', 'Deployment', 'plain', 'collapsed'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
+      message,
+      detail: chatRowDetail('chat-row-1', {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      }, 'Deployment'),
+    })).toThrow(SubmissionConflictError);
+    expect(() => store.appendChatRow('chat-one', {
+      viewId: view.viewId,
+      at,
       message: 'changed',
       detail: chatRowDetail('chat-row-1', 'error', 'Deployment'),
     })).toThrow(SubmissionConflictError);
@@ -216,7 +237,7 @@ describe('TranscriptLedgerStore', () => {
       viewId: view.viewId,
       at,
       message,
-      detail: chatRowDetail('chat-row-2', 'notice'),
+      detail: chatRowDetail('chat-row-2', 'info'),
     });
     expect(second).toMatchObject({ inserted: true, row: { ordinal: 2 } });
     expect(store.currentRows('chat-one')).toHaveLength(2);
@@ -229,7 +250,12 @@ describe('TranscriptLedgerStore', () => {
         kind: 'notice',
         ordinal: 2,
         message,
-        detail: { clientMessageId: 'chat-row-2', title: null },
+        detail: {
+          clientMessageId: 'chat-row-2',
+          presentation: { style: 'info' },
+          format: 'plain',
+          title: null,
+        },
       },
     ]);
   });
@@ -273,6 +299,19 @@ describe('TranscriptLedgerStore', () => {
     expect(decodeLedgerRow(storedRow(valid))).toMatchObject({
       kind: 'notice',
       detail: valid,
+    });
+    expect(decodeLedgerRow(storedRow({
+      type: 'cli-row',
+      clientMessageId: 'chat-row-1',
+      presentation: 'error',
+      title: null,
+    }))).toMatchObject({
+      kind: 'notice',
+      detail: {
+        presentation: { style: 'error' },
+        format: 'plain',
+        disclosure: 'expanded',
+      },
     });
     expect(() => decodeLedgerRow(storedRow({ ...valid, title: undefined })))
       .toThrow('Stored chat row detail is invalid');
@@ -1058,8 +1097,21 @@ function userDraft(clientMessageId, content) {
   return { kind: 'user-input', at, detail: inputDetail(clientMessageId, content) };
 }
 
-function chatRowDetail(clientMessageId, presentation, title = null) {
-  return { type: 'cli-row', clientMessageId, presentation, title };
+function chatRowDetail(
+  clientMessageId,
+  presentation,
+  title = null,
+  format = 'plain',
+  disclosure = 'expanded',
+) {
+  return {
+    type: 'cli-row',
+    clientMessageId,
+    presentation: typeof presentation === 'string' ? { style: presentation } : presentation,
+    format,
+    disclosure,
+    title,
+  };
 }
 
 function provider(content) {

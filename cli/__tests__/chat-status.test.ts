@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import {
 	AssistantMessage,
+	CliRowMessage,
 	ErrorMessage,
 	ToolResultMessage,
 	TranscriptNoticeMessage,
@@ -206,7 +207,7 @@ describe('chat status', () => {
     }));
 
     expect(value).toContain('older messages available');
-    expect(value).toContain('... [truncated; use --json for the complete snapshot]');
+    expect(value).toContain('... [truncated; use export for the complete transcript]');
     expect(value).not.toContain('x'.repeat(4_001));
   });
 
@@ -217,36 +218,63 @@ describe('chat status', () => {
         transcriptViewId: 'view-1',
         messages: [{
           ordinal: 1,
-          message: new TranscriptNoticeMessage(
+          message: new CliRowMessage(
             TIMESTAMP,
             'Deployment window opened.',
-            { type: 'cli-row' },
+            { style: 'notice' },
+            'plain',
             'Deployment',
           ),
         }, {
           ordinal: 2,
-          message: new ErrorMessage(
+          message: new CliRowMessage(
             TIMESTAMP,
             'Validation failed.',
-            { type: 'cli-row' },
+            { style: 'error' },
+            'plain',
           ),
         }, {
           ordinal: 3,
+          message: new CliRowMessage(
+            TIMESTAMP,
+            'Consultation complete.',
+            { style: 'info' },
+            'markdown',
+            'Consultation status',
+          ),
+        }, {
+          ordinal: 4,
           message: new ErrorMessage(TIMESTAMP, 'Provider failed.'),
+        }, {
+          ordinal: 5,
+          message: new CliRowMessage(
+            TIMESTAMP,
+            '**Custom.**',
+            {
+              style: 'custom',
+              customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+            },
+            'markdown',
+            'Custom status',
+          ),
         }],
-        lastOrdinal: 3,
+        lastOrdinal: 5,
         pageOldestOrdinal: 1,
-        pageNewestOrdinal: 3,
+        pageNewestOrdinal: 5,
         hasMore: false,
       },
     }));
 
     expect(value).toContain(
-      `[1] ${TIMESTAMP} transcript-notice (CLI) — Deployment\nDeployment window opened.`,
+      `[1] ${TIMESTAMP} cli-row (CLI notice) — Deployment\nDeployment window opened.`,
     );
-    expect(value).toContain(`[2] ${TIMESTAMP} error (CLI)\nValidation failed.`);
-    expect(value).toContain(`[3] ${TIMESTAMP} error\nProvider failed.`);
-    expect(value).not.toContain(`[3] ${TIMESTAMP} error (CLI)`);
+    expect(value).toContain(`[2] ${TIMESTAMP} cli-row (CLI error)\nValidation failed.`);
+    expect(value).toContain(
+      `[3] ${TIMESTAMP} cli-row (CLI info) — Consultation status\nConsultation complete.`,
+    );
+    expect(value).toContain(`[4] ${TIMESTAMP} error\nProvider failed.`);
+    expect(value).not.toContain(`[4] ${TIMESTAMP} error (CLI error)`);
+    expect(value).toContain(`[5] ${TIMESTAMP} cli-row (CLI custom) — Custom status\n**Custom.**`);
   });
 
   test('labels presented user messages without printing presentation JSON', () => {
@@ -261,7 +289,7 @@ describe('chat status', () => {
             'Do not deploy.',
             undefined,
             undefined,
-            { origin: 'cli', style: 'error', title: 'Blocker' },
+            { origin: 'cli', style: 'info', title: 'Context' },
           ),
         }],
         lastOrdinal: 1,
@@ -271,8 +299,34 @@ describe('chat status', () => {
       },
     }));
 
-    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI error) — Blocker\nDo not deploy.`);
+    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI info) — Context\nDo not deploy.`);
     expect(value).not.toContain('"presentation"');
+  });
+
+  test('labels a styleless collapsible CLI user message without inventing a style', () => {
+    const value = formatChatStatus(snapshot({
+      transcript: {
+        availability: 'available',
+        transcriptViewId: 'view-1',
+        messages: [{
+          ordinal: 1,
+          message: new UserMessage(
+            TIMESTAMP,
+            'Collapsed context.',
+            undefined,
+            undefined,
+            { origin: 'cli', disclosure: 'collapsed' },
+          ),
+        }],
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
+        hasMore: false,
+      },
+    }));
+
+    expect(value).toContain(`[1] ${TIMESTAMP} user-message (CLI)\nCollapsed context.`);
+    expect(value).not.toContain('CLI undefined');
   });
 
   test('shows a plain notice title without CLI provenance', () => {

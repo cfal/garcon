@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -15,6 +16,8 @@
 		showTimestamp?: boolean;
 		showProjectPath?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
+		titleBadge?: Snippet;
+		hasDesktopOverlayMenu?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: () => void;
 	}
@@ -27,6 +30,8 @@
 		showTimestamp = false,
 		showProjectPath = true,
 		chatItemLayout = 'default',
+		titleBadge,
+		hasDesktopOverlayMenu = false,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatSummaryProps = $props();
@@ -42,11 +47,18 @@
 	let formattedTimestamp = $derived(
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
 	);
+	let singleLineStatusClass = $derived(
+		cn(
+			'ml-auto shrink-0',
+			hasDesktopOverlayMenu &&
+				'mr-6 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:mr-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-none [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-0',
+		),
+	);
 
 	let displayProjectPath = $derived(formatSidebarProjectPath(projectPath));
 </script>
 
-<div class={cn('relative min-w-0', !isSingleLine && 'w-full')} data-slot="sidebar-chat-summary">
+<div class="relative w-full min-w-0" data-slot="sidebar-chat-summary">
 	{#if isSingleLine}
 		<div
 			class={cn(
@@ -62,17 +74,23 @@
 					{m.sidebar_chat_unread()}
 				</span>
 			{/if}
+			{@render titleBadge?.()}
 			{#if isProcessing}
 				<span class="sr-only">{m.chat_pane_processing()}</span>
 				<span
-					class="sidebar-processing-indicator size-2 shrink-0 rounded-full bg-status-processing"
+					class={cn('flex items-center justify-end pr-0.5', singleLineStatusClass)}
 					aria-hidden="true"
-					data-slot="sidebar-chat-processing-indicator"
-				></span>
+				>
+					<span
+						class="sidebar-processing-indicator size-2 shrink-0 rounded-full bg-status-processing"
+						data-slot="sidebar-chat-processing-indicator"
+					></span>
+				</span>
 			{:else if formattedTimestamp}
 				<span
 					class={cn(
-						'shrink-0 whitespace-nowrap rounded-full border px-1.5 text-[11px] leading-4 tabular-nums',
+						'whitespace-nowrap rounded-full border px-1.5 text-[11px] leading-4 tabular-nums',
+						singleLineStatusClass,
 						isSelected
 							? 'border-sidebar-chat-item-selected-foreground/25 bg-sidebar-chat-item-selected-foreground/10 text-sidebar-chat-item-selected-foreground/80'
 							: 'border-border/70 bg-muted/40 text-muted-foreground',

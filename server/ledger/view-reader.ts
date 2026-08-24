@@ -8,7 +8,7 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { TranscriptAdoptionService } from './adoption.js';
-import type { TranscriptViewId } from './contracts.js';
+import type { LedgerRow, TranscriptViewId } from './contracts.js';
 import {
   InvalidTranscriptReplayRequestError,
   LedgerFencedError,
@@ -155,6 +155,17 @@ export class TranscriptViewReader {
     return readWithFenceTranslation(() => this.#renderingSnapshot(chatId, signal));
   }
 
+  async exportSnapshot(
+    chatId: string,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<{
+    readonly transcriptViewId: TranscriptViewId;
+    readonly lastOrdinal: number;
+    readonly rows: readonly LedgerRow[];
+  }> {
+    return readWithFenceTranslation(() => this.#exportSnapshot(chatId, signal));
+  }
+
   async #renderingSnapshot(
     chatId: string,
     signal: AbortSignal,
@@ -162,6 +173,22 @@ export class TranscriptViewReader {
     readonly transcriptViewId: TranscriptViewId;
     readonly lastOrdinal: number;
     readonly messages: readonly ChatMessage[];
+  }> {
+    const snapshot = await this.#exportSnapshot(chatId, signal);
+    return {
+      transcriptViewId: snapshot.transcriptViewId,
+      lastOrdinal: snapshot.lastOrdinal,
+      messages: ledgerRowsToMessages(snapshot.rows),
+    };
+  }
+
+  async #exportSnapshot(
+    chatId: string,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly transcriptViewId: TranscriptViewId;
+    readonly lastOrdinal: number;
+    readonly rows: readonly LedgerRow[];
   }> {
     const view = await this.#adoption.ensure(chatId, signal);
     signal.throwIfAborted();
@@ -178,7 +205,7 @@ export class TranscriptViewReader {
     return {
       transcriptViewId: view.viewId,
       lastOrdinal: watermark.ordinal,
-      messages: ledgerRowsToMessages(rows),
+      rows,
     };
   }
 }

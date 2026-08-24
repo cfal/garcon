@@ -6,9 +6,14 @@ import {
   requiredString,
 } from './command-request-validation.js';
 import { isRecord } from './json.js';
-
-export const CHAT_ROW_TYPES = ['notice', 'error'] as const;
-export type ChatRowType = (typeof CHAT_ROW_TYPES)[number];
+import {
+  isCliBodyDisclosure,
+  isCliPresentation,
+  isCliRowFormat,
+  type CliBodyDisclosure,
+  type CliPresentation,
+  type CliRowFormat,
+} from './cli-presentation.js';
 
 export const CHAT_ROW_CONTENT_MAX_BYTES = 64 * 1024;
 export const CHAT_ROW_TITLE_MAX_CODE_POINTS = 120;
@@ -27,7 +32,9 @@ export interface AddChatRowRequest {
   readonly clientMessageId: string;
   readonly chatId: string;
   readonly transcriptViewId: string;
-  readonly type: ChatRowType;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly title?: string;
   readonly content: string;
 }
@@ -40,7 +47,9 @@ export interface AddChatRowResponse {
   readonly chatId: string;
   readonly transcriptViewId: string;
   readonly ordinal: number;
-  readonly type: ChatRowType;
+  readonly presentation: CliPresentation;
+  readonly format: CliRowFormat;
+  readonly disclosure: CliBodyDisclosure;
   readonly status: 'appended' | 'duplicate';
   readonly timestamp: string;
 }
@@ -85,8 +94,14 @@ export function parseChatRowTitle(value: unknown): string | undefined {
 
 export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
   const body = requestRecord(value);
-  if (body.type !== 'notice' && body.type !== 'error') {
-    throw new CommandRequestValidationError('type must be notice or error');
+  if (!isCliPresentation(body.presentation)) {
+    throw new CommandRequestValidationError('presentation is invalid');
+  }
+  if (!isCliRowFormat(body.format)) {
+    throw new CommandRequestValidationError('format must be plain or markdown');
+  }
+  if (!isCliBodyDisclosure(body.disclosure)) {
+    throw new CommandRequestValidationError('disclosure must be expanded or collapsed');
   }
   const title = parseChatRowTitle(body.title);
   return {
@@ -94,7 +109,9 @@ export function parseAddChatRowRequest(value: unknown): AddChatRowRequest {
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
     chatId: requiredChatId(body, 'chatId'),
     transcriptViewId: requiredString(body, 'transcriptViewId'),
-    type: body.type,
+    presentation: body.presentation,
+    format: body.format,
+    disclosure: body.disclosure,
     ...(title === undefined ? {} : { title }),
     content: parseChatRowContent(body.content),
   };
@@ -127,7 +144,9 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     || !isNonEmptyString(value.transcriptViewId)
     || !Number.isSafeInteger(value.ordinal)
     || Number(value.ordinal) < 1
-    || (value.type !== 'notice' && value.type !== 'error')
+    || !isCliPresentation(value.presentation)
+    || !isCliRowFormat(value.format)
+    || !isCliBodyDisclosure(value.disclosure)
     || (value.status !== 'appended' && value.status !== 'duplicate')
     || !isNonEmptyString(value.timestamp)
   ) {
@@ -141,7 +160,9 @@ export function parseAddChatRowResponse(value: unknown): AddChatRowResponse | nu
     chatId: value.chatId,
     transcriptViewId: value.transcriptViewId,
     ordinal: Number(value.ordinal),
-    type: value.type,
+    presentation: value.presentation,
+    format: value.format,
+    disclosure: value.disclosure,
     status: value.status,
     timestamp: value.timestamp,
   };

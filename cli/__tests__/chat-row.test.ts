@@ -9,9 +9,11 @@ const command: AddRowCliCommand = {
   workspace: 'default',
   configDir: '/tmp/config',
   chatId: '1787000000000000',
-  type: 'error',
-  title: 'Release validation',
-  content: '  durable error\n',
+  presentation: { style: 'info' },
+  format: 'markdown',
+  disclosure: 'collapsed',
+  title: 'Consultation status',
+  content: '  durable information\n',
   readsContentFromStdin: false,
 };
 
@@ -55,7 +57,9 @@ describe('runAddRow', () => {
       clientMessageId: 'message-1',
       chatId: command.chatId,
       transcriptViewId: 'view-1',
-      type: 'error',
+      presentation: { style: 'info' },
+      format: 'markdown',
+      disclosure: 'collapsed',
       title: command.title,
       content: command.content,
     });
@@ -64,7 +68,9 @@ describe('runAddRow', () => {
         `chat id: ${command.chatId}`,
         'transcript view id: view-1',
         'ordinal: 9',
-        'type: error',
+        'type: info',
+        'format: markdown',
+        'disclosure: collapsed',
         'status: appended',
       ].join('\n'),
     ]);

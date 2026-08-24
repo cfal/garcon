@@ -186,6 +186,15 @@ describe('Settings', () => {
 				screen.getByRole('button', { name: 'Move Main view down' }),
 			);
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			const alwaysExpandCliMessages = screen.getByRole('switch', {
+				name: 'Always expand CLI messages',
+			});
+			expect(alwaysExpandCliMessages.getAttribute('aria-checked')).toBe('false');
+			expect(
+				screen.getByText('Keeps collapsible CLI rows and CLI user messages expanded.'),
+			).toBeTruthy();
+			await fireEvent.click(alwaysExpandCliMessages);
+			expect(onLocalToggle).toHaveBeenCalledWith('alwaysExpandCliMessages');
 			const allowDirectChats = screen.getByRole('switch', { name: 'Allow direct chats' });
 			expect(allowDirectChats.getAttribute('aria-checked')).toBe('false');
 			expect(

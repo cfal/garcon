@@ -292,10 +292,11 @@ export function estimateConversationFeedItemSize(
 	if (layout === 'permission') return 240 * scale + spacing;
 	if (renderItem.kind === 'local-notice') return 52 * scale + spacing;
 	if (renderItem.message.type === 'user-message') {
-		return (renderItem.message.presentation ? 144 : 112) * scale + spacing;
+		return (renderItem.message.presentation?.style ? 144 : 112) * scale + spacing;
 	}
 	if (renderItem.message.type === 'assistant-message') return 180 * scale + spacing;
 	if (renderItem.message.type === 'thinking') return 160 * scale + spacing;
+	if (renderItem.message.type === 'cli-row') return 112 * scale + spacing;
 	return 96 * scale + spacing;
 }
 

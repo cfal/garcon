@@ -68,7 +68,8 @@ describe('TranscriptLedgerService', () => {
         chatId: 'chat-1',
         viewId: view.viewId,
         clientMessageId: 'chat-row-1',
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         title: 'Release validation',
         content: 'durable error',
       });
@@ -76,7 +77,8 @@ describe('TranscriptLedgerService', () => {
         chatId: 'chat-1',
         viewId: view.viewId,
         clientMessageId: 'chat-row-1',
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         title: 'Release validation',
         content: 'durable error',
       });
@@ -93,7 +95,9 @@ describe('TranscriptLedgerService', () => {
           message: 'durable error',
           detail: {
             type: 'cli-row',
-            presentation: 'error',
+            presentation: { style: 'error' },
+            format: 'plain',
+            disclosure: 'expanded',
             title: 'Release validation',
           },
         }],

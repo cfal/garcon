@@ -329,6 +329,10 @@
 					<span class="text-muted-foreground">{m.sidebar_search_legend_status()}</span>
 				</div>
 				<div class="flex gap-3">
+					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground">is:X</code>
+					<span class="text-muted-foreground">{m.sidebar_search_legend_order_group()}</span>
+				</div>
+				<div class="flex gap-3">
 					<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
 						>project:X</code
 					>

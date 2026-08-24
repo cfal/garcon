@@ -13,6 +13,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.desktopLayoutOrder).toEqual(['chat-list', 'main', 'workspace-sidebar']);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
+		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
@@ -28,6 +29,20 @@ describe('LocalSettingsStore', () => {
 		expect(store.steerWithCtrlEnter).toBe(true);
 
 		store.destroy();
+	});
+
+	it('persists the CLI message expansion preference', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('alwaysExpandCliMessages');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ alwaysExpandCliMessages: true });
+		const restored = createLocalSettingsStore();
+		expect(restored.alwaysExpandCliMessages).toBe(true);
+
+		store.destroy();
+		restored.destroy();
 	});
 
 	it('persists every chat item layout and defaults malformed values to default', () => {

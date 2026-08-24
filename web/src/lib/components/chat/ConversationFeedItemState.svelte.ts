@@ -1,4 +1,5 @@
-export type ConversationDisclosureKind = 'thinking' | 'tool-input' | 'tool-result' | 'compaction';
+export type ConversationDisclosureKind =
+	'thinking' | 'tool-input' | 'tool-result' | 'compaction' | 'cli-body';
 
 export interface ConversationDisclosureStatePort {
 	open(kind: ConversationDisclosureKind, localId: string, defaultOpen: boolean): boolean;

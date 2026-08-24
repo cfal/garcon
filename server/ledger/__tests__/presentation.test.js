@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   ErrorMessage,
   TranscriptNoticeMessage,
   UserMessage,
@@ -55,6 +56,33 @@ describe('transcript ledger presentation', () => {
     ]);
   });
 
+  it('projects chat rows as explicit CLI row messages', () => {
+    const rendered = ledgerRowToMessage({
+      kind: 'notice',
+      ordinal: 1,
+      at: AT,
+      providerMeta: null,
+      message: 'Consultation complete.',
+      detail: {
+        type: 'cli-row',
+        clientMessageId: 'chat-row-info',
+        presentation: { style: 'info' },
+        format: 'markdown',
+        disclosure: 'collapsed',
+        title: 'Consultation status',
+      },
+    });
+
+    expect(rendered).toEqual(new CliRowMessage(
+      AT,
+      'Consultation complete.',
+      { style: 'info' },
+      'markdown',
+      'Consultation status',
+      'collapsed',
+    ));
+  });
+
   it('renders every visible row kind in ordinal order and omits internal lifecycle rows', () => {
     const rows = [
       {
@@ -105,7 +133,9 @@ describe('transcript ledger presentation', () => {
         detail: {
           type: 'cli-row',
           clientMessageId: 'chat-row-notice',
-          presentation: 'notice',
+          presentation: { style: 'notice' },
+          format: 'plain',
+          disclosure: 'expanded',
           title: 'Deployment',
         },
       },
@@ -118,7 +148,9 @@ describe('transcript ledger presentation', () => {
         detail: {
           type: 'cli-row',
           clientMessageId: 'chat-row-error',
-          presentation: 'error',
+          presentation: { style: 'error' },
+          format: 'plain',
+          disclosure: 'expanded',
           title: null,
         },
       },
@@ -170,8 +202,8 @@ describe('transcript ledger presentation', () => {
       [2, 'assistant-message'],
       [3, 'transcript-notice'],
       [4, 'agent-switch'],
-      [5, 'transcript-notice'],
-      [6, 'error'],
+      [5, 'cli-row'],
+      [6, 'cli-row'],
       [7, 'permission-request'],
       [8, 'permission-resolved'],
       [9, 'permission-cancelled'],
@@ -197,20 +229,21 @@ describe('transcript ledger presentation', () => {
       title: 'Provider retry',
     });
     expect(titled.detail).toBeUndefined();
-    expect(rendered[4].message).toBeInstanceOf(TranscriptNoticeMessage);
+    expect(rendered[4].message).toBeInstanceOf(CliRowMessage);
     expect(rendered[4].message).toMatchObject({
       content: '  exact notice\n',
       title: 'Deployment',
     });
-    expect(rendered[4].message.detail).toEqual({ type: 'cli-row' });
-    expect(rendered[5].message).toBeInstanceOf(ErrorMessage);
+    expect(rendered[4].message.presentation).toEqual({ style: 'notice' });
+    expect(rendered[4].message.format).toBe('plain');
+    expect(rendered[5].message).toBeInstanceOf(CliRowMessage);
     expect(rendered[5].message).toMatchObject({ content: 'exact error', timestamp: AT });
-    expect(rendered[5].message.detail).toEqual({ type: 'cli-row' });
+    expect(rendered[5].message.presentation).toEqual({ style: 'error' });
     expect(rendered[5].message.title).toBeUndefined();
     expect(JSON.stringify([rendered[4].message, rendered[5].message]))
       .not.toContain('clientMessageId');
     expect(JSON.stringify([rendered[4].message, rendered[5].message]))
-      .not.toContain('presentation');
+      .toContain('presentation');
   });
 });
 

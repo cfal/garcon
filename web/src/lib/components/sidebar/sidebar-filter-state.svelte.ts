@@ -49,6 +49,7 @@ function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): 
 	merged.models = Array.from(new Set([...(base?.models ?? []), ...search.models]));
 	merged.project = Array.from(new Set([...(base?.project ?? []), ...search.project]));
 	merged.status = base?.status;
+	merged.orderGroup = search.orderGroup;
 	return merged;
 }
 

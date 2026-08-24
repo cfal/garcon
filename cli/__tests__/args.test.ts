@@ -62,10 +62,41 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       '--resume', CHAT_ID,
       '--message-style', 'error',
+      '--collapsible',
       'prompt',
     ], ENV)).toMatchObject({
       kind: 'resume',
-      userMessagePresentation: { origin: 'cli', style: 'error' },
+      userMessagePresentation: { origin: 'cli', style: 'error', disclosure: 'collapsed' },
+    });
+    expect(parseCliArgs(['send-async', CHAT_ID, '--collapsible', 'prompt'], ENV)).toMatchObject({
+      kind: 'send-async',
+      userMessagePresentation: { origin: 'cli', disclosure: 'collapsed' },
+    });
+  });
+
+  test('normalizes custom presentation accents for new and resumed messages', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--color', '7C3AED', 'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'start',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#7c3aed' },
+      },
+    });
+    expect(parseCliArgs([
+      '--resume', CHAT_ID,
+      '--message-style', 'custom',
+      '--color', '#0EA5E9,c4b5fd',
+      'prompt',
+    ], ENV)).toMatchObject({
+      kind: 'resume',
+      userMessagePresentation: {
+        origin: 'cli',
+        style: 'custom',
+        customStyle: { lightAccent: '#0ea5e9', darkAccent: '#c4b5fd' },
+      },
     });
   });
 
@@ -184,13 +215,14 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--message-title <title>] [--message-style <notice|error>] <prompt>',
+      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
-      '--resume <chat-id> [--message-title <title>] [--message-style <notice|error>] <prompt>',
+      '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
+    expect(CLI_HELP).toContain('--color selects custom styling');
   });
 
   test('parses an exact turn wait with connection options and JSON output', () => {
@@ -282,6 +314,7 @@ describe('parseCliArgs', () => {
     { args: ['status', CHAT_ID, '--tag', 'review'], message: '--tag cannot be used with status' },
     { args: ['status', CHAT_ID, '--resume', CHAT_ID], message: '--resume cannot be used with status' },
     { args: ['status', CHAT_ID, '--allow-steer'], message: '--allow-steer cannot be used with status' },
+    { args: ['status', CHAT_ID, '--collapsible'], message: '--collapsible cannot be used with status' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--messages', '1'], message: '--messages cannot be used with wait' },
     { args: ['list', 'agents', '--messages', '1'], message: '--messages cannot be used with list' },
     { args: ['stop', CHAT_ID, '--messages', '1'], message: '--messages cannot be used with stop' },
@@ -301,6 +334,7 @@ describe('parseCliArgs', () => {
     { args: ['wait', CHAT_ID, '--turn', 'one', '--turn', 'two'], message: 'only once' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--cwd', '.'], message: '--cwd cannot be used with wait' },
     { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--allow-steer'], message: '--allow-steer cannot be used with wait' },
+    { args: ['wait', CHAT_ID, '--turn', 'turn-1', '--collapsible'], message: '--collapsible cannot be used with wait' },
     { args: ['list', 'agents', '--turn', 'turn-1'], message: '--turn cannot be used with list' },
     { args: ['stop', CHAT_ID, '--turn', 'turn-1'], message: '--turn cannot be used with stop' },
     { args: ['send-async', CHAT_ID, '--turn', 'turn-1', 'message'], message: '--turn cannot be used with send-async' },
@@ -325,12 +359,12 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       'send-async', CHAT_ID,
       '--message-title', 'Blocker',
-      '--message-style', 'error',
+      '--message-style', 'info',
       'Do not deploy',
     ], ENV)).toMatchObject({
       kind: 'send-async',
       message: 'Do not deploy',
-      userMessagePresentation: { origin: 'cli', style: 'error', title: 'Blocker' },
+      userMessagePresentation: { origin: 'cli', style: 'info', title: 'Blocker' },
     });
   });
 
@@ -453,10 +487,16 @@ describe('parseCliArgs', () => {
     { args: ['--resume', CHAT_ID, '--allow-steer', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['--agent', 'codex', '--model', 'gpt', '--allow-steer', '--', 'prompt'], message: '--allow-steer can only be used with send-async' },
     { args: ['send-async', CHAT_ID, '--tag', '!!!', 'message'], message: 'letters or numbers' },
-    { args: ['send-async', CHAT_ID, '--message-style', 'ERROR', 'message'], message: 'must be notice or error' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'INFO', 'message'], message: 'must be one of: info, notice, error, custom' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'custom', 'message'], message: 'requires --color' },
+    { args: ['send-async', CHAT_ID, '--message-style', 'error', '--color', '7c3aed', 'message'], message: 'preset --message-style' },
+    { args: ['send-async', CHAT_ID, '--color', 'red', 'message'], message: 'six-digit hex colors' },
+    { args: ['send-async', CHAT_ID, '--markdown', 'message'], message: '--markdown cannot be used with send-async' },
     { args: ['stop', CHAT_ID, '--message-title', 'Heading'], message: 'message presentation cannot be used with stop' },
+    { args: ['stop', CHAT_ID, '--collapsible'], message: 'message presentation cannot be used with stop' },
     { args: ['status', CHAT_ID, '--message-style', 'notice'], message: '--message-style cannot be used with status' },
     { args: ['list', 'agents', '--message-title', 'Heading'], message: '--message-title cannot be used with list' },
+    { args: ['list', 'agents', '--collapsible'], message: '--collapsible cannot be used with list' },
   ])('rejects invalid control arguments: $message', ({ args, message }) => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
     try {
@@ -481,28 +521,53 @@ describe('add-row arguments', () => {
       workspace: 'review',
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
-      type: 'notice',
+      presentation: { style: 'notice' },
+      format: 'plain',
+      disclosure: 'expanded',
       title: 'Deployment',
       content: '  exact content\n',
       readsContentFromStdin: false,
     });
     expect(parseCliArgs([
       'add-row', CHAT_ID, '-', '--type', 'error', '--title', 'Release validation',
+      '--collapsible',
     ], ENV)).toMatchObject({
       kind: 'add-row',
-      type: 'error',
+      presentation: { style: 'error' },
+      format: 'plain',
+      disclosure: 'collapsed',
       title: 'Release validation',
       content: null,
       readsContentFromStdin: true,
     });
     expect(parseCliArgs([
-      'add-row', CHAT_ID, '--type', 'notice', '--', '--starts-with-dash',
-    ], ENV)).toMatchObject({ content: '--starts-with-dash' });
+      'add-row', CHAT_ID, '--type', 'info', '--', '--starts-with-dash',
+    ], ENV)).toMatchObject({
+      presentation: { style: 'info' },
+      format: 'plain',
+      content: '--starts-with-dash',
+    });
+    expect(parseCliArgs([
+      'add-row', CHAT_ID,
+      '--color', '7C3AED,c4b5fd',
+      '--markdown',
+      '## Complete',
+    ], ENV)).toMatchObject({
+      presentation: {
+        style: 'custom',
+        customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+      },
+      format: 'markdown',
+      content: '## Complete',
+    });
   });
 
   test.each([
-    [['add-row', CHAT_ID, 'content'], 'requires --type notice or --type error'],
-    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type notice or --type error'],
+    [['add-row', CHAT_ID, 'content'], 'requires --type info or --type notice or --type error or --color'],
+    [['add-row', CHAT_ID, '--type', 'alert', 'content'], 'requires --type info or --type notice or --type error or --color'],
+    [['add-row', CHAT_ID, '--type', 'custom', 'content'], 'requires --color'],
+    [['add-row', CHAT_ID, '--type', 'error', '--color', '7c3aed', 'content'], 'preset --type'],
+    [['add-row', CHAT_ID, '--color', '7c3aed,', 'content'], 'six-digit hex colors'],
     [['add-row', CHAT_ID, '--type', 'notice', '--type', 'error', 'content'], 'only once'],
     [['add-row', CHAT_ID, '--type', 'notice'], 'requires a chat ID and one content argument'],
     [['add-row', CHAT_ID, '--type', 'notice', 'one', 'two'], 'requires a chat ID and one content argument'],
@@ -526,5 +591,61 @@ describe('add-row arguments', () => {
     expect(parseCliArgs([
       '--agent', 'codex', '--model', 'gpt', '--', 'add-row', 'is', 'documented',
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'add-row is documented' });
+  });
+});
+
+describe('export arguments', () => {
+  test('parses formats, repeatable exclusions, aliases, and file output canonically', () => {
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'export', CHAT_ID,
+      '--format', 'xml',
+      '--exclude', 'handoffs,tools',
+      '--exclude', 'reasoning,tool-calls',
+      '--output', './transcript.xml',
+      '--force',
+    ], ENV)).toEqual({
+      kind: 'export',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      format: 'xml',
+      exclusions: ['tool-calls', 'tool-results', 'reasoning', 'handoffs'],
+      outputPath: './transcript.xml',
+      force: true,
+    });
+    expect(parseCliArgs(['export', CHAT_ID], ENV)).toMatchObject({
+      kind: 'export',
+      format: 'markdown',
+      exclusions: [],
+      force: false,
+    });
+  });
+
+  test.each([
+    [['export'], 'exactly one chat ID'],
+    [['export', 'bad'], 'valid Garcon chat ID'],
+    [['export', CHAT_ID, '--format', 'json'], '--format must be markdown or xml'],
+    [['export', CHAT_ID, '--format', 'xml', '--format', 'markdown'], 'only once'],
+    [['export', CHAT_ID, '--exclude', 'unknown'], '--exclude must be one of'],
+    [['export', CHAT_ID, '--exclude', 'toString'], '--exclude must be one of'],
+    [['export', CHAT_ID, '--exclude', 'tools,,reasoning'], 'empty category'],
+    [['export', CHAT_ID, '--output', '-'], 'omit --output'],
+    [['export', CHAT_ID, '--force'], '--force requires --output'],
+    [['export', CHAT_ID, '--json'], '--json cannot be used with export'],
+    [['export', CHAT_ID, '--collapsible'], '--collapsible cannot be used with export'],
+    [['status', CHAT_ID, '--format', 'xml'], '--format cannot be used with status'],
+    [['wait', CHAT_ID, '--turn', 'turn-1', '--exclude', 'tools'], '--exclude cannot be used with wait'],
+    [['list', 'agents', '--output', 'file'], '--output cannot be used with list'],
+    [['send-async', CHAT_ID, '--force', 'message'], '--force cannot be used with send-async'],
+    [['--agent', 'codex', '--model', 'gpt', '--format', 'xml', 'prompt'], '--format can only be used with export'],
+  ])('rejects invalid export arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('treats an option-terminated export token as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--', 'export', 'the', 'results',
+    ], ENV)).toMatchObject({ kind: 'start', prompt: 'export the results' });
   });
 });

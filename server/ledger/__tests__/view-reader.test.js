@@ -341,6 +341,38 @@ describe('TranscriptViewReader', () => {
     });
   });
 
+  it('captures raw export rows at the same pinned view watermark', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId,
+        message: new UserMessage(TS, 'prompt'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+      });
+      const producer = ledger.openProducer('chat-1', 'test');
+      producer.sink.publish({
+        type: 'session',
+        session: { agentSessionId: 'session-1', nativeSession: null, nativeSeedReceipt: null },
+      });
+      ledger.beginRun('chat-1', 'run-1');
+      producer.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
+
+      const snapshot = await reader.exportSnapshot('chat-1');
+
+      expect(snapshot).toMatchObject({
+        transcriptViewId: viewId,
+        lastOrdinal: 3,
+      });
+      expect(snapshot.rows.map((row) => [row.ordinal, row.kind])).toEqual([
+        [1, 'user-input'],
+        [2, 'session'],
+        [3, 'run-ended'],
+      ]);
+    });
+  });
+
   it('rejects a rendering snapshot when adoption races a view replacement', async () => {
     await withReader(async ({ ledger, viewId }) => {
       ledger.appendInputAndCompose({
@@ -390,6 +422,7 @@ describe('TranscriptViewReader', () => {
         () => reader.page('chat-1', 20),
         () => reader.replay('chat-1', transcriptViewId('view-1'), 0),
         () => reader.renderingSnapshot('chat-1'),
+        () => reader.exportSnapshot('chat-1'),
       ]) {
         let failure;
         try {

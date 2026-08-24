@@ -5,12 +5,14 @@ import path from 'node:path';
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CliRowMessage,
   ErrorMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
+import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 import { TranscriptLedgerService } from '../service.ts';
@@ -166,7 +168,42 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
-  it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps notices and every error presentation-only across ledger folds', async () => {
+  it('[TLV5-L01.02-CORE-EXPORT-01] projects every durable row kind through the user-export fold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-ledger-export-matrix-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => AT });
+    try {
+      ledger.initializeChat(CHAT_ID);
+      const entries = foldRowsForExport(store.append(CHAT_ID, VIEW_ID, allRowKindDrafts()));
+
+      expect(entries.map((entry) => [entry.ordinal, entry.kind, entry.category])).toEqual([
+        [1, 'message', 'conversation'],
+        [2, 'message', 'conversation'],
+        [3, 'message', 'diagnostics'],
+        [4, 'message', 'conversation'],
+        [5, 'message', 'handoffs'],
+        [6, 'message', 'permissions'],
+        [7, 'message', 'permissions'],
+        [8, 'message', 'permissions'],
+        [9, 'message', 'permissions'],
+        [10, 'message', 'permissions'],
+        [12, 'run-ended', 'diagnostics'],
+        [13, 'message', 'conversation'],
+        [14, 'message', 'conversation'],
+        [15, 'message', 'conversation'],
+      ]);
+      expect(entries.some((entry) => entry.ordinal === 11)).toBe(false);
+      expect(JSON.stringify(entries)).not.toContain('providerOccurrence');
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps every CLI row style presentation-only across ledger folds', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-row-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {
       createViewId: () => VIEW_ID,
@@ -183,11 +220,21 @@ describe('transcript ledger read-fold matrix', () => {
         clientMessageId: 'pending-input',
         steer: false,
       });
+      const info = ledger.appendChatRow({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        clientMessageId: 'chat-row-info',
+        presentation: { style: 'info' },
+        format: 'plain',
+        title: 'Consultation checkpoint',
+        content: 'presentation information',
+      });
       const notice = ledger.appendChatRow({
         chatId: CHAT_ID,
         viewId: view.viewId,
         clientMessageId: 'chat-row-notice',
-        type: 'notice',
+        presentation: { style: 'notice' },
+        format: 'markdown',
         title: 'Presentation checkpoint',
         content: 'presentation notice',
       });
@@ -195,7 +242,8 @@ describe('transcript ledger read-fold matrix', () => {
         chatId: CHAT_ID,
         viewId: view.viewId,
         clientMessageId: 'chat-row-error',
-        type: 'error',
+        presentation: { style: 'error' },
+        format: 'plain',
         title: 'Failure checkpoint',
         content: 'chat row error',
       });
@@ -207,7 +255,7 @@ describe('transcript ledger read-fold matrix', () => {
       const rows = ledger.currentRows(CHAT_ID);
 
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 4,
+        ordinal: 5,
         at: AT,
       });
 
@@ -217,9 +265,10 @@ describe('transcript ledger read-fold matrix', () => {
         'content' in message ? message.content : null,
       ])).toEqual([
         [1, 'user-message', 'pending user input'],
-        [2, 'transcript-notice', 'presentation notice'],
-        [3, 'error', 'chat row error'],
-        [4, 'error', 'provider error'],
+        [2, 'cli-row', 'presentation information'],
+        [3, 'cli-row', 'presentation notice'],
+        [4, 'cli-row', 'chat row error'],
+        [5, 'error', 'provider error'],
       ]);
       expect(ledger.conversationMessages(CHAT_ID)).toEqual([
         expect.objectContaining({ type: 'user-message', content: 'pending user input' }),
@@ -251,33 +300,45 @@ describe('transcript ledger read-fold matrix', () => {
         type: 'rows',
         chatId: CHAT_ID,
         viewId: VIEW_ID,
-        rows: [notice.row, error.row, rows[3]],
+        rows: [info.row, notice.row, error.row, rows[4]],
       });
 
       expect(metadataUpdates).toEqual([]);
       expect(broadcasts).toEqual([expect.objectContaining({
         firstOrdinal: 2,
-        lastOrdinal: 4,
+        lastOrdinal: 5,
         messages: [
           {
             ordinal: 2,
-            message: new TranscriptNoticeMessage(
+            message: new CliRowMessage(
               CHAT_ROW_AT,
-              'presentation notice',
-              { type: 'cli-row' },
-              'Presentation checkpoint',
+              'presentation information',
+              { style: 'info' },
+              'plain',
+              'Consultation checkpoint',
             ),
           },
           {
             ordinal: 3,
-            message: new ErrorMessage(
+            message: new CliRowMessage(
+              CHAT_ROW_AT,
+              'presentation notice',
+              { style: 'notice' },
+              'markdown',
+              'Presentation checkpoint',
+            ),
+          },
+          {
+            ordinal: 4,
+            message: new CliRowMessage(
               CHAT_ROW_AT,
               'chat row error',
-              { type: 'cli-row' },
+              { style: 'error' },
+              'plain',
               'Failure checkpoint',
             ),
           },
-          { ordinal: 4, message: new ErrorMessage(AT, 'provider error') },
+          { ordinal: 5, message: new ErrorMessage(AT, 'provider error') },
         ],
       })]);
     } finally {

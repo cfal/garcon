@@ -240,8 +240,8 @@ describe('chat command request parsers', () => {
       chatId: CHAT_ID,
       transcriptViewId: TRANSCRIPT_VIEW_ID,
       content: 'stop here',
-      userMessagePresentation: { origin: 'cli', style: 'error' },
-    }).userMessagePresentation).toEqual({ origin: 'cli', style: 'error' });
+      userMessagePresentation: { origin: 'cli', style: 'info' },
+    }).userMessagePresentation).toEqual({ origin: 'cli', style: 'info' });
     expect(() => parseAgentRunCommandRequest({
       ...run,
       userMessagePresentation: { origin: 'cli', style: 'notice', extra: true },

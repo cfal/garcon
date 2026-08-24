@@ -21,9 +21,11 @@ describe('ConversationFeedItemState', () => {
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set());
 		const disclosure = items.disclosurePort('row-1');
 		disclosure.setOpen('tool-input', 'tool-1', true, false);
+		disclosure.setOpen('cli-body', 'body', true, false);
 
 		expect(disclosure.open('tool-input', 'tool-1', false)).toBe(true);
 		expect(disclosure.open('tool-result', 'tool-1', false)).toBe(false);
+		expect(disclosure.open('cli-body', 'body', false)).toBe(true);
 	});
 
 	it('preserves permission drafts across ordinary row remounts', () => {

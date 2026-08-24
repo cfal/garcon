@@ -4,8 +4,13 @@ import type { BrowserContext, Page } from 'playwright';
 import type {
   AddChatRowResponse,
   ChatRowTargetResponse,
-  ChatRowType,
 } from '../../../common/chat-row-contracts.js';
+import type { UserMessagePresentation } from '../../../common/chat-types.js';
+import type {
+  CliBodyDisclosure,
+  CliPresentation,
+  CliRowFormat,
+} from '../../../common/cli-presentation.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
   withChromiumFixture,
@@ -69,13 +74,18 @@ async function allowDirectChats(context: BrowserContext): Promise<void> {
 async function completeChat(
   fixture: ChromiumFixture,
   content: string,
+  userMessagePresentation?: UserMessagePresentation,
 ): Promise<string> {
   const chatId = fixture.integration.newChatId();
-  const started = await fixture.integration.client.startDirectChat({
+  const request = fixture.integration.client.directStartRequest({
     chatId,
     content,
     projectPath: fixture.integration.dirs.project,
     agent: fixture.integration.directAgents.openAi,
+  });
+  const started = await fixture.integration.client.startChat({
+    ...request,
+    ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   });
   expect((await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId)).type).toBe(
     'agent-run-finished',
@@ -157,7 +167,9 @@ async function addRow(input: {
   fixture: ChromiumFixture;
   chatId: string;
   transcriptViewId: string;
-  type: ChatRowType;
+  presentation: CliPresentation;
+  format?: CliRowFormat;
+  disclosure?: CliBodyDisclosure;
   title: string;
   content: string;
   identity: string;
@@ -167,7 +179,9 @@ async function addRow(input: {
     clientMessageId: `${input.identity}-message`,
     chatId: input.chatId,
     transcriptViewId: input.transcriptViewId,
-    type: input.type,
+    presentation: input.presentation,
+    format: input.format ?? 'plain',
+    disclosure: input.disclosure ?? 'expanded',
     title: input.title,
     content: input.content,
   });
@@ -183,10 +197,19 @@ async function expectRenderedRow(
   page: Page,
   row: Pick<AddChatRowResponse, 'transcriptViewId' | 'ordinal'>,
   expected: {
-    messageType: 'transcript-notice' | 'error';
+    messageType: 'cli-row';
     title: string;
     content: string;
-    variantClass: 'border-status-info-border' | 'border-status-error-border';
+    variantClass:
+      | 'border-status-info-border'
+      | 'border-status-error-border'
+      | 'border-status-neutral-border';
+    customStyle?: {
+      lightAccent: string;
+      darkAccent: string;
+    };
+    markdownStrongText?: string;
+    collapsed?: boolean;
   },
 ): Promise<void> {
   const locator = rowLocator(page, row);
@@ -198,11 +221,41 @@ async function expectRenderedRow(
   expect(await card.getAttribute('class')).toContain(expected.variantClass);
   await card.getByText(expected.title, { exact: true }).waitFor();
   await card.getByText(expected.content, { exact: true }).waitFor();
-  expect(await card.locator('svg[aria-hidden="true"]').count()).toBe(1);
-  expect(await card.locator('button').count()).toBe(0);
-  if (expected.messageType === 'error') {
-    expect(await locator.getByText('Error', { exact: true }).count()).toBe(0);
+  if (expected.customStyle) {
+    expect(await card.getAttribute('class')).toContain('cli-row-message-custom');
+    expect(await card.getAttribute('class')).toContain('cli-presentation-custom');
+    const customStyleContainer = card.locator('..');
+    const inlineStyle = await customStyleContainer.getAttribute('style');
+    expect(inlineStyle).toContain(
+      `--cli-presentation-accent-light: ${expected.customStyle.lightAccent}`,
+    );
+    expect(inlineStyle).toContain(
+      `--cli-presentation-accent-dark: ${expected.customStyle.darkAccent}`,
+    );
   }
+  if (expected.markdownStrongText) {
+    await card.locator('strong').getByText(expected.markdownStrongText, { exact: true }).waitFor();
+  }
+  expect(await card.locator('svg[aria-hidden="true"]').count()).toBe(1);
+  const disclosureButton = card.getByRole('button', {
+    name: expected.collapsed ? 'Show more' : 'Show less',
+  });
+  if (expected.collapsed) {
+    expect(await disclosureButton.getAttribute('aria-expanded')).toBe('false');
+  } else {
+    expect(await card.locator('button').count()).toBe(0);
+  }
+  expect(await locator.getByText('Error', { exact: true }).count()).toBe(0);
+}
+
+async function cardColors(
+  page: Page,
+  row: Pick<AddChatRowResponse, 'transcriptViewId' | 'ordinal'>,
+): Promise<{ border: string; background: string }> {
+  return rowLocator(page, row).locator('article.cli-row-message').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { border: style.borderColor, background: style.backgroundColor };
+  });
 }
 
 async function waitForTrackedContent(page: Page, content: string): Promise<void> {
@@ -326,7 +379,19 @@ describe('Chromium transcript chat rows', () => {
       try {
         markPhase('creating target and control transcripts');
         const targetPreview = 'echo:chat-row-browser-target';
-        const targetChatId = await completeChat(fixture, 'chat-row-browser-target');
+        const targetChatId = await completeChat(
+          fixture,
+          'chat-row-browser-target',
+          {
+            origin: 'cli',
+            style: 'custom',
+            customStyle: {
+              lightAccent: '#0ea5e9',
+              darkAccent: '#7dd3fc',
+            },
+            title: 'Browser CLI prompt',
+          },
+        );
         const controlChatId = await completeChat(fixture, 'chat-row-browser-control');
         const targetPage = await fixture.integration.client.getMessages(targetChatId, {
           limit: 200,
@@ -358,6 +423,34 @@ describe('Chromium transcript chat rows', () => {
           controlChatId,
           'echo:chat-row-browser-control',
         );
+        const presentedUserBubble = fixture.page.locator(
+          '[data-user-message-presentation="custom"]',
+        );
+        await presentedUserBubble.waitFor();
+        await presentedUserBubble.getByText('Browser CLI prompt', { exact: true }).waitFor();
+        expect(await presentedUserBubble.getAttribute('class')).toContain(
+          'cli-presentation-custom',
+        );
+        const presentedUserColors = await presentedUserBubble.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            background: style.backgroundColor,
+            border: style.borderColor,
+            lightAccent: style.getPropertyValue('--cli-presentation-accent-light').trim(),
+            darkAccent: style.getPropertyValue('--cli-presentation-accent-dark').trim(),
+          };
+        });
+        expect(presentedUserColors.lightAccent).toBe('#0ea5e9');
+        expect(presentedUserColors.darkAccent).toBe('#7dd3fc');
+
+        const ordinaryUserBubble = observerPage.locator('.user-message-context-target').first();
+        await ordinaryUserBubble.waitFor();
+        expect(await ordinaryUserBubble.getAttribute('data-user-message-presentation')).toBeNull();
+        const ordinaryUserColors = await ordinaryUserBubble.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { background: style.backgroundColor, border: style.borderColor };
+        });
+        expect(presentedUserColors).not.toMatchObject(ordinaryUserColors);
         const targetSummary = observerPage.locator(
           `[data-sidebar-virtual-row="${targetChatId}"] [data-slot="sidebar-chat-summary"]`,
         );
@@ -368,16 +461,33 @@ describe('Chromium transcript chat rows', () => {
         );
         await captureComposer(fixture.page, 'chat row draft remains stable');
 
+        const infoContent = 'browser chat row information';
         const noticeContent = 'browser chat row notice';
         const errorContent = 'browser chat row error';
+        const customContent = [
+          '**browser custom deployment**',
+          ...Array.from({ length: 18 }, (_, index) => `collapsed detail ${index + 1}`),
+        ].join('\n\n');
+        const customRenderedContent = 'browser custom deployment';
+        const infoTitle = 'Browser consultation status';
         const noticeTitle = 'Browser deployment';
         const errorTitle = 'Browser release validation';
-        markPhase('publishing live notice and error chat rows');
+        const customTitle = 'Browser custom deployment';
+        markPhase('publishing live preset and custom chat rows');
+        const info = await addRow({
+          fixture,
+          chatId: targetChatId,
+          transcriptViewId: target.transcriptViewId,
+          presentation: { style: 'info' },
+          title: infoTitle,
+          content: infoContent,
+          identity: 'browser-live-info',
+        });
         const notice = await addRow({
           fixture,
           chatId: targetChatId,
           transcriptViewId: target.transcriptViewId,
-          type: 'notice',
+          presentation: { style: 'notice' },
           title: noticeTitle,
           content: noticeContent,
           identity: 'browser-live-notice',
@@ -386,61 +496,161 @@ describe('Chromium transcript chat rows', () => {
           fixture,
           chatId: targetChatId,
           transcriptViewId: target.transcriptViewId,
-          type: 'error',
+          presentation: { style: 'error' },
           title: errorTitle,
           content: errorContent,
           identity: 'browser-live-error',
         });
-        expect(notice).toMatchObject({
+        const custom = await addRow({
+          fixture,
+          chatId: targetChatId,
+          transcriptViewId: target.transcriptViewId,
+          presentation: {
+            style: 'custom',
+            customStyle: {
+              lightAccent: '#7c3aed',
+              darkAccent: '#c4b5fd',
+            },
+          },
+          format: 'markdown',
+          disclosure: 'collapsed',
+          title: customTitle,
+          content: customContent,
+          identity: 'browser-live-custom',
+        });
+        expect(info).toMatchObject({
           status: 'appended',
           transcriptViewId: target.transcriptViewId,
-          type: 'notice',
+          presentation: { style: 'info' },
+          format: 'plain',
+        });
+        expect(notice).toMatchObject({
+          ordinal: info.ordinal + 1,
+          status: 'appended',
+          transcriptViewId: target.transcriptViewId,
+          presentation: { style: 'notice' },
+          format: 'plain',
         });
         expect(error).toMatchObject({
           ordinal: notice.ordinal + 1,
           status: 'appended',
           transcriptViewId: target.transcriptViewId,
-          type: 'error',
+          presentation: { style: 'error' },
+          format: 'plain',
+        });
+        expect(custom).toMatchObject({
+          ordinal: error.ordinal + 1,
+          status: 'appended',
+          transcriptViewId: target.transcriptViewId,
+          presentation: {
+            style: 'custom',
+            customStyle: {
+              lightAccent: '#7c3aed',
+              darkAccent: '#c4b5fd',
+            },
+          },
+          format: 'markdown',
+          disclosure: 'collapsed',
+        });
+        await expectRenderedRow(fixture.page, info, {
+          messageType: 'cli-row',
+          title: infoTitle,
+          content: infoContent,
+          variantClass: 'border-status-neutral-border',
         });
         await expectRenderedRow(fixture.page, notice, {
-          messageType: 'transcript-notice',
+          messageType: 'cli-row',
           title: noticeTitle,
           content: noticeContent,
           variantClass: 'border-status-info-border',
         });
         await expectRenderedRow(fixture.page, error, {
-          messageType: 'error',
+          messageType: 'cli-row',
           title: errorTitle,
           content: errorContent,
           variantClass: 'border-status-error-border',
         });
+        await expectRenderedRow(fixture.page, custom, {
+          messageType: 'cli-row',
+          title: customTitle,
+          content: customRenderedContent,
+          variantClass: 'border-status-neutral-border',
+          customStyle: {
+            lightAccent: '#7c3aed',
+            darkAccent: '#c4b5fd',
+          },
+          markdownStrongText: customRenderedContent,
+          collapsed: true,
+        });
+        const collapsedBodyBox = await rowLocator(fixture.page, custom)
+          .locator('.cli-collapsible-body-collapsed')
+          .boundingBox();
+        expect(collapsedBodyBox).not.toBeNull();
+        expect(collapsedBodyBox!.height).toBeLessThanOrEqual(160);
+        await rowLocator(fixture.page, custom)
+          .getByRole('button', { name: 'Show more' })
+          .evaluate((button: HTMLButtonElement) => button.click());
+        await rowLocator(fixture.page, custom).getByRole('button', { name: 'Show less' }).waitFor();
+        await fixture.page.waitForFunction(() => {
+          const feed = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+          return Boolean(feed && Math.abs(feed.scrollHeight - feed.clientHeight - feed.scrollTop) <= 1);
+        });
+        expect(await cardColors(fixture.page, custom)).not.toEqual(
+          await cardColors(fixture.page, info),
+        );
+        await waitForTrackedContent(observerPage, infoContent);
         await waitForTrackedContent(observerPage, noticeContent);
         await waitForTrackedContent(observerPage, errorContent);
+        await waitForTrackedContent(observerPage, customRenderedContent);
+        await waitForTrackedContent(observerPage, infoTitle);
         await waitForTrackedContent(observerPage, noticeTitle);
         await waitForTrackedContent(observerPage, errorTitle);
+        await waitForTrackedContent(observerPage, customTitle);
         await expectComposerStable(fixture.page, 'chat row draft remains stable');
 
         markPhase('restoring the warmed background transcript');
-        await selectSidebarChat(observerPage, targetChatId, errorContent);
+        await selectSidebarChat(observerPage, targetChatId, customRenderedContent);
+        await expectRenderedRow(observerPage, info, {
+          messageType: 'cli-row',
+          title: infoTitle,
+          content: infoContent,
+          variantClass: 'border-status-neutral-border',
+        });
         await expectRenderedRow(observerPage, notice, {
-          messageType: 'transcript-notice',
+          messageType: 'cli-row',
           title: noticeTitle,
           content: noticeContent,
           variantClass: 'border-status-info-border',
         });
         await expectRenderedRow(observerPage, error, {
-          messageType: 'error',
+          messageType: 'cli-row',
           title: errorTitle,
           content: errorContent,
           variantClass: 'border-status-error-border',
         });
+        await expectRenderedRow(observerPage, custom, {
+          messageType: 'cli-row',
+          title: customTitle,
+          content: customRenderedContent,
+          variantClass: 'border-status-neutral-border',
+          customStyle: {
+            lightAccent: '#7c3aed',
+            darkAccent: '#c4b5fd',
+          },
+          markdownStrongText: customRenderedContent,
+          collapsed: true,
+        });
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
         expect(await chatSummaryMetadata(fixture, targetChatId)).toEqual(initialTargetSummary);
         const liveBoxes = await Promise.all([
+          rowLocator(observerPage, info).boundingBox(),
           rowLocator(observerPage, notice).boundingBox(),
           rowLocator(observerPage, error).boundingBox(),
+          rowLocator(observerPage, custom).boundingBox(),
         ]);
         expect(liveBoxes[0]?.y).toBeLessThan(liveBoxes[1]?.y ?? Number.NEGATIVE_INFINITY);
+        expect(liveBoxes[1]?.y).toBeLessThan(liveBoxes[2]?.y ?? Number.NEGATIVE_INFINITY);
+        expect(liveBoxes[2]?.y).toBeLessThan(liveBoxes[3]?.y ?? Number.NEGATIVE_INFINITY);
 
         const activeTracker = await trackerSnapshot(fixture.page);
         const observerTracker = await trackerSnapshot(observerPage);
@@ -480,7 +690,9 @@ describe('Chromium transcript chat rows', () => {
                 detail: {
                   type: 'cli-row',
                   clientMessageId: 'browser-replay-notice-message',
-                  presentation: 'notice',
+                  presentation: { style: 'notice' },
+                  format: 'plain',
+                  disclosure: 'expanded',
                   title: 'Replay deployment',
                 },
               });
@@ -491,7 +703,9 @@ describe('Chromium transcript chat rows', () => {
                 detail: {
                   type: 'cli-row',
                   clientMessageId: 'browser-replay-error-message',
-                  presentation: 'error',
+                  presentation: { style: 'error' },
+                  format: 'plain',
+                  disclosure: 'expanded',
                   title: 'Replay release validation',
                 },
               });
@@ -503,7 +717,9 @@ describe('Chromium transcript chat rows', () => {
                 chatId: targetChatId,
                 transcriptViewId: noticeResult.row.viewId,
                 ordinal: noticeResult.row.ordinal,
-                type: noticeResult.row.detail.presentation,
+                presentation: noticeResult.row.detail.presentation,
+                format: noticeResult.row.detail.format,
+                disclosure: noticeResult.row.detail.disclosure,
                 status: 'appended',
                 timestamp: noticeResult.row.at,
               };
@@ -515,7 +731,9 @@ describe('Chromium transcript chat rows', () => {
                 chatId: targetChatId,
                 transcriptViewId: errorResult.row.viewId,
                 ordinal: errorResult.row.ordinal,
-                type: errorResult.row.detail.presentation,
+                presentation: errorResult.row.detail.presentation,
+                format: errorResult.row.detail.format,
+                disclosure: errorResult.row.detail.disclosure,
                 status: 'appended',
                 timestamp: errorResult.row.at,
               };
@@ -560,14 +778,14 @@ describe('Chromium transcript chat rows', () => {
           fixture.page,
           missedNotice,
           {
-            messageType: 'transcript-notice',
+            messageType: 'cli-row',
             title: 'Replay deployment',
             content: 'browser replay notice',
             variantClass: 'border-status-info-border',
           },
         );
         await expectRenderedRow(fixture.page, missedError, {
-          messageType: 'error',
+          messageType: 'cli-row',
           title: 'Replay release validation',
           content: 'browser replay error',
           variantClass: 'border-status-error-border',
@@ -576,20 +794,20 @@ describe('Chromium transcript chat rows', () => {
           observerPage,
           missedNotice,
           {
-            messageType: 'transcript-notice',
+            messageType: 'cli-row',
             title: 'Replay deployment',
             content: 'browser replay notice',
             variantClass: 'border-status-info-border',
           },
         );
         await expectRenderedRow(observerPage, missedError, {
-          messageType: 'error',
+          messageType: 'cli-row',
           title: 'Replay release validation',
           content: 'browser replay error',
           variantClass: 'border-status-error-border',
         });
         for (const page of [fixture.page, observerPage]) {
-          for (const row of [notice, error, missedNotice, missedError]) {
+          for (const row of [info, notice, error, custom, missedNotice, missedError]) {
             expect(await rowLocator(page, row).count()).toBe(1);
           }
         }
@@ -601,42 +819,83 @@ describe('Chromium transcript chat rows', () => {
           limit: 200,
         });
         expect(canonical.messages.filter((entry) => (
-          [notice.ordinal, error.ordinal, missedNotice.ordinal, missedError.ordinal]
+          [
+            info.ordinal,
+            notice.ordinal,
+            error.ordinal,
+            custom.ordinal,
+            missedNotice.ordinal,
+            missedError.ordinal,
+          ]
             .includes(entry.ordinal)
         )).map((entry) => ({
           ordinal: entry.ordinal,
           type: entry.message.type,
           content: 'content' in entry.message ? entry.message.content : null,
           title: 'title' in entry.message ? entry.message.title : undefined,
-          detail: 'detail' in entry.message ? entry.message.detail : undefined,
+          presentation: 'presentation' in entry.message ? entry.message.presentation : undefined,
+          format: 'format' in entry.message ? entry.message.format : undefined,
+          disclosure: 'disclosure' in entry.message ? entry.message.disclosure : undefined,
         }))).toEqual([
           {
+            ordinal: info.ordinal,
+            type: 'cli-row',
+            content: infoContent,
+            title: infoTitle,
+            presentation: { style: 'info' },
+            format: 'plain',
+            disclosure: 'expanded',
+          },
+          {
             ordinal: notice.ordinal,
-            type: 'transcript-notice',
+            type: 'cli-row',
             content: noticeContent,
             title: noticeTitle,
-            detail: { type: 'cli-row' },
+            presentation: { style: 'notice' },
+            format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: error.ordinal,
-            type: 'error',
+            type: 'cli-row',
             content: errorContent,
             title: errorTitle,
-            detail: { type: 'cli-row' },
+            presentation: { style: 'error' },
+            format: 'plain',
+            disclosure: 'expanded',
+          },
+          {
+            ordinal: custom.ordinal,
+            type: 'cli-row',
+            content: customContent,
+            title: customTitle,
+            presentation: {
+              style: 'custom',
+              customStyle: {
+                lightAccent: '#7c3aed',
+                darkAccent: '#c4b5fd',
+              },
+            },
+            format: 'markdown',
+            disclosure: 'collapsed',
           },
           {
             ordinal: missedNotice.ordinal,
-            type: 'transcript-notice',
+            type: 'cli-row',
             content: 'browser replay notice',
             title: 'Replay deployment',
-            detail: { type: 'cli-row' },
+            presentation: { style: 'notice' },
+            format: 'plain',
+            disclosure: 'expanded',
           },
           {
             ordinal: missedError.ordinal,
-            type: 'error',
+            type: 'cli-row',
             content: 'browser replay error',
             title: 'Replay release validation',
-            detail: { type: 'cli-row' },
+            presentation: { style: 'error' },
+            format: 'plain',
+            disclosure: 'expanded',
           },
         ]);
         await targetSummary.getByText(targetPreview, { exact: true }).waitFor();
