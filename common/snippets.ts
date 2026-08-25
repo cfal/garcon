@@ -1,4 +1,9 @@
 import { parseChatId } from './chat-id.js';
+import {
+  CHAT_ID_TEMPLATE_TOKEN,
+  matchTemplateTokens,
+  type TemplateTokenMatch,
+} from './template-tokens.js';
 
 export const SNIPPET_MAX_COUNT = 100;
 export const SNIPPET_SHORT_NAME_MAX_LENGTH = 64;
@@ -8,39 +13,21 @@ export const SNIPPET_EXPANDED_MAX_LENGTH = 64_000;
 export const SNIPPET_SHORT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SNIPPET_ARGUMENTS_TOKEN = '{{arguments}}';
 export const SNIPPET_PROJECT_PATH_TOKEN = '{{project_path}}';
-export const SNIPPET_CHAT_ID_TOKEN = '{{chat_id}}';
-
-const SNIPPET_TEMPLATE_TOKEN_PATTERN = /\\?\{\{(?:arguments|project_path|chat_id)\}\}/g;
+export const SNIPPET_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 
 export type SnippetTemplateVariable = 'arguments' | 'project_path' | 'chat_id';
+export const SNIPPET_TEMPLATE_VARIABLES: readonly SnippetTemplateVariable[] = [
+  'arguments',
+  'project_path',
+  'chat_id',
+];
 
-function snippetTemplateVariable(token: string): SnippetTemplateVariable {
-  if (token === SNIPPET_ARGUMENTS_TOKEN) return 'arguments';
-  if (token === SNIPPET_PROJECT_PATH_TOKEN) return 'project_path';
-  return 'chat_id';
-}
-
-export interface SnippetTemplateTokenMatch {
-  index: number;
-  raw: string;
-  variable: SnippetTemplateVariable;
-  escaped: boolean;
-}
+export type SnippetTemplateTokenMatch = TemplateTokenMatch<SnippetTemplateVariable>;
 
 export function* matchSnippetTemplateTokens(
   template: string,
 ): Generator<SnippetTemplateTokenMatch> {
-  for (const match of template.matchAll(SNIPPET_TEMPLATE_TOKEN_PATTERN)) {
-    const raw = match[0];
-    const escaped = raw.startsWith('\\');
-    const token = escaped ? raw.slice(1) : raw;
-    yield {
-      index: match.index,
-      raw,
-      variable: snippetTemplateVariable(token),
-      escaped,
-    };
-  }
+  yield* matchTemplateTokens(template, SNIPPET_TEMPLATE_VARIABLES);
 }
 
 export function snippetTemplateTokenSignature(template: string): string[] {
