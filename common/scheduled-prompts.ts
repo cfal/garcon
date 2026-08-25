@@ -6,6 +6,7 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-integration.js';
+import { CHAT_ID_LENGTH } from './chat-id.js';
 import { normalizeTags } from './tags.js';
 import {
   CHAT_ID_TEMPLATE_TOKEN,
@@ -22,7 +23,7 @@ export const SCHEDULED_PROMPT_MAX_COUNT = 500;
 export const SCHEDULED_PROMPT_CHAT_ID_TOKEN = CHAT_ID_TEMPLATE_TOKEN;
 
 const SCHEDULED_PROMPT_TEMPLATE_VARIABLES = [CHAT_ID_TEMPLATE_VARIABLE] as const;
-const SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE = '1000000000000000';
+const SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE = '1'.repeat(CHAT_ID_LENGTH);
 
 export type ScheduledPromptBusyBehavior = 'queue' | 'skip';
 
@@ -160,9 +161,12 @@ export function renderScheduledPrompt(prompt: string, chatId: string): string {
   );
 }
 
-export function scheduledPromptFitsRenderedLimit(prompt: string): boolean {
+export function scheduledPromptFitsRenderedLimit(
+  prompt: string,
+  chatId = SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE,
+): boolean {
   try {
-    renderScheduledPrompt(prompt, SCHEDULED_PROMPT_CHAT_ID_LENGTH_SAMPLE);
+    renderScheduledPrompt(prompt, chatId);
     return true;
   } catch (error) {
     if (error instanceof TemplateExpansionTooLongError) return false;

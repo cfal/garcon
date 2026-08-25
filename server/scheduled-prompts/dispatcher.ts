@@ -21,7 +21,10 @@ export class ScheduledPromptDispatcher {
   async dispatch(scheduledPrompt: ScheduledPrompt, scheduledFor: string): Promise<ScheduledPromptDispatchOutcome> {
     const requestId = `scheduled:${scheduledPrompt.id}:${scheduledFor}`;
     const messageId = `scheduled-message:${scheduledPrompt.id}:${scheduledFor}`;
-    if (!scheduledPromptFitsRenderedLimit(scheduledPrompt.prompt)) {
+    const fitsRenderedLimit = scheduledPrompt.target.type === 'existing-chat'
+      ? scheduledPromptFitsRenderedLimit(scheduledPrompt.prompt, scheduledPrompt.target.chatId)
+      : scheduledPromptFitsRenderedLimit(scheduledPrompt.prompt);
+    if (!fitsRenderedLimit) {
       throw new Error('Scheduled prompt exceeds the maximum length after variable expansion');
     }
     if (scheduledPrompt.target.type === 'existing-chat') {

@@ -105,12 +105,13 @@ describe('dialog input zoom protection', () => {
 		expect(failures).toEqual([]);
 	});
 
-	it('keeps the shared form controls safe without global CSS', () => {
-		const sharedControls = [
+	it('keeps shared and extracted dialog controls safe without global CSS', () => {
+		const auditedControls = [
 			join(componentsRoot, 'ui/input/input.svelte'),
 			join(componentsRoot, 'ui/textarea/textarea.svelte'),
+			join(componentsRoot, 'settings/ScheduledPromptField.svelte'),
 		];
-		const failures = sharedControls.flatMap((path) =>
+		const failures = auditedControls.flatMap((path) =>
 			auditDialogControls(path, readFileSync(path, 'utf8')),
 		);
 

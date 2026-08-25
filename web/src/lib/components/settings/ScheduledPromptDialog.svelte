@@ -369,16 +369,14 @@
 			</section>
 
 			{#if form.targetType === 'existing-chat'}
-				<section>
-					<ScheduledPromptField
-						prompt={form.prompt}
-						promptError={form.promptError}
-						targetType="existing-chat"
-						surface="standalone"
-						onPromptChange={(value) => (form.prompt = value)}
-						onPromptKeydown={handlePromptKeydown}
-					/>
-				</section>
+				<ScheduledPromptField
+					prompt={form.prompt}
+					promptError={form.promptError}
+					targetType="existing-chat"
+					surface="standalone"
+					onPromptChange={(value) => (form.prompt = value)}
+					onPromptKeydown={handlePromptKeydown}
+				/>
 			{/if}
 
 			{#if form.error}

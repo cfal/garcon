@@ -149,8 +149,40 @@ describe('scheduled prompt dispatcher', () => {
         '2030-01-01T09:00:00.000Z',
       );
       expect(outcome.message).toContain(expected);
-      expect(outcome.message).not.toContain('Review the current work');
+      expect(outcome.message).not.toContain('Review in');
+      expect(outcome.message).not.toContain(SCHEDULED_PROMPT_CHAT_ID_TOKEN);
     }
+  });
+
+  it('reports the domain error for a persisted existing-chat ID that renders over the limit', async () => {
+    const submitScheduledExistingChat = mock(() => {
+      throw new Error('unexpected');
+    });
+    const dispatcher = new ScheduledPromptDispatcher({
+      chatIds: { allocate: () => CREATED_CHAT_ID },
+      commands: {
+        async submitScheduledStart() {
+          throw new Error('unexpected');
+        },
+        submitScheduledExistingChat,
+      },
+    });
+    const exactForCanonicalId = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - CREATED_CHAT_ID.length)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
+
+    await expect(
+      dispatcher.dispatch(
+        prompt(
+          {
+            type: 'existing-chat',
+            chatId: `${CREATED_CHAT_ID}0`,
+            busyBehavior: 'queue',
+          },
+          exactForCanonicalId,
+        ),
+        '2030-01-01T09:00:00.000Z',
+      ),
+    ).rejects.toThrow('Scheduled prompt exceeds the maximum length after variable expansion');
+    expect(submitScheduledExistingChat).not.toHaveBeenCalled();
   });
 
   it('leaves prompts without scheduled variables unchanged', async () => {

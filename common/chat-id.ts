@@ -1,4 +1,6 @@
-const CHAT_ID_PATTERN = /^\d{16}$/;
+export const CHAT_ID_LENGTH = 16;
+
+const CHAT_ID_PATTERN = new RegExp(`^\\d{${CHAT_ID_LENGTH}}$`);
 const LEGACY_SECONDS_CHAT_ID_PATTERN = /^\d{10}$/;
 const LEGACY_MILLISECONDS_CHAT_ID_PATTERN = /^\d{13}$/;
 const MICROSECONDS_PER_MILLISECOND = 1_000n;
@@ -10,7 +12,7 @@ export type ChatId = string & { readonly [chatIdBrand]: true };
 
 export class InvalidChatIdError extends Error {
   constructor(readonly value: unknown) {
-    super('Chat ID must be a valid 16-digit Unix-microsecond timestamp');
+    super(`Chat ID must be a valid ${CHAT_ID_LENGTH}-digit Unix-microsecond timestamp`);
     this.name = 'InvalidChatIdError';
   }
 }
@@ -57,10 +59,10 @@ export function chatIdCreatedAt(chatId: string): Date {
 export function legacyChatIdToCanonical(value: unknown): ChatId | null {
   if (typeof value !== 'string') return null;
   if (LEGACY_SECONDS_CHAT_ID_PATTERN.test(value)) {
-    return parseChatId(value.padEnd(16, '0'));
+    return parseChatId(value.padEnd(CHAT_ID_LENGTH, '0'));
   }
   if (LEGACY_MILLISECONDS_CHAT_ID_PATTERN.test(value)) {
-    return parseChatId(value.padEnd(16, '0'));
+    return parseChatId(value.padEnd(CHAT_ID_LENGTH, '0'));
   }
   return null;
 }
