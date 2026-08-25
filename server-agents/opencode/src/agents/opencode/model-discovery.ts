@@ -58,6 +58,22 @@ export class OpenCodeModelDiscovery {
     return this.#pending;
   }
 
+  // Resolves the model's declared thinking modes, discovering once when a
+  // warm cache does not contain the model: a cold catalog otherwise passes an
+  // above-ceiling mode through unchanged, and OpenCode silently ignores
+  // undeclared variant names instead of downgrading them. A model still absent
+  // after a fresh discovery stays passthrough; the cache TTL bounds repeats.
+  async declaredThinkingModes(model: string): Promise<readonly ThinkingMode[] | undefined> {
+    const lookup = () => this.models.find((entry) => entry.value === model)?.thinkingModes;
+    const cached = lookup();
+    if (cached !== undefined) return cached;
+    // A fresh cache without the model means the provider does not list it;
+    // only a cold or stale cache justifies one discovery pass.
+    if (this.#cache && this.#isCacheFresh()) return undefined;
+    await this.getModels();
+    return lookup();
+  }
+
   // Effort maps to the model's declared variants; unknown models pass the mode
   // through because the catalog may simply be cold.
   resolveThinkingVariant(
@@ -67,6 +83,17 @@ export class OpenCodeModelDiscovery {
     const declared = model
       ? this.models.find((entry) => entry.value === model)?.thinkingModes
       : undefined;
+    return resolveOpenCodeThinkingVariant(thinkingMode, declared);
+  }
+
+  async resolveThinkingVariantForTurn(
+    model: string | undefined,
+    thinkingMode: ThinkingMode | undefined,
+  ): Promise<string | undefined> {
+    if (!model || !thinkingMode || thinkingMode === 'none') {
+      return this.resolveThinkingVariant(model, thinkingMode);
+    }
+    const declared = await this.declaredThinkingModes(model);
     return resolveOpenCodeThinkingVariant(thinkingMode, declared);
   }
 

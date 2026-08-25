@@ -353,13 +353,12 @@ describe('OpenCode server death turn semantics', () => {
     expect(await startOutcome).toMatchObject({
       message: 'OpenCode server process was retired while the request was in flight',
     });
-    // Cleanup attempted the deletion through the dead endpoint and retained it.
-    await waitFor(() => oldDelete.mock.calls.length === 1);
     expect(runtime.isRunning('late-session')).toBe(false);
 
-    // The next instance drains the retained deletion.
+    // Cleanup never contacted the dead endpoint; the deletion was retained.
     await expect(runtime.getClient()).resolves.toBe(replacement.client);
     await waitFor(() => replacementDelete.mock.calls.length === 1);
+    expect(oldDelete.mock.calls.length).toBe(0);
     expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'late-session' });
     await runtime.shutdown();
   });
@@ -399,11 +398,115 @@ describe('OpenCode server death turn semantics', () => {
     expect(await queryOutcome).toMatchObject({
       message: 'OpenCode server process was retired while the request was in flight',
     });
-    // The dead client was never prompted, and the created session was cleaned up.
+    // The dead client was never prompted; the created session was retained for
+    // the replacement instead of being deleted through the dead endpoint.
     expect(oldPrompt.mock.calls.length).toBe(0);
-    await waitFor(() => oldDelete.mock.calls.length === 1);
     await expect(runtime.getClient()).resolves.toBe(replacement.client);
     await waitFor(() => replacementDelete.mock.calls.length === 1);
+    expect(oldDelete.mock.calls.length).toBe(0);
+    expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'one-shot-session' });
+    await runtime.shutdown();
+  });
+
+  it('never arms the cooldown when stale-cleanup deletion would hang', async () => {
+    const termination = deferred();
+    let firstClosed = false;
+    const sessionCreate = deferred();
+    const oldDelete = mock(() => new Promise(() => {}));
+    const oldClient = deathClient({ create: mock(() => sessionCreate.promise), delete: oldDelete });
+    const replacementDelete = mock(() => Promise.resolve({}));
+    const replacement = {
+      client: deathClient({ delete: replacementDelete }),
+      server: { close: mock(() => undefined) },
+    };
+    const createInstance = mock()
+      .mockImplementationOnce(() => Promise.resolve({
+        client: oldClient,
+        server: { close: () => { firstClosed = true; }, termination: termination.promise },
+      }))
+      .mockImplementationOnce(() => Promise.resolve(replacement));
+
+    const runtime = new OpenCodeRuntime({
+      createInstance,
+      sseRetryDelayMs: 60_000,
+      unavailableRetryMs: 60_000,
+      requestTimeoutMs: 60,
+    });
+    const published = collectOperation('run-a');
+    const startOutcome = runtime.startSession({
+      command: 'hello',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: published.operation,
+    }).then(() => null, (error) => error);
+    await waitFor(() => oldClient.session.create.mock.calls.length === 1);
+
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitFor(() => firstClosed);
+    sessionCreate.resolve({ data: { id: 'late-session' } });
+
+    // Cleanup resolves promptly despite the hanging stale-client delete mock,
+    // and the death disarm stands: no cooldown, immediate replacement.
+    expect(await startOutcome).toMatchObject({
+      message: 'OpenCode server process was retired while the request was in flight',
+    });
+    expect(runtime.isTemporarilyUnavailable()).toBe(false);
+    expect(oldDelete.mock.calls.length).toBe(0);
+    await expect(runtime.getClient()).resolves.toBe(replacement.client);
+    await runtime.shutdown();
+  });
+
+  it('rejects a native fork while the source session is running a compaction', async () => {
+    const termination = deferred();
+    const client = deathClient({
+      prompt: mock(() => Promise.resolve({
+        data: {
+          info: {
+            id: 'assistant-seed', role: 'assistant', parentID: 'user-seed',
+            sessionID: 'session-1', finish: 'stop', time: { completed: Date.now() },
+          },
+          parts: [],
+        },
+      })),
+      summarize: mock((_input, options) => pendingUntilAborted(options.signal)),
+    });
+    const createInstance = mock(() => Promise.resolve({
+      client,
+      server: { close: mock(() => undefined), termination: termination.promise },
+    }));
+    const runtime = new OpenCodeRuntime({ createInstance, sseRetryDelayMs: 60_000 });
+    const seed = collectOperation('run-seed');
+    await runtime.startSession({
+      command: 'hello',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: seed.operation,
+    });
+    await waitFor(() => runtime.isRunning('session-1') === false);
+
+    const compactOperation = collectOperation('run-compact');
+    const compactOutcome = runtime.compact({
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      model: 'provider/model',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: compactOperation.operation,
+    }).then(() => null, (error) => error);
+    await waitFor(() => client.session.summarize.mock.calls.length === 1);
+
+    // The persisted-but-unsummarized control would clone into the child.
+    await expect(runtime.forkSession('session-1')).rejects.toMatchObject({
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+      details: { nativeForkReason: 'not-settled' },
+    });
+    expect(client.session.fork).not.toHaveBeenCalled();
+
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitFor(() => failureMessages(compactOperation.events).length === 1);
     await runtime.shutdown();
   });
 

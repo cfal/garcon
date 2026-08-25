@@ -145,6 +145,69 @@ describe('OpenCodeRuntime model discovery', () => {
     ]);
   });
 
+  it('downgrades effort against a cold catalog by discovering once per turn', async () => {
+    const promptCalls = [];
+    const configProviders = mock(() => Promise.resolve({
+      data: {
+        providers: [{
+          id: 'mixed',
+          name: 'Mixed',
+          models: {
+            reasoned: {
+              id: 'reasoned',
+              name: 'Reasoned',
+              variants: { low: {}, high: {} },
+            },
+          },
+        }],
+      },
+    }));
+    const createInstance = mock(() => Promise.resolve({
+      client: {
+        config: { providers: configProviders },
+        permission: { reply: mock(() => Promise.resolve({})) },
+        provider: { list: mock(() => Promise.resolve({ data: { all: [], connected: [] } })) },
+        global: { event: mock(() => Promise.resolve({
+          stream: (async function* () {
+            yield { payload: { id: 'evt_c', type: 'server.connected', properties: {} } };
+            await new Promise(() => {});
+          })(),
+        })) },
+        session: {
+          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt: mock((body) => {
+            promptCalls.push(body);
+            return new Promise(() => {});
+          }),
+          promptAsync: mock(() => Promise.resolve({})),
+          abort: mock(() => Promise.resolve({ data: true })),
+          delete: mock(() => Promise.resolve({})),
+        },
+      },
+      server: { close: mock(() => {}) },
+    }));
+
+    const OpenCodeRuntime = await importProvider();
+    const runtime = new OpenCodeRuntime({ createInstance });
+
+    // The catalog was never warmed: resolving max against a model whose
+    // declared variants stop at high must discover once and downgrade.
+    await runtime.startSession({
+      command: 'hello',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'max',
+      model: 'mixed/reasoned',
+      operation: { runId: 'run-cold', publish: mock(() => {}) },
+    });
+
+    expect(configProviders).toHaveBeenCalledTimes(1);
+    expect(promptCalls).toHaveLength(1);
+    expect(promptCalls[0]?.variant).toBe('high');
+    await runtime.shutdown();
+  });
+
   it('carries declared thinking variants as ladder-ordered thinking modes', async () => {
     const configProviders = mock(() => Promise.resolve({
       data: {

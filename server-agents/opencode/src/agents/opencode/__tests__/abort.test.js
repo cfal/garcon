@@ -1291,7 +1291,9 @@ describe('OpenCodeRuntime abort', () => {
       });
       expect(activated).not.toHaveBeenCalled();
       expect(oldClient.session.prompt).not.toHaveBeenCalled();
-      expect(oldDelete).toHaveBeenCalledTimes(1);
+      // Cleanup never contacts the retired endpoint; the deletion is retained
+      // for the replacement instance instead.
+      expect(oldDelete).not.toHaveBeenCalled();
       expect(terminalEvents(published.events)).toHaveLength(1);
       expect(failureMessages(published.events)[0]).toContain('terminated unexpectedly');
       expect(runtime.isRunning('session-1')).toBe(false);

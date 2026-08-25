@@ -102,6 +102,7 @@ const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
 const DEFAULT_OPENCODE_SSE_RETRY_DELAY_MS = 3_000;
+const RETAINED_SESSION_DELETION_LIMIT = 256;
 const DEFAULT_OPENCODE_SSE_HEARTBEAT_TIMEOUT_MS = 30_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_OPENCODE_SHUTDOWN_STARTUP_GRACE_MS = 100;
@@ -488,14 +489,23 @@ export class OpenCodeRuntime {
   // next instance otherwise: the provider persists sessions in its own
   // database, so a leak survives the respawn. A not-found result means the
   // session is already gone and satisfies the deletion.
+  // Deletes a native session when possible and retains the deletion for the
+  // next instance otherwise: the provider persists sessions in its own
+  // database, so a leak survives the respawn. A not-found result means the
+  // session is already gone and satisfies the deletion. Cleanup carrying a
+  // retired generation never contacts the stale client: a hanging deletion
+  // through a dead endpoint would time out against the current generation and
+  // wrongly arm the cooldown the death path just disarmed.
   async #deleteSessionBestEffort(
     sessionId: string,
     scope: OpenCodeRequestScope,
-    client?: any,
+    cleanup: { client?: any; generation?: number } = {},
   ): Promise<void> {
-    const deleteThrough = client ?? (() => this.getClientIfInitialized())();
+    const retired = cleanup.generation !== undefined
+      && cleanup.generation !== this.#instanceGeneration;
+    const deleteThrough = retired ? null : (cleanup.client ?? (() => this.getClientIfInitialized())());
     if (!deleteThrough) {
-      this.#pendingSessionDeletions.push({ sessionId, scope });
+      this.#retainSessionDeletion(sessionId, scope);
       return;
     }
     try {
@@ -511,8 +521,24 @@ export class OpenCodeRuntime {
         throwOpenCodeResultError(result, 'OpenCode cancelled session delete failed');
       }
     } catch {
-      this.#pendingSessionDeletions.push({ sessionId, scope });
+      this.#retainSessionDeletion(sessionId, scope);
     }
+  }
+
+  // Retained deletions stay keyed by session id so repeated failures for one
+  // session cannot accumulate, and the queue stays bounded: a provider that
+  // never accepts deletions must not grow Garcon's memory without limit.
+  #retainSessionDeletion(sessionId: string, scope: OpenCodeRequestScope): void {
+    const existing = this.#pendingSessionDeletions.findIndex((entry) => entry.sessionId === sessionId);
+    if (existing >= 0) this.#pendingSessionDeletions.splice(existing, 1);
+    if (this.#pendingSessionDeletions.length >= RETAINED_SESSION_DELETION_LIMIT) {
+      this.#logger.warn('Discarding an OpenCode retained session deletion at capacity', {
+        sessionId,
+        retained: this.#pendingSessionDeletions.length,
+      });
+      return;
+    }
+    this.#pendingSessionDeletions.push({ sessionId, scope });
   }
 
   // Replays retained deletions through the freshly installed instance. Each
@@ -534,7 +560,7 @@ export class OpenCodeRuntime {
           throwOpenCodeResultError(result, 'OpenCode retained session delete failed');
         }
       }).catch(() => {
-        this.#pendingSessionDeletions.push({ sessionId, scope });
+        this.#retainSessionDeletion(sessionId, scope);
       });
     }
   }
@@ -1109,8 +1135,11 @@ export class OpenCodeRuntime {
     return this.#models.getModels();
   }
 
-  #resolveThinkingVariant(model: string | undefined, thinkingMode: ThinkingMode | undefined): string | undefined {
-    return this.#models.resolveThinkingVariant(model, thinkingMode);
+  #resolveThinkingVariant(
+    model: string | undefined,
+    thinkingMode: ThinkingMode | undefined,
+  ): Promise<string | undefined> {
+    return this.#models.resolveThinkingVariantForTurn(model, thinkingMode);
   }
 
   async #runRequest<T>(
@@ -1280,6 +1309,7 @@ export class OpenCodeRuntime {
     const scope = createOpenCodeRequestScope(projectPath);
 
     const instance = await this.#ensureOpenCodeServer();
+    const generation = this.#instanceGeneration;
     await this.#globalEventListener.start(scope.directory);
     this.#assertInstanceCurrent(instance);
 
@@ -1301,7 +1331,7 @@ export class OpenCodeRuntime {
     }
 
     const turn = createOpenCodeTurnContext(operation);
-    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
+    const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
@@ -1347,7 +1377,7 @@ export class OpenCodeRuntime {
     } catch (error) {
       this.#operationRoutes.unregister(route);
       this.#sessions.delete(agentSessionId);
-      await this.#deleteSessionBestEffort(agentSessionId, scope, client);
+      await this.#deleteSessionBestEffort(agentSessionId, scope, { client, generation });
       throw error;
     }
 
@@ -1412,7 +1442,7 @@ export class OpenCodeRuntime {
     const waiter = this.#createTurnWaiter(agentSessionId);
     // One resolution per turn: the stored variant steering reuses must be the
     // variant this prompt submits, even if discovery refreshes mid-admission.
-    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
+    const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
     this.#activateTurn(agentSessionId, session, {
       chatId,
       model,
@@ -1573,6 +1603,18 @@ export class OpenCodeRuntime {
     sourceSessionId: string,
     options: { projectPath?: string | null; messageId?: string } = {},
   ): Promise<string> {
+    // OpenCode persists a manual compaction control before its summary runs, so
+    // a whole-tip fork mid-compaction would clone a pending control into the
+    // child, where the next prompt could be consumed as compaction input.
+    const source = this.#sessions.get(sourceSessionId.trim());
+    if (source?.status === 'running' && source.turn.compaction) {
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'The OpenCode source session is compacting; fork after it settles',
+        true,
+        { nativeForkReason: 'not-settled' },
+      );
+    }
     return this.#endpointCoordinator.forkSession(
       sourceSessionId,
       options,
@@ -1718,7 +1760,7 @@ export class OpenCodeRuntime {
           tools: { '*': false },
         };
         if (parsedModel) body.model = parsedModel;
-        const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
+        const thinkingVariant = await this.#resolveThinkingVariant(model, thinkingMode);
         if (thinkingVariant) body.variant = thinkingVariant;
 
         const promptResult: any = await this.#runScopedSessionRequest<any>(
@@ -1735,19 +1777,7 @@ export class OpenCodeRuntime {
         throwOpenCodeResultError(promptResult, 'OpenCode one-shot prompt failed');
         return extractTextParts(promptResult.data?.parts);
       } finally {
-        await this.#runScopedSessionRequest(
-          'OpenCode session delete',
-          scope,
-          (requestSignal, requestScope) => client.session.delete(
-            withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
-            { signal: requestSignal },
-          ),
-        ).then((result) => {
-          if (isOpenCodeNotFoundResult(result)) return;
-          throwOpenCodeResultError(result, 'OpenCode session delete failed');
-        }).catch(() => {
-          this.#pendingSessionDeletions.push({ sessionId, scope });
-        });
+        await this.#deleteSessionBestEffort(sessionId, scope, { client, generation });
       }
     }));
   }
