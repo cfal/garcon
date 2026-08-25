@@ -177,9 +177,11 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
         ? lastVisibleUserText
         : null;
       overflowCompactionPending = false;
-      // A failed summary remains internal, but its provider failure must survive reload.
+      // A failed summary remains internal, but its provider failure must survive
+      // reload. A successful manual boundary re-appears as the summary assistant
+      // itself, anchored to its id so point forks match the live transcript.
       if (!succeeded) visible.push({ ...message, parts: [] });
-      if (manualCompactionBoundary) visible.push(manualCompactionBoundary);
+      else if (manualCompactionBoundary) visible.push({ ...message, parts: [] });
       manualCompactionBoundary = null;
       continue;
     }
@@ -301,12 +303,6 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
       ?? new Date().toISOString();
 
     if (info.role === 'user') {
-      const compaction = (Array.isArray(msg.parts) ? msg.parts.map(asRecord) : [])
-        .find((part) => part.type === 'compaction' && part.auto !== true);
-      if (compaction) {
-        push(new CompactionMessage(ts, 'manual', ''), info.id);
-        continue;
-      }
       const text = extractUserTextFromParts(msg.parts || []);
       const images = extractUserImagesFromParts(msg.parts || []);
       if (text?.trim() || images.length > 0) {
@@ -320,6 +316,23 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
     }
 
     if (info.role === 'assistant') {
+      if (isCompactionAssistant(info)) {
+        // A visible compaction assistant is either a failed summary (its stored
+        // error survives) or a successful manual boundary anchored to the same
+        // id the live turn published.
+        const providerError = openCodeStoredErrorMessage(info.error);
+        if (providerError) push(new ErrorMessage(ts, providerError), info.id);
+        else {
+          const time = asRecord(info.time);
+          const completed = time && typeof time.completed === 'number' ? time.completed : undefined;
+          push(new CompactionMessage(
+            dateToIso(completed) ?? ts,
+            'manual',
+            '',
+          ), info.id);
+        }
+        continue;
+      }
       const providerError = openCodeStoredErrorMessage(info.error);
       const parts = Array.isArray(msg.parts) ? msg.parts : [];
       for (const rawPart of parts) {

@@ -409,6 +409,129 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('a transient summary fault is retried by the provider loop and still publishes one boundary', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('RETRIED_MANUAL_PROMPT');
+    const answer = marker('RETRIED_MANUAL_ANSWER');
+    const summaryFault = marker('RETRIED_MANUAL_FAULT');
+    const summary = marker('RETRIED_MANUAL_SUMMARY');
+    const requestCursor = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([chatCompletionsText(answer)]);
+    testEnvironment.model.scriptFault({
+      kind: 'http-error',
+      status: 500,
+      message: summaryFault,
+    });
+    testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
+
+    await withIntegrationFixture('opencode-manual-compaction-retried', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: answer,
+        afterIndex: cursor,
+      });
+
+      const compactCursor = fixture.client.markEvents();
+      const compact = await fixture.client.post<{ turnId: string }>('/api/v1/chats/compact', {
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      });
+      const terminal = await fixture.client.waitForTurnTerminal(
+        chatId,
+        compact.turnId,
+        { afterIndex: compactCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expect(terminal.type).toBe('agent-run-finished');
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: compactCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const boundaries = messagesOfType(transcript.messages, 'compaction');
+      expect(boundaries).toHaveLength(1);
+      expect(boundaries[0]).toMatchObject({ trigger: 'manual' });
+      // The fault surfaces only as the provider retry notice, not as content.
+      expect(JSON.stringify(transcript.messages)).not.toContain(summary);
+      // The summarize loop consumed the fault then completed from the retry.
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(3);
+      testEnvironment.model.assertSettled();
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const imported = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(imported.messages, 'compaction')).toHaveLength(1);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('repeated manual compactions each publish one boundary row', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('REPEATED_PROMPT');
+    const answer = marker('REPEATED_ANSWER');
+    const firstSummary = marker('REPEATED_FIRST_SUMMARY');
+    const secondSummary = marker('REPEATED_SECOND_SUMMARY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(answer)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(firstSummary)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(secondSummary)]);
+
+    await withIntegrationFixture('opencode-manual-compaction-repeated', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: answer,
+        afterIndex: cursor,
+      });
+
+      for (const summary of [firstSummary, secondSummary]) {
+        const compactCursor = fixture.client.markEvents();
+        const compact = await fixture.client.post<{ turnId: string }>('/api/v1/chats/compact', {
+          clientRequestId: crypto.randomUUID(),
+          chatId,
+        });
+        const terminal = await fixture.client.waitForTurnTerminal(
+          chatId,
+          compact.turnId,
+          { afterIndex: compactCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        expect(terminal.type).toBe('agent-run-finished');
+        await fixture.client.waitForProcessing(chatId, false, {
+          afterIndex: compactCursor,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        });
+        void summary;
+      }
+
+      const transcript = await fixture.client.getMessages(chatId);
+      const boundaries = messagesOfType(transcript.messages, 'compaction');
+      expect(boundaries).toHaveLength(2);
+      expect(boundaries.every((boundary) => boundary.trigger === 'manual')).toBe(true);
+      expect(JSON.stringify(transcript.messages)).not.toContain(firstSummary);
+      expect(JSON.stringify(transcript.messages)).not.toContain(secondSummary);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const imported = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(imported.messages, 'compaction')).toHaveLength(2);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 async function exerciseInterruptedCompaction(

@@ -5,7 +5,7 @@ import type {
   OpenCodeOperationRoute,
   OpenCodeOperationRoutes,
 } from './operation-routes.js';
-import { isOpenCodeCompactionAssistant } from './sse-events.js';
+import { isOpenCodeCompactionAssistant, openCodeAssistantTerminal } from './sse-events.js';
 import type { SSEEvent } from './sse-events.js';
 import type { OpenCodeSession } from './turn-events.js';
 
@@ -120,16 +120,29 @@ function dropCompactionPart(
   return null;
 }
 
-// The single boundary row a manual compaction turn publishes: the provider's
-// summary assistant completing is the marker; summary text and control parts
+export interface OpenCodeManualCompactionBoundary {
+  readonly row: CompactionMessage;
+  // The successful summary assistant's id anchors the boundary so point-fork
+  // boundaries match across live and reloaded transcripts.
+  readonly summaryMessageId: string;
+}
+
+// The single boundary row a manual compaction turn publishes: only a summary
+// assistant that finished successfully replaced prior context; a failed or
+// aborted summary leaves the boundary unmarked. Summary text and control parts
 // stay internal to the native session.
-export function manualCompactionBoundaryRow(event: SSEEvent): CompactionMessage | null {
+export function manualCompactionBoundaryRow(event: SSEEvent): OpenCodeManualCompactionBoundary | null {
   if (event.type !== 'message.updated') return null;
   const info = event.properties?.info;
   if (!isRecord(info) || !isOpenCodeCompactionAssistant(info)) return null;
+  const terminal = openCodeAssistantTerminal(event);
+  if (!terminal || terminal.outcome !== 'finished') return null;
   const completed = isRecord(info.time) && typeof info.time.completed === 'number'
     ? info.time.completed
     : null;
   if (completed === null) return null;
-  return new CompactionMessage(new Date(completed).toISOString(), 'manual', '');
+  return {
+    row: new CompactionMessage(new Date(completed).toISOString(), 'manual', ''),
+    summaryMessageId: terminal.messageId,
+  };
 }

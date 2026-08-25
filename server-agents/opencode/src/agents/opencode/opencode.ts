@@ -723,7 +723,9 @@ export class OpenCodeRuntime {
     const boundary = manualCompactionBoundaryRow(event);
     if (!boundary) return;
     route.turn.compactionBoundaryPublished = true;
-    this.#publishRows(route.sessionId, route.turn.operation, [boundary]);
+    this.#publishRows(route.sessionId, route.turn.operation, [
+      attachNativeMessageSource(boundary.row, { entryId: boundary.summaryMessageId }),
+    ]);
   }
 
   #dispatchPromptResponse(
@@ -1183,7 +1185,7 @@ export class OpenCodeRuntime {
       model,
       turn.providerPromptPartId,
       images ?? [],
-      this.#resolveThinkingVariant(model, thinkingMode),
+      thinkingVariant,
     );
 
     const promptRequest = this.#runScopedTurnRequest(
@@ -1235,10 +1237,13 @@ export class OpenCodeRuntime {
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     const waiter = this.#createTurnWaiter(agentSessionId);
+    // One resolution per turn: the stored variant steering reuses must be the
+    // variant this prompt submits, even if discovery refreshes mid-admission.
+    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
     this.#activateTurn(agentSessionId, session, {
       chatId,
       model,
-      thinkingVariant: this.#resolveThinkingVariant(model, thinkingMode),
+      thinkingVariant,
       permissionMode,
       directory: scope.directory,
       turn,
@@ -1256,7 +1261,7 @@ export class OpenCodeRuntime {
       model,
       turn.providerPromptPartId,
       images ?? [],
-      this.#resolveThinkingVariant(model, thinkingMode),
+      thinkingVariant,
     );
 
     try {
@@ -1296,6 +1301,7 @@ export class OpenCodeRuntime {
   // arrives through the global stream.
   async compact(request: Omit<OpenCodeResumeRequest, 'command' | 'images'>): Promise<void> {
     this.#endpointCoordinator.turnAdmissionStarted();
+    let turn: OpenCodeTurnContext | null = null;
     try {
       assertOpenCodeExecutionOpen(request);
       const {
@@ -1316,7 +1322,7 @@ export class OpenCodeRuntime {
       await this.#globalEventListener.start(scope.directory);
       assertOpenCodeExecutionOpen(request);
 
-      const turn = createOpenCodeTurnContext(operation, { compaction: true });
+      turn = createOpenCodeTurnContext(operation, { compaction: true });
       const client = await this.getClient();
       if (session) {
         await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
@@ -1375,6 +1381,10 @@ export class OpenCodeRuntime {
       const turnFailure = await waiter.promise;
       if (turnFailure) throw turnFailure;
     } finally {
+      // The route outlives the summarize response because the terminal arrives
+      // on the stream; retiring here follows the awaited turn settlement and
+      // keeps repeated compactions from leaking routes.
+      if (turn) this.#operationRoutes.retireTurn(turn);
       this.#endpointCoordinator.turnAdmissionFinished();
       if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
     }
