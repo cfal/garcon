@@ -35,7 +35,6 @@ import { agentHandoffReplayDisposition, withHandoffChatProjection } from '../age
 import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
-import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import type { PathCache } from '../chats/path-cache.js';
@@ -150,7 +149,6 @@ export interface ChatCommandServiceDeps {
   forkChatFileCopy: ForkChatFileCopyDep;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;
-  chatIds: Pick<ChatIdAllocator, 'allocate'>;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;
   pathCache: Pick<PathCache, 'resolveProjectPath'>;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
@@ -191,6 +189,7 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
 export type ChatStartInput = StartChatCommandRequest;
 
 export interface ScheduledChatStartInput {
+  chatId: ChatId;
   clientRequestId: string;
   clientMessageId: string;
   agentId: string;

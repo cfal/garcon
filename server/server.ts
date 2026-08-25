@@ -548,7 +548,6 @@ export async function startServer(): Promise<void> {
         });
       },
       transcripts: transcriptLedger,
-      chatIds,
       chatListProjector,
       pathCache,
       ownership: agentOwnership,
@@ -564,6 +563,7 @@ export async function startServer(): Promise<void> {
       runLog: scheduledPromptRunLog,
       dispatcher: new ScheduledPromptDispatcher({
         commands: chatCommands,
+        chatIds,
       }),
       chats: chatRegistry,
       agents: agentRegistry,

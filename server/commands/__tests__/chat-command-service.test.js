@@ -9,7 +9,6 @@ import { ChatCommandService } from '../chat-command-service.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
-import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
 import {
   GOAL_CONTROL_NOT_DELIVERED_MESSAGE,
   GOAL_CONTROL_OUTCOME_UNKNOWN_MESSAGE,
@@ -661,7 +660,6 @@ function makeService(overrides = {}) {
     metadata,
     agents,
     fileMentions,
-    chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
     chatListProjector,
     pathCache,
     forkChatFileCopy,
@@ -976,8 +974,7 @@ describe('ChatCommandService', () => {
   });
 
   it('keeps interactive and scheduled new-chat creation behavior conformant', async () => {
-    const allocate = mock(() => SCHEDULED_CHAT_ID);
-    const { service, chats, agents } = makeService({ chatIds: { allocate } });
+    const { service, chats, agents } = makeService();
     const shared = {
       agentId: 'claude',
       projectPath: projectBaseDir,
@@ -1000,13 +997,13 @@ describe('ChatCommandService', () => {
     });
     const scheduled = await service.submitScheduledStart({
       ...shared,
+      chatId: SCHEDULED_CHAT_ID,
       clientRequestId: 'req-scheduled',
       clientMessageId: 'msg-scheduled',
       agentSettingsById: { claude: agentSettings() },
     });
 
     expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
-    expect(allocate).toHaveBeenCalledTimes(1);
     const [{ id: interactiveId, ...interactive }, { id: scheduledId, ...scheduledEntry }] =
       chats.addChat.mock.calls.map(([entry]) => entry);
     expect(interactiveId).toBe(TARGET_CHAT_ID);

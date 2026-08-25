@@ -44,7 +44,6 @@ export class StartCommands {
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
     return this.submitStart({
       ...input,
-      chatId: this.deps.chatIds.allocate(),
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
     });

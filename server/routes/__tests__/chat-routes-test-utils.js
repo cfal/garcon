@@ -4,7 +4,6 @@ import { randomUUID } from 'crypto';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
-import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { mock } from 'bun:test';
 
@@ -113,7 +112,6 @@ export function createRouteCommandService({
         return true;
       },
     },
-    chatIds: new ChatIdAllocator(registry),
 	pathCache: pathCache ?? createRoutePathCache(),
 	chatListProjector: chatListProjector ?? {
 		buildOne: async (chatId) => {
