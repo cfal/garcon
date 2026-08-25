@@ -16,7 +16,8 @@ const GRANDFATHER = {
   'server/routes/chats.ts': 1350,
   'common/chat-types.ts': 1325,
   'server-agents/codex/src/agents/codex/app-server/runtime.ts': 1750,
-  'server-agents/opencode/src/agents/opencode/opencode.ts': 1550,
+  // Includes manual compaction turn orchestration and thinking-variant resolution.
+  'server-agents/opencode/src/agents/opencode/opencode.ts': 1600,
   // Includes provider protocol correlation and transport failure handling.
   'server-agents/claude/src/agents/claude/claude-cli.ts': 1483,
 };

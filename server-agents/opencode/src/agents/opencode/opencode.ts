@@ -32,10 +32,11 @@ import {
 } from '@garcon/server-agent-common/execution/runtime-events';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type { OpenCodeConfig } from '../../config.js';
-import { normalizeThinkingMode, type ThinkingMode } from '@garcon/common/chat-modes';
+import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import {
   assertOpenCodeExecutionOpen,
   markOpenCodeExecutionStarted,
+  type OpenCodeExecutionAdmission,
   type OpenCodeResumeRequest,
   type OpenCodeSessionSettingsPatch,
   type OpenCodeStartRequest,
@@ -64,6 +65,7 @@ import {
 } from './request-control.js';
 import { convertOpenCodeEventToChatMessages } from './event-converter.js';
 import { OpenCodeSteeringController } from './steering.js';
+import { OpenCodeModelDiscovery } from './model-discovery.js';
 import { resolveOpenCodeThinkingVariant } from './thinking-variant.js';
 import {
   OpenCodeOperationRoutes,
@@ -81,7 +83,7 @@ import {
   modelsFromProviders,
   type OpenCodeModelOption,
 } from './model-catalog.js';
-import { adoptOpenCodeCompactionPartRoute } from './compaction-routing.js';
+import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -140,11 +142,6 @@ interface NormalizedOpenCodeRuntimeOptions {
   }) => Promise<OpenCodeInstance>;
 }
 
-interface OpenCodeModelCache {
-  models: OpenCodeModelOption[];
-  fetchedAt: number;
-}
-
 function normalizeOptions(options: OpenCodeRuntimeOptions): NormalizedOpenCodeRuntimeOptions {
   return {
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_OPENCODE_STARTUP_TIMEOUT_MS,
@@ -179,8 +176,7 @@ export class OpenCodeRuntime {
   readonly #endpointCoordinator: OpenCodeEndpointCoordinator;
   readonly #globalEventListener: OpenCodeGlobalEventListener;
   readonly #operationRoutes: OpenCodeOperationRoutes;
-  #modelCache: OpenCodeModelCache | null = null;
-  #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
+  readonly #models: OpenCodeModelDiscovery;
   #unavailableUntil = 0;
   #unavailableReason = '';
   readonly #instanceCreations: OpenCodeInstanceCreationTracker;
@@ -220,6 +216,17 @@ export class OpenCodeRuntime {
       ),
     });
     this.#instanceCreations = new OpenCodeInstanceCreationTracker(() => this.#shuttingDown);
+    this.#models = new OpenCodeModelDiscovery({
+      cacheTtlMs: this.#options.modelCacheTtlMs,
+      discoveryTimeoutMs: this.#options.modelDiscoveryTimeoutMs,
+      logger: this.#logger,
+      withClientLease: (operation) => this.withClientLease(operation),
+      isAvailable: () => this.isAvailable(),
+      isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
+      markAvailable: () => this.#markAvailable(),
+      markTemporarilyUnavailable: (reason) => this.#markTemporarilyUnavailable(reason),
+      now: () => this.#now(),
+    });
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
       ensureUnlocked: () => this.#ensureOpenCodeServerUnlocked(),
@@ -619,6 +626,83 @@ export class OpenCodeRuntime {
     return this.#initPromise;
   }
 
+  // Fails an admitted turn whose delivery raised: either the execution
+  // admission closed (the caller aborted) or the provider work failed.
+  #failAdmittedTurn(
+    agentSessionId: string,
+    turn: OpenCodeTurnContext,
+    route: OpenCodeOperationRoute,
+    request: { readonly executionAdmission?: OpenCodeExecutionAdmission },
+    error: Error & { message: string },
+    options: { readonly logLabel: string; readonly stageSteeringCleanup?: boolean },
+  ): unknown {
+    if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
+    const sess = this.#sessions.get(agentSessionId);
+    if (request.executionAdmission?.signal.aborted) {
+      if (sess?.turn === turn) {
+        sess.providerWorkRequiresQuiescence = true;
+        sess.status = 'completed';
+        sess.lastActivityAt = Date.now();
+      }
+      this.#clearTurnWaiter(agentSessionId);
+      return error;
+    }
+    this.#logger.error(options.logLabel, { agentSessionId, error: error.message });
+    if (!sess || sess.status !== 'running' || sess.turn !== turn) return error;
+    if (options.stageSteeringCleanup) this.steering.stagePendingCleanup(sess);
+    sess.providerWorkRequiresQuiescence = true;
+    sess.status = 'completed';
+    sess.lastActivityAt = Date.now();
+    this.#clearTurnWaiter(agentSessionId);
+    this.#publishFailed(agentSessionId, turn.operation, error.message);
+    return error;
+  }
+
+  // Marks a session as the owner of a freshly admitted turn, inserting one
+  // for a session the runtime has not seen (fork materialization, compaction).
+  #activateTurn(
+    agentSessionId: string,
+    session: OpenCodeSession | undefined,
+    input: {
+      chatId: string;
+      model: string;
+      thinkingVariant?: string;
+      permissionMode: PermissionMode;
+      directory: string | undefined;
+      turn: OpenCodeTurnContext;
+    },
+  ): void {
+    if (session) {
+      session.status = 'running';
+      session.aborting = false;
+      session.activeSteeringDeliveries = 0;
+      session.deferredTerminal = null;
+      session.chatId = input.chatId;
+      session.model = input.model;
+      session.thinkingVariant = input.thinkingVariant;
+      session.permissionMode = input.permissionMode;
+      session.directory = input.directory;
+      session.lastActivityAt = Date.now();
+      session.turn = input.turn;
+      return;
+    }
+    this.#sessions.set(agentSessionId, {
+      status: 'running',
+      chatId: input.chatId,
+      model: input.model,
+      thinkingVariant: input.thinkingVariant,
+      permissionMode: input.permissionMode,
+      directory: input.directory,
+      startedAt: new Date().toISOString(),
+      lastActivityAt: Date.now(),
+      providerWorkRequiresQuiescence: false,
+      activeSteeringDeliveries: 0,
+      deferredTerminal: null,
+      pendingSteeringRevertMessageId: null,
+      turn: input.turn,
+    });
+  }
+
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
     if (route.turn.compaction) {
       this.#dispatchCompactionBoundary(event, route);
@@ -636,19 +720,10 @@ export class OpenCodeRuntime {
   // summary text and control parts stay internal to the native session.
   #dispatchCompactionBoundary(event: SSEEvent, route: OpenCodeOperationRoute): void {
     if (route.turn.compactionBoundaryPublished) return;
-    if (event.type !== 'message.updated') return;
-    const info = event.properties?.info;
-    if (!isRecord(info) || !isOpenCodeCompactionAssistant(info)) return;
-    const completed = isRecord(info.time) && typeof info.time.completed === 'number'
-      ? info.time.completed
-      : null;
-    if (completed === null) return;
+    const boundary = manualCompactionBoundaryRow(event);
+    if (!boundary) return;
     route.turn.compactionBoundaryPublished = true;
-    this.#publishRows(route.sessionId, route.turn.operation, [new CompactionMessage(
-      new Date(completed).toISOString(),
-      'manual',
-      '',
-    )]);
+    this.#publishRows(route.sessionId, route.turn.operation, [boundary]);
   }
 
   #dispatchPromptResponse(
@@ -859,69 +934,11 @@ export class OpenCodeRuntime {
   }
 
   async getModels(): Promise<OpenCodeModelOption[]> {
-    if (!this.isAvailable()) return [];
-    if (this.isTemporarilyUnavailable()) return this.#cachedModels();
-    if (this.#isModelCacheFresh()) return this.#cachedModels();
-    if (this.#modelsPromise) return this.#modelsPromise;
-
-    this.#modelsPromise = this.#loadModels().finally(() => {
-      this.#modelsPromise = null;
-    });
-    return this.#modelsPromise;
+    return this.#models.getModels();
   }
 
-  #cachedModels(): OpenCodeModelOption[] {
-    return this.#modelCache?.models ?? [];
-  }
-
-  // Effort maps to the model's declared variants; unknown models pass the mode
-  // through because the catalog may simply be cold.
   #resolveThinkingVariant(model: string | undefined, thinkingMode: ThinkingMode | undefined): string | undefined {
-    const declared = model
-      ? this.#cachedModels().find((entry) => entry.value === model)?.thinkingModes
-      : undefined;
-    return resolveOpenCodeThinkingVariant(thinkingMode, declared);
-  }
-
-  #isModelCacheFresh(): boolean {
-    if (!this.#modelCache) return false;
-    return this.#now() - this.#modelCache.fetchedAt < this.#options.modelCacheTtlMs;
-  }
-
-  async #loadModels(): Promise<OpenCodeModelOption[]> {
-    try {
-      const models = await this.withClientLease((client) => this.#discoverModels(client));
-      this.#modelCache = {
-        models,
-        fetchedAt: this.#now(),
-      };
-      this.#markAvailable();
-      return models;
-    } catch (err) {
-      const reason = errorMessage(err);
-      if (this.#markTemporarilyUnavailable(reason)) {
-        this.#logger.warn('OpenCode model discovery is unavailable', { reason });
-      }
-      return this.#cachedModels();
-    }
-  }
-
-  async #discoverModels(client: any): Promise<OpenCodeModelOption[]> {
-    if (typeof client.config?.providers === 'function') {
-      const result = await withAbortableTimeout(
-        (signal) => client.config.providers(undefined, { signal }),
-        this.#options.modelDiscoveryTimeoutMs,
-        'OpenCode model discovery',
-      );
-      return modelsFromProviders(configuredProvidersFromResult(result));
-    }
-
-    const result = await withAbortableTimeout(
-      (signal) => client.provider.list(undefined, { signal }),
-      this.#options.modelDiscoveryTimeoutMs,
-      'OpenCode provider list',
-    );
-    return modelsFromProviders(connectedProvidersFromListResult(result));
+    return this.#models.resolveThinkingVariant(model, thinkingMode);
   }
 
   async #runRequest<T>(
@@ -1166,7 +1183,7 @@ export class OpenCodeRuntime {
       model,
       turn.providerPromptPartId,
       images ?? [],
-      thinkingVariant,
+      this.#resolveThinkingVariant(model, thinkingMode),
     );
 
     const promptRequest = this.#runScopedTurnRequest(
@@ -1218,36 +1235,14 @@ export class OpenCodeRuntime {
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
     const waiter = this.#createTurnWaiter(agentSessionId);
-    const thinkingVariant = this.#resolveThinkingVariant(model, thinkingMode);
-    if (session) {
-      session.status = 'running';
-      session.aborting = false;
-      session.activeSteeringDeliveries = 0;
-      session.deferredTerminal = null;
-      session.chatId = chatId;
-      session.model = model;
-      session.thinkingVariant = thinkingVariant;
-      session.permissionMode = permissionMode;
-      session.directory = scope.directory;
-      session.lastActivityAt = Date.now();
-      session.turn = turn;
-    } else {
-      this.#sessions.set(agentSessionId, {
-        status: 'running',
-        chatId,
-        model,
-        thinkingVariant,
-        permissionMode,
-        directory: scope.directory,
-        startedAt: new Date().toISOString(),
-        lastActivityAt: Date.now(),
-        providerWorkRequiresQuiescence: false,
-        activeSteeringDeliveries: 0,
-        deferredTerminal: null,
-        pendingSteeringRevertMessageId: null,
-        turn,
-      });
-    }
+    this.#activateTurn(agentSessionId, session, {
+      chatId,
+      model,
+      thinkingVariant: this.#resolveThinkingVariant(model, thinkingMode),
+      permissionMode,
+      directory: scope.directory,
+      turn,
+    });
     const route = this.#operationRoutes.register(
       agentSessionId,
       chatId,
@@ -1261,7 +1256,7 @@ export class OpenCodeRuntime {
       model,
       turn.providerPromptPartId,
       images ?? [],
-      thinkingVariant,
+      this.#resolveThinkingVariant(model, thinkingMode),
     );
 
     try {
@@ -1281,26 +1276,10 @@ export class OpenCodeRuntime {
       );
       void this.#completePromptRequest(client, route, scope, promptRequest);
     } catch (err: any) {
-      if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
-      const sess = this.#sessions.get(agentSessionId);
-      if (request.executionAdmission?.signal.aborted) {
-        if (sess?.turn === turn) {
-          sess.providerWorkRequiresQuiescence = true;
-          sess.status = 'completed';
-          sess.lastActivityAt = Date.now();
-        }
-        this.#clearTurnWaiter(agentSessionId);
-        throw err;
-      }
-      this.#logger.error('OpenCode query failed', { agentSessionId, error: err.message });
-      if (!sess || sess.status !== 'running' || sess.turn !== turn) throw err;
-      this.steering.stagePendingCleanup(sess);
-      sess.providerWorkRequiresQuiescence = true;
-      sess.status = 'completed';
-      sess.lastActivityAt = Date.now();
-      this.#clearTurnWaiter(agentSessionId);
-      this.#publishFailed(agentSessionId, turn.operation, err.message);
-      throw err;
+      throw this.#failAdmittedTurn(agentSessionId, turn, route, request, err, {
+        logLabel: 'OpenCode query failed',
+        stageSteeringCleanup: true,
+      });
     }
 
     const turnFailure = await waiter.promise;
@@ -1342,32 +1321,14 @@ export class OpenCodeRuntime {
       if (session) {
         await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
         await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
-        session.status = 'running';
-        session.aborting = false;
-        session.activeSteeringDeliveries = 0;
-        session.deferredTerminal = null;
-        session.chatId = chatId;
-        session.model = model;
-        session.permissionMode = request.permissionMode;
-        session.directory = scope.directory;
-        session.lastActivityAt = Date.now();
-        session.turn = turn;
-      } else {
-        this.#sessions.set(agentSessionId, {
-          status: 'running',
-          chatId,
-          model,
-          permissionMode: request.permissionMode,
-          directory: scope.directory,
-          startedAt: new Date().toISOString(),
-          lastActivityAt: Date.now(),
-          providerWorkRequiresQuiescence: false,
-          activeSteeringDeliveries: 0,
-          deferredTerminal: null,
-          pendingSteeringRevertMessageId: null,
-          turn,
-        });
       }
+      this.#activateTurn(agentSessionId, session, {
+        chatId,
+        model,
+        permissionMode: request.permissionMode,
+        directory: scope.directory,
+        turn,
+      });
       const route = this.#operationRoutes.register(
         agentSessionId,
         chatId,
@@ -1406,25 +1367,9 @@ export class OpenCodeRuntime {
           throw new Error('OpenCode compaction did not create a compaction message');
         }
       } catch (error: any) {
-        if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
-        const sess = this.#sessions.get(agentSessionId);
-        if (request.executionAdmission?.signal.aborted) {
-          if (sess?.turn === turn) {
-            sess.providerWorkRequiresQuiescence = true;
-            sess.status = 'completed';
-            sess.lastActivityAt = Date.now();
-          }
-          this.#clearTurnWaiter(agentSessionId);
-          throw error;
-        }
-        this.#logger.error('OpenCode compaction failed', { agentSessionId, error: error.message });
-        if (!sess || sess.status !== 'running' || sess.turn !== turn) throw error;
-        sess.providerWorkRequiresQuiescence = true;
-        sess.status = 'completed';
-        sess.lastActivityAt = Date.now();
-        this.#clearTurnWaiter(agentSessionId);
-        this.#publishFailed(agentSessionId, turn.operation, error.message);
-        throw error;
+        throw this.#failAdmittedTurn(agentSessionId, turn, route, request, error, {
+          logLabel: 'OpenCode compaction failed',
+        });
       }
 
       const turnFailure = await waiter.promise;

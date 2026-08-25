@@ -352,7 +352,7 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       });
 
       const compactCursor = fixture.client.markEvents();
-      const compact = await fixture.client.post('/api/v1/chats/compact', {
+      const compact = await fixture.client.post<{ turnId: string }>('/api/v1/chats/compact', {
         clientRequestId: crypto.randomUUID(),
         chatId,
       });

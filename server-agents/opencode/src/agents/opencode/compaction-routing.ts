@@ -1,8 +1,11 @@
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import { isRecord } from '@garcon/common/json';
+import { CompactionMessage } from '@garcon/common/chat-types';
 import type {
   OpenCodeOperationRoute,
   OpenCodeOperationRoutes,
 } from './operation-routes.js';
+import { isOpenCodeCompactionAssistant } from './sse-events.js';
 import type { SSEEvent } from './sse-events.js';
 import type { OpenCodeSession } from './turn-events.js';
 
@@ -115,4 +118,18 @@ function dropCompactionPart(
     messageId: typeof part?.messageID === 'string' ? part.messageID : null,
   });
   return null;
+}
+
+// The single boundary row a manual compaction turn publishes: the provider's
+// summary assistant completing is the marker; summary text and control parts
+// stay internal to the native session.
+export function manualCompactionBoundaryRow(event: SSEEvent): CompactionMessage | null {
+  if (event.type !== 'message.updated') return null;
+  const info = event.properties?.info;
+  if (!isRecord(info) || !isOpenCodeCompactionAssistant(info)) return null;
+  const completed = isRecord(info.time) && typeof info.time.completed === 'number'
+    ? info.time.completed
+    : null;
+  if (completed === null) return null;
+  return new CompactionMessage(new Date(completed).toISOString(), 'manual', '');
 }
