@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
+	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import { ScheduledPromptFormState } from './scheduled-prompt-form-state.svelte';
 	import {
 		getChatSessions,
@@ -368,28 +369,15 @@
 			</section>
 
 			{#if form.targetType === 'existing-chat'}
-				<section class="space-y-2" aria-labelledby="scheduled-prompt-content">
-					<div>
-						<label
-							id="scheduled-prompt-content"
-							for="scheduled-prompt-input"
-							class="text-sm font-medium"
-						>
-							{m.scheduled_prompts_prompt()}
-						</label>
-						<p class="text-xs text-muted-foreground">{m.scheduled_prompts_prompt_description()}</p>
-					</div>
-					<textarea
-						id="scheduled-prompt-input"
-						bind:value={form.prompt}
-						onkeydown={handlePromptKeydown}
-						rows="5"
-						placeholder={m.scheduled_prompts_prompt_placeholder()}
-						class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-					></textarea>
-					{#if form.prompt.length > 0 && form.promptError}
-						<p class="text-xs text-destructive">{form.promptError}</p>
-					{/if}
+				<section>
+					<ScheduledPromptField
+						prompt={form.prompt}
+						promptError={form.promptError}
+						targetType="existing-chat"
+						surface="standalone"
+						onPromptChange={(value) => (form.prompt = value)}
+						onPromptKeydown={handlePromptKeydown}
+					/>
 				</section>
 			{/if}
 

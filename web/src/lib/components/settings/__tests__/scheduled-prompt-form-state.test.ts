@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptFormState } from '../scheduled-prompt-form-state.svelte';
 import { localDateValue, localTimeValue } from '$lib/scheduling/local-schedule';
-import type { ScheduledPrompt } from '$shared/scheduled-prompts';
+import {
+	SCHEDULED_PROMPT_CHAT_ID_TOKEN,
+	SCHEDULED_PROMPT_MAX_LENGTH,
+	type ScheduledPrompt,
+} from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/types/app';
 
 function createForm(
@@ -78,6 +82,27 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(true);
 		form.prompt = '/compact first';
 		expect(form.canSave).toBe(false);
+	});
+
+	it('validates the prompt length after chat ID substitution', () => {
+		const form = createForm();
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		form.date = localDateValue(tomorrow);
+		form.time = localTimeValue(tomorrow);
+		form.targetType = 'existing-chat';
+		form.existingChatId = '123';
+		form.prompt = `${'x'.repeat(
+			SCHEDULED_PROMPT_MAX_LENGTH - SCHEDULED_PROMPT_CHAT_ID_TOKEN.length,
+		)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
+
+		expect(form.prompt).toHaveLength(SCHEDULED_PROMPT_MAX_LENGTH);
+		expect(form.promptError).toBe('The prompt is too long after chat IDs are inserted.');
+		expect(form.canSave).toBe(false);
+
+		form.prompt = `${'x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH - 16)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}`;
+		expect(form.promptError).toBeNull();
+		expect(form.canSave).toBe(true);
 	});
 
 	it('reanchors a one-off scheduled prompt when it is changed to recurring', async () => {

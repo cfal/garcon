@@ -14,6 +14,7 @@ import {
 	SCHEDULED_PROMPT_INTERVAL_DAYS_MIN,
 	SCHEDULED_PROMPT_MAX_LENGTH,
 	hasLeadingSlashCommand,
+	scheduledPromptFitsRenderedLimit,
 	type ScheduledPrompt,
 	type ScheduledPromptDefinitionInput,
 } from '$shared/scheduled-prompts';
@@ -60,20 +61,16 @@ export class ScheduledPromptFormState {
 	}
 
 	get canSave(): boolean {
-		return (
-			!this.saving &&
-			this.prompt.trim().length > 0 &&
-			this.prompt.trim().length <= SCHEDULED_PROMPT_MAX_LENGTH &&
-			!hasLeadingSlashCommand(this.prompt) &&
-			this.scheduleValid &&
-			this.targetValid
-		);
+		return !this.saving && this.promptError === null && this.scheduleValid && this.targetValid;
 	}
 
 	get promptError(): string | null {
 		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
 		if (this.prompt.trim().length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
+		}
+		if (!scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
+			return m.scheduled_prompts_prompt_rendered_too_long();
 		}
 		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
