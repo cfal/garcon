@@ -414,6 +414,192 @@ describe('OpenCode history loader', () => {
     ]);
   });
 
+  it('restores a manual compaction boundary anchored to the successful summary', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'before compaction' }],
+            },
+            {
+              info: { id: 'msg_control', role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [{ type: 'compaction', auto: false }],
+            },
+            {
+              info: {
+                id: 'msg_summary',
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                finish: 'stop',
+                time: { created: '2026-07-04T00:00:02.000Z', completed: 1751582402000 },
+              },
+              parts: [{ type: 'text', text: 'internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
+              parts: [{ type: 'text', text: 'after compaction' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => message.type)).toEqual([
+      'user-message',
+      'compaction',
+      'user-message',
+    ]);
+    expect(messages[1]).toMatchObject({ trigger: 'manual', summary: '' });
+    expect(getNativeMessageRevisionSource(messages[1])).toMatchObject({ entryId: 'msg_summary' });
+  });
+
+  it('reloads an aborted manual compaction as no boundary at all', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'before compaction' }],
+            },
+            {
+              info: { id: 'msg_control', role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [{ type: 'compaction', auto: false }],
+            },
+            {
+              info: {
+                id: 'msg_summary',
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                error: { name: 'MessageAbortedError' },
+                time: { created: '2026-07-04T00:00:02.000Z', completed: 1751582402000 },
+              },
+              parts: [{ type: 'text', text: 'partial internal summary' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
+              parts: [{ type: 'text', text: 'after abort' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['user-message', 'before compaction'],
+      ['user-message', 'after abort'],
+    ]);
+  });
+
+  it('reloads an aborted automatic compaction summary as nothing', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'text', text: 'before compaction' }],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:01.000Z' } },
+              parts: [{ type: 'compaction', auto: true }],
+            },
+            {
+              info: {
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                error: { name: 'MessageAbortedError' },
+                time: { created: '2026-07-04T00:00:02.000Z', completed: 1751582402000 },
+              },
+              parts: [],
+            },
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:03.000Z' } },
+              parts: [{ type: 'text', text: 'after abort' }],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['user-message', 'before compaction'],
+      ['user-message', 'after abort'],
+    ]);
+  });
+
+  it('reloads a finish-error summary without an error object as a provider failure', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'compaction', auto: false }],
+            },
+            {
+              info: {
+                id: 'msg_summary',
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                finish: 'error',
+                time: { created: '2026-07-04T00:00:01.000Z', completed: 1751582401000 },
+              },
+              parts: [],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages.map((message) => [message.type, message.content])).toEqual([
+      ['error', 'OpenCode session failed'],
+    ]);
+  });
+
+  it('reloads an incomplete summary as no boundary', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'user', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [{ type: 'compaction', auto: false }],
+            },
+            {
+              info: {
+                id: 'msg_summary',
+                role: 'assistant',
+                summary: true,
+                mode: 'compaction',
+                time: { created: '2026-07-04T00:00:01.000Z' },
+              },
+              parts: [],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    expect(messages).toEqual([]);
+  });
+
   it('returns an empty transcript when the session id is missing', async () => {
     const getClient = mock(() => Promise.resolve({
       session: {

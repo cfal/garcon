@@ -42,6 +42,7 @@ export interface OpenCodeMessage {
     agent?: string;
     summary?: boolean;
     error?: unknown;
+    finish?: string;
     time?: {
       created?: string | number | Date;
     };
@@ -172,7 +173,7 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
     }
 
     if (info.role === 'assistant' && isCompactionAssistant(info)) {
-      const succeeded = info.error == null;
+      const succeeded = info.error == null && info.finish !== 'error';
       replayExpectedText = overflowCompactionPending && succeeded
         ? lastVisibleUserText
         : null;
@@ -317,19 +318,30 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
 
     if (info.role === 'assistant') {
       if (isCompactionAssistant(info)) {
-        // A visible compaction assistant is either a failed summary (its stored
-        // error survives) or a successful manual boundary anchored to the same
-        // id the live turn published.
-        const providerError = openCodeStoredErrorMessage(info.error);
-        if (providerError) push(new ErrorMessage(ts, providerError), info.id);
-        else {
+        // A visible summary assistant is either a successful manual boundary
+        // anchored to the same id the live turn published or a failed summary
+        // whose stored error survives. Aborted and incomplete summaries
+        // replaced nothing and reload as no boundary at all.
+        if (info.error != null && !isOpenCodeStoredAbort(info.error)) {
+          push(new ErrorMessage(ts, openCodeStoredErrorMessage(info.error) ?? 'OpenCode session failed'), info.id);
+        } else if (info.error != null) {
+          // Aborted summary: nothing to render.
+        } else if (info.finish === 'error') {
+          push(new ErrorMessage(ts, 'OpenCode session failed'), info.id);
+        } else {
           const time = asRecord(info.time);
           const completed = time && typeof time.completed === 'number' ? time.completed : undefined;
-          push(new CompactionMessage(
-            dateToIso(completed) ?? ts,
-            'manual',
-            '',
-          ), info.id);
+          const terminalFinish = typeof info.finish === 'string'
+            && info.finish
+            && info.finish !== 'tool-calls'
+            && info.finish !== 'unknown';
+          if (completed !== undefined && terminalFinish) {
+            push(new CompactionMessage(
+              dateToIso(completed) ?? ts,
+              'manual',
+              '',
+            ), info.id);
+          }
         }
         continue;
       }

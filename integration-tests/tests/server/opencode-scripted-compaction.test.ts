@@ -584,6 +584,12 @@ async function exerciseInterruptedCompaction(
     expect(assistantContents(stopped.messages)).toEqual([]);
     expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
     expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
+    // The aborted summary replaced nothing, so reloading must not resurrect a
+    // compaction boundary the live transcript never published.
+    await reloadFromNativeHistory(fixture, chatId);
+    const reloaded = await fixture.client.getMessages(chatId);
+    expect(messagesOfType(reloaded.messages, 'compaction')).toEqual([]);
+    expectCompactionInternalsHidden(reloaded.messages, [overflow, summary, stoppedAnswer]);
 
     if (phase === 'summary') {
       testEnvironment.model.scriptTurn([chatCompletionsText(recoverySummary)]);
