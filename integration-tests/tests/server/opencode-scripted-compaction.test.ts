@@ -323,6 +323,92 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('manual compaction runs as its own turn with a boundary row and hidden internals', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('MANUAL_PROMPT');
+    const answer = marker('MANUAL_ANSWER');
+    const summary = marker('MANUAL_SUMMARY');
+    const followUpPrompt = marker('MANUAL_FOLLOWUP_PROMPT');
+    const followUpAnswer = marker('MANUAL_FOLLOWUP_ANSWER');
+    const requestCursor = testEnvironment.model.markRequests();
+    testEnvironment.model.scriptTurn([chatCompletionsText(answer)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(summary)]);
+
+    await withIntegrationFixture('opencode-manual-compaction', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: answer,
+        afterIndex: cursor,
+      });
+
+      const compactCursor = fixture.client.markEvents();
+      const compact = await fixture.client.post('/api/v1/chats/compact', {
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+      });
+      const compactTerminal = await fixture.client.waitForTurnTerminal(
+        chatId,
+        compact.turnId,
+        { afterIndex: compactCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      expect(compactTerminal.type).toBe('agent-run-finished');
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: compactCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+
+      const compacted = await fixture.client.getMessages(chatId);
+      const boundaries = messagesOfType(compacted.messages, 'compaction');
+      expect(boundaries).toHaveLength(1);
+      expect(boundaries[0]).toMatchObject({ trigger: 'manual' });
+      expect(userContents(compacted.messages)).toEqual([prompt]);
+      expect(assistantContents(compacted.messages)).toEqual([answer]);
+      expect(JSON.stringify(compacted.messages)).not.toContain(summary);
+      expect(JSON.stringify(compacted.messages)).not.toContain(AUTOCONTINUE_TEXT);
+      expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(2);
+      testEnvironment.model.assertSettled();
+
+      const native = await openCodeNativeSession(fixture, chatId);
+      const rows = readOpenCodeSessionRows(native);
+      expect(rows.parts.some((row) => (
+        row.data.type === 'compaction' && row.data.auto === false
+      ))).toBe(true);
+
+      await reloadFromNativeHistory(fixture, chatId);
+      const imported = await fixture.client.getMessages(chatId);
+      const importedBoundaries = messagesOfType(imported.messages, 'compaction');
+      expect(importedBoundaries).toHaveLength(1);
+      expect(importedBoundaries[0]).toMatchObject({ trigger: 'manual' });
+      expect(JSON.stringify(imported.messages)).not.toContain(summary);
+
+      testEnvironment.model.scriptTurn([chatCompletionsText(followUpAnswer)]);
+      const followUpCursor = fixture.client.markEvents();
+      const followUp = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: followUpPrompt,
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: followUp.turnId,
+        marker: followUpAnswer,
+        afterIndex: followUpCursor,
+      });
+      expect(userContents((await fixture.client.getMessages(chatId)).messages))
+        .toEqual([prompt, followUpPrompt]);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 async function exerciseInterruptedCompaction(

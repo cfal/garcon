@@ -35,6 +35,37 @@ export function adoptOpenCodeCompactionPartRoute(
       event,
     );
   }
+
+  const part = event.properties?.part;
+  const messageId = typeof part?.messageID === 'string' ? part.messageID : '';
+  // A manual compaction control part is the compaction turn's own source message:
+  // adopting it supplies the provider identity the summarize route never returns.
+  if (part && (part as Record<string, unknown>).auto !== true && session.turn.compaction) {
+    if (session.turn.providerMessageId !== null) {
+      return dropCompactionPart(logger, 'COMPACTION_PART_BEFORE_PROMPT', sessionId, event);
+    }
+    const manualAdoption = operationRoutes.adoptCompactionPart(session.turn, event);
+    if (manualAdoption.kind !== 'adopted') {
+      return dropCompactionPart(
+        logger,
+        manualAdoption.kind === 'route-retired'
+          ? 'COMPACTION_PART_ROUTE_RETIRED'
+          : manualAdoption.kind === 'invalid-identifiers'
+            ? 'COMPACTION_PART_INVALID_IDENTIFIERS'
+            : 'COMPACTION_PART_IDENTITY_COLLISION',
+        sessionId,
+        event,
+      );
+    }
+    session.turn.providerMessageId = messageId;
+    logger.debug('Adopted an OpenCode manual compaction source', {
+      agentSessionId: sessionId,
+      messageId,
+      partId: typeof part.id === 'string' ? part.id : null,
+    });
+    return manualAdoption.route;
+  }
+
   if (session.turn.providerMessageId === null) {
     return dropCompactionPart(logger, 'COMPACTION_PART_BEFORE_PROMPT', sessionId, event);
   }

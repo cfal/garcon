@@ -10,6 +10,7 @@ import {
   isOpenCodeCompactionAssistant,
   isOpenCodeCompactionContinuationPart,
   isOpenCodeCompactionControlPart,
+  isOpenCodeManualCompactionControlPart,
   openCodeAssistantTerminal,
   openCodeRetryNotice,
   type OpenCodeAssistantTerminal,
@@ -22,7 +23,7 @@ import {
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { ErrorMessage } from '@garcon/common/chat-types';
+import { CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
@@ -619,12 +620,35 @@ export class OpenCodeRuntime {
   }
 
   #dispatchOpenCodeEvent(event: SSEEvent, route: OpenCodeOperationRoute): void {
+    if (route.turn.compaction) {
+      this.#dispatchCompactionBoundary(event, route);
+      return;
+    }
     const chatMessages = convertOpenCodeEventToChatMessages(event, route.turn, this.#logger);
     if (!chatMessages || !chatMessages.length) {
       return;
     }
 
     this.#publishRows(route.sessionId, route.turn.operation, chatMessages);
+  }
+
+  // A manual compaction turn surfaces only the boundary marker; the provider's
+  // summary text and control parts stay internal to the native session.
+  #dispatchCompactionBoundary(event: SSEEvent, route: OpenCodeOperationRoute): void {
+    if (route.turn.compactionBoundaryPublished) return;
+    if (event.type !== 'message.updated') return;
+    const info = event.properties?.info;
+    if (!isRecord(info) || !isOpenCodeCompactionAssistant(info)) return;
+    const completed = isRecord(info.time) && typeof info.time.completed === 'number'
+      ? info.time.completed
+      : null;
+    if (completed === null) return;
+    route.turn.compactionBoundaryPublished = true;
+    this.#publishRows(route.sessionId, route.turn.operation, [new CompactionMessage(
+      new Date(completed).toISOString(),
+      'manual',
+      '',
+    )]);
   }
 
   #dispatchPromptResponse(
@@ -738,7 +762,8 @@ export class OpenCodeRuntime {
     // Marked parts always pass through current-turn adoption so a foreign named ID cannot
     // bypass collision refusal through ordinary named resolution.
     const isCompactionPart = isOpenCodeCompactionControlPart(event)
-      || isOpenCodeCompactionContinuationPart(event);
+      || isOpenCodeCompactionContinuationPart(event)
+      || isOpenCodeManualCompactionControlPart(event);
     const route = taskChildRoute ?? (
       isCompactionPart
         ? adoptOpenCodeCompactionPartRoute({
@@ -792,7 +817,17 @@ export class OpenCodeRuntime {
       this.#dispatchOpenCodeEvent(event, route);
     }
     const terminal = belongs ? openCodeAssistantTerminal(event) : null;
-    if (terminal) route.turn.assistantTerminals.set(terminal.messageId, terminal);
+    if (terminal) {
+      route.turn.assistantTerminals.set(terminal.messageId, terminal);
+      // A compaction turn has no prompt HTTP completion to drive settlement;
+      // the summary assistant's terminal settles it directly.
+      if (route.turn.compaction) {
+        const terminalSession = this.#sessions.get(route.sessionId);
+        if (terminalSession?.turn === route.turn) {
+          this.#settleTurnTerminal(route.sessionId, terminalSession, terminal);
+        }
+      }
+    }
   }
 
   // Surfaces a provider-announced retry wait as one durable notice row per
@@ -1270,6 +1305,130 @@ export class OpenCodeRuntime {
 
     const turnFailure = await waiter.promise;
     if (turnFailure) throw turnFailure;
+    } finally {
+      this.#endpointCoordinator.turnAdmissionFinished();
+      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+    }
+  }
+
+  // Manual compaction runs provider-native summarize as its own turn. The
+  // summarize route returns before the model runs, so the turn's route binds to
+  // the compaction user message it created and the summary assistant's terminal
+  // arrives through the global stream.
+  async compact(request: Omit<OpenCodeResumeRequest, 'command' | 'images'>): Promise<void> {
+    this.#endpointCoordinator.turnAdmissionStarted();
+    try {
+      assertOpenCodeExecutionOpen(request);
+      const {
+        agentSessionId,
+        chatId,
+        model,
+        projectPath,
+        operation,
+      } = request;
+      const session = this.#sessions.get(agentSessionId);
+      if (session?.status === 'running') {
+        throw new Error('Cannot compact while an OpenCode turn is active');
+      }
+      const requestScope = createOpenCodeRequestScope(projectPath);
+      const scope = requestScope.directory ? requestScope : { directory: session?.directory };
+
+      await this.#ensureOpenCodeServer();
+      await this.#globalEventListener.start(scope.directory);
+      assertOpenCodeExecutionOpen(request);
+
+      const turn = createOpenCodeTurnContext(operation, { compaction: true });
+      const client = await this.getClient();
+      if (session) {
+        await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
+        await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
+        session.status = 'running';
+        session.aborting = false;
+        session.activeSteeringDeliveries = 0;
+        session.deferredTerminal = null;
+        session.chatId = chatId;
+        session.model = model;
+        session.permissionMode = request.permissionMode;
+        session.directory = scope.directory;
+        session.lastActivityAt = Date.now();
+        session.turn = turn;
+      } else {
+        this.#sessions.set(agentSessionId, {
+          status: 'running',
+          chatId,
+          model,
+          permissionMode: request.permissionMode,
+          directory: scope.directory,
+          startedAt: new Date().toISOString(),
+          lastActivityAt: Date.now(),
+          providerWorkRequiresQuiescence: false,
+          activeSteeringDeliveries: 0,
+          deferredTerminal: null,
+          pendingSteeringRevertMessageId: null,
+          turn,
+        });
+      }
+      const route = this.#operationRoutes.register(
+        agentSessionId,
+        chatId,
+        turn,
+        false,
+        request.permissionMode,
+        scope.directory,
+      );
+      const waiter = this.#createTurnWaiter(agentSessionId);
+
+      try {
+        await this.#globalEventListener.start(scope.directory);
+        const activeSession = this.#sessions.get(agentSessionId);
+        if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
+          throw new Error('OpenCode event stream ended before compaction delivery');
+        }
+        if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+        const parsedModel = parseOpenCodeModel(model);
+        const summarizeRequest = this.#runScopedTurnRequest(
+          scope,
+          route.requestAbortController.signal,
+          (signal, requestScopeInner) => client.session.summarize(
+            withOpenCodeRequestScope({
+              sessionID: agentSessionId,
+              ...(parsedModel ?? {}),
+            }, requestScopeInner),
+            { signal },
+          ),
+        );
+        const result = await summarizeRequest;
+        await this.#awaitGlobalEventBarrier(client, scope.directory, route.requestAbortController.signal);
+        throwOpenCodeResultError(result, 'OpenCode compaction failed');
+        // The control part event precedes the summarize response, so the stream
+        // adoption must have bound the compaction source by now.
+        if (turn.providerMessageId === null) {
+          throw new Error('OpenCode compaction did not create a compaction message');
+        }
+      } catch (error: any) {
+        if (turn.providerMessageId === null) this.#operationRoutes.unregister(route);
+        const sess = this.#sessions.get(agentSessionId);
+        if (request.executionAdmission?.signal.aborted) {
+          if (sess?.turn === turn) {
+            sess.providerWorkRequiresQuiescence = true;
+            sess.status = 'completed';
+            sess.lastActivityAt = Date.now();
+          }
+          this.#clearTurnWaiter(agentSessionId);
+          throw error;
+        }
+        this.#logger.error('OpenCode compaction failed', { agentSessionId, error: error.message });
+        if (!sess || sess.status !== 'running' || sess.turn !== turn) throw error;
+        sess.providerWorkRequiresQuiescence = true;
+        sess.status = 'completed';
+        sess.lastActivityAt = Date.now();
+        this.#clearTurnWaiter(agentSessionId);
+        this.#publishFailed(agentSessionId, turn.operation, error.message);
+        throw error;
+      }
+
+      const turnFailure = await waiter.promise;
+      if (turnFailure) throw turnFailure;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
       if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();

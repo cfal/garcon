@@ -59,6 +59,17 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     });
   }
 
+  async compact(
+    request: Parameters<AgentRuntimeExecution['resume']>[0],
+    publish: AgentRuntimePublisher,
+  ): Promise<void> {
+    await this.runtime.compact({
+      ...executionFields(request),
+      agentSessionId: request.agentSessionId,
+      operation: runtimeOperation(request.runId, publish),
+    });
+  }
+
   async abort(agentSessionId: string): Promise<boolean> {
     return this.runtime.abort(agentSessionId);
   }

@@ -1,6 +1,7 @@
 import {
   UserMessage,
   AssistantMessage,
+  CompactionMessage,
   ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
@@ -127,11 +128,14 @@ function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): bool
 
 // OpenCode persists compaction summaries and continuation prompts as ordinary messages.
 // The overflow path also replays the original prompt after its successful summary.
+// A manual compaction boundary survives as a synthetic marker row so Reload and
+// fork seeding reproduce the live transcript's compaction boundary.
 function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): OpenCodeMessage[] {
   const visible: OpenCodeMessage[] = [];
   let overflowCompactionPending = false;
   let replayExpectedText: string | null = null;
   let lastVisibleUserText: string | null = null;
+  let manualCompactionBoundary: OpenCodeMessage | null = null;
 
   for (const message of rawMessages) {
     const info = message.info ?? {};
@@ -142,6 +146,7 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
       if (compaction) {
         overflowCompactionPending = compaction.overflow === true;
         replayExpectedText = null;
+        manualCompactionBoundary = compaction.auto === true ? null : message;
         continue;
       }
 
@@ -174,6 +179,8 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
       overflowCompactionPending = false;
       // A failed summary remains internal, but its provider failure must survive reload.
       if (!succeeded) visible.push({ ...message, parts: [] });
+      if (manualCompactionBoundary) visible.push(manualCompactionBoundary);
+      manualCompactionBoundary = null;
       continue;
     }
 
@@ -294,6 +301,12 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
       ?? new Date().toISOString();
 
     if (info.role === 'user') {
+      const compaction = (Array.isArray(msg.parts) ? msg.parts.map(asRecord) : [])
+        .find((part) => part.type === 'compaction' && part.auto !== true);
+      if (compaction) {
+        push(new CompactionMessage(ts, 'manual', ''), info.id);
+        continue;
+      }
       const text = extractUserTextFromParts(msg.parts || []);
       const images = extractUserImagesFromParts(msg.parts || []);
       if (text?.trim() || images.length > 0) {

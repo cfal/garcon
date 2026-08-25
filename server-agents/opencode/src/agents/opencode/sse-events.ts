@@ -122,6 +122,14 @@ export function isOpenCodeCompactionControlPart(event: SSEEvent): boolean {
   return isRecord(part) && part.type === 'compaction' && part.auto === true;
 }
 
+// A summarize-kicked manual compaction carries auto !== true on its control part;
+// the running compaction turn adopts it to acquire its provider message identity.
+export function isOpenCodeManualCompactionControlPart(event: SSEEvent): boolean {
+  if (event.type !== 'message.part.updated') return false;
+  const part = event.properties?.part;
+  return isRecord(part) && part.type === 'compaction' && part.auto !== true;
+}
+
 // The metadata key distinguishes compaction continuation from other synthetic text parts.
 // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/session/compaction.ts#L486-L501
 export function isOpenCodeCompactionContinuationPart(event: SSEEvent): boolean {

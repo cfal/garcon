@@ -10,6 +10,12 @@ import {
 
 export interface OpenCodeTurnContext {
   operation: AgentRuntimeOperation;
+  // A manual compaction turn: the provider's summary assistant settles the turn
+  // and its internals stay out of the transcript.
+  compaction?: boolean;
+  // One boundary row per manual compaction turn; completed timestamps persist
+  // across later message updates.
+  compactionBoundaryPublished?: boolean;
   // OpenCode assigns this ID and Garcon resolves it from the submitted prompt part event.
   providerMessageId: string | null;
   providerPromptPartId: string;
@@ -60,9 +66,11 @@ const RECENT_EVENT_ID_LIMIT = 512;
 
 export function createOpenCodeTurnContext(
   operation: AgentRuntimeOperation,
+  options: { compaction?: boolean } = {},
 ): OpenCodeTurnContext {
   return {
     operation,
+    compaction: options.compaction === true,
     providerMessageId: null,
     providerPromptPartId: createOpenCodePromptPartId(),
     lastRetryNoticeKey: null,
@@ -156,7 +164,13 @@ export function openCodeEventBelongsToTurn(
     ) {
       return false;
     }
-    if (isOpenCodeCompactionAssistant(info)) return false;
+    if (isOpenCodeCompactionAssistant(info)) {
+      // The summary assistant is internal to ordinary turns; a compaction turn
+      // owns it as its terminal message.
+      if (!turn.compaction) return false;
+      turn.assistantMessageIds.add(messageId);
+      return true;
+    }
     turn.assistantMessageIds.add(messageId);
     turn.pendingSteeringMessageIds.delete(info.parentID);
     return true;

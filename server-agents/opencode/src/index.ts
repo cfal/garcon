@@ -70,7 +70,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
   readonly commands = null;
-  readonly compaction = null;
+  readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;
   readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
@@ -91,6 +91,15 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       descriptors: [],
     });
     const providerExecution = new OpenCodeExecution(runtime, nativeSessions);
+    const producer = createAgentProducerAdapter(providerExecution, logger);
+    this.compaction = {
+      compact: async (request) => (
+        await producer.runExisting(
+          request,
+          (runtimeRequest, publish) => providerExecution.compact(runtimeRequest, publish),
+        )
+      ).handle,
+    };
     this.sessionConfiguration = {
       apply: (agentSessionId, configuration) => (
         providerExecution.applySessionConfiguration(agentSessionId, configuration)
@@ -98,7 +107,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId);
     this.nativeSessions = nativeEvidence;
-    this.execution = createAgentProducerAdapter(providerExecution, logger).execution;
+    this.execution = producer.execution;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
     this.nativeActivity = createOpenCodeNativeActivityProbe({

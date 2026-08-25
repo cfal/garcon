@@ -54,6 +54,7 @@ export class OpenCodeSteeringController {
     const session = this.options.getSession(agentSessionId);
     if (
       !session
+      || session.turn.compaction
       || session.status !== 'running'
       || session.aborting
       || !session.turn.providerMessageId
