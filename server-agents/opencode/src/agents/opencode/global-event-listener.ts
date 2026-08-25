@@ -12,7 +12,8 @@ interface OpenCodeGlobalEventListenerOptions {
   isShuttingDown(): boolean;
   isTemporarilyUnavailable(): boolean;
   getUnavailableRetryAfterMs(): number;
-  markTemporarilyUnavailable(reason: string): boolean;
+  instanceGeneration?(): number;
+  markTemporarilyUnavailable(reason: string, sourceGeneration?: number): boolean;
   failRunningTurns(error: Error): void;
   closeUnavailableInstanceIfIdle(): boolean;
   confirmEventDelivery(input: {
@@ -212,11 +213,16 @@ export class OpenCodeGlobalEventListener {
       signal?: AbortSignal,
     ): Promise<SSEEvent> => this.#waitForEvent(input.generation, matches, signal);
     let confirmationStarted = false;
+    let instanceGeneration: number | undefined;
     try {
       const client = await this.#options.getClient();
       if (input.generation !== this.#generation) {
         throw new Error('OpenCode event listener was superseded during startup');
       }
+      // A pre-ready or timeout failure of this attempt reports against the
+      // instance generation it connected on; a death-retired generation must
+      // not arm a cooldown the replacement has to wait out.
+      instanceGeneration = this.#options.instanceGeneration?.();
       for await (const event of streamGlobalEvents(
         client,
         input.abortController.signal,
@@ -255,7 +261,7 @@ export class OpenCodeGlobalEventListener {
       if (input.generation !== this.#generation) return;
       if (!input.ready() || failure instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(failure);
-        if (this.#options.markTemporarilyUnavailable(reason)) {
+        if (this.#options.markTemporarilyUnavailable(reason, instanceGeneration)) {
           this.#options.logger.warn('OpenCode event stream marked the runtime unavailable', { reason });
         }
       }

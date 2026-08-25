@@ -25,8 +25,9 @@ export interface OpenCodeModelDiscoveryOptions {
   readonly withClientLease: <T>(operation: (client: any) => Promise<T>) => Promise<T>;
   readonly isAvailable: () => boolean;
   readonly isTemporarilyUnavailable: () => boolean;
-  readonly markAvailable: () => void;
-  readonly markTemporarilyUnavailable: (reason: string) => boolean;
+  readonly instanceGeneration: () => number;
+  readonly markAvailable: (sourceGeneration: number) => void;
+  readonly markTemporarilyUnavailable: (reason: string, sourceGeneration: number) => boolean;
   readonly now: () => number;
 }
 
@@ -75,17 +76,27 @@ export class OpenCodeModelDiscovery {
   }
 
   async #load(): Promise<OpenCodeModelOption[]> {
+    // A discovery outcome for a retired generation must not touch availability
+    // of the replacement; late success would erase its startup cooldown. The
+    // generation is read inside the lease, after the instance is installed.
+    let generation: number | undefined;
     try {
-      const models = await this.#options.withClientLease((client) => this.#discover(client));
+      const models = await this.#options.withClientLease((client) => {
+        generation = this.#options.instanceGeneration();
+        return this.#discover(client);
+      });
       this.#cache = {
         models,
         fetchedAt: this.#options.now(),
       };
-      this.#options.markAvailable();
+      this.#options.markAvailable(generation ?? this.#options.instanceGeneration());
       return models;
     } catch (err) {
       const reason = errorMessage(err);
-      if (this.#options.markTemporarilyUnavailable(reason)) {
+      const reported = generation === undefined
+        ? this.#options.markTemporarilyUnavailable(reason, this.#options.instanceGeneration())
+        : this.#options.markTemporarilyUnavailable(reason, generation);
+      if (reported) {
         this.#options.logger.warn('OpenCode model discovery is unavailable', { reason });
       }
       return this.models;

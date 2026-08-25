@@ -920,6 +920,483 @@ describe('OpenCodeRuntime abort', () => {
     expect(replacementClose).toHaveBeenCalledTimes(1);
   });
 
+  describe('server process death', () => {
+    function deathInstance({ subscribe, termination, close }) {
+      return {
+        client: {
+          permission: { reply: mock(() => Promise.resolve({})) },
+          global: { event: subscribe },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
+            promptAsync: mock(() => Promise.resolve({})),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close, termination: termination.promise },
+      };
+    }
+
+    function replacementInstance() {
+      return {
+        client: {
+          permission: { reply: mock(() => Promise.resolve({})) },
+          global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-2' } })),
+            prompt: mock((_input, options) => pendingUntilAborted(options.signal)),
+            promptAsync: mock(() => Promise.resolve({})),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close: mock(() => undefined) },
+      };
+    }
+
+    it('retires a dead instance and respawns on the next demand without arming the cooldown', async () => {
+      const firstTermination = deferred();
+      const firstClose = mock(() => undefined);
+      const replacement = replacementInstance();
+      const createInstance = mock()
+        .mockImplementationOnce(() => Promise.resolve(deathInstance({
+          subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
+          termination: firstTermination,
+          close: firstClose,
+        })))
+        .mockImplementationOnce(() => Promise.resolve(replacement));
+      const runtime = new OpenCodeRuntime({
+        createInstance,
+        sseRetryDelayMs: 60_000,
+        unavailableRetryMs: 60_000,
+      });
+      const published = await start(runtime);
+
+      firstTermination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => firstClose.mock.calls.length === 1);
+      await waitFor(() => failureMessages(published.events).length === 1);
+      expect(failureMessages(published.events)).toEqual([
+        'OpenCode server process terminated unexpectedly (code 1)',
+      ]);
+      expect(runtime.isTemporarilyUnavailable()).toBe(false);
+
+      await expect(runtime.getClient()).resolves.toBe(replacement.client);
+      expect(createInstance).toHaveBeenCalledTimes(2);
+      await runtime.shutdown();
+      expect(replacement.server.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails an active turn exactly once when the stream ends and the process exits together', async () => {
+      const eventStream = createEventStream();
+      const termination = deferred();
+      const close = mock(() => undefined);
+      const subscribe = mock(() => Promise.resolve({ stream: eventStream.stream() }));
+      const runtime = new OpenCodeRuntime({
+        createInstance: mock(() => Promise.resolve(deathInstance({ subscribe, termination, close }))),
+        sseRetryDelayMs: 20,
+      });
+      const published = await start(runtime, { runId: 'run-a' });
+
+      eventStream.close();
+      termination.resolve({ kind: 'exit', code: 137, signal: 'SIGKILL' });
+      await waitFor(() => close.mock.calls.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(terminalEvents(published.events)).toHaveLength(1);
+      expect(failureMessages(published.events)[0]).toContain('terminated unexpectedly');
+      expect(subscribe).toHaveBeenCalledTimes(1);
+      expect(runtime.isTemporarilyUnavailable()).toBe(false);
+      runtime.shutdown();
+    });
+
+    it('ignores a stream end that arrives after the process exit already retired the instance', async () => {
+      const eventStream = createEventStream();
+      const termination = deferred();
+      const close = mock(() => undefined);
+      const subscribe = mock(() => Promise.resolve({ stream: eventStream.stream() }));
+      const runtime = new OpenCodeRuntime({
+        createInstance: mock(() => Promise.resolve(deathInstance({ subscribe, termination, close }))),
+        sseRetryDelayMs: 20,
+      });
+      const published = await start(runtime, { runId: 'run-a' });
+
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => close.mock.calls.length === 1);
+      eventStream.close();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(terminalEvents(published.events)).toHaveLength(1);
+      expect(subscribe).toHaveBeenCalledTimes(1);
+      expect(runtime.isTemporarilyUnavailable()).toBe(false);
+      runtime.shutdown();
+    });
+
+    it('creates exactly one replacement for concurrent demand after death', async () => {
+      const firstTermination = deferred();
+      const replacement = replacementInstance();
+      const createInstance = mock()
+        .mockImplementationOnce(() => Promise.resolve(deathInstance({
+          subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
+          termination: firstTermination,
+          close: mock(() => undefined),
+        })))
+        .mockImplementationOnce(() => Promise.resolve(replacement));
+      const runtime = new OpenCodeRuntime({ createInstance });
+      await start(runtime);
+
+      firstTermination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => !runtime.isRunning('session-1'));
+
+      const [first, second] = await Promise.all([runtime.getClient(), runtime.getClient()]);
+      expect(first).toBe(replacement.client);
+      expect(second).toBe(replacement.client);
+      expect(createInstance).toHaveBeenCalledTimes(2);
+      await runtime.shutdown();
+    });
+
+    it('disarms a cooldown that an in-flight start armed during the death window', async () => {
+      const eventStream = createEventStream();
+      const termination = deferred();
+      const firstClose = mock(() => undefined);
+      const subscribe = mock()
+        .mockImplementationOnce(() => Promise.resolve({ stream: eventStream.stream() }))
+        .mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+      const replacement = replacementInstance();
+      const createInstance = mock()
+        .mockImplementationOnce(() => Promise.resolve(deathInstance({
+          subscribe,
+          termination,
+          close: firstClose,
+        })))
+        .mockImplementationOnce(() => Promise.resolve(replacement));
+      const runtime = new OpenCodeRuntime({
+        createInstance,
+        sseRetryDelayMs: 60_000,
+        unavailableRetryMs: 60_000,
+      });
+      await start(runtime, { runId: 'run-a' });
+
+      // A start attempt that lands between the death and its handling fails against the
+      // stale instance and arms the cooldown through the listener failure path. Wait for
+      // the arm so the death handler's disarm is the last word.
+      eventStream.close();
+      const published = collectOperation('run-b');
+      const staleStart = runtime.startSession({
+        command: 'during-death',
+        chatId: 'chat-2',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: published.operation,
+      });
+      const staleOutcome = staleStart.then(() => null, (error) => error);
+      await waitFor(() => subscribe.mock.calls.length === 2);
+      await waitFor(() => runtime.isTemporarilyUnavailable());
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      expect(await staleOutcome).toMatchObject({ message: 'connect ECONNREFUSED' });
+      await waitFor(() => firstClose.mock.calls.length === 1);
+      expect(runtime.isTemporarilyUnavailable()).toBe(false);
+
+      await expect(runtime.getClient()).resolves.toBe(replacement.client);
+      expect(createInstance).toHaveBeenCalledTimes(2);
+      await runtime.shutdown();
+    });
+
+    it('rejects an admission whose session create resolves after the instance died', async () => {
+      const termination = deferred();
+      const sessionCreate = deferred();
+      const createStarted = deferred();
+      let firstClosed = false;
+      let oldPromptStarted = false;
+      let factoryCalls = 0;
+      const oldClient = {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+        session: {
+          create: mock(() => {
+            createStarted.resolve();
+            return sessionCreate.promise;
+          }),
+          prompt: mock(() => {
+            oldPromptStarted = true;
+            return new Promise(() => {});
+          }),
+          promptAsync: mock(() => Promise.resolve({})),
+          abort: mock(() => Promise.resolve({ data: true })),
+          delete: mock(() => Promise.resolve({})),
+        },
+      };
+      const replacement = replacementInstance();
+      const createInstance = mock(() => {
+        factoryCalls += 1;
+        return Promise.resolve(factoryCalls === 1
+          ? {
+            client: oldClient,
+            server: {
+              close: () => { firstClosed = true; },
+              termination: termination.promise,
+            },
+          }
+          : replacement);
+      });
+      const runtime = new OpenCodeRuntime({ createInstance });
+      const published = collectOperation('run-a');
+      const startOutcome = runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: published.operation,
+      }).then(() => null, (error) => error);
+      await createStarted.promise;
+
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => firstClosed);
+      sessionCreate.resolve({ data: { id: 'late-session' } });
+
+      expect(await startOutcome).toMatchObject({
+        message: 'OpenCode server process was retired while the request was in flight',
+      });
+      expect(oldPromptStarted).toBe(false);
+      expect(runtime.isRunning('late-session')).toBe(false);
+      expect(published.events).toEqual([]);
+      // Retirement never eagerly respawns; the next demand creates the replacement.
+      expect(factoryCalls).toBe(1);
+      await expect(runtime.getClient()).resolves.toBe(replacement.client);
+      expect(factoryCalls).toBe(2);
+      await runtime.shutdown();
+    });
+
+    it('rejects a resume that crosses instance retirement before prompting', async () => {
+      const eventStream = createEventStream();
+      const termination = deferred();
+      const secondSubscribe = deferred();
+      let firstClosed = false;
+      const promptAsync = mock(() => Promise.resolve({}));
+      const subscribe = mock()
+        .mockImplementationOnce(() => Promise.resolve({ stream: eventStream.stream() }))
+        .mockImplementationOnce(() => secondSubscribe.promise);
+      const oldClient = {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: subscribe },
+        session: {
+          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt: promptThrough(eventStream, promptAsync),
+          promptAsync,
+          abort: mock(() => Promise.resolve({ data: true })),
+        },
+      };
+      const createInstance = mock(() => Promise.resolve({
+        client: oldClient,
+        server: {
+          close: () => { firstClosed = true; },
+          termination: termination.promise,
+        },
+      }));
+      const runtime = new OpenCodeRuntime({ createInstance, sseRetryDelayMs: 60_000 });
+      await start(runtime, { runId: 'run-a' });
+      eventStream.push(envelope({
+        id: 'evt_0001',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-a',
+            type: 'text',
+            text: 'hello',
+          },
+        },
+      }));
+      eventStream.push(completedAssistantEnvelope({
+        eventId: 'evt_0002',
+        messageId: 'assistant-a',
+        parentId: 'user-a',
+      }));
+      await waitFor(() => !runtime.isRunning('session-1'));
+
+      // End the listener generation without a replacement so the resume parks inside
+      // the listener restart while the retirement lands.
+      eventStream.close();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const published = collectOperation('run-b');
+      const resumeOutcome = runtime.runTurn({
+        command: 'resume',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: published.operation,
+      }).then(() => null, (error) => error);
+      await waitFor(() => subscribe.mock.calls.length === 2);
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => firstClosed);
+      secondSubscribe.resolve({ stream: neverEndingStream() });
+
+      // The retirement closes the listener generation the resume is parked on, so the
+      // admission fails there before any prompt can reach the dead client.
+      expect(await resumeOutcome).toMatchObject({
+        message: 'OpenCode event listener closed before it was ready',
+      });
+      expect(promptAsync).toHaveBeenCalledTimes(1);
+      expect(terminalEvents(published.events)).toEqual([]);
+      await runtime.shutdown();
+    });
+
+    it('rejects a start whose execution admission crosses the retirement, without activating', async () => {
+      const termination = deferred();
+      const markStarted = deferred();
+      let firstClosed = false;
+      const oldDelete = mock(() => Promise.resolve({}));
+      const oldClient = {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+        session: {
+          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt: mock(() => new Promise(() => {})),
+          promptAsync: mock(() => Promise.resolve({})),
+          abort: mock(() => Promise.resolve({ data: true })),
+          delete: oldDelete,
+        },
+      };
+      const createInstance = mock(() => Promise.resolve({
+        client: oldClient,
+        server: {
+          close: () => { firstClosed = true; },
+          termination: termination.promise,
+        },
+      }));
+      const runtime = new OpenCodeRuntime({ createInstance });
+      const published = collectOperation('run-a');
+      const activated = mock(() => undefined);
+      const startOutcome = runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: published.operation,
+        executionAdmission: {
+          signal: new AbortController().signal,
+          markStarted: () => markStarted.promise,
+        },
+        onSessionActivated: activated,
+      }).then(() => null, (error) => error);
+      await waitFor(() => runtime.isRunning('session-1'));
+
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => firstClosed);
+      await waitFor(() => terminalEvents(published.events).length === 1);
+      markStarted.resolve();
+
+      expect(await startOutcome).toMatchObject({
+        message: 'OpenCode server process was retired while the request was in flight',
+      });
+      expect(activated).not.toHaveBeenCalled();
+      expect(oldClient.session.prompt).not.toHaveBeenCalled();
+      expect(oldDelete).toHaveBeenCalledTimes(1);
+      expect(terminalEvents(published.events)).toHaveLength(1);
+      expect(failureMessages(published.events)[0]).toContain('terminated unexpectedly');
+      expect(runtime.isRunning('session-1')).toBe(false);
+      await runtime.shutdown();
+    });
+
+    it('rejects a resume whose execution admission crosses the retirement, with one terminal', async () => {
+      const eventStream = createEventStream();
+      const termination = deferred();
+      const markStarted = deferred();
+      let firstClosed = false;
+      const promptAsync = mock(() => Promise.resolve({}));
+      const oldClient = {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
+        session: {
+          create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+          prompt: promptThrough(eventStream, promptAsync),
+          promptAsync,
+          abort: mock(() => Promise.resolve({ data: true })),
+        },
+      };
+      const createInstance = mock(() => Promise.resolve({
+        client: oldClient,
+        server: {
+          close: () => { firstClosed = true; },
+          termination: termination.promise,
+        },
+      }));
+      const runtime = new OpenCodeRuntime({ createInstance });
+      await start(runtime, { runId: 'run-a' });
+      eventStream.push(envelope({
+        id: 'evt_0001',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-a',
+            type: 'text',
+            text: 'hello',
+          },
+        },
+      }));
+      eventStream.push(completedAssistantEnvelope({
+        eventId: 'evt_0002',
+        messageId: 'assistant-a',
+        parentId: 'user-a',
+      }));
+      await waitFor(() => !runtime.isRunning('session-1'));
+
+      const published = collectOperation('run-b');
+      const resumeOutcome = runtime.runTurn({
+        command: 'resume',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: published.operation,
+        executionAdmission: {
+          signal: new AbortController().signal,
+          markStarted: () => markStarted.promise,
+        },
+      }).then(() => null, (error) => error);
+      await waitFor(() => runtime.isRunning('session-1'));
+
+      termination.resolve({ kind: 'exit', code: 1, signal: null });
+      await waitFor(() => firstClosed);
+      await waitFor(() => terminalEvents(published.events).length === 1);
+      markStarted.resolve();
+
+      expect(await resumeOutcome).toMatchObject({
+        message: 'OpenCode server process was retired while the request was in flight',
+      });
+      expect(promptAsync).toHaveBeenCalledTimes(1);
+      expect(terminalEvents(published.events)).toHaveLength(1);
+      expect(failureMessages(published.events)[0]).toContain('terminated unexpectedly');
+      expect(runtime.isRunning('session-1')).toBe(false);
+      await runtime.shutdown();
+    });
+
+    it('ignores termination caused by a deliberate shutdown close', async () => {
+      const termination = deferred();
+      const warn = mock(() => undefined);
+      const createInstance = mock(() => Promise.resolve(deathInstance({
+        subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })),
+        termination,
+        close: mock(() => undefined),
+      })));
+      const runtime = new OpenCodeRuntime({
+        createInstance,
+        logger: { debug() {}, info() {}, warn, error() {} },
+      });
+      await start(runtime);
+
+      const shutdown = runtime.shutdown();
+      termination.resolve({ kind: 'exit', code: null, signal: 'SIGTERM' });
+      await shutdown;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(createInstance).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   it('fails an owned turn exactly when the provider event stream ends', async () => {
     const eventStream = createEventStream();
     const prompt = deferred();

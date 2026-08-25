@@ -1,10 +1,20 @@
 import { withAbortableTimeout } from './request-control.js';
 
+export type OpenCodeServerTermination =
+  | { readonly kind: 'exit'; readonly code: number | null; readonly signal: NodeJS.Signals | null }
+  | { readonly kind: 'error'; readonly error: unknown };
+
 export interface OpenCodeInstance {
   client: any;
   baseUrl?: string;
   server?: {
     close?: () => void;
+    // Resolves once when the spawned server process terminates, including after
+    // readiness. Optional so injected test instances stay lightweight.
+    termination?: Promise<OpenCodeServerTermination>;
+    // Reports whether the process already exited or errored; a deliberate
+    // close of a still-live process preserves the availability cooldown.
+    exitObserved?: () => boolean;
   };
   close?: () => void;
 }

@@ -16,6 +16,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  killScriptedOpenCodeProvider,
   openCodeNativeSession,
   OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT,
   readOpenCodeSessionRows,
@@ -113,7 +114,97 @@ describeOnLinux('scripted OpenCode provider failures', () => {
     }, withScriptedOpenCode());
   }, 120_000);
 
-  // OpenCode 1.18.22 retries provider error frames and genuine socket resets.
+  // Locks the process-death contract against the real binary: killing the pinned server
+  // fails the active turn exactly once and the next chat respawns a fresh server at once,
+  // never waiting out the unavailability cooldown.
+  test('restarts a killed server process and starts a new chat immediately', async () => {
+    const testEnvironment = requireEnvironment();
+    const recoveryReply = marker('KILL_RECOVERY_REPLY');
+    const held = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(marker('KILL_HELD_REPLY')),
+    ]);
+
+    await withIntegrationFixture('opencode-server-killed', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('KILL_PROMPT'),
+      }));
+      await held.requested;
+
+      const supervisors = await readSupervisorStates(fixture.dirs);
+      expect(supervisors).toHaveLength(1);
+      const killedAt = Date.now();
+      await killScriptedOpenCodeProvider(supervisors[0]!);
+
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal.type).toBe('agent-run-failed');
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: cursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expectSingleFailedTerminal(fixture.client.eventsSince(cursor), chatId, turn.turnId);
+      held.release();
+
+      // The wrapper is Garcon's direct child: once every supervised identity is gone,
+      // Garcon has been notified of the death. A start that still lands inside the
+      // death-handling window may fail once against the stale endpoint; the termination
+      // handler disarms the cooldown, so a bounded retry must succeed well before the
+      // 60-second unavailability cooldown could expire.
+      await waitForSupervisorExit(supervisors);
+
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryDeadline = killedAt + 30_000;
+      let recoveryChatId = '';
+      let recoveryTurnId = '';
+      let recoveryCursor = 0;
+      let staleWindowFailures = 0;
+      for (;;) {
+        recoveryChatId = fixture.newChatId();
+        recoveryCursor = fixture.client.markEvents();
+        try {
+          const recovery = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+            chatId: recoveryChatId,
+            projectPath: fixture.dirs.project,
+            command: marker('KILL_RECOVERY_PROMPT'),
+          }));
+          recoveryTurnId = recovery.turnId;
+          break;
+        } catch {
+          staleWindowFailures += 1;
+          if (Date.now() > recoveryDeadline || staleWindowFailures > 1) {
+            throw new Error(`Recovery needed ${staleWindowFailures} stale-window failures`);
+          }
+          await Bun.sleep(250);
+        }
+      }
+      await waitForVisibleResponse({
+        fixture,
+        chatId: recoveryChatId,
+        turnId: recoveryTurnId,
+        marker: recoveryReply,
+        afterIndex: recoveryCursor,
+      });
+      expect(Date.now() - killedAt).toBeLessThan(30_000);
+
+      // Hermetic fixture: exactly the killed supervisor plus its single
+      // replacement, with the killed turn still owning exactly one terminal.
+      const supervisorsAfter = await readSupervisorStates(fixture.dirs);
+      expect(supervisorsAfter).toHaveLength(2);
+      expect(supervisorsAfter.filter((state) => state.reason === 'provider-exited')).toHaveLength(1);
+      expect(supervisorsAfter.filter((state) =>
+        state.status === 'running' && state.wrapperPid !== supervisors[0]!.wrapperPid
+      )).toHaveLength(1);
+      expectSingleFailedTerminal(fixture.client.eventsSince(cursor), chatId, turn.turnId);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
   test('retries an errored model stream and finishes without a visible failure', async () => {
     const testEnvironment = requireEnvironment();
     const prompt = marker('STREAM_ERROR_PROMPT');

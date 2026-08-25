@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { OpenCodeInstance } from './instance-lifecycle.js';
+import type { OpenCodeInstance, OpenCodeServerTermination } from './instance-lifecycle.js';
 
 export function buildOpenCodeServerEnv(
   baseEnv: Record<string, string | undefined> = process.env,
@@ -28,6 +28,41 @@ function stopOpenCodeProcess(proc: ChildProcess): void {
   proc.once('exit', () => clearTimeout(killTimer));
 }
 
+export interface OpenCodeProcessLifetime {
+  readonly termination: Promise<OpenCodeServerTermination>;
+  // True once the process reported exit or error, distinguishing a deliberate
+  // kill of a live process from cleanup after an observed death.
+  exitObserved(): boolean;
+}
+
+// Lifetime observers, resolved once and never rejected: unlike startup
+// handlers, these survive readiness so the runtime learns about post-readiness
+// death. The error observer stays registered for the process lifetime because
+// a failed escalation kill can emit 'error' after an earlier one consumed a
+// once listener; promise resolution is one-shot, so repeated events settle
+// only the first outcome.
+export function trackOpenCodeProcessLifetime(
+  proc: Pick<ChildProcess, 'once' | 'on'>,
+): OpenCodeProcessLifetime {
+  let settleTermination!: (termination: OpenCodeServerTermination) => void;
+  let exitObserved = false;
+  const termination = new Promise<OpenCodeServerTermination>((resolve) => {
+    settleTermination = resolve;
+  });
+  proc.once('exit', (code, signal) => {
+    exitObserved = true;
+    settleTermination({ kind: 'exit', code, signal });
+  });
+  proc.on('error', (error) => {
+    exitObserved = true;
+    settleTermination({ kind: 'error', error });
+  });
+  return {
+    termination,
+    exitObserved: () => exitObserved,
+  };
+}
+
 export async function createOpenCodeInstance(input: {
   signal: AbortSignal;
 }): Promise<OpenCodeInstance> {
@@ -40,6 +75,7 @@ export async function createOpenCodeInstance(input: {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let resourcesClosed = false;
+  const lifetime = trackOpenCodeProcessLifetime(proc);
   const closeResources = () => {
     if (resourcesClosed) return;
     resourcesClosed = true;
@@ -112,6 +148,10 @@ export async function createOpenCodeInstance(input: {
   return {
     client: createOpencodeClient({ baseUrl: url }),
     baseUrl: url,
-    server: { close: closeResources },
+    server: {
+      close: closeResources,
+      termination: lifetime.termination,
+      exitObserved: lifetime.exitObserved,
+    },
   };
 }

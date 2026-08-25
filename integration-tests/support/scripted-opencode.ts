@@ -569,6 +569,33 @@ export async function waitForSupervisorExit(
   );
 }
 
+// Kills the exact recorded provider process after identity verification so a test exercises
+// Garcon's reaction to a genuine post-readiness server death rather than a simulated one.
+// The supervisor observes the provider exit and winds the wrapper down itself.
+export async function killScriptedOpenCodeProvider(
+  state: OpenCodeProcessState,
+  signal: NodeJS.Signals = 'SIGKILL',
+  timeoutMs = 10_000,
+): Promise<void> {
+  if (!state.providerPid || !state.providerStartTimeTicks) {
+    throw new Error('OpenCode supervisor state has no verified provider process identity.');
+  }
+  const identity: OpenCodeProcessIdentity = {
+    pid: state.providerPid,
+    startTimeTicks: state.providerStartTimeTicks,
+  };
+  if (!identityAlive(identity)) {
+    throw new Error('OpenCode provider process exited before the test could kill it.');
+  }
+  process.kill(identity.pid, signal);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!identityAlive(identity)) return;
+    await Bun.sleep(20);
+  }
+  throw new Error(`OpenCode provider process ${identity.pid} survived ${signal}.`);
+}
+
 export function scriptedOpenCodeStartRequest(input: {
   chatId: string;
   projectPath: string;

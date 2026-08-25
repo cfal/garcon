@@ -43,6 +43,7 @@ import {
 } from './runtime-types.js';
 import {
   createOpenCodeRequestScope,
+  isOpenCodeNotFoundResult,
   throwOpenCodeResultError,
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
@@ -57,6 +58,7 @@ import {
   closeOpenCodeInstance,
   OpenCodeInstanceCreationTracker,
   type OpenCodeInstance,
+  type OpenCodeServerTermination,
 } from './instance-lifecycle.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
 import {
@@ -164,6 +166,16 @@ export class OpenCodeRuntime {
   readonly #config: OpenCodeConfig;
   readonly #logger: AgentLogger;
   #instance: OpenCodeInstance | null = null;
+  // Bumped on every instance transition so availability reports can be
+  // generation-tagged: reports from a retired generation are ignored.
+  #instanceGeneration = 0;
+  // Instances Garcon itself closed; their termination callbacks must leave the
+  // availability cooldown intact instead of disarming it.
+  readonly #deliberatelyClosed = new WeakSet<OpenCodeInstance>();
+  // Sessions whose deletion failed through a dead endpoint; replayed once the
+  // next instance is installed, because native sessions persist in the
+  // provider database across respawns.
+  #pendingSessionDeletions: Array<{ sessionId: string; scope: OpenCodeRequestScope }> = [];
   #initPromise: Promise<OpenCodeInstance> | null = null;
   #startupAbortController: AbortController | null = null;
   #shutdownPromise: Promise<void> | null = null;
@@ -223,8 +235,11 @@ export class OpenCodeRuntime {
       withClientLease: (operation) => this.withClientLease(operation),
       isAvailable: () => this.isAvailable(),
       isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
-      markAvailable: () => this.#markAvailable(),
-      markTemporarilyUnavailable: (reason) => this.#markTemporarilyUnavailable(reason),
+      instanceGeneration: () => this.#instanceGeneration,
+      markAvailable: (sourceGeneration) => this.#markAvailable(sourceGeneration),
+      markTemporarilyUnavailable: (reason, sourceGeneration) => (
+        this.#markTemporarilyUnavailable(reason, sourceGeneration)
+      ),
       now: () => this.#now(),
     });
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
@@ -241,7 +256,10 @@ export class OpenCodeRuntime {
       isShuttingDown: () => this.#shuttingDown,
       isTemporarilyUnavailable: () => this.isTemporarilyUnavailable(),
       getUnavailableRetryAfterMs: () => this.getUnavailableRetryAfterMs(),
-      markTemporarilyUnavailable: (reason) => this.#markTemporarilyUnavailable(reason),
+      instanceGeneration: () => this.#instanceGeneration,
+      markTemporarilyUnavailable: (reason, sourceGeneration) => (
+        this.#markTemporarilyUnavailable(reason, sourceGeneration)
+      ),
       failRunningTurns: (error) => this.#failRunningTurnsForListenerError(error),
       closeUnavailableInstanceIfIdle: () => this.#closeInstanceIfIdle(),
       confirmEventDelivery: this.#options.requiresExecutable
@@ -335,12 +353,19 @@ export class OpenCodeRuntime {
     if (this.isTemporarilyUnavailable()) throw this.#temporaryUnavailableError();
   }
 
-  #markAvailable(): void {
+  #markAvailable(sourceGeneration?: number): void {
+    if (sourceGeneration !== undefined && sourceGeneration !== this.#instanceGeneration) return;
     this.#unavailableUntil = 0;
     this.#unavailableReason = '';
   }
 
-  #markTemporarilyUnavailable(reason: string): boolean {
+  #markTemporarilyUnavailable(reason: string, sourceGeneration?: number): boolean {
+    // A report about a retired generation must not poison the current one: a
+    // late timeout from a dead instance never arms a cooldown the replacement
+    // has to wait out.
+    if (sourceGeneration !== undefined && sourceGeneration !== this.#instanceGeneration) {
+      return false;
+    }
     const now = this.#now();
     const wasAvailable = this.#unavailableRemainingMs() === 0;
     const reasonChanged = this.#unavailableReason !== reason;
@@ -363,13 +388,155 @@ export class OpenCodeRuntime {
   }
 
   #closeInstance(): void {
+    // Null before killing the process so the resulting termination callback finds a
+    // stale identity and is ignored.
+    const instance = this.#instance;
+    this.#instance = null;
+    this.#instanceGeneration += 1;
     this.#globalEventListener.close();
     this.#operationRoutes.clear();
-    const instance = this.#instance;
     if (instance) {
+      // Killing a still-live process must preserve the availability cooldown
+      // that prompted the close; an already-exited process keeps death
+      // semantics so the termination handler disarms the cooldown.
+      if (instance.server?.exitObserved && !instance.server.exitObserved()) {
+        this.#deliberatelyClosed.add(instance);
+      }
       closeOpenCodeInstance(instance);
     }
-    this.#instance = null;
+  }
+
+  // Subscribes to the instance's process-lifetime termination signal. The instance
+  // object itself is the generation token: a late callback from a deliberately closed
+  // or replaced instance finds a different #instance and is ignored.
+  // Fences admissions that captured an instance which was retired mid-flight: after every
+  // await that can cross a termination transition, the captured identity must still be
+  // current before sessions are registered, activations are published, or prompts are
+  // sent through the captured client.
+  #assertInstanceCurrent(instance: OpenCodeInstance): void {
+    if (this.#instance !== instance) {
+      throw new Error('OpenCode server process was retired while the request was in flight');
+    }
+  }
+
+  #watchServerTermination(instance: OpenCodeInstance): void {
+    const termination = instance.server?.termination;
+    if (!termination) return;
+    void termination.then((outcome) => this.#handleServerTermination(instance, outcome));
+  }
+
+  #handleServerTermination(
+    instance: OpenCodeInstance,
+    outcome: OpenCodeServerTermination,
+  ): void {
+    void this.#endpointCoordinator.runTransition(async () => {
+      if (this.#shuttingDown) return;
+      if (this.#deliberatelyClosed.has(instance)) {
+        // Garcon closed this instance on purpose, most often to honor an
+        // availability cooldown: the resulting exit must not disarm it.
+        return;
+      }
+      if (this.#instance !== instance) {
+        // The instance was already retired, but its death still invalidates any cooldown
+        // armed by failures in its death window while no replacement is installed. A
+        // failed replacement startup re-arms the cooldown on its own ensure path.
+        if (this.#instance === null) this.#markAvailable();
+        return;
+      }
+      const detail = outcome.kind === 'exit'
+        ? `code ${outcome.code ?? outcome.signal ?? 'unknown'}`
+        : errorMessage(outcome.error);
+      this.#logger.warn('OpenCode server process terminated; retiring the instance', { detail });
+      // Death is authoritative, unlike an SSE failure: retire the dead endpoint
+      // immediately regardless of in-flight admissions or leases, fail active
+      // turns, and leave the cooldown disarmed so the next demand respawns at
+      // once. A failed replacement startup still arms the cooldown through the
+      // ensure path.
+      this.#failRunningTurnsForServerDeath(
+        new Error(`OpenCode server process terminated unexpectedly (${detail})`),
+      );
+      this.#closeInstance();
+      this.#markAvailable();
+    }).catch((error) => {
+      this.#logger.error('OpenCode server termination handling failed', {
+        error: errorMessage(error),
+      });
+    });
+  }
+
+  // Death leaves no provider work behind, unlike an SSE failure: sessions stop
+  // without quiescence so the idle purger can reclaim them, while steering
+  // cleanup staging survives for the next turn.
+  #failRunningTurnsForServerDeath(failure: Error): void {
+    for (const [agentSessionId, session] of this.#sessions) {
+      if (session.status !== 'running') continue;
+      this.steering.stagePendingCleanup(session);
+      session.providerWorkRequiresQuiescence = false;
+      session.status = 'completed';
+      session.lastActivityAt = Date.now();
+      this.#operationRoutes.cancelRequest(session.turn, failure);
+      this.#decisions.cancelForSession(agentSessionId, 'cancelled');
+      this.#rejectTurnWaiter(agentSessionId, failure);
+      this.#publishFailed(agentSessionId, session.turn.operation, failure.message);
+    }
+    for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
+      this.#rejectTurnWaiter(agentSessionId, failure);
+    }
+  }
+
+  // Deletes a native session when possible and retains the deletion for the
+  // next instance otherwise: the provider persists sessions in its own
+  // database, so a leak survives the respawn. A not-found result means the
+  // session is already gone and satisfies the deletion.
+  async #deleteSessionBestEffort(
+    sessionId: string,
+    scope: OpenCodeRequestScope,
+    client?: any,
+  ): Promise<void> {
+    const deleteThrough = client ?? (() => this.getClientIfInitialized())();
+    if (!deleteThrough) {
+      this.#pendingSessionDeletions.push({ sessionId, scope });
+      return;
+    }
+    try {
+      const result = await this.#runScopedSessionRequest(
+        'OpenCode cancelled session delete',
+        scope,
+        (signal, requestScope) => deleteThrough.session.delete(
+          withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
+          { signal },
+        ),
+      );
+      if (!isOpenCodeNotFoundResult(result)) {
+        throwOpenCodeResultError(result, 'OpenCode cancelled session delete failed');
+      }
+    } catch {
+      this.#pendingSessionDeletions.push({ sessionId, scope });
+    }
+  }
+
+  // Replays retained deletions through the freshly installed instance. Each
+  // attempt is best-effort: a failed replay stays retained for the next one.
+  #drainPendingSessionDeletions(): void {
+    if (this.#pendingSessionDeletions.length === 0) return;
+    const pending = this.#pendingSessionDeletions.splice(0);
+    for (const { sessionId, scope } of pending) {
+      void this.withClientLease(async (client) => {
+        const result = await this.#runScopedSessionRequest(
+          'OpenCode retained session delete',
+          scope,
+          (signal, requestScope) => client.session.delete(
+            withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
+            { signal },
+          ),
+        );
+        if (!isOpenCodeNotFoundResult(result)) {
+          throwOpenCodeResultError(result, 'OpenCode retained session delete failed');
+        }
+      }).catch(() => {
+        this.#pendingSessionDeletions.push({ sessionId, scope });
+      });
+    }
   }
 
   #createTurnWaiter(agentSessionId: string): PendingTurnWaiter {
@@ -606,7 +773,10 @@ export class OpenCodeRuntime {
         }
 
         this.#instance = result;
+        this.#instanceGeneration += 1;
+        this.#watchServerTermination(result);
         this.#markAvailable();
+        this.#drainPendingSessionDeletions();
         return result;
       } catch (err) {
         const reason = errorMessage(err);
@@ -948,6 +1118,7 @@ export class OpenCodeRuntime {
     operation: (signal: AbortSignal) => Promise<T>,
     control: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<T> {
+    const generation = this.#instanceGeneration;
     this.#endpointCoordinator.requestStarted();
     try {
       return await withAbortableTimeout(
@@ -959,7 +1130,7 @@ export class OpenCodeRuntime {
     } catch (err) {
       if (err instanceof OpenCodeTimeoutError) {
         const reason = errorMessage(err);
-        if (this.#markTemporarilyUnavailable(reason)) {
+        if (this.#markTemporarilyUnavailable(reason, generation)) {
           this.#logger.warn('OpenCode request timed out', { reason });
         }
       }
@@ -1108,10 +1279,11 @@ export class OpenCodeRuntime {
     } = request;
     const scope = createOpenCodeRequestScope(projectPath);
 
-    await this.#ensureOpenCodeServer();
+    const instance = await this.#ensureOpenCodeServer();
     await this.#globalEventListener.start(scope.directory);
+    this.#assertInstanceCurrent(instance);
 
-    const client = await this.getClient();
+    const client: any = instance.client;
     assertOpenCodeExecutionOpen(request);
     const sessionResult: any = await this.#runRequest<any>(
       'OpenCode session create',
@@ -1156,12 +1328,18 @@ export class OpenCodeRuntime {
     this.#logger.info('OpenCode session created and registered', { agentSessionId });
 
     try {
+      // Fence inside the cleanup scope: a retirement after the session was
+      // created must still attempt deleting it, because native sessions
+      // persist in the provider database across respawns.
+      this.#assertInstanceCurrent(instance);
       await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
       if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+      this.#assertInstanceCurrent(instance);
       // Activation publishes the durable session fact, so it must follow every
       // failure whose cleanup deletes the just-created native session; a chat
       // must never stay durably bound to a session this path removed.
@@ -1169,14 +1347,7 @@ export class OpenCodeRuntime {
     } catch (error) {
       this.#operationRoutes.unregister(route);
       this.#sessions.delete(agentSessionId);
-      await this.#runScopedSessionRequest(
-        'OpenCode cancelled session delete',
-        scope,
-        (signal, requestScope) => client.session.delete(
-          withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
-          { signal },
-        ),
-      ).catch(() => undefined);
+      await this.#deleteSessionBestEffort(agentSessionId, scope, client);
       throw error;
     }
 
@@ -1226,16 +1397,18 @@ export class OpenCodeRuntime {
     const requestScope = createOpenCodeRequestScope(projectPath);
     const scope = requestScope.directory ? requestScope : { directory: session?.directory };
 
-    await this.#ensureOpenCodeServer();
+    const instance = await this.#ensureOpenCodeServer();
     await this.#globalEventListener.start(scope.directory);
+    this.#assertInstanceCurrent(instance);
     assertOpenCodeExecutionOpen(request);
 
     const turn = createOpenCodeTurnContext(operation);
-    const client = await this.getClient();
+    const client: any = instance.client;
     if (session) {
       await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
       await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
     }
+    this.#assertInstanceCurrent(instance);
     const waiter = this.#createTurnWaiter(agentSessionId);
     // One resolution per turn: the stored variant steering reuses must be the
     // variant this prompt submits, even if discovery refreshes mid-admission.
@@ -1266,11 +1439,13 @@ export class OpenCodeRuntime {
 
     try {
       await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
       const activeSession = this.#sessions.get(agentSessionId);
       if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
         throw new Error('OpenCode event stream ended before prompt delivery');
       }
       if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+      this.#assertInstanceCurrent(instance);
       const promptRequest = this.#runScopedTurnRequest(
         scope,
         route.requestAbortController.signal,
@@ -1318,16 +1493,18 @@ export class OpenCodeRuntime {
       const requestScope = createOpenCodeRequestScope(projectPath);
       const scope = requestScope.directory ? requestScope : { directory: session?.directory };
 
-      await this.#ensureOpenCodeServer();
+      const instance = await this.#ensureOpenCodeServer();
       await this.#globalEventListener.start(scope.directory);
+      this.#assertInstanceCurrent(instance);
       assertOpenCodeExecutionOpen(request);
 
       turn = createOpenCodeTurnContext(operation, { compaction: true });
-      const client = await this.getClient();
+      const client: any = instance.client;
       if (session) {
         await this.#quiesceRetiredProviderWork(client, agentSessionId, session, scope);
         await this.steering.removeUnconsumed(client, agentSessionId, session, scope);
       }
+      this.#assertInstanceCurrent(instance);
       this.#activateTurn(agentSessionId, session, {
         chatId,
         model,
@@ -1347,11 +1524,13 @@ export class OpenCodeRuntime {
 
       try {
         await this.#globalEventListener.start(scope.directory);
+        this.#assertInstanceCurrent(instance);
         const activeSession = this.#sessions.get(agentSessionId);
         if (!activeSession || activeSession.status !== 'running' || activeSession.turn !== turn) {
           throw new Error('OpenCode event stream ended before compaction delivery');
         }
         if (request.executionAdmission) await markOpenCodeExecutionStarted(request);
+        this.#assertInstanceCurrent(instance);
         const parsedModel = parseOpenCodeModel(model);
         const summarizeRequest = this.#runScopedTurnRequest(
           scope,
@@ -1505,6 +1684,17 @@ export class OpenCodeRuntime {
       ? Math.max(1, Math.round(options.timeoutMs))
       : undefined;
     return withSingleQueryControl(options, async (signal) => this.withClientLease(async (client) => {
+      // The lease blocks idle retirement but not authoritative death
+      // retirement: every stage after this point re-fences the generation so a
+      // dead client is never prompted through, while the created session is
+      // still cleaned up or retained for the replacement.
+      const generation = this.#instanceGeneration;
+      const assertCurrent = () => {
+        if (this.#instanceGeneration !== generation) {
+          throw new Error('OpenCode server process was retired while the request was in flight');
+        }
+      };
+
       const createResult: any = await this.#runRequest<any>(
         'OpenCode session create',
         (requestSignal) => client.session.create(withOpenCodeRequestScope({
@@ -1521,6 +1711,7 @@ export class OpenCodeRuntime {
       }
 
       try {
+        assertCurrent();
         const parsedModel = parseOpenCodeModel(model);
         const body: Record<string, unknown> = {
           parts: [{ type: 'text', text: prompt }],
@@ -1539,6 +1730,7 @@ export class OpenCodeRuntime {
           }, requestScope), { signal: requestSignal }),
           { signal, timeoutMs: requestTimeoutMs },
         );
+        assertCurrent();
 
         throwOpenCodeResultError(promptResult, 'OpenCode one-shot prompt failed');
         return extractTextParts(promptResult.data?.parts);
@@ -1551,8 +1743,11 @@ export class OpenCodeRuntime {
             { signal: requestSignal },
           ),
         ).then((result) => {
+          if (isOpenCodeNotFoundResult(result)) return;
           throwOpenCodeResultError(result, 'OpenCode session delete failed');
-        }).catch(() => {});
+        }).catch(() => {
+          this.#pendingSessionDeletions.push({ sessionId, scope });
+        });
       }
     }));
   }
