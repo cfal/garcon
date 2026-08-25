@@ -172,7 +172,11 @@ export function openCodeEventBelongsToTurn(
       return true;
     }
     turn.assistantMessageIds.add(messageId);
-    turn.pendingSteeringMessageIds.delete(info.parentID);
+    // A batched loop consumes every queued steering message up to its parent;
+    // ids sort lexically, so all pending steers at or below the parent were read.
+    for (const pending of turn.pendingSteeringMessageIds) {
+      if (pending <= info.parentID) turn.pendingSteeringMessageIds.delete(pending);
+    }
     return true;
   }
   if (event.type === 'message.part.updated') {
