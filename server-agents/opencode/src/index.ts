@@ -1,4 +1,5 @@
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
+import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 import {
   AgentIntegrationError,
   type AgentChatReference,
@@ -56,7 +57,9 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'opencode';
   static readonly apiVersion = 5 as const;
   readonly descriptor = OPENCODE_DESCRIPTOR;
-  readonly attachments = null;
+  readonly attachments = {
+    fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
+  } as const;
   readonly execution;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;

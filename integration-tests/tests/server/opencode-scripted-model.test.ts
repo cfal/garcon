@@ -784,6 +784,45 @@ describeOnLinux('OpenCode against a scripted model', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('forwards file attachments and surfaces the provider modality gate', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('PDF_PROMPT');
+    const reply = marker('PDF_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+    const pdfBytes = Buffer.from('%PDF-1.4 scripted attachment').toString('base64');
+    const dataUrl = `data:application/pdf;base64,${pdfBytes}`;
+
+    await withIntegrationFixture('opencode-scripted-pdf-attachment', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      const requestCursor = testEnvironment.model.markRequests();
+      const started = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+        images: [{ data: dataUrl, name: 'notes.pdf', mimeType: 'application/pdf' }],
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: started.turnId,
+        marker: reply,
+        afterIndex: eventCursor,
+      });
+
+      // The fake model declares only text and image input, so OpenCode's own
+      // modality gate replaces the file part with an honest error text instead
+      // of dropping the attachment silently.
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].userTexts.join('\n')).toContain(prompt);
+      expect(requests[0].userTexts.join('\n')).toContain(
+        'Cannot read "notes.pdf" (this model does not support pdf input)',
+      );
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {
