@@ -87,18 +87,31 @@ export function isConversationVirtualViewportCovered(
 	return false;
 }
 
-export function retainedConversationRange(
-	range: VirtualRange | null,
-	count: number,
-	retainedIndexes: readonly number[],
-	trailingStartIndex: number | null = null,
-	followingRowCount = 0,
-): number[] {
+export function retainedConversationRange(input: {
+	readonly overscanRange: VirtualRange | null;
+	readonly visibleRange: VirtualRange | null;
+	readonly count: number;
+	readonly retainedIndexes: readonly number[];
+	readonly trailingStartIndex?: number | null;
+	readonly followingRowCount?: number;
+}): number[] {
+	const {
+		overscanRange,
+		visibleRange,
+		count,
+		retainedIndexes,
+		trailingStartIndex = null,
+		followingRowCount = 0,
+	} = input;
 	const indexes = new Set<number>();
-	if (range) {
-		for (let index = range.startIndex; index <= range.endIndex; index += 1) indexes.add(index);
-		const followingEndIndex = Math.min(count - 1, range.endIndex + followingRowCount);
-		for (let index = range.endIndex + 1; index <= followingEndIndex; index += 1) {
+	if (overscanRange) {
+		for (let index = overscanRange.startIndex; index <= overscanRange.endIndex; index += 1) {
+			indexes.add(index);
+		}
+	}
+	if (visibleRange) {
+		const followingEndIndex = Math.min(count - 1, visibleRange.endIndex + followingRowCount);
+		for (let index = visibleRange.endIndex + 1; index <= followingEndIndex; index += 1) {
 			indexes.add(index);
 		}
 	}

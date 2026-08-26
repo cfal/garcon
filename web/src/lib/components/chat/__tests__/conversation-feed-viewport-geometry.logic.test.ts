@@ -80,11 +80,25 @@ describe('conversation virtual viewport geometry', () => {
 		expect(selectConversationReadingAnchor(items, 61, new Set(['a', 'b']))?.key).toBe('b');
 	});
 
-	it('merges inclusive overscan, following, retained, and trailing indexes', () => {
-		expect(retainedConversationRange({ startIndex: 2, endIndex: 3 }, 10, [0, 8], 7, 2)).toEqual([
-			0, 2, 3, 4, 5, 7, 8, 9,
-		]);
-		expect(retainedConversationRange(null, 4, [1, 9])).toEqual([1]);
+	it('overlaps overscan and following rows while merging retained and trailing indexes', () => {
+		expect(
+			retainedConversationRange({
+				overscanRange: { startIndex: 1, endIndex: 5 },
+				visibleRange: { startIndex: 2, endIndex: 3 },
+				count: 10,
+				retainedIndexes: [0, 8],
+				trailingStartIndex: 7,
+				followingRowCount: 2,
+			}),
+		).toEqual([0, 1, 2, 3, 4, 5, 7, 8, 9]);
+		expect(
+			retainedConversationRange({
+				overscanRange: null,
+				visibleRange: null,
+				count: 4,
+				retainedIndexes: [1, 9],
+			}),
+		).toEqual([1]);
 	});
 
 	it('keeps a switched feed concealed while its committed range leaves visible space uncovered', () => {

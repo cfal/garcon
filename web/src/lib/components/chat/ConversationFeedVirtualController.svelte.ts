@@ -171,13 +171,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					this.#configuredModel.transcriptEndIndex - 1,
 				)
 			: null;
-		return retainedConversationRange(
-			snapshot.overscanRange,
-			snapshot.positions.count,
-			retained,
-			trailingStart,
-			CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS,
-		);
+		return retainedConversationRange({
+			overscanRange: snapshot.overscanRange,
+			visibleRange: snapshot.visibleRange,
+			count: snapshot.positions.count,
+			retainedIndexes: retained,
+			trailingStartIndex: trailingStart,
+			followingRowCount: CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS,
+		});
 	}
 
 	applyProjection(input: ConversationProjectionApplication): boolean {
