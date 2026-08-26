@@ -1799,13 +1799,15 @@ describe('ChatCommandService', () => {
     });
     expect(handoffs.resolveTarget).toHaveBeenCalledTimes(1);
     expect(handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(handoffs.createPreparation).toHaveBeenCalledWith(expect.objectContaining({
+      command: input.command,
+    }));
     expect(handoffPreparations[0].prepare.mock.invocationCallOrder[0])
       .toBeLessThan(queue.admitUserInput.mock.invocationCallOrder[0]);
     expect(queue.runReservedTurn).toHaveBeenCalledWith(
       expect.anything(),
       input.command,
       expect.objectContaining({
-        contextTransition: 'agent-handoff',
         model: 'gpt-5.6-sol',
         permissionMode: 'bypassPermissions',
         thinkingMode: 'max',

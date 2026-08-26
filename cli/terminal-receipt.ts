@@ -19,7 +19,11 @@ export function requireCompletedTurnReceipt(
     return receipt;
   }
   if (receipt.state === 'failed') {
-    throw new CliError('receipt polling', `agent turn failed: ${receipt.error}`, 1);
+    throw new CliError(
+      'receipt polling',
+      `agent turn failed [${receipt.errorCode}]: ${receipt.error}`,
+      1,
+    );
   }
   if (receipt.state === 'interrupted') {
     const reason = receipt.reason === 'chat-deleted' ? 'the chat was deleted' : 'the turn was stopped';

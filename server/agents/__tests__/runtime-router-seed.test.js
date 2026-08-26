@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
+import { renderCarriedContext } from '../../../common/transcript-seed.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 let projectDir;
@@ -115,7 +117,10 @@ function makeRouter(overrides = {}) {
     endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
-    createCarriedContext: overrides.createCarriedContext,
+    createCarriedContext: overrides.createCarriedContext ?? (async ({ messages }) => ({
+      context: renderCarriedContext(messages),
+      summary: null,
+    })),
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
@@ -194,7 +199,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('derives a new session seed from the authoritative ledger context', async () => {
-    const createCarriedContext = mock(async (_chatId, _entry, messages) => ({
+    const createCarriedContext = mock(async ({ messages }) => ({
       context: {
         prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
       },
@@ -207,16 +212,23 @@ describe('AgentRuntimeRouter producer boundary', () => {
       turnId: 'turn-1',
     });
 
-    expect(createCarriedContext).toHaveBeenCalledWith(
-      'chat-1',
-      expect.objectContaining({ agentId: 'test' }),
-      conversation,
-      undefined,
-    );
+    expect(createCarriedContext).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      entry: expect.objectContaining({ agentId: 'test' }),
+      messages: conversation,
+      transcriptViewId: 'view-1',
+      destinationPrompt: 'continue',
+      clientRequestId: null,
+      signal: undefined,
+    });
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted:prior context' },
     }));
-    expect(transcript.notices).toEqual([]);
+    expect(transcript.notices).toEqual([expect.objectContaining({
+      kind: 'notice',
+      message: 'compacted prior context',
+      detail: { title: 'Handoff summary' },
+    })]);
   });
 
   it('appends the accepted handoff summary immediately before provider start', async () => {
@@ -239,7 +251,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await router.runAgentTurn('chat-1', 'continue', {
       clientMessageId: 'message-1',
       turnId: 'turn-1',
-      contextTransition: 'agent-handoff',
     });
 
     expect(order).toEqual([`notice:${summary}`, 'provider-start']);
@@ -253,7 +264,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
   });
 
-  it('does not append a handoff notice for a fallback result', async () => {
+  it('does not append a handoff notice for a complete projection', async () => {
     const { router, transcript } = makeRouter({
       createCarriedContext: async () => ({
         context: { prefix: 'deterministic seed' },
@@ -263,7 +274,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     await router.runAgentTurn('chat-1', 'continue', {
       turnId: 'turn-1',
-      contextTransition: 'agent-handoff',
     });
 
     expect(transcript.notices).toEqual([]);
@@ -284,7 +294,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     });
     const options = {
       clientMessageId: 'message-1',
-      contextTransition: 'agent-handoff',
     };
 
     await router.runAgentTurn('chat-1', 'continue', { ...options, turnId: 'turn-1' });
@@ -305,7 +314,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     await expect(router.runAgentTurn('chat-1', 'continue', {
       turnId: 'turn-1',
-      contextTransition: 'agent-handoff',
       executionAdmission: { signal: admission.signal, markStarted: mock() },
     })).rejects.toThrow('handoff stopped');
 
@@ -324,11 +332,37 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     await expect(router.runAgentTurn('chat-1', 'continue', {
       turnId: 'turn-1',
-      contextTransition: 'agent-handoff',
     })).rejects.toThrow('notice commit failed');
 
     expect(start).not.toHaveBeenCalled();
     expect(transcript.notices).toEqual([]);
+  });
+
+  it('fails the begun run with the carryover domain code before provider start', async () => {
+    const failure = new DomainError(
+      'CARRYOVER_COMPACTION_FAILED',
+      'Agent-switch compaction failed after two attempts.',
+      502,
+      true,
+    );
+    const { router, start, transcript } = makeRouter({
+      createCarriedContext: async () => { throw failure; },
+    });
+    const failRun = mock(transcript.ledger.failRun.bind(transcript.ledger));
+    transcript.ledger.failRun = failRun;
+
+    await expect(router.runAgentTurn('chat-1', 'continue', {
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    })).rejects.toBe(failure);
+
+    expect(failRun).toHaveBeenCalledWith('chat-1', 'turn-1', {
+      code: 'CARRYOVER_COMPACTION_FAILED',
+      message: failure.message,
+    });
+    expect(start).not.toHaveBeenCalled();
+    expect(transcript.notices).toEqual([]);
+    expect(transcript.activeRunId()).toBeNull();
   });
 
   it('fails closed when the transcript view changes during handoff compaction', async () => {
@@ -354,7 +388,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.runAgentTurn('chat-1', 'continue', {
       clientMessageId: 'message-1',
       turnId: 'turn-1',
-      contextTransition: 'agent-handoff',
     })).rejects.toThrow('stale view');
 
     expect(start).not.toHaveBeenCalled();

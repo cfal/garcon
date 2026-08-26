@@ -351,6 +351,7 @@ describe('runConsultation', () => {
       ...receipt,
       state: 'failed',
       error: 'provider failed',
+      errorCode: 'INTERNAL_ERROR',
       output: { availability: 'available', completeness: 'best-effort', assistantMessages: ['Partial'] },
     } as AgentTurnReceipt;
     const testOutput = output();

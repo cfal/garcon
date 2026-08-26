@@ -63,6 +63,7 @@ function makeRouter(execution) {
       getActiveTurn: mock(() => null),
     },
     getCarryOverRevision: () => 'carry-1',
+    createCarriedContext: async () => ({ context: null, summary: null }),
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,

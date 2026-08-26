@@ -104,6 +104,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
   async settleOperationFailure(command: AcceptedExecutionCommand, error: unknown): Promise<void> {
     await this.ledger.settleTerminal(command.key, 'failed', {
       error: error instanceof Error ? error.message : String(error),
+      errorCode: error instanceof DomainError ? error.code : 'INTERNAL_ERROR',
     });
   }
 

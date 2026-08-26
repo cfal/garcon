@@ -36,6 +36,7 @@ export async function prepareAgentHandoffCommand(input: {
   readonly chatId: string;
   readonly clientRequestId: string;
   readonly handoff: AgentHandoffRequest;
+  readonly command: string;
   readonly source: ChatRegistryEntry;
   readonly permissionFallbackPolicy?: 'require-explicit-bypass';
   readonly service: Pick<AgentHandoffService, 'resolveTarget' | 'createPreparation'>;
@@ -76,6 +77,7 @@ export async function prepareAgentHandoffCommand(input: {
       handoff: input.handoff,
       source: input.source,
       target,
+      command: input.command,
     }),
   };
 }

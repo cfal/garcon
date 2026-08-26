@@ -68,4 +68,28 @@ describe('agent turn receipt route', () => {
     expect(expired.response.status).toBe(410);
     expect(expired.body.errorCode).toBe('TURN_RESULT_EXPIRED');
   });
+
+  it('returns the structured failure code in a failed turn receipt', async () => {
+    const ledger = new CommandLedger();
+    const accepted = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      payload: { command: 'hello' },
+    });
+    await ledger.settleTerminal(accepted.record.key, 'failed', {
+      error: 'compaction failed',
+      errorCode: 'CARRYOVER_COMPACTION_FAILED',
+    });
+    await ledger.markPublicTerminal('chat-1', 'turn-1');
+
+    const failed = await getReceipt(ledger, 'chatId=chat-1&turnId=turn-1');
+
+    expect(failed.body).toMatchObject({
+      state: 'failed',
+      error: 'compaction failed',
+      errorCode: 'CARRYOVER_COMPACTION_FAILED',
+    });
+  });
 });

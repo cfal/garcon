@@ -6,8 +6,8 @@ import type {
   AgentSteerTarget,
   AgentTranscriptSourceLocation,
 } from '@garcon/server-agent-interface';
-import type { ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
@@ -37,7 +37,11 @@ import type {
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
-import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
+import {
+  AgentRuntimeRouter,
+  type CreateCarriedContextInput,
+  type RunSingleQueryOptions,
+} from './runtime-router.js';
 import { AgentSessionSettingsService } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../lib/log.js';
@@ -173,12 +177,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
-    createCarriedContext(
-      chatId: string,
-      entry: AgentChatEntry,
-      messages: readonly ChatMessage[],
-      signal?: AbortSignal,
-    ): Promise<CarryOverCompactionResult>;
+    createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverCompactionResult>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;
@@ -434,7 +433,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
   onFinished(cb: Parameters<AgentEventBus['onFinished']>[0]): void { this.#events.onFinished(cb); }
-  onFailed(cb: (chatId: string, error: string, metadata?: TurnEventMetadata) => void | Promise<void>): void { this.#events.onFailed(cb); }
+  onFailed(cb: (
+    chatId: string,
+    error: string,
+    errorCode: string,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>): void { this.#events.onFailed(cb); }
   settleTurn(chatId: string, turn: TurnEventMetadata): void { this.#events.settleTurn(chatId, turn); }
   discardTurn(chatId: string): void { this.#events.clearTurn(chatId); }
   getActiveTurn(chatId: string): TurnEventMetadata | undefined { return this.#events.getActiveTurn(chatId); }

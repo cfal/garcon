@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatStopIntent, ChatStopOutcome } from '../common/chat-types.js';
 import type { TranscriptSearchStatusV1 } from '../common/chat-search.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
+import { isErrorCode } from '../common/error-codes.ts';
 import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import type { TranscriptViewId } from './ledger/contracts.js';
@@ -265,12 +266,15 @@ export function wireServerEvents({
     turnMetadata: TurnEventMetadata | undefined,
     status: 'finished' | 'failed',
     error?: string,
+    errorCode?: string,
   ): Promise<void> {
     if (!turnMetadata?.commandType || !turnMetadata.clientRequestId) return;
     await commandLedger.settleTerminal(
       commandLedgerKey(turnMetadata.commandType, chatId, turnMetadata.clientRequestId),
       status,
-      error ? { error } : {},
+      error
+        ? { error, errorCode: isErrorCode(errorCode) ? errorCode : 'INTERNAL_ERROR' }
+        : {},
     );
   }
 
@@ -289,10 +293,17 @@ export function wireServerEvents({
   async function handleAgentFailure(
     chatId: string,
     agentErrorMessage: string,
+    agentErrorCode: string,
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
     markProcessFailure(chatId, turnMetadata);
-    await settleExecutionCommand(chatId, turnMetadata, 'failed', agentErrorMessage);
+    await settleExecutionCommand(
+      chatId,
+      turnMetadata,
+      'failed',
+      agentErrorMessage,
+      agentErrorCode,
+    );
     broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
     await markPublicTurnTerminal(chatId, turnMetadata);
   }
@@ -437,7 +448,7 @@ export function wireServerEvents({
       }
     });
   });
-  agentRegistry.onFailed(async (chatId, agentErrorMessage, turnMetadata) => {
+  agentRegistry.onFailed(async (chatId, agentErrorMessage, agentErrorCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
     return scheduleChatTask(chatId, 'server-events: turn failure handling failed', async () => {
@@ -447,7 +458,7 @@ export function wireServerEvents({
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
         await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         released = true;
-        await handleAgentFailure(chatId, agentErrorMessage, turnMetadata);
+        await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata);
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         void queue.checkChatIdle(chatId).catch((err) => {

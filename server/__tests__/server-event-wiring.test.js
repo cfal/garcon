@@ -257,7 +257,7 @@ describe('server event wiring', () => {
 
     fixture.agent.transcript(providerCommit('partial answer'));
     fixture.agent.transcript(terminalCommit('failed'));
-    fixture.agent.failed('chat-1', 'provider failed', turn);
+    fixture.agent.failed('chat-1', 'provider failed', 'CARRYOVER_COMPACTION_FAILED', turn);
     await fixture.wiring.waitForIdle();
 
     const types = fixture.published.map((message) => message.type);
@@ -266,7 +266,7 @@ describe('server event wiring', () => {
     expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledWith(
       'agent-run:chat-1:request-1',
       'failed',
-      { error: 'provider failed' },
+      { error: 'provider failed', errorCode: 'CARRYOVER_COMPACTION_FAILED' },
     );
   });
 

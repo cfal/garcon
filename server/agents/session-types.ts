@@ -152,7 +152,6 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   excludedResendOrdinals?: readonly number[];
   turnId?: string;
   commandType?: AgentExecutionCommandType;
-  contextTransition?: 'agent-handoff';
   executionAdmission?: AgentExecutionAdmission;
   integrationEndpoint?: AgentEndpointSelection | null;
 };

@@ -1,214 +1,315 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
 } from '../../../common/transcript-seed.js';
+import { usableHandoffTokenBudget } from '../../../common/handoff-sizing.js';
 import { CarryOverCompactionService } from '../carryover-compaction.ts';
+import { estimateHandoffTokens } from '../handoff-token-budget.ts';
 
 const TIME = '2026-01-01T00:00:00.000Z';
 const DESTINATION = { agentId: 'claude', model: 'opus', prompt: 'keep going' };
 
-function transcript() {
+function shortHistory() {
+  return turns(8, (turn) => `short content ${turn}`);
+}
+
+function longHistory(count = 40) {
+  return turns(count, (turn) => Array.from(
+    { length: 500 },
+    (_, token) => `token_${turn}_${token}`,
+  ).join(' '));
+}
+
+function turns(count, content) {
   const messages = [];
-  for (let turn = 0; turn < 8; turn += 1) {
-    messages.push(new UserMessage(TIME, `request ${turn}`));
-    messages.push(new AssistantMessage(TIME, `answer ${turn}`));
+  for (let turn = 0; turn < count; turn += 1) {
+    const body = content(turn);
+    messages.push(new UserMessage(TIME, body));
+    messages.push(new AssistantMessage(TIME, body));
   }
   return messages;
 }
 
-function service({ enabled = true, respond, discovery = 'ok', selection, unsafeSingleQuery = false } = {}) {
-  const warnings = [];
-  const empty = discovery === 'empty';
-  const fail = () => {
-    throw new Error('provider unavailable');
-  };
-  const instance = new CarryOverCompactionService({
-    agents: {
-      getAgentAuthStatusMap: async () => (discovery === 'throws'
-        ? fail()
-        : { claude: { authenticated: !empty } }),
-      getAgentReadinessMap: async () => (discovery === 'throws'
-        ? fail()
-        : { claude: { ready: !empty } }),
-      getAgentCatalogEntries: async () => (discovery === 'throws' ? fail() : (empty ? [] : [{
-        id: 'claude',
-        label: 'Claude',
-        kind: 'agent',
-        models: [{ id: 'haiku', label: 'Haiku' }],
-      }])),
-      runSingleQuery: async (prompt) => respond(prompt),
-      singleQueryRunsToolsWithoutPermission: () => unsafeSingleQuery,
-    },
-    getUiSettings: () => ({
-      agentSwitchCompaction: enabled === null
-        ? { agentId: 'claude', model: 'haiku' }
-        : { enabled, ...(selection ?? { agentId: 'claude', model: 'haiku' }) },
-    }),
-    warn: (chatId, message) => warnings.push({ chatId, message }),
-  });
-  return { instance, warnings };
-}
-
-function run(instance, messages = transcript(), signal) {
-  return instance.carriedContextFor({
-    chatId: 'chat-1',
-    projectPath: '/workspace',
-    messages,
-    destination: DESTINATION,
-    ...(signal ? { signal } : {}),
-  });
-}
-
-// Three turns whose newest carries the bulk, so the pinned spine is genuinely
-// large rather than being three short asks.
 function spineOf(commands) {
-  const messages = [];
-  // Five turns, so the three-turn spine still leaves older material to summarize.
-  for (const turn of [0, 1, 2, 3, 4]) {
-    messages.push(new UserMessage(TIME, `request ${turn}`));
-    messages.push(new AssistantMessage(TIME, `answer ${turn}`));
-  }
+  const messages = turns(5, (turn) => `short content ${turn}`);
   for (let index = 0; index < commands; index += 1) {
     messages.push(new BashToolUseMessage(TIME, `t${index}`, `command-${index} ${'x'.repeat(140)}`));
   }
   return messages;
 }
 
-function deterministic(messages = transcript()) {
+function service({
+  enabled = true,
+  respond = async () => '<summary>objective: ship it</summary>',
+  discovery = 'ok',
+  selection,
+  unsafeSingleQuery = false,
+  contextWindowTokens = 200_000,
+  getUiSettings,
+} = {}) {
+  const empty = discovery === 'empty';
+  const fail = () => {
+    throw new Error('provider unavailable');
+  };
+  const runSingleQuery = mock(respond);
+  const settings = getUiSettings ?? mock(() => ({
+    agentSwitchCompaction: {
+      enabled,
+      contextWindowTokens,
+      ...(selection ?? { agentId: 'claude', model: 'haiku' }),
+    },
+  }));
+  const agents = {
+    getAgentAuthStatusMap: mock(async () => (discovery === 'throws'
+      ? fail()
+      : { claude: { authenticated: !empty } })),
+    getAgentReadinessMap: mock(async () => (discovery === 'throws'
+      ? fail()
+      : { claude: { ready: !empty } })),
+    getAgentCatalogEntries: mock(async () => (discovery === 'throws' ? fail() : (empty ? [] : [{
+      id: 'claude',
+      label: 'Claude',
+      kind: 'agent',
+      models: [{ id: 'haiku', label: 'Haiku' }],
+    }]))),
+    runSingleQuery,
+    singleQueryRunsToolsWithoutPermission: mock(() => unsafeSingleQuery),
+  };
   return {
-    context: createCarryoverTranscript(messages, CARRYOVER_INJECTION_MAX_CHARS),
-    summary: null,
+    instance: new CarryOverCompactionService({ agents, getUiSettings: settings }),
+    agents,
+    getUiSettings: settings,
+    runSingleQuery,
   };
 }
 
+function run(instance, {
+  messages = longHistory(),
+  signal,
+  operation = 'agent-switch',
+  destination = DESTINATION,
+} = {}) {
+  return instance.planFor({
+    operation,
+    chatId: 'chat-1',
+    projectPath: '/workspace',
+    messages,
+    destination,
+    ...(signal ? { signal } : {}),
+  });
+}
+
 describe('carryover compaction', () => {
-  it('falls back rather than clipping the pinned turns', async () => {
-    // A spine that fits on its own beside a summary that only fits if part of it
-    // is dropped. The verbatim guarantee wins and the operator is told why.
-    const messages = spineOf(900);
-    const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(65_000)}</summary>`,
+  it('returns empty or small complete projections before reading Settings', async () => {
+    const getUiSettings = mock(() => {
+      throw new Error('Settings must not be read');
     });
+    const { instance, agents } = service({ getUiSettings });
 
-    const result = await run(instance, messages);
+    expect(await run(instance, { messages: [] })).toEqual({ context: null, summary: null });
+    const messages = shortHistory();
+    const result = await run(instance, { messages });
 
-    expect(result).toEqual(deterministic(messages));
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('too large to carry');
+    expect(result).toEqual({
+      context: createCarryoverTranscript(messages, 0),
+      summary: null,
+    });
+    expect(agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
   });
 
-  it('skips the query when the pinned turns already fill the budget', async () => {
-    const messages = spineOf(2_000);
-    const { instance, warnings } = service({
-      respond: async () => {
-        throw new Error('no model should be queried');
+  it('carries a small projection above the compacted injection ceiling in full', async () => {
+    const messages = turns(30, () => 'word '.repeat(1_500));
+    const complete = createCarryoverTranscript(messages, 0);
+    expect(complete.prefix.length).toBeGreaterThan(CARRYOVER_INJECTION_MAX_CHARS);
+    expect(estimateHandoffTokens(complete.prefix)).toBeLessThan(100_000);
+    const { instance, runSingleQuery } = service({ enabled: false });
+
+    expect(await run(instance, { messages })).toEqual({ context: complete, summary: null });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('applies strict compaction only above the 100,000 estimated-token boundary', async () => {
+    const below = longHistory(19);
+    const above = longHistory(20);
+    expect(estimateHandoffTokens(createCarryoverTranscript(below, 0).prefix)).toBeLessThan(100_000);
+    expect(estimateHandoffTokens(createCarryoverTranscript(above, 0).prefix)).toBeGreaterThan(100_000);
+    const { instance, runSingleQuery } = service();
+
+    expect((await run(instance, { messages: below })).summary).toBeNull();
+    expect((await run(instance, { messages: above })).summary).toBe('objective: ship it');
+    expect(runSingleQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires enabled compaction for long histories with operation-aware copy', async () => {
+    const { instance, runSingleQuery } = service({ enabled: false });
+
+    await expect(run(instance)).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_REQUIRED',
+      status: 422,
+      message: "This chat's history is too large to carry directly. Enable agent-switch compaction in Settings to switch agents during long chats.",
+    });
+    await expect(run(instance, { operation: 'fresh-start' })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_REQUIRED',
+      message: expect.stringContaining('restart long chats with their history'),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unresolved model', { discovery: 'empty', selection: {} }, 'could be resolved'],
+    ['discovery failure', { discovery: 'throws', selection: {} }, 'could be resolved'],
+    ['unsafe integration', { unsafeSingleQuery: true }, 'without a permission gate'],
+  ])('rejects %s before querying', async (_label, options, reason) => {
+    const { instance, runSingleQuery } = service(options);
+
+    await expect(run(instance)).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      status: 422,
+      message: expect.stringContaining(reason),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a spine that cannot share the compacted carryover envelope', async () => {
+    const { instance, runSingleQuery } = service();
+
+    await expect(run(instance, { messages: spineOf(3_000) })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      message: expect.stringContaining('most recent turns already fill'),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wrapper that leaves no room for a transcript', async () => {
+    const { instance, runSingleQuery } = service();
+    const destination = { ...DESTINATION, prompt: 'instruction '.repeat(200_000) };
+
+    await expect(run(instance, { destination })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      message: expect.stringContaining('does not fit the configured window'),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([200_000, 500_000, 1_000_000])(
+    'fits the complete authored prompt within 75%% of a %d-token window',
+    async (contextWindowTokens) => {
+      const { instance, runSingleQuery } = service({ contextWindowTokens });
+      await run(instance, {
+        messages: longHistory(80),
+        destination: { ...DESTINATION, prompt: `Focus on this request: ${'detail '.repeat(2_000)}` },
+      });
+
+      const prompt = runSingleQuery.mock.calls[0][0];
+      expect(prompt).toContain('Focus on this request:');
+      expect(estimateHandoffTokens(prompt))
+        .toBeLessThanOrEqual(usableHandoffTokenBudget(contextWindowTokens));
+    },
+  );
+
+  it('keeps the newest three turns out of the compaction prompt and beside the summary', async () => {
+    let prompt = '';
+    const { instance } = service({
+      respond: async (value) => {
+        prompt = value;
+        return '<summary>objective: ship it</summary>';
       },
     });
 
-    const result = await run(instance, messages);
+    const result = await run(instance, { messages: longHistory(20) });
 
-    expect(result).toEqual(deterministic(messages));
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('already fill');
-  });
-
-  it('refuses an integration whose one-shot runs tools without a permission gate', async () => {
-    // The prompt carries archived transcript text influenced by files, web
-    // content and tool output. Sending it to an unrestricted one-shot would let
-    // that text act on the workspace during summarization.
-    const { instance, warnings } = service({
-      unsafeSingleQuery: true,
-      respond: async () => {
-        throw new Error('no model should be queried');
-      },
-    });
-
-    const result = await run(instance);
-
-    expect(result).toEqual(deterministic());
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('without a permission gate');
-  });
-
-  it('warns when it is enabled but no model can be resolved', async () => {
-    // Discovery turns provider failures into empty catalogs, so an operator who
-    // opted in would otherwise silently pay the full carryover cost.
-    const { instance, warnings } = service({
-      discovery: 'empty',
-      selection: {},
-      respond: async () => {
-        throw new Error('no model should be queried');
-      },
-    });
-
-    const result = await run(instance);
-
-    expect(result).toEqual(deterministic());
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].chatId).toBe('chat-1');
-    expect(warnings[0].message).toContain('could not be resolved');
-  });
-
-  it('warns when discovery itself fails', async () => {
-    const { instance, warnings } = service({
-      discovery: 'throws',
-      selection: {},
-      respond: async () => {
-        throw new Error('no model should be queried');
-      },
-    });
-
-    const result = await run(instance);
-
-    expect(result).toEqual(deterministic());
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('could not be resolved');
-  });
-
-  it('stays silent when the setting is off or the turn was abandoned', async () => {
-    const off = service({
-      enabled: false,
-      respond: async () => {
-        throw new Error('no model should be queried');
-      },
-    });
-    expect(await run(off.instance)).toEqual(deterministic());
-    expect(off.warnings).toEqual([]);
-
-    const aborted = service({
-      discovery: 'empty',
-      selection: {},
-      respond: async () => {
-        throw new Error('no model should be queried');
-      },
-    });
-    expect(await run(aborted.instance, transcript(), AbortSignal.abort()))
-      .toEqual(deterministic());
-    // Warning about a torn-down turn would notify a chat the user abandoned.
-    expect(aborted.warnings).toEqual([]);
-  });
-
-  it('keeps the newest turns verbatim beside the summary', async () => {
-    const { instance, warnings } = service({
-      respond: async () => '<summary>objective: ship it</summary>',
-    });
-
-    const result = await run(instance);
-
-    expect(result.summary).toBe('objective: ship it');
+    expect(prompt).toContain('token_0_0');
+    expect(prompt).not.toContain('token_19_0');
     expect(result.context.prefix).toContain('<summary>objective: ship it</summary>');
-    // The spine is the last three turns, rendered rather than summarized.
-    expect(result.context.prefix).toContain('<user>request 7</user>');
-    expect(result.context.prefix).toContain('<user>request 5</user>');
-    expect(result.context.prefix).not.toContain('<user>request 4</user>');
-    expect(warnings).toEqual([]);
+    expect(result.context.prefix).toContain('token_19_0');
+    expect(result.context.prefix).not.toContain('token_16_0');
   });
 
-  it('accepts outer framing whitespace and preserves logical summary formatting', async () => {
+  it('retries once from the original history at 70% of the first entry budget', async () => {
+    let attempt = 0;
+    const { instance, runSingleQuery } = service({
+      respond: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new Error('first attempt failed');
+        return '<summary>second attempt succeeded</summary>';
+      },
+    });
+
+    const result = await run(instance, { messages: longHistory(40) });
+
+    expect(result.summary).toBe('second attempt succeeded');
+    expect(runSingleQuery).toHaveBeenCalledTimes(2);
+    const firstPrompt = runSingleQuery.mock.calls[0][0];
+    const secondPrompt = runSingleQuery.mock.calls[1][0];
+    expect(estimateHandoffTokens(secondPrompt)).toBeLessThan(estimateHandoffTokens(firstPrompt));
+    expect(firstPrompt).toContain('token_0_0');
+    expect(secondPrompt).toContain('token_0_0');
+    expect(runSingleQuery.mock.calls[0][1].signal)
+      .not.toBe(runSingleQuery.mock.calls[1][1].signal);
+  });
+
+  it.each([
+    ['malformed framing', 'summary without XML'],
+    ['empty summary', '<summary> </summary>'],
+    ['duplicate summary', '<summary>outer <summary>inner</summary></summary>'],
+    ['oversized summary', `<summary>${'é'.repeat(32_769)}</summary>`],
+  ])('retries a %s result once', async (_label, response) => {
+    const { instance, runSingleQuery } = service({ respond: async () => response });
+
+    await expect(run(instance)).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_FAILED',
+      status: 502,
+      retryable: true,
+    });
+    expect(runSingleQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries an uninjectable summary once', async () => {
+    const { instance, runSingleQuery } = service({
+      respond: async () => `<summary>${'x'.repeat(65_537)}</summary>`,
+    });
+
+    await expect(run(instance)).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_FAILED',
+      message: expect.stringContaining('65536 UTF-8 bytes'),
+    });
+    expect(runSingleQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after two provider failures without returning a fallback', async () => {
+    const { instance, runSingleQuery } = service({
+      respond: async () => {
+        throw new Error('model unavailable');
+      },
+    });
+
+    await expect(run(instance)).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_FAILED',
+      status: 502,
+      retryable: true,
+      message: expect.stringContaining('failed after two attempts (model unavailable)'),
+    });
+    expect(runSingleQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an outer cancellation', async () => {
+    const controller = new AbortController();
+    const { instance, runSingleQuery } = service({
+      respond: async () => {
+        controller.abort(new Error('handoff stopped'));
+        throw controller.signal.reason;
+      },
+    });
+
+    await expect(run(instance, { signal: controller.signal })).rejects.toThrow('handoff stopped');
+    expect(runSingleQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts outer whitespace and preserves logical summary formatting', async () => {
     const logical = 'Objective\n\n    Keep <path> & command indentation.';
-    const { instance, warnings } = service({
+    const { instance } = service({
       respond: async () => ` \n<summary>\n  ${logical}\n</summary>\n\t`,
     });
 
@@ -218,155 +319,6 @@ describe('carryover compaction', () => {
     expect(result.context.prefix).toContain(
       '<summary>Objective\n\n    Keep &lt;path&gt; &amp; command indentation.</summary>',
     );
-    expect(warnings).toEqual([]);
-  });
-
-  it.each([
-    ['prefix prose', 'before <summary>valid</summary>'],
-    ['suffix prose', '<summary>valid</summary> after'],
-    ['attributes', '<summary role="handoff">valid</summary>'],
-    ['nested tag', '<summary>outer <summary>inner</summary></summary>'],
-    ['nested attributed tag', '<summary>outer <summary role="x">inner</summary></summary>'],
-    ['nested malformed tag', '<summary>outer <summary/ >inner</summary>'],
-    ['duplicate tags', '<summary>first</summary><summary>second</summary>'],
-    ['duplicate close', '<summary>first</summary></summary>'],
-    ['mismatched close', '<summary>valid</Summary>'],
-    ['empty body', '<summary> \n\t </summary>'],
-    ['malformed Unicode', `<summary>${String.fromCharCode(0xd800)}</summary>`],
-  ])('rejects %s instead of presenting it as an accepted summary', async (_label, response) => {
-    const { instance, warnings } = service({ respond: async () => response });
-
-    expect(await run(instance)).toEqual(deterministic());
-    expect(warnings).toHaveLength(1);
-  });
-
-  it('rejects a summary larger than the transcript notice byte limit', async () => {
-    const { instance, warnings } = service({
-      respond: async () => `<summary>${'é'.repeat(32_769)}</summary>`,
-    });
-
-    expect(await run(instance)).toEqual(deterministic());
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('65536 UTF-8 bytes');
-  });
-
-  it('renders one envelope so the rewritten-prefix guard can still anchor', async () => {
-    const { instance } = service({ respond: async () => '<summary>objective: ship it</summary>' });
-
-    const result = await run(instance);
-
-    // A bare <summary> beside a second <carried-context> root would escape
-    // sanitizeRecordedCarriedContext's startsWith('<carried-context') check.
-    expect(result.context.prefix).toStartWith('<carried-context version="3">');
     expect(result.context.prefix.match(/<carried-context/g)).toHaveLength(1);
-    expect(result.context.prefix.indexOf('<summary>')).toBeGreaterThan(0);
-    expect(result.context.prefix.endsWith('</carried-context>\n\n')).toBeTrue();
-  });
-
-  it('accepts a summary at the transcript notice byte limit', async () => {
-    const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(65_536)}</summary>`,
-    });
-
-    const result = await run(instance);
-
-    expect(result.context.prefix.length).toBeLessThanOrEqual(CARRYOVER_INJECTION_MAX_CHARS);
-    expect(result.summary).toHaveLength(65_536);
-    expect(warnings).toEqual([]);
-  });
-
-  it('stays off until the setting is explicitly enabled', async () => {
-    let called = false;
-    const { instance } = service({
-      enabled: null,
-      respond: async () => { called = true; return '<summary>s</summary>'; },
-    });
-
-    await run(instance);
-
-    // `resolveEffectiveGenerationConfig` auto-enables generation whenever some
-    // agent resolves; compaction must not inherit that default.
-    expect(called).toBeFalse();
-  });
-
-  it('never sends the pinned turns to the model', async () => {
-    let seen = '';
-    const { instance } = service({ respond: async (prompt) => { seen = prompt; return '<summary>s</summary>'; } });
-
-    await run(instance);
-
-    expect(seen).toContain('<user>request 0</user>');
-    expect(seen).not.toContain('<user>request 7</user>');
-  });
-
-  it('falls back to the deterministic projection when output overflows', async () => {
-    const { instance, warnings } = service({
-      respond: async () => `<summary>${'x'.repeat(65_537)}</summary>`,
-    });
-    const messages = transcript();
-
-    const result = await run(instance, messages);
-
-    expect(result).toEqual(deterministic(messages));
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toContain('larger than 65536 UTF-8 bytes');
-  });
-
-  it('falls back and warns when the model returns no summary element', async () => {
-    const { instance, warnings } = service({ respond: async () => 'here is a summary, roughly' });
-
-    const result = await run(instance);
-
-    expect(result).toEqual(deterministic());
-    expect(warnings[0].message).toContain('exactly one <summary> element');
-  });
-
-  it('falls back and warns when the model throws', async () => {
-    const { instance, warnings } = service({
-      respond: async () => { throw new Error('model unavailable'); },
-    });
-    const messages = transcript();
-
-    const result = await run(instance, messages);
-
-    expect(result).toEqual(deterministic(messages));
-    expect(warnings[0].message).toContain('model unavailable');
-  });
-
-  it('falls back silently when the compaction query is aborted', async () => {
-    const controller = new AbortController();
-    const { instance, warnings } = service({
-      respond: async () => {
-        controller.abort(new Error('handoff stopped'));
-        throw controller.signal.reason;
-      },
-    });
-
-    expect(await run(instance, transcript(), controller.signal)).toEqual(deterministic());
-    expect(warnings).toEqual([]);
-  });
-
-  it('returns an explicit empty fallback result when there is no context', async () => {
-    const { instance } = service({
-      enabled: false,
-      respond: async () => { throw new Error('no model should be queried'); },
-    });
-
-    expect(await run(instance, [])).toEqual({ context: null, summary: null });
-  });
-
-  it('does not call the model when the setting is off', async () => {
-    let called = false;
-    const { instance, warnings } = service({
-      enabled: false,
-      respond: async () => { called = true; return '<summary>s</summary>'; },
-    });
-    const messages = transcript();
-
-    const result = await run(instance, messages);
-
-    expect(called).toBeFalse();
-    expect(warnings).toEqual([]);
-    expect(result).toEqual(deterministic(messages));
   });
 });

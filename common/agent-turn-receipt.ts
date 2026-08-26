@@ -1,3 +1,5 @@
+import { isErrorCode, type ErrorCode } from './error-codes.js';
+
 export type AgentTurnOutputCompleteness = 'complete' | 'best-effort';
 
 export interface AgentTurnOutputAvailable {
@@ -35,6 +37,7 @@ export interface FailedAgentTurnReceipt extends AgentTurnReceiptBase {
   state: 'failed';
   settledAt: string;
   error: string;
+  errorCode: ErrorCode;
   output: AgentTurnOutput;
 }
 
@@ -73,11 +76,15 @@ export function parseAgentTurnReceipt(value: unknown): AgentTurnReceipt {
     return { ...base, state: 'completed', settledAt, output: parseOutput(raw.output) };
   }
   if (raw.state === 'failed') {
+    if (!isErrorCode(raw.errorCode)) {
+      throw new AgentTurnReceiptContractError('errorCode must be a registered error code');
+    }
     return {
       ...base,
       state: 'failed',
       settledAt,
       error: requiredString(raw, 'error'),
+      errorCode: raw.errorCode,
       output: parseOutput(raw.output),
     };
   }

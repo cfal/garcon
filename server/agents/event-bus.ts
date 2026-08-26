@@ -31,7 +31,12 @@ export class AgentEventBus {
     metadata: TurnEventMetadata | undefined,
     outcome: AgentRunCompletionOutcome,
   ) => void | Promise<void>>();
-  readonly #failedListeners = new Set<(chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void | Promise<void>>();
+  readonly #failedListeners = new Set<(
+    chatId: string,
+    errorMessage: string,
+    errorCode: string,
+    metadata?: TurnEventMetadata,
+  ) => void | Promise<void>>();
 
   trackTurn(chatId: string, opts: TurnEventMetadata): void {
     if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
@@ -106,7 +111,12 @@ export class AgentEventBus {
   }
 
   onFailed(
-    cb: (chatId: string, errorMessage: string, metadata?: TurnEventMetadata) => void | Promise<void>,
+    cb: (
+      chatId: string,
+      errorMessage: string,
+      errorCode: string,
+      metadata?: TurnEventMetadata,
+    ) => void | Promise<void>,
   ): void {
     this.#failedListeners.add(cb);
   }
@@ -122,7 +132,8 @@ export class AgentEventBus {
     this.#turnMetadataByChatId.delete(chatId);
     if (row.outcome === 'failed') {
       const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
-      for (const listener of this.#failedListeners) await listener(chatId, message, metadata);
+      const code = row.error?.code ?? 'INTERNAL_ERROR';
+      for (const listener of this.#failedListeners) await listener(chatId, message, code, metadata);
       return;
     }
     for (const listener of this.#finishedListeners) {

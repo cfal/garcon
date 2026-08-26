@@ -131,6 +131,7 @@ describe('AgentEventBus', () => {
     expect(failed).toHaveBeenCalledWith(
       'chat-1',
       'Could not start',
+      'START_FAILED',
       expect.objectContaining({ turnId: 'turn-1' }),
     );
   });

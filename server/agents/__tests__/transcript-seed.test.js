@@ -15,6 +15,7 @@ import {
   boundProjectedMessage,
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
+  createCarryoverTranscriptWithinCost,
   createNativeSeedReceipt,
   parseNativeSeedReceipt,
   renderCarriedContext,
@@ -289,6 +290,19 @@ describe('transcript seed contract', () => {
       expect(renderCarriedContext(messages, { maxChars }).prefix.length)
         .toBeLessThanOrEqual(maxChars);
     }
+  });
+
+  test('returns no measured projection when its minimal envelope cannot fit', () => {
+    const messages = [new UserMessage(TIME, 'prior')];
+
+    expect(createCarryoverTranscriptWithinCost(messages, {
+      maximumCost: 0,
+      cost: (value) => value.length,
+    })).toBeNull();
+    expect(createCarryoverTranscriptWithinCost(messages, {
+      maximumCost: 1,
+      cost: (value) => value.length,
+    })).toBeNull();
   });
 
   test('strips only the exact receipt-bound prefix for the current session', () => {

@@ -87,6 +87,7 @@ describe('runChatWait', () => {
       ...completed,
       state: 'failed',
       error: 'provider failed',
+      errorCode: 'INTERNAL_ERROR',
       output: {
         availability: 'available',
         completeness: 'best-effort',

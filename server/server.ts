@@ -49,8 +49,8 @@ import { TranscriptExportService } from './chats/transcript-export/service.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry } from './agents/index.js';
-import { renderCarriedContext } from '@garcon/common/transcript-seed';
 import { CarryOverCompactionService } from './chats/carryover-compaction.js';
+import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -287,6 +287,11 @@ export async function startServer(): Promise<void> {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
     });
+    const preparedCarryover = new PreparedCarryoverStore();
+    transcriptLedger.subscribe((event) => {
+      if (event.type === 'view-replaced') preparedCarryover.discard(event.chatId);
+    });
+    chatRegistry.onChatRemoved((chatId) => preparedCarryover.discard(chatId));
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
@@ -324,10 +329,9 @@ export async function startServer(): Promise<void> {
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
     let unsubscribeSearchStatus = () => {};
-    // Both are constructed below but are needed by the carried-context callback,
-    // which only runs once a session starts.
+    // Constructed below but captured by the carried-context callback, which only
+    // runs once a session starts.
     let carryOverCompaction: CarryOverCompactionService | null = null;
-    let carryOverWarnings: ((chatId: string, message: string) => void) | null = null;
     let agentRegistry!: AgentRegistry;
     let executionQueries: Pick<ChatExecutionCoordinator, 'ownsExecution'> | null = null;
     let chatSearch: TranscriptSearchController | null = null;
@@ -371,17 +375,27 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,
       ),
-      async createCarriedContext(chatId, entry, messages, signal) {
-        if (messages.length === 0) return { context: null, summary: null };
-        if (!carryOverCompaction) {
-          return { context: renderCarriedContext(messages), summary: null };
-        }
-        return carryOverCompaction.carriedContextFor({
-          chatId,
-          projectPath: entry.projectPath,
-          messages,
-          destination: { agentId: entry.agentId, model: entry.model ?? '', prompt: null },
-          signal,
+      async createCarriedContext(input) {
+        const prepared = preparedCarryover.take({
+          chatId: input.chatId,
+          transcriptViewId: input.transcriptViewId,
+          targetAgentId: input.entry.agentId,
+          clientRequestId: input.clientRequestId,
+        });
+        if (prepared) return prepared;
+        if (input.messages.length === 0) return { context: null, summary: null };
+        if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
+        return carryOverCompaction.planFor({
+          operation: 'fresh-start',
+          chatId: input.chatId,
+          projectPath: input.entry.projectPath,
+          messages: input.messages,
+          destination: {
+            agentId: input.entry.agentId,
+            model: input.entry.model ?? '',
+            prompt: input.destinationPrompt,
+          },
+          signal: input.signal,
         });
       },
       onCarryOverChanged(chatId) {
@@ -405,13 +419,9 @@ export async function startServer(): Promise<void> {
     await metadata.init();
 
     const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
-    carryOverWarnings = (chatId, message) => {
-      eventWiring?.notifyOperationalNotice(chatId, 'warning', message);
-    };
     carryOverCompaction = new CarryOverCompactionService({
       agents: agentRegistry,
       getUiSettings: () => settings.getUiSettings(),
-      warn: (chatId, message) => carryOverWarnings?.(chatId, message),
     });
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
@@ -456,6 +466,8 @@ export async function startServer(): Promise<void> {
       catalog: agentRegistry,
       ownership: agentOwnership,
       ledger: transcriptLedger,
+      carryover: carryOverCompaction,
+      preparedCarryover,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       onCommitted(chatId) {
         eventWiring?.notifyAgentHandoff(chatId);

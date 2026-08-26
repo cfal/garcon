@@ -91,6 +91,7 @@ export class SessionCommands {
         chatId: input.chatId,
         clientRequestId: input.clientRequestId,
         handoff: input.handoff,
+        command: input.command,
         source: chat,
         permissionFallbackPolicy: input.permissionFallbackPolicy,
         service: this.deps.handoffs,

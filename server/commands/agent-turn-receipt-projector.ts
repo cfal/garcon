@@ -1,13 +1,12 @@
 import type { AgentTurnOutput, AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type { CommandLedgerRecord } from './command-ledger.js';
+import { isErrorCode } from '../../common/error-codes.js';
 
 export type AgentTurnReceiptProjection =
   | { kind: 'found'; receipt: AgentTurnReceipt }
   | { kind: 'expired' };
 
-export function projectAgentTurnReceipt(
-  record: CommandLedgerRecord,
-): AgentTurnReceiptProjection {
+export function projectAgentTurnReceipt(record: CommandLedgerRecord): AgentTurnReceiptProjection {
   if (record.turnResultAvailability === 'expired') return { kind: 'expired' };
   const base = {
     chatId: record.chatId,
@@ -40,6 +39,7 @@ export function projectAgentTurnReceipt(
         state: 'failed',
         settledAt: record.publicTerminalAt,
         error: record.error ?? 'Agent turn failed',
+        errorCode: isErrorCode(record.errorCode) ? record.errorCode : 'INTERNAL_ERROR',
         output,
       },
     };

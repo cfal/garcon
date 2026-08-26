@@ -11,9 +11,6 @@ import {
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
-import {
-  renderCarriedContext,
-} from '@garcon/common/transcript-seed';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import {
@@ -68,15 +65,20 @@ export interface AgentRuntimeRouterOptions {
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
-  createCarriedContext?(
-    chatId: string,
-    entry: AgentChatEntry,
-    messages: readonly ChatMessage[],
-    signal?: AbortSignal,
-  ): Promise<CarryOverCompactionResult>;
+  createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverCompactionResult>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
+}
+
+export interface CreateCarriedContextInput {
+  readonly chatId: string;
+  readonly entry: AgentChatEntry;
+  readonly messages: readonly ChatMessage[];
+  readonly transcriptViewId: TranscriptViewId;
+  readonly destinationPrompt: string;
+  readonly clientRequestId: string | null;
+  readonly signal?: AbortSignal;
 }
 
 export interface RunSingleQueryOptions {
@@ -109,7 +111,7 @@ export class AgentRuntimeRouter {
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #events: AgentEventBus;
   readonly #getCarryOverRevision: (entry: AgentChatEntry) => string;
-  readonly #createCarriedContext: NonNullable<AgentRuntimeRouterOptions['createCarriedContext']>;
+  readonly #createCarriedContext: AgentRuntimeRouterOptions['createCarriedContext'];
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
@@ -127,11 +129,7 @@ export class AgentRuntimeRouter {
     this.#endpointResolver = options.endpointResolver;
     this.#events = options.events;
     this.#getCarryOverRevision = options.getCarryOverRevision;
-    this.#createCarriedContext = options.createCarriedContext
-      ?? (async (_chatId, _entry, messages) => ({
-        context: renderCarriedContext(messages),
-        summary: null,
-      }));
+    this.#createCarriedContext = options.createCarriedContext;
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
@@ -153,7 +151,6 @@ export class AgentRuntimeRouter {
     clientMessageId?: string;
     turnId?: string;
     commandType?: AgentExecutionCommandType;
-    contextTransition?: RunAgentTurnOptions['contextTransition'];
     executionAdmission?: AgentExecutionAdmission;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
@@ -185,20 +182,23 @@ export class AgentRuntimeRouter {
     await this.#validateEndpoint(integration, selection);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
-    assertExecutionAdmissionOpen(opts);
-    const carryover = await this.#createCarriedContext(
-      chatId,
-      entry,
-      this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
-      opts.executionAdmission?.signal,
-    );
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
     this.#events.trackTurn(chatId, operationMetadata(operation));
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
       assertExecutionAdmissionOpen(opts);
-      if (opts.contextTransition === 'agent-handoff' && carryover.summary) {
+      const carryover = await this.#createCarriedContext({
+        chatId,
+        entry,
+        messages: this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
+        transcriptViewId: prepared.viewId,
+        destinationPrompt: prepared.prompt,
+        clientRequestId: opts.clientRequestId ?? null,
+        signal: opts.executionAdmission?.signal,
+      });
+      assertExecutionAdmissionOpen(opts);
+      if (carryover.summary) {
         this.#ledger.appendNotice(chatId, prepared.viewId, {
           title: 'Handoff summary',
           content: carryover.summary,

@@ -49,9 +49,15 @@ describe('agent turn receipt projection', () => {
       status: 'failed',
       publicTerminalAt,
       error: 'provider failed',
+      errorCode: 'CARRYOVER_COMPACTION_FAILED',
     }))).toMatchObject({
       kind: 'found',
-      receipt: { state: 'failed', error: 'provider failed', output: { completeness: 'best-effort' } },
+      receipt: {
+        state: 'failed',
+        error: 'provider failed',
+        errorCode: 'CARRYOVER_COMPACTION_FAILED',
+        output: { completeness: 'best-effort' },
+      },
     });
     expect(projectAgentTurnReceipt(record({
       status: 'finished',

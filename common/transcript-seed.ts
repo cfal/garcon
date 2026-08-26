@@ -11,9 +11,7 @@ export const SEED_CONTEXT_OPEN = '<carried-context>';
 export const SEED_CONTEXT_CLOSE = '</carried-context>';
 export const CARRIED_CONTEXT_VERSION = 3 as const;
 
-// Assembled only when a compaction model will reduce it before injection.
-export const CARRYOVER_COMPACTION_INPUT_MAX_CHARS = 500_000;
-// Ceiling on injected text, whether rendered directly or returned by compaction.
+// Ceiling on the accepted compacted summary plus newest-turn spine.
 export const CARRYOVER_INJECTION_MAX_CHARS = 250_000;
 
 const CARRIED_CONTEXT_OPEN_PREFIX = '<carried-context';
@@ -61,6 +59,21 @@ export interface CarriedContext {
   readonly summaryTruncated?: boolean;
 }
 
+export interface ProjectionCostBudget {
+  readonly maximumCost: number;
+  cost(text: string): number;
+}
+
+interface PreparedCarryoverProjection {
+  readonly opening: string;
+  readonly closing: string;
+  readonly summaryElement: string;
+  readonly turns: readonly (readonly ChatMessage[])[];
+  readonly entries: readonly ProjectedEntry[];
+  readonly body: string;
+  readonly full: string;
+}
+
 export type SanitizeCarriedContextResult =
   | { readonly kind: 'not-applicable'; readonly messages: readonly ChatMessage[] }
   | { readonly kind: 'stripped-exact'; readonly messages: readonly ChatMessage[] }
@@ -79,36 +92,9 @@ export function createCarryoverTranscript(
   maxChars: number,
   options: { readonly summary?: string } = {},
 ): CarriedContext | null {
-  const projected = messages.filter(isProjectableMessage);
-  // A summary with no surviving transcript is still worth carrying; it is the
-  // compacted history.
-  if (projected.length === 0 && !options.summary) return null;
-
-  const opening = [
-    `<carried-context version="${CARRIED_CONTEXT_VERSION}">`,
-    `  <instructions>${CARRIED_CONTEXT_PREAMBLE}</instructions>`,
-    '  <transcript>',
-  ].join('\n');
-  const closing = '  </transcript>\n</carried-context>\n\n';
-  // Rendered inside the same envelope as the transcript rather than beside it.
-  // A second root would escape `sanitizeRecordedCarriedContext`'s rewritten-
-  // envelope guard, which anchors on the prefix starting with `<carried-context`.
-  // Trimmed but never clipped: the per-message bound exists to stop one chat
-  // message dominating the budget, and the summary *is* the compacted history,
-  // so the budget alone governs it. An oversized one leaves the prefix over the
-  // ceiling, which the compaction caller detects and falls back from.
-  const summaryElement = options.summary
-    ? fitElement('    <summary>', options.summary.trim(), '</summary>', Number.POSITIVE_INFINITY)
-    : '';
-  const lead = summaryElement ? `${summaryElement}\n` : '';
-  const turns = groupIntoTurns(projected);
-  const entries = turns.flatMap((turn, index) => renderTurn(turn, index));
-  if (entries.length === 0 && !summaryElement) return null;
-
-  const body = entries.map((entry) => entry.text).join('\n');
-  const full = entries.length > 0
-    ? `${opening}\n${lead}${body}\n${closing}`
-    : `${opening}\n${summaryElement}\n${closing}`;
+  const prepared = prepareCarryoverProjection(messages, options);
+  if (!prepared) return null;
+  const { opening, closing, summaryElement, turns, entries, body, full } = prepared;
   if (maxChars <= 0 || full.length <= maxChars) return { prefix: full };
 
   const truncatedMinimum = `${opening}\n${TRUNCATION_ELEMENT}\n${closing}`;
@@ -152,6 +138,74 @@ export function createCarryoverTranscript(
     prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selection.selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
     summaryTruncated: fittedSummary !== summaryElement,
   };
+}
+
+export function createCarryoverTranscriptWithinCost(
+  messages: readonly ChatMessage[],
+  budget: ProjectionCostBudget,
+  options: { readonly summary?: string } = {},
+): CarriedContext | null {
+  if (!Number.isFinite(budget.maximumCost) || budget.maximumCost <= 0) return null;
+  const prepared = prepareCarryoverProjection(messages, options);
+  if (!prepared) return null;
+  const { opening, closing, summaryElement, turns, entries, body, full } = prepared;
+  if (budget.cost(full) <= budget.maximumCost) return { prefix: full };
+
+  const truncatedMinimum = `${opening}\n${TRUNCATION_ELEMENT}\n${closing}`;
+  if (budget.cost(truncatedMinimum) > budget.maximumCost) return null;
+
+  const fittedSummary = options.summary
+    ? fitElementWithinCost(
+      '    <summary>',
+      options.summary.trim(),
+      '</summary>',
+      budget.maximumCost,
+      (element) => budget.cost(
+        `${opening}\n${element}\n${TRUNCATION_ELEMENT}${body ? `\n${body}` : ''}\n${closing}`,
+      ),
+    )
+    : '';
+  const truncatedLead = fittedSummary ? `${fittedSummary}\n` : '';
+  const fixedDocument = `${opening}\n${truncatedLead}${closing}`;
+  const available = Math.max(0, budget.maximumCost - budget.cost(fixedDocument));
+  const selection = selectPrioritizedProjection({
+    entries,
+    turnCount: turns.length,
+    maximumCost: available,
+    truncationMarkerCost: budget.cost(`${TRUNCATION_ELEMENT}\n`),
+    cost: (text) => budget.cost(`${text}\n`),
+    recentTurnsVerbatim: RECENT_TURNS_VERBATIM,
+  });
+  return {
+    prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selection.selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
+    summaryTruncated: fittedSummary !== summaryElement,
+  };
+}
+
+function prepareCarryoverProjection(
+  messages: readonly ChatMessage[],
+  options: { readonly summary?: string },
+): PreparedCarryoverProjection | null {
+  const projected = messages.filter(isProjectableMessage);
+  if (projected.length === 0 && !options.summary) return null;
+  const opening = [
+    `<carried-context version="${CARRIED_CONTEXT_VERSION}">`,
+    `  <instructions>${CARRIED_CONTEXT_PREAMBLE}</instructions>`,
+    '  <transcript>',
+  ].join('\n');
+  const closing = '  </transcript>\n</carried-context>\n\n';
+  const summaryElement = options.summary
+    ? fitElement('    <summary>', options.summary.trim(), '</summary>', Number.POSITIVE_INFINITY)
+    : '';
+  const lead = summaryElement ? `${summaryElement}\n` : '';
+  const turns = groupIntoTurns(projected);
+  const entries = turns.flatMap((turn, index) => renderTurn(turn, index));
+  if (entries.length === 0 && !summaryElement) return null;
+  const body = entries.map((entry) => entry.text).join('\n');
+  const full = entries.length > 0
+    ? `${opening}\n${lead}${body}\n${closing}`
+    : `${opening}\n${summaryElement}\n${closing}`;
+  return { opening, closing, summaryElement, turns, entries, body, full };
 }
 
 // Retained for callers that want the injection ceiling without naming it.

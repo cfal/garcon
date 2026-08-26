@@ -92,10 +92,17 @@ describe('AgentHandoffService', () => {
     const calls = [];
     const state = handoffState(current, calls);
     const ledger = ledgerState(calls);
+    const planFor = mock(async () => {
+      calls.push('plan');
+      return { context: { prefix: 'prepared context' }, summary: 'prepared summary' };
+    });
+    const deposit = mock(() => calls.push('deposit'));
     const service = createService({
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
+      carryover: { planFor },
+      preparedCarryover: { deposit, discard: mock(() => {}) },
       reopenProducer: () => calls.push('reopen'),
       onCommitted: mock(async () => calls.push('notify')),
     });
@@ -107,12 +114,15 @@ describe('AgentHandoffService', () => {
       handoff: handoff(),
       source: current,
       target: target(),
+      command: 'continue the work',
     }).prepare(admission);
 
     expect(calls).toEqual([
       'close',
       'watermark',
       'checkpoint',
+      'messages',
+      'plan',
       'decision',
       'close',
       'marker',
@@ -120,10 +130,28 @@ describe('AgentHandoffService', () => {
       'registry',
       'complete',
       'reopen',
+      'deposit',
       'notify',
     ]);
     expect(admission.assertAdmissionActive).toHaveBeenCalledTimes(2);
     expect(state.decided.watermark).toEqual({ viewId: 'view-1', ordinal: 7 });
+    expect(planFor).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'agent-switch',
+      chatId: 'chat',
+      projectPath: '/workspace/project',
+      destination: {
+        agentId: 'target-agent',
+        model: 'target-model',
+        prompt: 'continue the work',
+      },
+      signal: admission.signal,
+    }));
+    expect(deposit).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 'chat',
+      transcriptViewId: 'view-1',
+      targetAgentId: 'target-agent',
+      clientRequestId: 'request-1',
+    }));
     expect(current).toMatchObject({
       agentId: 'target-agent',
       agentOwnershipEpoch: state.decided.target.agentOwnershipEpoch,
@@ -150,10 +178,49 @@ describe('AgentHandoffService', () => {
       handoff: handoff(),
       source: current,
       target: target(),
+      command: 'continue',
     }).prepare(context())).rejects.toThrow('checkpoint busy');
 
     expect(state.ownership.decideHandoff).not.toHaveBeenCalled();
     expect(calls).toEqual(['close', 'watermark', 'reopen']);
+    expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
+  });
+
+  it('reopens the producer and leaves ownership untouched when planning fails', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    const deposit = mock(() => {});
+    const discard = mock(() => {});
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+      carryover: {
+        planFor: mock(async () => {
+          calls.push('plan');
+          throw new Error('compaction failed');
+        }),
+      },
+      preparedCarryover: { deposit, discard },
+      reopenProducer: () => calls.push('reopen'),
+    });
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    });
+
+    await expect(preparation.prepare(context())).rejects.toThrow('compaction failed');
+    await preparation.compensate();
+
+    expect(calls).toEqual(['close', 'watermark', 'checkpoint', 'messages', 'plan', 'reopen']);
+    expect(state.ownership.decideHandoff).not.toHaveBeenCalled();
+    expect(deposit).not.toHaveBeenCalled();
+    expect(discard).toHaveBeenCalledWith('chat');
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
   });
 
@@ -163,10 +230,14 @@ describe('AgentHandoffService', () => {
     const state = handoffState(current, calls);
     state.setIntent(persistedIntent());
     const ledger = ledgerState(calls);
+    const planFor = mock(async () => ({ context: null, summary: null }));
+    const deposit = mock(() => {});
     const service = createService({
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger,
+      carryover: { planFor },
+      preparedCarryover: { deposit, discard: mock(() => {}) },
       reopenProducer: () => calls.push('reopen'),
     });
 
@@ -176,11 +247,14 @@ describe('AgentHandoffService', () => {
       handoff: handoff(),
       source: current,
       target: target(),
+      command: 'continue',
     }).prepare(context());
 
     expect(calls).toEqual(['close', 'marker', 'boundary', 'registry', 'complete', 'reopen']);
     expect(ledger.highWatermark).not.toHaveBeenCalled();
     expect(ledger.checkpointForHandoff).not.toHaveBeenCalled();
+    expect(planFor).not.toHaveBeenCalled();
+    expect(deposit).not.toHaveBeenCalled();
   });
 
   it('recovers every durable handoff through the ledger boundary', async () => {
@@ -422,6 +496,7 @@ describe('AgentHandoffService', () => {
       handoff: handoff(),
       source: current,
       target: target(),
+      command: 'continue',
     }).prepare(context());
     let outcome = null;
     void preparation.then(
@@ -571,6 +646,7 @@ describe('AgentHandoffService', () => {
         model: 'other-agent-model',
         agentSettings: envelope('other-agent'),
       },
+      command: 'continue',
     }).prepare(context())).rejects.toMatchObject({
       code: 'IDEMPOTENCY_CONFLICT',
       status: 409,
@@ -613,8 +689,13 @@ function createService(overrides = {}) {
     registry: overrides.registry ?? { getChat: () => sourceChat() },
     ownership: overrides.ownership ?? handoffState(sourceChat(), []).ownership,
     ledger: overrides.ledger ?? ledgerState([]),
-    carryOver: overrides.carryOver ?? {},
-    capture: overrides.capture ?? {},
+    carryover: overrides.carryover ?? {
+      planFor: mock(async () => ({ context: null, summary: null })),
+    },
+    preparedCarryover: overrides.preparedCarryover ?? {
+      deposit: mock(() => {}),
+      discard: mock(() => {}),
+    },
     integrations: overrides.integrations ?? {
       get: (agentId) => integrations.get(agentId),
       require: (agentId) => integrations.get(agentId),
@@ -689,6 +770,10 @@ function ledgerState(calls) {
     checkpointForHandoff: mock(() => {
       calls.push('checkpoint');
       return { viewId: 'view-1', ordinal: 7 };
+    }),
+    conversationMessages: mock(() => {
+      calls.push('messages');
+      return [];
     }),
     rowsAfter: mock(() => []),
     appendAgentSwitch: mock(() => {

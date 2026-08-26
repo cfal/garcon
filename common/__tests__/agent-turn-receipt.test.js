@@ -33,8 +33,13 @@ describe('agent turn receipt contract', () => {
       state: 'failed',
       settledAt: '2026-07-31T12:01:00.000Z',
       error: 'provider failed',
+      errorCode: 'INTERNAL_ERROR',
       output: { availability: 'unavailable', reason: 'too-large' },
-    })).toMatchObject({ state: 'failed', error: 'provider failed' });
+    })).toMatchObject({
+      state: 'failed',
+      error: 'provider failed',
+      errorCode: 'INTERNAL_ERROR',
+    });
     expect(parseAgentTurnReceipt({
       ...base,
       state: 'completed',
