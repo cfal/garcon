@@ -5,6 +5,7 @@
 		AssistantMessage,
 		ThinkingMessage,
 		isToolUseMessage,
+		isHandoffSummaryNoticeDetail,
 		ErrorMessage,
 		TranscriptNoticeMessage,
 		CliRowMessage,
@@ -747,14 +748,26 @@
 								{#if asNotice.title}
 									<div class="min-w-0 truncate text-xs font-medium">{asNotice.title}</div>
 								{/if}
-								<div
-									class={[
-										'text-sm whitespace-pre-wrap break-words',
-										asNotice.title && 'mt-1',
-									]}
-								>
-									{asNotice.content}
-								</div>
+								{#if isHandoffSummaryNoticeDetail(asNotice.detail)}
+									<div class={['text-sm', asNotice.title && 'mt-1']}>
+										<Markdown
+											source={asNotice.content}
+											variant="presented"
+											fileLinkBasePath={projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+											{acquireTransientActivity}
+										/>
+									</div>
+								{:else}
+									<div
+										class={[
+											'text-sm whitespace-pre-wrap break-words',
+											asNotice.title && 'mt-1',
+										]}
+									>
+										{asNotice.content}
+									</div>
+								{/if}
 							{/snippet}
 						</ChatEventCard>
 					{:else if asError}

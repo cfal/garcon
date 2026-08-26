@@ -11,6 +11,7 @@
 		TranscriptNoticeMessage,
 		CliRowMessage,
 		isToolUseMessage,
+		isHandoffSummaryNoticeDetail,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
@@ -335,14 +336,20 @@
 										{#if message.title}
 											<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>
 										{/if}
-										<div
-											class={[
-												'text-sm whitespace-pre-wrap break-words',
-												message.title && 'mt-1',
-											]}
-										>
-											{message.content}
-										</div>
+										{#if isHandoffSummaryNoticeDetail(message.detail)}
+											<div class={['text-sm', message.title && 'mt-1']}>
+												<Markdown source={message.content} variant="presented" />
+											</div>
+										{:else}
+											<div
+												class={[
+													'text-sm whitespace-pre-wrap break-words',
+													message.title && 'mt-1',
+												]}
+											>
+												{message.content}
+											</div>
+										{/if}
 									{/snippet}
 								</ChatEventCard>
 							{:else if message instanceof ErrorMessage}

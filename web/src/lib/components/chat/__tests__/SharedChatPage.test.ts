@@ -230,6 +230,25 @@ describe('SharedChatPage', () => {
 		expect(screen.getByText('6 of 6 messages')).toBeTruthy();
 	});
 
+	it('renders shared handoff summaries as Markdown', async () => {
+		const shared = response([], 0, 1, { nextBefore: null });
+		shared.snapshot.messages = [{
+			type: 'transcript-notice',
+			timestamp: '2025-01-02T03:05:00.000Z',
+			content: '## Current objective\n\nPreserve **typed provenance**.',
+			title: 'Handoff summary',
+			detail: { type: 'handoff-summary' },
+		}];
+		shared.page.end = 1;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(shared);
+
+		const { container } = render(SharedChatPageTestHost);
+
+		await screen.findByText('Handoff summary');
+		expect(container.querySelector('h2')?.textContent).toBe('Current objective');
+		expect(container.querySelector('strong')?.textContent).toBe('typed provenance');
+	});
+
 	it('styles the complete shared CLI user message surface', async () => {
 		const shared = response([], 0, 1, { nextBefore: null });
 		shared.snapshot.messages = [{
