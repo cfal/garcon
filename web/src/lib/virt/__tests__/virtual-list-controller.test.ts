@@ -221,6 +221,34 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(1_000);
 	});
 
+	it('preserves a pending anchor correction through a resize batch', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 10),
+			anchor: { kind: 'none' },
+		});
+		const retained = test.mountItem('item-10', 10);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(500);
+
+		test.controller.apply({
+			kind: 'reset-measurements',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'item', key: 'item-50' },
+		});
+		test.environment.observer.emit(retained.element, 15);
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 50, endIndex: 54 });
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(995);
+		retained.detach?.();
+	});
+
 	it('publishes a programmatic target range before its scroll write', () => {
 		const test = harness({ viewportSize: 100, overscan: 0 });
 		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
@@ -236,6 +264,29 @@ describe('VirtualListController', () => {
 		expect(test.writes).toBe(0);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(1_000);
+	});
+
+	it('preserves a pending navigation target through a resize batch', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'none' },
+		});
+		const retained = test.mountItem('item-10', 20);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(500);
+
+		expect(test.controller.scrollToIndex(50)).toEqual({ kind: 'scheduled' });
+		test.environment.observer.emit(retained.element, 15);
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 50, endIndex: 54 });
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(995);
+		retained.detach?.();
 	});
 
 	it('keeps the intended target range across a leading-offset commit barrier', () => {

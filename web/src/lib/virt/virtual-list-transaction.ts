@@ -400,9 +400,14 @@ export class VirtualListTransaction {
 		followEnd: boolean;
 		clampedRemainder?: number;
 	}): void {
+		const pendingCorrection = this.#pendingCommit;
+		const provenance =
+			pendingCorrection?.provenance === 'navigation' ? 'navigation' : input.provenance;
+		const source =
+			pendingCorrection?.provenance === 'navigation' ? pendingCorrection.source : input.source;
 		const record = this.#record(
-			input.source,
-			input.provenance,
+			source,
+			provenance,
 			input.anchor,
 			input.dom,
 			input.started,
@@ -416,7 +421,7 @@ export class VirtualListTransaction {
 			current: this.#deviation,
 			correction: input.correction,
 			activity: this.#activity,
-			provenance: input.provenance,
+			provenance,
 			inPhysicalBounds: input.dom?.inPhysicalBounds ?? false,
 			canRedeemExactly: value >= 0 || (input.dom?.scrollTop ?? 0) >= Math.abs(value),
 			now: input.started,
@@ -431,17 +436,27 @@ export class VirtualListTransaction {
 		}
 
 		if (decision.kind === 'settled') {
-			this.#publish(input.dom, true);
+			this.#publish(
+				input.dom,
+				true,
+				false,
+				this.#pendingCommit && input.dom
+					? this.#logicalOffsetForTarget(this.#pendingCommit.target, input.dom)
+					: undefined,
+			);
 			record.published = true;
 			this.#emitRecord(record);
 			return;
 		}
 
-		const target: PendingTarget = input.followEnd
+		const target: PendingTarget = input.followEnd || pendingCorrection?.target.kind === 'end'
 			? { kind: 'end' }
 			: {
 					kind: 'relative',
-					offset: (input.dom?.scrollTop ?? 0) + decision.amount,
+					offset:
+						(input.dom && pendingCorrection
+							? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
+							: (input.dom?.scrollTop ?? 0)) + decision.amount,
 					leadingOffset: input.dom?.leadingOffset ?? 0,
 				};
 		this.#publish(
@@ -454,14 +469,17 @@ export class VirtualListTransaction {
 		record.deviationAfter = 0;
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
-			source: input.source,
-			provenance: input.provenance,
+			source,
+			provenance,
 			target,
 			barriers: 0,
-			restoreDeviation: {
-				value: decision.amount,
-				pendingSince: input.started,
-			},
+			restoreDeviation:
+				pendingCorrection?.provenance === 'navigation'
+					? null
+					: {
+							value: (pendingCorrection?.restoreDeviation?.value ?? 0) + decision.amount,
+							pendingSince: input.started,
+						},
 			record,
 		});
 	}
@@ -487,7 +505,9 @@ export class VirtualListTransaction {
 		| { kind: 'none' } {
 		if (this.options.getMeasurementAnchor() === 'end') return { kind: 'end' };
 		if (!dom || this.geometry.count === 0) return { kind: 'none' };
-		const logicalOffset = dom.scrollTop - dom.leadingOffset + this.#deviation.value;
+		const logicalOffset = this.#pendingCommit
+			? this.#logicalOffsetForTarget(this.#pendingCommit.target, dom)
+			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
 		const item =
 			this.geometry.itemAtOffset(logicalOffset) ?? this.geometry.item(this.geometry.count - 1);
 		return item
@@ -550,6 +570,12 @@ export class VirtualListTransaction {
 	#logicalOffsetForTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
 		if (target.kind === 'end') return Math.max(0, this.geometry.totalSize() - dom.viewportSize);
 		return target.kind === 'logical' ? target.offset : target.offset - target.leadingOffset;
+	}
+
+	#physicalOffsetForTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
+		if (target.kind === 'end') return dom.physicalMaximum;
+		if (target.kind === 'logical') return dom.leadingOffset + target.offset;
+		return target.offset + dom.leadingOffset - target.leadingOffset;
 	}
 
 	#overscanRange(visible: VirtualRange): VirtualRange {
