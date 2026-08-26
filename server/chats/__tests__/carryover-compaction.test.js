@@ -1,5 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import {
+  MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
+} from '@garcon/server-agent-common/direct/single-query-options';
+import {
   AssistantMessage,
   BashToolUseMessage,
   TranscriptNoticeMessage,
@@ -116,6 +119,12 @@ function run(instance, {
 }
 
 describe('carryover compaction', () => {
+  it('keeps the Direct timeout cap at least as large as a compaction attempt', () => {
+    expect(MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS).toBeGreaterThanOrEqual(
+      CARRYOVER_COMPACTION_TIMEOUT_MS,
+    );
+  });
+
   it('returns empty or small complete projections before reading Settings', async () => {
     const getUiSettings = mock(() => {
       throw new Error('Settings must not be read');
