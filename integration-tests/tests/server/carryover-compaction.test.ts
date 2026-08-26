@@ -18,6 +18,7 @@ import {
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const SUMMARY = 'Objective: ship the fix\n\n    Preserve the current verification plan.';
+const SMALL_TURNS = Array.from({ length: 5 }, (_, index) => `turn-${index}`);
 
 interface RecordedProviderRequest {
   readonly lastUserText: string;
@@ -27,74 +28,12 @@ interface RecordedProviderRequest {
 }
 
 describe('agent switch compaction', () => {
-  test('sends one visible compacted summary to a fresh Direct destination', async () => {
-    await withIntegrationFixture('compaction-summary', async (fixture) => {
+  test('carries a small history in full without compaction or a summary notice', async () => {
+    await withIntegrationFixture('compaction-small-history', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
-      const chatId = await seedDirectHistory(fixture, source);
-      await enableCompaction(fixture, source);
-      const observer = await fixture.connectObserver('summary-observer');
-
-      const compactionCall = fixture.fakeProviders.openAi.holdNext({
-        model: source.provider.model,
-      });
-      const targetCall = fixture.fakeProviders.anthropic.holdNext({
-        model: target.provider.model,
-      });
-      const handoff = fixture.client.handoffDirectChat({
-        chatId,
-        content: 'carry on',
-        agent: target,
-      });
-
-      const compactionPrompt = (await compactionCall.received).lastUserText;
-      expect(compactionPrompt).toContain('turn-0');
-      expect(compactionPrompt).toContain(target.agentId);
-      expect(compactionPrompt).not.toContain('turn-4');
-      expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
-
-      const targetRequest = await targetCall.received;
-      const seededInput = expectedCompactedInput(SUMMARY, 'carry on');
-      expect(targetRequest.lastUserText).toBe(seededInput);
-      expect(requestConversation(targetRequest)).toEqual([seededInput]);
-      expect(targetCall.releaseText('target answer')).toBeTrue();
-      const accepted = await handoff;
-      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
-
-      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, 'carry on');
-      await observer.disconnect();
-      await observer.reconnect();
-      assertOneHandoffNotice(await observer.getMessages(chatId), SUMMARY, 'carry on');
-
-      await fixture.restartGarcon();
-      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, 'carry on');
-
-      const followCall = fixture.fakeProviders.anthropic.holdNext({
-        model: target.provider.model,
-      });
-      const follow = fixture.client.runDirectChat({
-        chatId,
-        content: 'after restart',
-        agent: target,
-      });
-      const followRequest = await followCall.received;
-      expect(requestConversation(followRequest)).toEqual([
-        seededInput,
-        'target answer',
-        'after restart',
-      ]);
-      expect(followCall.releaseText('follow answer')).toBeTrue();
-      const followAccepted = await follow;
-      await fixture.client.waitForTurnTerminal(chatId, followAccepted.turnId);
-      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, 'carry on');
-    });
-  }, 90_000);
-
-  test('sends deterministic carried context and no notice while compaction is disabled', async () => {
-    await withIntegrationFixture('compaction-disabled', async (fixture) => {
-      const source = fixture.directAgents.openAi;
-      const target = fixture.directAgents.anthropic;
-      const chatId = await seedDirectHistory(fixture, source);
+      const chatId = await seedDirectHistory(fixture, source, SMALL_TURNS);
+      const sourceRequestCount = fixture.fakeProviders.openAi.requests().length;
       const targetCall = fixture.fakeProviders.anthropic.holdNext({
         model: target.provider.model,
       });
@@ -105,10 +44,10 @@ describe('agent switch compaction', () => {
       });
 
       const targetRequest = await targetCall.received;
-      const seededInput = expectedFallbackInput('carry on');
+      const seededInput = expectedCompleteInput(SMALL_TURNS, 'carry on');
       expect(targetRequest.lastUserText).toBe(seededInput);
       expect(requestConversation(targetRequest)).toEqual([seededInput]);
-      expect(seededInput).not.toContain('<summary>');
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount);
       expect(targetCall.releaseText('target answer')).toBeTrue();
       const accepted = await handoff;
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
@@ -116,90 +55,194 @@ describe('agent switch compaction', () => {
     });
   }, 90_000);
 
-  test('falls back without a notice for every invalid compactor result', async () => {
-    await withIntegrationFixture('compaction-invalid-results', async (fixture) => {
+  test('retries one invalid result from the original history at a smaller budget', async () => {
+    await withIntegrationFixture('compaction-retry', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
+      const turns = largeTurns(12);
+      const chatId = await seedDirectHistory(fixture, source, turns);
       await enableCompaction(fixture, source);
+      const firstCall = fixture.fakeProviders.openAi.holdNext({ model: source.provider.model });
+      const secondCall = fixture.fakeProviders.openAi.holdNext({ model: source.provider.model });
+      const targetCall = fixture.fakeProviders.anthropic.holdNext({ model: target.provider.model });
+      const handoff = fixture.client.handoffDirectChat({
+        chatId,
+        content: 'carry on after retry',
+        agent: target,
+      });
 
-      for (const [label, response] of [
-        ['malformed', 'before <summary>summary</summary>'],
-        ['empty', '<summary> \n </summary>'],
-        ['duplicate', '<summary>first</summary><summary>second</summary>'],
-        ['oversized', `<summary>${'x'.repeat(65_537)}</summary>`],
-      ] as const) {
-        const chatId = await seedDirectHistory(fixture, source);
-        const compactionCall = fixture.fakeProviders.openAi.holdNext({
-          model: source.provider.model,
-        });
-        const targetCall = fixture.fakeProviders.anthropic.holdNext({
-          model: target.provider.model,
-        });
-        const prompt = `fallback-${label}`;
-        const handoff = fixture.client.handoffDirectChat({ chatId, content: prompt, agent: target });
+      const firstPrompt = (await firstCall.received).lastUserText;
+      expect(firstPrompt).toContain(largeTurnMarker(0));
+      expect(firstPrompt).not.toContain(largeTurnMarker(turns.length - 1));
+      expect(firstCall.releaseText('malformed summary')).toBeTrue();
 
-        await compactionCall.received;
-        expect(compactionCall.releaseText(response)).toBeTrue();
-        const targetRequest = await targetCall.received;
-        expect(targetRequest.lastUserText).toBe(expectedFallbackInput(prompt));
-        expect(targetCall.releaseText(`answer-${label}`)).toBeTrue();
-        const accepted = await handoff;
-        await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
-        expect(handoffNotices((await fixture.client.getMessages(chatId)).messages)).toEqual([]);
-      }
+      const secondPrompt = (await secondCall.received).lastUserText;
+      expect(secondPrompt.length).toBeLessThan(firstPrompt.length);
+      expect(secondPrompt).toContain(largeTurnMarker(0));
+      expect(secondPrompt).not.toContain(largeTurnMarker(turns.length - 1));
+      expect(secondCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
+
+      const targetRequest = await targetCall.received;
+      const seededInput = expectedCompactedInput(turns, SUMMARY, 'carry on after retry');
+      expect(targetRequest.lastUserText).toBe(seededInput);
+      expect(requestConversation(targetRequest)).toEqual([seededInput]);
+      expect(targetCall.releaseText('target answer')).toBeTrue();
+      const accepted = await handoff;
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      assertOneHandoffNotice(
+        await fixture.client.getMessages(chatId),
+        SUMMARY,
+        'carry on after retry',
+      );
     });
   }, 120_000);
 
-  test('stops held compaction before notice append or destination launch', async () => {
+  test('requires compaction for a large history and succeeds after it is enabled', async () => {
+    await withIntegrationFixture('compaction-required', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const turns = largeTurns(8);
+      const chatId = await seedDirectHistory(fixture, source, turns);
+      const before = await chatSummary(fixture, chatId);
+      const beforeMessages = await fixture.client.getMessages(chatId, { limit: 200 });
+      const beforeControl = await fixture.client.getExecutionControl(chatId);
+      const targetRequestCount = fixture.fakeProviders.anthropic.requests().length;
+
+      await expect(fixture.client.handoffDirectChat({
+        chatId,
+        content: 'compaction required',
+        agent: target,
+      })).rejects.toMatchObject({
+        status: 422,
+        body: {
+          errorCode: 'CARRYOVER_COMPACTION_REQUIRED',
+          error: expect.stringContaining('Enable agent-switch compaction in Settings'),
+        },
+      });
+
+      expect(await chatSummary(fixture, chatId)).toEqual(before);
+      expect(await fixture.client.getExecutionControl(chatId)).toEqual(beforeControl);
+      expect((await fixture.client.getMessages(chatId, { limit: 200 })).messages)
+        .toEqual(beforeMessages.messages);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(targetRequestCount);
+
+      await enableCompaction(fixture, source);
+      const compactionCall = fixture.fakeProviders.openAi.holdNext({ model: source.provider.model });
+      const targetCall = fixture.fakeProviders.anthropic.holdNext({ model: target.provider.model });
+      const handoff = fixture.client.handoffDirectChat({
+        chatId,
+        content: 'compaction required',
+        agent: target,
+      });
+      await compactionCall.received;
+      expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
+      await targetCall.received;
+      expect(targetCall.releaseText('target answer')).toBeTrue();
+      const accepted = await handoff;
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      expect((await chatSummary(fixture, chatId)).agentId).toBe(target.agentId);
+    });
+  }, 120_000);
+
+  test('stops after two provider failures without changing ownership or transcript', async () => {
+    await withIntegrationFixture('compaction-double-failure', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const chatId = await seedDirectHistory(fixture, source, largeTurns(8));
+      await enableCompaction(fixture, source);
+      const before = await chatSummary(fixture, chatId);
+      const beforeMessages = await fixture.client.getMessages(chatId, { limit: 200 });
+      const beforeControl = await fixture.client.getExecutionControl(chatId);
+      const sourceRequestCount = fixture.fakeProviders.openAi.requests().length;
+      const targetRequestCount = fixture.fakeProviders.anthropic.requests().length;
+      fixture.fakeProviders.openAi.failNextHttp(
+        { model: source.provider.model },
+        503,
+        'synthetic first compaction failure',
+      );
+      fixture.fakeProviders.openAi.failNextHttp(
+        { model: source.provider.model },
+        503,
+        'synthetic second compaction failure',
+      );
+
+      await expect(fixture.client.handoffDirectChat({
+        chatId,
+        content: 'must fail closed',
+        agent: target,
+      })).rejects.toMatchObject({
+        status: 502,
+        body: {
+          errorCode: 'CARRYOVER_COMPACTION_FAILED',
+          error: expect.stringContaining('failed after two attempts'),
+        },
+      });
+
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount + 2);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(targetRequestCount);
+      expect(await chatSummary(fixture, chatId)).toEqual(before);
+      expect(await fixture.client.getExecutionControl(chatId)).toEqual(beforeControl);
+      expect((await fixture.client.getMessages(chatId, { limit: 200 })).messages)
+        .toEqual(beforeMessages.messages);
+      expect(handoffNotices(beforeMessages.messages)).toEqual([]);
+    });
+  }, 120_000);
+
+  test('does not retry when a held compaction is cancelled', async () => {
     await withIntegrationFixture('compaction-stop-before-launch', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
-      const chatId = await seedDirectHistory(fixture, source);
+      const chatId = await seedDirectHistory(fixture, source, largeTurns(8));
       await enableCompaction(fixture, source);
+      const before = await chatSummary(fixture, chatId);
+      const beforeMessages = await fixture.client.getMessages(chatId, { limit: 200 });
+      const sourceRequestCount = fixture.fakeProviders.openAi.requests().length;
       const targetRequestCount = fixture.fakeProviders.anthropic.requests().length;
-      const compactionCall = fixture.fakeProviders.openAi.holdNext({
-        model: source.provider.model,
-      });
+      const compactionCall = fixture.fakeProviders.openAi.holdNext({ model: source.provider.model });
       const handoff = fixture.client.handoffDirectChat({
         chatId,
         content: 'stop-before-provider-start',
         agent: target,
       });
+      const handoffResult = handoff.then(
+        (value) => ({ value, error: null }),
+        (error: unknown) => ({ value: null, error }),
+      );
       await compactionCall.received;
-      await handoff;
       const compactionAborted = compactionCall.expectAbort();
-      const eventCursor = fixture.client.markEvents();
 
       const stopped = await fixture.client.stopChat({
         chatId,
         clientRequestId: crypto.randomUUID(),
       });
 
-      expect(stopped.outcome).toBe('interrupt-requested');
+      expect(stopped.outcome).toBe('already-idle');
       await compactionAborted;
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: eventCursor });
+      expect((await handoffResult).error).toBeInstanceOf(Error);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount + 1);
       expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(targetRequestCount);
-      expect(handoffNotices((await fixture.client.getMessages(chatId)).messages)).toEqual([]);
+      expect(await chatSummary(fixture, chatId)).toEqual(before);
+      expect((await fixture.client.getMessages(chatId, { limit: 200 })).messages)
+        .toEqual(beforeMessages.messages);
     });
-  }, 90_000);
+  }, 120_000);
 
-  test('compacts a native-to-Direct handoff', async () => {
+  test('compacts a large native-to-Direct handoff', async () => {
     const environment: Record<string, string> = {};
     await withIntegrationFixture('compaction-native-to-direct', async (fixture) => {
       const claude = (await fixture.client.listAgentCatalog()).agents.find(
         (agent) => agent.id === 'claude',
       );
       if (!claude) throw new Error('Claude integration is required.');
-      const chatId = await seedClaudeHistory(fixture, claude);
+      const turns = largeTurns(20);
+      const chatId = await seedClaudeHistory(fixture, claude, turns);
       const compactor = fixture.directAgents.anthropic;
       const target = fixture.directAgents.openAi;
       await enableCompaction(fixture, compactor);
       const compactionCall = fixture.fakeProviders.anthropic.holdNext({
         model: compactor.provider.model,
       });
-      const targetCall = fixture.fakeProviders.openAi.holdNext({
-        model: target.provider.model,
-      });
+      const targetCall = fixture.fakeProviders.openAi.holdNext({ model: target.provider.model });
       const handoff = fixture.client.handoffDirectChat({
         chatId,
         content: 'native to direct',
@@ -209,19 +252,17 @@ describe('agent switch compaction', () => {
       await compactionCall.received;
       expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
       const targetRequest = await targetCall.received;
-      expect(targetRequest.lastUserText).toBe(expectedCompactedInput(SUMMARY, 'native to direct'));
+      expect(targetRequest.lastUserText).toBe(
+        expectedCompactedInput(turns, SUMMARY, 'native to direct'),
+      );
       expect(targetCall.releaseText('direct target answer')).toBeTrue();
       const accepted = await handoff;
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
-      assertOneHandoffNotice(
-        await fixture.client.getMessages(chatId),
-        SUMMARY,
-        'native to direct',
-      );
+      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, 'native to direct');
     }, fakeClaudeOptions(environment));
-  }, 90_000);
+  }, 120_000);
 
-  test('compacts a Direct-to-native handoff', async () => {
+  test('compacts a large Direct-to-native handoff', async () => {
     const environment: Record<string, string> = {};
     await withIntegrationFixture('compaction-direct-to-native', async (fixture) => {
       const claude = (await fixture.client.listAgentCatalog()).agents.find(
@@ -230,10 +271,10 @@ describe('agent switch compaction', () => {
       if (!claude) throw new Error('Claude integration is required.');
       const source = fixture.directAgents.openAi;
       const compactor = fixture.directAgents.anthropic;
-      const chatId = await seedDirectHistory(fixture, source);
+      const turns = largeTurns(8);
+      const chatId = await seedDirectHistory(fixture, source, turns);
       await enableCompaction(fixture, compactor);
-      const current = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
-      if (!current) throw new Error('Direct source chat disappeared.');
+      const current = await chatSummary(fixture, chatId);
       const compactionCall = fixture.fakeProviders.anthropic.holdNext({
         model: compactor.provider.model,
       });
@@ -259,31 +300,30 @@ describe('agent switch compaction', () => {
       const accepted = await handoff;
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
       expect(await currentClaudeUserInput(fixture.dirs, chatId)).toBe(
-        expectedCompactedInput(SUMMARY, 'direct to native'),
+        expectedCompactedInput(turns, SUMMARY, 'direct to native'),
       );
-      assertOneHandoffNotice(
-        await fixture.client.getMessages(chatId),
-        SUMMARY,
-        'direct to native',
-      );
+      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, 'direct to native');
     }, fakeClaudeOptions(environment));
-  }, 90_000);
+  }, 120_000);
 });
 
 async function seedDirectHistory(
   fixture: IntegrationFixture,
   agent: ConfiguredDirectTestAgent,
+  turns: readonly string[],
 ): Promise<string> {
+  const [first, ...rest] = turns;
+  if (!first) throw new Error('At least one turn is required.');
   const chatId = fixture.newChatId();
   const started = await fixture.client.startDirectChat({
     chatId,
-    content: 'turn-0',
+    content: first,
     projectPath: fixture.dirs.project,
     agent,
   });
   await fixture.client.waitForTurnTerminal(chatId, started.turnId);
-  for (const index of [1, 2, 3, 4]) {
-    const accepted = await fixture.client.runDirectChat({ chatId, content: `turn-${index}`, agent });
+  for (const content of rest) {
+    const accepted = await fixture.client.runDirectChat({ chatId, content, agent });
     await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
   }
   return chatId;
@@ -296,7 +336,10 @@ async function seedClaudeHistory(
     readonly defaultModel: string;
     readonly defaultSettings: AgentSettingsEnvelope;
   },
+  turns: readonly string[],
 ): Promise<string> {
+  const [first, ...rest] = turns;
+  if (!first) throw new Error('At least one turn is required.');
   const chatId = fixture.newChatId();
   const started = await fixture.client.startChat({
     clientRequestId: crypto.randomUUID(),
@@ -308,15 +351,15 @@ async function seedClaudeHistory(
     permissionMode: 'default',
     thinkingMode: 'none',
     agentSettings: claude.defaultSettings,
-    command: 'turn-0',
+    command: first,
   });
   await fixture.client.waitForTurnTerminal(chatId, started.turnId);
-  for (const index of [1, 2, 3, 4]) {
+  for (const command of rest) {
     const accepted = await fixture.client.runChat({
       clientRequestId: crypto.randomUUID(),
       clientMessageId: crypto.randomUUID(),
       chatId,
-      command: `turn-${index}`,
+      command,
       model: claude.defaultModel,
       permissionMode: 'default',
       thinkingMode: 'none',
@@ -335,6 +378,7 @@ function enableCompaction(
     ui: {
       agentSwitchCompaction: {
         enabled: true,
+        contextWindowTokens: 200_000,
         agentId: agent.agentId,
         model: agent.provider.model,
         apiProviderId: agent.provider.providerId,
@@ -346,23 +390,34 @@ function enableCompaction(
   });
 }
 
-function sourceConversation() {
-  return [0, 1, 2, 3, 4].flatMap((index) => [
-    new UserMessage('2026-01-01T00:00:00.000Z', `turn-${index}`),
-    new AssistantMessage('2026-01-01T00:00:00.001Z', `echo:turn-${index}`),
+function largeTurns(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => (
+    `synthetic-large-turn-${index}-${'界'.repeat(8_000)}`
+  ));
+}
+
+function largeTurnMarker(index: number): string {
+  return `synthetic-large-turn-${index}-`;
+}
+
+function sourceConversation(turns: readonly string[]) {
+  return turns.flatMap((content) => [
+    new UserMessage('2026-01-01T00:00:00.000Z', content),
+    new AssistantMessage('2026-01-01T00:00:00.001Z', `echo:${content}`),
   ]);
 }
 
-function expectedFallbackInput(prompt: string): string {
-  return `${createCarryoverTranscript(
-    sourceConversation(),
-    CARRYOVER_INJECTION_MAX_CHARS,
-  )!.prefix}${prompt}`;
+function expectedCompleteInput(turns: readonly string[], prompt: string): string {
+  return `${createCarryoverTranscript(sourceConversation(turns), 0)!.prefix}${prompt}`;
 }
 
-function expectedCompactedInput(summary: string, prompt: string): string {
+function expectedCompactedInput(
+  turns: readonly string[],
+  summary: string,
+  prompt: string,
+): string {
   return `${createCarryoverTranscript(
-    sourceConversation().slice(4),
+    sourceConversation(turns).slice(-6),
     CARRYOVER_INJECTION_MAX_CHARS,
     { summary },
   )!.prefix}${prompt}`;
@@ -405,6 +460,12 @@ function assertOneHandoffNotice(
   expect(input.ordinal).toBeLessThan(notice.ordinal);
 }
 
+async function chatSummary(fixture: IntegrationFixture, chatId: string) {
+  const chat = (await fixture.client.listChats()).sessions.find((candidate) => candidate.id === chatId);
+  if (!chat) throw new Error(`Chat ${chatId} disappeared.`);
+  return chat;
+}
+
 function fakeClaudeOptions(environment: Record<string, string>) {
   return {
     serverEnvironment: environment,
@@ -429,11 +490,7 @@ async function currentClaudeUserInput(
   directories: IntegrationDirectories,
   chatId: string,
 ): Promise<string> {
-  const chat = await waitForPersistedNativeSession({
-    directories,
-    chatId,
-    agentId: 'claude',
-  });
+  const chat = await waitForPersistedNativeSession({ directories, chatId, agentId: 'claude' });
   const path = chat.nativeSession?.value.path;
   if (typeof path !== 'string') throw new Error('Claude native transcript path is missing.');
   const records = (await readFile(path, 'utf8'))
