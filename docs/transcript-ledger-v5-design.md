@@ -1,10 +1,24 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 24 integrated design. Supersedes
+Status: revision 25 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 25 makes enabled transcript search a second explicit genesis-adoption
+occasion alongside first open. Search maintenance probes current-view
+existence without creating ledger files, adopts registered legacy chats
+sequentially through the sole `TranscriptAdoptionService` owner under the
+existing 50% ingest duty cycle, and never adopts or probes missing views from a
+query request. Status distinguishes the total registry population from
+indexed, pending, failed, and still-unindexed chats, so partial coverage cannot
+look complete. HTTP cancellation reaches the fixed reader pool; because each
+reader runs synchronous SQLite work, an abandoned request quarantines and
+replaces that one Worker while its peer remains available. Each structured
+query clause materializes at most 10,000 newest matching derived rows and sets
+`resultsTruncated` when a successor exists, making broad-prefix cost bounded
+and its sampled-result semantics visible instead of widening the deadline.
 
 Revision 24 makes ordinary export artifacts transcript-first. Both renderers
 retain durable ordinals and the role or typed entry shape, but omit repeated
@@ -299,6 +313,9 @@ The decisions:
     only through `nativeHistoryImport`. Every integration declares both
     nullable facets explicitly. Core never infers one capability from the
     other, and a migration failure never creates a false-empty current view.
+    Adoption occurs either when the chat is first opened or when enabled
+    transcript-search maintenance reaches the chat. Search maintenance is
+    paced, invokes the same sole adoption owner, and never runs from a query.
 
 ## 2. Invariants
 
@@ -409,9 +426,12 @@ The decisions:
   source — the current binding through its tail — while preserving the frozen
   prefix before it. The replaced view is deleted in the cutover transaction. A
   chat whose current binding has no native source or whose integration has a
-  null `nativeHistoryImport` has no Reload action. Genesis adoption initializes
-  no current view if a required prefix or legacy import fails, so the next open
-  can retry. A durable carryover migration quarantine is the sole exception:
+  null `nativeHistoryImport` has no Reload action. Genesis adoption is invoked
+  only by first-open activation or paced search maintenance; a search request
+  never probes for or adopts a missing view. Adoption initializes no current
+  view if a required prefix or legacy import fails, so a later open or search
+  maintenance pass can retry. A durable carryover migration quarantine is the
+  sole exception:
   the failed conversion and preserved artifact are already known, so adoption
   proceeds with an empty frozen prefix and a durable warning instead of
   permanently fencing the chat.
@@ -1290,6 +1310,17 @@ model context, carryover, or export.
   Index status is current-view/frontier-qualified: pending until
   acknowledgement, failed after terminal indexing rejection, and indexed
   after acknowledged repair, including valid views with no searchable rows.
+  Enabled search maintenance enumerates the registry, probes current-view
+  existence without creating a ledger, and sequentially invokes the sole
+  genesis-adoption owner for every unadopted chat under the ingest duty-cycle
+  pacer. Query admission reads only the controller's maintained view cache; it
+  never opens, probes, or adopts a ledger. Search status reports the registry
+  total and the indexed, pending, failed, and unindexed populations so partial
+  coverage cannot appear complete. Each compiled query clause materializes at
+  most the 10,000 newest matching FTS rows plus one successor probe. A
+  successor sets `resultsTruncated`; ranking, clause intersection, result
+  counts, and snippets then describe that bounded recent sample rather than an
+  unbounded complete match set.
 - **Preview** selects the latest conversational row; notices, provider errors,
   and lifecycle state are separate UI signals, never preview text.
 - **Model context and carryover** are the conversational fold, minus the
@@ -1442,9 +1473,14 @@ reconciliation action.
 ### 11.1 Genesis adoption
 
 Genesis adoption is the one-time conversion of a registered pre-V5 chat into
-its first ledger view. It is lazy at first open and keyed only on current-view
-existence: an existing current view means complete; a database with no current
-view remains unadopted and retryable. Under the per-chat adoption lock, core:
+its first ledger view. It occurs on either of two explicit occasions: first
+open, or the enabled transcript-search maintenance backfill. Both occasions
+invoke the same `TranscriptAdoptionService` owner and are keyed only on
+current-view existence: an existing current view means complete; a database
+with no current view remains unadopted and retryable. Search maintenance first
+uses a non-materializing existence probe, processes registered chats
+sequentially under the existing 50% ingest duty-cycle pacer, and never runs on
+the query request path. Under the per-chat adoption lock, core:
 
 1. Loads the complete frozen carryover/prefix strictly before the current
    binding, including prior-agent history. Any unavailable, corrupt, or failed
@@ -1468,7 +1504,10 @@ view remains unadopted and retryable. Under the per-chat adoption lock, core:
    adoption-completion marker.
 
 No broad catch substitutes an empty source. Failure creates no current view,
-does not affect unrelated chats, and the next open retries. The explicit
+does not affect unrelated chats, and a later first open, catalog refresh, or
+startup search-maintenance pass retries. Search records the failed adoption as
+a visible per-chat derived failure until a later adoption notification repairs
+it; it never reports that chat as indexed or silently absent. The explicit
 quarantine branch creates a usable view and durable visible warning instead of
 silently erasing the loss or permanently dead-ending the chat. The quarantine
 notice is part of the frozen prefix and survives Reload, continuation, fork,
@@ -1877,6 +1916,8 @@ relevant-entry definition under the 10.2 obligation.
 | Presentation-only chat row changes a reused ID, collides with user input, names a stale view, or races pending ownership | Typed conflict or fence failure; nothing appended or dispatched. |
 | Genesis adoption positively determines no frozen or legacy rows exist | Initializes a valid empty current view; absence is not inferred from an exception. |
 | Frozen-prefix or `legacyHistoryImport` discovery/read/parse/sanitation failure | Typed failure; no current view is created; later open retries; unrelated chats continue. |
+| Search maintenance reaches a registered chat without a current view | A non-materializing probe invokes the sole adoption service under pacing. Success enters ordinary derived indexing; failure creates no view and is reported as a per-chat search failure until a later adoption or maintenance retry. |
+| Search query names an unadopted chat while maintenance is incomplete | No ledger access or adoption occurs on the request path. The chat contributes to `unindexedChatCount`, returns no result, and remains visible as incomplete coverage. |
 | Durable carryover migration quarantine | Positively known prior loss: adoption creates a usable first view with no quarantined prefix rows, one durable warning carrying the artifact reference and error code, the current session fact when present, and any successfully imported current-binding rows. The notice survives frozen-projection flows; the quarantine artifact remains available for support. |
 | Dispatch failure (start or steer rejected/thrown) | Best-effort kill; core appends `run-ended: failed` with optional sanitized error detail for a turn-starting failure; preceding inputs remain eligible for the next scan only if no conversational provider output or non-interrupted `run-ended` intervenes. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
@@ -1908,6 +1949,8 @@ relevant-entry definition under the 10.2 obligation.
 | Crash-missed native output after genesis | The activation-time check compares against the integration-emitted watermark, so core-authored rows cannot mask it; a transient warning may surface it, and manual reload remediates while the binding is current. |
 | Native session used externally while Garcon is idle | Expected, not a violation; a later active newest-history load may warn, and manual reload adopts it. |
 | Chat deletion | Tombstone first; the ledger connection closes before the chat directory is removed. |
+| HTTP client abort or five-second search deadline during synchronous reader work | The request fails with `SEARCH_TIMEOUT`; its one reader Worker is quarantined and replaced, its peer remains admissible, and no abandoned query retains a pool slot. |
+| A compiled search clause has more than 10,000 matching rows | The reader consumes only the 10,000 newest rows plus the successor probe and returns `resultsTruncated: true`; the UI discloses that recent-match sampling occurred. |
 
 ## 16. Consciously Accepted Losses and Limitations
 
@@ -1976,6 +2019,12 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     be converted. The original artifact remains available for support, but its
     rows are absent from the ledger. A durable warning keeps that loss visible
     while allowing the chat and its current binding to remain usable.
+18. A query clause matching more than 10,000 derived rows is evaluated over
+    only its newest 10,000 matches. Multi-clause intersection, ranking, counts,
+    and snippets can therefore omit older qualifying chats or rows. The
+    response and UI disclose this with `resultsTruncated`; exact queries below
+    the cap remain complete. This bounded degradation is preferred to an
+    unbounded synchronous reader monopolizing the fixed pool.
 
 ## 17. Testing Strategy
 
@@ -2103,6 +2152,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   session native refs with the raw support export separate; direct
   providers receive resent inputs exactly once; late conversational content
   participates normally in every fold while late errors remain display-only.
+  Search fixtures include a clause with 10,001 matching rows and assert the
+  10,000-row ceiling, successor-derived `resultsTruncated`, newest-row
+  selection, multi-clause intersection within the sample, and a later exact
+  query proving no persistent reader state leaked from the bounded search.
 - **Drift check**: fixture native files; the probe obligation per provider
   (reported timestamps never exceed core append times for observed entries);
   successful active newest-history completion precedes scheduling and never
@@ -2147,7 +2200,17 @@ The catalog cites this revision, but its inventory is not repeated here.
   lock that the restored legacy Direct module has no session-content JSONL
   write/append surface; its separate versioned relocation hook remains allowed.
   The architecture tests assert the two facets are referenced only by their
-  owning flows.
+  owning flows. Search-specific coverage creates a large synthetic registry
+  with only a subset adopted, proves that resync and query requests create no
+  missing ledger files, and proves enabled maintenance adopts every remaining
+  chat sequentially through `TranscriptAdoptionService` under pacing. It
+  asserts truthful total/indexed/pending/failed/unindexed status throughout,
+  visible adoption failure and later repair, no duplicate catalog work from
+  the adoption callback, and a real-Worker synthetic corpus that becomes fully
+  searchable without opening each chat interactively. HTTP cancellation is
+  traced from `Request.signal` to the controller; a deterministic reader test
+  abandons one synchronous query, proves only its Worker retires and restarts,
+  and serves an immediate query through the peer.
 - **Reload**: gated on a native-bound binding with a non-null
   `nativeHistoryImport` (direct chats expose no Reload); staged build
   under a `staging` view with schema-enforced uniqueness; the frozen
@@ -2385,11 +2448,13 @@ stabilization defects. The current case inventory and gate status live in
     `legacyHistoryImport` is declared explicitly by every integration and is
     consumed only by genesis adoption; `nativeHistoryImport` is declared
     independently and is consumed only by Reload/native-fidelity operations.
-    Core never falls back from the former to the latter. Adoption is lazy at
-    first open and completes only by creating the first current view after the
-    frozen prefix and every supported migration source were positively absent
-    or read successfully. Any unknown/failing read aborts without a view and is
-    retryable. An already-durable carryover quarantine is positively known
+    Core never falls back from the former to the latter. Adoption occurs on
+    first open or from explicit paced search maintenance, and completes only by
+    creating the first current view after the frozen prefix and every supported
+    migration source were positively absent or read successfully. Search
+    queries never invoke adoption or probe missing views. Any unknown/failing
+    read aborts without a view, remains visibly unindexed or failed in search,
+    and is retryable. An already-durable carryover quarantine is positively known
     prior loss: adoption creates a usable view with an empty history prefix and
     persistent warning while retaining the artifact. Direct owns its released
     JSONL reader behind the legacy facet, writes no V5 JSONL, and keeps Reload
