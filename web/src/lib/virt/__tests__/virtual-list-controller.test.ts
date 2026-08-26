@@ -84,6 +84,32 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(70);
 	});
 
+	it('keeps the intended range while redeeming deferred correction at idle', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c', 'd'],
+			estimates: [40, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(40);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [30, 40, 40, 40],
+			anchor: { kind: 'item', key: 'b' },
+		});
+		const deferredRange = test.controller.snapshot.visibleRange;
+
+		test.controller.setScrollActivity('idle');
+
+		expect(test.controller.snapshot.visibleRange).toEqual(deferredRange);
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(70);
+	});
+
 	it('defers mutation-driven end follow without writing during coasting', () => {
 		const test = harness({ viewportSize: 80, measurementAnchor: 'end' });
 		test.controller.apply({
@@ -169,6 +195,67 @@ describe('VirtualListController', () => {
 		expect(test.controller.ownsScrollPosition).toBe(true);
 		test.environment.flushFrames();
 		expect(test.controller.ownsScrollPosition).toBe(false);
+	});
+
+	it('publishes the corrected anchor range before an immediate scroll write', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 10),
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(500);
+
+		test.controller.apply({
+			kind: 'reset-measurements',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'item', key: 'item-50' },
+		});
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 50, endIndex: 54 });
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(1_000);
+	});
+
+	it('publishes a programmatic target range before its scroll write', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'none' },
+		});
+
+		expect(test.controller.scrollToIndex(50)).toEqual({ kind: 'scheduled' });
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 50, endIndex: 54 });
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(1_000);
+	});
+
+	it('keeps the intended target range across a leading-offset commit barrier', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'none' },
+		});
+
+		expect(test.controller.scrollToIndex(50)).toEqual({ kind: 'scheduled' });
+		test.setLeadingOffset(30);
+		test.environment.microtasks.shift()?.();
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 50, endIndex: 54 });
+		expect(test.writes).toBe(0);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(1_030);
 	});
 
 	it('cancels a delayed write without discarding painted deviation', () => {

@@ -375,7 +375,7 @@ export class VirtualListTransaction {
 		this.#deviation = SETTLED_VIRTUAL_DEVIATION;
 		const started = this.options.environment.now();
 		const record = this.#record(source, 'navigation', { kind: 'none' }, dom, started);
-		this.#publish(dom, true);
+		this.#publish(dom, true, false, this.#logicalOffsetForTarget(target, dom));
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
 			source,
@@ -437,9 +437,6 @@ export class VirtualListTransaction {
 			return;
 		}
 
-		this.#publish(input.dom, true);
-		record.redeemed = true;
-		record.deviationAfter = 0;
 		const target: PendingTarget = input.followEnd
 			? { kind: 'end' }
 			: {
@@ -447,6 +444,14 @@ export class VirtualListTransaction {
 					offset: (input.dom?.scrollTop ?? 0) + decision.amount,
 					leadingOffset: input.dom?.leadingOffset ?? 0,
 				};
+		this.#publish(
+			input.dom,
+			true,
+			false,
+			input.dom ? this.#logicalOffsetForTarget(target, input.dom) : undefined,
+		);
+		record.redeemed = true;
+		record.deviationAfter = 0;
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
 			source: input.source,
@@ -490,10 +495,23 @@ export class VirtualListTransaction {
 			: { kind: 'none' };
 	}
 
-	#publish(dom: VirtualDomGeometry | null, force = false, notReady = false): void {
-		const logicalOffset = dom
+	#publish(
+		dom: VirtualDomGeometry | null,
+		force = false,
+		notReady = false,
+		intendedLogicalOffset?: number,
+	): void {
+		const observedLogicalOffset = dom
 			? dom.scrollTop - dom.leadingOffset + this.#deviation.value
 			: this.#lastLogicalOffset;
+		const logicalOffset =
+			intendedLogicalOffset === undefined || !dom
+				? observedLogicalOffset
+				: clamp(
+						intendedLogicalOffset,
+						0,
+						Math.max(0, this.geometry.totalSize() - dom.viewportSize),
+					);
 		const visibleRange =
 			!notReady && dom ? this.geometry.range(logicalOffset, dom.viewportSize) : null;
 		const overscanRange = visibleRange ? this.#overscanRange(visibleRange) : null;
@@ -527,6 +545,11 @@ export class VirtualListTransaction {
 			this.#lastDom = dom;
 			this.#lastLogicalOffset = logicalOffset;
 		}
+	}
+
+	#logicalOffsetForTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
+		if (target.kind === 'end') return Math.max(0, this.geometry.totalSize() - dom.viewportSize);
+		return target.kind === 'logical' ? target.offset : target.offset - target.leadingOffset;
 	}
 
 	#overscanRange(visible: VirtualRange): VirtualRange {
@@ -573,7 +596,7 @@ export class VirtualListTransaction {
 				commit.target.leadingOffset = dom.leadingOffset;
 			}
 			commit.barriers += 1;
-			this.#publish(dom, true);
+			this.#publish(dom, true, false, this.#logicalOffsetForTarget(commit.target, dom));
 			commit.revision = this.#snapshot.revision;
 			this.#queueCommit(commit);
 			return;
