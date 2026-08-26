@@ -8,6 +8,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { JsonObject } from '../../common/json.js';
+import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../common/handoff-timeouts.js';
 import {
   parseReorderChatRequest,
   type ReorderChatRequest,
@@ -69,7 +70,6 @@ import {
   carryOverRevision,
 } from '../chats/carryover-segments.js';
 
-const logger = createLogger('routes:chats');
 import type {
   ExecutionSettingsPatchRequest,
   ModelPatchRequest,
@@ -114,6 +114,18 @@ import {
   generateChatTitleFromMessage,
   TitleGenerationError,
 } from '../chats/title-generator.js';
+
+const logger = createLogger('routes:chats');
+
+interface RequestTimeoutServer {
+  timeout(request: Request, seconds: number): void;
+}
+
+function isRequestTimeoutServer(value: unknown): value is RequestTimeoutServer {
+  return value !== null
+    && typeof value === 'object'
+    && typeof (value as { timeout?: unknown }).timeout === 'function';
+}
 
 function acceptedTurnResponse(result: CommandAcceptedResponse): Response {
   if (!result.chatId || !result.turnId) {
@@ -742,10 +754,18 @@ export default function createChatRoutes({
     }
   }
 
-  async function postRunChat(body: unknown): Promise<Response> {
+  async function postRunChat(
+    body: unknown,
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
       const input = parseCommandRequest(parseAgentRunCommandRequest, body);
       const images = validatedCommandAttachments(input.images);
+      if (input.handoff && isRequestTimeoutServer(server)) {
+        server.timeout(request, AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS);
+      }
       const result = await commands.submitRun({ ...input, images });
 
       return acceptedTurnResponse(result);

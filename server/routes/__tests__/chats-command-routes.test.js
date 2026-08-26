@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { QUEUE_ENTRY_ID_MAX_BYTES } from '../../../common/chat-command-contracts.ts';
+import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../../common/handoff-timeouts.ts';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -515,7 +516,7 @@ function createRouteAgent(sessionOverrides = {}) {
   };
 }
 
-async function callJson(handler, body, method = 'POST') {
+async function callJson(handler, body, method = 'POST', server) {
   const inputBody = body && typeof body === 'object' && 'chatId' in body
     ? {
         ...body,
@@ -530,8 +531,9 @@ async function callJson(handler, body, method = 'POST') {
     : body;
   const requestBody = inputBody;
   parseJsonBody.mockResolvedValueOnce(requestBody);
-  const response = await handler(new Request('http://localhost/test', { method }));
-  return { response, body: await response.json() };
+  const request = new Request('http://localhost/test', { method });
+  const response = await handler(request, new URL(request.url), server);
+  return { request, response, body: await response.json() };
 }
 
 function agentRunBody(overrides = {}) {
@@ -569,6 +571,7 @@ describe('REST chat command routes', () => {
 
   it('POST /run returns before agent completion and persists before running', async () => {
     const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
     const order = [];
     let resolveRun;
     const runPromise = new Promise((resolve) => {
@@ -583,7 +586,12 @@ describe('REST chat command routes', () => {
       return runPromise;
     });
 
-    const { response, body } = await callJson(agent.routes['/api/v1/chats/run'].POST, agentRunBody());
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      agentRunBody(),
+      'POST',
+      server,
+    );
 
     expect(response.status).toBe(202);
     expect(body).toMatchObject({
@@ -598,6 +606,7 @@ describe('REST chat command routes', () => {
       `/api/v1/chats/turn-receipt?chatId=${CHAT_ID}&turnId=${body.turnId}`,
     );
     expect(order).toEqual(['pending', 'run']);
+    expect(server.timeout).not.toHaveBeenCalled();
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       CHAT_ID,
       'hello',
@@ -737,11 +746,12 @@ describe('REST chat command routes', () => {
 
   it('POST /run rejects a handoff before preparation when the chat is not idle', async () => {
     const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
     const control = storedQueue([queueEntry('entry-1')], { version: 5 });
     agent.queue.ownsExecution.mockReturnValue(true);
     agent.queue.readChatExecutionControl.mockResolvedValue(control);
 
-    const { response, body } = await callJson(
+    const { request, response, body } = await callJson(
       agent.routes['/api/v1/chats/run'].POST,
       {
         clientRequestId: 'req-handoff-busy',
@@ -759,6 +769,8 @@ describe('REST chat command routes', () => {
           },
         },
       },
+      'POST',
+      server,
     );
 
     expect(response.status).toBe(409);
@@ -769,6 +781,50 @@ describe('REST chat command routes', () => {
       control: { version: 5, queue: { entries: [{ id: 'entry-1' }] } },
     });
     expect(agent.queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(server.timeout).toHaveBeenCalledWith(
+      request,
+      AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS,
+    );
+  });
+
+  it('POST /run disables the Bun idle timeout for an accepted handoff', async () => {
+    const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
+
+    const { request, response, body } = await callJson(
+      agent.routes['/api/v1/chats/run'].POST,
+      {
+        clientRequestId: 'req-handoff-accepted',
+        clientMessageId: 'msg-handoff-accepted',
+        chatId: CHAT_ID,
+        command: 'delegate this work',
+        handoff: {
+          expectedAgentOwnershipEpoch: 'epoch-1',
+          target: {
+            agentId: 'codex',
+            model: 'gpt-5.5',
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+          },
+        },
+      },
+      'POST',
+      server,
+    );
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      success: true,
+      commandType: 'agent-run',
+      clientRequestId: 'req-handoff-accepted',
+      status: 'accepted',
+    });
+    expect(AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS).toBe(0);
+    expect(server.timeout).toHaveBeenCalledWith(
+      request,
+      AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS,
+    );
   });
 
   it('POST /fork-run forks once and schedules the target turn', async () => {

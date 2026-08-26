@@ -10,7 +10,10 @@ import {
   createCarryoverTranscript,
 } from '../../../common/transcript-seed.js';
 import { usableHandoffTokenBudget } from '../../../common/handoff-sizing.js';
-import { CarryOverCompactionService } from '../carryover-compaction.ts';
+import {
+  CARRYOVER_COMPACTION_TIMEOUT_MS,
+  CarryOverCompactionService,
+} from '../carryover-compaction.ts';
 import { estimateHandoffTokens } from '../handoff-token-budget.ts';
 
 const TIME = '2026-01-01T00:00:00.000Z';
@@ -53,6 +56,7 @@ function service({
   unsafeSingleQuery = false,
   contextWindowTokens = 200_000,
   getUiSettings,
+  onCompactionStarted = mock(() => {}),
 } = {}) {
   const empty = discovery === 'empty';
   const fail = () => {
@@ -83,9 +87,14 @@ function service({
     singleQueryRunsToolsWithoutPermission: mock(() => unsafeSingleQuery),
   };
   return {
-    instance: new CarryOverCompactionService({ agents, getUiSettings: settings }),
+    instance: new CarryOverCompactionService({
+      agents,
+      getUiSettings: settings,
+      onCompactionStarted,
+    }),
     agents,
     getUiSettings: settings,
+    onCompactionStarted,
     runSingleQuery,
   };
 }
@@ -140,11 +149,17 @@ describe('carryover compaction', () => {
     const above = longHistory(20);
     expect(estimateHandoffTokens(createCarryoverTranscript(below, 0).prefix)).toBeLessThan(100_000);
     expect(estimateHandoffTokens(createCarryoverTranscript(above, 0).prefix)).toBeGreaterThan(100_000);
-    const { instance, runSingleQuery } = service();
+    const { instance, onCompactionStarted, runSingleQuery } = service();
 
     expect((await run(instance, { messages: below })).summary).toBeNull();
     expect((await run(instance, { messages: above })).summary).toBe('objective: ship it');
+    expect(onCompactionStarted).toHaveBeenCalledOnce();
+    expect(onCompactionStarted).toHaveBeenCalledWith('chat-1');
     expect(runSingleQuery).toHaveBeenCalledTimes(1);
+    expect(runSingleQuery.mock.calls[0][1]).toMatchObject({
+      timeoutMs: CARRYOVER_COMPACTION_TIMEOUT_MS,
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('requires enabled compaction for long histories with operation-aware copy', async () => {
@@ -167,13 +182,14 @@ describe('carryover compaction', () => {
     ['discovery failure', { discovery: 'throws', selection: {} }, 'could be resolved'],
     ['unsafe integration', { unsafeSingleQuery: true }, 'without a permission gate'],
   ])('rejects %s before querying', async (_label, options, reason) => {
-    const { instance, runSingleQuery } = service(options);
+    const { instance, onCompactionStarted, runSingleQuery } = service(options);
 
     await expect(run(instance)).rejects.toMatchObject({
       code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
       status: 422,
       message: expect.stringContaining(reason),
     });
+    expect(onCompactionStarted).not.toHaveBeenCalled();
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
@@ -225,13 +241,14 @@ describe('carryover compaction', () => {
   });
 
   it('rejects a wrapper that leaves no room for a transcript', async () => {
-    const { instance, runSingleQuery } = service();
+    const { instance, onCompactionStarted, runSingleQuery } = service();
     const destination = { ...DESTINATION, prompt: 'instruction '.repeat(200_000) };
 
     await expect(run(instance, { destination })).rejects.toMatchObject({
       code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
       message: expect.stringContaining('does not fit the configured window'),
     });
+    expect(onCompactionStarted).not.toHaveBeenCalled();
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
@@ -283,7 +300,7 @@ describe('carryover compaction', () => {
 
   it('retries once from the original history at 70% of the first entry budget', async () => {
     let attempt = 0;
-    const { instance, runSingleQuery } = service({
+    const { instance, onCompactionStarted, runSingleQuery } = service({
       respond: async () => {
         attempt += 1;
         if (attempt === 1) throw new Error('first attempt failed');
@@ -294,6 +311,7 @@ describe('carryover compaction', () => {
     const result = await run(instance, { messages: longHistory(40) });
 
     expect(result.summary).toBe('second attempt succeeded');
+    expect(onCompactionStarted).toHaveBeenCalledOnce();
     expect(runSingleQuery).toHaveBeenCalledTimes(2);
     const firstPrompt = runSingleQuery.mock.calls[0][0];
     const secondPrompt = runSingleQuery.mock.calls[1][0];
@@ -302,6 +320,10 @@ describe('carryover compaction', () => {
     expect(secondPrompt).toContain('token_0_0');
     expect(runSingleQuery.mock.calls[0][1].signal)
       .not.toBe(runSingleQuery.mock.calls[1][1].signal);
+    expect(runSingleQuery.mock.calls.map(([, options]) => options.timeoutMs)).toEqual([
+      CARRYOVER_COMPACTION_TIMEOUT_MS,
+      CARRYOVER_COMPACTION_TIMEOUT_MS,
+    ]);
   });
 
   it.each([

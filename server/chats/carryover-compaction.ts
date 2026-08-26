@@ -22,7 +22,6 @@ import { resolveGenerationContextForSelection } from '../settings/generation-con
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import {
   createGenerationRequestSignal,
-  GENERATION_PROVIDER_TIMEOUT_MS,
 } from '../settings/generation-limits.js';
 import { DomainError } from '../lib/domain-error.js';
 import { errorMessage } from '../lib/errors.js';
@@ -38,6 +37,9 @@ const logger = createLogger('chats:carryover-compaction');
 const SUMMARY_OPEN = '<summary>';
 const SUMMARY_CLOSE = '</summary>';
 const utf8Encoder = new TextEncoder();
+// The Direct runtime cap in server-agents/common/src/direct/single-query-options.ts
+// must remain at least this large.
+export const CARRYOVER_COMPACTION_TIMEOUT_MS = 5 * 60_000;
 
 export interface CarryOverCompactionAgents {
   singleQueryRunsToolsWithoutPermission(agentId: string): boolean;
@@ -67,6 +69,7 @@ export interface CarryOverCompactionDestination {
 export interface CarryOverCompactionDeps {
   readonly agents: CarryOverCompactionAgents;
   getUiSettings(): { agentSwitchCompaction?: unknown } | null | undefined;
+  onCompactionStarted?(chatId: string): void;
 }
 
 export interface CarryOverCompactionInput {
@@ -173,6 +176,7 @@ export class CarryOverCompactionService {
         lastFailure = new Error('the reduced compaction prompt does not fit');
         break;
       }
+      if (attempt === 0) this.deps.onCompactionStarted?.(input.chatId);
       try {
         const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
           agentId: selection.agentId,
@@ -183,8 +187,8 @@ export class CarryOverCompactionService {
           apiProviderId: selection.apiProviderId,
           modelEndpointId: selection.modelEndpointId,
           modelProtocol: selection.modelProtocol,
-          timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
-          signal: createGenerationRequestSignal(input.signal),
+          timeoutMs: CARRYOVER_COMPACTION_TIMEOUT_MS,
+          signal: createGenerationRequestSignal(input.signal, CARRYOVER_COMPACTION_TIMEOUT_MS),
         });
         const summary = validateCompactionSummary(raw);
         const context = projectSummaryWithSpine(summary, spine);

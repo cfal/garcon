@@ -6,8 +6,11 @@ const GENERATION_TIMEOUT_CODES = new Set([
   'UND_ERR_BODY_TIMEOUT',
 ]);
 
-export function createGenerationRequestSignal(externalSignal?: AbortSignal): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(GENERATION_PROVIDER_TIMEOUT_MS);
+export function createGenerationRequestSignal(
+  externalSignal?: AbortSignal,
+  timeoutMs = GENERATION_PROVIDER_TIMEOUT_MS,
+): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   return externalSignal
     ? AbortSignal.any([externalSignal, timeoutSignal])
     : timeoutSignal;

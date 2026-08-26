@@ -50,7 +50,10 @@ import { HandoffArtifactService } from './chats/handoff-artifact/service.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry } from './agents/index.js';
-import { CarryOverCompactionService } from './chats/carryover-compaction.js';
+import {
+  CARRYOVER_COMPACTION_TIMEOUT_MS,
+  CarryOverCompactionService,
+} from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
@@ -423,6 +426,13 @@ export async function startServer(): Promise<void> {
     carryOverCompaction = new CarryOverCompactionService({
       agents: agentRegistry,
       getUiSettings: () => settings.getUiSettings(),
+      onCompactionStarted(chatId) {
+        eventWiring?.notifyOperationalNotice(
+          chatId,
+          'info',
+          `Compacting earlier chat history. This may take up to ${CARRYOVER_COMPACTION_TIMEOUT_MS / 60_000} minutes per attempt.`,
+        );
+      },
     });
     const transcriptSearchService = new TranscriptSearchService({
       workspaceDirectory: workspaceDir,
