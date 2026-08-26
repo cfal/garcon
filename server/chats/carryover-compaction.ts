@@ -15,6 +15,7 @@ import {
   RECENT_TURNS_VERBATIM,
   createCarryoverTranscript,
   createCarryoverTranscriptWithinCost,
+  isProjectableMessage,
 } from '../../common/transcript-seed.js';
 import { isRecord } from '../../common/json.js';
 import { resolveGenerationContextForSelection } from '../settings/generation-config-source.js';
@@ -139,7 +140,7 @@ export class CarryOverCompactionService {
         `the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
       );
     }
-    if (older.length === 0) {
+    if (!older.some(isProjectableMessage)) {
       throw compactionUnavailable(
         input,
         'the complete history is inside the newest-three-turn verbatim spine and exceeds the 100,000 estimated-token uncompacted carry limit',

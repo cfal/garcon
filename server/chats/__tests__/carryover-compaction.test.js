@@ -1,5 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.js';
+import {
+  AssistantMessage,
+  BashToolUseMessage,
+  TranscriptNoticeMessage,
+  UserMessage,
+} from '../../../common/chat-types.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
@@ -199,6 +204,25 @@ describe('carryover compaction', () => {
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
+  it('reports protected-spine capacity when older history is not projectable', async () => {
+    const messages = [new TranscriptNoticeMessage(TIME, 'handoff boundary')];
+    for (let turn = 0; turn < 3; turn += 1) {
+      messages.push(new UserMessage(TIME, `objective ${turn}`));
+      for (let reply = 0; reply < 7; reply += 1) {
+        messages.push(new AssistantMessage(TIME, '界'.repeat(8_000)));
+      }
+    }
+    const complete = createCarryoverTranscript(messages, 0);
+    expect(estimateHandoffTokens(complete.prefix)).toBeGreaterThan(100_000);
+    expect(complete.prefix.length).toBeLessThan(CARRYOVER_INJECTION_MAX_CHARS);
+    const { instance, runSingleQuery } = service();
+
+    await expect(run(instance, { messages })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      message: expect.stringContaining('newest-three-turn verbatim spine'),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
 
   it('rejects a wrapper that leaves no room for a transcript', async () => {
     const { instance, runSingleQuery } = service();
