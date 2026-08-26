@@ -298,7 +298,7 @@ describe('GET /api/app/settings', () => {
     expect(body.chatSortOrder).toBeUndefined();
   });
 
-  it('auto-enables generation defaults from authenticated agent priority', async () => {
+  it('auto-resolves generation defaults without auto-enabling compaction', async () => {
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({ version: 1 }));
     ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
       claude: { authenticated: false },
@@ -317,6 +317,9 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
     expect(body.uiEffective.chatTitle.agentId).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
+    expect(body.uiEffective.agentSwitchCompaction.enabled).toBe(false);
+    expect(body.uiEffective.agentSwitchCompaction.agentId).toBe('codex');
+    expect(body.uiEffective.agentSwitchCompaction.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');

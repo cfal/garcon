@@ -197,6 +197,8 @@ export class CarryOverCompactionService {
 
   async #selection(signal: AbortSignal) {
     const persisted = this.deps.getUiSettings()?.agentSwitchCompaction;
+    // Long-history compaction is an explicit opt-in even when generation model
+    // discovery can auto-resolve a usable agent.
     if (!isRecord(persisted) || persisted.enabled !== true) return null;
     const context = await resolveGenerationContextForSelection(this.deps.agents, persisted, signal);
     const config = resolveEffectiveGenerationConfig({ persisted, ...context });

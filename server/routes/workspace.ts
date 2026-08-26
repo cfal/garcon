@@ -100,8 +100,9 @@ export async function buildRemoteSettingsSnapshot({
       [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage, ui?.promptRefinement],
     );
 
+  const persistedCompaction = asPlainObject(ui?.agentSwitchCompaction);
   const effectiveCompaction = resolveEffectiveGenerationUiConfig({
-    persisted: asPlainObject(ui?.agentSwitchCompaction),
+    persisted: persistedCompaction,
     ...compactionContext,
   });
   const uiEffective = {
@@ -111,6 +112,7 @@ export async function buildRemoteSettingsSnapshot({
     }),
     agentSwitchCompaction: {
       ...effectiveCompaction,
+      enabled: persistedCompaction.enabled === true,
       contextWindowTokens:
         parseAgentSwitchContextWindowTokens(effectiveCompaction.contextWindowTokens)
         ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
