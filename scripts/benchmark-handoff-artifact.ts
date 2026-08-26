@@ -10,6 +10,7 @@ import { renderFittedHandoffArtifact } from '../server/chats/handoff-artifact/xm
 
 const AT = '2026-08-26T00:00:00.000Z';
 const TARGETS = [100_000, 500_000, 1_000_000] as const;
+const MAX_FIT_RENDER_PASSES = 9;
 const BODY = [
   'Synthetic implementation history with generic identifiers.',
   'Files: src/module.ts, tests/module.test.ts.',
@@ -46,7 +47,9 @@ for (const targetTokens of TARGETS) {
   const renderMs = performance.now() - renderStartedAt;
   rssSamples.push(process.memoryUsage.rss());
   if (!rendered) throw new Error(`Artifact did not fit for ${targetTokens} tokens`);
-  if (rendered.fitCorrectionPasses > 8) throw new Error('Correction pass limit exceeded');
+  if (rendered.fitCorrectionPasses > MAX_FIT_RENDER_PASSES) {
+    throw new Error('Correction pass limit exceeded');
+  }
 
   const sourceEstimatedTokens = sourceFold.entries.reduce(
     (total, entry) => total + estimateHandoffTokens(renderHandoffArtifactEntry(entry)),

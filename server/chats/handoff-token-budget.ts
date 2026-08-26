@@ -53,27 +53,34 @@ export function fitEstimatedTokenDocument<T>(input: {
   );
   if (entryBudget < minimumEntryBudget) return null;
 
-  for (let attempt = 0; attempt < FIT_CORRECTION_MAX_PASSES; attempt += 1) {
+  let correctionPasses = 0;
+  let minimumAttemptPending = false;
+  while (correctionPasses < FIT_CORRECTION_MAX_PASSES || minimumAttemptPending) {
     const value = input.render(entryBudget);
     if (value === null) return null;
+    correctionPasses += 1;
+    const renderedAtMinimum = entryBudget === minimumEntryBudget;
+    if (renderedAtMinimum) minimumAttemptPending = false;
     const estimatedTokens = estimateHandoffTokens(input.document(value));
     if (estimatedTokens <= input.usableTokens) {
       return {
         value,
         estimatedTokens,
         entryBudgetTokens: entryBudget,
-        correctionPasses: attempt + 1,
+        correctionPasses,
       };
     }
+    if (renderedAtMinimum) return null;
     const overflowCorrection = entryBudget
       - (estimatedTokens - input.usableTokens + FIT_CONVERGENCE_GUARD_TOKENS);
     const admittedCost = input.admittedEntryCost?.(value);
     // Crossing the prior selection's admission threshold guarantees that a
     // whole-entry selector cannot return the same oversized document again.
-    entryBudget = admittedCost === undefined
+    const correctedEntryBudget = admittedCost === undefined
       ? overflowCorrection
       : Math.min(overflowCorrection, Math.ceil(admittedCost) - 1);
-    if (entryBudget < minimumEntryBudget) return null;
+    entryBudget = Math.max(minimumEntryBudget, correctedEntryBudget);
+    minimumAttemptPending = entryBudget === minimumEntryBudget;
   }
   return null;
 }

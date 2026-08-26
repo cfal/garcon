@@ -99,6 +99,19 @@ describe('handoff artifact XML', () => {
     expect(rendered.gapCount).toBeGreaterThan(1);
   });
 
+  it('tries the minimum rendering after a correction crosses below it', () => {
+    const messages = [];
+    for (let index = 0; index < 90; index += 1) {
+      messages.push(new UserMessage(AT, `Short objective ${index}`));
+      messages.push(new AssistantMessage(AT, `Short response ${index}`));
+    }
+
+    const rendered = render(messages, 2_048);
+
+    expect(rendered).not.toBeNull();
+    expect(rendered.estimatedTokens).toBeLessThanOrEqual(1_536);
+  });
+
   it('renders an empty eligible source without a zero-count gap', () => {
     const rendered = renderFittedHandoffArtifact({
       chat: {
