@@ -135,14 +135,30 @@ export class VirtualListGeometry {
 	}
 
 	measure(key: string, size: number): number {
-		const index = this.#indexByKey.get(key);
-		if (index === undefined) return 0;
+		return this.measureMany([{ key, size }]).delta;
+	}
+
+	measureMany(measurements: readonly { readonly key: string; readonly size: number }[]): {
+		readonly delta: number;
+		readonly changedCount: number;
+		readonly firstChangedIndex: number | null;
+	} {
+		this.#operations = emptyOperationCounts();
 		this.#rebuild();
-		const previous = this.#sizes[index];
-		if (this.#measurements.get(key) === size) return 0;
-		this.#measurements.set(key, size);
-		this.#markDirty(index, 1);
-		return size - previous;
+		let delta = 0;
+		let changedCount = 0;
+		let firstChangedIndex: number | null = null;
+		for (const measurement of measurements) {
+			const { key, size } = measurement;
+			const index = this.#indexByKey.get(key);
+			if (index === undefined || this.#measurements.get(key) === size) continue;
+			delta += size - this.#sizes[index];
+			changedCount += 1;
+			firstChangedIndex = firstChangedIndex === null ? index : Math.min(firstChangedIndex, index);
+			this.#measurements.set(key, size);
+			this.#markDirty(index, 1);
+		}
+		return { delta, changedCount, firstChangedIndex };
 	}
 
 	deleteMeasurement(key: string): void {
