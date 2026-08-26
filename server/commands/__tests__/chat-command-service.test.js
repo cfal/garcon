@@ -1396,6 +1396,36 @@ describe('ChatCommandService', () => {
     expect(interruptActiveTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels handoff preparation before Interrupt and Send waits for the mutation lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const cancelPreparation = mock(() => undefined);
+    const interruptActiveTurn = mock(async () => 'already-idle');
+    const { service } = makeService({
+      chatMutationLock: lock,
+      handoffs: { cancelPreparation },
+      queue: { interruptActiveTurn },
+    });
+
+    const interrupt = service.submitInterruptAndSend({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-interrupt-cancel-preparation',
+    });
+
+    expect(cancelPreparation).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(interruptActiveTurn).not.toHaveBeenCalled();
+    release.resolve();
+    await held;
+    await expect(interrupt).resolves.toMatchObject({ outcome: 'already-idle' });
+    expect(interruptActiveTurn).toHaveBeenCalledOnce();
+  });
+
   it('records one acknowledged latch outcome for two unique Stop commands', async () => {
     const inputProjection = makeInputProjection();
     let running = true;
@@ -2532,6 +2562,33 @@ describe('ChatCommandService', () => {
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(settings.removeSessionName).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
+  });
+
+  it('cancels handoff preparation before deletion waits for the mutation lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const cancelPreparation = mock(() => undefined);
+    const abortForChatDeletion = mock(async () => true);
+    const { service } = makeService({
+      chatMutationLock: lock,
+      handoffs: { cancelPreparation },
+      queue: { abortForChatDeletion },
+    });
+
+    const deletion = service.deleteChat({ chatId: SOURCE_CHAT_ID });
+
+    expect(cancelPreparation).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(abortForChatDeletion).not.toHaveBeenCalled();
+    release.resolve();
+    await held;
+    await expect(deletion).resolves.toEqual({ success: true, chatId: SOURCE_CHAT_ID });
+    expect(abortForChatDeletion).toHaveBeenCalledOnce();
   });
 
   it('keeps deleted-chat receipts private until the ordered removal event', async () => {

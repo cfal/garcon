@@ -192,16 +192,14 @@ export class SessionCommands {
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
     const chatId = input.chatId.trim();
-    if (!chatId) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
-    }
+    if (!chatId) throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
+    this.support.requireChat(chatId);
+    this.deps.handoffs.cancelPreparation(chatId);
     return this.support.withChatMutationLock(chatId, () => this.deleteChatLocked(chatId));
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
-    return this.support.withChatMutationLock(input.chatId, () => (
-      this.submitPermissionDecisionLocked(input)
-    ));
+    return this.support.withChatMutationLock(input.chatId, () => this.submitPermissionDecisionLocked(input));
   }
 
   private async submitPermissionDecisionLocked(
@@ -261,6 +259,8 @@ export class SessionCommands {
 
   async submitInterruptAndSend(input: StopInput): Promise<AgentInterruptAndSendResponse> {
     this.support.requireChat(input.chatId);
+    this.support.requireClientRequestId(input.clientRequestId);
+    this.deps.handoffs.cancelPreparation(input.chatId);
     return this.support.withChatMutationLock(input.chatId, () => this.submitInterruptAndSendLocked(input));
   }
 
