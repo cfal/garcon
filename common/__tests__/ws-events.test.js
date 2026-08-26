@@ -24,6 +24,19 @@ describe('parseServerWsMessage chat-operational-notice', () => {
     });
   });
 
+  it('parses an informational notice', () => {
+    expect(parseServerWsMessage({
+      type: 'chat-operational-notice',
+      chatId: 'chat-1',
+      noticeType: 'info',
+      content: 'Compacting earlier chat history.',
+    })).toMatchObject({
+      chatId: 'chat-1',
+      noticeType: 'info',
+      content: 'Compacting earlier chat history.',
+    });
+  });
+
   it('rejects an unknown notice type', () => {
     expect(parseServerWsMessage({
       type: 'chat-operational-notice',

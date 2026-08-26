@@ -473,13 +473,13 @@ describe('server event wiring', () => {
   it('broadcasts operational notices without entering transcript sequence space', () => {
     const fixture = createFixture();
 
-    fixture.wiring.notifyOperationalNotice('chat-1', 'warning', 'Carryover was compacted.');
+    fixture.wiring.notifyOperationalNotice('chat-1', 'info', 'Carryover is being compacted.');
 
     expect(fixture.published).toEqual([expect.objectContaining({
       type: 'chat-operational-notice',
       chatId: 'chat-1',
-      noticeType: 'warning',
-      content: 'Carryover was compacted.',
+      noticeType: 'info',
+      content: 'Carryover is being compacted.',
     })]);
     expect(fixture.metadata.updateFromAppendedMessages).not.toHaveBeenCalled();
   });

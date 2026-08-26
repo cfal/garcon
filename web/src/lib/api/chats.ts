@@ -89,6 +89,7 @@ import {
 } from '$shared/chat-execution-control';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
 import type { AgentCommandImage } from '$shared/ws-requests';
+import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
 import {
 	parseReorderChatResponse,
 	type ReorderChatRequest,
@@ -96,7 +97,6 @@ import {
 } from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
-const AGENT_HANDOFF_TIMEOUT_MS = 10 * 60_000;
 
 function withParsedControl<T extends { control: ChatExecutionControlState }>(response: T): T {
 	const control = parseChatExecutionControlState(response.control);
@@ -195,7 +195,7 @@ export async function runChat(params: AgentRunCommandRequest): Promise<AgentTurn
 	const response = await apiPost<AgentTurnCommandResponse>(
 		'/api/v1/chats/run',
 		params,
-		params.handoff ? { timeoutMs: AGENT_HANDOFF_TIMEOUT_MS } : undefined,
+		params.handoff ? { timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS } : undefined,
 	);
 	if (params.handoff && !response.chat) {
 		throw new Error('Invalid handoff response: durable chat projection is missing');

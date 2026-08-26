@@ -219,6 +219,25 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(requestBodies[1].stream).toBe(true);
   });
 
+  it('honors a five-minute explicit one-shot timeout', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    globalThis.fetch = mock(async () => streamResponse('OK'));
+    globalThis.setTimeout = mock((callback, delay, ...args) => (
+      originalSetTimeout(callback, delay, ...args)
+    ));
+
+    try {
+      await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
+        model: 'glm-5.2',
+        timeoutMs: 5 * 60_000,
+      });
+
+      expect(globalThis.setTimeout).toHaveBeenCalledWith(expect.any(Function), 5 * 60_000);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
   it('aggregates streamed one-shot response chunks before returning', async () => {
     globalThis.fetch = mock(async () => streamResponse(
       '<thi',

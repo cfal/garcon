@@ -178,7 +178,7 @@ export class ChatExecutionControlUpdatedMessage {
   ) {}
 }
 
-export type ChatOperationalNoticeType = 'warning' | 'error';
+export type ChatOperationalNoticeType = 'info' | 'warning' | 'error';
 
 // Process-only advisory overlay for the chat feed. Notices never enter the
 // transcript sequence space, pages, replay, search, or shares.
@@ -687,7 +687,9 @@ export function parseServerWsMessage(
     case 'chat-operational-notice': {
       const chatId = requiredStr(data.chatId);
       const content = requiredStr(data.content);
-      const noticeType = data.noticeType === 'warning' || data.noticeType === 'error'
+      const noticeType = data.noticeType === 'info'
+        || data.noticeType === 'warning'
+        || data.noticeType === 'error'
         ? data.noticeType
         : null;
       return chatId && content && noticeType

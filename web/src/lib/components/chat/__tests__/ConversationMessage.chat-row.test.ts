@@ -27,6 +27,22 @@ describe('ConversationMessage chat rows', () => {
 		expect(card?.querySelector('button')).toBeNull();
 	});
 
+	it('renders handoff summaries as Markdown', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				'## Current objective\n\nPreserve **typed provenance**.',
+				{ type: 'handoff-summary' },
+				'Handoff summary',
+			),
+		});
+
+		const card = screen.getByText('Handoff summary').closest('article');
+		expect(card?.querySelector('h2')?.textContent).toBe('Current objective');
+		expect(card?.querySelector('strong')?.textContent).toBe('typed provenance');
+		expect(container.querySelector('.markdown-body')).toBeTruthy();
+	});
+
 	it('keeps provider errors on the generic error path', () => {
 		render(ConversationMessageHost, {
 			message: new ErrorMessage(AT, 'Synthetic error.'),
