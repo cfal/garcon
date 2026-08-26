@@ -12,6 +12,11 @@ import type {
 	ConversationViewportIntentCancellationResult,
 	ConversationViewportPort,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
+import {
+	inferConversationScrollDirection,
+	isConversationViewportAtStart,
+	isNearConversationPageBoundary,
+} from '$lib/chat/transcript/conversation-scroll-position.js';
 import type {
 	UserMessageNavigatorSelectionResult,
 	UserMessageNavigatorTarget,
@@ -22,12 +27,6 @@ const MIN_PAGE_PREFETCH_DISTANCE_PX = 100;
 const EARLIER_PAGE_PREFETCH_VIEWPORTS = 2;
 const LIVE_END_REPIN_THRESHOLD_PX = 50;
 const FEED_START_THRESHOLD_PX = 1;
-
-// Buffers extra earlier history while preserving one-viewport later paging.
-function pagePrefetchDistance(direction: TranscriptPageDirection, viewportHeight: number): number {
-	const viewportCount = direction === 'earlier' ? EARLIER_PAGE_PREFETCH_VIEWPORTS : 1;
-	return Math.max(MIN_PAGE_PREFETCH_DISTANCE_PX, viewportHeight * viewportCount);
-}
 
 type PageRequestReason = 'scroll' | 'button';
 type PageApplicationPolicy = 'immediate' | 'after-native-scroll';
@@ -95,7 +94,7 @@ export class ConversationScrollController {
 	#laterBoundaryArmed = true;
 	#earlierBoundaryRequestSignature: string | null = null;
 	#followLiveRequiresIntentAfter = 0;
-	#previousScrollTop: number | null = null;
+	#previousLogicalOffset: number | null = null;
 	#viewportOperationEpoch = 0;
 	#deferredLiveEdgeIntent: DeferredLiveEdgeIntent | null = null;
 	#nativeScrollHandoff: NativeScrollHandoff | null = null;
@@ -114,8 +113,10 @@ export class ConversationScrollController {
 		this.#lastObservedFeedChatId = deps.sessions.selectedChatId;
 		this.#lastObservedTranscriptViewId = deps.chatState.transcriptViewId;
 		this.#lastObservedFeedDataRevision = deps.chatState.feedMutationClock.dataRevision;
-		const scrollTop = deps.getScrollContainer()?.scrollTop;
-		if (scrollTop !== undefined) this.#isViewportAtStart = scrollTop <= FEED_START_THRESHOLD_PX;
+		const position = deps.getViewport()?.viewportPosition() ?? null;
+		this.#previousLogicalOffset = position?.logicalOffset ?? null;
+		const isAtStart = isConversationViewportAtStart(position, FEED_START_THRESHOLD_PX);
+		if (isAtStart !== null) this.#isViewportAtStart = isAtStart;
 	}
 
 	isNearBottom(): boolean {
@@ -139,7 +140,8 @@ export class ConversationScrollController {
 		if (!viewport) return;
 		viewport.scrollToEnd();
 		this.#isViewportAtStart = false;
-		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
+		this.#previousLogicalOffset =
+			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? this.#previousLogicalOffset;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
 	}
@@ -188,9 +190,10 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		const transcriptViewId = this.deps.chatState.transcriptViewId;
 		const dataRevision = this.deps.chatState.feedMutationClock.dataRevision;
-		const feedChanged = chatId !== this.#lastObservedFeedChatId
-			|| transcriptViewId !== this.#lastObservedTranscriptViewId
-			|| dataRevision !== this.#lastObservedFeedDataRevision;
+		const feedChanged =
+			chatId !== this.#lastObservedFeedChatId ||
+			transcriptViewId !== this.#lastObservedTranscriptViewId ||
+			dataRevision !== this.#lastObservedFeedDataRevision;
 		this.#lastObservedFeedChatId = chatId;
 		this.#lastObservedTranscriptViewId = transcriptViewId;
 		this.#lastObservedFeedDataRevision = dataRevision;
@@ -198,13 +201,13 @@ export class ConversationScrollController {
 		const deferredIntent = this.#deferredLiveEdgeIntent;
 		const viewport = this.deps.getViewport();
 		if (
-			feedChanged
-			&& deferredIntent?.chatId === chatId
-			&& deferredIntent.epoch === this.#userScrollIntent.epoch
-			&& deferredIntent.epoch > this.#followLiveRequiresIntentAfter
-			&& !this.deps.chatState.hasLaterMessages
-			&& !viewport?.ownsScrollPosition()
-			&& this.isNearBottom()
+			feedChanged &&
+			deferredIntent?.chatId === chatId &&
+			deferredIntent.epoch === this.#userScrollIntent.epoch &&
+			deferredIntent.epoch > this.#followLiveRequiresIntentAfter &&
+			!this.deps.chatState.hasLaterMessages &&
+			!viewport?.ownsScrollPosition() &&
+			this.isNearBottom()
 		) {
 			this.#deferredLiveEdgeIntent = null;
 			this.setPinnedToBottom(true);
@@ -238,7 +241,8 @@ export class ConversationScrollController {
 			this.#cancelViewportOperations();
 		}
 		this.#clearInitialBottomRestore();
-		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? this.#previousScrollTop;
+		this.#previousLogicalOffset =
+			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? this.#previousLogicalOffset;
 		const intentEpoch = this.#userScrollIntent.epoch + 1;
 		this.#userScrollIntent = {
 			epoch: intentEpoch,
@@ -325,29 +329,37 @@ export class ConversationScrollController {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		this.#nativeScrollSettlement.noteScroll();
-		const inferredDirection = this.#inferScrollDirection(node.scrollTop);
 		const viewport = this.deps.getViewport();
+		const position = viewport?.viewportPosition() ?? null;
+		if (viewport?.ownsScrollPosition()) {
+			const ownedDirection = inferConversationScrollDirection(
+				this.#previousLogicalOffset,
+				position,
+			);
+			if (position) this.#previousLogicalOffset = position.logicalOffset;
+			this.#resumeNativeScrollHandoff(ownedDirection, viewport);
+			const chatId = this.deps.sessions.selectedChatId;
+			if (
+				chatId &&
+				!this.deps.chatState.hasLaterMessages &&
+				this.#userScrollIntent.direction === 'later' &&
+				this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter &&
+				this.#hasRecentUserScrollIntent() &&
+				this.isNearBottom()
+			) {
+				this.#deferredLiveEdgeIntent = { chatId, epoch: this.#userScrollIntent.epoch };
+			}
+			return;
+		}
+		const inferredDirection = inferConversationScrollDirection(
+			this.#previousLogicalOffset,
+			position,
+		);
+		if (position) this.#previousLogicalOffset = position.logicalOffset;
 		const resumedNativeScroll = this.#resumeNativeScrollHandoff(inferredDirection, viewport);
 		if (this.#isPageMutationInProgress) {
 			this.#applyInferredIntentDirection(inferredDirection, resumedNativeScroll);
 			this.#preserveHistoryBrowsing();
-			return;
-		}
-		if (viewport?.ownsScrollPosition()) {
-			const chatId = this.deps.sessions.selectedChatId;
-			if (
-				chatId
-				&& !this.deps.chatState.hasLaterMessages
-				&& this.#userScrollIntent.direction === 'later'
-				&& this.#userScrollIntent.epoch > this.#followLiveRequiresIntentAfter
-				&& this.#hasRecentUserScrollIntent()
-				&& this.isNearBottom()
-			) {
-				this.#deferredLiveEdgeIntent = {
-					chatId,
-					epoch: this.#userScrollIntent.epoch,
-				};
-			}
 			return;
 		}
 		this.#syncViewportStart();
@@ -654,7 +666,8 @@ export class ConversationScrollController {
 		this.#isViewportVisible = isVisible;
 		if (!isVisible) this.cancelNativeScroll();
 		this.#cancelViewportOperations();
-		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
+		this.#previousLogicalOffset =
+			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? null;
 		if (!isVisible) return;
 		void this.#restoreVisibleViewport();
 	}
@@ -736,17 +749,12 @@ export class ConversationScrollController {
 		return layout === 'settled' ? result : 'invalidated';
 	}
 
-	#inferScrollDirection(scrollTop: number): TranscriptPageDirection | null {
-		const previousTop = this.#previousScrollTop;
-		this.#previousScrollTop = scrollTop;
-		if (previousTop === null || previousTop === scrollTop) return null;
-		return scrollTop < previousTop ? 'earlier' : 'later';
-	}
-
 	#syncViewportStart(): void {
-		const scrollTop = this.deps.getScrollContainer()?.scrollTop;
-		if (scrollTop === undefined) return;
-		const isViewportAtStart = scrollTop <= FEED_START_THRESHOLD_PX;
+		const isViewportAtStart = isConversationViewportAtStart(
+			this.deps.getViewport()?.viewportPosition() ?? null,
+			FEED_START_THRESHOLD_PX,
+		);
+		if (isViewportAtStart === null) return;
 		if (this.#isViewportAtStart !== isViewportAtStart) {
 			this.#isViewportAtStart = isViewportAtStart;
 		}
@@ -814,10 +822,15 @@ export class ConversationScrollController {
 	#isNearPageBoundary(direction: TranscriptPageDirection): boolean {
 		const scroller = this.deps.getScrollContainer();
 		if (!scroller || scroller.clientHeight <= 0) return false;
-		const distance = pagePrefetchDistance(direction, scroller.clientHeight);
-		return direction === 'earlier'
-			? scroller.scrollTop <= distance
-			: (this.deps.getViewport()?.isAtEnd(distance) ?? false);
+		const viewport = this.deps.getViewport();
+		return isNearConversationPageBoundary({
+			direction,
+			position: viewport?.viewportPosition() ?? null,
+			viewportHeight: scroller.clientHeight,
+			minimumDistance: MIN_PAGE_PREFETCH_DISTANCE_PX,
+			earlierViewportCount: EARLIER_PAGE_PREFETCH_VIEWPORTS,
+			isAtEnd: (distance) => viewport?.isAtEnd(distance) ?? false,
+		});
 	}
 
 	#earlierBoundarySignature(): string {
@@ -889,21 +902,19 @@ export class ConversationScrollController {
 		this.#laterBoundaryArmed = true;
 		this.#earlierBoundaryRequestSignature = null;
 		this.#followLiveRequiresIntentAfter = epoch;
-		this.#previousScrollTop = this.deps.getScrollContainer()?.scrollTop ?? null;
+		this.#previousLogicalOffset =
+			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? null;
 	}
-
 	#preserveHistoryBrowsing(): void {
 		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
 	}
-
 	#hasRecentUserScrollIntent(): boolean {
 		return (
 			this.#userScrollIntent.receivedAt > 0 &&
 			performance.now() - this.#userScrollIntent.receivedAt <= USER_SCROLL_INTENT_WINDOW_MS
 		);
 	}
-
 	#hasContinuedPageIntent(direction: TranscriptPageDirection, requestIntentEpoch: number): boolean {
 		return (
 			this.#userScrollIntent.epoch > requestIntentEpoch &&
@@ -911,7 +922,6 @@ export class ConversationScrollController {
 			this.#hasRecentUserScrollIntent()
 		);
 	}
-
 	#recordNativeScrollHandoff(
 		cancellation: ConversationViewportIntentCancellationResult | undefined,
 		epoch: number,
@@ -921,7 +931,6 @@ export class ConversationScrollController {
 		if (cancellation !== 'preserved-earlier-prepend' || !chatId) return;
 		this.#nativeScrollHandoff = { chatId, epoch, direction };
 	}
-
 	#resumeNativeScrollHandoff(
 		direction: TranscriptPageDirection | null,
 		viewport: ConversationViewportPort | null,
@@ -946,7 +955,6 @@ export class ConversationScrollController {
 		viewport.cancelForUserIntent(direction);
 		return true;
 	}
-
 	async #restoreVisibleViewport(): Promise<void> {
 		const operationEpoch = this.#viewportOperationEpoch;
 		await tick();

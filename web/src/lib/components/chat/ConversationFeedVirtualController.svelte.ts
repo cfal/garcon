@@ -274,6 +274,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	readonly ownsScrollPosition = (): boolean => this.#programmaticScroll.ownsPosition;
 
+	viewportPosition() {
+		const viewport = this.isReady() ? this.options.viewport : null;
+		if (!viewport) return null;
+		return {
+			logicalOffset: viewport.scrollTop,
+			distanceFromStart: Math.max(0, viewport.scrollTop),
+			leadingContentReachable: true,
+		};
+	}
+
 	scrollToStart(): void {
 		if (!this.isReady()) return;
 		this.#initialEndRestoreEpoch += 1;

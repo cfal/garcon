@@ -89,6 +89,7 @@ function expandedTranscriptState(): ActiveTranscriptState {
 interface FakeViewport extends ConversationViewportPort {
 	isReady: ReturnType<typeof vi.fn<() => boolean>>;
 	isAtEnd: ReturnType<typeof vi.fn<(threshold?: number) => boolean>>;
+	viewportPosition: ReturnType<typeof vi.fn<ConversationViewportPort['viewportPosition']>>;
 	scrollToStart: ReturnType<typeof vi.fn<() => void>>;
 	scrollToEnd: ReturnType<typeof vi.fn<ConversationViewportPort['scrollToEnd']>>;
 	restoreInitialEnd: ReturnType<typeof vi.fn<() => void>>;
@@ -111,6 +112,7 @@ function fakeViewport(overrides: Partial<ConversationViewportPort> = {}): FakeVi
 		isReady: vi.fn(() => true),
 		isAtEnd: vi.fn(() => false),
 		ownsScrollPosition: vi.fn(() => false),
+		viewportPosition: vi.fn(),
 		scrollToStart: vi.fn(),
 		scrollToEnd: vi.fn(),
 		restoreInitialEnd: vi.fn(),
@@ -175,6 +177,13 @@ function controllerFixture(
 					...options.scroller,
 				} as HTMLDivElement);
 	const queue = options.queue ? ({ ...options.queue } as HTMLDivElement) : undefined;
+	if (viewport.viewportPosition.getMockImplementation() === undefined) {
+		viewport.viewportPosition.mockImplementation(() => ({
+			logicalOffset: scroller.scrollTop,
+			distanceFromStart: Math.max(0, scroller.scrollTop),
+			leadingContentReachable: true,
+		}));
+	}
 	const sessions = { selectedChatId: options.chatId === undefined ? 'chat-1' : options.chatId };
 	const controller = new ConversationScrollController({
 		getScrollContainer: () => scroller,
@@ -250,9 +259,10 @@ describe('ConversationScrollController', () => {
 		]);
 		let resolvePage!: () => void;
 		vi.spyOn(chatState, 'loadEarlierPage').mockImplementation(
-			() => new Promise<'loaded'>((resolve) => {
-				resolvePage = () => resolve('loaded');
-			}),
+			() =>
+				new Promise<'loaded'>((resolve) => {
+					resolvePage = () => resolve('loaded');
+				}),
 		);
 		const fixture = controllerFixture({
 			chatState,
@@ -265,10 +275,12 @@ describe('ConversationScrollController', () => {
 		const pageRequest = fixture.controller.requestPage('earlier', 'button');
 		await vi.advanceTimersByTimeAsync(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
 
-		expect(chatState.entries.map((entry) => [
-			entry.ordinal,
-			(entry.message as AssistantMessage).content,
-		])).toEqual(expectedEntries);
+		expect(
+			chatState.entries.map((entry) => [
+				entry.ordinal,
+				(entry.message as AssistantMessage).content,
+			]),
+		).toEqual(expectedEntries);
 		resolvePage();
 		await pageRequest;
 		expect(chatState.entries.map((entry) => entry.ordinal)).toEqual(
@@ -317,10 +329,12 @@ describe('ConversationScrollController', () => {
 
 		await vi.advanceTimersByTimeAsync(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
 
-		expect(chatState.entries.map((entry) => [
-			entry.ordinal,
-			(entry.message as AssistantMessage).content,
-		])).toEqual(expectedEntries);
+		expect(
+			chatState.entries.map((entry) => [
+				entry.ordinal,
+				(entry.message as AssistantMessage).content,
+			]),
+		).toEqual(expectedEntries);
 	});
 
 	it('does not repin from proximity without user intent', () => {
@@ -777,8 +791,8 @@ describe('ConversationScrollController', () => {
 		);
 		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const invalidatePendingWindowNavigation = vi.fn();
-		const cancelForUserIntent = vi.fn<ConversationViewportPort['cancelForUserIntent']>(() =>
-			'cancelled',
+		const cancelForUserIntent = vi.fn<ConversationViewportPort['cancelForUserIntent']>(
+			() => 'cancelled',
 		);
 		const fixture = controllerFixture({
 			viewport: fakeViewport({
@@ -1592,10 +1606,12 @@ describe('ConversationScrollController', () => {
 		const chatState = expandedTranscriptState();
 		chatState.hasLaterMessages = true;
 		const expectedOrdinals = chatState.entries.map((entry) => entry.ordinal);
-		const navigateToWindow = vi.spyOn(chatState, 'navigateToWindow').mockImplementation(async () => {
-			chatState.hasLaterMessages = false;
-			return 'loaded' as const;
-		});
+		const navigateToWindow = vi
+			.spyOn(chatState, 'navigateToWindow')
+			.mockImplementation(async () => {
+				chatState.hasLaterMessages = false;
+				return 'loaded' as const;
+			});
 		const fixture = controllerFixture({
 			chatState,
 			viewport: fakeViewport({ isAtEnd: vi.fn(() => true) }),

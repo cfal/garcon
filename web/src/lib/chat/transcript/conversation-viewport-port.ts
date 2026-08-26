@@ -1,7 +1,8 @@
 import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
 
 export type ConversationViewportTarget =
-	{ kind: 'row'; id: string } | { kind: 'dom-anchor'; id: string };
+	| { kind: 'row'; id: string }
+	| { kind: 'dom-anchor'; id: string };
 export type ConversationViewportIntentSource = 'viewport' | 'scrollbar-drag';
 export type ConversationViewportIntentCancellationResult =
 	| 'cancelled'
@@ -12,12 +13,22 @@ export type HiddenReadingRestoreResult = 'restored' | 'missing-anchor' | 'not-re
 export type ConversationLayoutWaitResult = 'settled' | 'superseded' | 'not-ready';
 export type ConversationViewportFillResult = 'overflow' | 'underfilled' | 'unsettled';
 export type ConversationViewportTargetResult =
-	'completed' | 'cancelled' | 'target-missing' | 'not-ready';
+	| 'completed'
+	| 'cancelled'
+	| 'target-missing'
+	| 'not-ready';
+
+export interface ConversationViewportPosition {
+	readonly logicalOffset: number;
+	readonly distanceFromStart: number;
+	readonly leadingContentReachable: boolean;
+}
 
 export interface ConversationViewportPort {
 	isReady(): boolean;
 	isAtEnd(threshold?: number): boolean;
 	ownsScrollPosition(): boolean;
+	viewportPosition(): ConversationViewportPosition | null;
 	scrollToStart(): void;
 	scrollToEnd(): void;
 	restoreInitialEnd(): void;
