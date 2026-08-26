@@ -128,7 +128,13 @@ describe('transcript search v9 availability', () => {
         '/api/v1/chats/search/status',
       );
       expect(status.phase).toBe('disabled');
-      expect(status.chats).toEqual({ indexed: 0, pending: 0, failed: 0 });
+      expect(status.chats).toEqual({
+        total: 0,
+        indexed: 0,
+        pending: 0,
+        failed: 0,
+        unindexed: 0,
+      });
 
       const search = await fixture.client.timedSearchChats({ query: 'syntheticmarker' });
       expect(search.status).toBe(409);

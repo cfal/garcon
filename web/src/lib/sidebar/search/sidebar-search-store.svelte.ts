@@ -439,7 +439,9 @@ export class SidebarSearchStore {
 				indexedChatCount: 0,
 				pendingChatCount: 0,
 				failedChatCount: 0,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
+				resultsTruncated: false,
 			};
 			return;
 		}
@@ -482,7 +484,8 @@ export class SidebarSearchStore {
 				this.transcriptSearchResults = result.results;
 				this.transcriptSearchIndex = result.index;
 				this.lastRefreshIndexedCount = result.index.indexedChatCount;
-				if (result.index.pendingChatCount === 0) {
+				if (result.index.pendingChatCount === 0
+					&& result.index.unindexedChatCount === 0) {
 					this.transcriptSearchIndexing = false;
 					return;
 				}

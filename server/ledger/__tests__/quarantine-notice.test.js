@@ -130,12 +130,14 @@ async function collectSearchRows(ledger, rows) {
     listChatIds: () => [CHAT_ID],
     ledger: {
       currentView: (chatId) => ledger.currentView(chatId),
+      existingCurrentView: (chatId) => ledger.currentView(chatId),
       highWatermark: () => ({ viewId: VIEW_ID, ordinal: rows.at(-1)?.ordinal ?? 0 }),
       replayRows: (_chatId, _viewId, afterOrdinal, throughOrdinal, limit) => rows
         .filter((row) => row.ordinal > afterOrdinal && row.ordinal <= throughOrdinal)
         .slice(0, limit),
       subscribe: () => () => undefined,
     },
+    adoption: { ensure: async (chatId) => ledger.currentView(chatId) },
     service: {
       setResyncHandler: () => undefined,
       enable: async () => undefined,
@@ -146,6 +148,7 @@ async function collectSearchRows(ledger, rows) {
         fail: () => undefined,
       }),
       recordResyncFailure: () => undefined,
+      setCatalogChatTotal: () => undefined,
       syncChat,
       markChatUnavailable: async () => undefined,
       deleteChat: async () => undefined,
@@ -155,13 +158,15 @@ async function collectSearchRows(ledger, rows) {
           indexedChatCount: 0,
           pendingChatCount: 0,
           failedChatCount: 0,
+          unindexedChatCount: 0,
           unsupportedChatCount: 0,
+          resultsTruncated: false,
         },
       }),
       status: () => ({
         version: 1,
         phase: 'ready',
-        chats: { indexed: 0, pending: 0, failed: 0 },
+        chats: { total: 1, indexed: 0, pending: 0, failed: 0, unindexed: 1 },
         queuedJobs: 0,
         resync: null,
         backlogRows: 0,

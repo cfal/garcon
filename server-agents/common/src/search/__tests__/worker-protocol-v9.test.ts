@@ -202,7 +202,9 @@ describe('worker protocol v9', () => {
           indexedChatCount: 1,
           pendingChatCount: 0,
           failedChatCount: 0,
+          unindexedChatCount: 0,
           unsupportedChatCount: 0,
+          resultsTruncated: false,
         },
       },
       { ...envelope, type: 'error', code: 'READER_INTERNAL', retryable: true },
@@ -211,6 +213,14 @@ describe('worker protocol v9', () => {
       expect(isReaderEvent(event)).toBe(true);
       expect(isReaderEvent(extra(event))).toBe(false);
     }
+    const searchResult = events[2];
+    expect(isReaderEvent({
+      ...searchResult,
+      index: { ...searchResult.index, resultsTruncated: 1 },
+    })).toBe(false);
+    const missingCoverage: Record<string, unknown> = { ...searchResult.index };
+    Reflect.deleteProperty(missingCoverage, 'unindexedChatCount');
+    expect(isReaderEvent({ ...searchResult, index: missingCoverage })).toBe(false);
     expect(workerRequestIdentity({ ...envelope, type: 'invalid' })).toEqual(envelope);
     expect(workerRequestIdentity({ requestId: 0, lifecycleEpoch: 'epoch-0001' })).toBeNull();
   });

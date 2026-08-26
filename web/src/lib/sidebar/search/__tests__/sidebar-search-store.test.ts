@@ -77,7 +77,7 @@ function makeStatus(
 	return {
 		version: 1,
 		phase: 'rebuilding',
-		chats: { indexed: 0, pending: 1, failed: 0 },
+		chats: { total: 1, indexed: 0, pending: 1, failed: 0, unindexed: 0 },
 		queuedJobs: 1,
 		resync: { completedChats: 0, totalChats: 1 },
 		backlogRows: 1,
@@ -265,7 +265,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -303,7 +305,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -334,7 +338,9 @@ describe('SidebarSearchStore', () => {
 				indexedChatCount: 0,
 				pendingChatCount: 0,
 				failedChatCount: 0,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
+				resultsTruncated: false,
 			});
 		});
 
@@ -396,7 +402,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
@@ -431,7 +439,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
@@ -482,7 +492,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				})
 				.mockResolvedValueOnce({
@@ -501,7 +513,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			try {
@@ -519,7 +533,7 @@ describe('SidebarSearchStore', () => {
 
 				store.applyTranscriptSearchStatus(makeStatus({
 					phase: 'ready',
-					chats: { indexed: 1, pending: 0, failed: 0 },
+					chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
 					queuedJobs: 0,
 					resync: null,
 					backlogRows: 0,
@@ -547,7 +561,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
@@ -578,7 +594,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 0,
 						pendingChatCount: 1,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				};
 				const searchChatTranscripts = vi
@@ -591,7 +609,7 @@ describe('SidebarSearchStore', () => {
 
 				for (const indexed of [1, 2, 3]) {
 					store.applyTranscriptSearchStatus(makeStatus({
-						chats: { indexed, pending: 1, failed: 0 },
+						chats: { total: indexed + 1, indexed, pending: 1, failed: 0, unindexed: 0 },
 					}));
 				}
 				await vi.advanceTimersByTimeAsync(999);
@@ -601,7 +619,7 @@ describe('SidebarSearchStore', () => {
 
 				store.applyTranscriptSearchStatus(makeStatus({
 					phase: 'degraded',
-					chats: { indexed: 3, pending: 0, failed: 1 },
+					chats: { total: 4, indexed: 3, pending: 0, failed: 1, unindexed: 0 },
 					queuedJobs: 0,
 					resync: null,
 					backlogRows: 0,
@@ -663,7 +681,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -695,7 +715,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 1,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -717,7 +739,9 @@ describe('SidebarSearchStore', () => {
 					indexedChatCount: number;
 					pendingChatCount: number;
 					failedChatCount: number;
+					unindexedChatCount: number;
 					unsupportedChatCount: number;
+					resultsTruncated: boolean;
 				};
 			}>();
 			const searchChatTranscripts = vi
@@ -745,7 +769,9 @@ describe('SidebarSearchStore', () => {
 						indexedChatCount: 2,
 						pendingChatCount: 0,
 						failedChatCount: 0,
+						unindexedChatCount: 0,
 						unsupportedChatCount: 0,
+						resultsTruncated: false,
 					},
 				})
 				.mockReturnValueOnce(deferred.promise);
@@ -771,7 +797,9 @@ describe('SidebarSearchStore', () => {
 					indexedChatCount: 2,
 					pendingChatCount: 0,
 					failedChatCount: 0,
+					unindexedChatCount: 0,
 					unsupportedChatCount: 0,
+					resultsTruncated: false,
 				},
 			});
 			await pending;
@@ -1000,7 +1028,9 @@ describe('openTranscriptResult', () => {
 				indexedChatCount: 1,
 				pendingChatCount: 0,
 				failedChatCount: 0,
+				unindexedChatCount: 0,
 				unsupportedChatCount: 0,
+				resultsTruncated: false,
 			},
 		}));
 		const store = navigationStore({

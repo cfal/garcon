@@ -72,22 +72,27 @@ function harness(options = {}) {
     'chat-0001',
     { viewId: transcriptViewId('view-0001'), rows: [row(1, 'alpha'), row(2, 'bravo')] },
   ]]);
+  const unadoptedChatIds = new Set(options.unadoptedChatIds ?? []);
   let listener = () => {};
   const replayCalls = [];
+  const readCurrentView = (chatId) => {
+    if (options.fencedChats?.has(chatId)) {
+      throw new LedgerFencedError(chatId, { cause: { code: 'SQLITE_CORRUPT' } });
+    }
+    if (options.currentView) return options.currentView(chatId, chats);
+    const chat = chats.get(chatId);
+    return chat ? {
+      viewId: chat.viewId,
+      status: 'current',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contentStartOrdinal: 1,
+    } : null;
+  };
   const ledger = {
-    currentView: mock((chatId) => {
-      if (options.fencedChats?.has(chatId)) {
-        throw new LedgerFencedError(chatId, { cause: { code: 'SQLITE_CORRUPT' } });
-      }
-      if (options.currentView) return options.currentView(chatId, chats);
-      const chat = chats.get(chatId);
-      return chat ? {
-        viewId: chat.viewId,
-        status: 'current',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        contentStartOrdinal: 1,
-      } : null;
-    }),
+    currentView: mock(readCurrentView),
+    existingCurrentView: mock((chatId) => (
+      unadoptedChatIds.has(chatId) ? null : readCurrentView(chatId)
+    )),
     highWatermark: mock((chatId) => {
       if (options.highWatermark) return options.highWatermark(chatId, chats);
       const chat = chats.get(chatId);
@@ -128,6 +133,7 @@ function harness(options = {}) {
       };
     }),
     recordResyncFailure: mock(() => {}),
+    setCatalogChatTotal: mock(() => {}),
     syncChat: mock(async (request) => {
       const frames = [];
       syncCalls.push({ request, frames });
@@ -147,13 +153,15 @@ function harness(options = {}) {
         indexedChatCount: 0,
         pendingChatCount: 0,
         failedChatCount: 0,
+        unindexedChatCount: 0,
         unsupportedChatCount: 0,
+        resultsTruncated: false,
       },
     })),
     status: mock(() => ({
       version: 1,
       phase: 'ready',
-      chats: { indexed: 0, pending: 0, failed: 0 },
+      chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
       queuedJobs: 0,
       resync: null,
       backlogRows: 0,
@@ -168,9 +176,21 @@ function harness(options = {}) {
     resyncHandler: null,
   };
   const logger = { warn: mock(() => {}), info: mock(() => {}) };
+  const adoption = {
+    ensure: mock(async (chatId, signal) => {
+      if (options.adoptionEnsure) {
+        return options.adoptionEnsure(chatId, signal, { chats, unadoptedChatIds });
+      }
+      unadoptedChatIds.delete(chatId);
+      const view = readCurrentView(chatId);
+      if (!view) throw new Error('TRANSCRIPT_UNAVAILABLE');
+      return view;
+    }),
+  };
   const controller = new TranscriptSearchController({
     listChatIds: options.listChatIds ?? (() => [...chats.keys()]),
     ledger,
+    adoption,
     service,
     logger,
     searchTimeoutMs: 100,
@@ -178,6 +198,7 @@ function harness(options = {}) {
   return {
     chats,
     controller,
+    adoption,
     ledger,
     listener: (event) => listener(event),
     logger,
@@ -185,6 +206,7 @@ function harness(options = {}) {
     resyncScopes,
     service,
     syncCalls,
+    unadoptedChatIds,
   };
 }
 
@@ -244,6 +266,219 @@ describe('TranscriptSearchController v9', () => {
       [{ chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 }],
       [{ chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 }],
     ]);
+    await fixture.controller.close();
+  });
+
+  test('[TLV5-SEARCH.11-CORE-01] adopts every uninitialized registry chat sequentially and exposes incomplete coverage', async () => {
+    const chats = Array.from({ length: 24 }, (_, index) => {
+      const chatId = `legacy-${index}`;
+      const viewId = transcriptViewId(`legacy-view-${index}`);
+      return [chatId, { viewId, rows: [row(1, `legacy marker ${index}`, viewId)] }];
+    });
+    const chatIds = chats.map(([chatId]) => chatId);
+    const firstAdoption = deferred();
+    let activeAdoptions = 0;
+    let maximumActiveAdoptions = 0;
+    let fixture;
+    fixture = harness({
+      chats,
+      unadoptedChatIds: chatIds,
+      adoptionEnsure: async (chatId, signal, state) => {
+        activeAdoptions += 1;
+        maximumActiveAdoptions = Math.max(maximumActiveAdoptions, activeAdoptions);
+        try {
+          if (fixture.adoption.ensure.mock.calls.length === 1) await firstAdoption.promise;
+          signal.throwIfAborted();
+          state.unadoptedChatIds.delete(chatId);
+          fixture.controller.catalogMayHaveChanged(chatId);
+          return {
+            viewId: state.chats.get(chatId).viewId,
+            status: 'current',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            contentStartOrdinal: 1,
+          };
+        } finally {
+          activeAdoptions -= 1;
+        }
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.adoption.ensure.mock.calls.length === 1);
+    const probeCount = fixture.ledger.existingCurrentView.mock.calls.length;
+
+    const during = await fixture.controller.search({ query: 'legacy', allowedChatIds: chatIds });
+    expect(during.index).toMatchObject({
+      indexedChatCount: 0,
+      failedChatCount: 0,
+      unindexedChatCount: chatIds.length,
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([]);
+    await fixture.controller.search({ query: 'legacy', allowedChatIds: chatIds });
+    expect(fixture.ledger.existingCurrentView).toHaveBeenCalledTimes(probeCount);
+
+    firstAdoption.resolve();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1, 5_000);
+    expect(fixture.adoption.ensure).toHaveBeenCalledTimes(chatIds.length);
+    expect(maximumActiveAdoptions).toBe(1);
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(chatIds.length);
+
+    const after = await fixture.controller.search({ query: 'legacy', allowedChatIds: chatIds });
+    expect(after.index.unindexedChatCount).toBe(0);
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toHaveLength(chatIds.length);
+    await fixture.controller.close();
+  });
+
+  test('[TLV5-SEARCH.11-CORE-02] keeps adoption failures visible without re-probing and repairs after later adoption', async () => {
+    let failAdoption = true;
+    const fixture = harness({
+      unadoptedChatIds: ['chat-0001'],
+      adoptionEnsure: async (chatId, _signal, state) => {
+        if (failAdoption) {
+          throw Object.assign(new Error('legacy source is unavailable'), {
+            code: 'TRANSCRIPT_UNAVAILABLE',
+          });
+        }
+        state.unadoptedChatIds.delete(chatId);
+        return {
+          viewId: state.chats.get(chatId).viewId,
+          status: 'current',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          contentStartOrdinal: 1,
+        };
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    expect(fixture.service.markChatUnavailable).toHaveBeenCalledWith(
+      'chat-0001', 'ledger-unadopted', 'TRANSCRIPT_UNAVAILABLE',
+    );
+    const probeCount = fixture.ledger.existingCurrentView.mock.calls.length;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await fixture.controller.search({
+        query: 'alpha',
+        allowedChatIds: ['chat-0001'],
+      });
+      expect(result.index).toMatchObject({ failedChatCount: 1, unindexedChatCount: 0 });
+    }
+    expect(fixture.ledger.existingCurrentView).toHaveBeenCalledTimes(probeCount);
+
+    failAdoption = false;
+    fixture.unadoptedChatIds.delete('chat-0001');
+    fixture.controller.catalogMayHaveChanged('chat-0001');
+    await waitFor(() => fixture.service.syncChat.mock.calls.length === 1);
+    const repaired = await fixture.controller.search({
+      query: 'alpha',
+      allowedChatIds: ['chat-0001'],
+    });
+    expect(repaired.index).toMatchObject({ failedChatCount: 0, unindexedChatCount: 0 });
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([
+      { chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 },
+    ]);
+    await fixture.controller.close();
+  });
+
+  test('does not recreate failed search state when a chat is deleted during adoption', async () => {
+    const adoption = deferred();
+    const registry = new Set(['chat-0001']);
+    const fixture = harness({
+      unadoptedChatIds: ['chat-0001'],
+      listChatIds: () => [...registry],
+      adoptionEnsure: () => adoption.promise,
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.adoption.ensure.mock.calls.length === 1);
+
+    registry.delete('chat-0001');
+    fixture.controller.deleteChat('chat-0001');
+    adoption.reject(Object.assign(new Error('Cannot adopt transcript for unknown chat'), {
+      code: 'CHAT_NOT_FOUND',
+    }));
+
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    await waitFor(() => fixture.service.deleteChat.mock.calls.length === 1);
+    expect(fixture.service.markChatUnavailable).not.toHaveBeenCalled();
+    expect(fixture.logger.warn).not.toHaveBeenCalledWith(
+      'Transcript search indexing job failed',
+      expect.objectContaining({ chatId: 'chat-0001' }),
+    );
+    await fixture.controller.close();
+  });
+
+  test('does not start maintenance adoption after a chat leaves the registry', async () => {
+    const firstAdoption = deferred();
+    const registry = new Set(['chat-a', 'chat-b']);
+    const chats = [
+      ['chat-a', { viewId: transcriptViewId('view-a'), rows: [row(1, 'a', 'view-a')] }],
+      ['chat-b', { viewId: transcriptViewId('view-b'), rows: [row(1, 'b', 'view-b')] }],
+    ];
+    const fixture = harness({
+      chats,
+      unadoptedChatIds: ['chat-a', 'chat-b'],
+      listChatIds: () => [...registry],
+      adoptionEnsure: async (chatId, signal, state) => {
+        if (chatId === 'chat-a') await firstAdoption.promise;
+        signal.throwIfAborted();
+        state.unadoptedChatIds.delete(chatId);
+        return {
+          viewId: state.chats.get(chatId).viewId,
+          status: 'current',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          contentStartOrdinal: 1,
+        };
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.adoption.ensure.mock.calls.length === 1);
+
+    registry.delete('chat-b');
+    fixture.controller.deleteChat('chat-b');
+    firstAdoption.resolve();
+
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1, 5_000);
+    expect(fixture.adoption.ensure.mock.calls.map(([chatId]) => chatId)).toEqual(['chat-a']);
+    await fixture.controller.close();
+  });
+
+  test('serializes adoption across startup resync and catalog refresh maintenance', async () => {
+    const chats = [
+      ['chat-a', { viewId: transcriptViewId('view-a'), rows: [row(1, 'a', 'view-a')] }],
+      ['chat-b', { viewId: transcriptViewId('view-b'), rows: [row(1, 'b', 'view-b')] }],
+    ];
+    const firstAdoption = deferred();
+    let activeAdoptions = 0;
+    let maximumActiveAdoptions = 0;
+    const fixture = harness({
+      chats,
+      unadoptedChatIds: ['chat-a', 'chat-b'],
+      adoptionEnsure: async (chatId, signal, state) => {
+        activeAdoptions += 1;
+        maximumActiveAdoptions = Math.max(maximumActiveAdoptions, activeAdoptions);
+        try {
+          if (chatId === 'chat-a') await firstAdoption.promise;
+          signal.throwIfAborted();
+          state.unadoptedChatIds.delete(chatId);
+          return {
+            viewId: state.chats.get(chatId).viewId,
+            status: 'current',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            contentStartOrdinal: 1,
+          };
+        } finally {
+          activeAdoptions -= 1;
+        }
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.adoption.ensure.mock.calls.length === 1);
+
+    fixture.controller.catalogMayHaveChanged('chat-b');
+    for (let attempt = 0; attempt < 5; attempt += 1) await Bun.sleep(0);
+    firstAdoption.resolve();
+
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1, 5_000);
+    await waitFor(() => fixture.adoption.ensure.mock.calls.length >= 2, 5_000);
+    expect(maximumActiveAdoptions).toBe(1);
     await fixture.controller.close();
   });
 
@@ -412,6 +647,25 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.close();
   });
 
+  test('reindexes a catalog chat after a transient ledger fence clears', async () => {
+    const fencedChats = new Set();
+    const fixture = harness({ fencedChats });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(1);
+
+    fencedChats.add('chat-0001');
+    fixture.controller.catalogMayHaveChanged('chat-0001');
+    await waitFor(() => fixture.service.markChatUnavailable.mock.calls.length === 1);
+
+    fencedChats.delete('chat-0001');
+    fixture.controller.catalogMayHaveChanged('chat-0001');
+    await waitFor(() => fixture.ledger.existingCurrentView.mock.calls.length >= 3);
+    await fixture.controller.close();
+
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(2);
+  });
+
   test('[TLV5-SEARCH.06-CORE-04] resync settles every classification before completion', async () => {
     const chats = [
       ['chat-current-a', {
@@ -470,7 +724,10 @@ describe('TranscriptSearchController v9', () => {
     await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
     expect(fixture.resyncScopes[0]).toEqual({ total: 5, settled: 5, completed: 1, failures: [] });
     expect(fixture.service.deleteChat.mock.calls.map(([chatId]) => chatId))
-      .toEqual(['chat-no-view', 'chat-index-only']);
+      .toEqual(['chat-index-only']);
+    expect(fixture.service.markChatUnavailable).toHaveBeenCalledWith(
+      'chat-no-view', 'ledger-unadopted', 'TRANSCRIPT_UNAVAILABLE',
+    );
     expect(fixture.service.syncChat).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 'chat-sync' }),
     );
@@ -529,13 +786,16 @@ describe('TranscriptSearchController v9', () => {
       },
     });
     await midScope.controller.start();
-    await waitFor(() => midScope.resyncScopes[0]?.failures.length === 1);
+    await waitFor(() => midScope.resyncScopes[0]?.completed === 1);
     expect(midScope.resyncScopes[0]).toEqual({
-      total: 2, settled: 2, completed: 0, failures: ['SEARCH_RESYNC_FAILED'],
+      total: 2, settled: 2, completed: 1, failures: [],
     });
+    expect(midScope.service.markChatUnavailable).toHaveBeenCalledWith(
+      'chat-bad', 'ledger-unadopted', 'SEARCH_INDEX_UNAVAILABLE',
+    );
     expect(midScope.logger.warn).toHaveBeenCalledWith(
-      'Transcript search catalog job failed',
-      { operation: 'synchronization', code: 'SEARCH_RESYNC_FAILED' },
+      'Transcript search indexing job failed',
+      { chatId: 'chat-bad', operation: 'resync', code: 'SEARCH_INDEX_UNAVAILABLE' },
     );
     await midScope.controller.close();
   });

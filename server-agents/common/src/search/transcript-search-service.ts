@@ -11,6 +11,7 @@ import type {
 import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
+import { searchFrames } from './query-frames.js';
 import type { HistoricalSearchMessageRow } from './rows.js';
 import { SEARCH_INGEST_ROW_MAX_BYTES, type SearchChatState } from './schema.js';
 import type {
@@ -20,7 +21,6 @@ import type {
   ReaderRequest,
 } from './worker-protocol.js';
 import {
-  MAX_ALLOWLIST_PER_FRAME,
   MAX_FRAME_BYTES,
   MAX_ROWS_PER_FRAME,
   isIndexerEvent,
@@ -76,7 +76,7 @@ export interface TranscriptSearchResyncScope {
 const DISABLED_STATUS: TranscriptSearchStatusV1 = {
   version: 1,
   phase: 'disabled',
-  chats: { indexed: 0, pending: 0, failed: 0 },
+  chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
   queuedJobs: 0,
   resync: null,
   backlogRows: 0,
@@ -149,6 +149,7 @@ export class TranscriptSearchService {
   #lastErrorCode: string | null = null;
   #indexRecreated = false;
   #resync: { completed: number; total: number } | null = null;
+  #catalogChatTotal = 0;
   #catalogCurrent = false;
   #countsDirty = false;
   #countsRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -324,6 +325,7 @@ export class TranscriptSearchService {
       throw new Error('SEARCH_RESYNC_INVARIANT');
     }
     const scope = { completed: 0, total: totalChats };
+    this.#catalogChatTotal = totalChats;
     this.#resync = scope;
     this.#noteStatusMaybeChanged();
     return {
@@ -347,6 +349,15 @@ export class TranscriptSearchService {
         this.#recordCatalogFailure(errorCode);
       },
     };
+  }
+
+  setCatalogChatTotal(totalChats: number): void {
+    if (!Number.isSafeInteger(totalChats) || totalChats < 0) {
+      throw new Error('SEARCH_RESYNC_INVARIANT');
+    }
+    if (this.#catalogChatTotal === totalChats) return;
+    this.#catalogChatTotal = totalChats;
+    this.#noteStatusMaybeChanged();
   }
 
   recordResyncFailure(errorCode: string): void {
@@ -410,8 +421,9 @@ export class TranscriptSearchService {
     try {
       event = await raceAgainstSignal(pending, request.signal);
     } catch (error) {
-      if ((error instanceof DOMException && error.name === 'AbortError')
+      if ((error instanceof Error && error.name === 'AbortError')
           || (error instanceof Error && error.message === 'SEARCH_TIMEOUT')) {
+        this.#retireAbandonedReader(slot);
         this.#queryCounters.timedOut += 1;
         this.#rateLimitedWarn('Transcript search query timeout', {
           code: 'SEARCH_TIMEOUT',
@@ -449,6 +461,7 @@ export class TranscriptSearchService {
     await fs.rm(this.#searchDirectory, { recursive: true, force: true });
     this.#durableCounts = { indexed: 0, pending: 0, failed: 0 };
     this.#durableBacklogRows = 0;
+    this.#catalogChatTotal = 0;
     this.#resync = null;
     this.#catalogCurrent = false;
     this.#activeProgress = null;
@@ -516,6 +529,13 @@ export class TranscriptSearchService {
       slot.state = 'quarantined';
       this.#noteStatusMaybeChanged();
     }
+  }
+
+  #retireAbandonedReader(slot: ReaderSlot): void {
+    if (!slot.supervisor.available) return;
+    slot.state = 'quarantined';
+    slot.supervisor.crash();
+    this.#noteStatusMaybeChanged();
   }
 
   #onReaderAdmitted(slot: ReaderSlot): void {
@@ -763,10 +783,17 @@ export class TranscriptSearchService {
   }
 
   #publishIfChanged(): void {
+    const accountedChats = this.#durableCounts.indexed
+      + this.#durableCounts.pending
+      + this.#durableCounts.failed;
     const content = {
       version: 1 as const,
       phase: this.#phase(),
-      chats: { ...this.#durableCounts },
+      chats: {
+        total: this.#catalogChatTotal,
+        ...this.#durableCounts,
+        unindexed: Math.max(0, this.#catalogChatTotal - accountedChats),
+      },
       queuedJobs: this.#queuedJobCount(),
       resync: this.#resync
         ? { completedChats: this.#resync.completed, totalChats: this.#resync.total }
@@ -808,10 +835,17 @@ export class TranscriptSearchService {
     if (snapshot.phase === 'rebuilding') {
       this.#rateLimitedInfo('Transcript search ingest progress', {
         code: 'SEARCH_INGEST_PROGRESS',
+        chatsTotal: snapshot.chats.total,
         chatsIndexed: snapshot.chats.indexed,
+        chatsPending: snapshot.chats.pending,
+        chatsFailed: snapshot.chats.failed,
+        chatsUnindexed: snapshot.chats.unindexed,
         resyncCompleted: snapshot.resync?.completedChats ?? null,
         resyncTotal: snapshot.resync?.totalChats ?? null,
         backlogRows: snapshot.backlogRows,
+        queuedJobs: snapshot.queuedJobs,
+        activePosition: snapshot.activeChat?.position ?? null,
+        activeTotal: snapshot.activeChat?.total ?? null,
       });
     }
     for (const listener of this.#statusListeners) listener(snapshot);
@@ -831,6 +865,9 @@ export class TranscriptSearchService {
       !this.#catalogCurrent
       || this.#durableCounts.failed > 0
       || this.#durableCounts.pending > 0
+      || this.#catalogChatTotal > (
+        this.#durableCounts.indexed + this.#durableCounts.pending + this.#durableCounts.failed
+      )
     ) return 'degraded';
     return 'ready';
   }
@@ -930,36 +967,6 @@ function chunkFrame(frame: TranscriptSearchSyncFrame): Array<{
       ? frame.advanceTo
       : rows[rows.length - 1]!.ordinal,
   }));
-}
-
-function searchFrames(
-  query: ChatSearchQueryV1,
-  allowedChats: readonly TranscriptSearchAllowedChat[],
-  limit: number,
-): readonly WorkerRequestInput<ReaderRequest>[] {
-  const frames: WorkerRequestInput<ReaderRequest>[] = [{ type: 'search-start', query, limit }];
-  if (allowedChats.length === 0) {
-    frames.push({
-      type: 'search-allowlist-chunk',
-      chunkIndex: 0,
-      allowedChats: [],
-      done: true,
-    });
-    return frames;
-  }
-  for (let offset = 0; offset < allowedChats.length; offset += MAX_ALLOWLIST_PER_FRAME) {
-    const chunk = allowedChats.slice(offset, offset + MAX_ALLOWLIST_PER_FRAME);
-    if (Buffer.byteLength(JSON.stringify(chunk)) > MAX_FRAME_BYTES) {
-      throw new Error('SEARCH_ALLOWLIST_TOO_LARGE');
-    }
-    frames.push({
-      type: 'search-allowlist-chunk',
-      chunkIndex: offset / MAX_ALLOWLIST_PER_FRAME,
-      allowedChats: chunk,
-      done: offset + chunk.length >= allowedChats.length,
-    });
-  }
-  return frames;
 }
 
 function workerEventError(event: IndexerEvent | ReaderEvent): Error | null {

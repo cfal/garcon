@@ -60,7 +60,7 @@ describe('parseServerWsMessage transcript-search-status', () => {
   const status = {
     version: 1,
     phase: 'rebuilding',
-    chats: { indexed: 3, pending: 7, failed: 1 },
+    chats: { total: 12, indexed: 3, pending: 7, failed: 1, unindexed: 1 },
     queuedJobs: 2,
     resync: { completedChats: 4, totalChats: 10 },
     backlogRows: 42,

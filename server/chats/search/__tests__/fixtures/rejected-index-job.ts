@@ -46,7 +46,9 @@ const service = {
         indexedChatCount: 0,
         pendingChatCount: 0,
         failedChatCount: 0,
+        unindexedChatCount: 0,
         unsupportedChatCount: 0,
+        resultsTruncated: false,
       },
     };
   },

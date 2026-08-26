@@ -62,7 +62,9 @@ export interface ChatSearchIndexStatus {
   indexedChatCount: number;
   pendingChatCount: number;
   failedChatCount: number;
+  unindexedChatCount: number;
   unsupportedChatCount: number;
+  resultsTruncated: boolean;
 }
 
 export interface ChatSearchResponse {
@@ -84,9 +86,11 @@ export interface TranscriptSearchStatusV1 {
   readonly version: 1;
   readonly phase: TranscriptSearchPhase;
   readonly chats: {
+    readonly total: number;
     readonly indexed: number;
     readonly pending: number;
     readonly failed: number;
+    readonly unindexed: number;
   };
   readonly queuedJobs: number;
   readonly resync: {
@@ -130,9 +134,12 @@ export function isTranscriptSearchStatusV1(value: unknown): value is TranscriptS
       chats.indexed,
       chats.pending,
       chats.failed,
+      chats.total,
+      chats.unindexed,
       candidate.queuedJobs,
       candidate.backlogRows,
     ].every((count) => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
+    && chats.indexed + chats.pending + chats.failed + chats.unindexed >= chats.total
     && (resync === null
       || (!!resync
         && typeof resync === 'object'
