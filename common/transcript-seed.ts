@@ -64,6 +64,10 @@ export interface ProjectionCostBudget {
   cost(text: string): number;
 }
 
+export interface CostedCarriedContext extends CarriedContext {
+  readonly admissionCost: number;
+}
+
 interface PreparedCarryoverProjection {
   readonly opening: string;
   readonly closing: string;
@@ -144,12 +148,13 @@ export function createCarryoverTranscriptWithinCost(
   messages: readonly ChatMessage[],
   budget: ProjectionCostBudget,
   options: { readonly summary?: string } = {},
-): CarriedContext | null {
+): CostedCarriedContext | null {
   if (!Number.isFinite(budget.maximumCost) || budget.maximumCost <= 0) return null;
   const prepared = prepareCarryoverProjection(messages, options);
   if (!prepared) return null;
   const { opening, closing, summaryElement, turns, entries, body, full } = prepared;
-  if (budget.cost(full) <= budget.maximumCost) return { prefix: full };
+  const fullCost = budget.cost(full);
+  if (fullCost <= budget.maximumCost) return { prefix: full, admissionCost: fullCost };
 
   const truncatedMinimum = `${opening}\n${TRUNCATION_ELEMENT}\n${closing}`;
   if (budget.cost(truncatedMinimum) > budget.maximumCost) return null;
@@ -179,6 +184,7 @@ export function createCarryoverTranscriptWithinCost(
   return {
     prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selection.selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
     summaryTruncated: fittedSummary !== summaryElement,
+    admissionCost: budget.cost(fixedDocument) + selection.admissionCost,
   };
 }
 

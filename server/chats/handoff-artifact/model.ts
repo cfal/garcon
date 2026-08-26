@@ -38,6 +38,7 @@ export type HandoffArtifactDocumentNode =
 
 export interface HandoffArtifactSelection {
   readonly nodes: readonly HandoffArtifactDocumentNode[];
+  readonly admissionCost: number;
   readonly includedEntryCount: number;
   readonly omittedEntryCount: number;
   readonly abridgedEntryCount: number;

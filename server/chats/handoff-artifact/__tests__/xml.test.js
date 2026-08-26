@@ -79,6 +79,22 @@ describe('handoff artifact XML', () => {
     expect(rendered.document).not.toContain('<earlier-turns-truncated');
   });
 
+  it('fits a mid-sized window when gap overhead leaves a persistent overshoot', () => {
+    const messages = [];
+    for (let index = 0; index < 40; index += 1) {
+      messages.push(new UserMessage(AT, `Objective ${index}`));
+      messages.push(new AssistantMessage(AT, 'word '.repeat(500)));
+    }
+
+    const rendered = render(messages, 16_384);
+
+    expect(rendered).not.toBeNull();
+    expect(rendered.estimatedTokens).toBeLessThanOrEqual(12_288);
+    expect(rendered.includedEntryCount).toBeGreaterThan(0);
+    expect(rendered.omittedEntryCount).toBeGreaterThan(0);
+    expect(rendered.gapCount).toBeGreaterThan(1);
+  });
+
   it('renders an empty eligible source without a zero-count gap', () => {
     const rendered = renderFittedHandoffArtifact({
       chat: {

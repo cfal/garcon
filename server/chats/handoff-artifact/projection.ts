@@ -67,8 +67,8 @@ export function selectHandoffArtifactEntries(input: {
       refit: (maximumCost, cost) => refitHandoffArtifactEntry(source, maximumCost, cost),
     };
   });
-  const selected = input.maximumCost <= 0
-    ? []
+  const projection = input.maximumCost <= 0
+    ? null
     : selectPrioritizedProjection({
       entries: adapters,
       turnCount: input.entries.length === 0 ? 0 : input.entries.at(-1)!.turn + 1,
@@ -76,7 +76,8 @@ export function selectHandoffArtifactEntries(input: {
       truncationMarkerCost: input.cost('    <gap omitted-entries="1"/>\n'),
       cost: (text) => input.cost(`${text}\n`),
       recentTurnsVerbatim: 3,
-    }).selected;
+    });
+  const selected = projection?.selected ?? [];
   const selectedByOrdinal = new Map<number, RenderedHandoffArtifactEntry>();
   for (const entry of selected) {
     selectedByOrdinal.set(entry.source.ordinal, {
@@ -93,6 +94,7 @@ export function selectHandoffArtifactEntries(input: {
   const gapCount = nodes.filter((node) => node.kind === 'gap').length;
   return {
     nodes,
+    admissionCost: projection?.admissionCost ?? 0,
     includedEntryCount,
     omittedEntryCount,
     abridgedEntryCount,

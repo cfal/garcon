@@ -209,6 +209,18 @@ describe('carryover compaction', () => {
     },
   );
 
+  it('fits the default window when whole-entry selection initially stalls', async () => {
+    const { instance, runSingleQuery } = service({ contextWindowTokens: 500_000 });
+
+    await run(instance, {
+      messages: turns(400, () => 'word '.repeat(500)),
+    });
+
+    expect(runSingleQuery).toHaveBeenCalledTimes(1);
+    expect(estimateHandoffTokens(runSingleQuery.mock.calls[0][0]))
+      .toBeLessThanOrEqual(usableHandoffTokenBudget(500_000));
+  });
+
   it('keeps the newest three turns out of the compaction prompt and beside the summary', async () => {
     let prompt = '';
     const { instance } = service({

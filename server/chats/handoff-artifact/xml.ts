@@ -65,6 +65,7 @@ export function renderFittedHandoffArtifact(input: {
       return { selection, rendered };
     },
     document: ({ rendered }) => rendered.document,
+    admittedEntryCost: ({ selection }) => selection.admissionCost,
   });
   if (!fitted) return null;
   const { selection, rendered } = fitted.value;

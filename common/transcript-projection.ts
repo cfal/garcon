@@ -20,6 +20,7 @@ export interface ProjectionSelection<
 > {
   readonly selected: readonly Entry[];
   readonly truncated: boolean;
+  readonly admissionCost: number;
 }
 
 export function projectionPriorityLevel(type: string): number {
@@ -67,6 +68,8 @@ export function selectPrioritizedProjection<Entry extends PrioritizedProjectionE
   return {
     selected,
     truncated: selected.length !== input.entries.length,
+    admissionCost: input.truncationMarkerCost
+      + selected.reduce((total, entry) => total + input.cost(entry.text), 0),
   };
 }
 

@@ -37,6 +37,7 @@ export function fitEstimatedTokenDocument<T>(input: {
   readonly maximumEntryBudgetTokens?: number;
   readonly render: (entryBudgetTokens: number) => T | null;
   readonly document: (value: T) => string;
+  readonly admittedEntryCost?: (value: T) => number;
   readonly minimumEntryBudgetTokens?: number;
 }): {
   readonly value: T;
@@ -64,7 +65,14 @@ export function fitEstimatedTokenDocument<T>(input: {
         correctionPasses: attempt + 1,
       };
     }
-    entryBudget -= estimatedTokens - input.usableTokens + FIT_CONVERGENCE_GUARD_TOKENS;
+    const overflowCorrection = entryBudget
+      - (estimatedTokens - input.usableTokens + FIT_CONVERGENCE_GUARD_TOKENS);
+    const admittedCost = input.admittedEntryCost?.(value);
+    // Crossing the prior selection's admission threshold guarantees that a
+    // whole-entry selector cannot return the same oversized document again.
+    entryBudget = admittedCost === undefined
+      ? overflowCorrection
+      : Math.min(overflowCorrection, Math.ceil(admittedCost) - 1);
     if (entryBudget < minimumEntryBudget) return null;
   }
   return null;

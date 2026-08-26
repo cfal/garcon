@@ -9,7 +9,7 @@ import {
   parseAgentSwitchContextWindowTokens,
   usableHandoffTokenBudget,
 } from '../../common/handoff-sizing.js';
-import type { CarriedContext } from '../../common/transcript-seed.js';
+import type { CarriedContext, CostedCarriedContext } from '../../common/transcript-seed.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   RECENT_TURNS_VERBATIM,
@@ -83,7 +83,7 @@ export interface CarryOverCompactionResult {
 }
 
 interface FittedCompactionPrompt {
-  readonly assembled: CarriedContext;
+  readonly assembled: CostedCarriedContext;
   readonly prompt: string;
 }
 
@@ -139,7 +139,6 @@ export class CarryOverCompactionService {
         `the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
       );
     }
-
     const first = fitCompactionPrompt(
       older,
       input.destination,
@@ -235,6 +234,7 @@ function fitCompactionPrompt(
         : { assembled, prompt: buildCompactionPrompt(assembled.prefix, destination) };
     },
     document: ({ prompt }) => prompt,
+    admittedEntryCost: ({ assembled }) => assembled.admissionCost,
   });
 }
 

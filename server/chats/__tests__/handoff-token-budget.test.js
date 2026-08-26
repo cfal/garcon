@@ -70,4 +70,28 @@ describe('handoff token budget', () => {
       document: (value) => value,
     })).toBeNull();
   });
+
+  test('crosses the prior admission threshold when a whole-entry selection stalls', () => {
+    const oversizedDocument = 'word '.repeat(200);
+    const oversizedTokens = estimateHandoffTokens(oversizedDocument);
+    const usableTokens = oversizedTokens - 1;
+    const seen = [];
+    const result = fitEstimatedTokenDocument({
+      usableTokens,
+      fixedFrameTokens: usableTokens - 100,
+      render(entryBudgetTokens) {
+        seen.push(entryBudgetTokens);
+        return entryBudgetTokens >= 20
+          ? { document: oversizedDocument, admissionCost: 20 }
+          : { document: 'fits', admissionCost: 1 };
+      },
+      document: (value) => value.document,
+      admittedEntryCost: (value) => value.admissionCost,
+    });
+
+    expect(seen).toEqual([100, 19]);
+    expect(result).not.toBeNull();
+    expect(result.entryBudgetTokens).toBe(19);
+    expect(result.estimatedTokens).toBeLessThanOrEqual(usableTokens);
+  });
 });
