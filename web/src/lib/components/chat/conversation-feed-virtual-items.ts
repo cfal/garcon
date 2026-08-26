@@ -1,5 +1,6 @@
 import {
 	isToolUseMessage,
+	isHandoffSummaryNoticeDetail,
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -291,6 +292,11 @@ export function estimateConversationFeedItemSize(
 	if (layout === 'hidden') return 0;
 	if (layout === 'permission') return 240 * scale + spacing;
 	if (renderItem.kind === 'local-notice') return 52 * scale + spacing;
+	if (renderItem.message.type === 'transcript-notice') {
+		// The collapsed handoff body is clamp-bounded, so its default height is stable
+		// enough to estimate even though expansion is measured after render.
+		return (isHandoffSummaryNoticeDetail(renderItem.message.detail) ? 230 : 52) * scale + spacing;
+	}
 	if (renderItem.message.type === 'user-message') {
 		return (renderItem.message.presentation?.style ? 144 : 112) * scale + spacing;
 	}

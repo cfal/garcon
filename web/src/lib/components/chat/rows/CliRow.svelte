@@ -6,7 +6,7 @@
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CliPresentationHeader from './CliPresentationHeader.svelte';
-	import CliCollapsibleBody from './CliCollapsibleBody.svelte';
+	import CollapsibleBody from './CollapsibleBody.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 
 	interface Props {
@@ -46,7 +46,7 @@
 	>
 		{#snippet body()}
 			<CliPresentationHeader style={message.presentation.style} title={message.title} />
-			<CliCollapsibleBody
+			<CollapsibleBody
 				disclosure={message.disclosure}
 				{alwaysExpanded}
 				expanded={disclosureState?.open('cli-body', 'body', false)}
@@ -69,7 +69,7 @@
 						<div class="mt-1 whitespace-pre-wrap break-words text-sm">{message.content}</div>
 					{/if}
 				{/snippet}
-			</CliCollapsibleBody>
+			</CollapsibleBody>
 		{/snippet}
 	</ChatEventCard>
 </div>

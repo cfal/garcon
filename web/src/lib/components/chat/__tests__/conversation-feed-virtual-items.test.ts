@@ -3,6 +3,7 @@ import {
 	BashToolUseMessage,
 	GlobToolUseMessage,
 	ToolResultMessage,
+	TranscriptNoticeMessage,
 	UserMessage,
 } from '$shared/chat-types';
 import type { PendingPermissionRequest } from '$lib/types/chat';
@@ -173,6 +174,23 @@ describe('conversation virtual feed model', () => {
 		expect(estimateConversationFeedItemSize(ordinary, 1)).toBe(124);
 		expect(estimateConversationFeedItemSize(collapsible, 1)).toBe(124);
 		expect(estimateConversationFeedItemSize(presented, 1)).toBe(156);
+	});
+
+	it('bounds collapsed handoff notices while plain notices stay compact', () => {
+		const plain = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Plain notice.');
+		const handoff = new TranscriptNoticeMessage(
+			'2026-08-03T00:00:00.000Z',
+			'# Summary\n\nCarried context.',
+			{ type: 'handoff-summary' },
+			'Handoff summary',
+		);
+		const model = build([
+			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: plain },
+			{ kind: 'message', id: 'generation-1:2', index: 2, ordinal: 2, message: handoff },
+		]);
+
+		expect(estimateConversationFeedItemSize(model.items[1], 1)).toBe(64);
+		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBe(242);
 	});
 
 	it('includes viewport geometry and established floating permission spacing', () => {
