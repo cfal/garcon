@@ -1,10 +1,15 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   assistantContents,
   userContents,
 } from '../../support/chat-assertions.js';
-import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
+import {
+  chatCompletionsText,
+  chatCompletionsToolUse,
+} from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
   type IntegrationFixtureOptions,
@@ -18,6 +23,7 @@ import {
   openCodeNativeSession,
   openCodePaths,
   readOpenCodeSessionCount,
+  readOpenCodeSessionPermission,
   readOpenCodeSessionRows,
   readSupervisorStates,
   scriptedOpenCodeRunRequest,
@@ -350,6 +356,66 @@ describeOnLinux('scripted OpenCode persistence', () => {
         .toBeGreaterThan(sourceRows.messages.length);
       expect(assistantContents((await fixture.client.getMessages(forkChatId)).messages)
         .some((content) => content.includes(sourceContinuation))).toBe(false);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  // The forked native session inherits nothing from the source session upstream, so
+  // Garcon applies the chat's ruleset at fork time. Without it the forked turn's bash
+  // tool call would stall behind a native permission request despite bypass mode.
+  test('carries the chat permission mode into the forked native session', async () => {
+    const testEnvironment = requireEnvironment();
+    const sourceReply = marker('FORKPERM_SOURCE_REPLY');
+    const forkReply = marker('FORKPERM_FORK_REPLY');
+    const toolMarker = 'fork-permission.marker';
+    testEnvironment.model.scriptTurn([chatCompletionsText(sourceReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsToolUse('call_fork_perm_tool', 'bash', {
+      command: `touch ${toolMarker}`,
+    })]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(forkReply)]);
+
+    await withIntegrationFixture('opencode-scripted-fork-permission', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourceCursor = fixture.client.markEvents();
+      const source = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: sourceChatId,
+        projectPath: fixture.dirs.project,
+        command: marker('FORKPERM_SOURCE_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId: sourceChatId,
+        turnId: source.turnId,
+        marker: sourceReply,
+        afterIndex: sourceCursor,
+      });
+
+      const forkChatId = fixture.newChatId();
+      const forkCursor = fixture.client.markEvents();
+      const forkTurn = await fixture.client.forkRunChat({
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        sourceChatId,
+        chatId: forkChatId,
+        command: marker('FORKPERM_FORK_PROMPT'),
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'none',
+        agentSettings: { ownerId: 'opencode', schemaVersion: 1, values: {} },
+        model: undefined,
+      });
+      await waitForVisibleResponse({
+        fixture,
+        chatId: forkChatId,
+        turnId: forkTurn.turnId,
+        marker: forkReply,
+        afterIndex: forkCursor,
+      });
+
+      expect(existsSync(join(fixture.dirs.project, toolMarker))).toBe(true);
+      const forkNative = await openCodeNativeSession(fixture, forkChatId);
+      const permission = readOpenCodeSessionPermission(forkNative);
+      expect(permission).toContainEqual({ permission: 'bash', pattern: '*', action: 'allow' });
+      expect(permission).toContainEqual({ permission: 'edit', pattern: '*', action: 'allow' });
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

@@ -737,3 +737,22 @@ export function readOpenCodeSessionCount(databasePath: string): number {
     database.close();
   }
 }
+
+// Returns the session row's stored ruleset; undefined when the column is absent or empty.
+export function readOpenCodeSessionPermission(
+  native: OpenCodeNativeSession,
+): Array<{ permission: string; pattern: string; action: string }> | undefined {
+  const database = new Database(native.databasePath, { readonly: true, strict: true });
+  try {
+    const row = database.query('SELECT permission FROM session WHERE id = ?')
+      .get(native.agentSessionId) as { permission: string | null } | null;
+    if (!row?.permission) return undefined;
+    return JSON.parse(row.permission) as Array<{
+      permission: string;
+      pattern: string;
+      action: string;
+    }>;
+  } finally {
+    database.close();
+  }
+}

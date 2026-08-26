@@ -10,12 +10,13 @@ async function* neverEndingStream() {
 }
 
 function createForking(session) {
+  const update = mock(() => Promise.resolve({ data: {} }));
   const runtime = new OpenCodeRuntime({
     createInstance: mock(() => Promise.resolve({
       client: {
         permission: { reply: mock(() => Promise.resolve({})) },
         global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
-        session,
+        session: { update, ...session },
       },
       server: { close: mock(() => {}) },
     })),
@@ -24,6 +25,7 @@ function createForking(session) {
   return {
     runtime,
     nativeSessions,
+    update,
     forking: createOpenCodeNativeForking({
       runtime,
       nativeSessions,
@@ -91,6 +93,21 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
       sessionID: 'source-session',
       directory: '/repo',
     });
+  });
+
+  it('applies the request permission mode to the forked native session', async () => {
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const { forking, update } = createForking({ fork });
+
+    const outcome = await forking.fork(forkRequest({ permissionMode: 'bypassPermissions' }));
+
+    expect(outcome.kind).toBe('materialized');
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.mock.calls[0][0];
+    expect(payload.sessionID).toBe('forked-session');
+    expect(payload.directory).toBe('/repo');
+    expect(payload.permission).toContainEqual({ permission: 'bash', pattern: '*', action: 'allow' });
+    expect(payload.permission).toContainEqual({ permission: 'plan_enter', pattern: '*', action: 'deny' });
   });
 
   it('bounds a part anchor just past its owning message', async () => {

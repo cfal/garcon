@@ -24,11 +24,25 @@ function createRuntimeWithClient(client) {
 }
 
 async function waitForMockCall(fn) {
+  await waitForCondition(() => fn.mock.calls.length > 0);
+}
+
+async function waitForCondition(predicate) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (fn.mock.calls.length > 0) return;
+    if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  throw new Error('Timed out waiting for mock call');
+  throw new Error('Timed out waiting for condition');
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function operation(runId) {
@@ -127,6 +141,109 @@ describe('OpenCodeRuntime fork', () => {
     expect(failure?.code).toBe('TRANSCRIPT_UNAVAILABLE');
     expect(failure?.retryable).toBe(true);
     expect(failure?.details).toEqual({ nativeForkReason: 'source-missing' });
+  });
+
+  it('applies the chat permission mode to the forked session', async () => {
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const { runtime } = createRuntimeWithClient({
+      session: { fork, update },
+    });
+
+    await expect(runtime.forkSession('source-session', {
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+    })).resolves.toBe('forked-session');
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.mock.calls[0][0];
+    expect(payload.sessionID).toBe('forked-session');
+    expect(payload.directory).toBe('/repo');
+    expect(payload.permission).toContainEqual({ permission: 'bash', pattern: '*', action: 'allow' });
+    expect(payload.permission).toContainEqual({ permission: 'edit', pattern: '*', action: 'allow' });
+    // Native plan transitions stay denied even under bypass, matching session creation.
+    expect(payload.permission).toContainEqual({ permission: 'plan_enter', pattern: '*', action: 'deny' });
+  });
+
+  it('deletes the forked session when the permission update fails', async () => {
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => Promise.resolve({ error: { message: 'update rejected' } }));
+    const remove = mock(() => Promise.resolve({ data: true }));
+    const { runtime } = createRuntimeWithClient({
+      session: { fork, update, delete: remove },
+    });
+
+    const failure = await runtime.forkSession('source-session', {
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+    }).then(() => null, (error) => error);
+
+    expect(failure?.message).toBe('update rejected');
+    expect(failure?.code).toBe('TRANSCRIPT_UNAVAILABLE');
+    expect(failure?.retryable).toBe(true);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+  });
+
+  it('does not touch session update when no permission mode is given', async () => {
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const { runtime } = createRuntimeWithClient({
+      session: { fork, update },
+    });
+
+    await expect(runtime.forkSession('source-session')).resolves.toBe('forked-session');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('retains the forked session deletion when the endpoint dies and replays it on the replacement', async () => {
+    const termination = deferred();
+    let firstClosed = false;
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => Promise.reject(new Error('server gone')));
+    const deadDelete = mock(() => Promise.reject(new Error('dead endpoint')));
+    const replacementDelete = mock(() => Promise.resolve({ data: true }));
+    let factoryCalls = 0;
+    const createInstance = mock(() => {
+      factoryCalls += 1;
+      return Promise.resolve(factoryCalls === 1
+        ? {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { fork, update, delete: deadDelete },
+          },
+          server: {
+            close: () => { firstClosed = true; },
+            termination: termination.promise,
+          },
+        }
+        : {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { delete: replacementDelete },
+          },
+          server: { close: mock(() => {}) },
+        });
+    });
+    const runtime = new OpenCodeRuntime({ createInstance });
+
+    const failure = await runtime.forkSession('source-session', {
+      projectPath: '/repo',
+      permissionMode: 'bypassPermissions',
+    }).then(() => null, (error) => error);
+    expect(failure?.code).toBe('TRANSCRIPT_UNAVAILABLE');
+    expect(failure?.retryable).toBe(true);
+    // The delete through the dying endpoint fails, so the deletion is retained.
+    expect(deadDelete).toHaveBeenCalledTimes(1);
+
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitForCondition(() => firstClosed);
+    await runtime.getClient();
+    await waitForCondition(() => replacementDelete.mock.calls.length > 0);
+    expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+    await runtime.shutdown();
   });
 
   it('creates new sessions and submits the first prompt in the project directory', async () => {

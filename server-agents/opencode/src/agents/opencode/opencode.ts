@@ -1601,7 +1601,7 @@ export class OpenCodeRuntime {
 
   async forkSession(
     sourceSessionId: string,
-    options: { projectPath?: string | null; messageId?: string } = {},
+    options: { projectPath?: string | null; messageId?: string; permissionMode?: string } = {},
   ): Promise<string> {
     // OpenCode persists a manual compaction control before its summary runs, so
     // a whole-tip fork mid-compaction would clone a pending control into the
@@ -1615,11 +1615,48 @@ export class OpenCodeRuntime {
         { nativeForkReason: 'not-settled' },
       );
     }
-    return this.#endpointCoordinator.forkSession(
+    const forkedSessionId = await this.#endpointCoordinator.forkSession(
       sourceSessionId,
       options,
       (label, scope, operation) => this.#runScopedSessionRequest(label, scope, operation),
     );
+    // Native fork clones only messages: the forked session carries no permission
+    // ruleset, so without this the forked chat prompts for everything the source
+    // had allowed. https://github.com/anomalyco/opencode/blob/v1.18.22/packages/opencode/src/session/session.ts#L691-L701
+    const permissionMode = options.permissionMode;
+    if (permissionMode) {
+      try {
+        await this.withClientLease(async (client) => {
+          const result = await this.#runScopedSessionRequest(
+            'OpenCode fork permission update',
+            createOpenCodeRequestScope(options.projectPath),
+            (requestSignal, requestScope) => client.session.update(
+              withOpenCodeRequestScope({
+                sessionID: forkedSessionId,
+                permission: mapPermissionMode(permissionMode),
+              }, requestScope),
+              { signal: requestSignal },
+            ),
+          );
+          throwOpenCodeResultError(result, 'Failed to apply OpenCode fork permission mode');
+        });
+      } catch (error) {
+        // Never leave a forked session behind with a ruleset that does not match the
+        // chat record; the fork caller retries the whole operation. Cleanup goes
+        // through the retained-deletion path: an update that failed because the
+        // endpoint died would otherwise orphan a full transcript clone.
+        await this.#deleteSessionBestEffort(
+          forkedSessionId,
+          createOpenCodeRequestScope(options.projectPath),
+        );
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          errorMessage(error),
+          true,
+        );
+      }
+    }
+    return forkedSessionId;
   }
 
   async deleteSession(agentSessionId: string, signal?: AbortSignal): Promise<void> {

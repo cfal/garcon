@@ -44,6 +44,9 @@ export function createOpenCodeNativeForking(
         : null;
       const forkedSessionId = await options.runtime.forkSession(sourceSessionId, {
         projectPath: request.projectPath,
+        // The forked native session must carry the chat's ruleset; OpenCode's fork
+        // does not inherit it from the source session.
+        permissionMode: request.permissionMode,
         // OpenCode resolves the boundary by exact identity and clones its
         // chronological prefix.
         // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/session.ts#L704-L706
