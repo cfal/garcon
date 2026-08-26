@@ -4,11 +4,16 @@ import {
   isTranscriptExportFormat,
   type TranscriptExportCategory,
 } from '../../common/chat-export-contracts.js';
-import { InvalidChatIdError, parseChatId } from '../../common/chat-id.js';
+import { parseChatId } from '../../common/chat-id.js';
 import type { TranscriptExportService } from '../chats/transcript-export/service.js';
 import { ValidationDomainError } from '../lib/domain-error.js';
 import { jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import {
+  noStore,
+  normalizeChatIdError,
+  requiredSingleParameter,
+} from './chat-read-helpers.js';
 
 export function createChatExportRoutes(service: TranscriptExportService): RouteMap {
   async function getExport(request: Request, url: URL): Promise<Response> {
@@ -29,10 +34,7 @@ export function createChatExportRoutes(service: TranscriptExportService): RouteM
         exclusions,
       }, request.signal)));
     } catch (error) {
-      const normalized = error instanceof InvalidChatIdError
-        ? new ValidationDomainError(error.message)
-        : error;
-      return noStore(jsonErrorFromUnknown(normalized));
+      return noStore(jsonErrorFromUnknown(normalizeChatIdError(error)));
     }
   }
 
@@ -52,17 +54,4 @@ function parseExclusions(values: readonly string[]): TranscriptExportCategory[] 
     categories.push(value);
   }
   return canonicalTranscriptExportCategories(categories);
-}
-
-function requiredSingleParameter(parameters: URLSearchParams, name: string): string {
-  const values = parameters.getAll(name);
-  if (values.length !== 1 || values[0].length === 0) {
-    throw new ValidationDomainError(`${name} query parameter is required exactly once`);
-  }
-  return values[0];
-}
-
-function noStore(response: Response): Response {
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
 }

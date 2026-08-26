@@ -42,6 +42,7 @@ export function fitEstimatedTokenDocument<T>(input: {
   readonly value: T;
   readonly estimatedTokens: number;
   readonly entryBudgetTokens: number;
+  readonly correctionPasses: number;
 } | null {
   const minimumEntryBudget = input.minimumEntryBudgetTokens ?? 1;
   const availableEntryBudget = input.usableTokens - input.fixedFrameTokens;
@@ -56,7 +57,12 @@ export function fitEstimatedTokenDocument<T>(input: {
     if (value === null) return null;
     const estimatedTokens = estimateHandoffTokens(input.document(value));
     if (estimatedTokens <= input.usableTokens) {
-      return { value, estimatedTokens, entryBudgetTokens: entryBudget };
+      return {
+        value,
+        estimatedTokens,
+        entryBudgetTokens: entryBudget,
+        correctionPasses: attempt + 1,
+      };
     }
     entryBudget -= estimatedTokens - input.usableTokens + FIT_CONVERGENCE_GUARD_TOKENS;
     if (entryBudget < minimumEntryBudget) return null;

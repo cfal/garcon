@@ -1,0 +1,63 @@
+export interface HandoffArtifactChatMetadata {
+  readonly id: string;
+  readonly title: string;
+  readonly agentId: string;
+  readonly model: string | null;
+}
+
+export interface HandoffArtifactAttribute {
+  readonly name: string;
+  readonly value: string;
+}
+
+export interface HandoffArtifactSourceEntry {
+  readonly ordinal: number;
+  readonly level: number;
+  readonly turn: number;
+  readonly tag: 'user' | 'assistant' | 'compaction' | 'tool-call' | 'handoff' | 'notice';
+  readonly attributes: readonly HandoffArtifactAttribute[];
+  readonly body: string | null;
+  readonly abridged: boolean;
+}
+
+export interface RenderedHandoffArtifactEntry {
+  readonly source: HandoffArtifactSourceEntry;
+  readonly xml: string;
+  readonly abridged: boolean;
+}
+
+export interface HandoffArtifactGap {
+  readonly afterOrdinal: number | null;
+  readonly beforeOrdinal: number | null;
+  readonly omittedEntryCount: number;
+}
+
+export type HandoffArtifactDocumentNode =
+  | { readonly kind: 'entry'; readonly entry: RenderedHandoffArtifactEntry }
+  | { readonly kind: 'gap'; readonly gap: HandoffArtifactGap };
+
+export interface HandoffArtifactSelection {
+  readonly nodes: readonly HandoffArtifactDocumentNode[];
+  readonly includedEntryCount: number;
+  readonly omittedEntryCount: number;
+  readonly abridgedEntryCount: number;
+  readonly gapCount: number;
+  readonly truncated: boolean;
+}
+
+export interface RenderedHandoffArtifact {
+  readonly transcriptViewId: string;
+  readonly lastOrdinal: number;
+  readonly contextWindowTokens: number;
+  readonly usableTokenBudget: number;
+  readonly estimatedTokens: number;
+  readonly totalEntryCount: number;
+  readonly includedEntryCount: number;
+  readonly omittedEntryCount: number;
+  readonly abridgedEntryCount: number;
+  readonly gapCount: number;
+  readonly truncated: boolean;
+  readonly document: string;
+  readonly fitCorrectionPasses: number;
+  readonly metadataPasses: number;
+}

@@ -15,8 +15,10 @@ export interface PrioritizedProjectionEntry {
   refit(maximumCost: number, cost: (text: string) => number): string;
 }
 
-export interface ProjectionSelection {
-  readonly selected: readonly PrioritizedProjectionEntry[];
+export interface ProjectionSelection<
+  Entry extends PrioritizedProjectionEntry = PrioritizedProjectionEntry,
+> {
+  readonly selected: readonly Entry[];
   readonly truncated: boolean;
 }
 
@@ -25,14 +27,14 @@ export function projectionPriorityLevel(type: string): number {
   return index === -1 ? PROJECTION_LONG_TAIL_LEVEL : index;
 }
 
-export function selectPrioritizedProjection(input: {
-  readonly entries: readonly PrioritizedProjectionEntry[];
+export function selectPrioritizedProjection<Entry extends PrioritizedProjectionEntry>(input: {
+  readonly entries: readonly Entry[];
   readonly turnCount: number;
   readonly maximumCost: number;
   readonly truncationMarkerCost: number;
   readonly cost: (text: string) => number;
   readonly recentTurnsVerbatim?: number;
-}): ProjectionSelection {
+}): ProjectionSelection<Entry> {
   const admitted = new Set<PrioritizedProjectionEntry>();
   const asks = admitLevel({
     ...input,

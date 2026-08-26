@@ -30,6 +30,21 @@ export function textSafe(value: string): string {
   );
 }
 
+export function xmlText(value: string): string {
+  return textSafe(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('\r', '&#13;');
+}
+
+export function xmlAttribute(value: string): string {
+  return xmlText(value)
+    .replaceAll('\t', '&#9;')
+    .replaceAll('\n', '&#10;')
+    .replaceAll('"', '&quot;');
+}
+
 export function transcriptExportEntryType(entry: TranscriptExportEntry): string {
   return entry.kind === 'run-ended' ? 'run-ended' : entry.message.type;
 }
@@ -185,7 +200,7 @@ function sanitizeStructuredValue(value: unknown): unknown {
   );
 }
 
-function redactDataUrl(value: string): string {
+export function redactDataUrl(value: string): string {
   return value.replace(embeddedDataUrl, DATA_URL_OMISSION);
 }
 

@@ -15,6 +15,7 @@
     "./api-providers": "./api-providers.ts",
     "./chat-command-contracts": "./chat-command-contracts.ts",
     "./chat-export-contracts": "./chat-export-contracts.ts",
+    "./chat-handoff-artifact-contracts": "./chat-handoff-artifact-contracts.ts",
     "./chat-details": "./chat-details.ts",
     "./chat-execution-control": "./chat-execution-control.ts",
     "./chat-id": "./chat-id.ts",

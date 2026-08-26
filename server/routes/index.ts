@@ -19,6 +19,7 @@ import { createAgentTurnReceiptRoutes } from './agent-turn-receipt.js';
 import { createChatSnapshotRoutes } from './chat-snapshot.js';
 import { createChatRowRoutes } from './chat-rows.js';
 import { createChatExportRoutes } from './chat-export.js';
+import { createChatHandoffArtifactRoutes } from './chat-handoff-artifact.js';
 import type { ServerRuntimeState } from '../lib/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -48,6 +49,7 @@ import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
 import type { ChatRowService } from '../chats/chat-row-service.js';
 import type { TranscriptExportService } from '../chats/transcript-export/service.js';
+import type { HandoffArtifactService } from '../chats/handoff-artifact/service.js';
 
 export default function createAllRoutes({
   registry,
@@ -78,6 +80,7 @@ export default function createAllRoutes({
   transientFeeds,
   chatRows,
   transcriptExport,
+  handoffArtifact,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -107,6 +110,7 @@ export default function createAllRoutes({
   transientFeeds: ChatTransientFeedStore;
   chatRows: ChatRowService;
   transcriptExport: TranscriptExportService;
+  handoffArtifact: HandoffArtifactService;
 }): RouteMap {
   return {
     ...createRuntimeRoutes(runtimeState),
@@ -119,6 +123,7 @@ export default function createAllRoutes({
     }),
     ...createChatRowRoutes(chatRows),
     ...createChatExportRoutes(transcriptExport),
+    ...createChatHandoffArtifactRoutes(handoffArtifact),
     ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),

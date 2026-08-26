@@ -635,8 +635,23 @@ function toolName(message: ToolUseChatMessage): string {
   return message.type.replace(/-tool-use$/, '');
 }
 
+export interface ProjectedToolUseSummary {
+  readonly text: string;
+  readonly abridged: boolean;
+}
+
+export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
+  const raw = extractToolDetail(message);
+  const collapsed = boundedCollapse(raw);
+  const text = truncate(collapsed, TOOL_SUMMARY_MAX_CHARS);
+  return {
+    text,
+    abridged: raw.length > PROJECTED_BODY_MAX_CHARS || text !== collapsed,
+  };
+}
+
 function toolSummary(message: ToolUseChatMessage): string {
-  return truncate(boundedCollapse(extractToolDetail(message)), TOOL_SUMMARY_MAX_CHARS);
+  return projectToolUseSummary(message).text;
 }
 
 // Frozen alongside `stringifyLegacyToolResult` and for the same reason: the
