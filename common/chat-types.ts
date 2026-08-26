@@ -736,8 +736,9 @@ export class CompactionMessage {
 
 // Marks a cross-agent continuation boundary in the conversation. Messages
 // before this point were produced by `fromAgentId`; the chat continues under
-// `toAgentId` with a fresh seeded session, so prior tool state is not carried
-// over. Generic across agents: identifies both sides by agent id and model.
+// `toAgentId` with a fresh seeded session. Earlier context is carried as
+// history rather than a live native session. Generic across agents: identifies
+// both sides by agent id and model.
 export class AgentSwitchMessage {
   readonly type = 'agent-switch' as const;
   constructor(
