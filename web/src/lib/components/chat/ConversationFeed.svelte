@@ -38,6 +38,7 @@
 	import { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
+	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
 	import {
 		ConversationFeedAnnouncementBatcher,
 		ConversationFeedAnnouncerState,
@@ -160,6 +161,7 @@
 
 	function finishScrollbarPointerIntent(): void {
 		scrollbarPointerY = null;
+		virtualController.finishScrollbarDrag();
 	}
 
 	const feedScrollAreaClass = 'h-full overflow-hidden relative';
@@ -272,9 +274,9 @@
 		},
 		onInitialEndRestored: () => onInitialEndRestored?.(),
 	});
-	const virtualizer = virtualController.virtualizer;
-	const virtualItems = $derived($virtualizer.getVirtualItems());
-	const virtualTotalSize = $derived($virtualizer.getTotalSize());
+	const virtualSnapshot = $derived(virtualController.snapshot);
+	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
+	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
 
 	$effect.pre(() => {
 		const input = projectionInput;
@@ -283,12 +285,13 @@
 		);
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);
-			// Captures old coordinates before publishing the projection that changes row geometry.
-			virtualController.prepareForGeometryPublication(
-				nextProjection.geometry.geometryRevision,
-				nextProjection.geometry.mutationKinds.has('history-earlier'),
-				scrollbarPointerY !== null,
-			);
+			const applied = virtualController.applyProjection({
+				previous: projection,
+				next: nextProjection,
+				pinned: pinnedToBottom,
+				scrollbarDragActive: scrollbarPointerY !== null,
+			});
+			if (!applied) return;
 			projection = nextProjection;
 			itemState.reconcile(
 				input.surfaceIdentity,
@@ -375,7 +378,7 @@
 		<div
 			bind:this={virtualRoot}
 			class="relative w-full"
-			style:height={`${virtualTotalSize}px`}
+			style:height={`${virtualSnapshot.sizerSize}px`}
 			style="overflow-anchor: none;"
 			data-chat-virtual-sizer
 			data-chat-virtual-count={virtualItems.length}
@@ -383,6 +386,7 @@
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-entry-count={chatState.entries.length}
 			data-chat-transcript-scale={String(textScale)}
+			{@attach virtualController.sizer}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}
 				{@const itemIndex = projection.model.indexByKey.get(String(virtualItem.key))}
@@ -428,7 +432,7 @@
 			</div>
 		</div>
 	{:else if showEarlierLoadingStatus}
-		<!-- Keeps automatic loading outside TanStack geometry so prepends cannot move the reading anchor. -->
+		<!-- Keeps automatic loading outside virtual geometry so prepends cannot move the reading anchor. -->
 		<div
 			class={cn(
 				'pointer-events-none absolute left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-none',
@@ -461,6 +465,7 @@
 		data-chat-pinned-to-bottom={pinnedToBottom}
 		data-chat-user-scrolled-up={chatState.isUserScrolledUp}
 		class={feedViewportClass}
+		{@attach virtualController.viewport}
 	>
 		<div class={feedContentClass} data-chat-feed-content>
 			{@render feedContent()}

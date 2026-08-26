@@ -1,8 +1,13 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
-	import type { SvelteVirtualizer } from '@tanstack/svelte-virtual';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import type { Attachment } from 'svelte/attachments';
 	import { UserMessage } from '$shared/chat-types';
-	import type { ConversationVirtualGeometrySnapshot } from '../ConversationFeedProjectionState.svelte.js';
+	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { virtualItems, type VirtualTransactionRecord } from '$lib/virt/virtual-list-types.js';
+	import type {
+		ConversationFeedProjection,
+		ConversationVirtualGeometrySnapshot,
+	} from '../ConversationFeedProjectionState.svelte.js';
 	import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
 	import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 	import type {
@@ -12,19 +17,16 @@
 
 	interface Exposure {
 		controller: ConversationFeedVirtualController;
-		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>;
+		transactions: readonly VirtualTransactionRecord[];
+		viewport(): HTMLDivElement | null;
 		initialEndRestoredCount(): number;
-		prepareClampedScrollbarPrepend(): void;
-		publishPreparedEarlierPrependAfterUserIntent(): Promise<void>;
-		prepareHiddenOffsetWithMissingAnchor(): Promise<void>;
-		prepareHiddenOffsetWithoutAnchor(): Promise<void>;
-		releaseWithheldEndItem(): Promise<void>;
-		restoreHiddenWithConcurrentGeometry(): Promise<void>;
-		prependWithRetainedWithheldAnchor(index: number): Promise<void>;
-		stageEarlierPrependWithTail(index: number): Promise<void>;
-		stageLatchedEarlierPrependWithTail(index: number): Promise<void>;
-		withholdEndItem(): Promise<void>;
-		withholdItem(index: number): Promise<void>;
+		appendItem(): Promise<void>;
+		prependItems(): Promise<void>;
+		prependDuring(activity: 'dragging' | 'coasting'): Promise<void>;
+		replaceSurface(): Promise<void>;
+		setPinned(value: boolean): Promise<void>;
+		toggleScale(): Promise<void>;
+		hideAndShow(): Promise<void>;
 	}
 
 	interface Props {
@@ -42,12 +44,12 @@
 	let surfaceIdentity = $state('surface-1');
 	let textScale = $state(1);
 	let visible = $state(true);
-	let viewport: HTMLDivElement | null = $state(null);
+	let viewportElement: HTMLDivElement | null = $state(null);
 	let virtualRoot: HTMLDivElement | null = $state(null);
-	let releaseRetention: (() => void) | null = null;
+	let scrollbarDragActive = false;
 	let initialEndRestoredCount = 0;
-	let withheldKey: string | null = $state(null);
-	let transcriptEligible = $state(true);
+	const transactions: VirtualTransactionRecord[] = [];
+	const renderModel = buildConversationFeedRenderModel([]);
 
 	const keys = $derived(
 		Array.from({ length: itemCount }, (_, index) =>
@@ -55,54 +57,59 @@
 		),
 	);
 	const model = $derived.by((): ConversationVirtualFeedModel => {
-		void contentRevision;
-		// Transcript-kind items keep reading-anchor capture eligible, matching production feeds.
-		const items: ConversationVirtualFeedItem[] = keys.map((key, index) =>
-			transcriptEligible
-				? {
-						kind: 'transcript',
-						key,
-						item: {
-							kind: 'message',
-							id: `row-${index}`,
-							message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
-							index,
-						},
-						spacingAfter: 'none',
-					}
-				: { kind: 'viewport-start-spacer', key, spacingAfter: 'none' },
-		);
+		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
+			kind: 'transcript',
+			key,
+			item: {
+				kind: 'message',
+				id: `row-${index}`,
+				message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
+				index,
+			},
+			spacingAfter: 'none',
+		}));
 		return {
 			items,
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
 			indexByRowId: new Map(),
 			targetByDomAnchorId: new Map(),
 			transcriptStartIndex: 0,
-			transcriptEndIndex: transcriptEligible ? items.length : 0,
+			transcriptEndIndex: items.length,
 		};
 	});
-	const geometry = $derived.by((): ConversationVirtualGeometrySnapshot => ({
-		surfaceIdentity,
-		geometryRevision,
-		keys,
-		estimates: keys.map(() => 40 * textScale),
-		measurementReset,
-		mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
-		endBehavior: 'restore-if-pinned',
-	}));
+	const geometry = $derived.by(
+		(): ConversationVirtualGeometrySnapshot => ({
+			surfaceIdentity,
+			geometryRevision,
+			keys,
+			estimates: keys.map(() => 40 * textScale),
+			measurementReset,
+			mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
+			endBehavior: 'restore-if-pinned',
+		}),
+	);
+	const nextProjection = $derived.by(
+		(): ConversationFeedProjection => ({
+			renderModel,
+			model,
+			geometry,
+			projectedDataRevision: contentRevision,
+		}),
+	);
+	let appliedProjection = $state.raw<ConversationFeedProjection>(untrack(() => nextProjection));
 	const retention = new ConversationFeedRetentionState();
 	const controller = new ConversationFeedVirtualController({
 		get model() {
-			return model;
+			return appliedProjection.model;
 		},
 		get geometry() {
-			return geometry;
+			return appliedProjection.geometry;
 		},
 		get projectedDataRevision() {
-			return contentRevision;
+			return appliedProjection.projectedDataRevision;
 		},
 		get viewport() {
-			return viewport;
+			return viewportElement;
 		},
 		get virtualRoot() {
 			return virtualRoot;
@@ -119,232 +126,154 @@
 		onInitialEndRestored() {
 			initialEndRestoredCount += 1;
 		},
+		onTransaction(record) {
+			transactions.push(record);
+		},
 	});
-	const virtualizer = controller.virtualizer;
+	const snapshot = $derived(controller.snapshot);
+	const renderedIndexes = $derived(controller.renderedIndexes(snapshot));
+	const renderedItems = $derived(virtualItems(snapshot, renderedIndexes));
+
+	$effect.pre(() => {
+		const next = nextProjection;
+		untrack(() => {
+			const previous = appliedProjection;
+			if (
+				controller.applyProjection({
+					previous,
+					next,
+					pinned,
+					scrollbarDragActive,
+				})
+			) {
+				appliedProjection = next;
+			}
+		});
+	});
+
+	const installViewportGeometry: Attachment<HTMLElement> = (element) => {
+		Object.defineProperties(element, {
+			clientHeight: { configurable: true, value: 200 },
+			scrollHeight: { configurable: true, get: () => controller.snapshot.sizerSize },
+		});
+		element.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
+	};
+	const installSizerGeometry: Attachment<HTMLElement> = (element) => {
+		element.getBoundingClientRect = () =>
+			new DOMRect(0, -((viewportElement?.scrollTop ?? 0) as number), 400, snapshot.sizerSize);
+	};
+	function installItemGeometry(index: number): Attachment<HTMLElement> {
+		return (element) => {
+			Object.defineProperty(element, 'offsetHeight', {
+				configurable: true,
+				value: geometry.estimates[index] ?? 0,
+			});
+		};
+	}
 
 	onMount(() => {
-		let instance: SvelteVirtualizer<HTMLElement, HTMLDivElement> | undefined;
-		const unsubscribe = controller.virtualizer.subscribe((value) => {
-			instance ??= value;
-		});
-		unsubscribe();
-		if (!instance) throw new Error('Expected the virtualizer store to emit synchronously');
 		onReady({
 			controller,
-			instance,
+			transactions,
+			viewport: () => viewportElement,
 			initialEndRestoredCount: () => initialEndRestoredCount,
-			prepareClampedScrollbarPrepend,
-			publishPreparedEarlierPrependAfterUserIntent,
-			prepareHiddenOffsetWithMissingAnchor,
-			prepareHiddenOffsetWithoutAnchor,
-			releaseWithheldEndItem,
-			restoreHiddenWithConcurrentGeometry,
-			prependWithRetainedWithheldAnchor,
-			stageEarlierPrependWithTail,
-			stageLatchedEarlierPrependWithTail,
-			withholdEndItem,
-			withholdItem,
+			appendItem,
+			prependItems,
+			prependDuring,
+			replaceSurface,
+			setPinned,
+			toggleScale,
+			hideAndShow,
 		});
 	});
 
 	onDestroy(() => {
-		releaseRetention?.();
 		controller.destroy();
+		retention.clear();
 	});
 
-	function publishContent(): void {
-		contentRevision += 1;
-	}
-
-	function retainFirst(): void {
-		releaseRetention?.();
-		releaseRetention = retention.acquire(keys[0] ?? 'missing', 'focus');
-	}
-
-	function shrink(): void {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		itemCount = 4;
-		measurementReset = 'none';
-		geometryRevision += 1;
-	}
-
-	async function prependWithRetainedWithheldAnchor(index: number): Promise<void> {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		releaseRetention?.();
-		const key = keys[index] ?? 'missing';
-		releaseRetention = retention.acquire(key, 'focus');
-		withheldKey = key;
-		await tick();
-		historyEarlierMutation = true;
-		firstItemNumber -= 4;
-		itemCount += 4;
-		measurementReset = 'none';
-		geometryRevision += 1;
-		await tick();
-		await tick();
-	}
-
-	async function stageEarlierPrependWithTail(index: number): Promise<void> {
-		await prependWithRetainedWithheldAnchor(index);
-		appendItem();
-		await tick();
-	}
-
-	async function stageLatchedEarlierPrependWithTail(index: number): Promise<void> {
-		await prependWithRetainedWithheldAnchor(index);
-		if (viewport) viewport.scrollTop = 0;
-		controller.cancelForUserIntent(null);
-		controller.cancelForUserIntent('earlier');
-		appendItem();
-		await tick();
-	}
-
-	function appendItem(): void {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
+	async function appendItem(): Promise<void> {
 		historyEarlierMutation = false;
 		itemCount += 1;
 		measurementReset = 'none';
 		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
 	}
 
-	function prepareClampedScrollbarPrepend(): void {
-		if (viewport) viewport.scrollTop = 0;
-		controller.prepareForGeometryPublication(geometryRevision + 1, true, true);
-	}
-
-	function prependItems(): void {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
+	async function prependItems(): Promise<void> {
 		historyEarlierMutation = true;
 		firstItemNumber -= 4;
 		itemCount += 4;
 		measurementReset = 'none';
 		geometryRevision += 1;
-	}
-
-	async function publishPreparedEarlierPrependAfterUserIntent(): Promise<void> {
-		controller.prepareForGeometryPublication(geometryRevision + 1, true);
-		controller.cancelForUserIntent('earlier');
-		historyEarlierMutation = true;
-		firstItemNumber -= 4;
-		itemCount += 4;
-		measurementReset = 'none';
-		geometryRevision += 1;
-		await tick();
+		contentRevision += 1;
 		await tick();
 	}
 
-	function toggleScale(): void {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		textScale = textScale === 1 ? 0.85 : 1;
-		measurementReset = 'all';
-		geometryRevision += 1;
+	async function prependDuring(activity: 'dragging' | 'coasting'): Promise<void> {
+		controller.setNativeScrollActivity(activity);
+		await prependItems();
 	}
 
-	function replaceSurface(): void {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
+	async function replaceSurface(): Promise<void> {
 		surfaceIdentity = surfaceIdentity === 'surface-1' ? 'surface-2' : 'surface-1';
 		measurementReset = 'none';
 		geometryRevision += 1;
+		contentRevision += 1;
+		await tick();
 	}
 
-	async function showAndRestore(): Promise<void> {
-		visible = true;
+	async function setPinned(value: boolean): Promise<void> {
+		pinned = value;
 		await tick();
-		controller.scrollToEnd();
 	}
 
-	async function restoreHiddenWithConcurrentGeometry(): Promise<void> {
-		visible = false;
-		await tick();
-		visible = true;
-		await tick();
-		const restore = controller.restoreHiddenReadingPosition();
-		// Mimics a show-time clamp before the concurrent scale geometry publishes.
-		if (viewport) viewport.scrollTop = 0;
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		textScale = 0.85;
+	async function toggleScale(): Promise<void> {
+		textScale = textScale === 1 ? 0.85 : 1;
 		measurementReset = 'all';
 		geometryRevision += 1;
-		await restore;
+		await tick();
 	}
 
-	async function prepareHiddenOffsetWithoutAnchor(): Promise<void> {
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		transcriptEligible = false;
-		geometryRevision += 1;
-		await tick();
-		if (viewport) viewport.scrollTop = 86;
+	async function hideAndShow(): Promise<void> {
+		controller.prepareForHide();
 		visible = false;
 		await tick();
 		visible = true;
-		await tick();
-	}
-
-	async function prepareHiddenOffsetWithMissingAnchor(): Promise<void> {
-		if (viewport) viewport.scrollTop = 86;
-		visible = false;
-		await tick();
-		controller.prepareForGeometryPublication(geometryRevision + 1);
-		firstItemNumber += 100;
-		geometryRevision += 1;
-		await tick();
-		visible = true;
-		await tick();
-	}
-
-	async function withholdEndItem(): Promise<void> {
-		await withholdItem($virtualizer.getVirtualItems().at(-1)?.index ?? -1);
-	}
-
-	async function withholdItem(index: number): Promise<void> {
-		withheldKey = index >= 0 ? (keys[index] ?? null) : null;
-		await tick();
-	}
-
-	async function releaseWithheldEndItem(): Promise<void> {
-		withheldKey = null;
 		await tick();
 	}
 </script>
 
 <div
-	bind:this={viewport}
+	bind:this={viewportElement}
 	data-controller-viewport
 	data-visible={String(visible)}
 	style:display={visible ? 'block' : 'none'}
 	style:height="200px"
 	style:overflow="auto"
+	{@attach installViewportGeometry}
+	{@attach controller.viewport}
 >
 	<div
 		bind:this={virtualRoot}
 		data-controller-sizer
 		data-controller-model-count={model.items.length}
-		style:height={`${$virtualizer.getTotalSize()}px`}
+		style:height={`${snapshot.sizerSize}px`}
 		style:position="relative"
+		{@attach installSizerGeometry}
+		{@attach controller.sizer}
 	>
-		{#each $virtualizer.getVirtualItems() as virtualItem (virtualItem.key)}
-			{#if String(virtualItem.key) !== withheldKey}
-				<!-- Real browser geometry covers positionReadingAnchor; zero-valued test rects would invent corrections. -->
-				<div
-					data-index={virtualItem.index}
-					data-chat-virtual-item={String(virtualItem.key)}
-					style:height={`${geometry.estimates[virtualItem.index]}px`}
-					style:position="absolute"
-					style:transform={`translateY(${virtualItem.start}px)`}
-					{@attach controller.measureItem}
-				></div>
-			{/if}
+		{#each renderedItems as virtualItem (virtualItem.key)}
+			<div
+				data-index={virtualItem.index}
+				data-chat-virtual-item={virtualItem.key}
+				style:height={`${geometry.estimates[virtualItem.index]}px`}
+				style:position="absolute"
+				style:transform={`translateY(${virtualItem.start}px)`}
+				{@attach installItemGeometry(virtualItem.index)}
+				{@attach controller.item(virtualItem.key)}
+			></div>
 		{/each}
 	</div>
 </div>
-
-<button onclick={publishContent}>Publish content</button>
-<button onclick={appendItem}>Append</button>
-<button onclick={prependItems}>Prepend</button>
-<button onclick={retainFirst}>Retain first</button>
-<button onclick={shrink}>Shrink</button>
-<button onclick={toggleScale}>Toggle scale</button>
-<button onclick={() => (pinned = !pinned)}>Toggle pinned</button>
-<button onclick={() => (visible = false)}>Hide</button>
-<button onclick={showAndRestore}>Show and restore</button>
-<button onclick={replaceSurface}>Replace surface</button>
