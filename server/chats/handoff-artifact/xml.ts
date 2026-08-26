@@ -1,3 +1,9 @@
+import {
+  CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES,
+  CHAT_HANDOFF_ARTIFACT_FOLD,
+  CHAT_HANDOFF_ARTIFACT_GAP_UNIT,
+  type ChatHandoffArtifactExcludedEntryCount,
+} from '../../../common/chat-handoff-artifact-contracts.js';
 import { usableHandoffTokenBudget } from '../../../common/handoff-sizing.js';
 import {
   estimateHandoffTokens,
@@ -9,7 +15,7 @@ import type {
   HandoffArtifactChatMetadata,
   HandoffArtifactGap,
   HandoffArtifactSelection,
-  HandoffArtifactSourceEntry,
+  HandoffArtifactSourceFold,
   RenderedHandoffArtifact,
 } from './model.js';
 
@@ -21,7 +27,9 @@ export interface HandoffArtifactXmlInput {
   readonly lastOrdinal: number;
   readonly contextWindowTokens: number;
   readonly usableTokenBudget: number;
-  readonly totalEntryCount: number;
+  readonly sourceEntryCount: number;
+  readonly eligibleEntryCount: number;
+  readonly excludedEntryCounts: readonly ChatHandoffArtifactExcludedEntryCount[];
   readonly selection: HandoffArtifactSelection;
 }
 
@@ -30,19 +38,21 @@ export function renderFittedHandoffArtifact(input: {
   readonly transcriptViewId: string;
   readonly lastOrdinal: number;
   readonly contextWindowTokens: number;
-  readonly entries: readonly HandoffArtifactSourceEntry[];
+  readonly sourceFold: HandoffArtifactSourceFold;
   readonly signal?: AbortSignal;
 }): RenderedHandoffArtifact | null {
   const usableTokenBudget = usableHandoffTokenBudget(input.contextWindowTokens);
   const fixedSelection = selectHandoffArtifactEntries({
-    entries: input.entries,
+    entries: input.sourceFold.entries,
     maximumCost: 0,
     cost: estimateHandoffTokens,
   });
   const fixedFrame = renderHandoffArtifactXml({
     ...input,
     usableTokenBudget,
-    totalEntryCount: input.entries.length,
+    sourceEntryCount: input.sourceFold.sourceEntryCount,
+    eligibleEntryCount: input.sourceFold.eligibleEntryCount,
+    excludedEntryCounts: input.sourceFold.excludedEntryCounts,
     selection: fixedSelection,
   });
   const fitted = fitEstimatedTokenDocument({
@@ -52,14 +62,16 @@ export function renderFittedHandoffArtifact(input: {
     render(entryBudgetTokens) {
       input.signal?.throwIfAborted();
       const selection = selectHandoffArtifactEntries({
-        entries: input.entries,
+        entries: input.sourceFold.entries,
         maximumCost: entryBudgetTokens,
         cost: estimateHandoffTokens,
       });
       const rendered = renderHandoffArtifactXml({
         ...input,
         usableTokenBudget,
-        totalEntryCount: input.entries.length,
+        sourceEntryCount: input.sourceFold.sourceEntryCount,
+        eligibleEntryCount: input.sourceFold.eligibleEntryCount,
+        excludedEntryCounts: input.sourceFold.excludedEntryCounts,
         selection,
       });
       return { selection, rendered };
@@ -78,12 +90,14 @@ export function renderFittedHandoffArtifact(input: {
     contextWindowTokens: input.contextWindowTokens,
     usableTokenBudget,
     estimatedTokens: rendered.estimatedTokens,
-    totalEntryCount: input.entries.length,
+    sourceEntryCount: input.sourceFold.sourceEntryCount,
+    eligibleEntryCount: input.sourceFold.eligibleEntryCount,
+    excludedEntryCounts: input.sourceFold.excludedEntryCounts,
     includedEntryCount: selection.includedEntryCount,
-    omittedEntryCount: selection.omittedEntryCount,
+    budgetOmittedEntryCount: selection.budgetOmittedEntryCount,
     abridgedEntryCount: selection.abridgedEntryCount,
     gapCount: selection.gapCount,
-    truncated: selection.truncated,
+    projectionTruncated: selection.projectionTruncated,
     document: rendered.document,
     fitCorrectionPasses: fitted.correctionPasses,
     metadataPasses: rendered.metadataPasses,
@@ -109,10 +123,19 @@ export function renderHandoffArtifactXml(input: HandoffArtifactXmlInput): {
 
 function renderWithEstimate(input: HandoffArtifactXmlInput, estimatedTokens: number): string {
   const { selection } = input;
+  const excludedAttributes = CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES
+    .map((category) => ({
+      category,
+      count: input.excludedEntryCounts.find((entry) => entry.category === category)?.count ?? 0,
+    }))
+    .filter(({ count }) => count > 0)
+    .map(({ category, count }) => `${category}="${count}"`)
+    .join(' ');
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<handoff-artifact version="1" chat-id="${xmlAttribute(input.chat.id)}" transcript-view-id="${xmlAttribute(input.transcriptViewId)}" last-ordinal="${input.lastOrdinal}" context-window-tokens="${input.contextWindowTokens}" usable-token-budget="${input.usableTokenBudget}" estimated-tokens="${estimatedTokens}" total-entries="${input.totalEntryCount}" included-entries="${selection.includedEntryCount}" omitted-entries="${selection.omittedEntryCount}" abridged-entries="${selection.abridgedEntryCount}" gaps="${selection.gapCount}" truncated="${selection.truncated}">`,
+    `<handoff-artifact version="1" fold="${CHAT_HANDOFF_ARTIFACT_FOLD}" gap-unit="${CHAT_HANDOFF_ARTIFACT_GAP_UNIT}" chat-id="${xmlAttribute(input.chat.id)}" transcript-view-id="${xmlAttribute(input.transcriptViewId)}" last-ordinal="${input.lastOrdinal}" context-window-tokens="${input.contextWindowTokens}" usable-token-budget="${input.usableTokenBudget}" estimated-tokens="${estimatedTokens}" source-entries="${input.sourceEntryCount}" eligible-entries="${input.eligibleEntryCount}" included-entries="${selection.includedEntryCount}" budget-omitted-entries="${selection.budgetOmittedEntryCount}" abridged-entries="${selection.abridgedEntryCount}" gaps="${selection.gapCount}" projection-truncated="${selection.projectionTruncated}">`,
     `  <chat title="${xmlAttribute(input.chat.title)}" agent="${xmlAttribute(input.chat.agentId)}"${input.chat.model === null ? '' : ` model="${xmlAttribute(input.chat.model)}"`}/>`,
+    ...(excludedAttributes === '' ? [] : [`  <fixed-fold-excluded ${excludedAttributes}/>`]),
   ];
   if (selection.nodes.length === 0) {
     lines.push('  <entries/>');
@@ -131,7 +154,7 @@ function renderGap(gap: HandoffArtifactGap): string {
   const attributes = [
     ...(gap.afterOrdinal === null ? [] : [`after-ordinal="${gap.afterOrdinal}"`]),
     ...(gap.beforeOrdinal === null ? [] : [`before-ordinal="${gap.beforeOrdinal}"`]),
-    `omitted-entries="${gap.omittedEntryCount}"`,
+    `omitted-entries="${gap.omittedEligibleEntryCount}"`,
   ].join(' ');
   return `    <gap ${attributes}/>`;
 }

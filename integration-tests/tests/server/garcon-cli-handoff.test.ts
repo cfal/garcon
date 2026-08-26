@@ -93,7 +93,11 @@ describe('garcon-cli handoff', () => {
       expect(cli.stdout).toContain(
         `usable artifact budget: ${USABLE_TOKEN_BUDGET} tokens (75%; usage estimated)`,
       );
-      expect(cli.stdout).toContain('truncated: yes');
+      expect(cli.stdout).toContain('fold: handoff-v1');
+      expect(cli.stdout).toContain('budget-omitted eligible entries:');
+      expect(cli.stdout).toContain('gaps:');
+      expect(cli.stdout).toContain('(eligible entries only)');
+      expect(cli.stdout).toContain('projection truncated: yes');
 
       const document = await readFile(outputPath, 'utf8');
       expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
@@ -106,10 +110,15 @@ describe('garcon-cli handoff', () => {
       expect(rootNumber(document, 'estimated-tokens')).toBeLessThanOrEqual(USABLE_TOKEN_BUDGET);
       expect(rootAttribute(document, 'transcript-view-id')).toBe(beforeExport.transcriptViewId);
       expect(rootNumber(document, 'last-ordinal')).toBe(beforeExport.lastOrdinal);
-      expect(rootAttribute(document, 'truncated')).toBe('true');
-      expect(rootNumber(document, 'omitted-entries')).toBeGreaterThan(0);
+      expect(rootAttribute(document, 'fold')).toBe('handoff-v1');
+      expect(rootAttribute(document, 'gap-unit')).toBe('eligible-entry');
+      expect(rootNumber(document, 'source-entries')).toBe(beforeExport.totalEntryCount);
+      expect(rootAttribute(document, 'projection-truncated')).toBe('true');
+      expect(rootNumber(document, 'budget-omitted-entries')).toBeGreaterThan(0);
       expect(rootNumber(document, 'gaps')).toBeGreaterThan(0);
       expect(document).toContain('<gap ');
+      expect(document).toContain('<fixed-fold-excluded ');
+      expect(document).toMatch(/<fixed-fold-excluded [^>]*diagnostics="[1-9]\d*"/);
       expect(document).toContain('<handoff ordinal=');
       expect(document).toContain('type="handoff-summary"');
       expect(document).not.toContain(ORDINARY_NOTICE_MARKER);

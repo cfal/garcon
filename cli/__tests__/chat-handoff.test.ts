@@ -48,11 +48,15 @@ describe('runChatHandoff', () => {
     expect(receipt).toContain(`output: ${target}`);
     expect(receipt).toContain('context window: 131072 tokens');
     expect(receipt).toContain('usable artifact budget: 98304 tokens (75%; usage estimated)');
-    expect(receipt).toContain('entries: 2 of 5');
-    expect(receipt).toContain('omitted entries: 3');
-    expect(receipt).toContain('abridged entries: 1');
-    expect(receipt).toContain('gaps: 2');
-    expect(receipt).toContain('truncated: yes');
+    expect(receipt).toContain('fold: handoff-v1');
+    expect(receipt).toContain('source export entries: 8');
+    expect(receipt).toContain('eligible entries: 5');
+    expect(receipt).toContain('fixed-fold excluded entries: 3 (diagnostics 3)');
+    expect(receipt).toContain('included eligible entries: 2');
+    expect(receipt).toContain('budget-omitted eligible entries: 3');
+    expect(receipt).toContain('abridged included entries: 1');
+    expect(receipt).toContain('gaps: 2 (eligible entries only)');
+    expect(receipt).toContain('projection truncated: yes');
     expect(receipt).toContain(`code units: ${DOCUMENT.length}`);
     expect(receipt).toContain(`bytes: ${new TextEncoder().encode(DOCUMENT).byteLength}`);
     expect(receipt).toContain(
@@ -152,12 +156,16 @@ function response() {
     contextWindowTokens: 131_072,
     usableTokenBudget: 98_304,
     estimatedTokens: 20,
-    totalEntryCount: 5,
+    fold: 'handoff-v1' as const,
+    gapUnit: 'eligible-entry' as const,
+    sourceEntryCount: 8,
+    eligibleEntryCount: 5,
+    excludedEntryCounts: [{ category: 'diagnostics' as const, count: 3 }],
     includedEntryCount: 2,
-    omittedEntryCount: 3,
+    budgetOmittedEntryCount: 3,
     abridgedEntryCount: 1,
     gapCount: 2,
-    truncated: true,
+    projectionTruncated: true,
     documentCodeUnits: DOCUMENT.length,
     document: DOCUMENT,
   };

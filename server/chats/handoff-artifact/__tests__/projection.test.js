@@ -11,9 +11,10 @@ import {
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
+import { exportCategoryForMessage } from '../../../ledger/export-fold.ts';
 import {
   HANDOFF_ARTIFACT_BODY_MAX_CHARS,
-  handoffArtifactEntries,
+  foldHandoffArtifactEntries,
   selectHandoffArtifactEntries,
 } from '../projection.ts';
 
@@ -23,7 +24,18 @@ describe('handoff artifact projection', () => {
   it('keeps the fixed source fold with ordinals and visible abridgement', () => {
     const secret = 'data:image/png;base64,secret-payload';
     const entries = [
-      entry(1, new UserMessage(AT, `Prompt ${secret}`, [{ name: 'image.png', data: secret }])),
+      entry(1, new UserMessage(
+        AT,
+        `Prompt ${secret}`,
+        [{ name: 'image.png', data: secret }],
+        undefined,
+        {
+          origin: 'cli',
+          style: 'notice',
+          title: 'Detached specialist callback',
+          disclosure: 'collapsed',
+        },
+      )),
       entry(2, new ThinkingMessage(AT, 'reasoning')),
       entry(3, new AssistantMessage(AT, `${'a'.repeat(4_500)}</entries>`)),
       entry(4, new BashToolUseMessage(AT, 'tool-1', `run ${secret}`)),
@@ -41,7 +53,8 @@ describe('handoff artifact projection', () => {
       entry(12, new CliRowMessage(AT, 'CLI row', { style: 'notice' }, 'plain')),
     ];
 
-    const projected = handoffArtifactEntries(entries);
+    const folded = foldHandoffArtifactEntries(entries);
+    const projected = folded.entries;
 
     expect(projected.map(({ ordinal, tag }) => [ordinal, tag])).toEqual([
       [1, 'user'],
@@ -51,7 +64,25 @@ describe('handoff artifact projection', () => {
       [7, 'handoff'],
       [8, 'notice'],
     ]);
-    expect(projected[0]).toMatchObject({ abridged: true });
+    expect(folded).toMatchObject({
+      sourceEntryCount: 12,
+      eligibleEntryCount: 6,
+      excludedEntryCounts: [
+        { category: 'conversation', count: 1 },
+        { category: 'tool-results', count: 1 },
+        { category: 'reasoning', count: 1 },
+        { category: 'diagnostics', count: 3 },
+      ],
+    });
+    expect(projected[0]).toMatchObject({
+      abridged: true,
+      attributes: [
+        { name: 'origin', value: 'cli' },
+        { name: 'style', value: 'notice' },
+        { name: 'title', value: 'Detached specialist callback' },
+      ],
+    });
+    expect(projected[0].attributes.map((attribute) => attribute.name)).not.toContain('disclosure');
     expect(projected[0].body).toContain('[data URL omitted from export]');
     expect(projected[2]).toMatchObject({
       abridged: true,
@@ -90,7 +121,7 @@ describe('handoff artifact projection', () => {
 
     expect(selected.nodes.map((node) => node.kind === 'entry'
       ? ['entry', node.entry.source.ordinal]
-      : ['gap', node.gap.afterOrdinal, node.gap.beforeOrdinal, node.gap.omittedEntryCount]))
+      : ['gap', node.gap.afterOrdinal, node.gap.beforeOrdinal, node.gap.omittedEligibleEntryCount]))
       .toEqual([
         ['gap', null, 2, 1],
         ['entry', 2],
@@ -110,7 +141,7 @@ describe('handoff artifact projection', () => {
     });
     expect(omitted.nodes).toEqual([{
       kind: 'gap',
-      gap: { afterOrdinal: null, beforeOrdinal: null, omittedEntryCount: entries.length },
+      gap: { afterOrdinal: null, beforeOrdinal: null, omittedEligibleEntryCount: entries.length },
     }]);
   });
 
@@ -137,7 +168,7 @@ describe('handoff artifact projection', () => {
 });
 
 function entry(ordinal, message) {
-  return { kind: 'message', ordinal, category: 'conversation', message };
+  return { kind: 'message', ordinal, category: exportCategoryForMessage(message), message };
 }
 
 function source(ordinal, turn, bodyLength, tag = 'assistant') {

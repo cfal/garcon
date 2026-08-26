@@ -2,12 +2,16 @@ import type {
   ChatHandoffArtifactRequest,
   ChatHandoffArtifactResponse,
 } from '../../../common/chat-handoff-artifact-contracts.js';
+import {
+  CHAT_HANDOFF_ARTIFACT_FOLD,
+  CHAT_HANDOFF_ARTIFACT_GAP_UNIT,
+} from '../../../common/chat-handoff-artifact-contracts.js';
 import type { ChatSnapshotChat } from '../../../common/chat-snapshot.js';
 import { isHandoffContextWindowTokens } from '../../../common/handoff-sizing.js';
 import type { LedgerRow, TranscriptViewId } from '../../ledger/contracts.js';
 import { foldRowsForExport } from '../../ledger/export-fold.js';
 import { DomainError, ValidationDomainError } from '../../lib/domain-error.js';
-import { handoffArtifactEntries } from './projection.js';
+import { foldHandoffArtifactEntries } from './projection.js';
 import { renderFittedHandoffArtifact } from './xml.js';
 
 export interface HandoffArtifactServiceDeps {
@@ -38,7 +42,7 @@ export class HandoffArtifactService {
     if (!summary) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
 
     const snapshot = await this.deps.transcripts.exportSnapshot(request.chatId, signal);
-    const entries = handoffArtifactEntries(foldRowsForExport(snapshot.rows), signal);
+    const sourceFold = foldHandoffArtifactEntries(foldRowsForExport(snapshot.rows), signal);
     const rendered = renderFittedHandoffArtifact({
       chat: {
         id: summary.chat.id,
@@ -49,7 +53,7 @@ export class HandoffArtifactService {
       transcriptViewId: snapshot.transcriptViewId,
       lastOrdinal: snapshot.lastOrdinal,
       contextWindowTokens: request.contextWindowTokens,
-      entries,
+      sourceFold,
       signal,
     });
     if (!rendered) {
@@ -67,12 +71,16 @@ export class HandoffArtifactService {
       contextWindowTokens: rendered.contextWindowTokens,
       usableTokenBudget: rendered.usableTokenBudget,
       estimatedTokens: rendered.estimatedTokens,
-      totalEntryCount: rendered.totalEntryCount,
+      fold: CHAT_HANDOFF_ARTIFACT_FOLD,
+      gapUnit: CHAT_HANDOFF_ARTIFACT_GAP_UNIT,
+      sourceEntryCount: rendered.sourceEntryCount,
+      eligibleEntryCount: rendered.eligibleEntryCount,
+      excludedEntryCounts: rendered.excludedEntryCounts,
       includedEntryCount: rendered.includedEntryCount,
-      omittedEntryCount: rendered.omittedEntryCount,
+      budgetOmittedEntryCount: rendered.budgetOmittedEntryCount,
       abridgedEntryCount: rendered.abridgedEntryCount,
       gapCount: rendered.gapCount,
-      truncated: rendered.truncated,
+      projectionTruncated: rendered.projectionTruncated,
       documentCodeUnits: rendered.document.length,
       document: rendered.document,
     };

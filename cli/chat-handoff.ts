@@ -64,6 +64,13 @@ function renderHandoffReceipt(
   outputPath: string,
 ): string {
   const bytes = new TextEncoder().encode(response.document);
+  const excludedEntryCount = response.excludedEntryCounts
+    .reduce((sum, entry) => sum + entry.count, 0);
+  const excludedByCategory = response.excludedEntryCounts.length === 0
+    ? 'none'
+    : response.excludedEntryCounts
+      .map((entry) => `${entry.category} ${entry.count}`)
+      .join(', ');
   return [
     'operation: read-only handoff artifact',
     `chat id: ${response.chatId}`,
@@ -74,11 +81,15 @@ function renderHandoffReceipt(
     `context window: ${response.contextWindowTokens} tokens`,
     `usable artifact budget: ${response.usableTokenBudget} tokens (75%; usage estimated)`,
     `artifact estimate: ${response.estimatedTokens} tokens`,
-    `entries: ${response.includedEntryCount} of ${response.totalEntryCount}`,
-    `omitted entries: ${response.omittedEntryCount}`,
-    `abridged entries: ${response.abridgedEntryCount}`,
-    `gaps: ${response.gapCount}`,
-    `truncated: ${response.truncated ? 'yes' : 'no'}`,
+    `fold: ${response.fold}`,
+    `source export entries: ${response.sourceEntryCount}`,
+    `eligible entries: ${response.eligibleEntryCount}`,
+    `fixed-fold excluded entries: ${excludedEntryCount} (${excludedByCategory})`,
+    `included eligible entries: ${response.includedEntryCount}`,
+    `budget-omitted eligible entries: ${response.budgetOmittedEntryCount}`,
+    `abridged included entries: ${response.abridgedEntryCount}`,
+    `gaps: ${response.gapCount} (eligible entries only)`,
+    `projection truncated: ${response.projectionTruncated ? 'yes' : 'no'}`,
     `code units: ${response.documentCodeUnits}`,
     `bytes: ${bytes.byteLength}`,
     `sha256: ${crypto.createHash('sha256').update(bytes).digest('hex')}`,

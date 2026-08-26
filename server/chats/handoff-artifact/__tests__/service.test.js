@@ -65,16 +65,21 @@ describe('HandoffArtifactService', () => {
       generatedAt: AT,
       contextWindowTokens: 131_072,
       usableTokenBudget: 98_304,
-      totalEntryCount: 2,
+      fold: 'handoff-v1',
+      gapUnit: 'eligible-entry',
+      sourceEntryCount: 3,
+      eligibleEntryCount: 2,
+      excludedEntryCounts: [{ category: 'tool-results', count: 1 }],
       includedEntryCount: 2,
-      omittedEntryCount: 0,
-      truncated: false,
+      budgetOmittedEntryCount: 0,
+      projectionTruncated: false,
     });
     expect(response.document).toContain('Synthetic objective');
     expect(response.document).not.toContain('Concurrent append');
     expect(response.document).not.toContain('native-secret');
     expect(response.document).not.toContain('secret');
     expect(response.document).not.toContain('hidden');
+    expect(response.document).toContain('<fixed-fold-excluded tool-results="1"/>');
   });
 
   it('preserves snapshot replacement failures unchanged', async () => {

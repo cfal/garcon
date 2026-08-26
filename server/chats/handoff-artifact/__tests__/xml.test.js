@@ -8,7 +8,7 @@ import {
   UserMessage,
 } from '../../../../common/chat-types.ts';
 import { estimateHandoffTokens } from '../../handoff-token-budget.ts';
-import { handoffArtifactEntries } from '../projection.ts';
+import { foldHandoffArtifactEntries } from '../projection.ts';
 import { renderFittedHandoffArtifact } from '../xml.ts';
 
 const AT = '2026-08-26T00:00:00.000Z';
@@ -16,7 +16,11 @@ const AT = '2026-08-26T00:00:00.000Z';
 describe('handoff artifact XML', () => {
   it('renders the purpose-built ordinal vocabulary byte-for-byte', () => {
     const messages = [
-      new UserMessage(AT, 'Objective & <scope>'),
+      new UserMessage(AT, 'Objective & <scope>', undefined, undefined, {
+        origin: 'cli',
+        style: 'notice',
+        title: 'Specialist callback',
+      }),
       new AssistantMessage(AT, 'Decision'),
       new BashToolUseMessage(AT, 'tool-1', 'pwd'),
       new CompactionMessage(AT, 'auto', 'Older summary'),
@@ -26,10 +30,10 @@ describe('handoff artifact XML', () => {
     const rendered = render(messages, 200_000);
 
     expect(rendered.document).toBe(`<?xml version="1.0" encoding="UTF-8"?>
-<handoff-artifact version="1" chat-id="1787505989127000" transcript-view-id="view-1" last-ordinal="6" context-window-tokens="200000" usable-token-budget="150000" estimated-tokens="293" total-entries="6" included-entries="6" omitted-entries="0" abridged-entries="0" gaps="0" truncated="false">
+<handoff-artifact version="1" fold="handoff-v1" gap-unit="eligible-entry" chat-id="1787505989127000" transcript-view-id="view-1" last-ordinal="6" context-window-tokens="200000" usable-token-budget="150000" estimated-tokens="332" source-entries="6" eligible-entries="6" included-entries="6" budget-omitted-entries="0" abridged-entries="0" gaps="0" projection-truncated="false">
   <chat title="Artifact fixture" agent="codex" model="gpt-test"/>
   <entries>
-    <user ordinal="1">
+    <user ordinal="1" origin="cli" style="notice" title="Specialist callback">
       <text>Objective &amp; &lt;scope&gt;</text>
     </user>
     <assistant ordinal="2">
@@ -72,9 +76,9 @@ describe('handoff artifact XML', () => {
 
     expect(rendered.estimatedTokens).toBe(estimateHandoffTokens(rendered.document));
     expect(rendered.estimatedTokens).toBeLessThanOrEqual(768);
-    expect(rendered.omittedEntryCount).toBeGreaterThan(0);
+    expect(rendered.budgetOmittedEntryCount).toBeGreaterThan(0);
     expect(rendered.gapCount).toBeGreaterThan(0);
-    expect(rendered.truncated).toBe(true);
+    expect(rendered.projectionTruncated).toBe(true);
     expect(rendered.document).toContain('<gap ');
     expect(rendered.document).not.toContain('<earlier-turns-truncated');
   });
@@ -91,7 +95,7 @@ describe('handoff artifact XML', () => {
     expect(rendered).not.toBeNull();
     expect(rendered.estimatedTokens).toBeLessThanOrEqual(12_288);
     expect(rendered.includedEntryCount).toBeGreaterThan(0);
-    expect(rendered.omittedEntryCount).toBeGreaterThan(0);
+    expect(rendered.budgetOmittedEntryCount).toBeGreaterThan(0);
     expect(rendered.gapCount).toBeGreaterThan(1);
   });
 
@@ -106,17 +110,23 @@ describe('handoff artifact XML', () => {
       transcriptViewId: 'view-empty',
       lastOrdinal: 0,
       contextWindowTokens: 1_024,
-      entries: [],
+      sourceFold: {
+        entries: [],
+        sourceEntryCount: 0,
+        eligibleEntryCount: 0,
+        excludedEntryCounts: [],
+      },
     });
 
     expect(rendered).not.toBeNull();
     expect(rendered).toMatchObject({
-      totalEntryCount: 0,
+      sourceEntryCount: 0,
+      eligibleEntryCount: 0,
       includedEntryCount: 0,
-      omittedEntryCount: 0,
+      budgetOmittedEntryCount: 0,
       abridgedEntryCount: 0,
       gapCount: 0,
-      truncated: false,
+      projectionTruncated: false,
     });
     expect(rendered.document).toContain('  <entries/>\n');
     expect(rendered.document).not.toContain('<gap');
@@ -124,7 +134,7 @@ describe('handoff artifact XML', () => {
 });
 
 function render(messages, contextWindowTokens) {
-  const entries = handoffArtifactEntries(messages.map((message, index) => ({
+  const sourceFold = foldHandoffArtifactEntries(messages.map((message, index) => ({
     kind: 'message',
     ordinal: index + 1,
     category: 'conversation',
@@ -140,6 +150,6 @@ function render(messages, contextWindowTokens) {
     transcriptViewId: 'view-1',
     lastOrdinal: messages.length,
     contextWindowTokens,
-    entries,
+    sourceFold,
   });
 }

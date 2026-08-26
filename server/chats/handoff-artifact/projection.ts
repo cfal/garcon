@@ -1,4 +1,8 @@
 import {
+  CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES,
+  type ChatHandoffArtifactExclusionCategory,
+} from '../../../common/chat-handoff-artifact-contracts.js';
+import {
   isHandoffSummaryNoticeDetail,
   isToolUseMessage,
   type ChatMessage,
@@ -13,6 +17,7 @@ import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
   textSafe,
+  transcriptExportEntryCliPresentation,
   xmlAttribute,
   xmlText,
 } from '../transcript-export/values.js';
@@ -21,6 +26,7 @@ import type {
   HandoffArtifactDocumentNode,
   HandoffArtifactSelection,
   HandoffArtifactSourceEntry,
+  HandoffArtifactSourceFold,
   RenderedHandoffArtifactEntry,
 } from './model.js';
 
@@ -31,24 +37,35 @@ interface ProjectionAdapter extends PrioritizedProjectionEntry {
   readonly fullXml: string;
 }
 
-export function handoffArtifactEntries(
+export function foldHandoffArtifactEntries(
   entries: readonly TranscriptExportEntry[],
   signal?: AbortSignal,
-): HandoffArtifactSourceEntry[] {
+): HandoffArtifactSourceFold {
   const source: HandoffArtifactSourceEntry[] = [];
+  const excludedCounts = new Map<ChatHandoffArtifactExclusionCategory, number>();
   let turn = -1;
   for (let index = 0; index < entries.length; index += 1) {
     if (index % 256 === 0) signal?.throwIfAborted();
     const entry = entries[index];
-    if (entry.kind !== 'message') continue;
+    if (entry.kind !== 'message' || !isEligibleMessage(entry.message)) {
+      excludedCounts.set(entry.category, (excludedCounts.get(entry.category) ?? 0) + 1);
+      continue;
+    }
     const message = entry.message;
-    if (!isEligibleMessage(message)) continue;
     if (message.type === 'user-message' || turn < 0) turn += 1;
-    const projected = projectEntry(entry.ordinal, turn, message);
+    const projected = projectEntry(entry, turn);
     if (projected) source.push(projected);
   }
   signal?.throwIfAborted();
-  return source;
+  return {
+    entries: source,
+    sourceEntryCount: entries.length,
+    eligibleEntryCount: source.length,
+    excludedEntryCounts: CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES.flatMap((category) => {
+      const count = excludedCounts.get(category) ?? 0;
+      return count === 0 ? [] : [{ category, count }];
+    }),
+  };
 }
 
 export function selectHandoffArtifactEntries(input: {
@@ -88,7 +105,7 @@ export function selectHandoffArtifactEntries(input: {
   }
   const nodes = interleaveGaps(input.entries, selectedByOrdinal);
   const includedEntryCount = selectedByOrdinal.size;
-  const omittedEntryCount = input.entries.length - includedEntryCount;
+  const budgetOmittedEntryCount = input.entries.length - includedEntryCount;
   const abridgedEntryCount = [...selectedByOrdinal.values()]
     .filter((entry) => entry.abridged).length;
   const gapCount = nodes.filter((node) => node.kind === 'gap').length;
@@ -96,10 +113,10 @@ export function selectHandoffArtifactEntries(input: {
     nodes,
     admissionCost: projection?.admissionCost ?? 0,
     includedEntryCount,
-    omittedEntryCount,
+    budgetOmittedEntryCount,
     abridgedEntryCount,
     gapCount,
-    truncated: omittedEntryCount > 0 || abridgedEntryCount > 0,
+    projectionTruncated: budgetOmittedEntryCount > 0 || abridgedEntryCount > 0,
   };
 }
 
@@ -132,10 +149,10 @@ function isEligibleMessage(message: ChatMessage): boolean {
 }
 
 function projectEntry(
-  ordinal: number,
+  entry: Extract<TranscriptExportEntry, { readonly kind: 'message' }>,
   turn: number,
-  message: ChatMessage,
 ): HandoffArtifactSourceEntry | null {
+  const { ordinal, message } = entry;
   if (isToolUseMessage(message)) {
     const summary = projectToolUseSummary(message);
     const body = artifactBody(summary.text);
@@ -152,11 +169,23 @@ function projectEntry(
   switch (message.type) {
     case 'user-message': {
       const body = artifactBody(message.content);
+      const presentation = transcriptExportEntryCliPresentation(entry);
       return sourceEntry({
         ordinal,
         turn,
         level: projectionPriorityLevel(message.type),
         tag: 'user',
+        attributes: presentation === null
+          ? []
+          : [
+            { name: 'origin', value: presentation.origin },
+            ...(presentation.style === undefined
+              ? []
+              : [{ name: 'style', value: presentation.style }]),
+            ...(presentation.title === undefined
+              ? []
+              : [{ name: 'title', value: presentation.title }]),
+          ],
         body: body.text,
         abridged: body.abridged || (message.images?.length ?? 0) > 0,
       });
@@ -309,7 +338,7 @@ function interleaveGaps(
       gap: {
         afterOrdinal: previousOrdinal,
         beforeOrdinal: nextOrdinal,
-        omittedEntryCount: index - omittedStart,
+        omittedEligibleEntryCount: index - omittedStart,
       },
     });
   }

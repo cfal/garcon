@@ -29,7 +29,7 @@ export interface RenderedHandoffArtifactEntry {
 export interface HandoffArtifactGap {
   readonly afterOrdinal: number | null;
   readonly beforeOrdinal: number | null;
-  readonly omittedEntryCount: number;
+  readonly omittedEligibleEntryCount: number;
 }
 
 export type HandoffArtifactDocumentNode =
@@ -40,10 +40,17 @@ export interface HandoffArtifactSelection {
   readonly nodes: readonly HandoffArtifactDocumentNode[];
   readonly admissionCost: number;
   readonly includedEntryCount: number;
-  readonly omittedEntryCount: number;
+  readonly budgetOmittedEntryCount: number;
   readonly abridgedEntryCount: number;
   readonly gapCount: number;
-  readonly truncated: boolean;
+  readonly projectionTruncated: boolean;
+}
+
+export interface HandoffArtifactSourceFold {
+  readonly entries: readonly HandoffArtifactSourceEntry[];
+  readonly sourceEntryCount: number;
+  readonly eligibleEntryCount: number;
+  readonly excludedEntryCounts: readonly ChatHandoffArtifactExcludedEntryCount[];
 }
 
 export interface RenderedHandoffArtifact {
@@ -52,13 +59,18 @@ export interface RenderedHandoffArtifact {
   readonly contextWindowTokens: number;
   readonly usableTokenBudget: number;
   readonly estimatedTokens: number;
-  readonly totalEntryCount: number;
+  readonly sourceEntryCount: number;
+  readonly eligibleEntryCount: number;
+  readonly excludedEntryCounts: readonly ChatHandoffArtifactExcludedEntryCount[];
   readonly includedEntryCount: number;
-  readonly omittedEntryCount: number;
+  readonly budgetOmittedEntryCount: number;
   readonly abridgedEntryCount: number;
   readonly gapCount: number;
-  readonly truncated: boolean;
+  readonly projectionTruncated: boolean;
   readonly document: string;
   readonly fitCorrectionPasses: number;
   readonly metadataPasses: number;
 }
+import type {
+  ChatHandoffArtifactExcludedEntryCount,
+} from '../../../common/chat-handoff-artifact-contracts.js';
