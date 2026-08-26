@@ -649,3 +649,75 @@ describe('export arguments', () => {
     ], ENV)).toMatchObject({ kind: 'start', prompt: 'export the results' });
   });
 });
+
+describe('handoff artifact arguments', () => {
+  test('documents read-only semantics and estimated token headroom', () => {
+    expect(CLI_HELP).toContain('handoff creates a read-only XML projection');
+    expect(CLI_HELP).toContain('creates no chat, changes no agent or owner, starts no run');
+    expect(CLI_HELP).toContain('artifact to 75% of this token capacity using');
+    expect(CLI_HELP).toContain('token usage varies by model');
+  });
+
+  test('parses the default and arbitrary bounded context windows', () => {
+    expect(parseCliArgs(['handoff', CHAT_ID], ENV)).toEqual({
+      kind: 'handoff',
+      workspace: 'default',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      contextWindowTokens: 500_000,
+      force: false,
+    });
+    expect(parseCliArgs([
+      '--workspace', 'review',
+      'handoff', CHAT_ID,
+      '--context-window-size', '131072',
+      '--output', './handoff.xml',
+      '--force',
+    ], ENV)).toEqual({
+      kind: 'handoff',
+      workspace: 'review',
+      configDir: '/home/test/.garcon',
+      chatId: CHAT_ID,
+      contextWindowTokens: 131_072,
+      outputPath: './handoff.xml',
+      force: true,
+    });
+    expect(parseCliArgs([
+      'handoff', CHAT_ID, '--context-window-size', '1024',
+    ], ENV)).toMatchObject({ contextWindowTokens: 1_024 });
+    expect(parseCliArgs([
+      'handoff', CHAT_ID, '--context-window-size', '10000000',
+    ], ENV)).toMatchObject({ contextWindowTokens: 10_000_000 });
+  });
+
+  test.each([
+    [['handoff'], 'exactly one chat ID'],
+    [['handoff', 'bad'], 'valid Garcon chat ID'],
+    [['handoff', CHAT_ID, '--context-window-size', '0'], 'between 1024 and 10000000'],
+    [['handoff', CHAT_ID, '--context-window-size=-1'], 'base-10 integer'],
+    [['handoff', CHAT_ID, '--context-window-size', '1023'], 'between 1024 and 10000000'],
+    [['handoff', CHAT_ID, '--context-window-size', '10000001'], 'between 1024 and 10000000'],
+    [['handoff', CHAT_ID, '--context-window-size', '1.5'], 'base-10 integer'],
+    [['handoff', CHAT_ID, '--context-window-size', '1e5'], 'base-10 integer'],
+    [['handoff', CHAT_ID, '--context-window-size', '200k'], 'base-10 integer'],
+    [['handoff', CHAT_ID, '--context-window-size', '200000', '--context-window-size', '500000'], 'only once'],
+    [['handoff', CHAT_ID, '--output', '-'], 'omit --output'],
+    [['handoff', CHAT_ID, '--force'], '--force requires --output'],
+    [['handoff', CHAT_ID, '--format', 'xml'], '--format cannot be used with handoff'],
+    [['handoff', CHAT_ID, '--exclude', 'tools'], '--exclude cannot be used with handoff'],
+    [['handoff', CHAT_ID, '--json'], '--json cannot be used with handoff'],
+    [['export', CHAT_ID, '--context-window-size', '500000'], '--context-window-size cannot be used with export'],
+    [['status', CHAT_ID, '--context-window-size', '500000'], '--context-window-size cannot be used with status'],
+    [['list', 'agents', '--context-window-size', '500000'], '--context-window-size cannot be used with list'],
+    [['send-async', CHAT_ID, '--context-window-size', '500000', 'message'], '--context-window-size cannot be used with send-async'],
+    [['--agent', 'codex', '--model', 'gpt', '--context-window-size', '500000', 'prompt'], '--context-window-size can only be used with handoff'],
+  ])('rejects invalid handoff arguments: %s', (args, message) => {
+    expect(() => parseCliArgs(args, ENV)).toThrow(message);
+  });
+
+  test('treats an option-terminated handoff token as a new-chat prompt', () => {
+    expect(parseCliArgs([
+      '--agent', 'codex', '--model', 'gpt', '--', 'handoff', 'the', 'review',
+    ], ENV)).toMatchObject({ kind: 'start', prompt: 'handoff the review' });
+  });
+});

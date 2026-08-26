@@ -250,7 +250,7 @@ garcon-cli --workspace default --resume 1785337200123456 \
   "Do not deploy until the migration checksum matches."
 ```
 
-The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `add-row`, `status`, `wait`, or `export`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
+The CLI supports write-capable delegation and does not force `plan` mode. Permission and reasoning values use the selected agent's live Garcon catalog; inherited bypass modes require the matching explicit `--permissions` flag. A single `-` prompt reads stdin. Use `--` before a positional prompt whose first word is `list`, `send-async`, `stop`, `add-row`, `status`, `wait`, `export`, or `handoff`. Interrupting the terminal detaches the CLI without stopping work in Garcon.
 
 Every accepted start or resume prints an exact handle before waiting:
 
@@ -294,6 +294,26 @@ Without `--output`, stdout contains only the document. A file output is written 
 `diagnostics` includes presentation-only `add-row` notices and errors, provider errors and notices, and run lifecycle rows.
 
 Export reads Garcon's authoritative SQLite ledger through the running authenticated server. Session-native references and provider-private metadata never enter the export fold. Image bodies and structured data URLs are omitted with visible markers, while authored user and assistant text is retained. XML-illegal control characters are emitted as literal `\uXXXX` text in both formats. Sharing remains separate: Share publishes a persisted public snapshot, while export reads the current private ledger without creating or changing a share.
+
+Create a bounded XML projection for whole-chat summarization with `handoff`:
+
+```bash
+garcon-cli --workspace default handoff 1785337200123456 \
+  --context-window-size 131072 --output handoff.xml
+```
+
+This command is read-only despite its name: it creates no chat, changes no agent or owner,
+starts no run, and appends no transcript row. The context window is the consuming model's token
+capacity. Any integer from 1,024 through 10,000,000 is accepted; the default is 500,000. Garcon
+limits the artifact to 75% of that capacity using a generic token estimate, leaving fixed
+headroom for the consumer's instructions and reply. Token usage varies by model and is not an
+exact provider guarantee.
+
+Every retained source element carries its durable ordinal. Explicit gap markers and the file
+receipt disclose omitted or abridged entries, the pinned transcript view and watermark, estimated
+usage, byte count, and SHA-256. Use this lossy artifact for comprehensive high-level synthesis.
+Use complete XML export for exact enumeration, quotation, and evidence; verify any final ordinal
+or quote against a complete export from the same transcript view.
 
 ### One-Shot Chat Control From The CLI
 

@@ -36,6 +36,10 @@ import {
   type TranscriptExportFormat,
   type TranscriptExportResponse,
 } from '@garcon/common/chat-export-contracts';
+import {
+  parseChatHandoffArtifactResponse,
+  type ChatHandoffArtifactResponse,
+} from '@garcon/common/chat-handoff-artifact-contracts';
 import { normalizeRemoteSettingsSnapshot } from '@garcon/common/settings';
 import { abortableDelay } from './abortable-delay.js';
 import { CliError, type CliErrorPhase } from './errors.js';
@@ -43,7 +47,7 @@ import { probeRuntime, type RuntimeConnection } from './discovery.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HANDOFF_REQUEST_TIMEOUT_MS = 10 * 60_000;
-const EXPORT_REQUEST_TIMEOUT_MS = 120_000;
+const DOCUMENT_REQUEST_TIMEOUT_MS = 120_000;
 const SUBMISSION_ATTEMPTS = 3;
 const MAX_RETRY_AFTER_MS = 5_000;
 
@@ -69,7 +73,10 @@ export class GarconHttpError extends CliError {
         || errorCode === 'UNSUPPORTED_AGENT'
         || errorCode === 'EXPECTED_AGENT_MISMATCH'
         || errorCode === 'EXPLICIT_BYPASS_REQUIRED'
-        || ((phase === 'catalog resolution' || phase === 'title update' || phase === 'export') && status === 400)
+        || ((phase === 'catalog resolution'
+          || phase === 'title update'
+          || phase === 'export'
+          || phase === 'handoff artifact') && status === 400)
         ? 2
         : 3,
     );
@@ -302,7 +309,7 @@ export class GarconClient {
       `/api/v1/chats/export?${query.toString()}`,
       undefined,
       signal,
-      EXPORT_REQUEST_TIMEOUT_MS,
+      DOCUMENT_REQUEST_TIMEOUT_MS,
     );
     let response: TranscriptExportResponse;
     try {
@@ -319,6 +326,49 @@ export class GarconClient {
       || response.exclusions.some((category, index) => category !== request.exclusions[index])
     ) {
       throw new CliError('export', 'server returned an uncorrelated transcript export', 3);
+    }
+    return response;
+  }
+
+  async getChatHandoffArtifact(
+    request: {
+      readonly chatId: string;
+      readonly contextWindowTokens: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<ChatHandoffArtifactResponse> {
+    const query = new URLSearchParams({
+      chatId: request.chatId,
+      contextWindowTokens: String(request.contextWindowTokens),
+    });
+    const value = await this.#request(
+      'handoff artifact',
+      'GET',
+      `/api/v1/chats/handoff-artifact?${query.toString()}`,
+      undefined,
+      signal,
+      DOCUMENT_REQUEST_TIMEOUT_MS,
+    );
+    let response: ChatHandoffArtifactResponse;
+    try {
+      response = parseChatHandoffArtifactResponse(value);
+    } catch (error) {
+      throw new CliError(
+        'handoff artifact',
+        'server returned an invalid handoff artifact',
+        3,
+        { cause: error },
+      );
+    }
+    if (
+      response.chatId !== request.chatId
+      || response.contextWindowTokens !== request.contextWindowTokens
+    ) {
+      throw new CliError(
+        'handoff artifact',
+        'server returned an uncorrelated handoff artifact',
+        3,
+      );
     }
     return response;
   }

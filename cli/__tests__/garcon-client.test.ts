@@ -152,6 +152,59 @@ describe('GarconClient', () => {
     })).rejects.toMatchObject({ phase: 'export', exitCode: 2 });
   });
 
+  test('fetches and validates a correlated handoff artifact', async () => {
+    let requestedUrl = '';
+    const client = new GarconClient({
+      ...connection,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(validHandoffArtifact());
+      },
+    });
+
+    await expect(client.getChatHandoffArtifact({
+      chatId: runRequest.chatId,
+      contextWindowTokens: 131_072,
+    })).resolves.toMatchObject({
+      chatId: runRequest.chatId,
+      contextWindowTokens: 131_072,
+      usableTokenBudget: 98_304,
+    });
+    expect(requestedUrl).toBe(
+      `${connection.baseUrl}/api/v1/chats/handoff-artifact?chatId=${runRequest.chatId}&contextWindowTokens=131072`,
+    );
+  });
+
+  test('rejects malformed and uncorrelated handoff artifacts', async () => {
+    for (const response of [
+      { ...validHandoffArtifact(), document: 'missing newline' },
+      { ...validHandoffArtifact(), chatId: '1785337200123457' },
+      { ...validHandoffArtifact(), contextWindowTokens: 200_000, usableTokenBudget: 150_000 },
+    ]) {
+      const client = new GarconClient({ ...connection, fetch: async () => Response.json(response) });
+      await expect(client.getChatHandoffArtifact({
+        chatId: runRequest.chatId,
+        contextWindowTokens: 131_072,
+      })).rejects.toMatchObject({ phase: 'handoff artifact', exitCode: 3 });
+    }
+  });
+
+  test('maps handoff validation failures to an argument-level exit', async () => {
+    const client = new GarconClient({
+      ...connection,
+      fetch: async () => Response.json({
+        success: false,
+        error: 'Invalid context window',
+        errorCode: 'VALIDATION_FAILED',
+        retryable: false,
+      }, { status: 400 }),
+    });
+    await expect(client.getChatHandoffArtifact({
+      chatId: runRequest.chatId,
+      contextWindowTokens: 131_072,
+    })).rejects.toMatchObject({ phase: 'handoff artifact', exitCode: 2 });
+  });
+
   test('fetches and validates a correlated chat snapshot', async () => {
     let request: { url: string; method: string | undefined; authorization: string | null } | undefined;
     const client = new GarconClient({
@@ -748,6 +801,28 @@ function validExport(): Record<string, unknown> {
       { category: 'reasoning', count: 1 },
     ],
     document: '<?xml version="1.0"?>\n',
+  };
+}
+
+function validHandoffArtifact(): Record<string, unknown> {
+  const document = '<handoff-artifact/>\n';
+  return {
+    success: true,
+    chatId: runRequest.chatId,
+    transcriptViewId: 'view-1',
+    lastOrdinal: 3,
+    generatedAt: '2026-08-23T00:00:00.000Z',
+    contextWindowTokens: 131_072,
+    usableTokenBudget: 98_304,
+    estimatedTokens: 10,
+    totalEntryCount: 2,
+    includedEntryCount: 2,
+    omittedEntryCount: 0,
+    abridgedEntryCount: 0,
+    gapCount: 0,
+    truncated: false,
+    documentCodeUnits: document.length,
+    document,
   };
 }
 

@@ -698,4 +698,63 @@ describe('main', () => {
     expect(capture.results).toEqual([]);
     expect(capture.diagnostics).toEqual([]);
   });
+
+  test('routes read-only handoff artifacts without mixing receipts into stdout', async () => {
+    const capture = capturedOutput();
+    const document = '<handoff-artifact/>\n';
+    const exitCode = await main([
+      'handoff', CHAT_ID, '--context-window-size', '131072',
+    ], {
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async () => Response.json({
+        success: true,
+        chatId: CHAT_ID,
+        transcriptViewId: 'view-1',
+        lastOrdinal: 3,
+        generatedAt: '2026-08-26T00:00:00.000Z',
+        contextWindowTokens: 131_072,
+        usableTokenBudget: 98_304,
+        estimatedTokens: 10,
+        totalEntryCount: 0,
+        includedEntryCount: 0,
+        omittedEntryCount: 0,
+        abridgedEntryCount: 0,
+        gapCount: 0,
+        truncated: false,
+        documentCodeUnits: document.length,
+        document,
+      }),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(capture.documents).toEqual([document]);
+    expect(capture.results).toEqual([]);
+    expect(capture.diagnostics).toEqual([]);
+  });
+
+  test('interrupts handoff artifact generation with a read-only diagnostic', async () => {
+    const controller = new AbortController();
+    const capture = capturedOutput();
+    const result = main(['handoff', CHAT_ID], {
+      signal: controller.signal,
+      discoverRuntime: stubDiscovery,
+      output: capture.output,
+      fetch: async (_input, init) => {
+        const signal = init?.signal;
+        signal?.throwIfAborted();
+        return await new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+
+    await Promise.resolve();
+    controller.abort(new Error('terminal interrupted'));
+
+    await expect(result).resolves.toBe(130);
+    expect(capture.diagnostics).toEqual([
+      'terminal interrupted; no handoff artifact was written',
+    ]);
+  });
 });

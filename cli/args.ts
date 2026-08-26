@@ -39,6 +39,12 @@ import {
   type TranscriptExportCategory,
   type TranscriptExportFormat,
 } from '@garcon/common/chat-export-contracts';
+import {
+  DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+  HANDOFF_CONTEXT_WINDOW_MAX_TOKENS,
+  HANDOFF_CONTEXT_WINDOW_MIN_TOKENS,
+  isHandoffContextWindowTokens,
+} from '@garcon/common/handoff-sizing';
 import { argumentError } from './errors.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
@@ -56,6 +62,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] wait <chat-id> --turn <turn-id> [--json]
   garcon-cli [connection options] export <chat-id> [--format <markdown|xml>] [--exclude <category>]... [--output <path>] [--force]
+  garcon-cli [connection options] handoff <chat-id> [--context-window-size <tokens>] [--output <path>] [--force]
 
 Starts or resumes a visible chat through an already-running Garcon server.
 The selected permission mode may allow the agent to edit files and run tools.
@@ -68,6 +75,8 @@ add-row appends one durable presentation-only CLI row to chat history.
 It never sends, queues, or exposes the row to the agent.
 export writes the complete untruncated transcript as Markdown or XML. Exclusions
 apply to top-level entries; tool calls embedded in permission entries remain.
+handoff creates a read-only XML projection for another model to summarize. It
+creates no chat, changes no agent or owner, starts no run, and appends nothing.
 Message presentation is not sent as prompt text. A message title without a style
 uses notice; a style without a title displays its CLI label. --color selects custom styling.
 --collapsible starts the CLI-authored body collapsed without requiring a style.
@@ -108,14 +117,19 @@ Options:
   --format <markdown|xml>      Transcript export format (default: markdown)
   --exclude <category>         Export exclusion; repeatable or comma-separated:
                                ${TRANSCRIPT_EXPORT_CATEGORIES.join(', ')}; tools excludes calls and results
-  --output <path>              Write export atomically to a file instead of stdout
-  --force                      Replace an existing export output file
+  --context-window-size <tokens>
+                               Context window of the model that will read the
+                               handoff artifact (default: ${DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS}). Garcon limits
+                               the artifact to 75% of this token capacity using
+                               an estimate; token usage varies by model.
+  --output <path>              Write export or handoff artifact atomically to a file
+  --force                      Replace an existing export or handoff output file
   --json                       Print list, status, or wait results as JSON
   --help                       Show this help
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
-Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, or export.
+Use -- before a positional prompt whose first word is list, send-async, stop, add-row, status, wait, export, or handoff.
 The cli tag records creation through garcon-cli; resume, send-async, and stop never add it.`;
 
 export interface CliEnvironment {
@@ -230,6 +244,14 @@ export interface ExportCliCommand extends CliConnectionOptions {
   readonly force: boolean;
 }
 
+export interface HandoffCliCommand extends CliConnectionOptions {
+  readonly kind: 'handoff';
+  readonly chatId: ChatId;
+  readonly contextWindowTokens: number;
+  readonly outputPath?: string;
+  readonly force: boolean;
+}
+
 export type ParsedCliCommand =
   | { kind: 'help' }
   | { kind: 'version' }
@@ -240,6 +262,7 @@ export type ParsedCliCommand =
   | StatusCliCommand
   | WaitCliCommand
   | ExportCliCommand
+  | HandoffCliCommand
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
@@ -263,6 +286,7 @@ const SINGLE_STRING_OPTIONS = [
   'type',
   'format',
   'output',
+  'context-window-size',
 ] as const;
 
 type ParsedOptionValue = boolean | string | string[] | undefined;
@@ -407,6 +431,7 @@ const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['exclude', '--exclude'],
   ['output', '--output'],
   ['force', '--force'],
+  ['context-window-size', '--context-window-size'],
 ] as const;
 
 function rejectControlForbiddenOptions(
@@ -547,7 +572,7 @@ function parseAddRow(
   };
 }
 
-type ObservationCommandKind = 'status' | 'wait' | 'export';
+type ObservationCommandKind = 'status' | 'wait' | 'export' | 'handoff';
 
 const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
@@ -584,7 +609,7 @@ function parseWait(
   connection: CliConnectionOptions,
 ): WaitCliCommand {
   rejectObservationMutationOptions(values, 'wait');
-  rejectExportOptions(values, 'wait');
+  rejectDocumentOptions(values, 'wait');
   if (values.messages !== undefined) {
     throw argumentError('--messages cannot be used with wait');
   }
@@ -638,7 +663,7 @@ function parseStatus(
   connection: CliConnectionOptions,
 ): StatusCliCommand {
   rejectObservationMutationOptions(values, 'status');
-  rejectExportOptions(values, 'status');
+  rejectDocumentOptions(values, 'status');
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with status');
   if (parsed.positionals.length !== 2) {
     throw argumentError('status requires exactly one chat ID');
@@ -658,15 +683,16 @@ function parseStatus(
   };
 }
 
-function rejectExportOptions(
+function rejectDocumentOptions(
   values: Record<string, ParsedOptionValue>,
-  command: Exclude<ObservationCommandKind, 'export'>,
+  command: Exclude<ObservationCommandKind, 'export' | 'handoff'>,
 ): void {
   for (const [key, flag] of [
     ['format', '--format'],
     ['exclude', '--exclude'],
     ['output', '--output'],
     ['force', '--force'],
+    ['context-window-size', '--context-window-size'],
   ] as const) {
     if (values[key] !== undefined) throw argumentError(`${flag} cannot be used with ${command}`);
   }
@@ -678,6 +704,9 @@ function parseExport(
   connection: CliConnectionOptions,
 ): ExportCliCommand {
   rejectObservationMutationOptions(values, 'export');
+  if (values['context-window-size'] !== undefined) {
+    throw argumentError('--context-window-size cannot be used with export');
+  }
   if (values.json !== undefined) throw argumentError('--json cannot be used with export');
   if (values.turn !== undefined) throw argumentError('--turn cannot be used with export');
   if (values.messages !== undefined) throw argumentError('--messages cannot be used with export');
@@ -694,18 +723,72 @@ function parseExport(
   if (!isTranscriptExportFormat(rawFormat)) {
     throw argumentError('--format must be markdown or xml');
   }
-  const outputPath = nonEmptyOption(values.output as string | undefined, '--output');
-  if (outputPath === '-') {
-    throw argumentError('omit --output to write the transcript export to stdout');
-  }
-  const force = values.force === true;
-  if (force && outputPath === undefined) throw argumentError('--force requires --output');
+  const output = parseDocumentOutputOptions(values, 'transcript export');
   return {
     kind: 'export',
     ...connection,
     chatId,
     format: rawFormat,
     exclusions: parseExportExclusions(values.exclude),
+    ...output,
+  };
+}
+
+function parseHandoff(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): HandoffCliCommand {
+  rejectObservationMutationOptions(values, 'handoff');
+  if (values.json !== undefined) throw argumentError('--json cannot be used with handoff');
+  if (values.turn !== undefined) throw argumentError('--turn cannot be used with handoff');
+  if (values.messages !== undefined) throw argumentError('--messages cannot be used with handoff');
+  if (values.format !== undefined) throw argumentError('--format cannot be used with handoff');
+  if (values.exclude !== undefined) throw argumentError('--exclude cannot be used with handoff');
+  if (parsed.positionals.length !== 2) {
+    throw argumentError('handoff requires exactly one chat ID');
+  }
+  let chatId: ChatId;
+  try {
+    chatId = parseChatId(parsed.positionals[1]!);
+  } catch (error) {
+    throw argumentError('handoff requires a valid Garcon chat ID', { cause: error });
+  }
+  return {
+    kind: 'handoff',
+    ...connection,
+    chatId,
+    contextWindowTokens: parseContextWindowSize(values['context-window-size']),
+    ...parseDocumentOutputOptions(values, 'handoff artifact'),
+  };
+}
+
+function parseContextWindowSize(value: ParsedOptionValue): number {
+  if (value === undefined) return DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS;
+  const raw = value as string;
+  if (!/^[0-9]+$/.test(raw)) {
+    throw argumentError('--context-window-size must be a base-10 integer token count');
+  }
+  const parsed = Number(raw);
+  if (!isHandoffContextWindowTokens(parsed)) {
+    throw argumentError(
+      `--context-window-size must be between ${HANDOFF_CONTEXT_WINDOW_MIN_TOKENS} and ${HANDOFF_CONTEXT_WINDOW_MAX_TOKENS} tokens`,
+    );
+  }
+  return parsed;
+}
+
+function parseDocumentOutputOptions(
+  values: Record<string, ParsedOptionValue>,
+  noun: string,
+): Pick<ExportCliCommand, 'outputPath' | 'force'> {
+  const outputPath = nonEmptyOption(values.output as string | undefined, '--output');
+  if (outputPath === '-') {
+    throw argumentError(`omit --output to write the ${noun} to stdout`);
+  }
+  const force = values.force === true;
+  if (force && outputPath === undefined) throw argumentError('--force requires --output');
+  return {
     ...(outputPath === undefined ? {} : { outputPath }),
     force,
   };
@@ -768,6 +851,7 @@ export function parseCliArgs(
         format: { type: 'string' },
         exclude: { type: 'string', multiple: true },
         output: { type: 'string' },
+        'context-window-size': { type: 'string' },
         force: { type: 'boolean' },
         'allow-steer': { type: 'boolean' },
         markdown: { type: 'boolean' },
@@ -847,6 +931,9 @@ export function parseCliArgs(
   if (startsReservedCommand(tokens, 'export')) {
     return parseExport(parsed, values, connection);
   }
+  if (startsReservedCommand(tokens, 'handoff')) {
+    return parseHandoff(parsed, values, connection);
+  }
 
   if (startsReservedCommand(tokens, 'list')) {
     const resource = parsed.positionals[1] ?? '';
@@ -873,6 +960,7 @@ export function parseCliArgs(
     rejectListOption(values.exclude, '--exclude');
     rejectListOption(values.output, '--output');
     rejectListOption(values.force, '--force');
+    rejectListOption(values['context-window-size'], '--context-window-size');
     if (endpointId !== undefined && providerId === undefined) {
       throw argumentError('--endpoint requires --provider');
     }
@@ -920,8 +1008,15 @@ export function parseCliArgs(
   if (values.markdown !== undefined) throw argumentError('--markdown can only be used with add-row');
   if (values.format !== undefined) throw argumentError('--format can only be used with export');
   if (values.exclude !== undefined) throw argumentError('--exclude can only be used with export');
-  if (values.output !== undefined) throw argumentError('--output can only be used with export');
-  if (values.force !== undefined) throw argumentError('--force can only be used with export');
+  if (values['context-window-size'] !== undefined) {
+    throw argumentError('--context-window-size can only be used with handoff');
+  }
+  if (values.output !== undefined) {
+    throw argumentError('--output can only be used with export or handoff');
+  }
+  if (values.force !== undefined) {
+    throw argumentError('--force can only be used with export or handoff');
+  }
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);

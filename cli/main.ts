@@ -6,6 +6,7 @@ import { sendChatAsync, stopChat } from './chat-control.js';
 import { runAddRow, validateAddRowContent } from './chat-row.js';
 import { runChatStatus } from './chat-status.js';
 import { runChatExport } from './chat-export.js';
+import { runChatHandoff } from './chat-handoff.js';
 import { runChatWait } from './chat-wait.js';
 import { runConsultation } from './consultation.js';
 import { discoverRuntime } from './discovery.js';
@@ -129,6 +130,9 @@ function interruptDiagnostic(command: ParsedCliCommand | undefined): string {
   if (command?.kind === 'export') {
     return 'terminal interrupted; no transcript export was written';
   }
+  if (command?.kind === 'handoff') {
+    return 'terminal interrupted; no handoff artifact was written';
+  }
   return command !== undefined && (command.kind === 'send-async' || command.kind === 'stop')
     ? 'terminal interrupted; the control command may have reached Garcon; inspect the chat before retrying'
     : 'terminal interrupted; no Garcon agent was stopped';
@@ -168,6 +172,11 @@ export async function main(
     if (command.kind === 'export') {
       const client = await connectedClient(command, options);
       await runChatExport(command, client, output, options.signal);
+      return 0;
+    }
+    if (command.kind === 'handoff') {
+      const client = await connectedClient(command, options);
+      await runChatHandoff(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {

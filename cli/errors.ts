@@ -7,6 +7,7 @@ export type CliErrorPhase =
   | 'resume admission'
   | 'chat status'
   | 'export'
+  | 'handoff artifact'
   | 'submission'
   | 'title update'
   | 'receipt polling'
