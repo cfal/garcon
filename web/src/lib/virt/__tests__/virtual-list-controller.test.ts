@@ -28,8 +28,10 @@ describe('VirtualListController', () => {
 		expect(test.environment.observer.observed.has(test.viewport)).toBe(true);
 		expect(test.environment.observer.observed.has(test.sizer)).toBe(false);
 
-		test.mountItem('a', 40);
+		const first = test.mountItem('a', 40);
 		test.mountItem('b', 20);
+		expect(test.environment.observer.observedBoxes.get(test.viewport)).toBeUndefined();
+		expect(test.environment.observer.observedBoxes.get(first.element)).toBe('border-box');
 		test.environment.flushMicrotasks();
 		expect(test.controller.measuredSize('a')).toBe(40);
 		expect(test.controller.snapshot.positions.itemAt(1)?.start).toBe(40);

@@ -4,19 +4,23 @@ import type { VirtualTransactionRecord } from '../virtual-list-types';
 
 class TestResizeObserver implements ResizeObserver {
 	readonly observed = new Set<Element>();
+	readonly observedBoxes = new Map<Element, ResizeObserverBoxOptions | undefined>();
 
 	constructor(private readonly callback: ResizeObserverCallback) {}
 
-	observe(target: Element): void {
+	observe(target: Element, options?: ResizeObserverOptions): void {
 		this.observed.add(target);
+		this.observedBoxes.set(target, options?.box);
 	}
 
 	unobserve(target: Element): void {
 		this.observed.delete(target);
+		this.observedBoxes.delete(target);
 	}
 
 	disconnect(): void {
 		this.observed.clear();
+		this.observedBoxes.clear();
 	}
 
 	emit(target: Element, height: number): void {

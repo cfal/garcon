@@ -188,7 +188,7 @@ export class VirtualListDomDriver {
 		if (previous && previous !== element) this.#observer.unobserve(previous);
 		this.#elementsByKey.set(key, element);
 		this.#keysByElement.set(element, key);
-		if (!this.#suspended) this.#observer.observe(element);
+		if (!this.#suspended) this.#observer.observe(element, { box: 'border-box' });
 		if (this.options.shouldMeasureMount(key)) {
 			this.#pendingMounts.set(key, element);
 			this.#queueMountMeasurement();
@@ -251,7 +251,8 @@ export class VirtualListDomDriver {
 
 	#observeAll(): void {
 		if (this.#viewportElement) this.#observer.observe(this.#viewportElement);
-		for (const element of this.#elementsByKey.values()) this.#observer.observe(element);
+		for (const element of this.#elementsByKey.values())
+			this.#observer.observe(element, { box: 'border-box' });
 	}
 
 	#unobserveAll(): void {
