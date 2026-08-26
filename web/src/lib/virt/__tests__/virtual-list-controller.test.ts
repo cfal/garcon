@@ -208,6 +208,23 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(30);
 	});
 
+	it('attributes the first resumed target to the resume transaction', () => {
+		const test = harness({ viewportSize: 50 });
+		test.controller.apply({
+			kind: 'replace-surface',
+			keys: ['new-a', 'new-b'],
+			estimates: [40, 40],
+		});
+
+		expect(test.controller.resume({ kind: 'end' })).toEqual({ kind: 'scheduled' });
+		test.environment.flushMicrotasks();
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'resume',
+			provenance: 'navigation',
+			scrollWrites: 1,
+		});
+	});
+
 	it('rejects malformed mutations without changing the current snapshot', () => {
 		const test = harness();
 		const revision = test.controller.snapshot.revision;

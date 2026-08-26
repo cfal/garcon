@@ -324,13 +324,13 @@ export class VirtualListTransaction {
 		this.#replacementPending = false;
 		this.#deviation = SETTLED_VIRTUAL_DEVIATION;
 		this.#publish(dom, true);
-		if (target.kind === 'start') return this.#scheduleLogicalTarget(0);
-		if (target.kind === 'end') return this.#scheduleTarget({ kind: 'end' });
+		if (target.kind === 'start') return this.#scheduleLogicalTarget(0, 'resume');
+		if (target.kind === 'end') return this.#scheduleTarget({ kind: 'end' }, 'resume');
 		const index = this.geometry.indexOf(target.key);
 		if (index === undefined) return { kind: 'missing-key' };
 		const item = this.geometry.item(index);
 		return item
-			? this.#scheduleLogicalTarget(item.start - target.viewportOffset)
+			? this.#scheduleLogicalTarget(item.start - target.viewportOffset, 'resume')
 			: { kind: 'missing-key' };
 	}
 
@@ -356,21 +356,27 @@ export class VirtualListTransaction {
 		this.#driver?.destroy();
 	}
 
-	#scheduleLogicalTarget(offset: number): VirtualScrollResult {
-		return this.#scheduleTarget({ kind: 'logical', offset: Math.max(0, offset) });
+	#scheduleLogicalTarget(
+		offset: number,
+		source: 'programmatic' | 'resume' = 'programmatic',
+	): VirtualScrollResult {
+		return this.#scheduleTarget({ kind: 'logical', offset: Math.max(0, offset) }, source);
 	}
 
-	#scheduleTarget(target: PendingTarget): VirtualScrollResult {
+	#scheduleTarget(
+		target: PendingTarget,
+		source: 'programmatic' | 'resume' = 'programmatic',
+	): VirtualScrollResult {
 		const dom = this.#driver?.read();
 		if (!dom || this.#suspended) return { kind: 'not-ready' };
 		this.#replacementPending = false;
 		this.#deviation = SETTLED_VIRTUAL_DEVIATION;
 		const started = this.options.environment.now();
-		const record = this.#record('programmatic', 'navigation', { kind: 'none' }, dom, started);
+		const record = this.#record(source, 'navigation', { kind: 'none' }, dom, started);
 		this.#publish(dom, true);
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
-			source: 'programmatic',
+			source,
 			provenance: 'navigation',
 			target,
 			barriers: 0,
