@@ -406,7 +406,7 @@ describe('garcon-cli', () => {
 
       expect(failed.exitCode).toBe(1);
       expect(failed.stdout).toMatch(/^chat id: \d{16}\nturn id: [^\n]+\n$/);
-      expect(failed.stderr).toContain('receipt polling: agent turn failed:');
+      expect(failed.stderr).toContain('receipt polling: agent turn failed [INTERNAL_ERROR]:');
       expect(failed.stdout).not.toContain('provider rejected');
     }, { namedWorkspace: WORKSPACE });
   });
