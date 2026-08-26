@@ -96,7 +96,11 @@
 			projectedDataRevision: contentRevision,
 		}),
 	);
-	let appliedProjection = $state.raw<ConversationFeedProjection>(untrack(() => nextProjection));
+	const initialProjection = untrack(() => nextProjection);
+	let appliedProjection = $state.raw<ConversationFeedProjection>({
+		...initialProjection,
+		geometry: { ...initialProjection.geometry, surfaceIdentity: 'surface-before-mount' },
+	});
 	const retention = new ConversationFeedRetentionState();
 	const controller = new ConversationFeedVirtualController({
 		get model() {
@@ -130,6 +134,18 @@
 			transactions.push(record);
 		},
 	});
+	const mountedProjection = untrack(() => nextProjection);
+	if (
+		!controller.applyProjection({
+			previous: untrack(() => appliedProjection),
+			next: mountedProjection,
+			pinned: untrack(() => pinned),
+			scrollbarDragActive,
+		})
+	) {
+		throw new Error('Expected the initial virtual projection to be accepted');
+	}
+	appliedProjection = mountedProjection;
 	const snapshot = $derived(controller.snapshot);
 	const renderedIndexes = $derived(controller.renderedIndexes(snapshot));
 	const renderedItems = $derived(virtualItems(snapshot, renderedIndexes));

@@ -184,6 +184,12 @@ describe('ConversationFeedVirtualController', () => {
 		expect(observer?.observed.has(sizer!)).toBe(false);
 		expect(exposure.controller.snapshot.positions.count).toBe(12);
 		expect(exposure.controller.isReady()).toBe(true);
+		expect(exposure.transactions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: 'replace-surface', scrollWrites: 0 }),
+				expect.objectContaining({ source: 'resume', provenance: 'navigation' }),
+			]),
+		);
 	});
 
 	it('publishes pinned appends as follow transactions', async () => {
@@ -235,6 +241,48 @@ describe('ConversationFeedVirtualController', () => {
 
 		expect(redemption).toMatchObject({ source: 'viewport', scrollWrites: 1, deviationAfter: 0 });
 		expect(exposure.controller.viewportPosition()?.leadingContentReachable).toBe(true);
+	});
+
+	it('defers pinned end requests until native coasting becomes idle', async () => {
+		const { exposure } = await renderController();
+		const viewport = exposure.viewport();
+		if (!viewport) throw new Error('Expected the virtual viewport to be mounted');
+		viewport.scrollTop = Math.max(0, viewport.scrollTop - 40);
+		exposure.controller.setNativeScrollActivity('coasting');
+		const before = exposure.transactions.length;
+
+		exposure.controller.scrollToEnd();
+		await settleController();
+		expect(exposure.transactions.slice(before).some((record) => record.scrollWrites > 0)).toBe(
+			false,
+		);
+
+		exposure.controller.setNativeScrollActivity('idle');
+		await settleController();
+		expect(exposure.transactions.slice(before)).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					source: 'programmatic',
+					provenance: 'navigation',
+					scrollWrites: 1,
+				}),
+			]),
+		);
+	});
+
+	it('drops a deferred end request after the user detaches from the end', async () => {
+		const { exposure } = await renderController();
+		exposure.controller.setNativeScrollActivity('coasting');
+		const before = exposure.transactions.length;
+
+		exposure.controller.scrollToEnd();
+		await exposure.setPinned(false);
+		exposure.controller.setNativeScrollActivity('idle');
+		await settleController();
+
+		expect(exposure.transactions.slice(before).some((record) => record.scrollWrites > 0)).toBe(
+			false,
+		);
 	});
 
 	it('replaces a surface through an empty generation and one owned target', async () => {

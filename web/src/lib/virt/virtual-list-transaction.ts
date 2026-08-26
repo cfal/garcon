@@ -99,11 +99,13 @@ export class VirtualListTransaction {
 		if (!dom || this.#suspended || this.#replacementPending) return null;
 		const paintedOffset = dom.scrollTop - dom.leadingOffset;
 		const logicalOffset = paintedOffset + this.#deviation.value;
+		const logicalStartScrollTop = dom.leadingOffset - this.#deviation.value;
 		return {
 			paintedOffset,
 			logicalOffset,
 			distanceFromStart: Math.max(0, logicalOffset),
-			leadingContentReachable: dom.scrollTop - this.#deviation.value >= 0,
+			leadingContentReachable:
+				logicalStartScrollTop >= 0 && logicalStartScrollTop <= dom.physicalMaximum,
 		};
 	}
 
@@ -519,6 +521,7 @@ export class VirtualListTransaction {
 		};
 		this.#publishedGeometryRevision = this.geometry.revision;
 		this.#publishedDeviation = this.#deviation.value;
+		if (this.#pendingCommit) this.#pendingCommit.revision = this.#snapshot.revision;
 		this.options.publish(this.#snapshot);
 		if (dom) {
 			this.#lastDom = dom;

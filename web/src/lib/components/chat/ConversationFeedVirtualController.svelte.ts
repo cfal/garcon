@@ -82,7 +82,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#activeTargetScrolls = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
 	#hiddenResumeResult: HiddenReadingRestoreResult | null = null;
+	#pendingResumeTarget: VirtualResumeTarget | null = null;
+	#nativeScrollActivity: ConversationNativeScrollActivity = 'idle';
 	#pendingEndScroll = false;
+	#pendingEndFlushQueued = false;
 	#measureOnShow = false;
 	#earlierPrependAnchor = new ConversationEarlierPrependAnchorOwnership();
 	#mountedItems = new ConversationMountedVirtualItems();
@@ -121,6 +124,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => {
 			void options.viewport;
 			void options.virtualRoot;
+			this.#resumePendingSurface();
+			if (this.#nativeScrollActivity === 'idle') this.#queuePendingEndScrollFlush();
 			this.#virt.refreshLayout();
 		});
 	}
@@ -172,7 +177,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	applyProjection(input: ConversationProjectionApplication): boolean {
 		const nextGeometry = input.next.geometry;
-		if (nextGeometry.geometryRevision === this.#configuredGeometry.geometryRevision) {
+		if (
+			nextGeometry.surfaceIdentity === this.#configuredGeometry.surfaceIdentity &&
+			nextGeometry.geometryRevision === this.#configuredGeometry.geometryRevision
+		) {
 			this.#configuredModel = input.next.model;
 			this.#appliedDataRevision = Math.max(
 				this.#appliedDataRevision,
@@ -274,6 +282,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#hiddenAnchor = this.options.pinned ? null : this.#captureVirtualAnchor(true);
 		this.#hiddenResumeResult = null;
 		this.#configuredVisible = false;
+		this.#pendingResumeTarget = null;
 		this.#endRestoreEpoch += 1;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
@@ -326,6 +335,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#pendingEndScroll = true;
 			return;
 		}
+		if (this.#deferPinnedEndScroll()) return;
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#hiddenAnchor = null;
@@ -390,7 +400,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				this.#virt.scrollToIndex(index, { align: 'start' });
 			},
 			scrollToEnd: () => {
-				this.#virt.scrollToEnd();
+				this.#scrollToEndForPinnedFollow();
 			},
 		});
 	}
@@ -434,7 +444,9 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	setNativeScrollActivity(activity: ConversationNativeScrollActivity): void {
+		this.#nativeScrollActivity = activity;
 		this.#virt.setScrollActivity(activity);
+		if (activity === 'idle') this.#queuePendingEndScrollFlush();
 	}
 
 	refreshLayout(): void {
@@ -499,6 +511,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#earlierPrependAnchor.clear();
 		this.#mountedItems.clear();
 		this.#itemAttachments.clear();
+		this.#pendingResumeTarget = null;
 		this.#virt.destroy();
 	}
 
@@ -533,6 +546,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	#publishPinned(pinned: boolean): void {
 		this.#configuredPinned = pinned;
+		if (!pinned) this.#pendingEndScroll = false;
 	}
 
 	#publishVisibility(visible: boolean): void {
@@ -556,14 +570,58 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#measureOnShow = false;
 			this.#virt.remeasureAll();
 		}
-		if (target.kind === 'end') this.#settleEndRestore();
 	}
 
 	#resumeCurrentSurface(target: VirtualResumeTarget): HiddenReadingRestoreResult {
 		const result = this.#virt.resume(target);
-		if (result.kind === 'not-ready') return 'not-ready';
+		if (result.kind === 'not-ready') {
+			this.#pendingResumeTarget = target;
+			return 'not-ready';
+		}
+		this.#pendingResumeTarget = null;
 		if (result.kind === 'missing-key') return 'missing-anchor';
+		if (target.kind === 'end') this.#settleEndRestore();
 		return 'restored';
+	}
+
+	#resumePendingSurface(): void {
+		const target = this.#pendingResumeTarget;
+		if (!target || !this.#configuredVisible) return;
+		this.#resumeCurrentSurface(target);
+	}
+
+	#deferPinnedEndScroll(): boolean {
+		if (this.#nativeScrollActivity === 'idle' || !this.#configuredPinned) return false;
+		this.#pendingEndScroll = true;
+		return true;
+	}
+
+	#scrollToEndForPinnedFollow(): void {
+		if (!this.#deferPinnedEndScroll()) this.#virt.scrollToEnd();
+	}
+
+	#queuePendingEndScrollFlush(): void {
+		if (!this.#pendingEndScroll || this.#pendingEndFlushQueued) return;
+		this.#pendingEndFlushQueued = true;
+		queueMicrotask(() => {
+			this.#pendingEndFlushQueued = false;
+			if (
+				this.#destroyed ||
+				this.#nativeScrollActivity !== 'idle' ||
+				!this.#pendingEndScroll
+			) {
+				return;
+			}
+			if (!this.#configuredPinned) {
+				this.#pendingEndScroll = false;
+				return;
+			}
+			if (!this.isReady()) return;
+			this.#pendingEndScroll = false;
+			if (this.isAtEnd()) return;
+			this.#virt.scrollToEnd();
+			this.#settleEndRestore();
+		});
 	}
 
 	#settleEndRestore(): void {
@@ -582,7 +640,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			},
 			isAtEnd: () => this.isAtEnd(),
 			scrollToEnd: () => {
-				this.#virt.scrollToEnd();
+				this.#scrollToEndForPinnedFollow();
 			},
 			complete: () => this.options.onInitialEndRestored?.(),
 		});

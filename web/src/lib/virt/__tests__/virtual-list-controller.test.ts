@@ -57,28 +57,29 @@ describe('VirtualListController', () => {
 		const test = harness({ viewportSize: 80 });
 		test.controller.apply({
 			kind: 'update',
-			keys: ['b', 'c'],
-			estimates: [40, 40],
+			keys: ['b', 'c', 'd'],
+			estimates: [40, 40, 40],
 			anchor: { kind: 'none' },
 		});
+		test.setPhysicalScrollTop(40);
 		test.controller.setScrollActivity('coasting');
 		test.controller.apply({
 			kind: 'update',
-			keys: ['a', 'b', 'c'],
-			estimates: [30, 40, 40],
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [30, 40, 40, 40],
 			anchor: { kind: 'item', key: 'b' },
 		});
 
 		expect(test.writes).toBe(0);
 		expect(test.controller.snapshot.positions.itemAt(1)?.start).toBe(0);
-		expect(test.controller.snapshot.sizerSize).toBe(80);
+		expect(test.controller.snapshot.sizerSize).toBe(120);
 		expect(test.controller.viewportPosition?.leadingContentReachable).toBe(false);
 
 		test.controller.setScrollActivity('idle');
-		expect(test.controller.snapshot.sizerSize).toBe(110);
+		expect(test.controller.snapshot.sizerSize).toBe(150);
 		test.environment.flushMicrotasks();
 		expect(test.writes).toBe(1);
-		expect(test.viewport.scrollTop).toBe(30);
+		expect(test.viewport.scrollTop).toBe(70);
 	});
 
 	it('defers mutation-driven end follow without writing during coasting', () => {
@@ -234,6 +235,7 @@ describe('VirtualListController', () => {
 			estimates: [40, 40],
 		});
 
+		test.mountItem('new-a', 60);
 		expect(test.controller.resume({ kind: 'end' })).toEqual({ kind: 'scheduled' });
 		test.environment.flushMicrotasks();
 		expect(test.records.at(-1)).toMatchObject({
@@ -241,6 +243,7 @@ describe('VirtualListController', () => {
 			provenance: 'navigation',
 			scrollWrites: 1,
 		});
+		expect(test.viewport.scrollTop).toBe(50);
 	});
 
 	it('rejects malformed mutations without changing the current snapshot', () => {
