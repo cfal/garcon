@@ -16,6 +16,10 @@ import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
+import {
+  parseAgentSwitchContextWindowTokens,
+  type AgentSwitchContextWindowTokens,
+} from './handoff-sizing';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
 export const DEFAULT_APP_TITLE = 'Garcon';
@@ -48,6 +52,7 @@ export type PromptRefinementUiSettings = PromptGenerationUiSettings;
 // to another agent, or continues in a new chat through `/handoff`.
 export interface AgentSwitchCompactionUiSettings extends GenerationSelectionUiSettings {
   enabled?: boolean;
+  contextWindowTokens?: AgentSwitchContextWindowTokens;
 }
 
 export interface TelegramNotificationSettings {
@@ -99,7 +104,10 @@ export interface RemoteUiEffectiveSettings {
   chatTitle?: Required<Pick<ChatTitleUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationSelection;
   agentSwitchCompaction?: Required<
-    Pick<AgentSwitchCompactionUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>
+    Pick<
+      AgentSwitchCompactionUiSettings,
+      'enabled' | 'agentId' | 'model' | 'thinkingMode' | 'contextWindowTokens'
+    >
   > & EffectiveGenerationSelection;
   commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveCommitMessageExtras;
@@ -231,6 +239,8 @@ export function normalizeAgentSwitchCompactionUiSettings(
     ...normalizeGenerationSelection(raw),
   };
   if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  const contextWindowTokens = parseAgentSwitchContextWindowTokens(raw.contextWindowTokens);
+  if (contextWindowTokens !== null) normalized.contextWindowTokens = contextWindowTokens;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -356,12 +366,15 @@ function normalizeAgentSwitchCompactionUiEffectiveSettings(
   if (typeof raw.enabled !== 'boolean') return undefined;
   if (!isAgentId(raw.agentId)) return undefined;
   if (typeof raw.model !== 'string') return undefined;
+  const contextWindowTokens = parseAgentSwitchContextWindowTokens(raw.contextWindowTokens);
+  if (contextWindowTokens === null) return undefined;
 
   const normalized: NonNullable<RemoteUiEffectiveSettings['agentSwitchCompaction']> = {
     enabled: raw.enabled,
     agentId: raw.agentId,
     model: raw.model,
     thinkingMode: normalizeThinkingMode(raw.thinkingMode),
+    contextWindowTokens,
   };
   normalizeEffectiveGenerationSelection(raw, normalized);
   return normalized;

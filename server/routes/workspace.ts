@@ -34,6 +34,10 @@ import type {
   UpdateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
 import { testGenerationModel } from '../settings/generation-model-test.js';
+import {
+  DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+  parseAgentSwitchContextWindowTokens,
+} from '../../common/handoff-sizing.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -96,15 +100,21 @@ export async function buildRemoteSettingsSnapshot({
       [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage, ui?.promptRefinement],
     );
 
+  const effectiveCompaction = resolveEffectiveGenerationUiConfig({
+    persisted: asPlainObject(ui?.agentSwitchCompaction),
+    ...compactionContext,
+  });
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
       ...chatTitleContext,
     }),
-    agentSwitchCompaction: resolveEffectiveGenerationUiConfig({
-      persisted: asPlainObject(ui?.agentSwitchCompaction),
-      ...compactionContext,
-    }),
+    agentSwitchCompaction: {
+      ...effectiveCompaction,
+      contextWindowTokens:
+        parseAgentSwitchContextWindowTokens(effectiveCompaction.contextWindowTokens)
+        ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+    },
     commitMessage: resolveUntoggledGenerationUiConfig<'commitMessage'>({
       persisted: asPlainObject(ui?.commitMessage),
       ...commitMessageContext,

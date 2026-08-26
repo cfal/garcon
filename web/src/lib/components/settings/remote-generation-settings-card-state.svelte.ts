@@ -11,6 +11,10 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import { normalizeThinkingMode } from '$shared/chat-modes';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
+import {
+	DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
+	type AgentSwitchContextWindowTokens,
+} from '$shared/handoff-sizing';
 import type {
 	AgentSwitchCompactionUiSettings,
 	ChatTitleUiSettings,
@@ -98,6 +102,11 @@ export class RemoteGenerationSettingsCardState {
 		return this.options.settingsKey === 'agentSwitchCompaction'
 			? effective?.agentSwitchCompaction?.enabled === true
 			: effective?.chatTitle?.enabled !== false;
+	}
+
+	get contextWindowTokens(): AgentSwitchContextWindowTokens {
+		return this.options.remoteSettings.snapshot?.uiEffective.agentSwitchCompaction
+			?.contextWindowTokens ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS;
 	}
 
 	get provider(): SessionAgentId {
@@ -248,6 +257,20 @@ export class RemoteGenerationSettingsCardState {
 				...this.persistedChatTitleSettings,
 				...this.#selectionSettings(),
 				enabled,
+			},
+		});
+	}
+
+	async persistContextWindowTokens(
+		contextWindowTokens: AgentSwitchContextWindowTokens,
+	): Promise<boolean> {
+		if (this.options.settingsKey !== 'agentSwitchCompaction') return false;
+		return this.#saveUiSettings({
+			agentSwitchCompaction: {
+				...this.persistedCompactionSettings,
+				...this.#selectionSettings(),
+				enabled: this.enabled,
+				contextWindowTokens,
 			},
 		});
 	}

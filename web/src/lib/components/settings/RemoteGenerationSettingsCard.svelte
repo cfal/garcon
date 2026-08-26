@@ -12,6 +12,7 @@
 		DEFAULT_COMMIT_MESSAGE_PROMPT,
 		DEFAULT_PROMPT_REFINEMENT_PROMPT,
 	} from '$shared/generation-prompts';
+	import { parseAgentSwitchContextWindowTokens } from '$shared/handoff-sizing';
 	import GenerationPromptDialog, {
 		type GenerationPromptKind,
 	} from './GenerationPromptDialog.svelte';
@@ -69,6 +70,15 @@
 		if (result.ok) promptDialogOpen = false;
 		return result;
 	}
+
+	function saveContextWindow(event: Event): void {
+		const contextWindowTokens = parseAgentSwitchContextWindowTokens(
+			Number((event.currentTarget as HTMLSelectElement).value),
+		);
+		if (contextWindowTokens !== null) {
+			void cardState.persistContextWindowTokens(contextWindowTokens);
+		}
+	}
 </script>
 
 <div class="bg-muted/50 border border-border rounded-lg px-4">
@@ -94,6 +104,28 @@
 	{/if}
 
 	{#if cardState.enabled}
+		{#if settingsKey === 'agentSwitchCompaction'}
+			<div class="flex items-center justify-between gap-3 py-2">
+				<label
+					for="agent-switch-context-window"
+					class="text-sm font-medium text-foreground"
+				>
+					{m.settings_agent_switch_compaction_context_window()}
+				</label>
+				<select
+					id="agent-switch-context-window"
+					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:text-sm"
+					value={cardState.contextWindowTokens}
+					disabled={cardState.isSaving}
+					onchange={saveContextWindow}
+				>
+					<option value={200000}>{m.settings_context_window_200000()}</option>
+					<option value={500000}>{m.settings_context_window_500000()}</option>
+					<option value={1000000}>{m.settings_context_window_1000000()}</option>
+				</select>
+			</div>
+		{/if}
+
 		<div class="flex items-start justify-between gap-3 pb-1 pt-2">
 			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
 			<div class="flex min-w-0 flex-col items-end">

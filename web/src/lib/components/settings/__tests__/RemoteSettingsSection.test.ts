@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
@@ -126,6 +126,18 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 					thinkingMode: 'none',
 				}),
 				...patch.ui.chatTitle,
+			};
+		}
+		if (patch.ui?.agentSwitchCompaction) {
+			nextUiEffective.agentSwitchCompaction = {
+				...(current.uiEffective.agentSwitchCompaction ?? {
+					enabled: false,
+					agentId: 'claude',
+					model: 'opus',
+					thinkingMode: 'none',
+					contextWindowTokens: 500_000,
+				}),
+				...patch.ui.agentSwitchCompaction,
 			};
 		}
 		if (patch.ui?.commitMessage) {
@@ -314,6 +326,128 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getAllByRole('button', { name: 'Edit generation prompt' })).toHaveLength(2);
 		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(3);
 		expect(refinementModel.parentElement?.parentElement?.querySelector('[role="switch"]')).toBeNull();
+	});
+
+	it('configures the compaction context window and preserves it across nested saves', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					agentSwitchCompaction: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'none',
+					},
+				},
+				uiEffective: {
+					agentSwitchCompaction: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'none',
+						contextWindowTokens: 500_000,
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		const selector = screen.getByRole('combobox', {
+			name: 'Compaction model context window',
+		}) as HTMLSelectElement;
+		expect(Array.from(selector.options).map(({ value, text }) => ({ value, text }))).toEqual([
+			{ value: '200000', text: '200,000 tokens' },
+			{ value: '500000', text: '500,000 tokens (default)' },
+			{ value: '1000000', text: '1,000,000 tokens' },
+		]);
+		expect(selector.value).toBe('500000');
+
+		await fireEvent.change(selector, { target: { value: '200000' } });
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: {
+					agentSwitchCompaction: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+						thinkingMode: 'none',
+						contextWindowTokens: 200_000,
+					},
+				},
+			});
+		});
+
+		vi.mocked(updateRemoteSettings).mockClear();
+		const card = screen.getByText('Compaction model').closest('.rounded-lg');
+		expect(card).toBeTruthy();
+		await fireEvent.click(
+			within(card as HTMLElement).getByRole('button', { name: /Claude .* Opus .* Default/ }),
+		);
+		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: {
+					agentSwitchCompaction: expect.objectContaining({
+						thinkingMode: 'high',
+						contextWindowTokens: 200_000,
+					}),
+				},
+			});
+		});
+
+		vi.mocked(updateRemoteSettings).mockClear();
+		await fireEvent.click(screen.getByRole('switch', { name: 'Enable agent switch compaction' }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: {
+					agentSwitchCompaction: expect.objectContaining({
+						enabled: false,
+						contextWindowTokens: 200_000,
+					}),
+				},
+			});
+		});
+	});
+
+	it('disables the compaction context-window selector while saving', async () => {
+		const store = new RemoteSettingsStore();
+		const snapshot = makeSnapshot({
+			uiEffective: {
+				agentSwitchCompaction: {
+					enabled: true,
+					agentId: 'claude',
+					model: 'opus',
+					thinkingMode: 'none',
+					contextWindowTokens: 500_000,
+				},
+			},
+		});
+		store.applySnapshot(snapshot);
+		setTestRemoteSettingsStore(store);
+		let finishSave!: () => void;
+		vi.mocked(updateRemoteSettings).mockImplementationOnce(
+			() => new Promise((resolve) => {
+				finishSave = () => resolve({
+					success: true,
+					settings: snapshot,
+				});
+			}),
+		);
+		render(RemoteSettingsSectionTestHost);
+
+		const selector = screen.getByRole('combobox', {
+			name: 'Compaction model context window',
+		}) as HTMLSelectElement;
+		await fireEvent.change(selector, { target: { value: '200000' } });
+		await waitFor(() => expect(selector.disabled).toBe(true));
+		finishSave();
+		await waitFor(() => expect(selector.disabled).toBe(false));
 	});
 
 	it('keeps direct agents available in title and commit generation selectors', async () => {

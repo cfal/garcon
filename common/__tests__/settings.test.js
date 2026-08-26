@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
@@ -8,6 +9,20 @@ import {
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
+  it('accepts only supported compaction context-window presets', () => {
+    for (const contextWindowTokens of [200_000, 500_000, 1_000_000]) {
+      expect(normalizeAgentSwitchCompactionUiSettings({ contextWindowTokens }))
+        .toEqual({ contextWindowTokens });
+    }
+
+    for (const contextWindowTokens of ['500000', 500_000.5, 250_000, null]) {
+      expect(normalizeAgentSwitchCompactionUiSettings({
+        enabled: true,
+        contextWindowTokens,
+      })).toEqual({ enabled: true });
+    }
+  });
+
   it('keeps title settings limited to title generation fields', () => {
     expect(normalizeChatTitleUiSettings({
       enabled: true,
@@ -167,5 +182,60 @@ describe('generation settings contracts', () => {
       thinkingMode: 'medium',
       customPrompt: 'Refine {{USER_PROMPT}}',
     });
+  });
+
+  it('requires a supported context window in effective compaction settings', () => {
+    const base = {
+      version: 1,
+      features: { transcriptSearch: { enabled: false } },
+      ui: {},
+      paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
+      pinnedChatIds: [],
+      recentAgentSettings: [],
+      executionDefaults: {
+        global: {
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          agentSettingsById: {},
+        },
+        byAgent: {},
+      },
+      projectBasePath: '',
+      telegram: {
+        botTokenAvailable: false,
+        botUsername: null,
+        botFirstName: null,
+        recipientUsername: null,
+        recipientDisplayName: null,
+        recipientLinked: false,
+        pendingLink: false,
+        linkUrl: null,
+      },
+    };
+    const compaction = {
+      enabled: true,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      thinkingMode: 'medium',
+    };
+
+    for (const contextWindowTokens of [200_000, 500_000, 1_000_000]) {
+      expect(normalizeRemoteSettingsSnapshot({
+        ...base,
+        uiEffective: {
+          agentSwitchCompaction: { ...compaction, contextWindowTokens },
+        },
+      })?.uiEffective.agentSwitchCompaction?.contextWindowTokens)
+        .toBe(contextWindowTokens);
+    }
+
+    for (const contextWindowTokens of [undefined, '500000', 500_000.5, 250_000, null]) {
+      expect(normalizeRemoteSettingsSnapshot({
+        ...base,
+        uiEffective: {
+          agentSwitchCompaction: { ...compaction, contextWindowTokens },
+        },
+      })?.uiEffective.agentSwitchCompaction).toBeUndefined();
+    }
   });
 });
