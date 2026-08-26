@@ -199,10 +199,7 @@ export class AgentRuntimeRouter {
       });
       assertExecutionAdmissionOpen(opts);
       if (carryover.summary) {
-        this.#ledger.appendNotice(chatId, prepared.viewId, {
-          title: 'Handoff summary',
-          content: carryover.summary,
-        });
+        this.#ledger.appendHandoffSummary(chatId, prepared.viewId, carryover.summary);
       }
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),

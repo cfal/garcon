@@ -8,11 +8,13 @@ import {
   TranscriptNoticeMessage,
   UserMessage,
   isCarryoverMigrationQuarantineNoticeDetail,
+  isHandoffSummaryNoticeDetail,
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
 import {
   isLedgerCliRowNoticeDetail,
+  type LedgerNoticeRow,
   type LedgerRow,
 } from './contracts.js';
 
@@ -61,7 +63,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
-        isCarryoverMigrationQuarantineNoticeDetail(row.detail) ? row.detail : undefined,
+        noticeDetail(row.detail),
         typeof row.detail.title === 'string' && row.detail.title ? row.detail.title : undefined,
       );
     }
@@ -101,4 +103,16 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'run-ended':
       return null;
   }
+}
+
+function noticeDetail(detail: LedgerNoticeRow['detail']) {
+  if (isCarryoverMigrationQuarantineNoticeDetail(detail)) {
+    return {
+      type: detail.type,
+      artifactId: detail.artifactId,
+      errorCode: detail.errorCode,
+    };
+  }
+  if (isHandoffSummaryNoticeDetail(detail)) return { type: detail.type };
+  return undefined;
 }

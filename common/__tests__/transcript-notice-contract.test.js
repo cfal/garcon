@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { CliRowMessage, ErrorMessage, parseChatMessage } from '../chat-types.ts';
+import {
+  CliRowMessage,
+  ErrorMessage,
+  isHandoffSummaryNoticeDetail,
+  parseChatMessage,
+} from '../chat-types.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
 
@@ -22,6 +27,25 @@ describe('transcript notice contracts', () => {
     expect(parsed?.type).toBe('transcript-notice');
     expect(parsed?.detail).toEqual(message.detail);
     expect(JSON.parse(JSON.stringify(parsed))).toEqual(message);
+  });
+
+  it('round-trips typed handoff summaries without matching title-only notices', () => {
+    const message = {
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Objective and current state.',
+      detail: { type: 'handoff-summary' },
+      title: 'Handoff summary',
+    };
+
+    expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
+    expect(isHandoffSummaryNoticeDetail(message.detail)).toBe(true);
+    expect(isHandoffSummaryNoticeDetail({
+      type: 'handoff-summary',
+      title: 'Handoff summary',
+    })).toBe(true);
+    expect(isHandoffSummaryNoticeDetail({ title: 'Handoff summary' })).toBe(false);
+    expect(isHandoffSummaryNoticeDetail({ type: 'ordinary-notice' })).toBe(false);
   });
 
   it('upgrades legacy CLI provenance into explicit row messages', () => {

@@ -229,6 +229,20 @@ describe('transcript ledger presentation', () => {
       title: 'Provider retry',
     });
     expect(titled.detail).toBeUndefined();
+    const handoffSummary = ledgerRowToMessage({
+      kind: 'notice',
+      ordinal: 14,
+      at: AT,
+      providerMeta: null,
+      message: 'Objective and current state.',
+      detail: { type: 'handoff-summary', title: 'Handoff summary' },
+    });
+    expect(handoffSummary).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Objective and current state.',
+      { type: 'handoff-summary' },
+      'Handoff summary',
+    ));
     expect(rendered[4].message).toBeInstanceOf(CliRowMessage);
     expect(rendered[4].message).toMatchObject({
       content: '  exact notice\n',

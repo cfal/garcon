@@ -15,6 +15,7 @@ import type { ChatMessage, UserMessage } from '../../common/chat-types.js';
 import type { CliBodyDisclosure, CliPresentation, CliRowFormat } from '../../common/cli-presentation.js';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
+import type { JsonObject } from '../../common/json.js';
 import type {
   AppendChatRowResult,
   InputComposition,
@@ -404,13 +405,40 @@ export class TranscriptLedgerService {
     viewId: TranscriptViewId,
     input: { readonly title: string; readonly content: string },
   ): LedgerNoticeRow {
+    return this.#appendInternalNotice(chatId, viewId, {
+      ...input,
+      detail: {},
+    });
+  }
+
+  appendHandoffSummary(
+    chatId: string,
+    viewId: TranscriptViewId,
+    content: string,
+  ): LedgerNoticeRow {
+    return this.#appendInternalNotice(chatId, viewId, {
+      title: 'Handoff summary',
+      content,
+      detail: { type: 'handoff-summary' },
+    });
+  }
+
+  #appendInternalNotice(
+    chatId: string,
+    viewId: TranscriptViewId,
+    input: {
+      readonly title: string;
+      readonly content: string;
+      readonly detail: JsonObject;
+    },
+  ): LedgerNoticeRow {
     const title = parseChatRowTitle(input.title);
     if (!title) throw new TypeError('Notice title is required');
     const [row] = this.#store.append(chatId, viewId, [{
       kind: 'notice',
       at: this.#now(),
       message: parseChatRowContent(input.content),
-      detail: { title },
+      detail: { ...input.detail, title },
       providerMeta: null,
     }]);
     const notice = row as LedgerNoticeRow;

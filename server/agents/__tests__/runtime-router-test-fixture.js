@@ -93,16 +93,16 @@ export function createRuntimeTranscriptFixture(options = {}) {
     takePreparedInput: (...args) => typeof options.composition === 'function'
       ? options.composition(...args)
       : options.composition ?? null,
-    appendNotice: (chatId, viewId, input) => {
+    appendHandoffSummary: (chatId, viewId, content) => {
       if (viewId !== currentView()?.viewId) throw new Error('stale view');
-      options.appendNotice?.(chatId, viewId, input);
+      options.appendHandoffSummary?.(chatId, viewId, content);
       const row = {
         kind: 'notice',
         viewId,
         ordinal: (options.rows?.length ?? 0) + notices.length + 1,
         at: '2026-08-12T00:00:00.000Z',
-        message: input.content,
-        detail: { title: input.title },
+        message: content,
+        detail: { type: 'handoff-summary', title: 'Handoff summary' },
         providerMeta: null,
       };
       notices.push(row);

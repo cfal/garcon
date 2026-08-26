@@ -651,7 +651,13 @@ export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly errorCode: string;
 }
 
-export type TranscriptNoticeDetail = CarryoverMigrationQuarantineNoticeDetail;
+export interface HandoffSummaryNoticeDetail {
+  readonly type: 'handoff-summary';
+}
+
+export type TranscriptNoticeDetail =
+  | CarryoverMigrationQuarantineNoticeDetail
+  | HandoffSummaryNoticeDetail;
 
 export class TranscriptNoticeMessage {
   readonly type = 'transcript-notice' as const;
@@ -1148,6 +1154,15 @@ export function isCarryoverMigrationQuarantineNoticeDetail(
     && detail.errorCode.length > 0;
 }
 
+export function isHandoffSummaryNoticeDetail(
+  value: unknown,
+): value is HandoffSummaryNoticeDetail {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>).type === 'handoff-summary';
+}
+
 function isLegacyCliRowDetail(value: unknown): value is Record<string, unknown> {
   return value !== null
     && typeof value === 'object'
@@ -1177,6 +1192,7 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
       errorCode: value.errorCode,
     };
   }
+  if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
   return null;
 }
 

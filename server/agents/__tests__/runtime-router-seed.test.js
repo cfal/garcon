@@ -38,7 +38,7 @@ function makeRouter(overrides = {}) {
     conversation,
     composition: overrides.composition,
     conversationMessages: overrides.conversationMessages,
-    appendNotice: overrides.appendNotice,
+    appendHandoffSummary: overrides.appendHandoffSummary,
     currentView: overrides.currentView,
   });
   const start = overrides.start ?? mock(async (request) => {
@@ -227,7 +227,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(transcript.notices).toEqual([expect.objectContaining({
       kind: 'notice',
       message: 'compacted prior context',
-      detail: { title: 'Handoff summary' },
+      detail: { type: 'handoff-summary', title: 'Handoff summary' },
     })]);
   });
 
@@ -241,7 +241,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     });
     const { router, transcript } = makeRouter({
       start,
-      appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.content}`),
+      appendHandoffSummary: (_chatId, _viewId, content) => order.push(`notice:${content}`),
       createCarriedContext: async () => ({
         context: { prefix: 'compacted seed' },
         summary,
@@ -257,7 +257,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(transcript.notices).toEqual([expect.objectContaining({
       kind: 'notice',
       message: summary,
-      detail: { title: 'Handoff summary' },
+      detail: { type: 'handoff-summary', title: 'Handoff summary' },
     })]);
     expect(start).toHaveBeenCalledWith(expect.objectContaining({
       carriedContext: { prefix: 'compacted seed' },
@@ -323,7 +323,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
   it('does not invoke the provider when the handoff notice cannot commit', async () => {
     const { router, start, transcript } = makeRouter({
-      appendNotice: () => { throw new Error('notice commit failed'); },
+      appendHandoffSummary: () => { throw new Error('notice commit failed'); },
       createCarriedContext: async () => ({
         context: { prefix: 'compacted seed' },
         summary: 'One summary',

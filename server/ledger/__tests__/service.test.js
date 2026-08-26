@@ -137,6 +137,37 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('commits a typed handoff summary through its dedicated path', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+
+      const row = ledger.appendHandoffSummary(
+        'chat-1',
+        view.viewId,
+        'Objective\n\n  Preserve formatting.',
+      );
+
+      expect(row).toMatchObject({
+        kind: 'notice',
+        at: TS,
+        message: 'Objective\n\n  Preserve formatting.',
+        detail: { type: 'handoff-summary', title: 'Handoff summary' },
+        providerMeta: null,
+      });
+      expect(ledger.conversationMessages('chat-1')).toEqual([]);
+      expect(notifications).toEqual([]);
+      await tick();
+      expect(notifications).toEqual([expect.objectContaining({
+        type: 'rows',
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        rows: [row],
+      })]);
+    });
+  });
+
   it('rejects an invalid internal notice before append', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
