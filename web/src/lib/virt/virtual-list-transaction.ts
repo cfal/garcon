@@ -518,12 +518,13 @@ export class VirtualListTransaction {
 		let item =
 			this.geometry.itemAtOffset(logicalOffset) ?? this.geometry.item(this.geometry.count - 1);
 		if (item && firstMeasurements?.has(item.key)) {
+			const viewportEnd = logicalOffset + dom.viewportSize;
+			// Pins the last measured in-view row so interleaved first measurements cannot shift it.
 			for (let index = item.index + 1; index < this.geometry.count; index += 1) {
 				const candidate = this.geometry.item(index);
-				if (candidate && this.geometry.measuredSize(candidate.key) !== undefined) {
-					item = candidate;
-					break;
-				}
+				if (!candidate || candidate.start >= viewportEnd) break;
+				if (this.geometry.measuredSize(candidate.key) === undefined) continue;
+				item = candidate;
 			}
 		}
 		return item

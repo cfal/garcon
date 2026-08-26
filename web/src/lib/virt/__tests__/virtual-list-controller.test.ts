@@ -137,6 +137,12 @@ describe('VirtualListController', () => {
 		expect(test.controller.snapshot.positions.itemAt(3)?.start).toBe(104);
 		expect(104 - test.viewport.scrollTop).toBe(64);
 		expect(test.writes - writesBeforeMeasurement).toBe(1);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorIndex: 3,
+			correction: -160,
+			scrollWrites: 1,
+		});
 	});
 
 	it('keeps measured content fixed when prepended estimates settle during coasting', () => {
@@ -168,6 +174,87 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 		expect(104 - test.viewport.scrollTop).toBe(64);
 		expect(test.writes).toBe(1);
+	});
+
+	it('does not skip beyond the viewport when choosing a first-measurement anchor', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'visible', 'batch-1', 'batch-2', 'measured-tail'],
+			estimates: [100, 20, 20, 60, 100],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('measured-tail', 100);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(100);
+
+		test.mountItem('visible', 10);
+		test.mountItem('batch-1', 10);
+		test.mountItem('batch-2', 10);
+		test.environment.flushMicrotasks();
+
+		expect(test.viewport.scrollTop).toBe(100);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorIndex: 1,
+			correction: 0,
+			scrollWrites: 0,
+		});
+	});
+
+	it('skips unmeasured content to a measured anchor within the viewport', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'visible', 'unmeasured-gap', 'measured-inside', 'tail'],
+			estimates: [100, 20, 20, 20, 100],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('measured-inside', 20);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(100);
+
+		test.mountItem('visible', 10);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.snapshot.positions.itemAt(3)?.start).toBe(130);
+		expect(130 - test.viewport.scrollTop).toBe(40);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorIndex: 3,
+			correction: -10,
+			scrollWrites: 1,
+		});
+	});
+
+	it('preserves measured content across interleaved first measurements', () => {
+		const test = harness({ viewportSize: 100 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'visible', 'measured-middle', 'batch-after', 'reading', 'tail'],
+			estimates: [100, 20, 20, 20, 20, 100],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('measured-middle', 20);
+		test.mountItem('reading', 20);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(100);
+		const readingStart = test.controller.snapshot.positions.itemAt(4)?.start;
+		expect(readingStart).toBe(160);
+		const readingOffset = (readingStart ?? Number.NaN) - test.viewport.scrollTop;
+
+		test.mountItem('visible', 10);
+		test.mountItem('batch-after', 10);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.snapshot.positions.itemAt(4)?.start).toBe(140);
+		expect(140 - test.viewport.scrollTop).toBe(readingOffset);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorIndex: 4,
+			correction: -20,
+			scrollWrites: 1,
+		});
 	});
 
 	it('defers mutation-driven end follow without writing during coasting', () => {

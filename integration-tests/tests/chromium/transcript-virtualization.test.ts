@@ -1283,9 +1283,20 @@ async function stopTranscriptMomentum(page: Page): Promise<void> {
     };
     if (browserGlobal.__chatMomentum) browserGlobal.__chatMomentum.active = false;
   });
-  await page.evaluate(
-    () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-  );
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    let previous = feed.scrollTop;
+    let stableFrames = 0;
+    for (let frame = 0; stableFrames < 3; frame += 1) {
+      if (frame > 300) {
+        throw new Error('Transcript scroll never settled after momentum stop.');
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = feed.scrollTop;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+    }
+  });
 }
 
 async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAnchorFrameSample[]> {
