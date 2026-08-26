@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
+import {
+  projectionPriorityLevel,
+  selectPrioritizedProjection,
+  type PrioritizedProjectionEntry,
+} from './transcript-projection.js';
 
 export const SEED_CONTEXT_OPEN = '<carried-context>';
 export const SEED_CONTEXT_CLOSE = '</carried-context>';
@@ -33,17 +38,6 @@ const TRUNCATION_ELEMENT = '    <earlier-turns-truncated/>';
 // leave turns that were excluded from summarization to be laddered away instead.
 export const RECENT_TURNS_VERBATIM = 3;
 
-// Message classes admitted in order while the budget holds. Conversation first
-// because the asks are irreducible, then file activity because it is durable
-// state, then command history, which is the bulk and the least durable signal.
-const LADDER: readonly (readonly string[])[] = [
-  ['user-message'],
-  ['assistant-message'],
-  ['read-tool-use', 'grep-tool-use', 'glob-tool-use', 'list-tool-use'],
-  ['edit-tool-use', 'write-tool-use', 'apply-patch-tool-use'],
-  ['bash-tool-use', 'exec-tool-use'],
-];
-const LONG_TAIL_LEVEL = LADDER.length;
 const READ_LEVEL = 2;
 const EDIT_LEVEL = 3;
 const AGGREGATED_READS = new Set(['read-tool-use']);
@@ -57,12 +51,7 @@ export interface NativeSeedReceipt {
   readonly sha256: string;
 }
 
-interface ProjectedEntry {
-  readonly level: number;
-  readonly turn: number;
-  readonly text: string;
-  refit(maximum: number): string;
-}
+type ProjectedEntry = PrioritizedProjectionEntry;
 
 export interface CarriedContext {
   readonly prefix: string;
@@ -151,32 +140,16 @@ export function createCarryoverTranscript(
     : '';
   const truncatedLead = fittedSummary ? `${fittedSummary}\n` : '';
   const available = Math.max(0, maxChars - opening.length - closing.length - 2 - truncatedLead.length);
-  const pinnedFrom = Math.max(0, turns.length - RECENT_TURNS_VERBATIM);
-  const admitted = new Set<ProjectedEntry>();
-  // The asks come first, ahead of even the pinned turns. They are the irreducible
-  // floor and they are cheap; a single recent turn carrying forty commands would
-  // otherwise consume the whole budget and strand every request that produced it.
-  const asks = admitLevel(
+  const selection = selectPrioritizedProjection({
     entries,
-    0,
-    admitted,
-    TRUNCATION_ELEMENT.length,
-    available,
-    Number.POSITIVE_INFINITY,
-    true,
-  );
-  const pinned = admitPinnedTurns(entries, pinnedFrom, turns.length, admitted, asks.used, available);
-  // The ladder covers every turn the pin did not take, so a chat whose newest
-  // turns are too large to pin still gets the rest of its history laddered.
-  const used = runLadder(entries, pinned.admittedFrom, admitted, pinned.used, available);
-
-  const selected = entries.filter((entry) => admitted.has(entry));
-  if (selected.length === 0) {
-    const fitted = entries.at(-1)!.refit(available - used - 1);
-    if (fitted) selected.push({ ...entries.at(-1)!, text: fitted });
-  }
+    turnCount: turns.length,
+    maximumCost: available,
+    truncationMarkerCost: TRUNCATION_ELEMENT.length,
+    cost: codeUnitEntryCost,
+    recentTurnsVerbatim: RECENT_TURNS_VERBATIM,
+  });
   return {
-    prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
+    prefix: `${opening}\n${truncatedLead}${[TRUNCATION_ELEMENT, ...selection.selected.map((entry) => entry.text)].join('\n')}\n${closing}`,
     summaryTruncated: fittedSummary !== summaryElement,
   };
 }
@@ -187,88 +160,6 @@ export function renderCarriedContext(
   options: { readonly maxChars?: number } = {},
 ): CarriedContext | null {
   return createCarryoverTranscript(messages, options.maxChars ?? CARRYOVER_INJECTION_MAX_CHARS);
-}
-
-// Admits the newest turns whole. When even those overflow, drops them oldest
-// first so the turn the next agent continues from always survives.
-function admitPinnedTurns(
-  entries: readonly ProjectedEntry[],
-  pinnedFrom: number,
-  turnCount: number,
-  admitted: Set<ProjectedEntry>,
-  used: number,
-  available: number,
-): { readonly used: number; readonly admittedFrom: number } {
-  for (let earliest = pinnedFrom; earliest < turnCount; earliest += 1) {
-    const candidates = entries.filter((entry) => entry.turn >= earliest && !admitted.has(entry));
-    const cost = candidates.reduce((total, entry) => total + 1 + entry.text.length, 0);
-    if (used + cost <= available) {
-      for (const entry of candidates) admitted.add(entry);
-      return { used: used + cost, admittedFrom: earliest };
-    }
-  }
-  return { used, admittedFrom: turnCount };
-}
-
-// Admits one ladder class in full when it fits, otherwise newest-first until the
-// budget is spent. `complete` tells the ladder whether to continue to the next
-// class or stop, so a cheaper later class never displaces a more valuable one.
-function admitLevel(
-  entries: readonly ProjectedEntry[],
-  level: number,
-  admitted: Set<ProjectedEntry>,
-  used: number,
-  available: number,
-  turnLimit = Number.POSITIVE_INFINITY,
-  pinOldest = false,
-): { readonly used: number; readonly complete: boolean } {
-  const candidates = entries.filter((entry) => (
-    entry.turn < turnLimit && entry.level === level && !admitted.has(entry)
-  ));
-  const cost = candidates.reduce((sum, entry) => sum + 1 + entry.text.length, 0);
-  if (used + cost <= available) {
-    for (const entry of candidates) admitted.add(entry);
-    return { used: used + cost, complete: true };
-  }
-  let total = used;
-  // The asks are the one class where the oldest entry is reserved before the
-  // newest-first fill: a chat that outgrows the budget still states the
-  // objective it started from, and the requests lost come from the middle.
-  // The newest ask is reserved ahead of the oldest. Both are protected, but when
-  // only one fits it must be the request the next agent has to act on rather
-  // than the objective it started from.
-  for (const pin of pinOldest ? [candidates.at(-1), candidates[0]] : []) {
-    if (!pin || admitted.has(pin) || total + 1 + pin.text.length > available) continue;
-    admitted.add(pin);
-    total += 1 + pin.text.length;
-  }
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    if (admitted.has(candidates[index])) continue;
-    const entryCost = 1 + candidates[index].text.length;
-    if (total + entryCost > available) break;
-    admitted.add(candidates[index]);
-    total += entryCost;
-  }
-  return { used: total, complete: false };
-}
-
-// Admits older turns one class at a time. A level that fits entirely is taken
-// whole; the first level that does not is filled newest-first and ends the pass,
-// so a cheaper later class never displaces a more valuable earlier one.
-function runLadder(
-  entries: readonly ProjectedEntry[],
-  turnLimit: number,
-  admitted: Set<ProjectedEntry>,
-  used: number,
-  available: number,
-): number {
-  let total = used;
-  for (let level = 0; level <= LONG_TAIL_LEVEL; level += 1) {
-    const outcome = admitLevel(entries, level, admitted, total, available, turnLimit);
-    total = outcome.used;
-    if (!outcome.complete) break;
-  }
-  return total;
 }
 
 // A turn is a user message and the activity that follows it, up to the next user
@@ -311,10 +202,10 @@ function renderTurn(turn: readonly ChatMessage[], turnIndex: number): ProjectedE
     const text = renderMessageElement(message);
     if (text) {
       entries.push({
-        level: levelOf(message.type),
+        level: projectionPriorityLevel(message.type),
         turn: turnIndex,
         text,
-        refit: (maximum) => renderMessageElement(message, maximum),
+        refit: (maximumCost, cost) => refitMessageElement(message, maximumCost, cost),
       });
     }
   }
@@ -333,13 +224,14 @@ function aggregateEntry(name: string, content: string, level: number, turn: numb
     level,
     turn,
     text: fitElement(open, content, close, Number.POSITIVE_INFINITY),
-    refit: (maximum) => fitElement(open, content, close, maximum),
+    refit: (maximumCost, cost) => fitElementWithinCost(
+      open,
+      content,
+      close,
+      maximumCost,
+      cost,
+    ),
   };
-}
-
-function levelOf(type: string): number {
-  const index = LADDER.findIndex((classes) => classes.includes(type));
-  return index === -1 ? LONG_TAIL_LEVEL : index;
 }
 
 function toolFilePath(message: ChatMessage): string {
@@ -571,6 +463,43 @@ function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_IN
   }
 }
 
+function refitMessageElement(
+  message: ChatMessage,
+  maximumCost: number,
+  cost: (text: string) => number,
+): string {
+  if (isToolUseMessage(message)) {
+    const detail = toolSummary(message);
+    return fitElementWithinCost(
+      '    <assistant><tool-use>',
+      detail ? `${toolName(message)}: ${detail}` : toolName(message),
+      '</tool-use></assistant>',
+      maximumCost,
+      cost,
+    );
+  }
+  switch (message.type) {
+    case 'user-message':
+      return fitElementWithinCost(
+        '    <user>',
+        boundedCollapse(message.content),
+        '</user>',
+        maximumCost,
+        cost,
+      );
+    case 'assistant-message':
+      return fitElementWithinCost(
+        '    <assistant>',
+        boundedCollapse(message.content),
+        '</assistant>',
+        maximumCost,
+        cost,
+      );
+    default:
+      return '';
+  }
+}
+
 function fitElement(open: string, content: string, close: string, maximum: number): string {
   const overhead = open.length + close.length;
   if (maximum < overhead) return '';
@@ -588,6 +517,34 @@ function fitElement(open: string, content: string, close: string, maximum: numbe
     else high = middle - 1;
   }
   return `${open}${escapeXml(codePoints.slice(0, low).join(''))}${suffix}${close}`;
+}
+
+function fitElementWithinCost(
+  open: string,
+  content: string,
+  close: string,
+  maximumCost: number,
+  cost: (text: string) => number,
+): string {
+  const escaped = escapeXml(content);
+  const full = `${open}${escaped}${close}`;
+  if (cost(full) <= maximumCost) return full;
+  const suffix = '...';
+  if (cost(`${open}${suffix}${close}`) > maximumCost) return '';
+  const codePoints = Array.from(content);
+  let low = 0;
+  let high = codePoints.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = `${open}${escapeXml(codePoints.slice(0, middle).join(''))}${suffix}${close}`;
+    if (cost(candidate) <= maximumCost) low = middle;
+    else high = middle - 1;
+  }
+  return `${open}${escapeXml(codePoints.slice(0, low).join(''))}${suffix}${close}`;
+}
+
+function codeUnitEntryCost(text: string): number {
+  return text.length + 1;
 }
 
 function escapeXml(value: string): string {

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import {
   AgentSwitchMessage,
@@ -95,6 +96,24 @@ describe('transcript seed contract', () => {
     }
     expect(context.prefix).not.toContain('command-for-turn-4');
     expect(context.prefix).toContain('<user>request 0</user>');
+  });
+
+  test('locks representative v3 projection bytes across selector refactors', () => {
+    const messages = [];
+    for (let index = 0; index < 5; index += 1) {
+      messages.push(
+        new UserMessage(TIME, `objective-${index} ${'x'.repeat(25)}`),
+        new AssistantMessage(TIME, `decision-${index}`),
+        new ReadToolUseMessage(TIME, `r${index}`, `src/file-${index}.ts`),
+        new EditToolUseMessage(TIME, `e${index}`, `src/file-${index}.ts`, 'old', 'new'),
+        new BashToolUseMessage(TIME, `b${index}`, `bun test file-${index}`),
+      );
+    }
+
+    const prefix = createCarryoverTranscript(messages, 700).prefix;
+    expect(prefix.length).toBe(694);
+    expect(crypto.createHash('sha256').update(prefix).digest('hex'))
+      .toBe('63ccfdfe29c53f799a8b0f38c332c7262b5e451a16d218347875aaa4ddb28b44');
   });
 
   test('bounds a projected message to what the renderer reads', () => {
