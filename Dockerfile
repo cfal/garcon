@@ -46,7 +46,6 @@ COPY server-agents/direct-openai-responses-compatible/package.json server-agents
 COPY server-agents/factory/package.json server-agents/factory/
 COPY server-agents/opencode/package.json server-agents/opencode/
 COPY server-agents/pi/package.json server-agents/pi/
-COPY patches/ patches/
 
 RUN bun install --frozen-lockfile
 
