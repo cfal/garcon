@@ -1,4 +1,4 @@
-import type { VirtualItem } from '@tanstack/virtual-core';
+import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -77,8 +77,8 @@ export interface SidebarChatSeparatorItem {
 // Positions the hairline separator inside each chat row's trailing separator
 // slot, snapped to the physical pixel grid.
 export function computeSidebarSeparatorItems(
-	virtualItems: VirtualItem[],
-	rows: SidebarVirtualRow[],
+	virtualItems: readonly VirtualItem[],
+	rows: readonly SidebarVirtualRow[],
 	separatorLineHeight: number,
 	separatorPixelRatio: number,
 ): SidebarChatSeparatorItem[] {
@@ -99,47 +99,4 @@ export function computeSidebarSeparatorItems(
 				height: separatorLineHeight,
 			};
 		});
-}
-
-export interface SidebarScrollAnchor {
-	key: string | number;
-	offset: number;
-	size: number;
-}
-
-// Captures which virtual row anchors the viewport so a size re-estimation can
-// keep the same row visible at the same relative intra-row position.
-export function findSidebarScrollAnchor(
-	virtualItems: VirtualItem[],
-	scrollTop: number,
-): SidebarScrollAnchor | null {
-	const item = virtualItems.find((virtualItem) => virtualItem.start + virtualItem.size > scrollTop);
-	if (!item) return null;
-	return {
-		key: item.key as string | number,
-		offset: scrollTop - item.start,
-		size: item.size,
-	};
-}
-
-// Computes the anchored row's absolute top from the full row list; the anchor
-// row typically falls outside the post-switch visible window, so it cannot be
-// resolved from the visible virtual items alone. The intra-row offset is
-// normalized by the old and new row heights so a shrinking or growing row
-// keeps the anchor row itself inside the viewport.
-export function anchoredSidebarRowTop(
-	rows: SidebarVirtualRow[],
-	anchor: SidebarScrollAnchor,
-	chatItemLayout: SidebarChatItemLayout,
-): number | null {
-	let top = 0;
-	for (const row of rows) {
-		if (row.key === anchor.key) {
-			const size = estimateSidebarVirtualRowSize(row, chatItemLayout);
-			const normalizedOffset = (anchor.offset / anchor.size) * size;
-			return top + Math.min(Math.round(normalizedOffset), size);
-		}
-		top += estimateSidebarVirtualRowSize(row, chatItemLayout);
-	}
-	return null;
 }

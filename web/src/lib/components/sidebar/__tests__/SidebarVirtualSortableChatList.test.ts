@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
@@ -15,6 +15,7 @@ import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svel
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
+let originalElementsFromPoint: typeof document.elementsFromPoint | undefined;
 
 function touchAt(identifier: number, clientX: number, clientY: number) {
 	return {
@@ -178,9 +179,55 @@ function querySummaryProjectPath(projectPath: string): HTMLElement | null {
 	);
 }
 
+function isSidebarViewport(element: HTMLElement): boolean {
+	return (
+		element.dataset.testid === 'virtual-sidebar-viewport' ||
+		element.dataset.testid === 'sidebar-list-viewport'
+	);
+}
+
+beforeEach(() => {
+	originalElementsFromPoint = document.elementsFromPoint;
+	if (!originalElementsFromPoint) {
+		Object.defineProperty(document, 'elementsFromPoint', {
+			configurable: true,
+			value: () => [],
+		});
+	}
+	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		return isSidebarViewport(this) ? 640 : 0;
+	});
+	vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		if (!isSidebarViewport(this)) return 0;
+		const list = this.querySelector<HTMLElement>('[data-sidebar-virtual-list]');
+		return Math.max(640, Number.parseFloat(list?.style.height ?? '0') || 0);
+	});
+	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		if (isSidebarViewport(this)) return rect({ left: 0, top: 0, width: 320, height: 640 });
+		if (this.hasAttribute('data-sidebar-virtual-sizer')) {
+			const viewport = this.closest<HTMLElement>('[data-testid$="sidebar-viewport"]');
+			return rect({
+				left: 0,
+				top: -(viewport?.scrollTop ?? 0),
+				width: 320,
+				height: Number.parseFloat(this.style.height) || 0,
+			});
+		}
+		return rect({ left: 0, top: 0, width: 320, height: rowHeight });
+	});
+});
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	if (originalElementsFromPoint) document.elementsFromPoint = originalElementsFromPoint;
+	else Reflect.deleteProperty(document, 'elementsFromPoint');
 });
 
 describe('SidebarVirtualSortableChatList', () => {
@@ -681,9 +728,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 
 		await waitFor(() => {
-			// Single-line geometry: two 32px headers, 40px chats; chat-1 spans
-			// [104, 144) and the normalized offset is round(8.5/88 * 40) = 4.
-			expect(viewport.scrollTop).toBe(108);
+			// The normalized 108px target exceeds the shrunken list's 80px maximum.
+			expect(viewport.scrollTop).toBe(80);
 		});
 
 		viewport.dispatchEvent(new Event('scroll'));
@@ -726,12 +772,10 @@ describe('SidebarVirtualSortableChatList', () => {
 			},
 		});
 
-		// The normalized restore is 52*40 + round(64/88 * 40) = 2109, beyond the
-		// shrunken list's 1760 maximum. Real browsers clamp the write to 1760;
-		// happy-dom preserves it, and under either behavior chat-52 stays
-		// mounted, which is the anchoring contract at the bottom edge.
+		// The normalized 2109px target exceeds the shrunken list's 1776px maximum,
+		// including the 16px trailing padding, so Virt records the attained clamp.
 		await waitFor(() => {
-			expect(viewport.scrollTop).toBe(2109);
+			expect(viewport.scrollTop).toBe(1776);
 		});
 
 		viewport.dispatchEvent(new Event('scroll'));
