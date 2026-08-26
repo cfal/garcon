@@ -11,7 +11,6 @@
 		TranscriptNoticeMessage,
 		CliRowMessage,
 		isToolUseMessage,
-		isHandoffSummaryNoticeDetail,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
@@ -19,7 +18,8 @@
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/rows/CliRow.svelte';
 	import CliPresentationHeader from '$lib/components/chat/rows/CliPresentationHeader.svelte';
-	import CliCollapsibleBody from '$lib/components/chat/rows/CliCollapsibleBody.svelte';
+	import CollapsibleBody from '$lib/components/chat/rows/CollapsibleBody.svelte';
+	import TranscriptNoticeRow from '$lib/components/chat/rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { cn } from '$lib/utils/cn';
 	import { getAppTitle } from '$lib/context';
@@ -273,7 +273,7 @@
 												title={userPresentation.title}
 											/>
 										{/if}
-										<CliCollapsibleBody disclosure={userPresentation?.disclosure}>
+										<CollapsibleBody disclosure={userPresentation?.disclosure}>
 											{#snippet children()}
 												<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
 													<Markdown
@@ -282,7 +282,7 @@
 													/>
 												</div>
 											{/snippet}
-										</CliCollapsibleBody>
+										</CollapsibleBody>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">
 												{#each message.images as image, imageIndex (imageIndex)}
@@ -331,27 +331,7 @@
 							{:else if message instanceof CliRowMessage}
 								<CliRow {message} />
 							{:else if message instanceof TranscriptNoticeMessage}
-								<ChatEventCard variant="info">
-									{#snippet body()}
-										{#if message.title}
-											<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>
-										{/if}
-										{#if isHandoffSummaryNoticeDetail(message.detail)}
-											<div class={['text-sm', message.title && 'mt-1']}>
-												<Markdown source={message.content} variant="presented" />
-											</div>
-										{:else}
-											<div
-												class={[
-													'text-sm whitespace-pre-wrap break-words',
-													message.title && 'mt-1',
-												]}
-											>
-												{message.content}
-											</div>
-										{/if}
-									{/snippet}
-								</ChatEventCard>
+								<TranscriptNoticeRow {message} />
 							{:else if message instanceof ErrorMessage}
 								<ChatEventCard variant="error">
 									{#snippet body()}

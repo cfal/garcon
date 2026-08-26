@@ -245,6 +245,12 @@ describe('SharedChatPage', () => {
 		const { container } = render(SharedChatPageTestHost);
 
 		await screen.findByText('Handoff summary');
+
+		const disclosure = screen.getByRole('button', { name: 'Show more' });
+		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(disclosure);
+		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+
 		expect(container.querySelector('h2')?.textContent).toBe('Current objective');
 		expect(container.querySelector('strong')?.textContent).toBe('typed provenance');
 	});
