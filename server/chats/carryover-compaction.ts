@@ -139,6 +139,15 @@ export class CarryOverCompactionService {
         `the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
       );
     }
+    if (older.length === 0) {
+      throw compactionUnavailable(
+        input,
+        'the complete history is inside the newest-three-turn verbatim spine and exceeds the 100,000 estimated-token uncompacted carry limit',
+        input.operation === 'agent-switch'
+          ? 'Continue with the current agent or start a new chat.'
+          : 'Start a new chat to continue.',
+      );
+    }
     const first = fitCompactionPrompt(
       older,
       input.destination,
@@ -285,13 +294,17 @@ function compactionRequired(input: CarryOverCompactionInput): DomainError {
   );
 }
 
-function compactionUnavailable(input: CarryOverCompactionInput, reason: string): DomainError {
+function compactionUnavailable(
+  input: CarryOverCompactionInput,
+  reason: string,
+  advice = 'Choose a different compaction model in Settings.',
+): DomainError {
   const outcome = input.operation === 'agent-switch'
     ? 'The agent switch was not performed.'
     : 'No fresh agent session was started.';
   return new DomainError(
     'CARRYOVER_COMPACTION_UNAVAILABLE',
-    `Agent-switch compaction is unavailable: ${reason}. ${outcome} Choose a different compaction model in Settings.`,
+    `Agent-switch compaction is unavailable: ${reason}. ${outcome} ${advice}`,
     422,
   );
 }

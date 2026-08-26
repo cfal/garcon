@@ -182,6 +182,24 @@ describe('carryover compaction', () => {
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
+  it('reports when all long history belongs to the protected recent spine', async () => {
+    const messages = [new UserMessage(TIME, 'objective')];
+    for (let index = 0; index < 20; index += 1) {
+      messages.push(new AssistantMessage(TIME, '界'.repeat(8_000)));
+    }
+    const complete = createCarryoverTranscript(messages, 0);
+    expect(estimateHandoffTokens(complete.prefix)).toBeGreaterThan(100_000);
+    expect(complete.prefix.length).toBeLessThan(CARRYOVER_INJECTION_MAX_CHARS);
+    const { instance, runSingleQuery } = service();
+
+    await expect(run(instance, { messages })).rejects.toMatchObject({
+      code: 'CARRYOVER_COMPACTION_UNAVAILABLE',
+      message: expect.stringContaining('newest-three-turn verbatim spine'),
+    });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+
   it('rejects a wrapper that leaves no room for a transcript', async () => {
     const { instance, runSingleQuery } = service();
     const destination = { ...DESTINATION, prompt: 'instruction '.repeat(200_000) };
