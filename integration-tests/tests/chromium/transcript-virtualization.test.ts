@@ -1886,97 +1886,74 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
   await installDelayedTargetGrowth(page, rowId);
-  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
-    const feed = feedElement as HTMLElement;
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-      __restoreChatScrollTo?: () => void;
-    };
-    browserGlobal.__chatProgrammaticScrollWrites = [];
-    const originalScrollTo = feed.scrollTo.bind(feed);
-    browserGlobal.__restoreChatScrollTo = () => {
-      feed.scrollTo = originalScrollTo;
-    };
-    feed.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
-      const top =
-        typeof options === 'number' ? (y ?? feed.scrollTop) : (options.top ?? feed.scrollTop);
-      browserGlobal.__chatProgrammaticScrollWrites?.push(top);
-      if (typeof options === 'number') originalScrollTo(options, y ?? feed.scrollTop);
-      else originalScrollTo(options);
-    }) as typeof feed.scrollTo;
-  });
-  await clickUserMessageNavigatorRowContaining(page, marker);
-  await page.waitForFunction(
-    (expectedRowId) =>
-      [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
-        (candidate) => candidate.dataset.chatRowId === expectedRowId,
-      ),
-    rowId,
-    { timeout: 20_000 },
-  );
-  const writesAtMount = await page.evaluate(() => {
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-    };
-    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-  });
-  await page.waitForFunction(
-    (minimumWrites) => {
+  let trapInstalled = false;
+  try {
+    await installTranscriptScrollTopWriteTrap(page);
+    trapInstalled = true;
+    await clickUserMessageNavigatorRowContaining(page, marker);
+    await page.waitForFunction(
+      (expectedRowId) =>
+        [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
+          (candidate) => candidate.dataset.chatRowId === expectedRowId,
+        ),
+      rowId,
+      { timeout: 20_000 },
+    );
+    const writesAtMount = (await transcriptScrollTopWrites(page)).length;
+    await page.waitForFunction(
+      (minimumWrites) => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatDelayedTargetGrowthFrame?: number;
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        return (
+          (browserGlobal.__chatDelayedTargetGrowthFrame ?? 0) >= 5 &&
+          (browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0) > minimumWrites
+        );
+      },
+      writesAtMount,
+      { timeout: 20_000 },
+    );
+    const writesBeforeIntent = (await transcriptScrollTopWrites(page)).length;
+    const box = await page.locator(FEED_SELECTOR).boundingBox();
+    if (!box) throw new Error('Transcript viewport has no interaction bounds.');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -600);
+    const writes = await withDiagnosticTimeout(
+      'the cancelled navigator jump to stop writing',
+      page.evaluate(async () => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatDelayedTargetGrowthFrame?: number;
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        for (let frame = 0; frame < 2; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const afterCancellation = browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0;
+        for (let frame = 0; frame < 45; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        return {
+          afterCancellation,
+          final: browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0,
+          growthFrames: browserGlobal.__chatDelayedTargetGrowthFrame ?? 0,
+        };
+      }),
+    );
+    expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
+    expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
+    expect(writes.final).toBe(writes.afterCancellation);
+    await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+  } finally {
+    await page.evaluate(() => {
       const browserGlobal = globalThis as typeof globalThis & {
-        __chatDelayedTargetGrowthFrame?: number;
-        __chatProgrammaticScrollWrites?: number[];
-      };
-      return (
-        (browserGlobal.__chatDelayedTargetGrowthFrame ?? 0) >= 5 &&
-        (browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0) > minimumWrites
-      );
-    },
-    writesAtMount,
-    { timeout: 20_000 },
-  );
-  const writesBeforeIntent = await page.evaluate(() => {
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-    };
-    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-  });
-  const box = await page.locator(FEED_SELECTOR).boundingBox();
-  if (!box) throw new Error('Transcript viewport has no interaction bounds.');
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -600);
-  const writes = await withDiagnosticTimeout(
-    'the cancelled navigator jump to stop writing',
-    page.evaluate(async () => {
-      const browserGlobal = globalThis as typeof globalThis & {
-        __chatProgrammaticScrollWrites?: number[];
-        __chatDelayedTargetGrowthFrame?: number;
-        __restoreChatScrollTo?: () => void;
         __stopDelayedTargetGrowth?: () => void;
       };
-      for (let frame = 0; frame < 2; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      const afterCancellation = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-      for (let frame = 0; frame < 45; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      const final = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-      const growthFrames = browserGlobal.__chatDelayedTargetGrowthFrame ?? 0;
-      browserGlobal.__restoreChatScrollTo?.();
       browserGlobal.__stopDelayedTargetGrowth?.();
-      delete browserGlobal.__restoreChatScrollTo;
       delete browserGlobal.__stopDelayedTargetGrowth;
-      return {
-        afterCancellation,
-        final,
-        growthFrames,
-      };
-    }),
-  );
-  expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
-  expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
-  expect(writes.final).toBe(writes.afterCancellation);
-  await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+    });
+    if (trapInstalled) await uninstallTranscriptScrollTopWriteTrap(page);
+  }
 }
 
 async function transcriptGeometry(page: Page): Promise<TranscriptGeometry> {
