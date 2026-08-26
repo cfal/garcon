@@ -16,6 +16,12 @@ export interface VirtualGeometryOperationCounts {
 	readonly changedCount: number;
 }
 
+interface GeometryPositionGeneration {
+	readonly count: number;
+	readonly keys: readonly string[];
+	readonly offsets: Float64Array;
+}
+
 function emptyOperationCounts(): VirtualGeometryOperationCounts {
 	return {
 		mapWrites: 0,
@@ -38,6 +44,7 @@ export class VirtualListGeometry {
 	#dirtyFrom = 0;
 	#revision = 0;
 	#operations: VirtualGeometryOperationCounts = emptyOperationCounts();
+	#positionGeneration: (GeometryPositionGeneration & { readonly revision: number }) | null = null;
 
 	get count(): number {
 		return this.#count;
@@ -218,37 +225,21 @@ export class VirtualListGeometry {
 
 	positionView(deviation = 0): VirtualPositionView {
 		this.#rebuild();
-		return new GeometryPositionView(this, this.#revision, this.#count, deviation);
+		if (this.#positionGeneration?.revision !== this.#revision) {
+			this.#positionGeneration = {
+				revision: this.#revision,
+				count: this.#count,
+				keys: this.#keys,
+				offsets: this.#offsets.slice(0, this.#count + 1),
+			};
+		}
+		return new GeometryPositionView(this.#positionGeneration, deviation);
 	}
 
 	#logicalItem(index: number): LogicalVirtualItem {
 		const start = this.#offsets[index];
 		const size = this.#sizes[index];
 		return { key: this.#keys[index], index, start, size, end: start + size };
-	}
-
-	#positionItem(index: number, revision: number, deviation: number): VirtualItem | undefined {
-		this.#assertRevision(revision);
-		const item = this.item(index);
-		if (!item) return undefined;
-		const start = item.start - deviation;
-		return { ...item, start, end: start + item.size };
-	}
-
-	#positionItemAtOffset(
-		offset: number,
-		revision: number,
-		deviation: number,
-	): VirtualItem | undefined {
-		this.#assertRevision(revision);
-		const item = this.itemAtOffset(offset + deviation);
-		if (!item) return undefined;
-		const start = item.start - deviation;
-		return { ...item, start, end: start + item.size };
-	}
-
-	#assertRevision(revision: number): void {
-		if (revision !== this.#revision) throw new Error('Virtual position view is stale');
 	}
 
 	#indexAtOffset(offset: number): number | undefined {
@@ -336,53 +327,67 @@ export class VirtualListGeometry {
 	#incrementOperation(key: 'mapWrites' | 'arrayGrowths'): void {
 		this.#operations = { ...this.#operations, [key]: this.#operations[key] + 1 };
 	}
-
-	static positionItem(
-		geometry: VirtualListGeometry,
-		index: number,
-		revision: number,
-		deviation: number,
-	): VirtualItem | undefined {
-		return geometry.#positionItem(index, revision, deviation);
-	}
-
-	static positionItemAtOffset(
-		geometry: VirtualListGeometry,
-		offset: number,
-		revision: number,
-		deviation: number,
-	): VirtualItem | undefined {
-		return geometry.#positionItemAtOffset(offset, revision, deviation);
-	}
-
-	static assertPositionRevision(geometry: VirtualListGeometry, revision: number): void {
-		geometry.#assertRevision(revision);
-	}
 }
 
 class GeometryPositionView implements VirtualPositionView {
 	constructor(
-		private readonly geometry: VirtualListGeometry,
-		private readonly revision: number,
-		private readonly capturedCount: number,
+		private readonly generation: GeometryPositionGeneration,
 		private readonly deviation: number,
 	) {}
 
 	get count(): number {
-		VirtualListGeometry.assertPositionRevision(this.geometry, this.revision);
-		return this.capturedCount;
+		return this.generation.count;
 	}
 
 	itemAt(index: number): VirtualItem | undefined {
-		return VirtualListGeometry.positionItem(this.geometry, index, this.revision, this.deviation);
+		if (index < 0 || index >= this.generation.count) return undefined;
+		const logicalStart = this.generation.offsets[index];
+		const size = this.generation.offsets[index + 1] - logicalStart;
+		const start = logicalStart - this.deviation;
+		return {
+			key: this.generation.keys[index],
+			index,
+			start,
+			size,
+			end: start + size,
+		};
 	}
 
 	itemAtOffset(paintedOffset: number): VirtualItem | undefined {
-		return VirtualListGeometry.positionItemAtOffset(
-			this.geometry,
-			paintedOffset,
-			this.revision,
-			this.deviation,
-		);
+		const index = this.#indexAtOffset(paintedOffset + this.deviation);
+		return index === undefined ? undefined : this.itemAt(index);
+	}
+
+	#indexAtOffset(offset: number): number | undefined {
+		if (this.generation.count === 0) return undefined;
+		const total = this.generation.offsets[this.generation.count];
+		const target = Math.max(0, Math.min(offset, Math.max(0, total - Number.EPSILON)));
+		let index = this.#upperBoundOffset(target) - 1;
+		index = Math.max(0, Math.min(index, this.generation.count - 1));
+		while (index < this.generation.count && this.generation.offsets[index + 1] <= target) {
+			index += 1;
+		}
+		while (
+			index < this.generation.count &&
+			this.generation.offsets[index + 1] === this.generation.offsets[index]
+		) {
+			index += 1;
+		}
+		if (index < this.generation.count) return index;
+		for (index = this.generation.count - 1; index >= 0; index -= 1) {
+			if (this.generation.offsets[index + 1] > this.generation.offsets[index]) return index;
+		}
+		return 0;
+	}
+
+	#upperBoundOffset(value: number): number {
+		let low = 0;
+		let high = this.generation.count + 1;
+		while (low < high) {
+			const middle = (low + high) >>> 1;
+			if (this.generation.offsets[middle] <= value) low = middle + 1;
+			else high = middle;
+		}
+		return low;
 	}
 }

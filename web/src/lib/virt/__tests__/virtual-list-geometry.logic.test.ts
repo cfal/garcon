@@ -68,7 +68,7 @@ describe('VirtualListGeometry', () => {
 		expect(geometry.range(0, 100)).toBeNull();
 	});
 
-	it('publishes painted coordinates without copying or mutating logical geometry', () => {
+	it('publishes painted coordinates without mutating logical geometry', () => {
 		const geometry = new VirtualListGeometry();
 		geometry.setItems(['a', 'b'], [20, 30]);
 		const positive = geometry.positionView(12);
@@ -86,13 +86,23 @@ describe('VirtualListGeometry', () => {
 		expect(geometry.item(0)?.start).toBe(0);
 	});
 
-	it('invalidates a view after geometry changes', () => {
+	it('keeps a published view immutable after geometry changes', () => {
 		const geometry = new VirtualListGeometry();
-		geometry.setItems(['a'], [20]);
+		geometry.setItems(['a', 'b'], [20, 30]);
 		const view = geometry.positionView();
 		geometry.measure('a', 30);
+		geometry.setItems(['before', 'a', 'b'], [10, 20, 30]);
 
-		expect(() => view.itemAt(0)).toThrow('Virtual position view is stale');
+		expect(view.count).toBe(2);
+		expect(view.itemAt(0)).toEqual({ key: 'a', index: 0, start: 0, size: 20, end: 20 });
+		expect(view.itemAt(1)).toEqual({ key: 'b', index: 1, start: 20, size: 30, end: 50 });
+		expect(geometry.positionView().itemAt(1)).toEqual({
+			key: 'a',
+			index: 1,
+			start: 10,
+			size: 30,
+			end: 40,
+		});
 	});
 
 	it('updates a tail append incrementally with spare capacity', () => {
