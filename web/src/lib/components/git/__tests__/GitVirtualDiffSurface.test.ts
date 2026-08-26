@@ -5,6 +5,7 @@ import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-doc
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFilePlaceholderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
 type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
@@ -120,27 +121,10 @@ function lastViewportDemand(callback: ReturnType<typeof vi.fn>) {
 
 describe('GitVirtualDiffSurface', () => {
 	beforeEach(() => {
-		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
-		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
-		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-			this: HTMLElement,
-		) {
-			const height = this.hasAttribute('data-git-virtual-diff-root')
-				? 720
-				: this.dataset.index === '0' || this.dataset.index === '101'
-					? 64
-					: 42;
-			return {
-				width: 1024,
-				height,
-				top: 0,
-				right: 1024,
-				bottom: height,
-				left: 0,
-				x: 0,
-				y: 0,
-				toJSON: () => ({}),
-			};
+		installGitVirtualDiffTestLayout({
+			viewportHeight: 720,
+			rowHeight: (element) =>
+				element.dataset.index === '0' || element.dataset.index === '101' ? 64 : 42,
 		});
 	});
 
@@ -379,9 +363,13 @@ describe('GitVirtualDiffSurface', () => {
 	it('preserves a focused original header until focus moves to the pinned copy', async () => {
 		const { container } = renderSurface(makeFileRows(0, 40));
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
-		const original = container.querySelector<HTMLElement>(
-			'[data-git-virtual-row-id="file:0:header"]',
-		)!;
+		const original = await waitFor(() => {
+			const element = container.querySelector<HTMLElement>(
+				'[data-git-virtual-row-id="file:0:header"]',
+			);
+			expect(element).toBeTruthy();
+			return element!;
+		});
 		const originalAction = within(original).getByRole('button', { name: 'Stage file' });
 		originalAction.focus();
 		expect(document.activeElement).toBe(originalAction);
@@ -409,7 +397,7 @@ describe('GitVirtualDiffSurface', () => {
 		const onStageFile = vi.fn();
 		renderSurface([makeHeaderRow(0)], { onStageFile });
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Stage file' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Stage file' }));
 
 		expect(onStageFile).toHaveBeenCalledWith('file-0.ts');
 	});

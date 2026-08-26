@@ -5,6 +5,7 @@ import type {
 	GitVirtualReviewRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitVirtualDiffViewportTestHost from './GitVirtualDiffViewportTestHost.svelte';
 
 function makeRows(): GitVirtualReviewRow[] {
@@ -45,24 +46,7 @@ function makeRows(): GitVirtualReviewRow[] {
 
 describe('GitVirtualDiffViewport', () => {
 	beforeEach(() => {
-		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
-		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(84);
-		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-			this: HTMLElement,
-		) {
-			const height = this.hasAttribute('data-git-virtual-diff-root') ? 84 : 42;
-			return {
-				width: 800,
-				height,
-				top: 0,
-				right: 800,
-				bottom: height,
-				left: 0,
-				x: 0,
-				y: 0,
-				toJSON: () => ({}),
-			};
-		});
+		installGitVirtualDiffTestLayout({ viewportHeight: 84, width: 800 });
 	});
 
 	afterEach(() => {

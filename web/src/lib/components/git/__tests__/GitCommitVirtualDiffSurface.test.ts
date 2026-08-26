@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 
 const file = {
@@ -79,24 +80,7 @@ const rows: GitVirtualReviewRow[] = [
 
 describe('GitCommitVirtualDiffSurface', () => {
 	beforeEach(() => {
-		vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1024);
-		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(720);
-		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-			this: HTMLElement,
-		) {
-			const height = this.hasAttribute('data-git-virtual-diff-root') ? 720 : 42;
-			return {
-				width: 1024,
-				height,
-				top: 0,
-				right: 1024,
-				bottom: height,
-				left: 0,
-				x: 0,
-				y: 0,
-				toJSON: () => ({}),
-			};
-		});
+		installGitVirtualDiffTestLayout({ viewportHeight: 720 });
 	});
 
 	afterEach(() => {
