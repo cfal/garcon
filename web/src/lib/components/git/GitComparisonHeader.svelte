@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import type { GitComparisonSnapshotReady } from '$lib/api/git-comparison.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import WorkspaceFullscreenButton from '$lib/components/workspace/WorkspaceFullscreenButton.svelte';
@@ -13,6 +14,7 @@
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;
 		onBack?: () => void;
+		onEdit?: () => void;
 		fullscreenHost: HostId | null;
 	}
 
@@ -22,6 +24,7 @@
 		fileTreeVisible,
 		onToggleFileTree,
 		onBack,
+		onEdit,
 		fullscreenHost,
 	}: GitComparisonHeaderProps = $props();
 	let additions = $derived(snapshot.files.reduce((sum, file) => sum + file.additions, 0));
@@ -34,6 +37,16 @@
 		snapshot.to.kind === 'working-tree' ? snapshot.to.shortFingerprint : snapshot.to.shortHash,
 	);
 </script>
+
+{#snippet rangeEndpoints()}
+	<span class="truncate" title={snapshot.from.label} data-git-comparison-range-label
+		>{snapshot.from.label}</span
+	>
+	<span class="shrink-0">{snapshot.from.shortHash}</span>
+	<ArrowRight class="h-3.5 w-3.5 self-center" aria-hidden="true" />
+	<span class="truncate" title={toLabel}>{toLabel}</span>
+	<span class="shrink-0">{toIdentity}</span>
+{/snippet}
 
 <header class="border-b border-border bg-background px-3 py-1.5">
 	<div class="flex min-w-0 items-center gap-2" data-git-comparison-header-row>
@@ -52,15 +65,22 @@
 			class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-8 gap-y-0.5 overflow-hidden font-mono text-xs text-muted-foreground"
 			data-git-comparison-summary
 		>
-			<div class="flex min-w-0 max-w-full shrink items-baseline gap-1.5" data-git-comparison-range>
-				<span class="truncate" title={snapshot.from.label} data-git-comparison-range-label
-					>{snapshot.from.label}</span
+			{#if onEdit}
+				<button
+					type="button"
+					class="flex min-w-0 max-w-full shrink cursor-pointer items-baseline gap-1.5 rounded py-1 text-left hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					data-git-comparison-range
+					onclick={onEdit}
 				>
-				<span class="shrink-0">{snapshot.from.shortHash}</span>
-				<ArrowRight class="h-3.5 w-3.5 self-center" aria-hidden="true" />
-				<span class="truncate" title={toLabel}>{toLabel}</span>
-				<span class="shrink-0">{toIdentity}</span>
-			</div>
+					{@render rangeEndpoints()}
+					<Pencil class="h-3 w-3 shrink-0 self-center opacity-60" aria-hidden="true" />
+					<span class="sr-only">{m.git_compare_edit_comparison()}</span>
+				</button>
+			{:else}
+				<div class="flex min-w-0 max-w-full shrink items-baseline gap-1.5" data-git-comparison-range>
+					{@render rangeEndpoints()}
+				</div>
+			{/if}
 			<div
 				class="relative flex max-w-full shrink flex-wrap items-baseline gap-x-2 gap-y-0.5"
 				data-git-comparison-stats

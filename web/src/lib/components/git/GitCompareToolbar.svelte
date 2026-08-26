@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
@@ -11,14 +10,12 @@
 	let {
 		controller,
 		presentation,
-		onEdit,
 		onRefresh,
 		onClose,
 		closeDisabled,
 	}: {
 		controller: GitCompareSurfaceController;
 		presentation: 'main' | 'sidebar' | 'mobile';
-		onEdit: () => void;
 		onRefresh: () => void;
 		onClose: () => void;
 		closeDisabled: boolean;
@@ -27,13 +24,6 @@
 	const reviewDisplay = getGitReviewDisplay();
 	const localSettings = getLocalSettings();
 	const actions = $derived<ResponsiveSurfaceAction[]>([
-		{
-			id: 'edit',
-			label: m.git_compare_edit(),
-			icon: Pencil,
-			onclick: onEdit,
-			priority: 0,
-		},
 		{
 			id: 'refresh',
 			label: m.git_header_refresh(),

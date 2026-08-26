@@ -91,7 +91,6 @@
 	<GitCompareToolbar
 		{controller}
 		{presentation}
-		onEdit={editComparison}
 		onRefresh={refreshComparison}
 		onClose={() => void workspace.closeSurface(singletonSurfaceId('git-compare'))}
 		{closeDisabled}

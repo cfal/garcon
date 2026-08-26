@@ -274,9 +274,12 @@
 			</div>
 		</div>
 	{:else if isLoading}
-		<div class="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-			<LoaderCircle class="h-5 w-5 animate-spin" />
-			{loadingLabel}
+		<div class="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+			<div class="flex items-center gap-2">
+				<LoaderCircle class="h-5 w-5 animate-spin" />
+				{loadingLabel}
+			</div>
+			{@render fallbackActions?.()}
 		</div>
 	{:else}
 		<div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">

@@ -423,29 +423,22 @@ async function verifyCompareResponsiveActions(
       (candidate) => candidate.textContent?.trim() === 'Diff settings',
     );
     const separator = element.querySelector('[data-slot="dropdown-menu-separator"]');
-    const edit = Array.from(element.querySelectorAll('[role="menuitem"]')).find(
-      (candidate) => candidate.textContent?.trim() === 'Edit',
-    );
     const refresh = Array.from(element.querySelectorAll('[role="menuitem"]')).find(
       (candidate) => candidate.textContent?.trim() === 'Refresh',
     );
-    if (!settings || !separator || !edit || !refresh) return null;
+    if (!settings || !separator || !refresh) return null;
     return {
       settingsBeforeSeparator: Boolean(
         settings.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING,
       ),
-      separatorBeforeEdit: Boolean(
-        separator.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-      editBeforeRefresh: Boolean(
-        edit.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING,
+      separatorBeforeRefresh: Boolean(
+        separator.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     };
   });
   expect(order).toEqual({
     settingsBeforeSeparator: true,
-    separatorBeforeEdit: true,
-    editBeforeRefresh: true,
+    separatorBeforeRefresh: true,
   });
   expect(fixture.browserErrors).toEqual([]);
 }

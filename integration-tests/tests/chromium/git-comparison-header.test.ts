@@ -159,8 +159,11 @@ async function comparisonHeaderGeometry(page: Page) {
         },
       );
       return {
-        sameLine: Math.abs(rangeRect.top - statsRect.top) <= 1,
-        statsBelowRange: statsRect.top > rangeRect.top + 1,
+        rangeIsButton: range instanceof HTMLButtonElement,
+        rangeHeight: rangeRect.height,
+        rangeLeftInset: rangeRect.left - summaryRect.left,
+        sameLine: Math.abs(rangeLabelRect.top - primaryStatRect.top) <= 1,
+        statsBelowRange: primaryStatRect.top > rangeLabelRect.top + 1,
         labelTopDelta: Math.abs(rangeLabelRect.top - primaryStatRect.top),
         labelBottomDelta: Math.abs(
           rangeLabelRect.bottom - primaryStatRect.bottom,
@@ -205,6 +208,9 @@ describe("Chromium Git comparison header", () => {
         markPhase("checking the fitting one-line summary");
         await setHeaderWidth(fixture.page, 760);
         const wide = await comparisonHeaderGeometry(fixture.page);
+        expect(wide.rangeIsButton).toBe(true);
+        expect(wide.rangeHeight).toBeGreaterThanOrEqual(24);
+        expect(wide.rangeLeftInset).toBeGreaterThanOrEqual(0);
         expect(wide.sameLine).toBe(true);
         expect(wide.labelTopDelta).toBeLessThanOrEqual(1);
         expect(wide.labelBottomDelta).toBeLessThanOrEqual(1);

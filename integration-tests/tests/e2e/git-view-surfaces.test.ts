@@ -5,6 +5,9 @@ import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
+const COMPARE_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
+  + '[aria-hidden="false"]';
+
 async function runGit(projectPath: string, args: string[]): Promise<string> {
   const process = Bun.spawn(['git', ...args], {
     cwd: projectPath,
@@ -725,7 +728,7 @@ describe('Lightpanda standalone Git views', () => {
         },
         { timeout: 20_000 },
       );
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       await app.fill('#git-comparison-from', 'HEAD~1');
       await app.clickDialogButton('Revision');
@@ -772,7 +775,7 @@ describe('Lightpanda standalone Git views', () => {
         },
         { timeout: 20_000 },
       );
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       expect(await fixture.page.$eval(
         '#git-comparison-from',

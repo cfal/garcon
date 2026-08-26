@@ -608,6 +608,27 @@ export class SpaDriver {
     }, name);
   }
 
+  async clickEditComparison(options: { within?: string } = {}): Promise<void> {
+    await this.#page.waitForFunction(
+      (rootSelector) => {
+        const root = rootSelector ? document.querySelector(rootSelector) : document;
+        return root !== null && [...root.querySelectorAll<HTMLButtonElement>(
+          'button[data-git-comparison-range]',
+        )].some((element) => !element.closest('[aria-hidden="true"]'));
+      },
+      { timeout: 20_000 },
+      options.within ?? null,
+    );
+    await this.#page.evaluate((rootSelector) => {
+      const root = rootSelector ? document.querySelector(rootSelector) : document;
+      const button = [...(root?.querySelectorAll<HTMLButtonElement>(
+        'button[data-git-comparison-range]',
+      ) ?? [])].find((element) => !element.closest('[aria-hidden="true"]'));
+      if (!button) throw new Error('Missing comparison range edit button.');
+      button.click();
+    }, options.within ?? null);
+  }
+
   async userMessageNavigatorRows(): Promise<string[]> {
     return this.#page.$$eval(
       '[data-user-message-navigator-row]',

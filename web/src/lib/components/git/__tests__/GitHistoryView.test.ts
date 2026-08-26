@@ -892,7 +892,7 @@ describe('GitHistoryView', () => {
 			'direct',
 			expect.objectContaining({ context: 5 }),
 		);
-		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Edit comparison/ })).toBeNull();
 		const comparison = container.querySelector<HTMLElement>('[data-git-diff-document]');
 		expect(comparison).toBeTruthy();
 		if (!comparison) return;

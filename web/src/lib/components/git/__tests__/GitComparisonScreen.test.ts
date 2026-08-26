@@ -48,6 +48,22 @@ describe('GitComparisonScreen', () => {
 		expect(screen.queryByText('Comparison could not be loaded.')).toBeNull();
 	});
 
+	it('keeps comparison editing available during initialization', async () => {
+		const onEdit = vi.fn();
+		render(GitComparisonScreen, {
+			comparison: new GitComparisonController(),
+			isLoading: true,
+			presentation: 'main',
+			fontSize: 12,
+			onEdit,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit comparison' }));
+		expect(onEdit).toHaveBeenCalledOnce();
+	});
+
 	it('preserves a real comparison failure after initialization', () => {
 		const comparison = new GitComparisonController();
 		comparison.error = 'Revision HEAD was not found.';
@@ -68,6 +84,46 @@ describe('GitComparisonScreen', () => {
 		expect(screen.getByText('Working Tree')).toBeTruthy();
 		expect(screen.queryByText('Compare revisions')).toBeNull();
 		expect(screen.queryByText('Direct')).toBeNull();
+	});
+
+	it('offers the comparison range itself as the edit entry point', async () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = readySnapshot();
+		const onEdit = vi.fn();
+
+		render(GitComparisonScreen, {
+			comparison,
+			isLoading: false,
+			presentation: 'main',
+			fontSize: 12,
+			onEdit,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+
+		const range = screen.getByRole('button', { name: /Edit comparison/ });
+		expect(range.getAttribute('data-git-comparison-range')).not.toBeNull();
+		expect(range.textContent).toContain('HEAD~1');
+		expect(range.textContent).toContain('Working Tree');
+		await fireEvent.click(range);
+		expect(onEdit).toHaveBeenCalledOnce();
+	});
+
+	it('keeps the comparison range inert when editing is unavailable', () => {
+		const comparison = new GitComparisonController();
+		comparison.snapshot = readySnapshot();
+
+		render(GitComparisonScreen, {
+			comparison,
+			isLoading: false,
+			presentation: 'main',
+			fontSize: 12,
+			onRefresh: vi.fn(),
+			onOpenChat: vi.fn(),
+		});
+
+		expect(screen.queryByRole('button', { name: /Edit comparison/ })).toBeNull();
+		expect(screen.getByText('HEAD~1')).toBeTruthy();
 	});
 
 	it('identifies a comparison made since the common ancestor', () => {
@@ -107,7 +163,7 @@ describe('GitComparisonScreen', () => {
 			onOpenChat: vi.fn(),
 		});
 
-		expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Edit comparison/ })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 		expect(onBack).toHaveBeenCalledOnce();
 	});
@@ -122,6 +178,7 @@ describe('GitComparisonScreen', () => {
 				isLoading: false,
 				presentation,
 				fontSize: 12,
+				onEdit: vi.fn(),
 				onRefresh: vi.fn(),
 				onOpenChat: vi.fn(),
 			});

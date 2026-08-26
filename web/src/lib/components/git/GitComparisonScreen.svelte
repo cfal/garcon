@@ -51,6 +51,7 @@
 			{fileTreeVisible}
 			{onToggleFileTree}
 			{onBack}
+			{onEdit}
 			{fullscreenHost}
 		/>
 		{#if comparison.staleMessage}
@@ -78,7 +79,7 @@
 			class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			onclick={onEdit}
 		>
-			{m.git_compare_edit()}
+			{m.git_compare_edit_comparison()}
 		</button>
 	{/if}
 {/snippet}

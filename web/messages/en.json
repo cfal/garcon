@@ -667,7 +667,7 @@
 	"git_compare_swap_revisions": "Swap revisions",
 	"git_compare_use_direct": "Use Direct",
 	"git_compare_action": "Compare",
-	"git_compare_edit": "Edit",
+	"git_compare_edit_comparison": "Edit comparison",
 	"git_compare_refresh": "Refresh comparison",
 	"git_compare_context_refresh_required": "Refresh the comparison to apply the new context setting.",
 	"git_more_actions": "More Git actions",

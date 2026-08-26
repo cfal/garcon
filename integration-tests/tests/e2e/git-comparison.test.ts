@@ -78,7 +78,7 @@ describe('Lightpanda Git comparison', () => {
       await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
         'head comparison marker',
       ]);
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       await app.fill('#git-comparison-from', 'origin/main');
       await app.clickDialogButton('Revision');
@@ -101,7 +101,7 @@ describe('Lightpanda Git comparison', () => {
       await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
         'working tree marker',
       ]);
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       expect(await fixture.page.$eval(
         '#git-comparison-from',
@@ -148,7 +148,7 @@ describe('Lightpanda Git comparison', () => {
       await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
         'working tree marker',
       ]);
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       expect(await fixture.page.$eval(
         '#git-comparison-from',
@@ -219,7 +219,7 @@ describe('Lightpanda Git comparison', () => {
         '[data-git-diff-document]',
         (element) => element.textContent,
       )).toContain('Working Tree');
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
 
       expect(await fixture.page.$eval(
@@ -394,7 +394,7 @@ describe('Lightpanda Git comparison', () => {
         },
         { timeout: 20_000 },
       );
-      await app.clickResponsiveAction('Edit');
+      await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       await app.fill('#git-comparison-from', 'origin/main');
       await app.clickDialogButton('Revision');
