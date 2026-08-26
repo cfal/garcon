@@ -110,6 +110,8 @@ describe('handoff artifact XML', () => {
 
     expect(rendered).not.toBeNull();
     expect(rendered.estimatedTokens).toBeLessThanOrEqual(1_536);
+    expect(rendered.includedEntryCount).toBeGreaterThan(0);
+    expect(rendered.budgetOmittedEntryCount).toBeGreaterThan(0);
   });
 
   it('renders an empty eligible source without a zero-count gap', () => {

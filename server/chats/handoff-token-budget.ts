@@ -54,13 +54,17 @@ export function fitEstimatedTokenDocument<T>(input: {
   if (entryBudget < minimumEntryBudget) return null;
 
   let correctionPasses = 0;
-  let minimumAttemptPending = false;
-  while (correctionPasses < FIT_CORRECTION_MAX_PASSES || minimumAttemptPending) {
+  let forcedAttemptPending = false;
+  let minimumBridgeAttempted = false;
+  let minimumBridgePending = false;
+  while (correctionPasses < FIT_CORRECTION_MAX_PASSES || forcedAttemptPending) {
+    const renderedAtMinimumBridge = minimumBridgePending;
+    forcedAttemptPending = false;
+    minimumBridgePending = false;
     const value = input.render(entryBudget);
     if (value === null) return null;
     correctionPasses += 1;
     const renderedAtMinimum = entryBudget === minimumEntryBudget;
-    if (renderedAtMinimum) minimumAttemptPending = false;
     const estimatedTokens = estimateHandoffTokens(input.document(value));
     if (estimatedTokens <= input.usableTokens) {
       return {
@@ -71,6 +75,11 @@ export function fitEstimatedTokenDocument<T>(input: {
       };
     }
     if (renderedAtMinimum) return null;
+    if (renderedAtMinimumBridge) {
+      entryBudget = minimumEntryBudget;
+      forcedAttemptPending = true;
+      continue;
+    }
     const overflowCorrection = entryBudget
       - (estimatedTokens - input.usableTokens + FIT_CONVERGENCE_GUARD_TOKENS);
     const admittedCost = input.admittedEntryCost?.(value);
@@ -79,8 +88,23 @@ export function fitEstimatedTokenDocument<T>(input: {
     const correctedEntryBudget = admittedCost === undefined
       ? overflowCorrection
       : Math.min(overflowCorrection, Math.ceil(admittedCost) - 1);
+    if (correctedEntryBudget <= minimumEntryBudget && !minimumBridgeAttempted) {
+      // Uses one damped render before an overshooting correction collapses to
+      // the minimum, while crossing the prior selection's admission threshold.
+      const dampedEntryBudget = Math.min(
+        Math.floor((entryBudget + minimumEntryBudget) / 2),
+        admittedCost === undefined ? entryBudget - 1 : Math.ceil(admittedCost) - 1,
+      );
+      if (dampedEntryBudget > minimumEntryBudget) {
+        entryBudget = dampedEntryBudget;
+        minimumBridgeAttempted = true;
+        minimumBridgePending = true;
+        forcedAttemptPending = true;
+        continue;
+      }
+    }
     entryBudget = Math.max(minimumEntryBudget, correctedEntryBudget);
-    minimumAttemptPending = entryBudget === minimumEntryBudget;
+    forcedAttemptPending = entryBudget === minimumEntryBudget;
   }
   return null;
 }

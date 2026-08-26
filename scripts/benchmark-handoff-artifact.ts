@@ -10,7 +10,7 @@ import { renderFittedHandoffArtifact } from '../server/chats/handoff-artifact/xm
 
 const AT = '2026-08-26T00:00:00.000Z';
 const TARGETS = [100_000, 500_000, 1_000_000] as const;
-const MAX_FIT_RENDER_PASSES = 9;
+const MAX_FIT_RENDER_PASSES = 10;
 const BODY = [
   'Synthetic implementation history with generic identifiers.',
   'Files: src/module.ts, tests/module.test.ts.',
