@@ -6,17 +6,24 @@ interface GitVirtualDiffTestLayoutOptions {
 	rowHeight?(element: HTMLElement): number;
 }
 
+export interface GitVirtualDiffTestLayout {
+	setViewportHeight(height: number): void;
+}
+
 function sizerHeight(viewport: HTMLElement): number {
 	const sizer = viewport.querySelector<HTMLElement>('[data-git-virtual-diff-sizer]');
 	return Number.parseFloat(sizer?.style.height ?? '0') || 0;
 }
 
-export function installGitVirtualDiffTestLayout(options: GitVirtualDiffTestLayoutOptions): void {
+export function installGitVirtualDiffTestLayout(
+	options: GitVirtualDiffTestLayoutOptions,
+): GitVirtualDiffTestLayout {
 	const width = options.width ?? 1024;
 	const rowHeight = options.rowHeight ?? (() => 42);
+	let viewportHeight = options.viewportHeight;
 	const heightFor = (element: HTMLElement): number =>
 		element.hasAttribute('data-git-virtual-diff-root')
-			? options.viewportHeight
+			? viewportHeight
 			: element.hasAttribute('data-git-virtual-diff-sizer')
 				? Number.parseFloat(element.style.height) || 0
 				: rowHeight(element);
@@ -36,7 +43,7 @@ export function installGitVirtualDiffTestLayout(options: GitVirtualDiffTestLayou
 		this: HTMLElement,
 	) {
 		return this.hasAttribute('data-git-virtual-diff-root')
-			? Math.max(options.viewportHeight, sizerHeight(this))
+			? Math.max(viewportHeight, sizerHeight(this))
 			: heightFor(this);
 	});
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -58,4 +65,10 @@ export function installGitVirtualDiffTestLayout(options: GitVirtualDiffTestLayou
 			toJSON: () => ({}),
 		};
 	});
+
+	return {
+		setViewportHeight(height) {
+			viewportHeight = height;
+		},
+	};
 }

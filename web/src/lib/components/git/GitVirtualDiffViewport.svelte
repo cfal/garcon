@@ -69,6 +69,8 @@
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
+	const fallbackViewportHeight = 720;
+	const scrollTargetTolerance = 0.5;
 	const scrollKeys = new Set(['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' ']);
 
 	const virtual = new VirtualListController({
@@ -83,7 +85,10 @@
 
 	let virtualSnapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(
-		selectVirtualItems(virtualSnapshot, indexesInRange(virtualSnapshot.overscanRange)),
+		selectVirtualItems(
+			virtualSnapshot,
+			indexesInRange(virtualSnapshot.overscanRange ?? fallbackRange(true)),
+		),
 	);
 	let totalHeight = $derived(virtualSnapshot.sizerSize);
 	let windowStart = $derived(virtualItems[0]?.start ?? 0);
@@ -95,7 +100,7 @@
 	);
 	let pinnedFileHeader = $derived.by<GitVirtualFileHeaderRow | null>(() => {
 		if (!pinFileHeaders) return null;
-		const firstVisibleIndex = virtualSnapshot.visibleRange?.startIndex;
+		const firstVisibleIndex = (virtualSnapshot.visibleRange ?? fallbackRange(false))?.startIndex;
 		if (firstVisibleIndex === undefined) return null;
 
 		const filePath = source.filePathAt(firstVisibleIndex);
@@ -125,6 +130,20 @@
 					(_, offset) => range.startIndex + offset,
 				)
 			: [];
+	}
+
+	function fallbackRange(includeOverscan: boolean): VirtualRange | null {
+		if (source.rowCount === 0) return null;
+		const offset = Math.max(0, viewportRef?.scrollTop ?? 0);
+		const viewportHeight = fallbackViewportHeight;
+		const startIndex = virtualSnapshot.positions.itemAtOffset(offset)?.index ?? 0;
+		const endIndex =
+			virtualSnapshot.positions.itemAtOffset(offset + viewportHeight)?.index ?? source.rowCount - 1;
+		const extra = includeOverscan ? Math.max(0, Math.floor(overscan)) : 0;
+		return {
+			startIndex: Math.max(0, startIndex - extra),
+			endIndex: Math.min(source.rowCount - 1, endIndex + extra),
+		};
 	}
 
 	function virtualKey(value: string | number): string {
@@ -346,7 +365,14 @@
 			return;
 		}
 		const requestKey = `${requestId}\0${targetIndex}\0${targetState}`;
-		if (requestKey === lastScrollRequestKey || requestKey === pendingScrollRequestKey) return;
+		if (requestKey === pendingScrollRequestKey) return;
+		const targetItem = virtualSnapshot.positions.itemAt(targetIndex);
+		const paintedOffset = virtual.viewportPosition?.paintedOffset;
+		const targetIsAligned =
+			targetItem !== undefined &&
+			paintedOffset !== undefined &&
+			Math.abs(targetItem.start - paintedOffset) <= scrollTargetTolerance;
+		if (requestKey === lastScrollRequestKey && targetIsAligned) return;
 		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
@@ -355,7 +381,7 @@
 		const priorityFilePaths = source.filePathsInRange(start, end);
 		const documentId = reviewDocumentId;
 		untrack(() => {
-			if (documentId && priorityFilePaths.length > 0) {
+			if (requestKey !== lastScrollRequestKey && documentId && priorityFilePaths.length > 0) {
 				traceGitReviewDemand({
 					stage: 'viewport-demand',
 					documentId,

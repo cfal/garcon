@@ -389,7 +389,10 @@ export class GitCommitListVirtualController {
 		try {
 			const anchorHash = position.anchorHash;
 			if (!anchorHash) {
-				this.#scrollToOffset(Math.max(0, position.scrollTop));
+				const offset = Math.max(0, position.scrollTop);
+				if (Math.abs(viewport.scrollTop - offset) > RESTORE_OFFSET_TOLERANCE_PX) {
+					this.#scrollToOffset(offset);
+				}
 				return;
 			}
 			const index = this.#indexByHash.get(anchorHash);
