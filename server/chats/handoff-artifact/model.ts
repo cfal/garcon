@@ -1,3 +1,7 @@
+import type {
+  ChatHandoffArtifactExcludedEntryCount,
+} from '../../../common/chat-handoff-artifact-contracts.js';
+
 export interface HandoffArtifactChatMetadata {
   readonly id: string;
   readonly title: string;
@@ -71,6 +75,3 @@ export interface RenderedHandoffArtifact {
   readonly fitCorrectionPasses: number;
   readonly metadataPasses: number;
 }
-import type {
-  ChatHandoffArtifactExcludedEntryCount,
-} from '../../../common/chat-handoff-artifact-contracts.js';

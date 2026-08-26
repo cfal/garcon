@@ -54,7 +54,10 @@ export function foldHandoffArtifactEntries(
     const message = entry.message;
     if (message.type === 'user-message' || turn < 0) turn += 1;
     const projected = projectEntry(entry, turn);
-    if (projected) source.push(projected);
+    if (projected === null) {
+      throw new Error(`Eligible handoff artifact message cannot be projected: ${message.type}`);
+    }
+    source.push(projected);
   }
   signal?.throwIfAborted();
   return {
