@@ -39,6 +39,9 @@ export function humanizeCodexAppServerError(error: unknown): string {
   if (/model.*not.?found|invalid.*model|does not exist/i.test(raw)) {
     return 'Codex model not available. Check your model selection or Codex configuration.';
   }
+  if (/invalid [`']?previous_response_id[`']?/i.test(raw)) {
+    return 'Codex conversation state expired or belongs to a different API endpoint. Start a new chat or switch back to the endpoint used to start this chat.';
+  }
   if (/ECONNREFUSED|ENOTFOUND|network|timeout|ETIMEDOUT/i.test(raw)) {
     return 'Codex could not connect to the API. Check your network connection.';
   }
