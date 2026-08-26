@@ -97,6 +97,7 @@ export function createRouteCommandService({
 			prepare: async () => undefined,
 			compensate: async () => undefined,
 		}),
+		cancelPreparation: () => false,
 		seedContinuationLedger: ({ sourceChatId, targetChatId }) => {
 			const watermark = transcripts.highWatermark(sourceChatId);
 			transcripts.initializeChat(targetChatId, [], 1);
