@@ -110,6 +110,66 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(70);
 	});
 
+	it('keeps measured content fixed when prepended estimates settle after redemption', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['spacer', 'reading', 'tail'],
+			estimates: [64, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('spacer', 64);
+		test.mountItem('reading', 40);
+		test.environment.flushMicrotasks();
+
+		test.controller.apply({
+			kind: 'update',
+			keys: ['spacer', 'earlier-1', 'earlier-2', 'reading', 'tail'],
+			estimates: [64, 100, 100, 40, 40],
+			anchor: { kind: 'item', key: 'reading' },
+		});
+		test.environment.flushMicrotasks();
+		const writesBeforeMeasurement = test.writes;
+		test.mountItem('earlier-1', 20);
+		test.mountItem('earlier-2', 20);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.snapshot.positions.itemAt(3)?.start).toBe(104);
+		expect(104 - test.viewport.scrollTop).toBe(64);
+		expect(test.writes - writesBeforeMeasurement).toBe(1);
+	});
+
+	it('keeps measured content fixed when prepended estimates settle during coasting', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['spacer', 'reading', 'tail'],
+			estimates: [64, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('spacer', 64);
+		test.mountItem('reading', 40);
+		test.environment.flushMicrotasks();
+		test.controller.setScrollActivity('coasting');
+
+		test.controller.apply({
+			kind: 'update',
+			keys: ['spacer', 'earlier-1', 'earlier-2', 'reading', 'tail'],
+			estimates: [64, 100, 100, 40, 40],
+			anchor: { kind: 'item', key: 'reading' },
+		});
+		test.mountItem('earlier-1', 20);
+		test.mountItem('earlier-2', 20);
+		test.environment.flushMicrotasks();
+
+		expect(test.writes).toBe(0);
+		expect(test.controller.snapshot.positions.itemAt(3)?.start).toBe(64);
+		test.controller.setScrollActivity('idle');
+		test.environment.flushMicrotasks();
+		expect(104 - test.viewport.scrollTop).toBe(64);
+		expect(test.writes).toBe(1);
+	});
+
 	it('defers mutation-driven end follow without writing during coasting', () => {
 		const test = harness({ viewportSize: 80, measurementAnchor: 'end' });
 		test.controller.apply({

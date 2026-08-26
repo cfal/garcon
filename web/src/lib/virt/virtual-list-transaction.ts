@@ -177,7 +177,13 @@ export class VirtualListTransaction {
 		const dom = this.#driver?.read() ?? this.#lastDom;
 		const started = this.options.environment.now();
 		const oldTotal = this.geometry.totalSize();
-		const anchor = this.#captureMeasurementAnchor(dom);
+		const firstMeasurements = new Set<string>();
+		for (const measurement of accepted) {
+			if (this.geometry.measuredSize(measurement.key) === undefined) {
+				firstMeasurements.add(measurement.key);
+			}
+		}
+		const anchor = this.#captureMeasurementAnchor(dom, firstMeasurements);
 		this.geometry.measureMany(accepted);
 		const correction =
 			anchor.kind === 'end'
@@ -499,6 +505,7 @@ export class VirtualListTransaction {
 
 	#captureMeasurementAnchor(
 		dom: VirtualDomGeometry | null,
+		firstMeasurements?: ReadonlySet<string>,
 	):
 		| { kind: 'item'; key: string; index: number; start: number }
 		| { kind: 'end' }
@@ -508,8 +515,17 @@ export class VirtualListTransaction {
 		const logicalOffset = this.#pendingCommit
 			? this.#logicalOffsetForTarget(this.#pendingCommit.target, dom)
 			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
-		const item =
+		let item =
 			this.geometry.itemAtOffset(logicalOffset) ?? this.geometry.item(this.geometry.count - 1);
+		if (item && firstMeasurements?.has(item.key)) {
+			for (let index = item.index + 1; index < this.geometry.count; index += 1) {
+				const candidate = this.geometry.item(index);
+				if (candidate && this.geometry.measuredSize(candidate.key) !== undefined) {
+					item = candidate;
+					break;
+				}
+			}
+		}
 		return item
 			? { kind: 'item', key: item.key, index: item.index, start: item.start }
 			: { kind: 'none' };
