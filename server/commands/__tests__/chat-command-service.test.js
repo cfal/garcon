@@ -560,6 +560,7 @@ function makeService(overrides = {}) {
   };
   const handoffPreparations = [];
   const defaultHandoffs = {
+    cancelPreparation: mock(() => undefined),
     resolveTarget: mock(async ({ chat, handoff }) => {
       if (handoff.expectedAgentOwnershipEpoch !== chat.agentOwnershipEpoch) {
         throw new DomainError(

@@ -770,19 +770,17 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   async #performStop(chatId: string): Promise<ChatStopOutcome> {
     const attempt = this.#ownership.attempt(chatId);
+    const interruption = new Error('Turn interrupted by the user');
+    if (attempt) this.#ownership.abortAdmission(chatId, interruption);
     try {
       const acknowledged = await this.#turnRunner.abortSession(chatId);
       let currentAttempt: QueueExecutionAttempt | undefined;
       if (attempt && this.#ownership.isCurrentAttempt(chatId, attempt)) {
         currentAttempt = attempt;
       }
-      if (!acknowledged && !currentAttempt) return 'already-idle';
+      if (!acknowledged && !attempt) return 'already-idle';
       if (currentAttempt) {
-        this.#retireAttempt(
-          chatId,
-          currentAttempt,
-          new Error('Turn interrupted by the user'),
-        );
+        this.#retireAttempt(chatId, currentAttempt, interruption);
       }
       return 'interrupt-requested';
     } catch (error) {

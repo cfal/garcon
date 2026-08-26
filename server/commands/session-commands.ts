@@ -254,6 +254,8 @@ export class SessionCommands {
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {
     this.support.requireChat(input.chatId);
+    this.support.requireClientRequestId(input.clientRequestId);
+    this.deps.handoffs.cancelPreparation(input.chatId);
     return this.support.withChatMutationLock(input.chatId, () => this.submitStopLocked(input));
   }
 

@@ -53,6 +53,7 @@ export class AgentHandoffService {
   readonly #recoveries = new Map<string, PendingHandoffRecovery>();
   readonly #activeRecoveryAttempts = new Map<string, Promise<void>>();
   readonly #recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #carryoverPreparations = new Map<string, AbortController>();
   readonly #shutdownController = new AbortController();
 
   constructor(private readonly deps: {
@@ -72,9 +73,16 @@ export class AgentHandoffService {
 
   shutdown(): void {
     if (this.#shutdownController.signal.aborted) return;
-    this.#shutdownController.abort(new Error('Agent handoff service shut down'));
+    const reason = new Error('Agent handoff service shut down');
+    this.#shutdownController.abort(reason);
+    for (const controller of this.#carryoverPreparations.values()) controller.abort(reason);
+    this.#carryoverPreparations.clear();
     for (const timer of this.#recoveryTimers.values()) clearTimeout(timer);
     this.#recoveryTimers.clear();
+  }
+
+  cancelPreparation(chatId: string): void {
+    this.#carryoverPreparations.get(chatId)?.abort(new Error('Turn interrupted by the user'));
   }
 
   seedContinuationLedger(input: {
@@ -256,18 +264,27 @@ export class AgentHandoffService {
           if (checkpoint.viewId !== watermark.viewId || checkpoint.ordinal !== watermark.ordinal) {
             throw new Error('Transcript changed while the handoff checkpoint was captured');
           }
-          const planned = await this.deps.carryover.planFor({
-            operation: 'agent-switch',
-            chatId: input.chatId,
-            projectPath: sourceSnapshot.projectPath,
-            messages: this.deps.ledger.conversationMessages(input.chatId),
-            destination: {
-              agentId: input.target.agentId,
-              model: input.target.model,
-              prompt: input.command,
-            },
-            signal: context.signal,
-          });
+          const planningController = new AbortController();
+          this.#carryoverPreparations.set(input.chatId, planningController);
+          let planned: CarryOverCompactionResult;
+          try {
+            planned = await this.deps.carryover.planFor({
+              operation: 'agent-switch',
+              chatId: input.chatId,
+              projectPath: sourceSnapshot.projectPath,
+              messages: this.deps.ledger.conversationMessages(input.chatId),
+              destination: {
+                agentId: input.target.agentId,
+                model: input.target.model,
+                prompt: input.command,
+              },
+              signal: AbortSignal.any([context.signal, planningController.signal]),
+            });
+          } finally {
+            if (this.#carryoverPreparations.get(input.chatId) === planningController) {
+              this.#carryoverPreparations.delete(input.chatId);
+            }
+          }
           this.#requireUnchangedSource(input.chatId, sourceFence);
           context.assertAdmissionActive();
           decisionAttempted = true;

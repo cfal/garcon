@@ -144,8 +144,9 @@ describe('AgentHandoffService', () => {
         model: 'target-model',
         prompt: 'continue the work',
       },
-      signal: admission.signal,
+      signal: expect.any(AbortSignal),
     }));
+    expect(planFor.mock.calls[0][0].signal.aborted).toBe(false);
     expect(deposit).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat',
       transcriptViewId: 'view-1',
@@ -222,6 +223,47 @@ describe('AgentHandoffService', () => {
     expect(deposit).not.toHaveBeenCalled();
     expect(discard).toHaveBeenCalledWith('chat');
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
+  });
+
+  it('cancels active carryover planning without deciding ownership', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    let markPlanningStarted;
+    const planningStarted = new Promise((resolve) => { markPlanningStarted = resolve; });
+    let planningSignal;
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+      carryover: {
+        planFor: mock((input) => {
+          planningSignal = input.signal;
+          markPlanningStarted();
+          return new Promise((_resolve, reject) => {
+            input.signal.addEventListener('abort', () => reject(input.signal.reason), { once: true });
+          });
+        }),
+      },
+      reopenProducer: () => calls.push('reopen'),
+    });
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    });
+    const task = preparation.prepare(context());
+    await planningStarted;
+
+    service.cancelPreparation('chat');
+
+    await expect(task).rejects.toThrow('Turn interrupted by the user');
+    expect(planningSignal.aborted).toBe(true);
+    expect(state.ownership.decideHandoff).not.toHaveBeenCalled();
+    expect(calls).toEqual(['close', 'watermark', 'checkpoint', 'messages', 'reopen']);
   });
 
   it('[TLV5-HANDOFF.03-CORE-UNIT-01] rolls a persisted decision forward without recapturing or checkpointing', async () => {

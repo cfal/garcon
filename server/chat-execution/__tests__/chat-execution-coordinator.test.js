@@ -308,6 +308,25 @@ describe('ChatExecutionCoordinator', () => {
     await expect(run).rejects.toThrow('Turn interrupted by the user');
   });
 
+  it('cancels reserved admission before waiting for provider interruption', async () => {
+    const abort = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        abortSession: mock(() => abort.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    const stop = coordinator.stopActiveTurn('chat-1');
+    await waitFor(() => fixture.turnRunner.abortSession.mock.calls.length === 1);
+
+    expect(reservation.executionAdmission.signal.aborted).toBe(true);
+    abort.resolve(true);
+    expect((await stop).outcome).toBe('interrupt-requested');
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
   it('stops a dequeued turn before the provider run starts', async () => {
     const failures = [];
     const fixture = createFixture({

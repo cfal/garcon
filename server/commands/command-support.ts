@@ -156,6 +156,7 @@ export interface ChatCommandServiceDeps {
     AgentHandoffService,
     | 'resolveTarget'
     | 'createPreparation'
+    | 'cancelPreparation'
     | 'seedContinuationLedger'
     | 'deleteContinuationLedger'
   >;
