@@ -90,6 +90,23 @@ function mockFinePointerViewport(
 			},
 		},
 	});
+	installFileTreeRects(treegrid);
+}
+
+function installFileTreeRects(treegrid: HTMLElement): void {
+	const sizer = treegrid.querySelector<HTMLElement>('[data-file-tree-virtual-sizer]');
+	if (!sizer) throw new Error('Expected file tree virtual sizer');
+	Object.defineProperty(treegrid, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => new DOMRect(0, 0, 0, treegrid.clientHeight),
+	});
+	Object.defineProperty(sizer, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => {
+			const headerHeight = treegrid.querySelector('[data-file-tree-column-grid]') ? 32 : 0;
+			return new DOMRect(0, headerHeight - treegrid.scrollTop, 0, sizer.offsetHeight);
+		},
+	});
 }
 
 function scrollOnNextAnimationFrame(element: HTMLElement, offset: number): Promise<void> {
@@ -463,6 +480,7 @@ describe('FileTreeVirtualRows', () => {
 				value: FILE_TREE_HEADER_HEIGHT + items.length * FILE_TREE_ROW_HEIGHT,
 			},
 		});
+		installFileTreeRects(treegrid);
 		const outside = document.createElement('button');
 		document.body.append(outside);
 		first.focus();
