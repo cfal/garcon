@@ -233,14 +233,21 @@ describe('ConversationFeedVirtualController', () => {
 	it('redeems a deferred correction after native activity becomes idle', async () => {
 		const { exposure } = await renderController();
 		await exposure.prependDuring('coasting');
+		const viewport = exposure.viewport();
+		if (!viewport) throw new Error('Expected the virtual viewport to be mounted');
+		viewport.scrollTop = 0;
+		await settleController();
+		const retainedCount = exposure.controller.renderedIndexes(exposure.controller.snapshot).length;
 		const before = exposure.transactions.length;
 
 		exposure.controller.setNativeScrollActivity('idle');
 		await settleController();
 		const redemption = exposure.transactions.slice(before).find((candidate) => candidate.redeemed);
+		const settledCount = exposure.controller.renderedIndexes(exposure.controller.snapshot).length;
 
 		expect(redemption).toMatchObject({ source: 'viewport', scrollWrites: 1, deviationAfter: 0 });
 		expect(exposure.controller.viewportPosition()?.leadingContentReachable).toBe(true);
+		expect(settledCount).toBe(retainedCount);
 	});
 
 	it('defers pinned end requests until native coasting becomes idle', async () => {

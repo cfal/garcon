@@ -108,6 +108,13 @@ export class ConversationEarlierPrependAnchorOwnership {
 	finishScrollbarDrag(): void {
 		this.#blocksScrollbarDrag = false;
 	}
+
+	complete(): void {
+		this.#anchor = null;
+		this.#clamped = false;
+		this.#publicationBeganClamped = false;
+		this.#retainedMountedRowKeys = null;
+	}
 }
 
 export class ConversationMountedVirtualItems {

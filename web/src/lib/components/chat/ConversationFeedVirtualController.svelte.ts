@@ -90,6 +90,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#earlierPrependAnchor = new ConversationEarlierPrependAnchorOwnership();
 	#mountedItems = new ConversationMountedVirtualItems();
 	#itemAttachments = new Map<string, Attachment<HTMLElement>>();
+	#lastTransaction: VirtualTransactionRecord | null = null;
 	#destroyed = false;
 
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
@@ -107,7 +108,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			get measurementAnchor() {
 				return measurementAnchor();
 			},
-			onTransaction: options.onTransaction,
+			onTransaction: (record) => {
+				this.#lastTransaction = record;
+				this.#completeSettledEarlierPrepend(record);
+				options.onTransaction?.(record);
+			},
 		});
 		this.viewport = this.#virt.viewport;
 		this.sizer = this.#virt.sizer;
@@ -256,10 +261,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		);
 		this.options.retention.prune(nextGeometry.keys);
 		this.#pruneItemAttachments();
-		this.#earlierPrependAnchor.carry(
-			selectedAnchor,
-			nextGeometry.mutationKinds.has('history-earlier'),
-		);
+		const isEarlierPublication = nextGeometry.mutationKinds.has('history-earlier');
+		this.#earlierPrependAnchor.carry(selectedAnchor, isEarlierPublication);
+		if (
+			isEarlierPublication &&
+			this.#lastTransaction?.revision === this.#virt.snapshot.revision
+		) {
+			this.#completeSettledEarlierPrepend(this.#lastTransaction);
+		}
 		this.#layoutMutationToken += 1;
 		if (identityChanged) {
 			this.options.retention.clear();
@@ -664,6 +673,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#activeTargetScrolls === 0
 			? 'end'
 			: 'geometric';
+	}
+
+	#completeSettledEarlierPrepend(record: VirtualTransactionRecord): void {
+		if (record.deviationAfter !== 0) return;
+		if (!['items', 'mount', 'resize', 'viewport'].includes(record.source)) return;
+		this.#earlierPrependAnchor.complete();
 	}
 
 	#acknowledgeData(projectedDataRevision: number): void {
