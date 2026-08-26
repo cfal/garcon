@@ -96,12 +96,21 @@ function spacer(container: HTMLElement): HTMLElement {
 
 function mockViewportGeometry(container: HTMLElement, height = 720, width = 1_000): HTMLDivElement {
 	const element = viewport(container);
+	const virtualSpacer = spacer(container);
 	Object.defineProperties(element, {
 		clientHeight: { configurable: true, value: height },
 		scrollHeight: {
 			configurable: true,
 			get: () => Number.parseFloat(spacer(container).style.height || '0'),
 		},
+	});
+	Object.defineProperty(element, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => new DOMRect(0, 0, width, height),
+	});
+	Object.defineProperty(virtualSpacer, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => new DOMRect(0, -element.scrollTop, width, virtualSpacer.offsetHeight),
 	});
 	ResizeObserverHarness.emit(element, width, height);
 	return element;
@@ -132,7 +141,7 @@ describe('GitCommitListVirtualController', () => {
 	});
 
 	it('retains only a focused row outside the visible range', () => {
-		const range = { startIndex: 10, endIndex: 20, overscan: 2, count: 100 };
+		const range = { startIndex: 8, endIndex: 22 };
 
 		expect(retainedGitHistoryFocusRange(range, undefined)).toEqual(
 			Array.from({ length: 15 }, (_, index) => index + 8),
@@ -454,7 +463,9 @@ describe('GitCommitListVirtualController', () => {
 		expect(virtualRows(container).length).toBeLessThan(50);
 
 		await fireEvent.keyDown(last, { key: 'Home' });
-		await waitFor(() => expect(document.activeElement).toBe(first));
+		await waitFor(() =>
+			expect(document.activeElement?.getAttribute('aria-label')).toBe('Open commit Commit 0'),
+		);
 	});
 
 	it('moves the tab stop on screen when focus leaves a retained offscreen row', async () => {

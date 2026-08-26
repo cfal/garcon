@@ -18,6 +18,7 @@ export interface VirtualElementMeasurement {
 
 export interface VirtualListDomDriverOptions {
 	readonly environment: VirtualListEnvironment;
+	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
 	shouldMeasureMount(key: string): boolean;
 	onMount(measurements: readonly VirtualElementMeasurement[]): void;
 	onResize(measurements: readonly VirtualElementMeasurement[]): void;
@@ -101,14 +102,15 @@ export class VirtualListDomDriver {
 	measureElement(element: HTMLElement): VirtualElementMeasurement | null {
 		const key = this.#keysByElement.get(element);
 		if (!key || this.#elementsByKey.get(key) !== element || !element.isConnected) return null;
-		return { key, element, size: blockSize(undefined, element) };
+		return this.#measurement(key, element);
 	}
 
 	measureAll(): readonly VirtualElementMeasurement[] {
 		const measurements: VirtualElementMeasurement[] = [];
 		for (const [key, element] of this.#elementsByKey) {
 			if (!element.isConnected) continue;
-			measurements.push({ key, element, size: blockSize(undefined, element) });
+			const measurement = this.#measurement(key, element);
+			if (measurement) measurements.push(measurement);
 		}
 		return measurements;
 	}
@@ -208,7 +210,8 @@ export class VirtualListDomDriver {
 			const measurements: VirtualElementMeasurement[] = [];
 			for (const [key, element] of this.#pendingMounts) {
 				if (this.#elementsByKey.get(key) !== element || !element.isConnected) continue;
-				measurements.push({ key, element, size: blockSize(undefined, element) });
+				const measurement = this.#measurement(key, element);
+				if (measurement) measurements.push(measurement);
 			}
 			this.#pendingMounts.clear();
 			if (measurements.length > 0) this.options.onMount(measurements);
@@ -228,10 +231,22 @@ export class VirtualListDomDriver {
 			const element = entry.target;
 			const key = this.#keysByElement.get(element);
 			if (!key || this.#elementsByKey.get(key) !== element || !element.isConnected) continue;
-			measurements.push({ key, element, size: blockSize(entry, element) });
+			const measurement = this.#measurement(key, element, entry);
+			if (measurement) measurements.push(measurement);
 		}
 		if (measurements.length > 0) this.options.onResize(measurements);
 		if (viewportChanged) this.options.onViewportResize();
+	}
+
+	#measurement(
+		key: string,
+		element: HTMLElement,
+		entry?: ResizeObserverEntry,
+	): VirtualElementMeasurement | null {
+		const size = this.options.measureElement
+			? this.options.measureElement(element, entry)
+			: blockSize(entry, element);
+		return size === null ? null : { key, element, size };
 	}
 
 	#observeAll(): void {

@@ -1,20 +1,17 @@
 import { tick, untrack } from 'svelte';
-import { get, type Readable } from 'svelte/store';
-import {
-	createVirtualizer,
-	defaultRangeExtractor,
-	observeElementRect,
-	type Rect,
-	type Range,
-	type SvelteVirtualizer,
-	type Virtualizer,
-} from '@tanstack/svelte-virtual';
+import type { Attachment } from 'svelte/attachments';
 import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 import type {
 	GitHistoryListChange,
 	GitHistoryListPosition,
 } from '$lib/git/history/git-history.svelte.js';
-import { measureVirtualRow } from './git-virtual-row-measurement.js';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
+import {
+	virtualItems as selectVirtualItems,
+	type VirtualItem,
+	type VirtualListSnapshot,
+	type VirtualRange,
+} from '$lib/virt/virtual-list-types.js';
 
 export const GIT_HISTORY_ESTIMATED_ROW_HEIGHT = 64;
 export const GIT_HISTORY_VIRTUAL_OVERSCAN = 8;
@@ -43,19 +40,33 @@ function nextAnimationFrame(): Promise<void> {
 }
 
 export function retainedGitHistoryFocusRange(
-	range: Range,
+	range: VirtualRange | null,
 	focusedIndex: number | undefined,
 ): number[] {
-	const indexes = defaultRangeExtractor(range);
+	const indexes = range
+		? Array.from(
+				{ length: range.endIndex - range.startIndex + 1 },
+				(_, offset) => range.startIndex + offset,
+			)
+		: [];
 	if (focusedIndex !== undefined && !indexes.includes(focusedIndex)) indexes.push(focusedIndex);
 	return indexes.sort((left, right) => left - right);
+}
+
+function measureCommitRow(element: HTMLElement, entry: ResizeObserverEntry | undefined): number {
+	const boxes = entry?.borderBoxSize;
+	const box = Array.isArray(boxes) ? boxes[0] : boxes?.[0];
+	const size = box?.blockSize ?? element.getBoundingClientRect().height;
+	return Math.round(size > 0 ? size : GIT_HISTORY_ESTIMATED_ROW_HEIGHT);
 }
 
 export class GitCommitListVirtualController {
 	activeHash = $state<string | null>(null);
 	focusedHash = $state<string | null>(null);
-	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
+	readonly viewport: Attachment<HTMLElement>;
+	readonly sizer: Attachment<HTMLElement>;
 
+	#virt: VirtualListController;
 	#virtualCommits: readonly GitHistoryCommitListItem[] = [];
 	#indexByHash = new Map<string, number>();
 	#virtualScrollElement: HTMLDivElement | null = null;
@@ -75,19 +86,18 @@ export class GitCommitListVirtualController {
 		this.#replaceIndexModel(initialCommits);
 		this.#lastCollectionRevision = initialCollectionChange.revision;
 		this.activeHash = this.#resolveInitialActiveHash(initialPosition);
-
-		this.virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
-			count: initialCommits.length,
-			getScrollElement: this.#getScrollElement,
-			getItemKey: this.#getItemKey,
-			estimateSize: this.#estimateSize,
-			measureElement: this.#measureElement,
-			observeElementRect: this.#observeElementRect,
-			initialRect: { width: 0, height: FALLBACK_VIEWPORT_HEIGHT },
-			initialOffset: () => this.#estimatedInitialOffset(initialPosition),
-			overscan: GIT_HISTORY_VIRTUAL_OVERSCAN,
-			onChange: this.#handleVirtualizerChange,
+		this.#virt = new VirtualListController({
+			get overscan() {
+				return GIT_HISTORY_VIRTUAL_OVERSCAN;
+			},
+			get measurementAnchor() {
+				return 'geometric' as const;
+			},
+			measureElement: measureCommitRow,
 		});
+		this.viewport = this.#virt.viewport;
+		this.sizer = this.#virt.sizer;
+		this.#applyVirtualSource('replace');
 
 		$effect(() => {
 			const commits = options.commits;
@@ -146,8 +156,27 @@ export class GitCommitListVirtualController {
 					this.#capturePosition(true);
 				}
 				this.#loadBoundaryPending = false;
+				this.#virt.destroy();
 			};
 		});
+	}
+
+	get snapshot(): VirtualListSnapshot {
+		return this.#virt.snapshot;
+	}
+
+	commitAt(index: number): GitHistoryCommitListItem | undefined {
+		return this.#virtualCommits[index];
+	}
+
+	renderedItems(snapshot: VirtualListSnapshot): readonly VirtualItem[] {
+		const range = snapshot.overscanRange ?? this.#fallbackRange(snapshot);
+		const focusedIndex = this.focusedHash ? this.#indexByHash.get(this.focusedHash) : undefined;
+		return selectVirtualItems(snapshot, retainedGitHistoryFocusRange(range, focusedIndex));
+	}
+
+	item(hash: string): Attachment<HTMLElement> {
+		return this.#virt.item(hash);
 	}
 
 	noteUserScrollIntent(): void {
@@ -155,16 +184,9 @@ export class GitCommitListVirtualController {
 		if (!viewport) return;
 		this.#userInteractedViewports.add(viewport);
 		this.#cancelRestore();
+		this.#virt.cancelOwnedScroll();
 		this.options.onUserScrollIntent();
 	}
-
-	measureRow = (element: HTMLDivElement): { update(): void; destroy(): void } => {
-		this.#instance().measureElement(element);
-		return {
-			update: () => this.#instance().measureElement(element),
-			destroy: () => this.#instance().measureElement(null),
-		};
-	};
 
 	handleScroll = (): void => {
 		this.#loadBoundaryPending = true;
@@ -189,13 +211,6 @@ export class GitCommitListVirtualController {
 			return;
 		}
 		this.#releaseFocus(hash);
-	}
-
-	#releaseFocus(hash: string): void {
-		if (this.focusedHash === hash) {
-			this.focusedHash = null;
-			this.#schedulePositionCapture();
-		}
 	}
 
 	handleRowKeydown(event: KeyboardEvent, hash: string): void {
@@ -233,18 +248,22 @@ export class GitCommitListVirtualController {
 		return Math.max(1, Math.floor(height / GIT_HISTORY_ESTIMATED_ROW_HEIGHT));
 	}
 
-	#getScrollElement = (): HTMLDivElement | null => this.#virtualScrollElement;
-
-	#getItemKey = (index: number): string | number => this.#virtualCommits[index]?.hash ?? index;
-
-	#estimateSize = (): number => GIT_HISTORY_ESTIMATED_ROW_HEIGHT;
-
-	#handleVirtualizerChange = (
-		_instance: Virtualizer<HTMLElement, HTMLDivElement>,
-		sync: boolean,
-	): void => {
-		if (!sync) this.#schedulePositionCapture();
-	};
+	#fallbackRange(snapshot: VirtualListSnapshot): VirtualRange | null {
+		if (this.#virtualCommits.length === 0) return null;
+		const viewport = this.options.viewport;
+		const offset = viewport?.scrollTop ?? 0;
+		const start = snapshot.positions.itemAtOffset(offset)?.index ?? 0;
+		const visibleCount = Math.ceil(
+			(viewport?.clientHeight || FALLBACK_VIEWPORT_HEIGHT) / GIT_HISTORY_ESTIMATED_ROW_HEIGHT,
+		);
+		return {
+			startIndex: Math.max(0, start - GIT_HISTORY_VIRTUAL_OVERSCAN),
+			endIndex: Math.min(
+				this.#virtualCommits.length - 1,
+				start + visibleCount + GIT_HISTORY_VIRTUAL_OVERSCAN,
+			),
+		};
+	}
 
 	#schedulePositionCapture(): void {
 		if (this.#scrollFrame !== null) return;
@@ -257,27 +276,6 @@ export class GitCommitListVirtualController {
 		});
 	}
 
-	#measureElement = (
-		element: HTMLDivElement,
-		entry: ResizeObserverEntry | undefined,
-		instance: Virtualizer<HTMLElement, HTMLDivElement>,
-	): number => {
-		const measured = measureVirtualRow(element, entry, instance);
-		return measured > 0 ? measured : GIT_HISTORY_ESTIMATED_ROW_HEIGHT;
-	};
-
-	#observeElementRect = (
-		instance: Virtualizer<HTMLElement, HTMLDivElement>,
-		callback: (rect: Rect) => void,
-	): (() => void) | undefined =>
-		observeElementRect(instance, (rect) => {
-			callback(rect.height > 0 ? rect : { ...rect, height: FALLBACK_VIEWPORT_HEIGHT });
-		});
-
-	#instance(): SvelteVirtualizer<HTMLElement, HTMLDivElement> {
-		return get(this.virtualizer);
-	}
-
 	#resolveInitialActiveHash(position: GitHistoryListPosition): string | null {
 		if (position.activeHash && this.#indexByHash.has(position.activeHash))
 			return position.activeHash;
@@ -286,61 +284,39 @@ export class GitCommitListVirtualController {
 		return this.#virtualCommits[0]?.hash ?? null;
 	}
 
-	#estimatedInitialOffset(position: GitHistoryListPosition): number {
-		if (position.anchorHash) {
-			const index = this.#indexByHash.get(position.anchorHash);
-			return index === undefined
-				? 0
-				: Math.max(0, index * GIT_HISTORY_ESTIMATED_ROW_HEIGHT - position.anchorOffset);
-		}
-		return Math.max(0, position.scrollTop);
-	}
-
 	#updateVirtualizer(
 		commits: readonly GitHistoryCommitListItem[],
 		collectionChange: GitHistoryListChange,
 		viewport: HTMLDivElement | null,
-		focusedHash: string | null,
+		_focusedHash: string | null,
 	): void {
 		const update = this.#updateIndexModel(commits, collectionChange);
 		this.#virtualScrollElement = viewport;
-		const focusedIndex = focusedHash ? this.#indexByHash.get(focusedHash) : undefined;
-		const instance = this.#instance();
-		instance.setOptions({
-			count: commits.length,
-			getScrollElement: this.#getScrollElement,
-			getItemKey: this.#getItemKey,
-			estimateSize: this.#estimateSize,
-			measureElement: this.#measureElement,
-			observeElementRect: this.#observeElementRect,
-			initialRect: { width: 0, height: FALLBACK_VIEWPORT_HEIGHT },
-			overscan: GIT_HISTORY_VIRTUAL_OVERSCAN,
-			rangeExtractor: (range) => retainedGitHistoryFocusRange(range, focusedIndex),
-			onChange: this.#handleVirtualizerChange,
-		});
+		if (update !== 'unchanged') this.#applyVirtualSource(update);
 
 		if (update === 'replace') {
-			this.#resetMeasurementsForReplacement(instance, commits);
 			if (viewport) {
 				const position = untrack(() => this.options.savedPosition);
 				void this.#restorePosition(viewport, position);
 			}
-		} else if (update === 'reset') {
-			instance.measure();
-			if (viewport) this.#resetPosition(viewport);
+		} else if (update === 'reset' && viewport) {
+			this.#resetPosition(viewport);
 		}
 	}
 
-	#resetMeasurementsForReplacement(
-		instance: SvelteVirtualizer<HTMLElement, HTMLDivElement>,
-		commits: readonly GitHistoryCommitListItem[],
-	): void {
-		const retainedSizes = commits.flatMap((commit) => {
-			const size = instance.itemSizeCache.get(commit.hash);
-			return size === undefined ? [] : [{ hash: commit.hash, size }];
+	#applyVirtualSource(update: Exclude<CollectionUpdate, 'unchanged'>): void {
+		const result = this.#virt.apply({
+			kind: update === 'reset' ? 'reset-measurements' : 'update',
+			keys: this.#virtualCommits.map((commit) => commit.hash),
+			estimates: Array.from(
+				{ length: this.#virtualCommits.length },
+				() => GIT_HISTORY_ESTIMATED_ROW_HEIGHT,
+			),
+			anchor: { kind: 'none' },
 		});
-		instance.measure();
-		for (const { hash, size } of retainedSizes) instance.itemSizeCache.set(hash, size);
+		if (result.kind === 'rejected') {
+			console.error(`Git history virtualization rejected source geometry: ${result.reason}`);
+		}
 	}
 
 	#updateIndexModel(
@@ -356,11 +332,11 @@ export class GitCommitListVirtualController {
 				const hash = commits[index]?.hash;
 				if (hash) this.#indexByHash.set(hash, index);
 			}
+			this.#virtualCommits = commits;
 		} else {
 			if (update === 'append') update = 'replace';
 			this.#replaceIndexModel(commits);
 		}
-		this.#virtualCommits = commits;
 		this.#lastCollectionRevision = collectionChange.revision;
 		this.#reconcileInteractionKeys();
 		return update;
@@ -386,19 +362,20 @@ export class GitCommitListVirtualController {
 		const viewport = this.options.viewport;
 		if (!viewport) return;
 		const scrollTop = viewport.scrollTop;
-		const virtualItems = this.#instance().getVirtualItems();
-		const firstVisible = virtualItems.find((item) => item.end > scrollTop) ?? virtualItems.at(-1);
+		const snapshot = this.#virt.snapshot;
+		const paintedOffset = this.#virt.viewportPosition?.paintedOffset ?? scrollTop;
+		const firstVisible = snapshot.positions.itemAtOffset(paintedOffset);
 		const commit = firstVisible ? this.#virtualCommits[firstVisible.index] : undefined;
-		const activeIndex = this.activeHash ? this.#indexByHash.get(this.activeHash) : undefined;
-		const activeIsMounted =
-			activeIndex !== undefined && virtualItems.some((item) => item.index === activeIndex);
-		if (!this.focusedHash && commit && (!preserveMountedActive || !activeIsMounted)) {
+		const activeMounted = this.activeHash
+			? viewport.querySelector(`[data-git-history-commit-hash="${CSS.escape(this.activeHash)}"]`)
+			: null;
+		if (!this.focusedHash && commit && (!preserveMountedActive || !activeMounted)) {
 			this.activeHash = commit.hash;
 		}
 		this.options.onPositionSave({
 			scrollTop,
 			anchorHash: commit?.hash ?? null,
-			anchorOffset: firstVisible ? firstVisible.start - scrollTop : 0,
+			anchorOffset: firstVisible ? firstVisible.start - paintedOffset : 0,
 			activeHash: this.activeHash,
 		});
 	}
@@ -412,7 +389,7 @@ export class GitCommitListVirtualController {
 		try {
 			const anchorHash = position.anchorHash;
 			if (!anchorHash) {
-				this.#instance().scrollToOffset(Math.max(0, position.scrollTop));
+				this.#scrollToOffset(Math.max(0, position.scrollTop));
 				return;
 			}
 			const index = this.#indexByHash.get(anchorHash);
@@ -421,8 +398,7 @@ export class GitCommitListVirtualController {
 				return;
 			}
 
-			const instance = this.#instance();
-			instance.scrollToIndex(index, { align: 'start' });
+			this.#virt.scrollToAnchor(anchorHash, position.anchorOffset);
 			for (let attempt = 0; attempt < RESTORE_SETTLE_ATTEMPTS; attempt += 1) {
 				await tick();
 				await nextAnimationFrame();
@@ -434,14 +410,12 @@ export class GitCommitListVirtualController {
 					return;
 				}
 
-				const anchorItem = instance.getVirtualItems().find((item) => item.index === index);
-				if (!anchorItem) {
-					instance.scrollToIndex(index, { align: 'start' });
-					continue;
-				}
-				const offsetError = anchorItem.start - viewport.scrollTop - position.anchorOffset;
+				const anchorItem = this.#virt.snapshot.positions.itemAt(index);
+				if (!anchorItem) return;
+				const paintedOffset = this.#virt.viewportPosition?.paintedOffset ?? viewport.scrollTop;
+				const offsetError = anchorItem.start - paintedOffset - position.anchorOffset;
 				if (Math.abs(offsetError) <= RESTORE_OFFSET_TOLERANCE_PX) return;
-				instance.scrollToOffset(Math.max(0, viewport.scrollTop + offsetError));
+				this.#scrollToOffset(Math.max(0, viewport.scrollTop + offsetError));
 			}
 		} finally {
 			if (token === this.#restoreToken) {
@@ -451,10 +425,9 @@ export class GitCommitListVirtualController {
 		}
 	}
 
-	#resetPosition(viewport: HTMLDivElement): void {
+	#resetPosition(_viewport: HTMLDivElement): void {
 		this.#cancelRestore();
-		this.#instance().scrollToOffset(0);
-		viewport.scrollTop = 0;
+		this.#scrollToOffset(0);
 		this.activeHash = this.#virtualCommits[0]?.hash ?? null;
 		this.focusedHash = null;
 		this.options.onPositionSave({
@@ -463,6 +436,11 @@ export class GitCommitListVirtualController {
 			anchorOffset: 0,
 			activeHash: this.activeHash,
 		});
+	}
+
+	#scrollToOffset(offset: number): void {
+		const firstHash = this.#virtualCommits[0]?.hash;
+		if (firstHash) this.#virt.scrollToAnchor(firstHash, -offset);
 	}
 
 	#cancelRestore(): void {
@@ -477,7 +455,7 @@ export class GitCommitListVirtualController {
 		this.#cancelRestore();
 		this.activeHash = commit.hash;
 		this.focusedHash = commit.hash;
-		this.#instance().scrollToIndex(index, { align: 'auto' });
+		this.#scrollIndexIntoView(index);
 
 		for (let attempt = 0; attempt < FOCUS_MOUNT_ATTEMPTS; attempt += 1) {
 			await tick();
@@ -497,5 +475,25 @@ export class GitCommitListVirtualController {
 			}
 		}
 		this.#releaseFocus(commit.hash);
+	}
+
+	#scrollIndexIntoView(index: number): void {
+		const viewport = this.options.viewport;
+		const item = this.#virt.snapshot.positions.itemAt(index);
+		if (!viewport || !item) return;
+		const offset = this.#virt.viewportPosition?.paintedOffset ?? viewport.scrollTop;
+		const viewportEnd = offset + (viewport.clientHeight || FALLBACK_VIEWPORT_HEIGHT);
+		if (item.end > viewportEnd) {
+			this.#virt.scrollToIndex(index, { align: 'end' });
+		} else if (item.start < offset) {
+			this.#virt.scrollToIndex(index, { align: 'start' });
+		}
+	}
+
+	#releaseFocus(hash: string): void {
+		if (this.focusedHash === hash) {
+			this.focusedHash = null;
+			this.#schedulePositionCapture();
+		}
 	}
 }

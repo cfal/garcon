@@ -35,6 +35,24 @@ describe('VirtualListController', () => {
 		expect(test.controller.snapshot.positions.itemAt(1)?.start).toBe(40);
 	});
 
+	it('allows consumers to normalize measurements at DOM ingress', () => {
+		const test = harness({
+			measureElement: (_element, entry) => entry?.borderBoxSize[0]?.blockSize ?? 64,
+		});
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a'],
+			estimates: [32],
+			anchor: { kind: 'none' },
+		});
+		const mounted = test.mountItem('a', 0);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.measuredSize('a')).toBe(64);
+		test.environment.observer.emit(mounted.element, 48);
+		expect(test.controller.measuredSize('a')).toBe(48);
+	});
+
 	it('keeps an item fixed through prepend while coasting and redeems after idle', () => {
 		const test = harness({ viewportSize: 80 });
 		test.controller.apply({

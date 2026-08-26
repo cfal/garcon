@@ -81,6 +81,7 @@ export function createVirtualListHarness(options?: {
 	viewportSize?: number;
 	overscan?: number;
 	measurementAnchor?: 'geometric' | 'end';
+	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
 }) {
 	const environment = new TestEnvironment();
 	const records: VirtualTransactionRecord[] = [];
@@ -91,6 +92,7 @@ export function createVirtualListHarness(options?: {
 	const controller = new VirtualListController({
 		overscan: options?.overscan ?? 1,
 		measurementAnchor: options?.measurementAnchor ?? 'geometric',
+		measureElement: options?.measureElement,
 		environment,
 		onTransaction: (record) => records.push(record),
 	});
