@@ -220,6 +220,30 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.controller.snapshot.positions.count).toBe(13);
 	});
 
+	it('anchors a prepend to committed content when scrolling outruns the rendered range', async () => {
+		const { exposure } = await renderController();
+		await exposure.setPinned(false);
+		const viewport = exposure.viewport();
+		if (!viewport) throw new Error('Expected the virtual viewport to be mounted');
+		const mountedIndexes = [...document.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')]
+			.map((element) => Number(element.dataset.index))
+			.filter(Number.isInteger)
+			.sort((left, right) => left - right);
+		const firstMountedIndex = mountedIndexes[0];
+		const preceding = exposure.controller.snapshot.positions.itemAt(firstMountedIndex - 1);
+		if (!preceding) throw new Error('Expected an unmounted row before the rendered range');
+		viewport.scrollTop = preceding.start + 1;
+		const before = exposure.transactions.length;
+
+		await exposure.prependItems();
+		await settleController();
+		const record = exposure.transactions
+			.slice(before)
+			.find((candidate) => candidate.source === 'items');
+
+		expect(record).toMatchObject({ anchorKind: 'item', anchorIndex: firstMountedIndex });
+	});
+
 	it.each(['dragging', 'coasting'] as const)(
 		'defers prepend correction without a physical write while %s',
 		async (activity) => {
@@ -242,24 +266,32 @@ describe('ConversationFeedVirtualController', () => {
 		},
 	);
 
-	it('redeems a deferred correction after native activity becomes idle', async () => {
+	it('settles a deferred pinned correction after native activity becomes idle', async () => {
 		const { exposure } = await renderController();
 		await exposure.prependDuring('coasting');
 		const viewport = exposure.viewport();
 		if (!viewport) throw new Error('Expected the virtual viewport to be mounted');
 		viewport.scrollTop = 0;
 		await settleController();
-		const retainedCount = exposure.controller.renderedIndexes(exposure.controller.snapshot).length;
 		const before = exposure.transactions.length;
 
 		exposure.controller.setNativeScrollActivity('idle');
 		await settleController();
-		const redemption = exposure.transactions.slice(before).find((candidate) => candidate.redeemed);
-		const settledCount = exposure.controller.renderedIndexes(exposure.controller.snapshot).length;
-
-		expect(redemption).toMatchObject({ source: 'viewport', scrollWrites: 1, deviationAfter: 0 });
+		await waitFor(() =>
+			expect(
+				exposure.transactions.slice(before).some((candidate) => candidate.scrollWrites > 0),
+			).toBe(true),
+		);
+		const redemption = exposure.transactions
+			.slice(before)
+			.find((candidate) => candidate.scrollWrites > 0);
+		expect(redemption).toMatchObject({
+			source: 'programmatic',
+			provenance: 'navigation',
+			scrollWrites: 1,
+			deviationAfter: 0,
+		});
 		expect(exposure.controller.viewportPosition()?.leadingContentReachable).toBe(true);
-		expect(settledCount).toBe(retainedCount);
 	});
 
 	it('defers pinned end requests until native coasting becomes idle', async () => {

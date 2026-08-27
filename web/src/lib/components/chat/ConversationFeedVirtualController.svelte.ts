@@ -525,11 +525,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#captureVirtualAnchor(preferTranscript: boolean): ConversationVirtualAnchor | null {
+		let transcriptKeys = this.#configuredTranscriptKeys;
+		if (preferTranscript) {
+			// The live scroll position can outrun the snapshot range, so structural anchors use committed rows.
+			const mountedTranscriptKeys = this.#mountedItems.transcriptKeys(
+				this.#configuredGeometry.keys,
+				this.#configuredTranscriptKeys,
+			);
+			if (mountedTranscriptKeys.size > 0) transcriptKeys = mountedTranscriptKeys;
+		}
 		return captureConversationVirtualAnchor({
 			snapshot: this.#virt.snapshot,
 			position: this.#virt.viewportPosition,
 			keys: this.#configuredGeometry.keys,
-			transcriptKeys: this.#configuredTranscriptKeys,
+			transcriptKeys,
 			preferTranscript,
 		});
 	}

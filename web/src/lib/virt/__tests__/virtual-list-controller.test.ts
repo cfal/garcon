@@ -124,6 +124,7 @@ describe('VirtualListController', () => {
 		expect(test.controller.viewportPosition?.leadingContentReachable).toBe(false);
 
 		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
 		expect(test.controller.snapshot.sizerSize).toBe(150);
 		test.environment.flushMicrotasks();
 		expect(test.writes).toBe(1);
@@ -285,11 +286,92 @@ describe('VirtualListController', () => {
 		const deferredRange = test.controller.snapshot.visibleRange;
 
 		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
 
 		expect(test.controller.snapshot.visibleRange).toEqual(deferredRange);
 		expect(test.writes).toBe(0);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(70);
+	});
+
+	it('reports the intended painted offset through a leading-offset redemption barrier', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c', 'd'],
+			estimates: [40, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(40);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [30, 40, 40, 40],
+			anchor: { kind: 'item', key: 'b' },
+		});
+
+		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
+		test.setLeadingOffset(30);
+
+		expect(test.viewport.scrollTop).toBe(40);
+		expect(test.controller.viewportPosition).toMatchObject({
+			paintedOffset: 70,
+			logicalOffset: 70,
+		});
+		expect(test.controller.snapshot.positions.itemAt(1)?.start).toBe(30);
+	});
+
+	it('reports the published end offset while physical bounds await repaint', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [40, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollHeight(100);
+
+		expect(test.controller.scrollToEnd()).toEqual({ kind: 'scheduled' });
+
+		expect(test.controller.viewportPosition).toMatchObject({
+			paintedOffset: 40,
+			logicalOffset: 40,
+		});
+	});
+
+	it('folds a settlement-gated prepend into negative deviation before redemption', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'reading', 'tail'],
+			estimates: [200, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(62);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['before', 'reading', 'tail'],
+			estimates: [0, 40, 40],
+			anchor: { kind: 'item', key: 'reading' },
+		});
+
+		test.controller.setScrollActivity('idle');
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(0);
+		test.controller.apply({
+			kind: 'update',
+			keys: ['earlier', 'before', 'reading', 'tail'],
+			estimates: [300, 0, 40, 40],
+			anchor: { kind: 'item', key: 'reading' },
+		});
+		test.environment.flushMicrotasks();
+
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(162);
+		expect((test.controller.snapshot.positions.itemAt(2)?.start ?? 0) - 162).toBe(138);
 	});
 
 	it('keeps measured content fixed when prepended estimates settle after redemption', () => {
@@ -353,6 +435,7 @@ describe('VirtualListController', () => {
 		expect(test.writes).toBe(0);
 		expect(test.controller.snapshot.positions.itemAt(3)?.start).toBe(64);
 		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
 		test.environment.flushMicrotasks();
 		expect(104 - test.viewport.scrollTop).toBe(64);
 		expect(test.writes).toBe(1);

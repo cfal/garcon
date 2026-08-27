@@ -99,8 +99,14 @@ export class VirtualListTransaction {
 	get viewportPosition(): VirtualViewportPosition | null {
 		const dom = this.#driver?.read();
 		if (!dom || this.#suspended || this.#replacementPending) return null;
-		const paintedOffset = dom.scrollTop - dom.leadingOffset;
-		const logicalOffset = paintedOffset + this.#deviation.value;
+		const logicalOffset = this.#pendingCommit
+			? clamp(
+					this.#logicalOffsetForTarget(this.#pendingCommit.target, dom),
+					0,
+					Math.max(0, this.geometry.totalSize() - dom.viewportSize),
+				)
+			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
+		const paintedOffset = logicalOffset - this.#deviation.value;
 		return {
 			paintedOffset,
 			logicalOffset,
@@ -293,7 +299,11 @@ export class VirtualListTransaction {
 
 	setScrollActivity(activity: VirtualScrollActivity): void {
 		this.#activity = activity;
-		if (activity === 'idle' && this.#deviation.value !== 0) this.viewportChanged(false);
+		if (activity !== 'idle' || this.#deviation.value === 0) return;
+		const epoch = this.#ownedEpoch;
+		this.options.environment.requestAnimationFrame(() => {
+			if (this.#ownedEpoch === epoch && this.#activity === 'idle') this.viewportChanged(false);
+		});
 	}
 
 	refreshLayout(): void {
