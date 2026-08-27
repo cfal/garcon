@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import type { ComponentProps } from 'svelte';
+import { tick, type ComponentProps } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
@@ -287,6 +287,7 @@ describe('GitVirtualDiffSurface', () => {
 		const onStageFile = vi.fn();
 		const { container } = renderSurface(rows, { onStageFile });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
+		await tick();
 
 		expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull();
 		viewport.scrollTop = 63;

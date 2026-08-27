@@ -1,5 +1,8 @@
 import type { Attachment } from 'svelte/attachments';
-import type { VirtualListControllerOptions } from '$lib/virt/virtual-list-controller.svelte.js';
+import type {
+	VirtualListController,
+	VirtualListControllerOptions,
+} from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualIndexScrollResult,
 	VirtualItem,
@@ -19,6 +22,21 @@ export const virtualDiffControllerCalls = {
 };
 
 const instances = new Set<FakeVirtualListController>();
+type VirtualDiffControllerPort = Pick<
+	VirtualListController,
+	| 'snapshot'
+	| 'viewportPosition'
+	| 'viewport'
+	| 'sizer'
+	| 'item'
+	| 'apply'
+	| 'refreshLayout'
+	| 'scrollToIndex'
+	| 'scrollToStart'
+	| 'scrollBy'
+	| 'cancelOwnedScroll'
+	| 'destroy'
+>;
 
 export function resetVirtualDiffControllerFake(): void {
 	instances.clear();
@@ -60,7 +78,7 @@ class PositionView {
 	}
 }
 
-export class FakeVirtualListController {
+export class FakeVirtualListController implements VirtualDiffControllerPort {
 	readonly viewport: Attachment<HTMLElement>;
 	readonly sizer: Attachment<HTMLElement> = () => undefined;
 
