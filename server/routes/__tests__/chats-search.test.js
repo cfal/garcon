@@ -117,7 +117,7 @@ function createRoutesFixture({
     status: mock(() => ({
       version: 1,
       phase: 'rebuilding',
-      chats: { indexed: 1, pending: 1, failed: 0 },
+      chats: { total: 3, indexed: 1, pending: 1, failed: 0, unindexed: 1 },
       queuedJobs: 1,
       resync: { completedChats: 1, totalChats: 2 },
       backlogRows: 5,
@@ -143,7 +143,14 @@ function createRoutesFixture({
           snippets: [],
         },
       ] : [],
-      index: { indexedChatCount: request.allowedChatIds.length, pendingChatCount: 0 },
+      index: {
+        indexedChatCount: request.allowedChatIds.length,
+        pendingChatCount: 0,
+        failedChatCount: 0,
+        unindexedChatCount: 0,
+        unsupportedChatCount: 0,
+        resultsTruncated: false,
+      },
     })),
   };
   const chatListProjector = {
@@ -186,11 +193,12 @@ function createRoutesFixture({
   return { routes, searchIndex, registry, agents };
 }
 
-async function postSearch(routes, body) {
+async function postSearch(routes, body, signal) {
   const request = new Request('http://localhost/api/v1/chats/search', {
     method: 'POST',
     body: JSON.stringify(body),
     headers: { 'content-type': 'application/json' },
+    signal,
   });
   const url = new URL(request.url);
   return routes['/api/v1/chats/search'].POST(request, url);
@@ -203,6 +211,19 @@ async function getStatus(routes) {
 }
 
 describe('POST /api/v1/chats/search', () => {
+  it('[TLV5-SEARCH.11-ROUTE-01] forwards request cancellation to transcript search', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const abort = new AbortController();
+
+    await postSearch(routes, { query: 'needle' }, abort.signal);
+    const forwarded = searchIndex.search.mock.calls[0][0].signal;
+    expect(forwarded).toBeInstanceOf(AbortSignal);
+    expect(forwarded.aborted).toBe(false);
+
+    abort.abort();
+    expect(forwarded.aborted).toBe(true);
+  });
+
   it('searches only requested chats that still exist in the registry', async () => {
     const { routes, searchIndex } = createRoutesFixture();
 
@@ -224,6 +245,7 @@ describe('POST /api/v1/chats/search', () => {
       textTokens: ['needle'],
       allowedChatIds: ['c2'],
       limit: 5,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -347,7 +369,9 @@ describe('POST /api/v1/chats/search', () => {
         indexedChatCount: 1,
         pendingChatCount: 1,
         failedChatCount: 0,
+        unindexedChatCount: 0,
         unsupportedChatCount: 0,
+        resultsTruncated: false,
       },
     };
     searchIndex.search.mockResolvedValueOnce(result);
@@ -384,7 +408,7 @@ describe('GET /api/v1/chats/search/status', () => {
     await expect(response.json()).resolves.toMatchObject({
       version: 1,
       phase: 'disabled',
-      chats: { indexed: 0, pending: 0, failed: 0 },
+      chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
       queryStats: { served: 0, timedOut: 0, rejectedBusy: 0 },
     });
   });

@@ -17,7 +17,7 @@ vi.mock('$lib/ws/drain', () => ({ createDrainCursor }));
 const status = {
 	version: 1,
 	phase: 'rebuilding',
-	chats: { indexed: 3, pending: 1, failed: 0 },
+	chats: { total: 5, indexed: 3, pending: 1, failed: 0, unindexed: 1 },
 	queuedJobs: 1,
 	resync: { completedChats: 3, totalChats: 4 },
 	backlogRows: 12,

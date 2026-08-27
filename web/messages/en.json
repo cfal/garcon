@@ -1640,6 +1640,7 @@
 	"sidebar_search_transcript_searching": "Searching transcripts...",
 	"sidebar_search_transcript_indexing": "Indexing transcripts...",
 	"sidebar_search_transcript_indexing_progress": "Indexing transcripts: {indexed} indexed, {pending} remaining.",
+	"sidebar_search_results_truncated": "Broad search; showing recent matches.",
 	"sidebar_search_indexing_progress": "Indexing {done} of {total} chats…",
 	"sidebar_search_finalizing": "Finishing transcript search…",
 	"sidebar_search_updating": "Updating transcript search…",

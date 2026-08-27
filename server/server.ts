@@ -441,6 +441,7 @@ export async function startServer(): Promise<void> {
     chatSearch = new TranscriptSearchController({
       service: transcriptSearchService,
       ledger: transcriptLedger,
+      adoption: transcriptAdoption,
       listChatIds: () => Object.keys(chatRegistry.listAllChats()),
       logger,
     });

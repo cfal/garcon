@@ -1,10 +1,9 @@
 <script lang="ts">
-	import type { CliBodyDisclosure } from '$shared/cli-presentation';
 	import type { Snippet } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
-		disclosure?: CliBodyDisclosure;
+		disclosure?: 'expanded' | 'collapsed';
 		alwaysExpanded?: boolean;
 		expanded?: boolean;
 		onExpandedChange?: (expanded: boolean) => void;
@@ -44,7 +43,7 @@
 {#if collapsible}
 	<div
 		id={bodyId}
-		class:cli-collapsible-body-collapsed={!bodyExpanded}
+		class:collapsible-body-collapsed={!bodyExpanded}
 		onfocusin={expandOnFocus}
 	>
 		{@render children()}

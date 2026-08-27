@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '../../../common/chat-types.ts';
 import { randomUUID } from 'node:crypto';
+import * as nodeFs from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +36,38 @@ afterEach(async () => {
 });
 
 describe('TranscriptLedgerStore', () => {
+  it('[TLV5-SEARCH.11-STORE-01] probes existing views without materializing a missing ledger', async () => {
+    const missingPath = path.join(root, 'never-opened', 'ledger.sqlite');
+    expect(store.existingCurrentView('never-opened')).toBeNull();
+    await expect(fs.stat(missingPath)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    expect(store.currentView('schema-only')).toBeNull();
+    const current = store.initializeCurrentView('adopted', {
+      viewId: transcriptViewId('adopted-view'),
+      contentStartOrdinal: 1,
+    });
+    store.close();
+    store = new TranscriptLedgerStore(root);
+
+    expect(store.existingCurrentView('schema-only')).toBeNull();
+    expect(store.existingCurrentView('adopted')).toEqual(current);
+  });
+
+  it('treats a ledger removed during its existence probe as absent', async () => {
+    const chatDirectory = path.join(root, 'disappearing');
+    await fs.mkdir(chatDirectory, { recursive: true });
+    await fs.writeFile(path.join(chatDirectory, 'ledger.sqlite'), 'present');
+    const stat = spyOn(nodeFs, 'statSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('ledger disappeared'), { code: 'ENOENT' });
+    });
+
+    try {
+      expect(store.existingCurrentView('disappearing')).toBeNull();
+    } finally {
+      stat.mockRestore();
+    }
+  });
+
   it('[TLV5-L02.01-STORE-UNIT-01] commits atomic batches with dense view-local ordinals', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

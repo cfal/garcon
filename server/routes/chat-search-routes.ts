@@ -30,6 +30,7 @@ export interface ChatSearchDep {
     textTokens?: string[];
     allowedChatIds: string[];
     limit?: number;
+    signal?: AbortSignal;
   }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
@@ -48,13 +49,13 @@ interface ChatSearchRouteDeps {
 }
 
 export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
-  postSearchChats(body: unknown): Promise<Response>;
+  postSearchChats(body: unknown, request?: Request): Promise<Response>;
   postSearchNavigate(body: unknown): Promise<Response>;
   getSearchStatus(): Response;
 } {
   const { registry, pathCache, chatListProjector, searchIndex } = deps;
 
-  async function postSearchChats(body: unknown): Promise<Response> {
+  async function postSearchChats(body: unknown, request?: Request): Promise<Response> {
     try {
       if (!searchIndex) {
         throw new TranscriptSearchUnavailableError(
@@ -74,6 +75,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
           search.chatIds,
         ),
         limit: search.limit,
+        signal: request?.signal,
       });
       return Response.json({
         query: search.query,
@@ -108,7 +110,7 @@ export function createChatSearchRoutes(deps: ChatSearchRouteDeps): {
       return Response.json({
         version: 1,
         phase: 'disabled',
-        chats: { indexed: 0, pending: 0, failed: 0 },
+        chats: { total: 0, indexed: 0, pending: 0, failed: 0, unindexed: 0 },
         queuedJobs: 0,
         resync: null,
         backlogRows: 0,

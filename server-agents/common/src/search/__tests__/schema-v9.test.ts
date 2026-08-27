@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { searchTranscriptIndexV1 } from '../query.js';
+import { SEARCH_QUERY_MATCH_ROW_LIMIT, searchTranscriptIndexV1 } from '../query.js';
 import {
   SEARCH_INGEST_ROW_MAX_BYTES,
   SEARCH_INGEST_TXN_MAX_ROWS,
@@ -414,8 +414,85 @@ describe('schema v9', () => {
       indexedChatCount: 1,
       pendingChatCount: 0,
       failedChatCount: 0,
+      unindexedChatCount: 0,
       unsupportedChatCount: 0,
+      resultsTruncated: false,
     });
+    db.close();
+  });
+
+  test('[TLV5-SEARCH.11-SCHEMA-01] bounds broad match materialization and preserves later exact queries', async () => {
+    const db = await openFresh();
+    const rowCount = SEARCH_QUERY_MATCH_ROW_LIMIT + 5;
+    planChatSync(db, {
+      mode: 'replace',
+      chatId: 'chat-broad',
+      transcriptViewId: 'view-broad',
+      targetThrough: rowCount,
+      expectedAfterOrdinal: 0,
+    });
+    for (let offset = 0; offset < rowCount; offset += SEARCH_INGEST_TXN_MAX_ROWS) {
+      const count = Math.min(SEARCH_INGEST_TXN_MAX_ROWS, rowCount - offset);
+      insertRowsBatch(db, {
+        chatId: 'chat-broad',
+        transcriptViewId: 'view-broad',
+        rows: Array.from({ length: count }, (_, index) => {
+          const ordinal = offset + index + 1;
+          return {
+            ordinal,
+            role: ordinal % 2 === 0 ? 'assistant' as const : 'user' as const,
+            timestamp: '2026-01-01T00:00:00.000Z',
+            body: [
+              'broadmarker',
+              ordinal % 2 === 0 ? 'intersectionmarker' : '',
+              ordinal === 1 ? 'oldestexactmarker' : '',
+            ].filter(Boolean).join(' '),
+          };
+        }),
+        advanceTo: offset + count,
+      });
+    }
+    finishChatSync(db, { chatId: 'chat-broad', transcriptViewId: 'view-broad' });
+    const search = (...markers: string[]) => searchTranscriptIndexV1(db, {
+      query: {
+        version: 1,
+        clauses: markers.map((marker) => ({
+          kind: 'all-words' as const,
+          tokens: [{ text: marker, normalized: marker, match: 'exact' as const }],
+        })),
+      },
+      allowedChats: [{
+        chatId: 'chat-broad',
+        transcriptViewId: 'view-broad',
+        throughOrdinal: rowCount,
+      }],
+    });
+
+    const broad = search('broadmarker');
+    expect(broad.index.resultsTruncated).toBe(true);
+    expect(broad.results).toEqual([
+      expect.objectContaining({
+        chatId: 'chat-broad',
+        matchedMessageCount: SEARCH_QUERY_MATCH_ROW_LIMIT,
+      }),
+    ]);
+    expect(broad.results[0]!.snippets.every((snippet) => snippet.ordinal > 1)).toBe(true);
+
+    const intersection = search('broadmarker', 'intersectionmarker');
+    expect(intersection.index.resultsTruncated).toBe(true);
+    expect(intersection.results).toEqual([
+      expect.objectContaining({ chatId: 'chat-broad' }),
+    ]);
+
+    const exact = search('oldestexactmarker');
+    expect(exact.index.resultsTruncated).toBe(false);
+    expect(exact.results).toEqual([
+      expect.objectContaining({
+        chatId: 'chat-broad',
+        matchedMessageCount: 1,
+        snippets: [expect.objectContaining({ ordinal: 1 })],
+      }),
+    ]);
     db.close();
   });
 

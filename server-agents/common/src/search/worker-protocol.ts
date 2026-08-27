@@ -272,9 +272,15 @@ function searchQuery(value: unknown): boolean {
 function indexStatus(value: unknown): value is ChatSearchIndexStatus {
   const candidate = record(value);
   return Boolean(candidate)
-    && Object.keys(candidate!).length === 4
-    && ['indexedChatCount', 'pendingChatCount', 'failedChatCount', 'unsupportedChatCount']
-      .every((key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]));
+    && Object.keys(candidate!).length === 6
+    && [
+      'indexedChatCount',
+      'pendingChatCount',
+      'failedChatCount',
+      'unindexedChatCount',
+      'unsupportedChatCount',
+    ].every((key) => Object.hasOwn(candidate!, key) && nonNegativeInteger(candidate![key]))
+    && typeof candidate!.resultsTruncated === 'boolean';
 }
 
 function searchResult(value: unknown): value is ChatSearchResult {

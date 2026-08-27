@@ -5,7 +5,6 @@
 		AssistantMessage,
 		ThinkingMessage,
 		isToolUseMessage,
-		isHandoffSummaryNoticeDetail,
 		ErrorMessage,
 		TranscriptNoticeMessage,
 		CliRowMessage,
@@ -38,7 +37,8 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import CliRow from './rows/CliRow.svelte';
 	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
-	import CliCollapsibleBody from './rows/CliCollapsibleBody.svelte';
+	import CollapsibleBody from './rows/CollapsibleBody.svelte';
+	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
@@ -513,7 +513,7 @@
 									title={userMessagePresentation.title}
 								/>
 							{/if}
-							<CliCollapsibleBody
+							<CollapsibleBody
 								disclosure={userMessagePresentation?.disclosure}
 								alwaysExpanded={localSettings.alwaysExpandCliMessages}
 								expanded={disclosureState?.open('cli-body', 'body', false)}
@@ -532,7 +532,7 @@
 										/>
 									</div>
 								{/snippet}
-							</CliCollapsibleBody>
+							</CollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
 									{#each asUser.images as img, idx (idx)}
@@ -743,33 +743,13 @@
 							{disclosureState}
 						/>
 					{:else if asNotice}
-						<ChatEventCard variant="info">
-							{#snippet body()}
-								{#if asNotice.title}
-									<div class="min-w-0 truncate text-xs font-medium">{asNotice.title}</div>
-								{/if}
-								{#if isHandoffSummaryNoticeDetail(asNotice.detail)}
-									<div class={['text-sm', asNotice.title && 'mt-1']}>
-										<Markdown
-											source={asNotice.content}
-											variant="presented"
-											fileLinkBasePath={projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-											{acquireTransientActivity}
-										/>
-									</div>
-								{:else}
-									<div
-										class={[
-											'text-sm whitespace-pre-wrap break-words',
-											asNotice.title && 'mt-1',
-										]}
-									>
-										{asNotice.content}
-									</div>
-								{/if}
-							{/snippet}
-						</ChatEventCard>
+						<TranscriptNoticeRow
+							message={asNotice}
+							fileLinkBasePath={projectBasePath}
+							onLinkNavigate={handleLinkNavigate}
+							{acquireTransientActivity}
+							{disclosureState}
+						/>
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}

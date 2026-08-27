@@ -73,7 +73,9 @@ describe('transcript corruption isolation', () => {
         indexedChatCount: 1,
         pendingChatCount: 0,
         failedChatCount: 1,
+        unindexedChatCount: 0,
         unsupportedChatCount: 0,
+        resultsTruncated: false,
       });
       const healthyTurn = await fixture.client.runDirectChat({
         chatId: healthyChatId,

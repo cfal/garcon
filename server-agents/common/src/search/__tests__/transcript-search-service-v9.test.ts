@@ -498,18 +498,28 @@ describe('transcript search service v9', () => {
     await service.close();
   });
 
-  test('[TLV5-SEARCH.08-SVC-01] caller abandonment keeps the reader alive until settlement', async () => {
+  test('[TLV5-SEARCH.08-SVC-01] caller abandonment retires only its reader', async () => {
     const records: Array<{ message: string; fields: unknown }> = [];
+    const searchReaders: number[] = [];
+    let suppressFirstResult = true;
     const service = new TranscriptSearchService({
       workspaceDirectory: workspace(),
       logger: logger(records),
-      workerFactory: interceptingWorkerFactory((reader, event, deliver) => {
-        const type = (event.data as { type?: unknown }).type;
-        if (reader === 0 && type === 'search-result') {
-          setTimeout(() => deliver(event), 50);
-          return;
-        }
-        deliver(event);
+      workerFactory: instrumentingWorkerFactory({
+        onEvent: (role, reader, event, deliver) => {
+          const type = (event.data as { type?: unknown }).type;
+          if (role === 'reader' && reader === 0 && type === 'search-result'
+              && suppressFirstResult) {
+            suppressFirstResult = false;
+            return;
+          }
+          deliver(event);
+        },
+        onPost: (role, reader, message) => {
+          if (role === 'reader' && (message as { type?: unknown }).type === 'search-start') {
+            searchReaders.push(reader);
+          }
+        },
       }),
     });
     await service.enable(new AbortController().signal);
@@ -521,13 +531,13 @@ describe('transcript search service v9', () => {
     });
     setTimeout(() => abort.abort(), 5);
     await expect(abandoned).rejects.toThrow('SEARCH_TIMEOUT');
-    await Bun.sleep(75);
     await expect(service.search(searchRequest(
       'chat-abandon', 'view-abandon', 100, 'abandonmarker',
     ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-abandon' })] });
-    expect(records.some((record) => (
+    expect(searchReaders.slice(0, 2)).toEqual([0, 1]);
+    await waitFor(() => records.some((record) => (
       (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
-    ))).toBe(false);
+    )), 5_000);
     await service.close();
   });
 

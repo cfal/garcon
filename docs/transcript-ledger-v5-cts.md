@@ -421,6 +421,12 @@ routine local testing.
 | TLV5-SEARCH.03 | View replacement deletes old entries before admitting results for the new current view. | Unit, server black-box         |
 | TLV5-SEARCH.04 | Long append series performs work linear in appended rows.                               | Deterministic performance gate |
 | TLV5-SEARCH.05 | Index health is current-view/frontier-qualified: pending until acknowledgement, failed after terminal rejection, and indexed after acknowledged repair, including valid views with no searchable rows. | Core unit, service unit |
+| TLV5-SEARCH.06 | Startup resynchronization reuses current durable frontiers, prunes only absent registry chats, and recreates stale readers with the derived index. | Core unit, service unit |
+| TLV5-SEARCH.07 | Ingest, cleanup, maintenance, and status work remain bounded and resumable at durable frontiers. | Schema, service, supervisor unit |
+| TLV5-SEARCH.08 | Reader/indexer failures, timeouts, cancellation, queue limits, and restarts isolate one worker or chat while later work remains available. | Protocol, service, supervisor unit |
+| TLV5-SEARCH.09 | Search serves committed prefixes with exact status, allowlist, frontier, HTTP, WebSocket, and browser contracts while rebuilds continue. | Contract, core, service, route, UI, server black-box |
+| TLV5-SEARCH.10 | Schema identity, stale-version recreation, readonly-reader isolation, scale, endurance, and bounded-resource gates hold for v9. | Schema, server black-box, scale and endurance gates |
+| TLV5-SEARCH.11 | Enabling search non-materializingly discovers and sequentially adopts every registered legacy chat, reports incomplete or failed coverage, propagates caller cancellation, retires abandoned synchronous readers, and bounds broad-match materialization with explicit truncation. | Store, core, protocol, schema, service, route, UI, server black-box |
 
 ### Handoff
 

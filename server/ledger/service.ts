@@ -153,6 +153,10 @@ export class TranscriptLedgerService {
     return this.#store.currentView(chatId);
   }
 
+  existingCurrentView(chatId: string): TranscriptView | null {
+    return this.#store.existingCurrentView(chatId);
+  }
+
   openProducer(chatId: string, ownerAgentId: string): TranscriptProducerLease {
     if (!ownerAgentId) throw new TypeError('Producer owner agent ID is required');
     const view = this.#store.currentView(chatId);

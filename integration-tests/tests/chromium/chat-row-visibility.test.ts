@@ -583,7 +583,7 @@ describe('Chromium transcript chat rows', () => {
           collapsed: true,
         });
         const collapsedBodyBox = await rowLocator(fixture.page, custom)
-          .locator('.cli-collapsible-body-collapsed')
+          .locator('.collapsible-body-collapsed')
           .boundingBox();
         expect(collapsedBodyBox).not.toBeNull();
         expect(collapsedBodyBox!.height).toBeLessThanOrEqual(160);

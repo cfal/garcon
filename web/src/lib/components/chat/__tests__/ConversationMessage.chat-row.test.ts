@@ -11,6 +11,15 @@ import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
 
+function handoffNotice(): TranscriptNoticeMessage {
+	return new TranscriptNoticeMessage(
+		AT,
+		'## Current objective\n\nPreserve **typed provenance**.',
+		{ type: 'handoff-summary' },
+		'Handoff summary',
+	);
+}
+
 describe('ConversationMessage chat rows', () => {
 	afterEach(() => cleanup());
 
@@ -27,20 +36,72 @@ describe('ConversationMessage chat rows', () => {
 		expect(card?.querySelector('button')).toBeNull();
 	});
 
-	it('renders handoff summaries as Markdown', () => {
-		const { container } = render(ConversationMessageHost, {
+	it('renders handoff summaries as Markdown behind a body collapsed by default', () => {
+		const { container } = render(ConversationMessageHost, { message: handoffNotice() });
+
+		const button = screen.getByRole('button', { name: 'Show more' });
+		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
+			'collapsible-body-collapsed',
+		);
+		const card = screen.getByText('Handoff summary').closest('article');
+		expect(card?.querySelector('h2')?.textContent).toBe('Current objective');
+		expect(card?.querySelector('strong')?.textContent).toBe('typed provenance');
+		expect(container.querySelector('.markdown-body')).toBeTruthy();
+	});
+
+	it('keeps handoff summaries collapsed when CLI messages are always expanded', () => {
+		render(ConversationMessageHost, {
+			message: handoffNotice(),
+			alwaysExpandCliMessages: true,
+		});
+
+		expect(screen.getByRole('button', { name: 'Show more' }).getAttribute('aria-expanded')).toBe(
+			'false',
+		);
+	});
+
+	it('expands a collapsed handoff summary through Show more', async () => {
+		render(ConversationMessageHost, { message: handoffNotice() });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('preserves handoff summary expansion across remounts through the feed disclosure state', async () => {
+		const itemState = new ConversationFeedItemState();
+		const disclosureState = itemState.disclosurePort('notice-row-1');
+		const message = handoffNotice();
+		const first = render(ConversationMessageHost, { message, disclosureState });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+		first.unmount();
+
+		render(ConversationMessageHost, { message, disclosureState });
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('expands a collapsed handoff summary before focus can remain clipped', async () => {
+		render(ConversationMessageHost, {
 			message: new TranscriptNoticeMessage(
 				AT,
-				'## Current objective\n\nPreserve **typed provenance**.',
+				'[Focused link](https://example.com)',
 				{ type: 'handoff-summary' },
 				'Handoff summary',
 			),
 		});
 
-		const card = screen.getByText('Handoff summary').closest('article');
-		expect(card?.querySelector('h2')?.textContent).toBe('Current objective');
-		expect(card?.querySelector('strong')?.textContent).toBe('typed provenance');
-		expect(container.querySelector('.markdown-body')).toBeTruthy();
+		await fireEvent.focusIn(screen.getByRole('link', { name: 'Focused link' }));
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
 	});
 
 	it('keeps provider errors on the generic error path', () => {
@@ -206,7 +267,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(button.getAttribute('aria-expanded')).toBe('false');
 		expect(button.classList).toContain('min-h-6');
 		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
-			'cli-collapsible-body-collapsed',
+			'collapsible-body-collapsed',
 		);
 		await fireEvent.click(button);
 		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
@@ -272,7 +333,7 @@ describe('ConversationMessage chat rows', () => {
 
 		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
 		expect(
-			screen.getByText('Long CLI content').closest('.cli-collapsible-body-collapsed'),
+			screen.getByText('Long CLI content').closest('.collapsible-body-collapsed'),
 		).toBeNull();
 	});
 

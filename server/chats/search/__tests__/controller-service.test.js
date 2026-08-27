@@ -43,7 +43,7 @@ function fakeLedger(count = 50) {
       steer: false,
     },
   }));
-  return {
+  const ledger = {
     currentView: () => ({
       viewId,
       status: 'current',
@@ -58,10 +58,12 @@ function fakeLedger(count = 50) {
     ),
     subscribe: () => () => {},
   };
+  ledger.existingCurrentView = ledger.currentView;
+  return ledger;
 }
 
 function multiChatLedger(chats) {
-  return {
+  const ledger = {
     currentView: (chatId) => {
       const chat = chats.get(chatId);
       return chat ? {
@@ -83,6 +85,57 @@ function multiChatLedger(chats) {
         : [];
     },
     subscribe: () => () => {},
+  };
+  ledger.existingCurrentView = ledger.currentView;
+  return ledger;
+}
+
+function adoptionFor(ledger) {
+  return { ensure: async (chatId) => ledger.currentView(chatId) };
+}
+
+function unadoptedCorpus(count) {
+  const marker = 'searchbackfillcorpusmarker';
+  const chats = new Map(Array.from({ length: count }, (_, index) => {
+    const chatId = `legacy-chat-${index}`;
+    const viewId = transcriptViewId(`legacy-view-${index}`);
+    return [chatId, {
+      viewId,
+      rows: chatRows(viewId, 1, `${marker} synthetic chat ${index}`),
+    }];
+  }));
+  const adopted = new Set();
+  const view = (chatId) => {
+    if (!adopted.has(chatId)) return null;
+    const chat = chats.get(chatId);
+    return chat ? {
+      viewId: chat.viewId,
+      status: 'current',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      contentStartOrdinal: 1,
+    } : null;
+  };
+  return {
+    marker,
+    chats,
+    adopted,
+    ledger: {
+      currentView: view,
+      existingCurrentView: view,
+      highWatermark(chatId) {
+        const chat = chats.get(chatId);
+        if (!chat || !adopted.has(chatId)) throw new Error('missing adopted chat');
+        return { viewId: chat.viewId, ordinal: chat.rows.at(-1)?.ordinal ?? 0 };
+      },
+      replayRows(chatId, requestedView, after, through, limit) {
+        const chat = chats.get(chatId);
+        return chat && adopted.has(chatId) && requestedView === chat.viewId
+          ? chat.rows.filter((entry) => entry.ordinal > after && entry.ordinal <= through)
+            .slice(0, limit)
+          : [];
+      },
+      subscribe: () => () => {},
+    },
   };
 }
 
@@ -114,13 +167,91 @@ async function waitFor(predicate, timeoutMs = 5_000) {
 }
 
 describe('TranscriptSearchController with v9 Workers', () => {
+  test('[TLV5-SEARCH.11-SVC-01] backfills a synthetic legacy corpus and makes every chat searchable', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
+    workspaces.push(workspace);
+    const corpus = unadoptedCorpus(32);
+    const firstAdoption = deferred();
+    let activeAdoptions = 0;
+    let maximumActiveAdoptions = 0;
+    let adoptionCalls = 0;
+    const adoption = {
+      ensure: async (chatId, signal) => {
+        adoptionCalls += 1;
+        activeAdoptions += 1;
+        maximumActiveAdoptions = Math.max(maximumActiveAdoptions, activeAdoptions);
+        try {
+          if (adoptionCalls === 1) await firstAdoption.promise;
+          signal.throwIfAborted();
+          corpus.adopted.add(chatId);
+          return corpus.ledger.currentView(chatId);
+        } finally {
+          activeAdoptions -= 1;
+        }
+      },
+    };
+    const service = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
+    const controller = new TranscriptSearchController({
+      listChatIds: () => [...corpus.chats.keys()],
+      ledger: corpus.ledger,
+      adoption,
+      service,
+      logger: logger(),
+    });
+    await controller.start();
+    try {
+      await waitFor(() => adoptionCalls === 1);
+      await waitFor(() => controller.status().chats.unindexed === corpus.chats.size);
+      const during = await controller.search({
+        query: corpus.marker,
+        allowedChatIds: [...corpus.chats.keys()],
+        limit: 100,
+      });
+      expect(during.results).toEqual([]);
+      expect(during.index).toMatchObject({
+        indexedChatCount: 0,
+        failedChatCount: 0,
+        unindexedChatCount: corpus.chats.size,
+      });
+
+      firstAdoption.resolve();
+      await waitFor(() => controller.status().phase === 'ready', 15_000);
+      expect(adoptionCalls).toBe(corpus.chats.size);
+      expect(maximumActiveAdoptions).toBe(1);
+      expect(controller.status().chats).toEqual({
+        total: corpus.chats.size,
+        indexed: corpus.chats.size,
+        pending: 0,
+        failed: 0,
+        unindexed: 0,
+      });
+      const result = await controller.search({
+        query: corpus.marker,
+        allowedChatIds: [...corpus.chats.keys()],
+        limit: 100,
+      });
+      expect(result.index).toMatchObject({
+        indexedChatCount: corpus.chats.size,
+        pendingChatCount: 0,
+        failedChatCount: 0,
+        unindexedChatCount: 0,
+      });
+      expect(result.results.map((entry) => entry.chatId).sort())
+        .toEqual([...corpus.chats.keys()].sort());
+    } finally {
+      firstAdoption.resolve();
+      await controller.close();
+    }
+  }, 30_000);
+
   test('[TLV5-SEARCH.06-SVC-02] builds, searches, and restarts as a durable no-op', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
     workspaces.push(workspace);
     const ledger = fakeLedger();
     const firstService = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
     const first = new TranscriptSearchController({
-      listChatIds: () => ['chat-e2e'], ledger, service: firstService, logger: logger(),
+      listChatIds: () => ['chat-e2e'], ledger, adoption: adoptionFor(ledger),
+      service: firstService, logger: logger(),
     });
     await first.start();
     await waitFor(() => first.status().phase === 'ready');
@@ -131,7 +262,8 @@ describe('TranscriptSearchController with v9 Workers', () => {
 
     const secondService = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
     const second = new TranscriptSearchController({
-      listChatIds: () => ['chat-e2e'], ledger, service: secondService, logger: logger(),
+      listChatIds: () => ['chat-e2e'], ledger, adoption: adoptionFor(ledger),
+      service: secondService, logger: logger(),
     });
     await second.start();
     await waitFor(() => second.status().phase === 'ready');
@@ -180,6 +312,7 @@ describe('TranscriptSearchController with v9 Workers', () => {
     const controller = new TranscriptSearchController({
       listChatIds: () => [...chats.keys()],
       ledger,
+      adoption: adoptionFor(ledger),
       service,
       logger: logger(),
     });
@@ -233,6 +366,7 @@ describe('TranscriptSearchController with v9 Workers', () => {
     const controller = new TranscriptSearchController({
       listChatIds: () => [...chats.keys()],
       ledger,
+      adoption: adoptionFor(ledger),
       service,
       logger: logger(),
     });

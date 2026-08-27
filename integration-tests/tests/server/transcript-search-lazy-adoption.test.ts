@@ -5,8 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
-describe('lazy transcript adoption search indexing', () => {
-  test('[TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01] indexes a lazy adoption without a later commit', async () => {
+describe('transcript search maintenance adoption', () => {
+  test('[TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01][TLV5-SEARCH.11-SERVER-01] adopts and indexes without opening the chat', async () => {
     const environment: Record<string, string> = {};
     await withIntegrationFixture('transcript-search-lazy-adoption', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -48,13 +48,14 @@ describe('lazy transcript adoption search indexing', () => {
         },
       });
 
-      const adopted = await fixture.client.getMessages(chatId);
       const result = await fixture.client.waitForChatSearch(
         { query: marker, chatIds: [chatId] },
         (response) => response.index.pendingChatCount === 0
+          && response.index.unindexedChatCount === 0
           && response.index.indexedChatCount === 1
           && response.results.some((entry) => entry.chatId === chatId),
       );
+      const adopted = await fixture.client.getMessages(chatId);
 
       const adoptedRows = adopted.messages.filter((entry) => (
         entry.message.type === 'user-message' && entry.message.content === marker

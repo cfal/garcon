@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   readdirSync,
   rmSync,
@@ -52,6 +51,7 @@ import {
   SubmissionConflictError,
   TranscriptViewNotInitializedError,
 } from './errors.js';
+import { statSizeIfExists } from './file-stat.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -126,6 +126,15 @@ export class TranscriptLedgerStore {
   }
 
   currentView(chatId: string): TranscriptView | null {
+    return this.#read(chatId, (entry) => entry.current);
+  }
+  existingCurrentView(chatId: string): TranscriptView | null {
+    validateChatDirectoryName(chatId);
+    if (this.#connections.has(chatId) || this.#openFailures.has(chatId)) {
+      return this.#read(chatId, (entry) => entry.current);
+    }
+    const databasePath = path.join(this.#rootDirectory, chatId, 'ledger.sqlite');
+    if ((statSizeIfExists(databasePath) ?? 0) === 0) return null;
     return this.#read(chatId, (entry) => entry.current);
   }
 
@@ -574,7 +583,7 @@ export class TranscriptLedgerStore {
 
   removeUnregisteredChatDirectories(registeredChatIds: ReadonlySet<string>): readonly string[] {
     const removed: string[] = [];
-    if (!existsSync(this.#rootDirectory)) return removed;
+    if (statSizeIfExists(this.#rootDirectory) === null) return removed;
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
@@ -809,7 +818,7 @@ function openConnection(
   const directory = path.join(rootDirectory, chatId);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const databasePath = path.join(directory, 'ledger.sqlite');
-  const existed = existsSync(databasePath) && statSync(databasePath).size > 0;
+  const existed = (statSizeIfExists(databasePath) ?? 0) > 0;
   const db = new Database(databasePath);
   try {
     configureConnection(db, synchronous);

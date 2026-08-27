@@ -31,6 +31,7 @@ import type {
   TranscriptCommitEvent,
   TranscriptLedgerService,
 } from '../../ledger/service.js';
+import type { TranscriptAdoptionService } from '../../ledger/adoption.js';
 import { TranscriptSearchUnavailableError } from './errors.js';
 
 const DEFAULT_LIMIT = 20;
@@ -38,13 +39,15 @@ const MAX_LIMIT = 100;
 const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
 const LEDGER_PAGE_ROWS = 512;
 const LEDGER_FENCED_VIEW_SENTINEL: TranscriptViewId = transcriptViewId('ledger-fenced');
+const LEDGER_UNADOPTED_VIEW_SENTINEL: TranscriptViewId = transcriptViewId('ledger-unadopted');
 
 export interface TranscriptSearchControllerDeps {
   readonly listChatIds: () => readonly string[];
   readonly ledger: Pick<
     TranscriptLedgerService,
-    'currentView' | 'highWatermark' | 'replayRows' | 'subscribe'
+    'currentView' | 'existingCurrentView' | 'highWatermark' | 'replayRows' | 'subscribe'
   >;
+  readonly adoption: Pick<TranscriptAdoptionService, 'ensure'>;
   readonly service: TranscriptSearchService;
   readonly logger: Pick<AgentLogger, 'warn' | 'info'>;
   readonly searchTimeoutMs?: number;
@@ -63,12 +66,15 @@ export class TranscriptSearchController {
     string,
     { viewId: TranscriptViewId; through: number }
   >();
+  readonly #adoptionFailedChatIds = new Set<string>();
+  readonly #adoptingChatIds = new Set<string>();
   readonly #fencedChatIds = new Set<string>();
   readonly #unsubscribe: () => void;
   #resyncTail: Promise<void> = Promise.resolve();
   #enabled = false;
   #admissionFailed = false;
   #closed = false;
+  #enableAbort: AbortController | null = null;
 
   constructor(deps: TranscriptSearchControllerDeps) {
     this.#deps = deps;
@@ -93,9 +99,13 @@ export class TranscriptSearchController {
   async start(): Promise<void> {
     if (this.#closed) throw new Error('Transcript search controller is closed');
     if (this.#enabled) return;
+    const enableAbort = new AbortController();
+    this.#enableAbort = enableAbort;
     try {
       await this.#deps.service.enable(this.#lifecycleAbort.signal);
     } catch (error) {
+      enableAbort.abort();
+      if (this.#enableAbort === enableAbort) this.#enableAbort = null;
       this.#enabled = false;
       this.#admissionFailed = true;
       throw error;
@@ -118,15 +128,17 @@ export class TranscriptSearchController {
   }
 
   catalogMayHaveChanged(chatId: string): void {
+    this.#adoptionFailedChatIds.delete(chatId);
     if (!this.#enabled || this.#closed) return;
+    this.#deps.service.setCatalogChatTotal(new Set(this.#deps.listChatIds()).size);
+    if (this.#adoptingChatIds.has(chatId)) return;
     this.#schedule(chatId, 'catalog-refresh', () => this.#syncCatalogChat(chatId));
   }
 
   deleteChat(chatId: string): void {
-    this.#indexedViews.delete(chatId);
-    this.#ledgerSnapshots.delete(chatId);
-    this.#fencedChatIds.delete(chatId);
+    this.#forgetChat(chatId);
     if (!this.#enabled || this.#closed) return;
+    this.#deps.service.setCatalogChatTotal(new Set(this.#deps.listChatIds()).size);
     this.#schedule(chatId, 'delete', () => this.#deps.service.deleteChat(chatId));
   }
 
@@ -135,6 +147,7 @@ export class TranscriptSearchController {
     readonly textTokens?: string[];
     readonly allowedChatIds: string[];
     readonly limit?: number;
+    readonly signal?: AbortSignal;
   }): Promise<{ results: ChatSearchResult[]; index: ChatSearchIndexStatus }> {
     if (!this.#enabled || this.#closed) {
       const unavailable = this.#admissionFailed || this.#closed;
@@ -145,19 +158,29 @@ export class TranscriptSearchController {
       );
     }
     const abort = new AbortController();
+    const enableSignal = this.#enableAbort?.signal;
+    const forwardAbort = () => abort.abort();
+    options.signal?.addEventListener('abort', forwardAbort, { once: true });
+    enableSignal?.addEventListener('abort', forwardAbort, { once: true });
+    if (options.signal?.aborted || enableSignal?.aborted) forwardAbort();
     const timeout = setTimeout(
       () => abort.abort(),
       this.#deps.searchTimeoutMs ?? DEFAULT_SEARCH_TIMEOUT_MS,
     );
     timeout.unref?.();
     try {
+      abort.signal.throwIfAborted();
       const allowedViews = new Map<string, TranscriptViewId>();
       const allowedChats: TranscriptSearchAllowedChat[] = [];
       const fencedChatIds = new Set<string>();
-      for (const chatId of options.allowedChatIds) {
-        const snapshot = this.#ledgerSnapshot(chatId);
+      const adoptionFailedChatIds = new Set<string>();
+      let unindexedChatCount = 0;
+      for (const chatId of new Set(options.allowedChatIds)) {
+        const snapshot = this.#ledgerSnapshots.get(chatId) ?? null;
         if (!snapshot) {
           if (this.#fencedChatIds.has(chatId)) fencedChatIds.add(chatId);
+          else if (this.#adoptionFailedChatIds.has(chatId)) adoptionFailedChatIds.add(chatId);
+          else unindexedChatCount += 1;
           continue;
         }
         allowedViews.set(chatId, snapshot.viewId);
@@ -180,32 +203,18 @@ export class TranscriptSearchController {
         )),
         index: {
           ...response.index,
-          failedChatCount: response.index.failedChatCount + fencedChatIds.size,
+          failedChatCount: response.index.failedChatCount
+            + fencedChatIds.size
+            + adoptionFailedChatIds.size,
+          unindexedChatCount,
         },
       };
     } catch (error) {
       throw translateSearchError(error, this.#deps.logger);
     } finally {
       clearTimeout(timeout);
-    }
-  }
-
-  #ledgerSnapshot(chatId: string): { viewId: TranscriptViewId; through: number } | null {
-    const cached = this.#ledgerSnapshots.get(chatId);
-    if (cached) return cached;
-    if (this.#fencedChatIds.has(chatId)) return null;
-    try {
-      const view = this.#deps.ledger.currentView(chatId);
-      if (!view) return null;
-      const watermark = this.#deps.ledger.highWatermark(chatId);
-      if (watermark.viewId !== view.viewId) return null;
-      const snapshot = { viewId: view.viewId, through: watermark.ordinal };
-      this.#ledgerSnapshots.set(chatId, snapshot);
-      return snapshot;
-    } catch (error) {
-      if (!(error instanceof LedgerFencedError)) throw error;
-      this.#fencedChatIds.add(chatId);
-      return null;
+      options.signal?.removeEventListener('abort', forwardAbort);
+      enableSignal?.removeEventListener('abort', forwardAbort);
     }
   }
 
@@ -222,10 +231,15 @@ export class TranscriptSearchController {
   async disableAndDelete(): Promise<void> {
     this.#enabled = false;
     this.#admissionFailed = false;
+    this.#enableAbort?.abort();
+    this.#enableAbort = null;
+    await this.#resyncTail.catch(() => undefined);
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
     this.#indexedViews.clear();
     this.#ledgerSnapshots.clear();
+    this.#adoptionFailedChatIds.clear();
+    this.#adoptingChatIds.clear();
     this.#fencedChatIds.clear();
     await this.#deps.service.disableAndDelete(new AbortController().signal);
   }
@@ -234,6 +248,8 @@ export class TranscriptSearchController {
     if (this.#closed) return;
     this.#closed = true;
     this.#enabled = false;
+    this.#enableAbort?.abort();
+    this.#enableAbort = null;
     this.#lifecycleAbort.abort();
     this.#unsubscribe();
     await this.#resyncTail.catch(() => undefined);
@@ -241,8 +257,76 @@ export class TranscriptSearchController {
     this.#chatTails.clear();
     this.#indexedViews.clear();
     this.#ledgerSnapshots.clear();
+    this.#adoptionFailedChatIds.clear();
+    this.#adoptingChatIds.clear();
     this.#fencedChatIds.clear();
     await this.#deps.service.close();
+  }
+
+  async #catalogSnapshot(
+    chatId: string,
+    operation: 'resync' | 'catalog-refresh',
+  ): Promise<{ view: TranscriptView; through: number } | null> {
+    try {
+      let view = await this.#ingestPacer.pay(
+        () => this.#deps.ledger.existingCurrentView(chatId),
+      );
+      if (!view) {
+        this.#adoptingChatIds.add(chatId);
+        try {
+          const signal = this.#enableAbort?.signal ?? this.#lifecycleAbort.signal;
+          const adopted = await this.#ingestPacer.pay(() => (
+            this.#deps.listChatIds().includes(chatId)
+              ? this.#deps.adoption.ensure(chatId, signal)
+              : null
+          ));
+          if (!adopted) {
+            this.#forgetChat(chatId);
+            return null;
+          }
+          view = adopted;
+        } finally {
+          this.#adoptingChatIds.delete(chatId);
+        }
+      }
+      const watermark = await this.#ingestPacer.pay(
+        () => this.#deps.ledger.highWatermark(chatId),
+      );
+      if (watermark.viewId !== view.viewId) throw new Error('SEARCH_VIEW_MISMATCH');
+      if (!this.#deps.listChatIds().includes(chatId)) {
+        this.#forgetChat(chatId);
+        return null;
+      }
+      this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through: watermark.ordinal });
+      this.#adoptionFailedChatIds.delete(chatId);
+      this.#fencedChatIds.delete(chatId);
+      return { view, through: watermark.ordinal };
+    } catch (error) {
+      this.#adoptingChatIds.delete(chatId);
+      this.#indexedViews.delete(chatId);
+      this.#ledgerSnapshots.delete(chatId);
+      if (isAbortError(error) && (!this.#enabled || this.#closed)) throw error;
+      if (!this.#deps.listChatIds().includes(chatId)) {
+        this.#forgetChat(chatId);
+        return null;
+      }
+      const fenced = error instanceof LedgerFencedError;
+      if (fenced) {
+        this.#fencedChatIds.add(chatId);
+        this.#adoptionFailedChatIds.delete(chatId);
+      } else {
+        this.#fencedChatIds.delete(chatId);
+        this.#adoptionFailedChatIds.add(chatId);
+      }
+      const code = searchFailureCode(error);
+      const viewId = fenced
+        ? LEDGER_FENCED_VIEW_SENTINEL
+        : LEDGER_UNADOPTED_VIEW_SENTINEL;
+      await this.#deps.service.markChatUnavailable(chatId, viewId, code)
+        .catch((markError) => this.#warnIndexFailure(chatId, operation, markError));
+      this.#warnIndexFailure(chatId, operation, error);
+      return null;
+    }
   }
 
   async #resyncAll(): Promise<void> {
@@ -269,43 +353,13 @@ export class TranscriptSearchController {
       for (const chatId of chatIds) {
         if (!this.#enabled || this.#closed) return;
         try {
-          let view: TranscriptView | null;
-          let through: number;
-          try {
-            const probe = await this.#ingestPacer.pay(() => {
-              const currentView = this.#deps.ledger.currentView(chatId);
-              return {
-                view: currentView,
-                through: currentView ? this.#deps.ledger.highWatermark(chatId).ordinal : 0,
-              };
-            });
-            view = probe.view;
-            through = probe.through;
-            this.#fencedChatIds.delete(chatId);
-            if (view) this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through });
-            else this.#ledgerSnapshots.delete(chatId);
-          } catch (error) {
-            if (!(error instanceof LedgerFencedError)) throw error;
-            this.#ledgerSnapshots.delete(chatId);
-            this.#fencedChatIds.add(chatId);
-            failures += 1;
-            await this.#enqueue(chatId, () => this.#deps.service.markChatUnavailable(
-              chatId,
-              LEDGER_FENCED_VIEW_SENTINEL,
-              fenceErrorCode(error),
-            )).catch((markError) => this.#warnIndexFailure(chatId, 'resync', markError));
-            this.#warnIndexFailure(chatId, 'resync', error);
-            continue;
-          }
+          const snapshot = await this.#catalogSnapshot(chatId, 'resync');
           const state = states.get(chatId) ?? null;
-          if (!view) {
-            if (state) {
-              deletions += 1;
-              await this.#enqueue(chatId, () => this.#deps.service.deleteChat(chatId))
-                .catch((error) => this.#warnIndexFailure(chatId, 'resync', error));
-            }
+          if (!snapshot) {
+            failures += 1;
             continue;
           }
+          const { view, through } = snapshot;
           if (
             state
             && state.status === 'indexed'
@@ -359,7 +413,10 @@ export class TranscriptSearchController {
       view = this.#deps.ledger.currentView(chatId);
       through = view ? this.#deps.ledger.highWatermark(chatId).ordinal : 0;
       this.#fencedChatIds.delete(chatId);
-      if (view) this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through });
+      if (view) {
+        this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through });
+        this.#adoptionFailedChatIds.delete(chatId);
+      }
       else this.#ledgerSnapshots.delete(chatId);
     } catch (error) {
       if (!(error instanceof LedgerFencedError)) throw error;
@@ -427,40 +484,16 @@ export class TranscriptSearchController {
 
   async #syncCatalogChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
-    let view: TranscriptView | null;
-    let through = 0;
-    try {
-      view = this.#deps.ledger.currentView(chatId);
-      through = view ? this.#deps.ledger.highWatermark(chatId).ordinal : 0;
-      this.#fencedChatIds.delete(chatId);
-      if (view) this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through });
-      else this.#ledgerSnapshots.delete(chatId);
-    } catch (error) {
-      if (!(error instanceof LedgerFencedError)) throw error;
-      this.#indexedViews.delete(chatId);
-      this.#ledgerSnapshots.delete(chatId);
-      this.#fencedChatIds.add(chatId);
-      await this.#deps.service.markChatUnavailable(
-        chatId,
-        LEDGER_FENCED_VIEW_SENTINEL,
-        fenceErrorCode(error),
-      );
-      return;
-    }
-    if (!view) {
-      this.#ledgerSnapshots.delete(chatId);
-      if (this.#indexedViews.delete(chatId)) await this.#deps.service.deleteChat(chatId);
-      return;
-    }
-    const cached = this.#indexedViews.get(chatId);
-    if (cached && cached.viewId === view.viewId && cached.through >= through) return;
     if (!this.#deps.listChatIds().includes(chatId)) {
-      this.#indexedViews.delete(chatId);
-      this.#ledgerSnapshots.delete(chatId);
-      this.#fencedChatIds.delete(chatId);
+      this.#forgetChat(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
     }
+    const snapshot = await this.#catalogSnapshot(chatId, 'catalog-refresh');
+    if (!snapshot) return;
+    const { view, through } = snapshot;
+    const cached = this.#indexedViews.get(chatId);
+    if (cached && cached.viewId === view.viewId && cached.through >= through) return;
     await this.#syncCurrentChat(chatId);
   }
 
@@ -468,6 +501,7 @@ export class TranscriptSearchController {
     if (!this.#enabled || this.#closed) return;
     if (event.type === 'view-replaced') {
       this.#ledgerSnapshots.delete(event.chatId);
+      this.#adoptionFailedChatIds.delete(event.chatId);
       this.#fencedChatIds.delete(event.chatId);
       this.#schedule(event.chatId, 'view-replacement', () => this.#syncCurrentChat(event.chatId));
       return;
@@ -478,6 +512,7 @@ export class TranscriptSearchController {
       viewId: event.viewId,
       through: rows.at(-1)!.ordinal,
     });
+    this.#adoptionFailedChatIds.delete(event.chatId);
     this.#fencedChatIds.delete(event.chatId);
     this.#schedule(event.chatId, 'append', async () => {
       const first = rows[0]!.ordinal;
@@ -533,6 +568,14 @@ export class TranscriptSearchController {
     void next.then(removeTail, removeTail);
     return next;
   }
+
+  #forgetChat(chatId: string): void {
+    this.#indexedViews.delete(chatId);
+    this.#ledgerSnapshots.delete(chatId);
+    this.#adoptionFailedChatIds.delete(chatId);
+    this.#adoptingChatIds.delete(chatId);
+    this.#fencedChatIds.delete(chatId);
+  }
 }
 
 function fenceErrorCode(error: LedgerFencedError): string {
@@ -550,11 +593,18 @@ const INGEST_PACING_RATIO = 0.5;
 
 class IngestPacer {
   #debtMs = 0;
+  #tail: Promise<void> = Promise.resolve();
 
-  async pay<T>(work: () => T): Promise<T> {
+  pay<T>(work: () => T | Promise<T>): Promise<T> {
+    const run = this.#tail.then(() => this.#pay(work));
+    this.#tail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  async #pay<T>(work: () => T | Promise<T>): Promise<T> {
     const started = performance.now();
     try {
-      return work();
+      return await work();
     } finally {
       const busyMs = performance.now() - started;
       this.#debtMs += busyMs * (1 - INGEST_PACING_RATIO) / INGEST_PACING_RATIO;
@@ -575,7 +625,7 @@ function translateSearchError(
 ): TranscriptSearchUnavailableError {
   if (error instanceof TranscriptSearchUnavailableError) return error;
   const code = error instanceof Error ? error.message : '';
-  if (code === 'SEARCH_TIMEOUT' || (error instanceof DOMException && error.name === 'AbortError')) {
+  if (code === 'SEARCH_TIMEOUT' || isAbortError(error)) {
     return new TranscriptSearchUnavailableError(
       'SEARCH_TIMEOUT',
       'Transcript search timed out',
@@ -607,8 +657,16 @@ function isIndexPositionMismatch(error: unknown): boolean {
     && (error.message === 'SEARCH_INDEX_GAP' || error.message === 'SEARCH_VIEW_MISMATCH');
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 function searchFailureCode(error: unknown): string {
   if (error instanceof LedgerFencedError) return fenceErrorCode(error);
+  if (error && typeof error === 'object' && 'code' in error
+      && typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code)) {
+    return error.code;
+  }
   if (error instanceof Error && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.message)) {
     return error.message;
   }
