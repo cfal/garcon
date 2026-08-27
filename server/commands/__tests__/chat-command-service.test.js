@@ -4825,6 +4825,28 @@ describe('ChatCommandService', () => {
     expect(rollback).not.toHaveBeenCalled();
   });
 
+  it('preserves an unchanged native binding without publishing another session fact', async () => {
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          commit: mock(() => Promise.resolve()),
+          rollback: mock(() => Promise.resolve()),
+        })),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'unchanged-native');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).resolves.toMatchObject({ success: true });
+
+    const update = fixture.chats.updateProjectPath.mock.calls[0][1];
+    expect('nativeSession' in update).toBe(false);
+    expect(fixture.agents.publishSessionFact).not.toHaveBeenCalled();
+  });
+
   it('rolls back provider preparation when registry persistence fails', async () => {
     const commit = mock(() => Promise.resolve());
     const rollback = mock(() => Promise.resolve());
@@ -4854,6 +4876,55 @@ describe('ChatCommandService', () => {
 
     expect(rollback).toHaveBeenCalledTimes(1);
     expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('rolls back an unchanged native binding when registry persistence fails', async () => {
+    const commit = mock(() => Promise.resolve());
+    const rollback = mock(() => Promise.resolve());
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({ commit, rollback })),
+      },
+      chats: {
+        updateProjectPath: mock(() => Promise.reject(new Error('disk full'))),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'failed-unchanged-native');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toThrow('disk full');
+
+    expect(rollback).toHaveBeenCalledTimes(1);
+    expect(commit).not.toHaveBeenCalled();
+    expect(fixture.agents.publishSessionFact).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown outcome when provider rollback fails', async () => {
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.resolve({
+          commit: mock(() => Promise.resolve()),
+          rollback: mock(() => Promise.reject(new Error('rollback unavailable'))),
+        })),
+      },
+      chats: {
+        updateProjectPath: mock(() => Promise.reject(new Error('disk full'))),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'failed-provider-rollback');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN',
+      status: 504,
+      retryable: true,
+    });
   });
 
   it('rolls back preparation and preserves the typed error when the chat disappears', async () => {
@@ -4929,6 +5000,60 @@ describe('ChatCommandService', () => {
       code: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
       status: 409,
       retryable: false,
+    });
+
+    expect(fixture.chats.updateProjectPath).not.toHaveBeenCalled();
+  });
+
+  it('maps provider destination rejections to the project-path error contract', async () => {
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.reject(
+          new AgentIntegrationError(
+            'PROJECT_PATH_DESTINATION_REJECTED',
+            'Destination directory belongs to another project',
+            false,
+          ),
+        )),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'different-provider-project');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'PROJECT_PATH_DESTINATION_REJECTED',
+      status: 422,
+      retryable: false,
+    });
+
+    expect(fixture.chats.updateProjectPath).not.toHaveBeenCalled();
+  });
+
+  it('reports an unconfirmed provider move without persisting the requested path', async () => {
+    const fixture = makeService({
+      agents: {
+        prepareProjectPathUpdate: mock(() => Promise.reject(
+          new AgentIntegrationError(
+            'TIMEOUT',
+            'OpenCode did not confirm the project path update',
+            true,
+          ),
+        )),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'unconfirmed-provider-move');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(fixture.service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: nextPath,
+    })).rejects.toMatchObject({
+      code: 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN',
+      status: 504,
+      retryable: true,
     });
 
     expect(fixture.chats.updateProjectPath).not.toHaveBeenCalled();

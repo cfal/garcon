@@ -1754,6 +1754,32 @@ describe('REST chat command routes', () => {
     expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 
+  it('PATCH /project-path returns provider destination rejections', async () => {
+    const agent = createRouteAgent({ agentId: 'opencode' });
+    const nextPath = path.join(testBasePath, 'different-provider-project');
+    await fs.mkdir(nextPath, { recursive: true });
+    agent.agents.prepareProjectPathUpdate.mockRejectedValueOnce(
+      new AgentIntegrationError(
+        'PROJECT_PATH_DESTINATION_REJECTED',
+        'Destination directory belongs to another project',
+        false,
+      ),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/project-path'].PATCH,
+      { chatId: CHAT_ID, projectPath: nextPath },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      errorCode: 'PROJECT_PATH_DESTINATION_REJECTED',
+      retryable: false,
+    });
+    expect(agent.registry.updateProjectPath).not.toHaveBeenCalled();
+  });
+
   it('PATCH /project-path rejects chats with queued messages', async () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');

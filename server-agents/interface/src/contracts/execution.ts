@@ -18,7 +18,8 @@ export interface AgentProjectPathUpdateRequest {
 }
 
 export interface AgentProjectPathUpdatePreparation {
-  readonly nativeSession: AgentNativeSessionRef | null;
+  // `undefined` preserves the binding, `null` clears it, and a ref replaces it.
+  readonly nativeSession?: AgentNativeSessionRef | null;
   commit(): Promise<void>;
   rollback(): Promise<void>;
 }

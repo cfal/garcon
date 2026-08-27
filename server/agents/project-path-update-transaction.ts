@@ -14,15 +14,32 @@ async function rollbackPreparation(
     readonly agentId: string;
     readonly logger: AgentLogger;
   },
+  persistenceError?: unknown,
 ): Promise<void> {
   if (!preparation) return;
-  await preparation.rollback().catch((error) => {
+  try {
+    await preparation.rollback();
+  } catch (error) {
     input.logger.warn('Project-path preparation rollback failed', {
       chatId: input.chatId,
       agentId: input.agentId,
       error: errorMessage(error),
+      ...(persistenceError === undefined
+        ? {}
+        : { persistenceError: errorMessage(persistenceError) }),
     });
-  });
+    throw new DomainError(
+      'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN',
+      'The agent did not confirm the project path rollback',
+      504,
+      true,
+      {
+        cause: persistenceError === undefined
+          ? error
+          : new AggregateError([persistenceError, error], 'Project path persistence and rollback failed'),
+      },
+    );
+  }
 }
 
 export async function runProjectPathUpdateTransaction<T>(input: {
@@ -39,32 +56,18 @@ export async function runProjectPathUpdateTransaction<T>(input: {
   try {
     preparation = await input.prepare();
   } catch (error) {
-    if (
-      error instanceof AgentIntegrationError
-      && error.code === 'TRANSCRIPT_UNAVAILABLE'
-    ) {
-      throw new DomainError(
-        'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
-        error.message,
-        409,
-        error.retryable,
-      );
-    }
-    throw new DomainError(
-      'CHAT_NOT_IDLE',
-      errorMessage(error),
-      409,
-      true,
-    );
+    throw projectPathPreparationError(error);
   }
 
   let updated: T | null;
   try {
     updated = await input.persist(
-      preparation ? preparation.nativeSession : input.fallbackNativeSession,
+      preparation?.nativeSession !== undefined
+        ? preparation.nativeSession
+        : input.fallbackNativeSession,
     );
   } catch (error) {
-    await rollbackPreparation(preparation, input);
+    await rollbackPreparation(preparation, input, error);
     throw error;
   }
   if (!updated) {
@@ -82,4 +85,59 @@ export async function runProjectPathUpdateTransaction<T>(input: {
     });
   }
   return updated;
+}
+
+function projectPathPreparationError(error: unknown): DomainError {
+  if (!(error instanceof AgentIntegrationError)) {
+    return new DomainError('CHAT_NOT_IDLE', errorMessage(error), 409, true);
+  }
+
+  switch (error.code) {
+    case 'TRANSCRIPT_UNAVAILABLE':
+    case 'SESSION_NOT_FOUND':
+      return new DomainError(
+        'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
+        error.message,
+        409,
+        error.retryable,
+      );
+    case 'PROJECT_PATH_DESTINATION_REJECTED':
+      return new DomainError(
+        'PROJECT_PATH_DESTINATION_REJECTED',
+        error.message,
+        422,
+        error.retryable,
+      );
+    case 'OPERATION_UNSUPPORTED':
+      return new DomainError(
+        'PROJECT_PATH_UPDATE_UNSUPPORTED',
+        error.message,
+        422,
+        error.retryable,
+      );
+    case 'TIMEOUT':
+      return new DomainError(
+        'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN',
+        error.message,
+        504,
+        error.retryable,
+      );
+    case 'SESSION_BUSY':
+      return new DomainError('CHAT_NOT_IDLE', error.message, 409, error.retryable);
+    case 'UNAVAILABLE':
+    case 'BINARY_NOT_FOUND':
+      return new DomainError(
+        'PROJECT_PATH_UPDATE_FAILED',
+        error.message,
+        503,
+        error.retryable,
+      );
+    default:
+      return new DomainError(
+        'PROJECT_PATH_UPDATE_FAILED',
+        error.message,
+        502,
+        error.retryable,
+      );
+  }
 }
