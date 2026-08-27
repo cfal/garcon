@@ -29,16 +29,16 @@ const persistedPaths = [
 
 let dockerfile;
 let composeFile;
-let readme;
+let dockerGuide;
 let dockerignore;
 let rootPackage;
 let integrationPackage;
 
 beforeAll(async () => {
-  [dockerfile, composeFile, readme, dockerignore, rootPackage, integrationPackage] = await Promise.all([
+  [dockerfile, composeFile, dockerGuide, dockerignore, rootPackage, integrationPackage] = await Promise.all([
     readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'README.md'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
     readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
     readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
     readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
@@ -123,7 +123,7 @@ describe('Docker contract', () => {
 
   test('documents every persistent container path', () => {
     for (const target of persistedPaths) {
-      expect(readme).toContain(`\`${target}\``);
+      expect(dockerGuide).toContain(`\`${target}\``);
     }
   });
 
