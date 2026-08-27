@@ -8,7 +8,10 @@ function createHarness(enabled = false) {
   let current = enabled;
   const events = [];
   const settings = {
-    getFeatureSettings: () => ({ transcriptSearch: { enabled: current } }),
+    getFeatureSettings: () => ({
+      transcriptSearch: { enabled: current },
+      chatIdDiscovery: { enabled: true },
+    }),
     setTranscriptSearchEnabled: mock(async (next) => {
       events.push(`persist:${next}`);
       current = next;

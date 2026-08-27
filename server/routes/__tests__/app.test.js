@@ -52,6 +52,7 @@ function createMockCtx() {
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
       setTranscriptSearchEnabled: mock(() => Promise.resolve({ transcriptSearch: { enabled: false } })),
+      setChatIdDiscoveryEnabled: mock(() => Promise.resolve({ chatIdDiscovery: { enabled: true } })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => []),
@@ -688,6 +689,45 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+  });
+
+  it('patches chat ID discovery only with a boolean setting', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: { chatIdDiscovery: { enabled: false } },
+    }));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      features: {
+        transcriptSearch: { enabled: false },
+        chatIdDiscovery: { enabled: false },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.settings.features.chatIdDiscovery.enabled).toBe(false);
+    expect(ctx.settings.setChatIdDiscoveryEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('rejects malformed chat ID discovery settings', async () => {
+    ctx.settings.setChatIdDiscoveryEnabled.mockClear();
+    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        chatIdDiscovery: { enabled: 'no' },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('features.chatIdDiscovery.enabled must be a boolean');
+    expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setChatIdDiscoveryEnabled).not.toHaveBeenCalled();
     expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
   });
 

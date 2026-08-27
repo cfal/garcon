@@ -20,6 +20,7 @@ import {
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
   type RemoteSettingsSnapshot,
+  type RemoteFeatureSettings,
   type RemoteUiEffectiveSettings,
 } from '../../common/settings.js';
 import {
@@ -166,19 +167,26 @@ export default function createWorkspaceRoutes(
   },
 ): RouteMap {
 
-  function transcriptSearchEnabledPatch(input: Record<string, unknown>): boolean | undefined | null {
+  function featureEnabledPatch(
+    input: Record<string, unknown>,
+    key: keyof RemoteFeatureSettings,
+  ): boolean | undefined | null {
     if (!('features' in input)) return undefined;
     const features = input.features;
     if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
     const featureRecord = features as Record<string, unknown>;
-    if (!('transcriptSearch' in featureRecord)) return undefined;
-    const transcriptSearch = featureRecord.transcriptSearch;
-    if (!transcriptSearch || typeof transcriptSearch !== 'object' || Array.isArray(transcriptSearch)) {
+    if (!(key in featureRecord)) return undefined;
+    const feature = featureRecord[key];
+    if (!feature || typeof feature !== 'object' || Array.isArray(feature)) {
       return null;
     }
-    const transcriptRecord = transcriptSearch as Record<string, unknown>;
-    if (!('enabled' in transcriptRecord) || typeof transcriptRecord.enabled !== 'boolean') return null;
-    return transcriptRecord.enabled;
+    const setting = feature as Record<string, unknown>;
+    if (!('enabled' in setting) || typeof setting.enabled !== 'boolean') return null;
+    return setting.enabled;
+  }
+
+  function featureEnabledPatchError(key: keyof RemoteFeatureSettings): string {
+    return `features.${key}.enabled must be a boolean`;
   }
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
@@ -283,10 +291,19 @@ export default function createWorkspaceRoutes(
         return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
-      const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
+      const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');
+      const chatIdDiscoveryEnabled = featureEnabledPatch(input, 'chatIdDiscovery');
       if (transcriptSearchEnabled === null) {
         return jsonError(
-          'features.transcriptSearch.enabled must be a boolean',
+          featureEnabledPatchError('transcriptSearch'),
+          400,
+          'INVALID_REMOTE_SETTINGS',
+          false,
+        );
+      }
+      if (chatIdDiscoveryEnabled === null) {
+        return jsonError(
+          featureEnabledPatchError('chatIdDiscovery'),
           400,
           'INVALID_REMOTE_SETTINGS',
           false,
@@ -298,6 +315,9 @@ export default function createWorkspaceRoutes(
         } else {
           await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
         }
+      }
+      if (chatIdDiscoveryEnabled !== undefined) {
+        await settings.setChatIdDiscoveryEnabled(chatIdDiscoveryEnabled);
       }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);

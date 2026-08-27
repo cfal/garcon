@@ -14,7 +14,10 @@ const mockedSettingsApi = vi.mocked(settingsApi);
 function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
 	return {
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			chatIdDiscovery: { enabled: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },

@@ -131,7 +131,10 @@
 	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
 	const remoteSettingsSnapshot = $derived<RemoteSettingsSnapshot>({
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			chatIdDiscovery: { enabled: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: {
