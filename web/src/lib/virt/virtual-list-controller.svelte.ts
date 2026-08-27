@@ -22,6 +22,7 @@ import type {
 export interface VirtualListControllerOptions {
 	get overscan(): number;
 	get measurementAnchor(): 'geometric' | 'end';
+	readonly initialViewportSize: number;
 	readonly environment?: VirtualListEnvironment;
 	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
 	onTransaction?(record: VirtualTransactionRecord): void;
@@ -49,6 +50,7 @@ export class VirtualListController {
 		this.#snapshot = this.#transaction.snapshot;
 		this.#driver = new VirtualListDomDriver({
 			environment,
+			initialViewportSize: options.initialViewportSize,
 			measureElement: options.measureElement,
 			shouldMeasureMount: (key) => this.#transaction.geometry.measuredSize(key) === undefined,
 			onMount: (measurements) => this.#transaction.measure(measurements, 'mount'),

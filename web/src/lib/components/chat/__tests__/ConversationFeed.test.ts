@@ -490,9 +490,10 @@ describe('ConversationFeed', () => {
 			}
 			const survivorKey = measuredRow.dataset.chatVirtualItem;
 			expect(survivorKey).toBeTruthy();
-			ResizeObserverHarness.emit(measuredRow, 900, 600);
 			const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
 			if (!viewport) throw new Error('Expected the Chat viewport');
+			ResizeObserverHarness.emit(viewport, 900, 720);
+			ResizeObserverHarness.emit(measuredRow, 900, 600);
 			viewport.scrollTop += 37;
 			await fireEvent.scroll(viewport);
 

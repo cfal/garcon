@@ -38,6 +38,7 @@ export class SidebarVirtualChatListController {
 	constructor() {
 		const getOverscan = () => this.#overscan;
 		this.#virt = new VirtualListController({
+			initialViewportSize: 640,
 			get overscan() {
 				return getOverscan();
 			},

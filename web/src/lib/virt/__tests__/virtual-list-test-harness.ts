@@ -103,6 +103,7 @@ class TestEnvironment implements VirtualListEnvironment {
 
 export function createVirtualListHarness(options?: {
 	viewportSize?: number;
+	initialViewportSize?: number;
 	overscan?: number;
 	measurementAnchor?: 'geometric' | 'end';
 	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
@@ -116,6 +117,7 @@ export function createVirtualListHarness(options?: {
 	const controller = new VirtualListController({
 		overscan: options?.overscan ?? 1,
 		measurementAnchor: options?.measurementAnchor ?? 'geometric',
+		initialViewportSize: options?.initialViewportSize ?? viewportSize,
 		measureElement: options?.measureElement,
 		environment,
 		onTransaction: (record) => records.push(record),
@@ -146,6 +148,7 @@ export function createVirtualListHarness(options?: {
 
 	let detachViewportAttachment = controller.viewport(viewport);
 	const detachSizer = controller.sizer(sizer);
+	if (viewportSize > 0) environment.observer.emit(viewport, viewportSize);
 	environment.flushMicrotasks();
 
 	return {
@@ -183,6 +186,7 @@ export function createVirtualListHarness(options?: {
 		},
 		attachViewport() {
 			detachViewportAttachment = controller.viewport(viewport);
+			if (viewportSize > 0) environment.observer.emit(viewport, viewportSize);
 		},
 		mountItem(key: string, size: number) {
 			const element = document.createElement('div');

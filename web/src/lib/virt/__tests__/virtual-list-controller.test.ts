@@ -37,6 +37,52 @@ describe('VirtualListController', () => {
 		expect(test.controller.snapshot.positions.itemAt(1)?.start).toBe(40);
 	});
 
+	it('uses the initial viewport size until the DOM reports a positive size', () => {
+		const test = harness({ viewportSize: 0, initialViewportSize: 60, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [30, 30, 30, 30],
+			anchor: { kind: 'none' },
+		});
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 0, endIndex: 1 });
+		test.mountItem('a', 5);
+		test.environment.flushMicrotasks();
+		expect(test.controller.measuredSize('a')).toBeUndefined();
+		test.setPhysicalScrollTop(30);
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 1, endIndex: 2 });
+
+		test.setViewportSize(60);
+		test.environment.flushMicrotasks();
+		expect(test.controller.measuredSize('a')).toBe(5);
+	});
+
+	it('treats DOM bounds as provisional until the viewport is observed', () => {
+		const test = harness({ viewportSize: 0, initialViewportSize: 60, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [30, 30, 30, 30],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(150);
+
+		test.controller.apply({
+			kind: 'update',
+			keys: ['earlier', 'a', 'b', 'c', 'd'],
+			estimates: [30, 30, 30, 30, 30],
+			anchor: { kind: 'item', key: 'b' },
+		});
+		test.environment.flushMicrotasks();
+
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'items',
+			redeemed: true,
+			scrollWrites: 1,
+		});
+	});
+
 	it('allows consumers to normalize measurements at DOM ingress', () => {
 		const test = harness({
 			measureElement: (_element, entry) => entry?.borderBoxSize[0]?.blockSize ?? 64,
@@ -537,6 +583,53 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(995);
 		retained.detach?.();
+	});
+
+	it('keeps a semantic prepend anchor authoritative through first measurements', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['top', 'before-anchor', 'reading', 'after-anchor', 'stable-bottom', 'tail'],
+			estimates: [20, 20, 20, 20, 20, 20],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('reading', 20);
+		test.mountItem('stable-bottom', 20);
+		test.environment.flushMicrotasks();
+		const initialReadingOffset = test.controller.snapshot.positions.itemAt(2)?.start;
+		expect(initialReadingOffset).toBe(40);
+
+		test.controller.apply({
+			kind: 'update',
+			keys: [
+				'earlier-1',
+				'earlier-2',
+				'top',
+				'before-anchor',
+				'reading',
+				'after-anchor',
+				'stable-bottom',
+				'tail',
+			],
+			estimates: [100, 100, 20, 20, 20, 20, 20, 20],
+			anchor: { kind: 'item', key: 'reading' },
+		});
+		test.mountItem('top', 10);
+		test.mountItem('before-anchor', 10);
+		test.mountItem('after-anchor', 10);
+		const mountMeasurement = test.environment.microtasks.pop();
+		mountMeasurement?.();
+		test.environment.flushMicrotasks();
+
+		const readingStart = test.controller.snapshot.positions.itemAt(4)?.start;
+		expect(readingStart).toBe(220);
+		expect((readingStart ?? Number.NaN) - test.viewport.scrollTop).toBe(initialReadingOffset);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			anchorKind: 'item',
+			intendedScrollTop: 180,
+			scrollWrites: 1,
+		});
 	});
 
 	it('publishes a programmatic target range before its scroll write', () => {

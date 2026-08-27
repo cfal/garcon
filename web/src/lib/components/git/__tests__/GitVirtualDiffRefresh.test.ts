@@ -379,6 +379,23 @@ describe('Git virtual diff refresh', () => {
 		expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4, 4, 5]);
 	});
 
+	it('does not replay a clamped request while its target geometry is unchanged', async () => {
+		const rows = makeUnloadedRows();
+		const props = makeSurfaceProps(rows, {
+			scrollToRequest: { filePath: 'file-2.ts', token: 1 },
+		});
+		const { container } = render(GitVirtualDiffSurface, { props });
+
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+		expect(viewport).toBeTruthy();
+		if (!viewport) return;
+		viewport.scrollTop = 0;
+		publishVirtualDiffRange(0);
+
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
+	});
+
 	it('does not replay a serviced scroll when a pending file becomes stale', async () => {
 		const initialRows = makeUnloadedRows();
 		const props = {

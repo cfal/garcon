@@ -5,6 +5,10 @@ import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-doc
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFilePlaceholderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness.js';
 import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
@@ -99,10 +103,12 @@ function renderSurface(
 		onOpenChat: vi.fn(),
 		...overrides,
 	};
+	const rendered = render(GitVirtualDiffSurface, { props });
+	const viewport = rendered.container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+	if (!viewport) throw new Error('Missing Git virtual viewport.');
+	ResizeObserverHarness.emit(viewport, 1_024, 720);
 	return {
-		...render(GitVirtualDiffSurface, {
-			props,
-		}),
+		...rendered,
 		props,
 	};
 }
@@ -120,7 +126,10 @@ function lastViewportDemand(callback: ReturnType<typeof vi.fn>) {
 }
 
 describe('GitVirtualDiffSurface', () => {
+	let restoreResizeObserver: () => void;
+
 	beforeEach(() => {
+		restoreResizeObserver = installResizeObserverHarness();
 		installGitVirtualDiffTestLayout({
 			viewportHeight: 720,
 			rowHeight: (element) =>
@@ -129,6 +138,7 @@ describe('GitVirtualDiffSurface', () => {
 	});
 
 	afterEach(() => {
+		restoreResizeObserver();
 		vi.restoreAllMocks();
 	});
 

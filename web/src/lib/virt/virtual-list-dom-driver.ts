@@ -3,7 +3,6 @@ import type { VirtualListEnvironment } from './virtual-list-environment';
 
 export interface VirtualDomGeometry {
 	readonly scrollTop: number;
-	readonly scrollHeight: number;
 	readonly viewportSize: number;
 	readonly leadingOffset: number;
 	readonly physicalMaximum: number;
@@ -18,6 +17,7 @@ export interface VirtualElementMeasurement {
 
 export interface VirtualListDomDriverOptions {
 	readonly environment: VirtualListEnvironment;
+	readonly initialViewportSize: number;
 	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
 	shouldMeasureMount(key: string): boolean;
 	onMount(measurements: readonly VirtualElementMeasurement[]): void;
@@ -46,6 +46,7 @@ export class VirtualListDomDriver {
 	#ignoredEntries = 0;
 	#observer: ResizeObserver;
 	#mountQueued = false;
+	#viewportObserved = false;
 	#suspended = false;
 	#destroyed = false;
 
@@ -70,18 +71,20 @@ export class VirtualListDomDriver {
 		const sizer = this.#sizerElement;
 		if (!viewport || !sizer || this.#suspended) return null;
 		const scrollTop = viewport.scrollTop;
-		const viewportSize = viewport.clientHeight;
+		const physicalViewportSize = viewport.clientHeight;
+		const viewportSize = this.#viewportObserved
+			? physicalViewportSize
+			: this.options.initialViewportSize;
 		const scrollHeight = viewport.scrollHeight;
 		const leadingOffset =
 			sizer.getBoundingClientRect().top - viewport.getBoundingClientRect().top + scrollTop;
-		const physicalMaximum = Math.max(0, scrollHeight - viewportSize);
+		const physicalMaximum = Math.max(0, scrollHeight - physicalViewportSize);
 		return {
 			scrollTop,
-			scrollHeight,
 			viewportSize,
 			leadingOffset,
 			physicalMaximum,
-			inPhysicalBounds: scrollTop >= 0 && scrollTop <= physicalMaximum,
+			inPhysicalBounds: !this.#viewportObserved || (scrollTop >= 0 && scrollTop <= physicalMaximum),
 		};
 	}
 
@@ -164,6 +167,7 @@ export class VirtualListDomDriver {
 	#attachViewport(element: HTMLElement): void | (() => void) {
 		if (this.#destroyed) return;
 		this.#viewportElement = element;
+		this.#viewportObserved = false;
 		if (!this.#suspended) {
 			this.#observer.observe(element);
 			this.#addViewportListeners();
@@ -210,7 +214,7 @@ export class VirtualListDomDriver {
 		this.#mountQueued = true;
 		this.options.environment.queueMicrotask(() => {
 			this.#mountQueued = false;
-			if (this.#destroyed || this.#suspended) return;
+			if (this.#destroyed || this.#suspended || !this.#viewportObserved) return;
 			const measurements: VirtualElementMeasurement[] = [];
 			for (const [key, element] of this.#pendingMounts) {
 				if (this.#elementsByKey.get(key) !== element || !element.isConnected) continue;
@@ -224,6 +228,9 @@ export class VirtualListDomDriver {
 
 	#handleObserver(entries: readonly ResizeObserverEntry[]): void {
 		if (this.#destroyed || this.#suspended) return;
+		const viewportEntry = entries.find((entry) => entry.target === this.#viewportElement);
+		this.#viewportObserved ||=
+			(viewportEntry?.borderBoxSize[0]?.blockSize ?? viewportEntry?.contentRect.height ?? 0) > 0;
 		let viewportChanged = false;
 		const measurements: VirtualElementMeasurement[] = [];
 		for (const entry of entries) {
@@ -237,11 +244,16 @@ export class VirtualListDomDriver {
 				this.#ignoredEntries += 1;
 				continue;
 			}
+			if (!this.#viewportObserved) continue;
 			const measurement = this.#measurement(key, element, entry);
-			if (measurement) measurements.push(measurement);
+			if (measurement) {
+				measurements.push(measurement);
+				this.#pendingMounts.delete(key);
+			}
 		}
 		if (measurements.length > 0) this.options.onResize(measurements);
 		if (viewportChanged) this.options.onViewportResize();
+		if (this.#viewportObserved && this.#pendingMounts.size > 0) this.#queueMountMeasurement();
 	}
 
 	#measurement(

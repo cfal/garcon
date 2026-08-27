@@ -116,6 +116,7 @@ export class FileTreeVirtualController {
 			activateEntry: options.activateEntry,
 		});
 		this.#virt = new VirtualListController({
+			initialViewportSize: FILE_TREE_FALLBACK_VIEWPORT_HEIGHT,
 			get overscan() {
 				return FILE_TREE_VIRTUAL_OVERSCAN;
 			},

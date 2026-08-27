@@ -58,6 +58,7 @@
 	let scrollRequestSequence = 0;
 	let servicedScrollRequestId = '';
 	let servicedScrollRequestState: 'pending' | 'resolved' | 'terminal' | null = null;
+	let servicedScrollTargetStart = Number.NaN;
 	let completedScrollRequestId = '';
 	let configuredLayoutIdentity: string | null | undefined;
 	let performanceFrame: number | null = null;
@@ -69,11 +70,12 @@
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
-	const fallbackViewportHeight = 720;
+	const fallbackViewportHeight = 360;
 	const scrollTargetTolerance = 0.5;
 	const scrollKeys = new Set(['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' ']);
 
 	const virtual = new VirtualListController({
+		initialViewportSize: fallbackViewportHeight,
 		get overscan() {
 			return overscan;
 		},
@@ -241,6 +243,7 @@
 				scrollRequestSequence += 1;
 				servicedScrollRequestId = '';
 				servicedScrollRequestState = null;
+				servicedScrollTargetStart = Number.NaN;
 				completedScrollRequestId = '';
 			}
 
@@ -346,6 +349,7 @@
 	$effect(() => {
 		if (!scrollToRequest) {
 			pendingScrollRequestKey = '';
+			servicedScrollTargetStart = Number.NaN;
 			scrollRequestSequence += 1;
 			return;
 		}
@@ -367,12 +371,10 @@
 		const requestKey = `${requestId}\0${targetIndex}\0${targetState}`;
 		if (requestKey === pendingScrollRequestKey) return;
 		const targetItem = virtualSnapshot.positions.itemAt(targetIndex);
-		const paintedOffset = virtual.viewportPosition?.paintedOffset;
-		const targetIsAligned =
+		const targetGeometryUnchanged =
 			targetItem !== undefined &&
-			paintedOffset !== undefined &&
-			Math.abs(targetItem.start - paintedOffset) <= scrollTargetTolerance;
-		if (requestKey === lastScrollRequestKey && targetIsAligned) return;
+			Math.abs(targetItem.start - servicedScrollTargetStart) <= scrollTargetTolerance;
+		if (requestKey === lastScrollRequestKey && targetGeometryUnchanged) return;
 		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
@@ -419,6 +421,8 @@
 				pendingScrollRequestKey = '';
 				lastScrollRequestKey = requestKey;
 				scrollIntentRevision += 1;
+				servicedScrollTargetStart =
+					virtualSnapshot.positions.itemAt(targetIndex)?.start ?? Number.NaN;
 				virtual.scrollToIndex(targetIndex, { align: 'start' });
 				servicedScrollRequestId = requestId;
 				servicedScrollRequestState = targetState;

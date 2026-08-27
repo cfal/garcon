@@ -143,7 +143,6 @@ export class VirtualListGeometry {
 
 		this.#pruneMeasurements();
 	}
-
 	replaceItems(keys: readonly string[], estimates: readonly number[]): void {
 		this.#keys = [];
 		this.#indexByKey.clear();
@@ -153,7 +152,6 @@ export class VirtualListGeometry {
 		this.#revision += 1;
 		this.setItems(keys, estimates);
 	}
-
 	resetMeasurements(): void {
 		if (this.#measurements.size === 0) return;
 		let first = this.#count;
@@ -164,11 +162,9 @@ export class VirtualListGeometry {
 		this.#measurements.clear();
 		if (first < this.#count) this.#markDirty(first, this.#count - first);
 	}
-
 	measure(key: string, size: number): number {
 		return this.measureMany([{ key, size }]).delta;
 	}
-
 	measureMany(measurements: readonly { readonly key: string; readonly size: number }[]): {
 		readonly delta: number;
 		readonly changedCount: number;
@@ -191,37 +187,30 @@ export class VirtualListGeometry {
 		}
 		return { delta, changedCount, firstChangedIndex };
 	}
-
 	deleteMeasurement(key: string): void {
 		if (!this.#measurements.delete(key)) return;
 		const index = this.#indexByKey.get(key);
 		if (index !== undefined) this.#markDirty(index, 1);
 	}
-
 	indexOf(key: string): number | undefined {
 		return this.#indexByKey.get(key);
 	}
-
 	keyAt(index: number): string | undefined {
 		return index >= 0 && index < this.#count ? this.#keys[index] : undefined;
 	}
-
 	item(index: number): LogicalVirtualItem | undefined {
 		if (index < 0 || index >= this.#count) return undefined;
 		this.#rebuild();
 		return this.#logicalItem(index);
 	}
-
 	itemAtOffset(offset: number): LogicalVirtualItem | undefined {
 		this.#rebuild();
 		const index = indexAtOffset(this.#offsets, this.#count, offset);
 		return index === undefined ? undefined : this.#logicalItem(index);
 	}
-
 	range(offset: number, viewportSize: number): VirtualRange | null {
 		this.#rebuild();
 		if (this.#count === 0 || viewportSize <= 0) return null;
-
 		const visibleStart = offset;
 		const visibleEnd = offset + viewportSize;
 		let index = this.#upperBoundOffset(visibleStart) - 1;
@@ -229,7 +218,6 @@ export class VirtualListGeometry {
 		while (index < this.#count && this.#offsets[index + 1] <= visibleStart) index += 1;
 		while (index < this.#count && this.#sizes[index] === 0) index += 1;
 		if (index >= this.#count || this.#offsets[index] >= visibleEnd) return null;
-
 		const startIndex = index;
 		let endIndex = index;
 		for (; index < this.#count && this.#offsets[index] < visibleEnd; index += 1) {
@@ -237,16 +225,13 @@ export class VirtualListGeometry {
 		}
 		return { startIndex, endIndex };
 	}
-
 	totalSize(): number {
 		this.#rebuild();
 		return this.#offsets[this.#count];
 	}
-
 	measuredSize(key: string): number | undefined {
 		return this.#measurements.get(key);
 	}
-
 	positionView(deviation = 0): VirtualPositionView {
 		this.#rebuild();
 		if (this.#positionGeneration?.revision !== this.#revision) {
@@ -259,13 +244,11 @@ export class VirtualListGeometry {
 		}
 		return new GeometryPositionView(this.#positionGeneration, deviation);
 	}
-
 	#logicalItem(index: number): LogicalVirtualItem {
 		const start = this.#offsets[index];
 		const size = this.#sizes[index];
 		return { key: this.#keys[index], index, start, size, end: start + size };
 	}
-
 	#upperBoundOffset(value: number): number {
 		let low = 0;
 		let high = this.#count + 1;
@@ -276,7 +259,6 @@ export class VirtualListGeometry {
 		}
 		return low;
 	}
-
 	#ensureCapacity(count: number): void {
 		if (count <= this.#estimates.length) return;
 		let capacity = this.#estimates.length;
@@ -292,7 +274,6 @@ export class VirtualListGeometry {
 		this.#offsets = offsets;
 		this.#incrementOperation('arrayGrowths');
 	}
-
 	#markDirty(index: number, changedCount: number): void {
 		this.#dirtyFrom = Math.min(this.#dirtyFrom, index);
 		this.#revision += 1;
@@ -303,14 +284,12 @@ export class VirtualListGeometry {
 			changedCount: this.#operations.changedCount + changedCount,
 		};
 	}
-
 	#rebuild(): void {
 		if (this.#dirtyFrom >= this.#count) {
 			this.#offsets[this.#count] = this.#count === 0 ? 0 : this.#offsets[this.#count];
 			this.#dirtyFrom = this.#count;
 			return;
 		}
-
 		const start = this.#dirtyFrom;
 		if (start === 0) this.#offsets[0] = 0;
 		for (let index = start; index < this.#count; index += 1) {
@@ -326,13 +305,11 @@ export class VirtualListGeometry {
 			rebuiltItems: this.#operations.rebuiltItems + this.#count - start,
 		};
 	}
-
 	#pruneMeasurements(): void {
 		for (const key of this.#measurements.keys()) {
 			if (!this.#indexByKey.has(key)) this.#measurements.delete(key);
 		}
 	}
-
 	#incrementOperation(key: 'mapWrites' | 'arrayGrowths'): void {
 		this.#operations = { ...this.#operations, [key]: this.#operations[key] + 1 };
 	}

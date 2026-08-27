@@ -87,6 +87,7 @@ export class GitCommitListVirtualController {
 		this.#lastCollectionRevision = initialCollectionChange.revision;
 		this.activeHash = this.#resolveInitialActiveHash(initialPosition);
 		this.#virt = new VirtualListController({
+			initialViewportSize: FALLBACK_VIEWPORT_HEIGHT,
 			get overscan() {
 				return GIT_HISTORY_VIRTUAL_OVERSCAN;
 			},

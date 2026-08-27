@@ -38,6 +38,7 @@ interface PendingCommit {
 	source: VirtualTransactionSource;
 	provenance: VirtualCorrectionProvenance;
 	target: PendingTarget;
+	measurementAnchor?: VirtualMutationAnchor;
 	barriers: number;
 	restoreDeviation: VirtualDeviationState | null;
 	record: MutableTransactionRecord;
@@ -507,6 +508,10 @@ export class VirtualListTransaction {
 			source,
 			provenance,
 			target,
+			measurementAnchor:
+				input.source === 'items'
+					? input.anchor
+					: (pendingCorrection?.measurementAnchor ?? input.anchor),
 			barriers: 0,
 			restoreDeviation:
 				pendingCorrection?.provenance === 'navigation'
@@ -533,6 +538,9 @@ export class VirtualListTransaction {
 	): CapturedAnchor {
 		if (this.options.getMeasurementAnchor() === 'end') return { kind: 'end' };
 		if (!dom || this.geometry.count === 0) return { kind: 'none' };
+		const pendingAnchor = this.#pendingCommit?.measurementAnchor;
+		if (pendingAnchor?.kind === 'end') return pendingAnchor;
+		if (pendingAnchor?.kind === 'item') return this.#captureMutationAnchor(pendingAnchor);
 		const logicalOffset = this.#pendingCommit
 			? this.#logicalOffsetForTarget(this.#pendingCommit.target, dom)
 			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;

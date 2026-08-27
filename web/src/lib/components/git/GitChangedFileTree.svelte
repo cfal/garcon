@@ -51,6 +51,7 @@
 			: (rows[0]?.key ?? null),
 	);
 	const virtual = new VirtualListController({
+		initialViewportSize: 720,
 		get overscan() {
 			return 12;
 		},

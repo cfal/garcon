@@ -42,6 +42,7 @@ import {
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
+const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
 const OFFSET_TOLERANCE_PX = 0.5;
 
@@ -101,6 +102,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#appliedDataRevision = untrack(() => options.projectedDataRevision);
 		const measurementAnchor = () => this.#measurementAnchor();
 		this.#virt = new VirtualListController({
+			initialViewportSize: CHAT_FALLBACK_VIEWPORT_HEIGHT,
 			get overscan() {
 				return CHAT_VIRTUAL_OVERSCAN;
 			},
