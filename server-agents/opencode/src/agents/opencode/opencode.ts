@@ -1660,7 +1660,6 @@ export class OpenCodeRuntime {
     }
     return forkedSessionId;
   }
-
   async moveSession(agentSessionId: string, directory: string, signal: AbortSignal): Promise<void> {
     await this.#endpointCoordinator.moveSession(
       agentSessionId, directory, signal, (...args) => this.#runRequest(...args),
