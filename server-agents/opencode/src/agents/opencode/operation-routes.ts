@@ -35,6 +35,10 @@ export class OpenCodeOperationRoutes {
 
   constructor(private readonly logger: AgentLogger) {}
 
+  get idle(): boolean {
+    return this.#byTurn.size === 0;
+  }
+
   register(
     sessionId: string,
     chatId: string,

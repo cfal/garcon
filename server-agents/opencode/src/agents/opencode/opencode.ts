@@ -30,7 +30,6 @@ import {
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import type { OpenCodeConfig } from '../../config.js';
 import { normalizeThinkingMode, type PermissionMode, type ThinkingMode } from '@garcon/common/chat-modes';
 import {
@@ -86,6 +85,7 @@ import {
   type OpenCodeModelOption,
 } from './model-catalog.js';
 import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
+import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -123,6 +123,8 @@ interface OpenCodeRuntimeOptions {
   sseHeartbeatTimeoutMs?: number;
   modelCacheTtlMs?: number;
   shutdownStartupGraceMs?: number;
+  idleRetirementDelayMs?: number;
+  idleRetirementCheckIntervalMs?: number;
   now?: () => number;
   createInstance?: (input: {
     signal: AbortSignal;
@@ -190,19 +192,10 @@ export class OpenCodeRuntime {
   readonly #globalEventListener: OpenCodeGlobalEventListener;
   readonly #operationRoutes: OpenCodeOperationRoutes;
   readonly #models: OpenCodeModelDiscovery;
+  readonly #idleLifecycle: OpenCodeIdleLifecycle;
   #unavailableUntil = 0;
   #unavailableReason = '';
   readonly #instanceCreations: OpenCodeInstanceCreationTracker;
-  #idlePurger = new IdleSessionPurger<OpenCodeSession>({
-    sessions: () => this.#sessions.entries(),
-    isRunning: (session) => (
-      session.status === 'running' || session.providerWorkRequiresQuiescence
-    ),
-    lastActivityAt: (session) => session.lastActivityAt,
-    purge: (sessionId) => {
-      this.#sessions.delete(sessionId);
-    },
-  });
 
   #available: boolean | null = null;
   readonly #options: NormalizedOpenCodeRuntimeOptions;
@@ -243,10 +236,29 @@ export class OpenCodeRuntime {
       ),
       now: () => this.#now(),
     });
+    this.#idleLifecycle = new OpenCodeIdleLifecycle({
+      logger: this.#logger,
+      sessions: () => this.#sessions.entries(),
+      purgeSession: (sessionId) => { this.#sessions.delete(sessionId); },
+      hasInstance: () => this.#instance !== null,
+      hasStartup: () => this.#initPromise !== null,
+      endpointIdle: () => this.#endpointCoordinator.idle,
+      routesIdle: () => this.#operationRoutes.idle,
+      decisionsIdle: () => this.#decisions.idle,
+      hasPendingTurnWaiters: () => this.#pendingTurnWaiters.size > 0,
+      isShuttingDown: () => this.#shuttingDown,
+      runTransition: (operation) => this.#endpointCoordinator.runTransition(operation),
+      invalidateModels: () => this.#models.invalidate(),
+      closeInstance: () => this.#closeInstance(),
+      now: () => this.#now(),
+      retirementDelayMs: options.idleRetirementDelayMs,
+      retirementCheckIntervalMs: options.idleRetirementCheckIntervalMs,
+    });
     this.#endpointCoordinator = new OpenCodeEndpointCoordinator({
       assertAvailable: () => this.#assertCanUseOpenCode(),
       ensureUnlocked: () => this.#ensureOpenCodeServerUnlocked(),
       logger: this.#logger,
+      onActivity: () => this.#idleLifecycle.recordActivity(),
     });
     this.#globalEventListener = new OpenCodeGlobalEventListener({
       requestTimeoutMs: this.#options.requestTimeoutMs,
@@ -262,7 +274,7 @@ export class OpenCodeRuntime {
         this.#markTemporarilyUnavailable(reason, sourceGeneration)
       ),
       failRunningTurns: (error) => this.#failRunningTurnsForListenerError(error),
-      closeUnavailableInstanceIfIdle: () => this.#closeInstanceIfIdle(),
+      closeUnavailableInstanceIfIdle: () => this.#idleLifecycle.closeInstanceIfIdle(),
       confirmEventDelivery: this.#options.requiresExecutable
         ? (input) => this.#confirmGlobalEventDelivery(input)
         : async () => undefined,
@@ -288,7 +300,7 @@ export class OpenCodeRuntime {
   shutdown(): Promise<void> {
     if (this.#shutdownPromise) return this.#shutdownPromise;
     this.#shuttingDown = true;
-    this.#idlePurger.stop();
+    this.#idleLifecycle.stop();
     for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
       this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
     }
@@ -372,20 +384,8 @@ export class OpenCodeRuntime {
     const reasonChanged = this.#unavailableReason !== reason;
     this.#unavailableReason = reason;
     this.#unavailableUntil = now + this.#options.unavailableRetryMs;
-    this.#closeInstanceIfIdle();
+    this.#idleLifecycle.closeInstanceIfIdle();
     return wasAvailable || reasonChanged;
-  }
-
-  #hasRunningSessions(): boolean {
-    return Array.from(this.#sessions.values()).some((session) => session.status === 'running');
-  }
-
-  #closeInstanceIfIdle(): boolean {
-    if (!this.#hasRunningSessions() && this.#endpointCoordinator.idle) {
-      this.#closeInstance();
-      return true;
-    }
-    return false;
   }
 
   #closeInstance(): void {
@@ -685,13 +685,13 @@ export class OpenCodeRuntime {
       || session.status !== 'running'
       || session.turn !== route.turn
     ) {
-      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
       return;
     }
     const providerTerminal = lastValue(route.turn.assistantTerminals.values());
     if (providerTerminal?.outcome === 'failed') {
       this.#failTurnForProviderError(route.sessionId, session, providerTerminal.error);
-      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
       return;
     }
     const message = errorMessage(error);
@@ -706,7 +706,7 @@ export class OpenCodeRuntime {
     this.#decisions.cancelForSession(route.sessionId, 'cancelled');
     this.#rejectTurnWaiter(route.sessionId, error);
     this.#publishFailed(route.sessionId, route.turn.operation, message);
-    if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+    if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
   }
 
   #settleTurnTerminal(
@@ -800,6 +800,7 @@ export class OpenCodeRuntime {
 
         this.#instance = result;
         this.#instanceGeneration += 1;
+        this.#idleLifecycle.recordActivity();
         this.#watchServerTermination(result);
         this.#markAvailable();
         this.#drainPendingSessionDeletions();
@@ -1402,7 +1403,7 @@ export class OpenCodeRuntime {
     return agentSessionId;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
-      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
     }
   }
 
@@ -1496,7 +1497,7 @@ export class OpenCodeRuntime {
     if (turnFailure) throw turnFailure;
     } finally {
       this.#endpointCoordinator.turnAdmissionFinished();
-      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
     }
   }
 
@@ -1595,7 +1596,7 @@ export class OpenCodeRuntime {
       // keeps repeated compactions from leaking routes.
       if (turn) this.#operationRoutes.retireTurn(turn);
       this.#endpointCoordinator.turnAdmissionFinished();
-      if (this.isTemporarilyUnavailable()) this.#closeInstanceIfIdle();
+      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
     }
   }
 
@@ -1820,7 +1821,7 @@ export class OpenCodeRuntime {
   }
 
   startPurgeTimer(): void {
-    this.#idlePurger.start();
+    this.#idleLifecycle.start();
   }
 }
 

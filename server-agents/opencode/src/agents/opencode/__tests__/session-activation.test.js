@@ -6,6 +6,14 @@ async function* neverEndingStream() {
   await new Promise(() => {});
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function collectOperation(runId = 'run-default') {
   const events = [];
   return {
@@ -99,5 +107,49 @@ describe('OpenCodeRuntime session activation', () => {
     expect(sessionDelete).toHaveBeenCalledTimes(1);
     expect(sessionDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'session-1' });
     await runtime.shutdown();
+  });
+
+  it('fences session activation when shutdown crosses session creation', async () => {
+    const sessionCreate = deferred();
+    const sessionCreateEntered = deferred();
+    const sessionDelete = mock(() => Promise.resolve({}));
+    const prompt = mock(() => new Promise(() => {}));
+    const onSessionActivated = mock(() => undefined);
+    const close = mock(() => undefined);
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          permission: { reply: mock(() => Promise.resolve({ data: true })) },
+          global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+          session: {
+            create: mock(() => {
+              sessionCreateEntered.resolve();
+              return sessionCreate.promise;
+            }),
+            prompt,
+            delete: sessionDelete,
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close },
+      })),
+    });
+
+    const startOutcome = runtime.startSession(startRequest({ onSessionActivated }))
+      .then(() => null, (error) => error);
+    await sessionCreateEntered.promise;
+
+    const shutdown = runtime.shutdown();
+    sessionCreate.resolve({ data: { id: 'session-1' } });
+
+    expect(await startOutcome).toMatchObject({
+      message: 'OpenCode server process was retired while the request was in flight',
+    });
+    await shutdown;
+    expect(onSessionActivated).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(sessionDelete).not.toHaveBeenCalled();
+    expect(runtime.isRunning('session-1')).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

@@ -46,6 +46,10 @@ export class OpenCodeModelDiscovery {
     return this.#cache?.models ?? [];
   }
 
+  invalidate(): void {
+    if (this.#cache) this.#cache.fetchedAt = Number.NEGATIVE_INFINITY;
+  }
+
   async getModels(): Promise<OpenCodeModelOption[]> {
     if (!this.#options.isAvailable()) return [];
     if (this.#options.isTemporarilyUnavailable()) return this.models;

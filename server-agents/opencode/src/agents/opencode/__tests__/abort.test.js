@@ -1648,15 +1648,17 @@ describe('OpenCodeRuntime abort', () => {
 
     const originalSetInterval = globalThis.setInterval;
     const originalDateNow = Date.now;
-    let purgeIdleSessions;
+    const intervalCallbacks = new Map();
     try {
-      globalThis.setInterval = mock((callback) => {
-        purgeIdleSessions = callback;
+      globalThis.setInterval = mock((callback, intervalMs) => {
+        intervalCallbacks.set(intervalMs, callback);
         return 1;
       });
       const idleSince = Date.now();
       Date.now = mock(() => idleSince + 31 * 60 * 1000);
       runtime.startPurgeTimer();
+      const purgeIdleSessions = intervalCallbacks.get(5 * 60 * 1000);
+      expect(purgeIdleSessions).toBeFunction();
       purgeIdleSessions();
     } finally {
       Date.now = originalDateNow;

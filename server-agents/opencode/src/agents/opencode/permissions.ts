@@ -114,6 +114,10 @@ export class OpenCodeDecisionController {
     this.#questions = new OpenCodeQuestionController(options);
   }
 
+  get idle(): boolean {
+    return this.#pending.size === 0 && this.#questions.idle;
+  }
+
   handle(
     client: any,
     event: SSEEvent,

@@ -15,6 +15,7 @@ interface OpenCodeEndpointCoordinatorOptions {
   readonly assertAvailable: () => void;
   readonly ensureUnlocked: () => Promise<OpenCodeEndpointInstance>;
   readonly logger: AgentLogger;
+  readonly onActivity: () => void;
 }
 
 type ScopedSessionRequest = <T>(
@@ -55,28 +56,34 @@ export class OpenCodeEndpointCoordinator {
       this.#options.assertAvailable();
       client = (await this.#options.ensureUnlocked()).client;
       this.#requestLeases += 1;
+      this.#options.onActivity();
     });
     try {
       return await operation(client);
     } finally {
       this.#requestLeases -= 1;
+      this.#options.onActivity();
     }
   }
 
   requestStarted(): void {
     this.#requestLeases += 1;
+    this.#options.onActivity();
   }
 
   requestFinished(): void {
     this.#requestLeases -= 1;
+    this.#options.onActivity();
   }
 
   turnAdmissionStarted(): void {
     this.#turnAdmissions += 1;
+    this.#options.onActivity();
   }
 
   turnAdmissionFinished(): void {
     this.#turnAdmissions -= 1;
+    this.#options.onActivity();
   }
 
   async forkSession(

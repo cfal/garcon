@@ -139,6 +139,10 @@ export class OpenCodeQuestionController {
 
   constructor(private readonly options: OpenCodeQuestionControllerOptions) {}
 
+  get idle(): boolean {
+    return this.#pending.size === 0;
+  }
+
   handle(
     client: any,
     event: SSEEvent,
