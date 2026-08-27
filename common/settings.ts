@@ -126,12 +126,18 @@ export interface TranscriptSearchFeatureSettings {
   enabled: boolean;
 }
 
+export interface ChatIdDiscoveryFeatureSettings {
+  enabled: boolean;
+}
+
 export interface RemoteFeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
+  chatIdDiscovery: ChatIdDiscoveryFeatureSettings;
 }
 
 export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
   transcriptSearch: { enabled: false },
+  chatIdDiscovery: { enabled: true },
 };
 
 export interface RecentAgentSetting {
@@ -169,6 +175,7 @@ export interface RemoteSettingsSnapshot {
 export interface UpdateRemoteSettingsInput {
   features?: {
     transcriptSearch?: Partial<TranscriptSearchFeatureSettings>;
+    chatIdDiscovery?: Partial<ChatIdDiscoveryFeatureSettings>;
   };
   ui?: Partial<RemoteUiSettings>;
   paths?: Partial<RemotePathSettings>;
@@ -471,11 +478,17 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
   const raw = asRecord(value);
   const transcriptSearch = asRecord(raw?.transcriptSearch);
+  const chatIdDiscovery = asRecord(raw?.chatIdDiscovery);
   return {
     transcriptSearch: {
       enabled: typeof transcriptSearch?.enabled === 'boolean'
         ? transcriptSearch.enabled
         : false,
+    },
+    chatIdDiscovery: {
+      enabled: typeof chatIdDiscovery?.enabled === 'boolean'
+        ? chatIdDiscovery.enabled
+        : true,
     },
   };
 }

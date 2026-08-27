@@ -46,7 +46,10 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			chatIdDiscovery: { enabled: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -115,6 +118,10 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 			transcriptSearch: {
 				...current.features.transcriptSearch,
 				...(patch.features?.transcriptSearch ?? {}),
+			},
+			chatIdDiscovery: {
+				...current.features.chatIdDiscovery,
+				...(patch.features?.chatIdDiscovery ?? {}),
 			},
 		};
 		if (patch.ui?.chatTitle) {
@@ -195,6 +202,30 @@ describe('RemoteSettingsSection', () => {
 				features: { transcriptSearch: { enabled: true } },
 			});
 			expect(store.snapshot?.features.transcriptSearch.enabled).toBe(true);
+		});
+	});
+
+	it('disables chat ID discovery through the inverted remote feature patch', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		const toggle = screen.getByRole('switch', { name: 'Disable chat ID auto-discovery' });
+		expect(toggle.getAttribute('aria-checked')).toBe('false');
+		expect(screen.getByText(/Allows an agent to automatically discover their own chat ID/)).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'See Garcon Skills' }).getAttribute('href')).toBe(
+			'https://github.com/cfal/garcon-skills',
+		);
+
+		await fireEvent.click(toggle);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				features: { chatIdDiscovery: { enabled: false } },
+			});
+			expect(store.snapshot?.features.chatIdDiscovery.enabled).toBe(false);
 		});
 	});
 

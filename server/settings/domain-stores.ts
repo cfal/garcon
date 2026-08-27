@@ -332,6 +332,19 @@ export class FeatureSettingsStore {
       return structuredClone(settings.features);
     });
   }
+
+  async setChatIdDiscoveryEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      settings.features = {
+        ...normalizeRemoteFeatureSettings(settings.features),
+        chatIdDiscovery: { enabled },
+      };
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+      return structuredClone(settings.features);
+    });
+  }
 }
 
 export class StartupDefaultsStore {

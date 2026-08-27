@@ -31,7 +31,10 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
-		features: { transcriptSearch: { enabled: false } },
+		features: {
+			transcriptSearch: { enabled: false },
+			chatIdDiscovery: { enabled: true },
+		},
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
