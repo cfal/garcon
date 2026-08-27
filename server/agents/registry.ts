@@ -50,6 +50,7 @@ import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import type { ChatIdDiscoveryControllerPort } from '../chats/chat-id-discovery-controller.js';
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
@@ -183,6 +184,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
+    chatIdDiscovery?: ChatIdDiscoveryControllerPort;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;
@@ -204,6 +206,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ledger: this.#ledger,
       adoption: this.#adoption,
       hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
+      chatIdDiscovery: args.chatIdDiscovery,
     });
     this.#hasPendingOwnershipTransfer = args.hasPendingOwnershipTransfer;
     this.#settings = new AgentSessionSettingsService({

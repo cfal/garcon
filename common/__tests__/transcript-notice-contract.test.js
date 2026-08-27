@@ -48,6 +48,40 @@ describe('transcript notice contracts', () => {
     expect(isHandoffSummaryNoticeDetail({ type: 'ordinary-notice' })).toBe(false);
   });
 
+  it('round-trips typed chat ID discovery notices', () => {
+    for (const message of [
+      {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request' },
+        title: 'Request: Garcon Chat ID',
+      },
+      {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Sent chat ID 1787836573296800 to agent',
+        detail: { type: 'chat-id-disclosure', delivery: 'input' },
+        title: 'Response: Garcon Chat ID',
+      },
+      {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Sent chat ID 1787836573296800 to agent (steer)',
+        detail: { type: 'chat-id-disclosure', delivery: 'steer' },
+        title: 'Response: Garcon Chat ID',
+      },
+    ]) {
+      expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
+    }
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Malformed disclosure.',
+      detail: { type: 'chat-id-disclosure', delivery: 'queued' },
+    })).toBeNull();
+  });
+
   it('upgrades legacy CLI provenance into explicit row messages', () => {
     for (const [type, style] of [
       ['transcript-notice', 'notice'],

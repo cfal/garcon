@@ -55,6 +55,8 @@ import {
   CarryOverCompactionService,
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
+import { ChatIdDiscoveryState } from './chats/chat-id-discovery-state.js';
+import { ChatIdDiscoveryController } from './chats/chat-id-discovery-controller.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -279,6 +281,16 @@ export async function startServer(): Promise<void> {
     });
     await chatRegistry.init();
     await settings.init();
+    let chatIdDiscoveryEnabled = settings.getFeatureSettings().chatIdDiscovery.enabled;
+    const chatIdDiscoveryState = new ChatIdDiscoveryState(
+      () => chatIdDiscoveryEnabled,
+      (error, chatId) => {
+        logger.warn('Ignored chat ID discovery request for noncanonical chat', {
+          chatId,
+          reason: errorMessage(error),
+        });
+      },
+    );
     const transcriptStore = new TranscriptLedgerStore(
       path.join(workspaceDir, 'transcript-ledgers'),
     );
@@ -290,12 +302,35 @@ export async function startServer(): Promise<void> {
       onListenerError(error) {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
+      chatIdRequests: {
+        enabled: () => chatIdDiscoveryState.enabled(),
+        request: (chatId, viewId) => chatIdDiscoveryState.request(chatId, viewId),
+      },
+    });
+    const chatIdDiscovery = new ChatIdDiscoveryController({
+      state: chatIdDiscoveryState,
+      notices: transcriptLedger,
+      onRecordError(error, chatId) {
+        logger.warn('Failed to record chat ID disclosure', {
+          chatId,
+          reason: errorMessage(error),
+        });
+      },
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
-      if (event.type === 'view-replaced') preparedCarryover.discard(event.chatId);
+      if (event.type !== 'view-replaced') return;
+      preparedCarryover.discard(event.chatId);
+      chatIdDiscoveryState.discard(event.chatId);
     });
-    chatRegistry.onChatRemoved((chatId) => preparedCarryover.discard(chatId));
+    chatRegistry.onChatRemoved((chatId) => {
+      preparedCarryover.discard(chatId);
+      chatIdDiscoveryState.discard(chatId);
+    });
+    settings.onRemoteSettingsChanged(() => {
+      chatIdDiscoveryEnabled = settings.getFeatureSettings().chatIdDiscovery.enabled;
+      if (!chatIdDiscoveryEnabled) chatIdDiscoveryState.clear();
+    });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
@@ -406,6 +441,7 @@ export async function startServer(): Promise<void> {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
       hasPendingOwnershipTransfer: (chatId) => agentOwnership.hasPending(chatId),
+      chatIdDiscovery,
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
@@ -482,6 +518,7 @@ export async function startServer(): Promise<void> {
       preparedCarryover,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       onCommitted(chatId) {
+        chatIdDiscoveryState.discard(chatId);
         eventWiring?.notifyAgentHandoff(chatId);
       },
     });

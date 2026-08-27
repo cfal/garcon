@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { AgentRunCommandRequest, StartChatCommandRequest } from '../../../common/chat-command-contracts.js';
 import type { ChatSessionStoppedMessage } from '../../../common/ws-events.js';
-import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
@@ -190,6 +190,65 @@ function defineSteeringConformance(
         });
       } finally {
         held.release();
+        driver.reset();
+      }
+    }, 120_000);
+
+    test('delivers a requested chat ID to the next queued turn exactly once', async () => {
+      if (!environment) throw new Error(`${providerName} environment was not initialized.`);
+      const { driver } = environment;
+      const firstPrompt = marker(driver.id, 'CHAT_ID_FIRST_PROMPT');
+      const queuedPrompt = marker(driver.id, 'CHAT_ID_QUEUED_PROMPT');
+      const queuedReply = marker(driver.id, 'CHAT_ID_QUEUED_REPLY');
+      const firstHeld = driver.holdReply(`<get-garcon-chat-id />${marker(driver.id, 'CHAT_ID_REQUEST')}`);
+      const queuedHeld = driver.holdReply(queuedReply);
+
+      try {
+        await withIntegrationFixture(`${driver.id}-scripted-chat-id-discovery`, async (fixture) => {
+          const chatId = fixture.newChatId();
+          await fixture.client.startChat(driver.startRequest({
+            chatId,
+            projectPath: fixture.dirs.project,
+            command: firstPrompt,
+          }));
+          await firstHeld.requested;
+          await fixture.client.enqueueNew(chatId, queuedPrompt);
+          firstHeld.release();
+
+          const queuedRequest = await queuedHeld.requested;
+          const disclosed = queuedRequest.userTexts.find((text) => text.includes(queuedPrompt));
+          if (!disclosed) throw new Error(`${providerName} omitted the queued user prompt.`);
+          expect(disclosed).toContain(queuedPrompt);
+          expect(disclosed.endsWith(
+            `\n\n<garcon-chat-id>${chatId}</garcon-chat-id>`,
+          )).toBe(true);
+          expect(disclosed.split('<garcon-chat-id>').length - 1).toBe(1);
+          queuedHeld.release();
+          await fixture.client.waitForProcessing(chatId, false, {
+            timeoutMs: LIVE_TURN_TIMEOUT_MS,
+          });
+
+          const page = await fixture.client.getMessages(chatId);
+          expect(userContents(page.messages)).toEqual([firstPrompt, queuedPrompt]);
+          expect(messagesOfType(page.messages, 'transcript-notice')
+            .filter((message) => message.detail?.type === 'chat-id-request')).toHaveLength(1);
+          expect(messagesOfType(page.messages, 'transcript-notice')
+            .filter((message) => message.detail?.type === 'chat-id-disclosure'))
+            .toEqual([expect.objectContaining({
+              content: `Sent chat ID ${chatId} to agent`,
+              detail: { type: 'chat-id-disclosure', delivery: 'input' },
+            })]);
+          driver.assertSettled();
+        }, {
+          serverEnvironment: driver.serverEnvironment,
+          resolveServerEnvironment: driver.resolveServerEnvironment,
+          prepareWorkspace: driver.prepareWorkspace,
+          afterGarconStop: driver.afterGarconStop,
+          extraDiagnostics: driver.extraDiagnostics,
+        });
+      } finally {
+        firstHeld.release();
+        queuedHeld.release();
         driver.reset();
       }
     }, 120_000);

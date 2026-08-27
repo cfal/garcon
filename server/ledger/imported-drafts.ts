@@ -4,6 +4,7 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
+import { sanitizeImportedChatIdMessage } from '../../common/chat-id-discovery.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {
@@ -32,10 +33,12 @@ export function frozenDrafts(
 
 // Permission lifecycle is reconstructed from its own durable rows, never from imported history.
 function importedDraftFor(
-  message: ChatMessage,
+  original: ChatMessage,
   providerMeta: JsonObject | null,
   now: () => string,
 ): LedgerRowDraft[] {
+  const message = sanitizeImportedChatIdMessage(original);
+  if (!message) return [];
   if (message.type === 'permission-request'
       || message.type === 'permission-resolved'
       || message.type === 'permission-cancelled'

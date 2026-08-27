@@ -203,6 +203,81 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
+  it('keeps chat ID discovery notices visible but presentation-only across folds', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-id-notice-fold-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => AT });
+    try {
+      ledger.initializeChat(CHAT_ID);
+      const rows = store.append(CHAT_ID, VIEW_ID, [
+        {
+          kind: 'notice',
+          at: AT,
+          message: 'Agent requested chat ID',
+          detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+          providerMeta: null,
+        },
+        {
+          kind: 'notice',
+          at: AT,
+          message: 'Sent chat ID 1787836573296800 to agent (steer)',
+          detail: {
+            type: 'chat-id-disclosure',
+            delivery: 'steer',
+            title: 'Response: Garcon Chat ID',
+          },
+          providerMeta: null,
+        },
+      ]);
+
+      expect(ledgerRowsToTranscriptMessages(rows)).toEqual([
+        {
+          ordinal: 1,
+          message: new TranscriptNoticeMessage(
+            AT,
+            'Agent requested chat ID',
+            { type: 'chat-id-request' },
+            'Request: Garcon Chat ID',
+          ),
+        },
+        {
+          ordinal: 2,
+          message: new TranscriptNoticeMessage(
+            AT,
+            'Sent chat ID 1787836573296800 to agent (steer)',
+            { type: 'chat-id-disclosure', delivery: 'steer' },
+            'Response: Garcon Chat ID',
+          ),
+        },
+      ]);
+      expect(ledger.conversationMessages(CHAT_ID)).toEqual([]);
+      expect(frozenConversationDrafts(rows)).toEqual([]);
+      expect((await initializeSearchFold(ledger, rows))).toEqual([]);
+      expect(foldRowsForExport(rows).map((entry) => entry.category)).toEqual([
+        'diagnostics',
+        'diagnostics',
+      ]);
+
+      const metadataUpdates = [];
+      const fanout = createTranscriptEventFanout({
+        chatExists: () => true,
+        schedule: (_chatId, task) => task(),
+        broadcast: () => undefined,
+        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        replaceMetadata: () => undefined,
+        resendCandidates: () => [],
+      });
+      fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
+      expect(metadataUpdates).toEqual([]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('[TLV5-CHAT-ROW.03-READ-FOLDS-CORE-UNIT-01] keeps every CLI row style presentation-only across ledger folds', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-row-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {

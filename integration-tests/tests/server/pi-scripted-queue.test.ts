@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { assistantContents } from '../../support/chat-assertions.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
@@ -98,6 +98,59 @@ describe('scripted Pi queue lifecycle', () => {
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
+  }, 120_000);
+
+  test('delivers a requested chat ID to the next queued turn exactly once', async () => {
+    const testEnvironment = requireEnvironment();
+    const firstPrompt = marker('CHAT_ID_FIRST_PROMPT');
+    const queuedPrompt = marker('CHAT_ID_QUEUED_PROMPT');
+    const firstHeld = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+    ]);
+    const queuedHeld = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(marker('CHAT_ID_QUEUED_REPLY')),
+    ]);
+
+    try {
+      await withIntegrationFixture('pi-scripted-chat-id-discovery', async (fixture) => {
+        const chatId = fixture.newChatId();
+        await fixture.client.startChat(scriptedPiStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: firstPrompt,
+        }));
+        await firstHeld.requested;
+        await fixture.client.enqueueNew(chatId, queuedPrompt);
+        firstHeld.release();
+
+        const queuedRequest = await queuedHeld.requested;
+        const disclosed = queuedRequest.userTexts.find((text) => text.includes(queuedPrompt));
+        if (!disclosed) throw new Error('Pi omitted the queued user prompt.');
+        expect(disclosed.endsWith(
+          `\n\n<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        )).toBe(true);
+        expect(disclosed.split('<garcon-chat-id>').length - 1).toBe(1);
+        queuedHeld.release();
+        await fixture.client.waitForProcessing(chatId, false, {
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        });
+
+        const page = await fixture.client.getMessages(chatId);
+        expect(userContents(page.messages)).toEqual([firstPrompt, queuedPrompt]);
+        expect(messagesOfType(page.messages, 'transcript-notice')
+          .filter((message) => message.detail?.type === 'chat-id-request')).toHaveLength(1);
+        expect(messagesOfType(page.messages, 'transcript-notice')
+          .filter((message) => message.detail?.type === 'chat-id-disclosure'))
+          .toEqual([expect.objectContaining({
+            content: `Sent chat ID ${chatId} to agent`,
+            detail: { type: 'chat-id-disclosure', delivery: 'input' },
+          })]);
+        testEnvironment.model.assertSettled();
+      }, withScriptedPi());
+    } finally {
+      firstHeld.release();
+      queuedHeld.release();
+    }
   }, 120_000);
 
   test('holds queued entries while paused and dispatches on resume', async () => {

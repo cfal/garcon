@@ -8,6 +8,8 @@ import {
   TranscriptNoticeMessage,
   UserMessage,
   isCarryoverMigrationQuarantineNoticeDetail,
+  isChatIdDisclosureNoticeDetail,
+  isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
   type ChatMessage,
 } from '../../common/chat-types.js';
@@ -114,5 +116,9 @@ function noticeDetail(detail: LedgerNoticeRow['detail']) {
     };
   }
   if (isHandoffSummaryNoticeDetail(detail)) return { type: detail.type };
+  if (isChatIdRequestNoticeDetail(detail)) return { type: detail.type };
+  if (isChatIdDisclosureNoticeDetail(detail)) {
+    return { type: detail.type, delivery: detail.delivery };
+  }
   return undefined;
 }
