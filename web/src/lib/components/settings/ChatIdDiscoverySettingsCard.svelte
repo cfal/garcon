@@ -7,12 +7,12 @@
 	const remoteSettings = getRemoteSettings();
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let discoveryDisabled = $derived(
+	let isDiscoveryDisabled = $derived(
 		remoteSettings.snapshot?.features?.chatIdDiscovery?.enabled === false,
 	);
 
-	async function setDisabled(disabled: boolean): Promise<void> {
-		if (isSaving || disabled === discoveryDisabled) return;
+	async function setDiscoveryDisabled(disabled: boolean): Promise<void> {
+		if (isSaving || disabled === isDiscoveryDisabled) return;
 		isSaving = true;
 		saveError = null;
 		try {
@@ -47,9 +47,9 @@
 		</div>
 		<Switch
 			id="chat-id-discovery-disabled"
-			checked={discoveryDisabled}
+			checked={isDiscoveryDisabled}
 			disabled={isSaving}
-			onCheckedChange={(checked) => void setDisabled(checked)}
+			onCheckedChange={(checked) => void setDiscoveryDisabled(checked)}
 		/>
 	</div>
 	{#if saveError}

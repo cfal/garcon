@@ -209,25 +209,19 @@ export class AgentRuntimeRouter {
       if (carryover.summary) {
         this.#ledger.appendHandoffSummary(chatId, prepared.viewId, carryover.summary);
       }
-      const disclosure = this.#chatIdDiscovery.reserve(
+      const handle = await this.#dispatchInputWithChatId(
         chatId,
         prepared.viewId,
         prepared.prompt,
-      );
-      try {
-        const handle = await integration.execution.start({
+        (providerPrompt) => integration.execution.start({
           ...this.#executionContextV5(chatId, entry, selection, runId, opts),
           sink: producer.sink,
-          prompt: disclosure.prompt,
+          prompt: providerPrompt,
           attachments: prepared.attachments,
           carriedContext: carryover.context,
-        });
-        this.#chatIdDiscovery.recordDelivered(disclosure.reservation, 'input');
-        await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
-      } catch (error) {
-        this.#chatIdDiscovery.release(disclosure.reservation);
-        throw error;
-      }
+        }),
+      );
+      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
         model: selection.model,
@@ -259,6 +253,7 @@ export class AgentRuntimeRouter {
       });
       return;
     }
+    const agentSessionId = entry.agentSessionId;
 
     const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
@@ -284,26 +279,20 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-      const disclosure = this.#chatIdDiscovery.reserve(
+      const handle = await this.#dispatchInputWithChatId(
         chatId,
         prepared.viewId,
         prepared.prompt,
-      );
-      try {
-        const handle = await integration.execution.resume({
+        (providerPrompt) => integration.execution.resume({
           ...this.#executionContextV5(chatId, entry, selection, runId, opts),
           sink: producer.sink,
-          agentSessionId: entry.agentSessionId,
+          agentSessionId,
           nativeSession: entry.nativeSession ?? null,
-          prompt: disclosure.prompt,
+          prompt: providerPrompt,
           attachments: prepared.attachments,
-        });
-        this.#chatIdDiscovery.recordDelivered(disclosure.reservation, 'input');
-        await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
-      } catch (error) {
-        this.#chatIdDiscovery.release(disclosure.reservation);
-        throw error;
-      }
+        }),
+      );
+      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
@@ -746,6 +735,23 @@ export class AgentRuntimeRouter {
       );
     }
     await integration.endpoints.validate(endpoint);
+  }
+
+  async #dispatchInputWithChatId<T>(
+    chatId: string,
+    viewId: TranscriptViewId,
+    prompt: string,
+    dispatch: (providerPrompt: string) => Promise<T>,
+  ): Promise<T> {
+    const disclosure = this.#chatIdDiscovery.reserve(chatId, viewId, prompt);
+    try {
+      const result = await dispatch(disclosure.prompt);
+      this.#chatIdDiscovery.recordDelivered(disclosure.reservation, 'input');
+      return result;
+    } catch (error) {
+      this.#chatIdDiscovery.release(disclosure.reservation);
+      throw error;
+    }
   }
 
   async #preparePrompt(

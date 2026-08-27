@@ -655,31 +655,24 @@ export class TranscriptLedgerService {
     switch (event.type) {
       case 'rows': {
         const drafts: LedgerRowDraft[] = [];
-        let requested = false;
+        let chatIdRequested = false;
         const discoveryEnabled = this.#chatIdRequests.enabled();
         for (const row of event.rows) {
           const request = discoveryEnabled
             ? transformChatIdRequest(row.message)
             : null;
-          if (!request) {
+          const message = request ? request.message : row.message;
+          if (message) {
             drafts.push({
               kind: 'provider-row',
-              at: row.message.timestamp,
-              message: row.message,
+              at: message.timestamp,
+              message,
               providerMeta: row.providerMeta ?? null,
             });
-            continue;
           }
+          if (!request) continue;
 
-          requested = true;
-          if (request.message) {
-            drafts.push({
-              kind: 'provider-row',
-              at: request.message.timestamp,
-              message: request.message,
-              providerMeta: row.providerMeta ?? null,
-            });
-          }
+          chatIdRequested = true;
           drafts.push({
             kind: 'notice',
             at: row.message.timestamp,
@@ -693,7 +686,7 @@ export class TranscriptLedgerService {
         }
         if (drafts.length === 0) return;
         const rows = this.#store.append(chatId, viewId, drafts);
-        if (requested) this.#chatIdRequests.request(chatId, viewId);
+        if (chatIdRequested) this.#chatIdRequests.request(chatId, viewId);
         this.#notify({ type: 'rows', chatId, viewId, rows });
         return;
       }

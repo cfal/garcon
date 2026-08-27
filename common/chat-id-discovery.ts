@@ -61,15 +61,14 @@ export function sanitizeImportedChatIdMessage(
   if (message.type !== 'user-message') return message;
 
   const content = stripImportedChatIdDisclosure(message.content);
-  return content === message.content
-    ? message
-    : new UserMessage(
-      message.timestamp,
-      content,
-      message.images,
-      message.metadata,
-      message.presentation,
-    );
+  if (content === message.content) return message;
+  return new UserMessage(
+    message.timestamp,
+    content,
+    message.images,
+    message.metadata,
+    message.presentation,
+  );
 }
 
 export function chatIdDisclosureNoticeContent(

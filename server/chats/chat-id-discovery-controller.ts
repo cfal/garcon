@@ -4,7 +4,7 @@ import {
   CHAT_ID_DISCLOSURE_NOTICE_TITLE,
   type ChatIdDisclosureDelivery,
 } from '../../common/chat-id-discovery.js';
-import type { TranscriptViewId } from '../ledger/contracts.js';
+import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { ChatIdDiscoveryState, ReservedChatIdDisclosure } from './chat-id-discovery-state.js';
 
 export interface PreparedChatIdDisclosure {
@@ -32,20 +32,7 @@ export const DISABLED_CHAT_ID_DISCOVERY_CONTROLLER = Object.freeze({
 
 interface ChatIdDiscoveryControllerDeps {
   readonly state: ChatIdDiscoveryState;
-  readonly notices: {
-    appendNotice(
-      chatId: string,
-      viewId: TranscriptViewId,
-      input: {
-        readonly title: string;
-        readonly content: string;
-        readonly detail: {
-          readonly type: 'chat-id-disclosure';
-          readonly delivery: ChatIdDisclosureDelivery;
-        };
-      },
-    ): unknown;
-  };
+  readonly notices: Pick<TranscriptLedgerService, 'appendNotice'>;
   readonly onRecordError?: (error: unknown, chatId: string) => void;
 }
 
