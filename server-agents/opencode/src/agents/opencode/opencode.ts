@@ -20,6 +20,7 @@ import {
   acceptUniqueOpenCodeTurnEvent,
   createOpenCodeTurnContext,
   openCodeEventBelongsToTurn,
+  relocateOpenCodeSession,
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
@@ -1660,6 +1661,13 @@ export class OpenCodeRuntime {
     return forkedSessionId;
   }
 
+  async moveSession(agentSessionId: string, directory: string, signal: AbortSignal): Promise<void> {
+    await this.#endpointCoordinator.moveSession(
+      agentSessionId, directory, signal, (...args) => this.#runRequest(...args),
+    );
+    const session = this.#sessions.get(agentSessionId.trim());
+    if (session) relocateOpenCodeSession(session, directory.trim());
+  }
   async deleteSession(agentSessionId: string, signal?: AbortSignal): Promise<void> {
     await this.withClientLease(async (client) => {
       const result = await this.#runScopedSessionRequest(

@@ -53,7 +53,7 @@ const agentCatalogEntries = [
     supportsFork: true,
     supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
-    supportsUpdateProjectPath: false,
+    supportsUpdateProjectPath: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -382,7 +382,7 @@ describe("GET /api/v1/models", () => {
     expect(opencode.supportsFork).toBe(true);
     expect(opencode.supportsForkAtMessage).toBe(false);
     expect(opencode.supportsForkWhileRunning).toBe(false);
-    expect(opencode.supportsUpdateProjectPath).toBe(false);
+    expect(opencode.supportsUpdateProjectPath).toBe(true);
     expect(opencode.supportsImages).toBe(false);
 
     const factory = body.catalog.agents.find((p) => p.id === "factory");

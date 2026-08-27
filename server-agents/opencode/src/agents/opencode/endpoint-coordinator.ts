@@ -3,6 +3,7 @@ import {
   createOpenCodeRequestScope,
   isOpenCodeNotFoundResult,
   openCodeResultErrorMessage,
+  throwOpenCodeResultError,
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
 } from './sdk-result.js';
@@ -22,6 +23,12 @@ type ScopedSessionRequest = <T>(
   label: string,
   scope: OpenCodeRequestScope,
   operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+) => Promise<T>;
+
+type OpenCodeRequest = <T>(
+  label: string,
+  operation: (signal: AbortSignal) => Promise<T>,
+  control?: { signal?: AbortSignal; timeoutMs?: number },
 ) => Promise<T>;
 
 export class OpenCodeEndpointCoordinator {
@@ -127,5 +134,37 @@ export class OpenCodeEndpointCoordinator {
     if (!forkedSessionId) throw new Error('OpenCode session fork did not return a session id');
     this.#options.logger.info('OpenCode session forked', { sourceSessionId: sessionID, forkedSessionId });
     return forkedSessionId;
+  }
+
+  async moveSession(
+    agentSessionId: string,
+    directory: string,
+    signal: AbortSignal,
+    runRequest: OpenCodeRequest,
+  ): Promise<void> {
+    const sessionID = agentSessionId.trim();
+    const destination = directory.trim();
+    if (!sessionID) throw new Error('Cannot move OpenCode session: missing session id');
+    if (!destination) throw new Error('Cannot move OpenCode session: missing destination directory');
+    signal.throwIfAborted();
+
+    await this.withClientLease(async (client) => {
+      if (typeof client.experimental?.controlPlane?.moveSession !== 'function') {
+        throw new AgentIntegrationError(
+          'OPERATION_UNSUPPORTED',
+          'This OpenCode version does not support project path updates',
+          false,
+        );
+      }
+      const result = await runRequest(
+        'OpenCode session move',
+        (requestSignal) => client.experimental.controlPlane.moveSession({
+          sessionID,
+          destination: { directory: destination },
+        }, { signal: requestSignal }),
+        { signal },
+      );
+      throwOpenCodeResultError(result, 'OpenCode session move failed');
+    });
   }
 }

@@ -34,6 +34,7 @@ import { createOpenCodeNativeForking } from './agents/opencode/forking.js';
 import { getOpenCodeAuthStatus } from './agents/opencode/opencode-auth.js';
 import { OpenCodeRuntime } from './agents/opencode/opencode.js';
 import { createOpenCodeNativeActivityProbe } from './agents/opencode/native-activity.js';
+import { createOpenCodeProjectPathUpdates } from './agents/opencode/project-path.js';
 
 const OPENCODE_DESCRIPTOR = {
   id: 'opencode',
@@ -43,7 +44,7 @@ const OPENCODE_DESCRIPTOR = {
   // OpenCode expresses effort as per-model variant names; no variant maps to ultra.
   supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'ultra'),
   supportsImages: true,
-  supportsProjectPathUpdate: false,
+  supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: [],
   configuration: [{
@@ -66,7 +67,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
-  readonly projectPathUpdates = null;
+  readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -110,6 +111,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
     };
     const nativeEvidence = createOpenCodeNativeEvidence(runtime, nativeSessions, sessionId);
     this.nativeSessions = nativeEvidence;
+    this.projectPathUpdates = createOpenCodeProjectPathUpdates({ runtime, sessionId });
     this.execution = producer.execution;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
