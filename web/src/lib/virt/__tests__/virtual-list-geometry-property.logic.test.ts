@@ -56,7 +56,7 @@ describe('VirtualListGeometry properties', () => {
 			let nextKey = 0;
 
 			for (let operation = 0; operation < 100; operation += 1) {
-				const choice = Math.floor(next() * 6);
+				const choice = Math.floor(next() * 7);
 				if (choice === 0 || rows.length === 0) {
 					rows.push({ key: `row-${nextKey++}`, estimate: Math.floor(next() * 80) / 2 });
 				} else if (choice === 1) {
@@ -69,6 +69,12 @@ describe('VirtualListGeometry properties', () => {
 					const row = rows[Math.floor(next() * rows.length)];
 					row.estimate = Math.floor(next() * 100) / 4;
 				} else if (choice === 4) {
+					const row = rows[0];
+					measurements.delete(row.key);
+					geometry.deleteMeasurement(row.key);
+					row.estimate = Math.floor(next() * 100) / 4;
+					rows.push({ key: `row-${nextKey++}`, estimate: Math.floor(next() * 80) / 2 });
+				} else if (choice === 5) {
 					const row = rows[Math.floor(next() * rows.length)];
 					const size = Math.floor(next() * 100) / 4;
 					measurements.set(row.key, size);

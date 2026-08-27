@@ -84,6 +84,142 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(70);
 	});
 
+	it('retries idle deviation when a scroll returns to physical bounds', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [80, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(-10);
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [20, 80, 80],
+			anchor: { kind: 'item', key: 'b' },
+		});
+
+		expect(test.writes).toBe(0);
+		expect(test.controller.snapshot.sizerSize).toBe(160);
+		test.setPhysicalScrollTop(0);
+		test.environment.flushMicrotasks();
+
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(20);
+		expect(test.controller.snapshot.sizerSize).toBe(180);
+	});
+
+	it('retries stale idle deviation when bounds recover without a scroll event', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [80, 80],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(-10);
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [20, 80, 80],
+			anchor: { kind: 'item', key: 'b' },
+		});
+
+		test.setPhysicalScrollTopSilently(0);
+		test.environment.advanceTime(1_000);
+		test.environment.flushMicrotasks();
+
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(20);
+	});
+
+	it('solves a bounds clamp when scroll dispatch precedes viewport resize', () => {
+		const test = harness({ viewportSize: 60 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [50, 50],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(40);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [30, 50, 50],
+			anchor: { kind: 'item', key: 'b' },
+		});
+
+		test.setViewportSizeSilently(120);
+		test.setPhysicalScrollTop(0);
+		test.emitViewportResize();
+
+		expect(test.controller.snapshot.sizerSize).toBe(120);
+		expect(test.controller.viewportPosition?.logicalOffset).toBe(10);
+		expect(test.records).toContainEqual(
+			expect.objectContaining({
+				source: 'viewport',
+				deviationAfter: 10,
+				clampedRemainder: 60,
+				scrollWrites: 0,
+			}),
+		);
+	});
+
+	it('records settled deviation and painted anchor coordinates', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [20, 40, 40],
+			anchor: { kind: 'item', key: 'b' },
+		});
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [40, 40],
+			anchor: { kind: 'item', key: 'b' },
+		});
+
+		expect(test.records.at(-1)).toMatchObject({
+			deviationBefore: 20,
+			deviationAfter: 0,
+			anchorPaintedStartBefore: 0,
+			anchorPaintedStartAfter: 0,
+			scrollWrites: 0,
+		});
+	});
+
+	it('publishes no overscan row when every candidate paints above the sizer', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b'],
+			estimates: [80],
+			anchor: { kind: 'none' },
+		});
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b'],
+			estimates: [80, 80],
+			anchor: { kind: 'item', key: 'b' },
+		});
+		test.setLeadingOffset(100);
+		test.setPhysicalScrollTop(0);
+
+		expect(test.controller.snapshot.visibleRange).toEqual({ startIndex: 0, endIndex: 0 });
+		expect(test.controller.snapshot.overscanRange).toBeNull();
+	});
+
 	it('keeps the intended range while redeeming deferred correction at idle', () => {
 		const test = harness({ viewportSize: 80, overscan: 0 });
 		test.controller.apply({
@@ -316,7 +452,14 @@ describe('VirtualListController', () => {
 		expect(test.controller.measuredSize('a')).toBe(40);
 
 		test.environment.observer.emit(first.element, 90);
+		test.environment.observer.emit(second.element, -10);
+		test.environment.observer.emit(second.element, 40);
 		expect(test.controller.measuredSize('a')).toBe(40);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'resize',
+			ignoredEntries: 2,
+			published: false,
+		});
 		second.detach?.();
 	});
 
@@ -413,6 +556,23 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(1_000);
 	});
 
+	it('targets physical scroll before leading content', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [40, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.setLeadingOffset(32);
+		test.setPhysicalScrollTop(20);
+
+		expect(test.controller.scrollToAnchor('a', 32)).toEqual({ kind: 'scheduled' });
+		test.environment.flushMicrotasks();
+
+		expect(test.viewport.scrollTop).toBe(0);
+	});
+
 	it('preserves a pending navigation target through a resize batch', () => {
 		const test = harness({ viewportSize: 100, overscan: 0 });
 		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
@@ -456,6 +616,76 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(1_030);
 	});
 
+	it('abandons a pending target when its viewport detaches before commit', () => {
+		const test = harness({ viewportSize: 80, overscan: 0 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c', 'd'],
+			estimates: [40, 40, 40, 40],
+			anchor: { kind: 'none' },
+		});
+		test.mountItem('b', 40);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(40);
+		expect(test.controller.scrollToIndex(3)).toEqual({ kind: 'scheduled' });
+
+		test.detachViewport();
+		test.environment.flushMicrotasks();
+		test.attachViewport();
+		test.environment.flushMicrotasks();
+		test.controller.setScrollActivity('coasting');
+		const writesBeforeMeasurement = test.writes;
+		test.mountItem('a', 60);
+		test.environment.flushMicrotasks();
+
+		expect(test.writes).toBe(writesBeforeMeasurement);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'mount',
+			provenance: 'measurement',
+			scrollWrites: 0,
+		});
+	});
+
+	it('yields after repeated leading-offset barriers and retries on the next frame', () => {
+		const test = harness({ viewportSize: 100, overscan: 0 });
+		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);
+		test.controller.apply({
+			kind: 'update',
+			keys,
+			estimates: keys.map(() => 20),
+			anchor: { kind: 'none' },
+		});
+		expect(test.controller.scrollToIndex(50)).toEqual({ kind: 'scheduled' });
+
+		for (const leadingOffset of [10, 20, 30]) {
+			test.setLeadingOffset(leadingOffset);
+			test.environment.microtasks.shift()?.();
+		}
+		expect(test.writes).toBe(0);
+		const yieldedRecord = test.records.at(-1);
+		expect(yieldedRecord).toMatchObject({
+			source: 'programmatic',
+			published: true,
+			scrollWrites: 0,
+		});
+		const recordCount = test.records.length;
+
+		expect(test.environment.frames.size).toBe(1);
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(1_030);
+		expect(test.records).toHaveLength(recordCount + 1);
+		const completedRecord = test.records.at(-1);
+		expect(completedRecord).toMatchObject({
+			source: 'programmatic',
+			published: true,
+			scrollWrites: 1,
+		});
+		expect(completedRecord).not.toBe(yieldedRecord);
+		expect(completedRecord?.durationMs).toBeLessThan(20);
+	});
+
 	it('cancels a delayed write without discarding painted deviation', () => {
 		const test = harness({ viewportSize: 80 });
 		test.controller.apply({
@@ -492,6 +722,41 @@ describe('VirtualListController', () => {
 		expect(test.controller.snapshot.revision).toBe(revision);
 	});
 
+	it('publishes no new revision for an unchanged observer measurement', () => {
+		const test = harness();
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a'],
+			estimates: [40],
+			anchor: { kind: 'none' },
+		});
+		const mounted = test.mountItem('a', 40);
+		test.environment.flushMicrotasks();
+		const revision = test.controller.snapshot.revision;
+
+		test.environment.observer.emit(mounted.element, 40);
+
+		expect(test.controller.snapshot.revision).toBe(revision);
+		expect(test.records.at(-1)).toMatchObject({ source: 'resize', published: false });
+	});
+
+	it('reports visible leading content as reachable when it cannot align to the viewport top', () => {
+		const test = harness({ viewportSize: 100 });
+		test.setLeadingOffset(30);
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a'],
+			estimates: [80],
+			anchor: { kind: 'none' },
+		});
+
+		expect(test.viewport.scrollHeight).toBe(110);
+		expect(test.controller.viewportPosition).toMatchObject({
+			distanceFromStart: 0,
+			leadingContentReachable: true,
+		});
+	});
+
 	it('clears old surface state and resumes with one explicit target', () => {
 		const test = harness({ viewportSize: 50 });
 		test.controller.apply({
@@ -512,6 +777,46 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 		expect(test.controller.snapshot.positions.itemAt(0)?.key).toBe('new-a');
 		expect(test.viewport.scrollTop).toBe(30);
+	});
+
+	it('keeps replacement measurements hidden until the first target', () => {
+		const test = harness({ viewportSize: 50 });
+		test.controller.apply({
+			kind: 'replace-surface',
+			keys: ['new-a', 'new-b'],
+			estimates: [40, 40],
+		});
+		const replacementRevision = test.controller.snapshot.revision;
+		test.mountItem('new-a', 60);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.measuredSize('new-a')).toBe(60);
+		expect(test.controller.snapshot.revision).toBe(replacementRevision);
+		expect(test.controller.snapshot.visibleRange).toBeNull();
+		expect(test.controller.scrollToEnd()).toEqual({ kind: 'scheduled' });
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(50);
+	});
+
+	it('prunes cached attachments for removed unmounted keys', () => {
+		const test = harness();
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b'],
+			estimates: [40, 40],
+			anchor: { kind: 'none' },
+		});
+		const removedAttachment = test.controller.item('b');
+		expect(test.controller.item('b')).toBe(removedAttachment);
+
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a'],
+			estimates: [40],
+			anchor: { kind: 'none' },
+		});
+
+		expect(test.controller.item('b')).not.toBe(removedAttachment);
 	});
 
 	it('attributes the first resumed target to the resume transaction', () => {
@@ -545,5 +850,10 @@ describe('VirtualListController', () => {
 			}),
 		).toEqual({ kind: 'rejected', reason: 'duplicate-key' });
 		expect(test.controller.snapshot.revision).toBe(revision);
+		expect(test.records.at(-1)).toMatchObject({
+			source: 'items',
+			rejectionReason: 'duplicate-key',
+			published: false,
+		});
 	});
 });

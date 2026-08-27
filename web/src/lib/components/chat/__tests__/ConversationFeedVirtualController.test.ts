@@ -42,12 +42,13 @@ async function settleController(): Promise<void> {
 	await Promise.resolve();
 }
 
-async function renderController(): Promise<{
+async function renderController(options?: { invalidInitialGeometry?: boolean }): Promise<{
 	exposure: ControllerExposure;
 	unmount(): void;
 }> {
 	let exposure: ControllerExposure | undefined;
 	const rendered = render(ConversationFeedVirtualControllerTestHost, {
+		...options,
 		onReady(value) {
 			exposure = value;
 		},
@@ -190,6 +191,17 @@ describe('ConversationFeedVirtualController', () => {
 				expect.objectContaining({ source: 'resume', provenance: 'navigation' }),
 			]),
 		);
+	});
+
+	it('retries an initially rejected geometry publication', async () => {
+		const { exposure } = await renderController({ invalidInitialGeometry: true });
+
+		expect(exposure.transactions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: 'items', rejectionReason: 'length-mismatch' }),
+			]),
+		);
+		expect(exposure.controller.snapshot.positions.count).toBe(12);
 	});
 
 	it('publishes pinned appends as follow transactions', async () => {

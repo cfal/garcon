@@ -1,15 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-	applyVirtualCorrection,
-	isVirtualDeviationStale,
-	preserveVirtualDeviation,
-	resetVirtualDeviation,
-	SETTLED_VIRTUAL_DEVIATION,
-} from '../virtual-scroll-deviation';
+import { applyVirtualCorrection, SETTLED_VIRTUAL_DEVIATION } from '../virtual-scroll-deviation';
 
 const redeemable = {
 	inPhysicalBounds: true,
-	canRedeemExactly: true,
 	now: 100,
 } as const;
 
@@ -45,7 +38,6 @@ describe('virtual scroll deviation', () => {
 			).toEqual({
 				kind: 'redeem',
 				amount: 15,
-				exact: true,
 				state: SETTLED_VIRTUAL_DEVIATION,
 			});
 		},
@@ -59,10 +51,9 @@ describe('virtual scroll deviation', () => {
 				activity: 'coasting',
 				provenance: 'navigation',
 				inPhysicalBounds: false,
-				canRedeemExactly: false,
 				now: 100,
 			}),
-		).toMatchObject({ kind: 'redeem', amount: 20, exact: false });
+		).toMatchObject({ kind: 'redeem', amount: 20 });
 	});
 
 	it('accumulates corrections and retains the original pending time', () => {
@@ -77,7 +68,7 @@ describe('virtual scroll deviation', () => {
 		).toEqual({ kind: 'deferred', state: { value: 25, pendingSince: 20 } });
 	});
 
-	it('reports an inexact negative top-boundary redemption', () => {
+	it('redeems a negative correction at the physical top boundary', () => {
 		expect(
 			applyVirtualCorrection({
 				current: { value: -30, pendingSince: 20 },
@@ -85,17 +76,8 @@ describe('virtual scroll deviation', () => {
 				activity: 'idle',
 				provenance: 'measurement',
 				inPhysicalBounds: true,
-				canRedeemExactly: false,
 				now: 100,
 			}),
-		).toMatchObject({ kind: 'redeem', amount: -30, exact: false });
-	});
-
-	it('preserves cancellation, resets surface state, and reports liveness', () => {
-		const pending = { value: 12, pendingSince: 100 };
-		expect(preserveVirtualDeviation(pending)).toBe(pending);
-		expect(resetVirtualDeviation()).toBe(SETTLED_VIRTUAL_DEVIATION);
-		expect(isVirtualDeviationStale(pending, 1_099)).toBe(false);
-		expect(isVirtualDeviationStale(pending, 1_100)).toBe(true);
+		).toMatchObject({ kind: 'redeem', amount: -30 });
 	});
 });

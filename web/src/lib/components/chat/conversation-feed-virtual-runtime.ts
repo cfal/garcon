@@ -10,7 +10,6 @@ import {
 	classifyMeasuredConversationViewportFill,
 	isConversationTargetLayoutReady,
 	isConversationVirtualViewportCovered,
-	selectConversationReadingAnchor,
 } from './conversation-feed-viewport-geometry.js';
 
 const HIDDEN_ANCHOR_FALLBACK_RADIUS = 8;
@@ -194,12 +193,20 @@ export function captureConversationVirtualAnchor(input: {
 	const paintedOffset = input.position?.paintedOffset ?? 0;
 	let item: VirtualItem | undefined;
 	if (input.preferTranscript) {
-		const candidates: VirtualItem[] = [];
-		for (let index = 0; index < input.snapshot.positions.count; index += 1) {
-			const candidate = input.snapshot.positions.itemAt(index);
-			if (candidate) candidates.push(candidate);
+		const positions = input.snapshot.positions;
+		const threshold = paintedOffset + CHAT_GEOMETRY_END_THRESHOLD_PX;
+		const firstCandidate = positions.itemAtOffset(threshold);
+		for (let index = firstCandidate?.index ?? 0; index < positions.count; index += 1) {
+			const candidate = positions.itemAt(index);
+			if (candidate && candidate.end > threshold && input.transcriptKeys.has(candidate.key)) {
+				item = candidate;
+				break;
+			}
 		}
-		item = selectConversationReadingAnchor(candidates, paintedOffset, input.transcriptKeys);
+		for (let index = positions.count - 1; !item && index >= 0; index -= 1) {
+			const candidate = positions.itemAt(index);
+			if (candidate && input.transcriptKeys.has(candidate.key)) item = candidate;
+		}
 	} else {
 		item = input.snapshot.positions.itemAtOffset(paintedOffset);
 	}

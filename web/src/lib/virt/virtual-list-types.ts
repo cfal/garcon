@@ -1,7 +1,5 @@
 export type VirtualScrollActivity = 'idle' | 'dragging' | 'coasting';
-
 export type VirtualCorrectionProvenance = 'measurement' | 'follow' | 'navigation';
-
 export interface VirtualItem {
 	readonly key: string;
 	readonly index: number;
@@ -9,27 +7,22 @@ export interface VirtualItem {
 	readonly size: number;
 	readonly end: number;
 }
-
 export type LogicalVirtualItem = VirtualItem;
-
 export interface VirtualRange {
 	readonly startIndex: number;
 	readonly endIndex: number;
 }
-
 export interface VirtualPositionView {
 	readonly count: number;
 	itemAt(index: number): VirtualItem | undefined;
 	itemAtOffset(paintedOffset: number): VirtualItem | undefined;
 }
-
 export interface VirtualViewportPosition {
 	readonly paintedOffset: number;
 	readonly logicalOffset: number;
 	readonly distanceFromStart: number;
 	readonly leadingContentReachable: boolean;
 }
-
 export interface VirtualListSnapshot {
 	readonly revision: number;
 	readonly visibleRange: VirtualRange | null;
@@ -37,7 +30,6 @@ export interface VirtualListSnapshot {
 	readonly sizerSize: number;
 	readonly positions: VirtualPositionView;
 }
-
 export function virtualItems(
 	snapshot: VirtualListSnapshot,
 	indexes: readonly number[],
@@ -52,18 +44,15 @@ export function virtualItems(
 
 	return items;
 }
-
 export type VirtualMutationAnchor =
 	| { readonly kind: 'item'; readonly key: string }
 	| { readonly kind: 'end' }
 	| { readonly kind: 'none' };
-
 interface VirtualItemsSource {
 	readonly keys: readonly string[];
 	readonly estimates: readonly number[];
 	readonly anchor: VirtualMutationAnchor;
 }
-
 export type VirtualItemsMutation =
 	| ({ readonly kind: 'update' } & VirtualItemsSource)
 	| ({ readonly kind: 'reset-measurements' } & VirtualItemsSource)
@@ -73,38 +62,28 @@ export type VirtualItemsMutation =
 			readonly estimates: readonly number[];
 	  };
 
+export type VirtualMutationRejectionReason =
+	'duplicate-key' | 'length-mismatch' | 'invalid-estimate';
 export type VirtualMutationResult =
 	| { readonly kind: 'applied' }
 	| {
 			readonly kind: 'rejected';
-			readonly reason: 'duplicate-key' | 'length-mismatch' | 'invalid-estimate';
+			readonly reason: VirtualMutationRejectionReason;
 	  };
-
 export type VirtualResumeTarget =
 	| { readonly kind: 'start' }
 	| { readonly kind: 'end' }
 	| { readonly kind: 'anchor'; readonly key: string; readonly viewportOffset: number };
-
 export type VirtualScrollResult = { readonly kind: 'scheduled' } | { readonly kind: 'not-ready' };
-
 export type VirtualResumeResult = VirtualScrollResult | { readonly kind: 'missing-key' };
-
 export type VirtualIndexScrollResult = VirtualScrollResult | { readonly kind: 'missing-index' };
-
 export type VirtualKeyScrollResult = VirtualScrollResult | { readonly kind: 'missing-key' };
-
 export type VirtualTransactionSource =
-	| 'items'
-	| 'mount'
-	| 'resize'
-	| 'viewport'
-	| 'resume'
-	| 'programmatic'
-	| 'replace-surface';
-
+	'items' | 'mount' | 'resize' | 'viewport' | 'resume' | 'programmatic' | 'replace-surface';
 export interface VirtualTransactionRecord {
 	readonly revision: number;
 	readonly source: VirtualTransactionSource;
+	readonly rejectionReason: VirtualMutationRejectionReason | null;
 	readonly provenance: VirtualCorrectionProvenance | null;
 	readonly activity: VirtualScrollActivity;
 	readonly anchorKind: 'item' | 'end' | 'none';

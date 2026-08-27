@@ -411,6 +411,9 @@ describe('FileTreeVirtualRows', () => {
 
 	it('cancels a stale long-distance focus transfer when a newer request wins', async () => {
 		const { container } = renderRows(10_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		const firstPath = '/workspace/file-000000.ts';
 		const first = await waitFor(() => {
 			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${firstPath}"]`);
@@ -428,6 +431,7 @@ describe('FileTreeVirtualRows', () => {
 		await waitFor(() =>
 			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(firstPath),
 		);
+		expect(treegrid.scrollTop).toBe(0);
 	});
 
 	it('reconciles removed DOM focus to the nearest surviving actionable row', async () => {
@@ -560,6 +564,7 @@ describe('FileTreeVirtualRows', () => {
 		const { container, store } = renderRows(500);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		treegrid.scrollTop = 640;
 		await fireEvent.scroll(treegrid);
 		expect(treegrid.scrollTop).toBe(640);

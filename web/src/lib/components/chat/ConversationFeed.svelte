@@ -54,11 +54,7 @@
 			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		onLoadEarlier?: () => void;
@@ -286,7 +282,6 @@
 		untrack(() => {
 			const nextProjection = projectionState.reconcile(input);
 			const applied = virtualController.applyProjection({
-				previous: projection,
 				next: nextProjection,
 				pinned: pinnedToBottom,
 				scrollbarDragActive: scrollbarPointerY !== null,

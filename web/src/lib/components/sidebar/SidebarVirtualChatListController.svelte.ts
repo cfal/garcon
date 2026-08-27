@@ -60,12 +60,16 @@ export class SidebarVirtualChatListController {
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
 			layoutChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
-		this.#virt.apply({
+		const result = this.#virt.apply({
 			kind: 'update',
 			keys: input.rows.map((row) => row.key),
 			estimates: input.rows.map((row) => this.#estimateRow(row, input)),
 			anchor: normalizedAnchor ? { kind: 'none' } : this.#currentAnchor(),
 		});
+		if (result.kind === 'rejected') {
+			console.error(`Sidebar virtualization rejected source geometry: ${result.reason}`);
+			return;
+		}
 		if (!normalizedAnchor) return;
 		const row = input.rows.find((candidate) => candidate.key === normalizedAnchor.key);
 		if (!row) return;

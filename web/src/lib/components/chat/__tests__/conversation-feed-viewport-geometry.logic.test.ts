@@ -6,8 +6,6 @@ import {
 	classifyMeasuredConversationViewportFill,
 	isConversationVirtualViewportCovered,
 	retainedConversationRange,
-	resolveConversationViewportRect,
-	selectConversationReadingAnchor,
 	shouldPreserveConversationVirtualEdge,
 } from '../conversation-feed-viewport-geometry';
 
@@ -67,17 +65,6 @@ describe('conversation virtual viewport geometry', () => {
 				restorePolicyEnd: false,
 			}),
 		).toBe(false);
-	});
-
-	it('selects the first intersecting eligible reading row', () => {
-		const items = [
-			virtualItem('spacer', 0, 0, 20),
-			virtualItem('a', 1, 20, 40),
-			virtualItem('b', 2, 60, 40),
-		];
-
-		expect(selectConversationReadingAnchor(items, 55, new Set(['a', 'b']))?.key).toBe('a');
-		expect(selectConversationReadingAnchor(items, 61, new Set(['a', 'b']))?.key).toBe('b');
 	});
 
 	it('overlaps overscan and following rows while merging retained and trailing indexes', () => {
@@ -178,7 +165,7 @@ describe('conversation virtual viewport geometry', () => {
 		).toBe('underfilled');
 	});
 
-	it('clamps targets and retains nonzero viewport rects', () => {
+	it('clamps targets', () => {
 		expect(
 			attainableConversationTargetOffset({
 				currentOffset: 80,
@@ -186,8 +173,5 @@ describe('conversation virtual viewport geometry', () => {
 				maximumOffset: 100,
 			}),
 		).toBe(100);
-		expect(
-			resolveConversationViewportRect({ width: 40, height: 50 }, { width: 0, height: 0 }),
-		).toEqual({ width: 40, height: 50 });
 	});
 });

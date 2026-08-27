@@ -43,6 +43,7 @@ export class VirtualListDomDriver {
 	#keysByElement = new WeakMap<HTMLElement, string>();
 	#attachmentsByKey = new Map<string, Attachment<HTMLElement>>();
 	#pendingMounts = new Map<string, HTMLElement>();
+	#ignoredEntries = 0;
 	#observer: ResizeObserver;
 	#mountQueued = false;
 	#suspended = false;
@@ -54,10 +55,6 @@ export class VirtualListDomDriver {
 		});
 		this.viewport = (element) => this.#attachViewport(element);
 		this.sizer = (element) => this.#attachSizer(element);
-	}
-
-	get attached(): boolean {
-		return this.#viewportElement !== null && this.#sizerElement !== null && !this.#suspended;
 	}
 
 	item(key: string): Attachment<HTMLElement> {
@@ -95,10 +92,6 @@ export class VirtualListDomDriver {
 		return viewport.scrollTop;
 	}
 
-	elementKey(element: HTMLElement): string | undefined {
-		return this.#keysByElement.get(element);
-	}
-
 	measureElement(element: HTMLElement): VirtualElementMeasurement | null {
 		const key = this.#keysByElement.get(element);
 		if (!key || this.#elementsByKey.get(key) !== element || !element.isConnected) return null;
@@ -115,14 +108,25 @@ export class VirtualListDomDriver {
 		return measurements;
 	}
 
+	recordIgnoredEntries(count: number): void {
+		this.#ignoredEntries += count;
+	}
+
+	drainIgnoredEntries(): number {
+		const ignoredEntries = this.#ignoredEntries;
+		this.#ignoredEntries = 0;
+		return ignoredEntries;
+	}
+
 	pruneKeys(hasKey: (key: string) => boolean): void {
 		for (const [key, element] of this.#elementsByKey) {
 			if (hasKey(key)) continue;
 			this.#observer.unobserve(element);
 			this.#elementsByKey.delete(key);
 			this.#pendingMounts.delete(key);
-			this.#attachmentsByKey.delete(key);
 		}
+		for (const key of this.#attachmentsByKey.keys())
+			if (!hasKey(key)) this.#attachmentsByKey.delete(key);
 	}
 
 	clearItems(): void {
@@ -227,10 +231,12 @@ export class VirtualListDomDriver {
 				viewportChanged = true;
 				continue;
 			}
-			if (!(entry.target instanceof HTMLElement)) continue;
-			const element = entry.target;
-			const key = this.#keysByElement.get(element);
-			if (!key || this.#elementsByKey.get(key) !== element || !element.isConnected) continue;
+			const element = entry.target instanceof HTMLElement ? entry.target : null;
+			const key = element ? this.#keysByElement.get(element) : undefined;
+			if (!element || !key || this.#elementsByKey.get(key) !== element || !element.isConnected) {
+				this.#ignoredEntries += 1;
+				continue;
+			}
 			const measurement = this.#measurement(key, element, entry);
 			if (measurement) measurements.push(measurement);
 		}

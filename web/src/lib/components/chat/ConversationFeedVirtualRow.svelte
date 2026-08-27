@@ -38,15 +38,8 @@
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
-		onPermissionDecision?: (
-			permissionOccurrenceId: string,
-			decision: PermissionDecision,
-		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;

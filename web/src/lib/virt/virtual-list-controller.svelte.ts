@@ -65,48 +65,37 @@ export class VirtualListController {
 	get snapshot(): VirtualListSnapshot {
 		return this.#snapshot;
 	}
-
 	get viewportPosition(): VirtualViewportPosition | null {
 		return this.#transaction.viewportPosition;
 	}
-
 	get ownsScrollPosition(): boolean {
 		return this.#transaction.ownsScroll;
 	}
-
 	item(key: string): Attachment<HTMLElement> {
 		return this.#driver.item(key);
 	}
-
 	measuredSize(key: string): number | undefined {
 		return this.#transaction.geometry.measuredSize(key);
 	}
-
 	apply(mutation: VirtualItemsMutation): VirtualMutationResult {
 		return this.#transaction.apply(mutation);
 	}
-
 	setScrollActivity(activity: VirtualScrollActivity): void {
 		this.#transaction.setScrollActivity(activity);
 	}
-
 	refreshLayout(): void {
 		this.#transaction.refreshLayout();
 	}
-
 	remeasure(element: HTMLElement): void {
 		const measurement = this.#driver.measureElement(element);
 		if (measurement) this.#transaction.measure([measurement], 'resize');
 	}
-
 	remeasureAll(): void {
 		this.#transaction.measure(this.#driver.measureAll(), 'resize');
 	}
-
 	suspend(): void {
 		this.#transaction.suspend();
 	}
-
 	resume(target: VirtualResumeTarget): VirtualResumeResult {
 		return this.#transaction.resume(target);
 	}
@@ -117,34 +106,27 @@ export class VirtualListController {
 	): VirtualIndexScrollResult {
 		return this.#transaction.scrollToIndex(index, options?.align);
 	}
-
 	scrollToKey(
 		key: string,
 		options?: { readonly align?: 'start' | 'center' | 'end' },
 	): VirtualKeyScrollResult {
 		return this.#transaction.scrollToKey(key, options?.align);
 	}
-
 	scrollToAnchor(key: string, viewportOffset: number): VirtualKeyScrollResult {
 		return this.#transaction.scrollToAnchor(key, viewportOffset);
 	}
-
 	scrollToStart(): VirtualScrollResult {
 		return this.#transaction.scrollToStart();
 	}
-
 	scrollToEnd(): VirtualScrollResult {
 		return this.#transaction.scrollToEnd();
 	}
-
 	scrollBy(delta: number): VirtualScrollResult {
 		return this.#transaction.scrollBy(delta);
 	}
-
 	cancelOwnedScroll(): void {
 		this.#transaction.cancelOwnedScroll();
 	}
-
 	destroy(): void {
 		this.#transaction.destroy();
 	}

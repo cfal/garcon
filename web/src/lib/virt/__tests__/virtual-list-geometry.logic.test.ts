@@ -27,6 +27,16 @@ describe('VirtualListGeometry', () => {
 		expect(geometry.totalSize()).toBe(136);
 	});
 
+	it('updates retained prefix estimates alongside a key append', () => {
+		const geometry = new VirtualListGeometry();
+		geometry.setItems(['a', 'b'], [20, 30]);
+		geometry.setItems(['a', 'b', 'c'], [40, 30, 10]);
+
+		expect(geometry.item(0)?.size).toBe(40);
+		expect(geometry.item(2)?.start).toBe(70);
+		expect(geometry.totalSize()).toBe(80);
+	});
+
 	it('prunes removed measurements and resets surviving measurements', () => {
 		const geometry = new VirtualListGeometry();
 		geometry.setItems(['a', 'b'], [20, 30]);

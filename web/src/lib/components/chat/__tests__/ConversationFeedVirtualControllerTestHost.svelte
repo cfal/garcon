@@ -31,9 +31,10 @@
 
 	interface Props {
 		onReady(exposure: Exposure): void;
+		invalidInitialGeometry?: boolean;
 	}
 
-	let { onReady }: Props = $props();
+	let { onReady, invalidInitialGeometry = false }: Props = $props();
 	let itemCount = $state(12);
 	let firstItemNumber = $state(0);
 	let historyEarlierMutation = $state(false);
@@ -77,29 +78,28 @@
 			transcriptEndIndex: items.length,
 		};
 	});
-	const geometry = $derived.by(
-		(): ConversationVirtualGeometrySnapshot => ({
-			surfaceIdentity,
-			geometryRevision,
-			keys,
-			estimates: keys.map(() => 40 * textScale),
-			measurementReset,
-			mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
-			endBehavior: 'restore-if-pinned',
-		}),
-	);
-	const nextProjection = $derived.by(
-		(): ConversationFeedProjection => ({
-			renderModel,
-			model,
-			geometry,
-			projectedDataRevision: contentRevision,
-		}),
-	);
+	const geometry = $derived.by((): ConversationVirtualGeometrySnapshot => ({
+		surfaceIdentity,
+		geometryRevision,
+		keys,
+		estimates: keys.map(() => 40 * textScale),
+		measurementReset,
+		mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
+		endBehavior: 'restore-if-pinned',
+	}));
+	const nextProjection = $derived.by((): ConversationFeedProjection => ({
+		renderModel,
+		model,
+		geometry,
+		projectedDataRevision: contentRevision,
+	}));
 	const initialProjection = untrack(() => nextProjection);
+	const initialGeometryIsInvalid = untrack(() => invalidInitialGeometry);
 	let appliedProjection = $state.raw<ConversationFeedProjection>({
 		...initialProjection,
-		geometry: { ...initialProjection.geometry, surfaceIdentity: 'surface-before-mount' },
+		geometry: initialGeometryIsInvalid
+			? { ...initialProjection.geometry, estimates: [] }
+			: { ...initialProjection.geometry, surfaceIdentity: 'surface-before-mount' },
 	});
 	const retention = new ConversationFeedRetentionState();
 	const controller = new ConversationFeedVirtualController({
@@ -137,7 +137,6 @@
 	const mountedProjection = untrack(() => nextProjection);
 	if (
 		!controller.applyProjection({
-			previous: untrack(() => appliedProjection),
 			next: mountedProjection,
 			pinned: untrack(() => pinned),
 			scrollbarDragActive,
@@ -153,10 +152,8 @@
 	$effect.pre(() => {
 		const next = nextProjection;
 		untrack(() => {
-			const previous = appliedProjection;
 			if (
 				controller.applyProjection({
-					previous,
 					next,
 					pinned,
 					scrollbarDragActive,

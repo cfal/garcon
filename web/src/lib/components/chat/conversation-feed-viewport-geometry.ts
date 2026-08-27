@@ -4,16 +4,8 @@ import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProj
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
 export const CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS = 12;
 
-export interface ConversationViewportRect {
-	readonly width: number;
-	readonly height: number;
-}
-
 export type ConversationVirtualStructureChange =
-	| 'none'
-	| 'identity'
-	| 'edge-qualified'
-	| 'interior-only';
+	'none' | 'identity' | 'edge-qualified' | 'interior-only';
 
 function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 	return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -49,18 +41,6 @@ export function shouldPreserveConversationVirtualEdge(input: {
 		input.structure === 'edge-qualified' &&
 		input.endBehavior !== 'explicit-navigation' &&
 		!input.restorePolicyEnd
-	);
-}
-
-export function selectConversationReadingAnchor<T extends { key: unknown; end: number }>(
-	items: readonly T[],
-	scrollOffset: number,
-	eligibleKeys: ReadonlySet<string>,
-): T | undefined {
-	const eligibleItems = items.filter((item) => eligibleKeys.has(String(item.key)));
-	return (
-		eligibleItems.find((item) => item.end > scrollOffset + CHAT_GEOMETRY_END_THRESHOLD_PX) ??
-		eligibleItems.at(-1)
 	);
 }
 
@@ -153,14 +133,6 @@ export function attainableConversationTargetOffset(input: {
 	maximumOffset: number;
 }): number {
 	return Math.max(0, Math.min(input.maximumOffset, input.currentOffset + input.alignmentDelta));
-}
-
-export function resolveConversationViewportRect(
-	previous: ConversationViewportRect,
-	observed: ConversationViewportRect,
-): ConversationViewportRect {
-	// Retains the last geometry only while the viewport is fully collapsed.
-	return observed.width > 0 && observed.height > 0 ? observed : previous;
 }
 
 export function isConversationTargetLayoutReady(node: HTMLElement): boolean {

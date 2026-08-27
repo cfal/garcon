@@ -349,6 +349,15 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
+	it('reads logical viewport position once per scroll event', () => {
+		const fixture = controllerFixture();
+		fixture.viewport.viewportPosition.mockClear();
+
+		fixture.controller.handleScroll();
+
+		expect(fixture.viewport.viewportPosition).toHaveBeenCalledOnce();
+	});
+
 	it('prefetches earlier history two viewports before the top edge', async () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const { controller } = controllerFixture({

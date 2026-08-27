@@ -1,22 +1,16 @@
 import type { ConversationNativeScrollActivity } from './conversation-native-scroll-settlement.js';
 
 export type ConversationViewportTarget =
-	| { kind: 'row'; id: string }
-	| { kind: 'dom-anchor'; id: string };
+	{ kind: 'row'; id: string } | { kind: 'dom-anchor'; id: string };
 export type ConversationViewportIntentSource = 'viewport' | 'scrollbar-drag';
 export type ConversationViewportIntentCancellationResult =
-	| 'cancelled'
-	| 'preserved-earlier-prepend'
-	| 'blocked-scrollbar-drag';
+	'cancelled' | 'preserved-earlier-prepend' | 'blocked-scrollbar-drag';
 
 export type HiddenReadingRestoreResult = 'restored' | 'missing-anchor' | 'not-ready';
 export type ConversationLayoutWaitResult = 'settled' | 'superseded' | 'not-ready';
 export type ConversationViewportFillResult = 'overflow' | 'underfilled' | 'unsettled';
 export type ConversationViewportTargetResult =
-	| 'completed'
-	| 'cancelled'
-	| 'target-missing'
-	| 'not-ready';
+	'completed' | 'cancelled' | 'target-missing' | 'not-ready';
 
 export interface ConversationViewportPosition {
 	readonly logicalOffset: number;

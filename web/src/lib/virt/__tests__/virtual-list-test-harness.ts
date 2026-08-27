@@ -43,8 +43,9 @@ class TestResizeObserver implements ResizeObserver {
 class TestEnvironment implements VirtualListEnvironment {
 	readonly microtasks: Array<() => void> = [];
 	readonly frames = new Map<number, FrameRequestCallback>();
+	readonly timers = new Map<number, { callback: () => void; dueAt: number }>();
 	observer!: TestResizeObserver;
-	#nextFrame = 1;
+	#nextHandle = 1;
 	#time = 0;
 
 	now(): number {
@@ -55,8 +56,18 @@ class TestEnvironment implements VirtualListEnvironment {
 		this.microtasks.push(callback);
 	}
 
+	setTimeout(callback: () => void, delayMs: number): number {
+		const handle = this.#nextHandle++;
+		this.timers.set(handle, { callback, dueAt: this.#time + delayMs });
+		return handle;
+	}
+
+	clearTimeout(handle: number): void {
+		this.timers.delete(handle);
+	}
+
 	requestAnimationFrame(callback: FrameRequestCallback): number {
-		const handle = this.#nextFrame++;
+		const handle = this.#nextHandle++;
 		this.frames.set(handle, callback);
 		return handle;
 	}
@@ -78,6 +89,15 @@ class TestEnvironment implements VirtualListEnvironment {
 		const frames = [...this.frames.values()];
 		this.frames.clear();
 		for (const frame of frames) frame(this.now());
+	}
+
+	advanceTime(milliseconds: number): void {
+		this.#time += milliseconds;
+		for (const [handle, timer] of [...this.timers]) {
+			if (timer.dueAt > this.#time) continue;
+			this.timers.delete(handle);
+			timer.callback();
+		}
 	}
 }
 
@@ -124,7 +144,7 @@ export function createVirtualListHarness(options?: {
 	sizer.getBoundingClientRect = () =>
 		rect(leadingOffset - physicalScrollTop, controller.snapshot.sizerSize);
 
-	const detachViewport = controller.viewport(viewport);
+	let detachViewportAttachment = controller.viewport(viewport);
 	const detachSizer = controller.sizer(sizer);
 	environment.flushMicrotasks();
 
@@ -144,9 +164,25 @@ export function createVirtualListHarness(options?: {
 			physicalScrollTop = value;
 			viewport.dispatchEvent(new Event('scroll'));
 		},
+		setPhysicalScrollTopSilently(value: number) {
+			physicalScrollTop = value;
+		},
 		setViewportSize(value: number) {
 			viewportSize = value;
 			environment.observer.emit(viewport, value);
+		},
+		setViewportSizeSilently(value: number) {
+			viewportSize = value;
+		},
+		emitViewportResize() {
+			environment.observer.emit(viewport, viewportSize);
+		},
+		detachViewport() {
+			detachViewportAttachment?.();
+			detachViewportAttachment = undefined;
+		},
+		attachViewport() {
+			detachViewportAttachment = controller.viewport(viewport);
 		},
 		mountItem(key: string, size: number) {
 			const element = document.createElement('div');
@@ -157,7 +193,7 @@ export function createVirtualListHarness(options?: {
 		},
 		destroy() {
 			detachSizer?.();
-			detachViewport?.();
+			detachViewportAttachment?.();
 			controller.destroy();
 			viewport.remove();
 		},

@@ -59,7 +59,6 @@ interface ConversationFeedVirtualControllerOptions {
 }
 
 interface ConversationProjectionApplication {
-	readonly previous: ConversationFeedProjection;
 	readonly next: ConversationFeedProjection;
 	readonly pinned: boolean;
 	readonly scrollbarDragActive: boolean;
@@ -116,12 +115,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		});
 		this.viewport = this.#virt.viewport;
 		this.sizer = this.#virt.sizer;
-		this.#virt.apply({
+		const initialResult = this.#virt.apply({
 			kind: 'update',
 			keys: this.#configuredGeometry.keys,
 			estimates: this.#configuredGeometry.estimates,
 			anchor: { kind: 'none' },
 		});
+		if (initialResult.kind === 'rejected')
+			this.#configuredGeometry = { ...this.#configuredGeometry, geometryRevision: -1 };
 		if (!this.#configuredVisible) this.#virt.suspend();
 		$effect(() => this.#acknowledgeData(options.projectedDataRevision));
 		$effect(() => this.#publishPinned(options.pinned));
@@ -138,7 +139,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	get snapshot(): VirtualListSnapshot {
 		return this.#virt.snapshot;
 	}
-
 	item(key: string): Attachment<HTMLElement> {
 		let attachment = this.#itemAttachments.get(key);
 		if (attachment) return attachment;
@@ -264,10 +264,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#pruneItemAttachments();
 		const isEarlierPublication = nextGeometry.mutationKinds.has('history-earlier');
 		this.#earlierPrependAnchor.carry(selectedAnchor, isEarlierPublication);
-		if (
-			isEarlierPublication &&
-			this.#lastTransaction?.revision === this.#virt.snapshot.revision
-		) {
+		if (isEarlierPublication && this.#lastTransaction?.revision === this.#virt.snapshot.revision) {
 			this.#completeSettledEarlierPrepend(this.#lastTransaction);
 		}
 		this.#layoutMutationToken += 1;
@@ -615,11 +612,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#pendingEndFlushQueued = true;
 		queueMicrotask(() => {
 			this.#pendingEndFlushQueued = false;
-			if (
-				this.#destroyed ||
-				this.#nativeScrollActivity !== 'idle' ||
-				!this.#pendingEndScroll
-			) {
+			if (this.#destroyed || this.#nativeScrollActivity !== 'idle' || !this.#pendingEndScroll) {
 				return;
 			}
 			if (!this.#configuredPinned) {

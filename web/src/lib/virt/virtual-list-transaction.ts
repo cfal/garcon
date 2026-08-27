@@ -10,6 +10,7 @@ import type {
 	VirtualIndexScrollResult,
 	VirtualItemsMutation,
 	VirtualKeyScrollResult,
+	LogicalVirtualItem,
 	VirtualListSnapshot,
 	VirtualMutationAnchor,
 	VirtualMutationResult,
@@ -32,7 +33,6 @@ type PendingTarget =
 	| { kind: 'relative'; offset: number; leadingOffset: number }
 	| { kind: 'logical'; offset: number }
 	| { kind: 'end' };
-
 interface PendingCommit {
 	revision: number;
 	source: VirtualTransactionSource;
@@ -42,10 +42,11 @@ interface PendingCommit {
 	restoreDeviation: VirtualDeviationState | null;
 	record: MutableTransactionRecord;
 }
-
 type MutableTransactionRecord = {
 	-readonly [Key in keyof VirtualTransactionRecord]: VirtualTransactionRecord[Key];
 };
+type CapturedAnchor =
+	{ kind: 'item'; key: string; index: number; start: number } | { kind: 'end' } | { kind: 'none' };
 
 export interface VirtualListTransactionOptions {
 	readonly environment: VirtualListEnvironment;
@@ -66,6 +67,8 @@ export class VirtualListTransaction {
 	#lastLogicalOffset = 0;
 	#pendingCommit: PendingCommit | null = null;
 	#commitQueued = false;
+	#viewportQueued = false;
+	#deviationTimer: number | null = null;
 	#ownedEpoch = 0;
 	#ownedFrame: number | null = null;
 	#ownsScrollPosition = false;
@@ -89,33 +92,39 @@ export class VirtualListTransaction {
 	get snapshot(): VirtualListSnapshot {
 		return this.#snapshot;
 	}
-
 	get ownsScroll(): boolean {
 		return this.#ownsScrollPosition;
 	}
-
 	get viewportPosition(): VirtualViewportPosition | null {
 		const dom = this.#driver?.read();
 		if (!dom || this.#suspended || this.#replacementPending) return null;
 		const paintedOffset = dom.scrollTop - dom.leadingOffset;
 		const logicalOffset = paintedOffset + this.#deviation.value;
-		const logicalStartScrollTop = dom.leadingOffset - this.#deviation.value;
 		return {
 			paintedOffset,
 			logicalOffset,
 			distanceFromStart: Math.max(0, logicalOffset),
-			leadingContentReachable:
-				logicalStartScrollTop >= 0 && logicalStartScrollTop <= dom.physicalMaximum,
+			leadingContentReachable: dom.leadingOffset >= this.#deviation.value,
 		};
 	}
-
 	attachDriver(driver: VirtualListDomDriver): void {
 		this.#driver = driver;
 	}
 
 	apply(mutation: VirtualItemsMutation): VirtualMutationResult {
 		const rejection = validateMutation(mutation, this.geometry);
-		if (rejection) return rejection;
+		if (rejection) {
+			const record = this.#record(
+				mutation.kind === 'replace-surface' ? 'replace-surface' : 'items',
+				null,
+				mutation.kind === 'replace-surface' ? { kind: 'none' } : mutation.anchor,
+				this.#lastDom,
+				this.options.environment.now(),
+			);
+			record.rejectionReason = rejection.reason;
+			this.#emitRecord(record);
+			return rejection;
+		}
 		const dom = this.#driver?.read() ?? this.#lastDom;
 		const started = this.options.environment.now();
 
@@ -123,7 +132,7 @@ export class VirtualListTransaction {
 			this.cancelOwnedScroll();
 			this.geometry.replaceItems(mutation.keys, mutation.estimates);
 			this.#driver?.clearItems();
-			this.#deviation = SETTLED_VIRTUAL_DEVIATION;
+			this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 			this.#replacementPending = true;
 			this.#lastLogicalOffset = 0;
 			this.#publish(dom, true, true);
@@ -173,6 +182,7 @@ export class VirtualListTransaction {
 				measurement.size >= 0 &&
 				this.geometry.indexOf(measurement.key) !== undefined,
 		);
+		this.#driver?.recordIgnoredEntries(measurements.length - accepted.length);
 		if (accepted.length === 0) return;
 		const dom = this.#driver?.read() ?? this.#lastDom;
 		const started = this.options.environment.now();
@@ -182,6 +192,10 @@ export class VirtualListTransaction {
 			if (this.geometry.measuredSize(measurement.key) === undefined) {
 				firstMeasurements.add(measurement.key);
 			}
+		}
+		if (this.#replacementPending) {
+			this.geometry.measureMany(accepted);
+			return;
 		}
 		const anchor = this.#captureMeasurementAnchor(dom, firstMeasurements);
 		this.geometry.measureMany(accepted);
@@ -209,6 +223,19 @@ export class VirtualListTransaction {
 		if (this.#destroyed || this.#suspended || this.#replacementPending) return;
 		const dom = this.#driver?.read();
 		if (!dom) return;
+		const yieldedCommit = this.#pendingCommit;
+		if (yieldedCommit && !this.#commitQueued && yieldedCommit.barriers >= 2) {
+			if (yieldedCommit.target.kind === 'relative') {
+				yieldedCommit.target.offset += dom.leadingOffset - yieldedCommit.target.leadingOffset;
+				yieldedCommit.target.leadingOffset = dom.leadingOffset;
+			}
+			yieldedCommit.barriers = 0;
+			yieldedCommit.record.durationMs = -this.options.environment.now();
+			this.#publish(dom, true, false, this.#logicalOffsetForTarget(yieldedCommit.target, dom));
+			yieldedCommit.revision = this.#snapshot.revision;
+			this.#queueCommit(yieldedCommit);
+			return;
+		}
 		const started = this.options.environment.now();
 		if (!this.#lastDom) {
 			this.#lastDom = dom;
@@ -246,9 +273,21 @@ export class VirtualListTransaction {
 		if (this.#destroyed || this.#suspended || this.#replacementPending) return;
 		const dom = this.#driver?.read();
 		if (!dom) return;
+		const previous = this.#lastDom;
+		const boundsChanged =
+			previous &&
+			(dom.viewportSize !== previous.viewportSize ||
+				dom.physicalMaximum !== previous.physicalMaximum);
+		if (boundsChanged && this.#deviation.value !== 0 && dom.scrollTop !== previous.scrollTop) {
+			this.viewportChanged(true);
+			return;
+		}
 		this.#lastDom = dom;
 		this.#lastLogicalOffset = dom.scrollTop - dom.leadingOffset + this.#deviation.value;
 		this.#publish(dom);
+		if (this.#deviation.value !== 0 && this.#activity === 'idle' && dom.inPhysicalBounds) {
+			this.#queueViewportChanged();
+		}
 	}
 
 	setScrollActivity(activity: VirtualScrollActivity): void {
@@ -257,7 +296,7 @@ export class VirtualListTransaction {
 	}
 
 	refreshLayout(): void {
-		this.options.environment.queueMicrotask(() => this.viewportChanged(false));
+		this.#queueViewportChanged();
 	}
 
 	scrollToIndex(
@@ -265,23 +304,17 @@ export class VirtualListTransaction {
 		align: 'start' | 'center' | 'end' = 'start',
 	): VirtualIndexScrollResult {
 		const item = this.geometry.item(index);
-		if (!item) return { kind: 'missing-index' };
-		const dom = this.#driver?.read();
-		if (!dom) return { kind: 'not-ready' };
-		const offset =
-			align === 'center'
-				? item.start - (dom.viewportSize - item.size) / 2
-				: align === 'end'
-					? item.end - dom.viewportSize
-					: item.start;
-		return this.#scheduleLogicalTarget(offset);
+		return item ? this.#scrollToItem(item, align) : { kind: 'missing-index' };
 	}
 
 	scrollToKey(key: string, align: 'start' | 'center' | 'end' = 'start'): VirtualKeyScrollResult {
 		const index = this.geometry.indexOf(key);
 		if (index === undefined) return { kind: 'missing-key' };
 		const item = this.geometry.item(index);
-		if (!item) return { kind: 'missing-key' };
+		return item ? this.#scrollToItem(item, align) : { kind: 'missing-key' };
+	}
+
+	#scrollToItem(item: LogicalVirtualItem, align: 'start' | 'center' | 'end'): VirtualScrollResult {
 		const dom = this.#driver?.read();
 		if (!dom) return { kind: 'not-ready' };
 		const offset =
@@ -330,7 +363,7 @@ export class VirtualListTransaction {
 		const dom = this.#driver?.read();
 		if (!dom) return { kind: 'not-ready' };
 		this.#replacementPending = false;
-		this.#deviation = SETTLED_VIRTUAL_DEVIATION;
+		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 		this.#publish(dom, true);
 		if (target.kind === 'start') return this.#scheduleLogicalTarget(0, 'resume');
 		if (target.kind === 'end') return this.#scheduleTarget({ kind: 'end' }, 'resume');
@@ -352,7 +385,7 @@ export class VirtualListTransaction {
 			this.#ownedFrame = null;
 		}
 		if (restoreDeviation && !this.#destroyed) {
-			this.#deviation = restoreDeviation;
+			this.#setDeviation(restoreDeviation);
 			this.#publish(this.#driver?.read() ?? this.#lastDom, true);
 		}
 	}
@@ -361,6 +394,7 @@ export class VirtualListTransaction {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.cancelOwnedScroll();
+		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 		this.#driver?.destroy();
 	}
 
@@ -368,7 +402,7 @@ export class VirtualListTransaction {
 		offset: number,
 		source: 'programmatic' | 'resume' = 'programmatic',
 	): VirtualScrollResult {
-		return this.#scheduleTarget({ kind: 'logical', offset: Math.max(0, offset) }, source);
+		return this.#scheduleTarget({ kind: 'logical', offset }, source);
 	}
 
 	#scheduleTarget(
@@ -378,7 +412,7 @@ export class VirtualListTransaction {
 		const dom = this.#driver?.read();
 		if (!dom || this.#suspended) return { kind: 'not-ready' };
 		this.#replacementPending = false;
-		this.#deviation = SETTLED_VIRTUAL_DEVIATION;
+		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 		const started = this.options.environment.now();
 		const record = this.#record(source, 'navigation', { kind: 'none' }, dom, started);
 		this.#publish(dom, true, false, this.#logicalOffsetForTarget(target, dom));
@@ -411,60 +445,56 @@ export class VirtualListTransaction {
 			pendingCorrection?.provenance === 'navigation' ? 'navigation' : input.provenance;
 		const source =
 			pendingCorrection?.provenance === 'navigation' ? pendingCorrection.source : input.source;
-		const record = this.#record(
-			source,
-			provenance,
-			input.anchor,
-			input.dom,
-			input.started,
-		);
+		const record = this.#record(source, provenance, input.anchor, input.dom, input.started);
 		record.anchorIndex = input.anchorIndex;
 		record.anchorPaintedStartBefore = input.anchorStart;
 		record.correction = input.correction;
 		record.clampedRemainder = input.clampedRemainder ?? 0;
-		const value = this.#deviation.value + input.correction;
 		const decision = applyVirtualCorrection({
 			current: this.#deviation,
 			correction: input.correction,
 			activity: this.#activity,
 			provenance,
 			inPhysicalBounds: input.dom?.inPhysicalBounds ?? false,
-			canRedeemExactly: value >= 0 || (input.dom?.scrollTop ?? 0) >= Math.abs(value),
 			now: input.started,
 		});
-		this.#deviation = decision.state;
+		this.#setDeviation(decision.state);
+		record.deviationAfter = decision.state.value;
+		if (input.anchor.kind === 'item') {
+			const index = this.geometry.indexOf(input.anchor.key);
+			const item = index === undefined ? undefined : this.geometry.item(index);
+			record.anchorPaintedStartAfter = item ? item.start - decision.state.value : null;
+		}
 		if (decision.kind === 'deferred') {
 			this.#publish(input.dom, true);
-			record.deviationAfter = decision.state.value;
 			record.published = true;
 			this.#emitRecord(record);
 			return;
 		}
 
 		if (decision.kind === 'settled') {
-			this.#publish(
-				input.dom,
-				true,
-				false,
+			const revision = this.#snapshot.revision;
+			const intendedLogicalOffset =
 				this.#pendingCommit && input.dom
 					? this.#logicalOffsetForTarget(this.#pendingCommit.target, input.dom)
-					: undefined,
-			);
-			record.published = true;
+					: undefined;
+			this.#publish(input.dom, false, false, intendedLogicalOffset);
+			record.published = this.#snapshot.revision !== revision;
 			this.#emitRecord(record);
 			return;
 		}
 
-		const target: PendingTarget = input.followEnd || pendingCorrection?.target.kind === 'end'
-			? { kind: 'end' }
-			: {
-					kind: 'relative',
-					offset:
-						(input.dom && pendingCorrection
-							? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
-							: (input.dom?.scrollTop ?? 0)) + decision.amount,
-					leadingOffset: input.dom?.leadingOffset ?? 0,
-				};
+		const target: PendingTarget =
+			input.followEnd || pendingCorrection?.target.kind === 'end'
+				? { kind: 'end' }
+				: {
+						kind: 'relative',
+						offset:
+							(input.dom && pendingCorrection
+								? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
+								: (input.dom?.scrollTop ?? 0)) + decision.amount,
+						leadingOffset: input.dom?.leadingOffset ?? 0,
+					};
 		this.#publish(
 			input.dom,
 			true,
@@ -472,7 +502,6 @@ export class VirtualListTransaction {
 			input.dom ? this.#logicalOffsetForTarget(target, input.dom) : undefined,
 		);
 		record.redeemed = true;
-		record.deviationAfter = 0;
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
 			source,
@@ -490,12 +519,7 @@ export class VirtualListTransaction {
 		});
 	}
 
-	#captureMutationAnchor(
-		anchor: VirtualMutationAnchor,
-	):
-		| { kind: 'item'; key: string; index: number; start: number }
-		| { kind: 'end' }
-		| { kind: 'none' } {
+	#captureMutationAnchor(anchor: VirtualMutationAnchor): CapturedAnchor {
 		if (anchor.kind !== 'item') return anchor;
 		const index = this.geometry.indexOf(anchor.key);
 		if (index === undefined) return { kind: 'none' };
@@ -506,10 +530,7 @@ export class VirtualListTransaction {
 	#captureMeasurementAnchor(
 		dom: VirtualDomGeometry | null,
 		firstMeasurements?: ReadonlySet<string>,
-	):
-		| { kind: 'item'; key: string; index: number; start: number }
-		| { kind: 'end' }
-		| { kind: 'none' } {
+	): CapturedAnchor {
 		if (this.options.getMeasurementAnchor() === 'end') return { kind: 'end' };
 		if (!dom || this.geometry.count === 0) return { kind: 'none' };
 		const logicalOffset = this.#pendingCommit
@@ -595,13 +616,46 @@ export class VirtualListTransaction {
 		return target.offset + dom.leadingOffset - target.leadingOffset;
 	}
 
-	#overscanRange(visible: VirtualRange): VirtualRange {
+	#overscanRange(visible: VirtualRange): VirtualRange | null {
 		const overscan = Math.max(0, Math.floor(this.options.getOverscan()));
 		let startIndex = Math.max(0, visible.startIndex - overscan);
 		const endIndex = Math.min(this.geometry.count - 1, visible.endIndex + overscan);
 		const view = this.geometry.positionView(this.#deviation.value);
 		while (startIndex <= endIndex && (view.itemAt(startIndex)?.end ?? 0) <= 0) startIndex += 1;
-		return { startIndex: Math.min(startIndex, endIndex), endIndex };
+		return startIndex <= endIndex ? { startIndex, endIndex } : null;
+	}
+
+	#setDeviation(deviation: VirtualDeviationState): void {
+		const previous = this.#deviation;
+		this.#deviation = deviation;
+		if (deviation.pendingSince === null) {
+			if (this.#deviationTimer !== null)
+				this.options.environment.clearTimeout(this.#deviationTimer);
+			this.#deviationTimer = null;
+			return;
+		}
+		if (previous.pendingSince === deviation.pendingSince) return;
+		if (this.#deviationTimer !== null) this.options.environment.clearTimeout(this.#deviationTimer);
+		const pendingSince = deviation.pendingSince;
+		const delay = Math.max(0, pendingSince + 1_000 - this.options.environment.now());
+		this.#deviationTimer = this.options.environment.setTimeout(() => {
+			this.#deviationTimer = null;
+			if (
+				this.#deviation.pendingSince === pendingSince &&
+				this.options.environment.now() - pendingSince >= 1_000
+			) {
+				this.viewportChanged(false);
+			}
+		}, delay);
+	}
+
+	#queueViewportChanged(): void {
+		if (this.#viewportQueued) return;
+		this.#viewportQueued = true;
+		this.options.environment.queueMicrotask(() => {
+			this.#viewportQueued = false;
+			this.viewportChanged(false);
+		});
 	}
 
 	#queueCommit(commit: PendingCommit): void {
@@ -614,14 +668,10 @@ export class VirtualListTransaction {
 	#commit(): void {
 		this.#commitQueued = false;
 		const commit = this.#pendingCommit;
+		if (!commit) return;
 		const dom = this.#driver?.read();
-		if (
-			!commit ||
-			!dom ||
-			this.#destroyed ||
-			this.#suspended ||
-			commit.revision !== this.#snapshot.revision
-		) {
+		if (!dom || this.#destroyed || this.#suspended || commit.revision !== this.#snapshot.revision) {
+			this.cancelOwnedScroll();
 			return;
 		}
 
@@ -629,11 +679,16 @@ export class VirtualListTransaction {
 			commit.target.kind === 'relative'
 				? commit.target.leadingOffset
 				: this.#lastDom?.leadingOffset;
-		if (
-			leadingAtPlan !== undefined &&
-			Math.abs(dom.leadingOffset - leadingAtPlan) > 0.5 &&
-			commit.barriers < 2
-		) {
+		if (leadingAtPlan !== undefined && Math.abs(dom.leadingOffset - leadingAtPlan) > 0.5) {
+			if (commit.barriers >= 2) {
+				commit.record.leadingOffsetAfter = dom.leadingOffset;
+				commit.record.published = true;
+				this.#emitRecord(commit.record);
+				this.options.environment.requestAnimationFrame(() => {
+					if (this.#pendingCommit === commit && !this.#commitQueued) this.viewportChanged(false);
+				});
+				return;
+			}
 			if (commit.target.kind === 'relative') {
 				commit.target.offset += dom.leadingOffset - commit.target.leadingOffset;
 				commit.target.leadingOffset = dom.leadingOffset;
@@ -698,6 +753,7 @@ export class VirtualListTransaction {
 		return {
 			revision: this.#revision + 1,
 			source,
+			rejectionReason: null,
 			provenance,
 			activity: this.#activity,
 			anchorKind: anchor.kind,
@@ -719,7 +775,7 @@ export class VirtualListTransaction {
 			published: false,
 			scrollWrites: 0,
 			durationMs: -started,
-			ignoredEntries: 0,
+			ignoredEntries: this.#driver?.drainIgnoredEntries() ?? 0,
 		};
 	}
 
@@ -734,22 +790,19 @@ export class VirtualListTransaction {
 function validateMutation(
 	mutation: VirtualItemsMutation,
 	geometry: VirtualListGeometry,
-): VirtualMutationResult | null {
-	if (mutation.keys.length !== mutation.estimates.length) {
+): Extract<VirtualMutationResult, { kind: 'rejected' }> | null {
+	if (mutation.keys.length !== mutation.estimates.length)
 		return { kind: 'rejected', reason: 'length-mismatch' };
-	}
 	let prefix = 0;
 	while (prefix < geometry.count && geometry.keyAt(prefix) === mutation.keys[prefix]) prefix += 1;
 	const appended = prefix === geometry.count && mutation.keys.length >= geometry.count;
 	const newKeys = appended ? mutation.keys.slice(prefix) : mutation.keys;
 	const uniqueNewKeys = new Set(newKeys);
 	const duplicatesExisting = appended && newKeys.some((key) => geometry.indexOf(key) !== undefined);
-	if (duplicatesExisting || uniqueNewKeys.size !== newKeys.length) {
+	if (duplicatesExisting || uniqueNewKeys.size !== newKeys.length)
 		return { kind: 'rejected', reason: 'duplicate-key' };
-	}
-	if (mutation.estimates.some((estimate) => !Number.isFinite(estimate) || estimate < 0)) {
+	if (mutation.estimates.some((estimate) => !Number.isFinite(estimate) || estimate < 0))
 		return { kind: 'rejected', reason: 'invalid-estimate' };
-	}
 	return null;
 }
 

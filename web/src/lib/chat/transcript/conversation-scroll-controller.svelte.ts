@@ -11,6 +11,7 @@ import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversa
 import type {
 	ConversationViewportIntentCancellationResult,
 	ConversationViewportPort,
+	ConversationViewportPosition,
 } from '$lib/chat/transcript/conversation-viewport-port.js';
 import {
 	inferConversationScrollDirection,
@@ -39,16 +40,9 @@ interface UserScrollIntent {
 	receivedAt: number;
 }
 
-interface DeferredLiveEdgeIntent {
-	chatId: string;
-	epoch: number;
-}
+type DeferredLiveEdgeIntent = { chatId: string; epoch: number };
 
-interface NativeScrollHandoff {
-	chatId: string;
-	epoch: number;
-	direction: TranscriptPageDirection | null;
-}
+type NativeScrollHandoff = DeferredLiveEdgeIntent & { direction: TranscriptPageDirection | null };
 
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
@@ -362,12 +356,15 @@ export class ConversationScrollController {
 			this.#preserveHistoryBrowsing();
 			return;
 		}
-		this.#syncViewportStart();
+		this.#syncViewportStart(position);
 		this.#deferredLiveEdgeIntent = null;
-		this.#reconcileUserScroll(inferredDirection);
+		this.#reconcileUserScroll(inferredDirection, position);
 	}
 
-	#reconcileUserScroll(inferredDirection: TranscriptPageDirection | null): void {
+	#reconcileUserScroll(
+		inferredDirection: TranscriptPageDirection | null,
+		position?: ConversationViewportPosition | null,
+	): void {
 		this.#applyInferredIntentDirection(inferredDirection);
 		const nearBottom = this.isNearBottom();
 		const hasRecentUserScrollIntent = this.#hasRecentUserScrollIntent();
@@ -390,8 +387,8 @@ export class ConversationScrollController {
 			return;
 		}
 
-		this.#handleBoundaryProximity('earlier', this.#isNearPageBoundary('earlier'));
-		this.#handleBoundaryProximity('later', this.#isNearPageBoundary('later'));
+		this.#handleBoundaryProximity('earlier', this.#isNearPageBoundary('earlier', position));
+		this.#handleBoundaryProximity('later', this.#isNearPageBoundary('later', position));
 	}
 
 	async requestPage(
@@ -749,9 +746,9 @@ export class ConversationScrollController {
 		return layout === 'settled' ? result : 'invalidated';
 	}
 
-	#syncViewportStart(): void {
+	#syncViewportStart(position?: ConversationViewportPosition | null): void {
 		const isViewportAtStart = isConversationViewportAtStart(
-			this.deps.getViewport()?.viewportPosition() ?? null,
+			position === undefined ? (this.deps.getViewport()?.viewportPosition() ?? null) : position,
 			FEED_START_THRESHOLD_PX,
 		);
 		if (isViewportAtStart === null) return;
@@ -819,13 +816,16 @@ export class ConversationScrollController {
 		else this.#laterBoundaryArmed = true;
 	}
 
-	#isNearPageBoundary(direction: TranscriptPageDirection): boolean {
+	#isNearPageBoundary(
+		direction: TranscriptPageDirection,
+		position?: ConversationViewportPosition | null,
+	): boolean {
 		const scroller = this.deps.getScrollContainer();
 		if (!scroller || scroller.clientHeight <= 0) return false;
 		const viewport = this.deps.getViewport();
 		return isNearConversationPageBoundary({
 			direction,
-			position: viewport?.viewportPosition() ?? null,
+			position: position === undefined ? (viewport?.viewportPosition() ?? null) : position,
 			viewportHeight: scroller.clientHeight,
 			minimumDistance: MIN_PAGE_PREFETCH_DISTANCE_PX,
 			earlierViewportCount: EARLIER_PAGE_PREFETCH_VIEWPORTS,

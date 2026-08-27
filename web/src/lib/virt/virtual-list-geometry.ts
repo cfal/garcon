@@ -33,6 +33,27 @@ function emptyOperationCounts(): VirtualGeometryOperationCounts {
 	};
 }
 
+function indexAtOffset(offsets: Float64Array, count: number, offset: number): number | undefined {
+	if (count === 0) return undefined;
+	const total = offsets[count];
+	const target = Math.max(0, Math.min(offset, Math.max(0, total - Number.EPSILON)));
+	let low = 0;
+	let high = count + 1;
+	while (low < high) {
+		const middle = (low + high) >>> 1;
+		if (offsets[middle] <= target) low = middle + 1;
+		else high = middle;
+	}
+	let index = Math.max(0, Math.min(low - 1, count - 1));
+	while (index < count && offsets[index + 1] <= target) index += 1;
+	while (index < count && offsets[index + 1] === offsets[index]) index += 1;
+	if (index < count) return index;
+	for (index = count - 1; index >= 0; index -= 1) {
+		if (offsets[index + 1] > offsets[index]) return index;
+	}
+	return 0;
+}
+
 export class VirtualListGeometry {
 	#keys: string[] = [];
 	#indexByKey = new Map<string, number>();
@@ -49,11 +70,9 @@ export class VirtualListGeometry {
 	get count(): number {
 		return this.#count;
 	}
-
 	get revision(): number {
 		return this.#revision;
 	}
-
 	get operationCounts(): VirtualGeometryOperationCounts {
 		this.#rebuild();
 		return this.#operations;
@@ -105,6 +124,11 @@ export class VirtualListGeometry {
 
 			this.#keys = nextKeys;
 			this.#count = newCount;
+			for (let index = 0; index < prefix; index += 1) {
+				if (this.#estimates[index] === estimates[index]) continue;
+				this.#estimates[index] = estimates[index];
+				this.#markDirty(index, 1);
+			}
 			for (let index = prefix; index < newCount; index += 1) {
 				this.#estimates[index] = estimates[index];
 			}
@@ -190,7 +214,7 @@ export class VirtualListGeometry {
 
 	itemAtOffset(offset: number): LogicalVirtualItem | undefined {
 		this.#rebuild();
-		const index = this.#indexAtOffset(offset);
+		const index = indexAtOffset(this.#offsets, this.#count, offset);
 		return index === undefined ? undefined : this.#logicalItem(index);
 	}
 
@@ -240,21 +264,6 @@ export class VirtualListGeometry {
 		const start = this.#offsets[index];
 		const size = this.#sizes[index];
 		return { key: this.#keys[index], index, start, size, end: start + size };
-	}
-
-	#indexAtOffset(offset: number): number | undefined {
-		if (this.#count === 0) return undefined;
-		const total = this.#offsets[this.#count];
-		const target = Math.max(0, Math.min(offset, Math.max(0, total - Number.EPSILON)));
-		let index = this.#upperBoundOffset(target) - 1;
-		index = Math.max(0, Math.min(index, this.#count - 1));
-		while (index < this.#count && this.#offsets[index + 1] <= target) index += 1;
-		while (index < this.#count && this.#sizes[index] === 0) index += 1;
-		if (index < this.#count) return index;
-		for (index = this.#count - 1; index >= 0; index -= 1) {
-			if (this.#sizes[index] > 0) return index;
-		}
-		return 0;
 	}
 
 	#upperBoundOffset(value: number): number {
@@ -354,40 +363,11 @@ class GeometryPositionView implements VirtualPositionView {
 	}
 
 	itemAtOffset(paintedOffset: number): VirtualItem | undefined {
-		const index = this.#indexAtOffset(paintedOffset + this.deviation);
+		const index = indexAtOffset(
+			this.generation.offsets,
+			this.generation.count,
+			paintedOffset + this.deviation,
+		);
 		return index === undefined ? undefined : this.itemAt(index);
-	}
-
-	#indexAtOffset(offset: number): number | undefined {
-		if (this.generation.count === 0) return undefined;
-		const total = this.generation.offsets[this.generation.count];
-		const target = Math.max(0, Math.min(offset, Math.max(0, total - Number.EPSILON)));
-		let index = this.#upperBoundOffset(target) - 1;
-		index = Math.max(0, Math.min(index, this.generation.count - 1));
-		while (index < this.generation.count && this.generation.offsets[index + 1] <= target) {
-			index += 1;
-		}
-		while (
-			index < this.generation.count &&
-			this.generation.offsets[index + 1] === this.generation.offsets[index]
-		) {
-			index += 1;
-		}
-		if (index < this.generation.count) return index;
-		for (index = this.generation.count - 1; index >= 0; index -= 1) {
-			if (this.generation.offsets[index + 1] > this.generation.offsets[index]) return index;
-		}
-		return 0;
-	}
-
-	#upperBoundOffset(value: number): number {
-		let low = 0;
-		let high = this.generation.count + 1;
-		while (low < high) {
-			const middle = (low + high) >>> 1;
-			if (this.generation.offsets[middle] <= value) low = middle + 1;
-			else high = middle;
-		}
-		return low;
 	}
 }
