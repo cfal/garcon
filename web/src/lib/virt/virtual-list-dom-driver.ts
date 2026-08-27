@@ -27,10 +27,10 @@ export interface VirtualListDomDriverOptions {
 	onUserIntent(): void;
 }
 
+// Matches TanStack Virtual's deliberate CSS-pixel rounding before the offsetHeight fallback.
+// https://github.com/TanStack/virtual/blob/e9874f033c74afd3251eeb9f3e60b2530cc7ae88/packages/virtual-core/src/index.ts#L259-L286
 function blockSize(entry: ResizeObserverEntry | undefined, element: HTMLElement): number {
-	const boxes = entry?.borderBoxSize;
-	const box = Array.isArray(boxes) ? boxes[0] : boxes?.[0];
-	return Math.round(box?.blockSize ?? element.offsetHeight);
+	return Math.round(entry?.borderBoxSize?.[0]?.blockSize ?? element.offsetHeight);
 }
 
 export class VirtualListDomDriver {
