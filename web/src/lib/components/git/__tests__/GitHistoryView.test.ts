@@ -21,6 +21,7 @@ import {
 import { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/components/workspace/WorkspaceFullscreenButton.svelte', async () => ({
@@ -224,6 +225,7 @@ describe('GitHistoryView', () => {
 
 	afterEach(() => {
 		restoreResizeObserver();
+		vi.restoreAllMocks();
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx);
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.gitDiffDocumentFileTreeVisible);
 	});
@@ -578,6 +580,7 @@ describe('GitHistoryView', () => {
 	});
 
 	it('loads the initially visible narrow diff without a scroll event', async () => {
+		const layout = installGitVirtualDiffTestLayout({ viewportHeight: 720 });
 		const files = Array.from({ length: 9 }, (_, index) =>
 			commitFile(`file-${index}.ts`, `fp-file-${index}.ts`),
 		);
@@ -622,6 +625,7 @@ describe('GitHistoryView', () => {
 		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Diff' }));
+		layout.setViewportHeight(3_000);
 		ResizeObserverHarness.emit(diffRoot, 480, 3_000);
 		await waitFor(() => {
 			const requestedNinthFile = vi
@@ -643,6 +647,7 @@ describe('GitHistoryView', () => {
 	});
 
 	it('loads a selected file outside the initial body candidates in a narrow layout', async () => {
+		installGitVirtualDiffTestLayout({ viewportHeight: 720 });
 		const { container } = render(GitHistoryView, {
 			props: {
 				history: createHistory(),

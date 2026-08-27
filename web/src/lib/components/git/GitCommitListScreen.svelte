@@ -72,8 +72,7 @@
 	}
 
 	function maybeLoadMore(): void {
-		if (isLoading || error || nextOffset === null || !isWithinLoadAheadRange() || !listRef)
-			return;
+		if (isLoading || error || nextOffset === null || !isWithinLoadAheadRange() || !listRef) return;
 		const collectionSignature =
 			collectionChange.kind === 'append'
 				? collectionChange.kind
@@ -109,17 +108,16 @@
 			lastBoundarySignature = null;
 		},
 	});
-	const virtualizer = virtual.virtualizer;
-	const measureRow = virtual.measureRow;
 	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (element, direction) => {
 		virtual.noteUserScrollIntent();
 		scrollElementHalfPage(element, direction);
 	});
-	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let totalHeight = $derived($virtualizer.getTotalSize());
+	let virtualSnapshot = $derived(virtual.snapshot);
+	let virtualItems = $derived(virtual.renderedItems(virtualSnapshot));
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
 	let renderedVirtualItems = $derived.by(() =>
 		virtualItems.flatMap((virtualItem) => {
-			const commit = commits[virtualItem.index];
+			const commit = virtual.commitAt(virtualItem.index);
 			return commit ? [{ virtualItem, commit }] : [];
 		}),
 	);
@@ -206,6 +204,7 @@
 
 	<div
 		bind:this={listRef}
+		{@attach virtual.viewport}
 		{@attach primaryScrollRegion}
 		class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-background {isMobile
 			? 'pb-16'
@@ -240,6 +239,7 @@
 				aria-busy={isLoading}
 				data-git-history-virtual-spacer
 				data-git-history-loaded-count={commits.length}
+				{@attach virtual.sizer}
 			>
 				{#each renderedVirtualItems as rendered (rendered.virtualItem.key)}
 					<div
@@ -250,7 +250,7 @@
 						aria-setsize={ariaSetSize}
 						data-index={rendered.virtualItem.index}
 						data-git-history-virtual-row
-						use:measureRow
+						{@attach virtual.item(rendered.commit.hash)}
 					>
 						<svelte:boundary>
 							<GitCommitListRow

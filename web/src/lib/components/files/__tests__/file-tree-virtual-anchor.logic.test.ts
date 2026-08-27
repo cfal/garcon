@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { VirtualItem } from '@tanstack/svelte-virtual';
+import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { FileTreeEntry } from '$shared/file-contracts';
 import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
@@ -27,7 +27,7 @@ function row(name: string): FileTableRow {
 }
 
 function item(index: number, start: number, size = 32): VirtualItem {
-	return { index, key: index, start, size, end: start + size, lane: 0 };
+	return { index, key: String(index), start, size, end: start + size };
 }
 
 function model(rows: readonly FileTableRow[]) {

@@ -58,6 +58,11 @@ export interface OpenCodeSession {
   turn: OpenCodeTurnContext;
 }
 
+export function relocateOpenCodeSession(session: OpenCodeSession, directory: string): void {
+  session.directory = directory;
+  session.lastActivityAt = Date.now();
+}
+
 // OpenCode assigns IDs before durable commits, so concurrent publishers can deliver unseen
 // events outside lexical order. The bounded window rejects actual duplicates without making
 // ordering an arrival contract; durable sequence metadata can replace it if global replay grows.

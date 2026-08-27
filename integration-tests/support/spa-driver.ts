@@ -660,18 +660,28 @@ export class SpaDriver {
   async trackChatScrollRequests(): Promise<void> {
     await this.#page.$eval('[data-chat-scroll-viewport]', (element) => {
       const feed = element as HTMLElement;
-      const nativeScrollTo = feed.scrollTo.bind(feed);
+      let prototype: object | null = feed;
+      let descriptor: PropertyDescriptor | undefined;
+      while (prototype && !descriptor) {
+        prototype = Object.getPrototypeOf(prototype);
+        descriptor = prototype
+          ? Object.getOwnPropertyDescriptor(prototype, 'scrollTop')
+          : undefined;
+      }
+      if (!descriptor?.get || !descriptor.set) {
+        throw new Error('Missing native scrollTop descriptor.');
+      }
       feed.dataset.testScrollRequests = '[]';
-      feed.scrollTo = ((...args: unknown[]) => {
-        const first = args[0];
-        const top = typeof first === 'object' && first !== null
-          ? Number((first as ScrollToOptions).top ?? 0)
-          : Number(args[1] ?? 0);
-        const requests = JSON.parse(feed.dataset.testScrollRequests ?? '[]') as number[];
-        requests.push(top);
-        feed.dataset.testScrollRequests = JSON.stringify(requests);
-        Reflect.apply(nativeScrollTo, feed, args);
-      }) as typeof feed.scrollTo;
+      Object.defineProperty(feed, 'scrollTop', {
+        configurable: true,
+        get: () => descriptor.get?.call(feed),
+        set: (value: number) => {
+          const requests = JSON.parse(feed.dataset.testScrollRequests ?? '[]') as number[];
+          requests.push(value);
+          feed.dataset.testScrollRequests = JSON.stringify(requests);
+          descriptor.set?.call(feed, value);
+        },
+      });
     });
   }
 

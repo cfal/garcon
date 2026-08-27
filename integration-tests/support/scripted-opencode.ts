@@ -738,6 +738,17 @@ export function readOpenCodeSessionCount(databasePath: string): number {
   }
 }
 
+export function readOpenCodeSessionDirectory(native: OpenCodeNativeSession): string | null {
+  const database = new Database(native.databasePath, { readonly: true, strict: true });
+  try {
+    const row = database.query('SELECT directory FROM session WHERE id = ?')
+      .get(native.agentSessionId) as { directory: string } | null;
+    return row?.directory ?? null;
+  } finally {
+    database.close();
+  }
+}
+
 // Returns the session row's stored ruleset; undefined when the column is absent or empty.
 export function readOpenCodeSessionPermission(
   native: OpenCodeNativeSession,

@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { tick, untrack, type Snippet } from 'svelte';
-	import { createVirtualizer } from '@tanstack/svelte-virtual';
+	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
 	import type {
 		GitVirtualFileHeaderRow,
 		GitVirtualReviewRow,
@@ -15,11 +14,14 @@
 		markGitReviewFirstRow,
 		markGitReviewViewportReady,
 	} from '$lib/git/review/git-review-performance.js';
-	import { measureVirtualRow } from './git-virtual-row-measurement.js';
+	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
-		managedWorkspaceScrollRegion,
-		scrollElementHalfPage,
-	} from '$lib/workspace/workspace-scroll-region.js';
+		virtualItems as selectVirtualItems,
+		type VirtualMutationAnchor,
+		type VirtualRange,
+	} from '$lib/virt/virtual-list-types.js';
+	import { measureVirtualRow } from './git-virtual-row-measurement.js';
+	import { managedWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitVirtualDiffViewportProps {
 		layoutIdentity?: string | null;
@@ -56,35 +58,41 @@
 	let scrollRequestSequence = 0;
 	let servicedScrollRequestId = '';
 	let servicedScrollRequestState: 'pending' | 'resolved' | 'terminal' | null = null;
+	let servicedScrollTargetStart = Number.NaN;
 	let completedScrollRequestId = '';
-	let measuredLayoutIdentity: string | null = null;
+	let configuredLayoutIdentity: string | null | undefined;
 	let performanceFrame: number | null = null;
 	let configuredMeasurementKey = '';
-	let configuredScrollElement: HTMLDivElement | null = null;
+	let configuredOverscan = Number.NaN;
 	let presentedSource: GitVirtualReviewRowSource | null = null;
 	let presentedMeasurementRevision = '';
 	let scrollIntentRevision = 0;
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
+	const fallbackViewportHeight = 360;
+	const scrollTargetTolerance = 0.5;
 	const scrollKeys = new Set(['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' ']);
 
-	let estimateSizeForOptions = (index: number): number =>
-		source.estimateRowHeight(index, rowLineHeight);
-	let itemKeyForOptions = (index: number): string | number => source.rowKey(index);
-
-	const virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
-		count: untrack(() => source.rowCount),
-		getScrollElement: () => viewportRef,
-		estimateSize: estimateSizeForOptions,
+	const virtual = new VirtualListController({
+		initialViewportSize: fallbackViewportHeight,
+		get overscan() {
+			return overscan;
+		},
+		get measurementAnchor() {
+			return 'geometric' as const;
+		},
 		measureElement: measureVirtualRow,
-		initialRect: { width: 0, height: 720 },
-		overscan: 18,
-		getItemKey: itemKeyForOptions,
 	});
 
-	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let totalHeight = $derived($virtualizer.getTotalSize());
+	let virtualSnapshot = $derived(virtual.snapshot);
+	let virtualItems = $derived(
+		selectVirtualItems(
+			virtualSnapshot,
+			indexesInRange(virtualSnapshot.overscanRange ?? fallbackRange(true)),
+		),
+	);
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
 	let windowStart = $derived(virtualItems[0]?.start ?? 0);
 	let renderedVirtualItems = $derived.by(() =>
 		virtualItems.flatMap((virtualItem) => {
@@ -94,7 +102,7 @@
 	);
 	let pinnedFileHeader = $derived.by<GitVirtualFileHeaderRow | null>(() => {
 		if (!pinFileHeaders) return null;
-		const firstVisibleIndex = $virtualizer.range?.startIndex;
+		const firstVisibleIndex = (virtualSnapshot.visibleRange ?? fallbackRange(false))?.startIndex;
 		if (firstVisibleIndex === undefined) return null;
 
 		const filePath = source.filePathAt(firstVisibleIndex);
@@ -114,12 +122,81 @@
 	});
 	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (element, direction) => {
 		completeScrollRequest();
-		scrollElementHalfPage(element, direction);
+		virtual.scrollBy((direction === 'later' ? 1 : -1) * (element.clientHeight / 2));
 	});
+
+	function indexesInRange(range: VirtualRange | null): number[] {
+		return range
+			? Array.from(
+					{ length: range.endIndex - range.startIndex + 1 },
+					(_, offset) => range.startIndex + offset,
+				)
+			: [];
+	}
+
+	function fallbackRange(includeOverscan: boolean): VirtualRange | null {
+		if (source.rowCount === 0) return null;
+		const offset = Math.max(0, viewportRef?.scrollTop ?? 0);
+		const viewportHeight = fallbackViewportHeight;
+		const startIndex = virtualSnapshot.positions.itemAtOffset(offset)?.index ?? 0;
+		const endIndex =
+			virtualSnapshot.positions.itemAtOffset(offset + viewportHeight)?.index ?? source.rowCount - 1;
+		const extra = includeOverscan ? Math.max(0, Math.floor(overscan)) : 0;
+		return {
+			startIndex: Math.max(0, startIndex - extra),
+			endIndex: Math.min(source.rowCount - 1, endIndex + extra),
+		};
+	}
+
+	function virtualKey(value: string | number): string {
+		return `${typeof value}:${String(value)}`;
+	}
+
+	function virtualSource(
+		rowSource: GitVirtualReviewRowSource,
+		lineHeight: number,
+	): { keys: string[]; estimates: number[] } {
+		const keys = new Array<string>(rowSource.rowCount);
+		const estimates = new Array<number>(rowSource.rowCount);
+		for (let index = 0; index < rowSource.rowCount; index += 1) {
+			keys[index] = virtualKey(rowSource.rowKey(index));
+			estimates[index] = rowSource.estimateRowHeight(index, lineHeight);
+		}
+		return { keys, estimates };
+	}
+
+	function currentAnchor(): VirtualMutationAnchor {
+		const position = virtual.viewportPosition;
+		const item = position
+			? virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
+			: undefined;
+		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
+	}
+
+	function restorePresentationOffset(
+		nextSource: GitVirtualReviewRowSource,
+		measurementRevision: string,
+		logicalOffset: number,
+		intentRevision: number,
+	): void {
+		void tick().then(() => {
+			if (
+				source !== nextSource ||
+				nextSource.measurementRevision !== measurementRevision ||
+				scrollIntentRevision !== intentRevision
+			) {
+				return;
+			}
+			const currentOffset = virtual.viewportPosition?.logicalOffset;
+			if (currentOffset === undefined || Math.abs(currentOffset - logicalOffset) <= 0.5) return;
+			virtual.scrollBy(logicalOffset - currentOffset);
+		});
+	}
 
 	function completeScrollRequest(): void {
 		scrollIntentRevision += 1;
 		if (servicedScrollRequestId) completedScrollRequestId = servicedScrollRequestId;
+		virtual.cancelOwnedScroll();
 	}
 
 	function handleViewportFocusIn(event: FocusEvent): void {
@@ -141,80 +218,60 @@
 		);
 	}
 
-	$effect(() => {
-		const nextLayoutIdentity = layoutIdentity;
-		const scrollElement = viewportRef;
-		if (!scrollElement || nextLayoutIdentity === measuredLayoutIdentity) return;
-		measuredLayoutIdentity = nextLayoutIdentity;
-		scrollIntentRevision += 1;
-		presentedSource = null;
-		presentedMeasurementRevision = '';
-		lastScrollRequestKey = '';
-		pendingScrollRequestKey = '';
-		scrollRequestSequence += 1;
-		servicedScrollRequestId = '';
-		servicedScrollRequestState = null;
-		completedScrollRequestId = '';
-		untrack(() => {
-			scrollElement.scrollTop = 0;
-			$virtualizer.measure();
-		});
-	});
-
 	$effect.pre(() => {
 		const nextSource = source;
 		const nextMeasurementRevision = nextSource.measurementRevision;
-		const scrollElement = viewportRef;
-		const preserveScroll =
-			presentedSource !== null &&
-			presentedSource !== nextSource &&
-			presentedMeasurementRevision === nextMeasurementRevision;
-		presentedSource = nextSource;
-		presentedMeasurementRevision = nextMeasurementRevision;
-		if (!preserveScroll || !scrollElement) return;
-
-		const scrollTop = scrollElement.scrollTop;
-		const intentRevision = scrollIntentRevision;
-		void tick().then(() => {
-			if (
-				source === nextSource &&
-				viewportRef === scrollElement &&
-				nextSource.measurementRevision === nextMeasurementRevision &&
-				scrollIntentRevision === intentRevision
-			) {
-				if (scrollElement.scrollTop !== scrollTop) scrollElement.scrollTop = scrollTop;
-			}
-		});
-	});
-
-	$effect(() => {
-		const measurementRevision = source.measurementRevision;
-		const count = source.rowCount;
-		const scrollElement = viewportRef;
+		const nextLayoutIdentity = layoutIdentity;
 		const rowOverscan = overscan;
 		const lineHeight = rowLineHeight;
 		untrack(() => {
-			const measurementKey = `${measurementRevision}\0${count}\0${rowOverscan}\0${lineHeight}`;
-			if (
-				measurementKey === configuredMeasurementKey &&
-				scrollElement === configuredScrollElement
-			) {
-				return;
+			const layoutChanged = configuredLayoutIdentity !== nextLayoutIdentity;
+			const measurementKey = `${nextMeasurementRevision}\0${nextSource.rowCount}\0${lineHeight}`;
+			const presentationOnly =
+				!layoutChanged &&
+				presentedSource !== null &&
+				presentedSource !== nextSource &&
+				presentedMeasurementRevision === nextMeasurementRevision &&
+				measurementKey === configuredMeasurementKey;
+			const restoreOffset = presentationOnly ? virtual.viewportPosition?.logicalOffset : undefined;
+			const restoreIntentRevision = scrollIntentRevision;
+
+			if (layoutChanged) {
+				scrollIntentRevision += 1;
+				lastScrollRequestKey = '';
+				pendingScrollRequestKey = '';
+				scrollRequestSequence += 1;
+				servicedScrollRequestId = '';
+				servicedScrollRequestState = null;
+				servicedScrollTargetStart = Number.NaN;
+				completedScrollRequestId = '';
 			}
-			configuredMeasurementKey = measurementKey;
-			configuredScrollElement = scrollElement;
-			const measurementSource = source;
-			estimateSizeForOptions = (index) => measurementSource.estimateRowHeight(index, lineHeight);
-			itemKeyForOptions = (index) => measurementSource.rowKey(index);
-			$virtualizer.setOptions({
-				count,
-				getScrollElement: () => scrollElement,
-				estimateSize: estimateSizeForOptions,
-				measureElement: measureVirtualRow,
-				initialRect: { width: 0, height: 720 },
-				overscan: rowOverscan,
-				getItemKey: itemKeyForOptions,
-			});
+
+			if (layoutChanged || measurementKey !== configuredMeasurementKey) {
+				const next = virtualSource(nextSource, lineHeight);
+				virtual.apply({
+					kind: layoutChanged ? 'reset-measurements' : 'update',
+					...next,
+					anchor: layoutChanged ? { kind: 'none' } : currentAnchor(),
+				});
+				configuredMeasurementKey = measurementKey;
+			}
+
+			if (layoutChanged) virtual.scrollToStart();
+			else if (rowOverscan !== configuredOverscan) virtual.refreshLayout();
+			if (restoreOffset !== undefined) {
+				restorePresentationOffset(
+					nextSource,
+					nextMeasurementRevision,
+					restoreOffset,
+					restoreIntentRevision,
+				);
+			}
+
+			configuredLayoutIdentity = nextLayoutIdentity;
+			configuredOverscan = rowOverscan;
+			presentedSource = nextSource;
+			presentedMeasurementRevision = nextMeasurementRevision;
 		});
 	});
 
@@ -292,6 +349,7 @@
 	$effect(() => {
 		if (!scrollToRequest) {
 			pendingScrollRequestKey = '';
+			servicedScrollTargetStart = Number.NaN;
 			scrollRequestSequence += 1;
 			return;
 		}
@@ -311,7 +369,12 @@
 			return;
 		}
 		const requestKey = `${requestId}\0${targetIndex}\0${targetState}`;
-		if (requestKey === lastScrollRequestKey || requestKey === pendingScrollRequestKey) return;
+		if (requestKey === pendingScrollRequestKey) return;
+		const targetItem = virtualSnapshot.positions.itemAt(targetIndex);
+		const targetGeometryUnchanged =
+			targetItem !== undefined &&
+			Math.abs(targetItem.start - servicedScrollTargetStart) <= scrollTargetTolerance;
+		if (requestKey === lastScrollRequestKey && targetGeometryUnchanged) return;
 		scrollIntentRevision += 1;
 		pendingScrollRequestKey = requestKey;
 		const requestSequence = ++scrollRequestSequence;
@@ -320,7 +383,7 @@
 		const priorityFilePaths = source.filePathsInRange(start, end);
 		const documentId = reviewDocumentId;
 		untrack(() => {
-			if (documentId && priorityFilePaths.length > 0) {
+			if (requestKey !== lastScrollRequestKey && documentId && priorityFilePaths.length > 0) {
 				traceGitReviewDemand({
 					stage: 'viewport-demand',
 					documentId,
@@ -358,7 +421,9 @@
 				pendingScrollRequestKey = '';
 				lastScrollRequestKey = requestKey;
 				scrollIntentRevision += 1;
-				$virtualizer.scrollToIndex(targetIndex, { align: 'start' });
+				servicedScrollTargetStart =
+					virtualSnapshot.positions.itemAt(targetIndex)?.start ?? Number.NaN;
+				virtual.scrollToIndex(targetIndex, { align: 'start' });
 				servicedScrollRequestId = requestId;
 				servicedScrollRequestState = targetState;
 			});
@@ -400,20 +465,7 @@
 		};
 	});
 
-	function measureRow(
-		element: HTMLDivElement,
-		_index: number,
-	): { update: (index: number) => void; destroy: () => void } {
-		$virtualizer.measureElement(element);
-		return {
-			update() {
-				$virtualizer.measureElement(element);
-			},
-			destroy() {
-				$virtualizer.measureElement(null);
-			},
-		};
-	}
+	onDestroy(() => virtual.destroy());
 </script>
 
 {#snippet renderRow(row: GitVirtualReviewRow)}
@@ -431,8 +483,10 @@
 
 <div
 	bind:this={viewportRef}
+	{@attach virtual.viewport}
 	{@attach primaryScrollRegion}
 	class="min-h-0 flex-1 overflow-auto bg-muted/15"
+	style:overflow-anchor="none"
 	data-git-virtual-diff-root
 	onfocusin={handleViewportFocusIn}
 	onfocusout={handleViewportFocusOut}
@@ -442,7 +496,12 @@
 			{emptyMessage}
 		</div>
 	{:else}
-		<div class="relative w-full" style:height={`${totalHeight}px`}>
+		<div
+			class="relative w-full"
+			style:height={`${totalHeight}px`}
+			data-git-virtual-diff-sizer
+			{@attach virtual.sizer}
+		>
 			{#if pinnedFileHeader}
 				<div class="sticky top-0 z-20 h-0" data-git-pinned-file-header-host>
 					<div
@@ -466,7 +525,7 @@
 						data-git-virtual-row-id={rendered.row.id}
 						aria-hidden={hidePinnedOriginal}
 						inert={hidePinnedOriginal}
-						use:measureRow={rendered.virtualItem.index}
+						{@attach virtual.item(rendered.virtualItem.key)}
 					>
 						{@render renderRow(rendered.row)}
 					</div>

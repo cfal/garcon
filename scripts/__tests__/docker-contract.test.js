@@ -69,7 +69,12 @@ describe('Docker contract', () => {
   });
 
   test('copies declared patches before installing the workspace', () => {
-    expect(Object.keys(rootPackage.patchedDependencies)).not.toHaveLength(0);
+    const patchedDependencies = rootPackage.patchedDependencies ?? {};
+    if (Object.keys(patchedDependencies).length === 0) {
+      expect(dockerfile).not.toContain('COPY patches/ patches/');
+      return;
+    }
+
     expect(dockerfile.indexOf('COPY patches/ patches/')).toBeGreaterThan(-1);
     expect(dockerfile.indexOf('COPY patches/ patches/')).toBeLessThan(
       dockerfile.indexOf('RUN bun install --frozen-lockfile'),

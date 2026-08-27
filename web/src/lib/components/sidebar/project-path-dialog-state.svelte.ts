@@ -276,6 +276,15 @@ export class ProjectPathDialogState {
 		if (error.errorCode === 'PROJECT_PATH_UPDATE_UNSUPPORTED') {
 			return m.sidebar_project_path_errors_unsupported();
 		}
+		if (error.errorCode === 'PROJECT_PATH_DESTINATION_REJECTED') {
+			return m.sidebar_project_path_errors_destination_rejected();
+		}
+		if (error.errorCode === 'PROJECT_PATH_UPDATE_OUTCOME_UNKNOWN') {
+			return m.sidebar_project_path_errors_outcome_unknown();
+		}
+		if (error.errorCode === 'PROJECT_PATH_UPDATE_FAILED') {
+			return m.sidebar_project_path_errors_update_failed();
+		}
 		if (error.errorCode === 'PROJECT_PATH_OUTSIDE_BASE') {
 			return m.chat_new_chat_errors_path_outside_base_dir();
 		}

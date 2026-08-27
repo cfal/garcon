@@ -31,6 +31,8 @@ describe('OpenCodeAgentIntegration', () => {
     expect(integration.execution).toBeDefined();
     expect(integration.nativeHistoryImport).toBeDefined();
     expect(integration.nativeSessions).toBeDefined();
+    expect(integration.descriptor.supportsProjectPathUpdate).toBe(true);
+    expect(integration.projectPathUpdates).toMatchObject({ prepare: expect.any(Function) });
     expect(integration.transcriptSearch).toBeUndefined();
     expect(integration.forking).toMatchObject({
       fork: expect.any(Function),

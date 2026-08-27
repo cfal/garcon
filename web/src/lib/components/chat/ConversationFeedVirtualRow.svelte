@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
-	import type { VirtualItem } from '@tanstack/svelte-virtual';
+	import { onDestroy } from 'svelte';
+	import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 	import ConversationFeedVirtualItem from './ConversationFeedVirtualItem.svelte';
 	import type { ConversationFeedVirtualController } from './ConversationFeedVirtualController.svelte.js';
 	import type { ConversationFeedRetentionState } from './ConversationFeedRetentionState.svelte.js';
@@ -38,15 +38,8 @@
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
-		onPermissionDecision?: (
-			permissionOccurrenceId: string,
-			decision: PermissionDecision,
-		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
@@ -80,8 +73,6 @@
 
 	let wrapper: HTMLDivElement;
 	let releaseFocus: (() => void) | null = null;
-	const virtualizer = untrack(() => controller.virtualizer);
-
 	function handleFocusIn(): void {
 		releaseFocus ??= retention.acquire(item.key, 'focus');
 	}
@@ -100,14 +91,13 @@
 <div
 	bind:this={wrapper}
 	class="absolute inset-x-0 top-0 w-full"
-	style:transform={`translateY(${virtualItem.start - $virtualizer.options.scrollMargin}px)`}
+	style:transform={`translateY(${virtualItem.start}px)`}
 	data-index={virtualItem.index}
 	data-chat-virtual-item={item.key}
 	role="presentation"
 	onfocusin={handleFocusIn}
 	onfocusout={handleFocusOut}
-	{@attach controller.measureItem}
-	{@attach controller.positionReadingAnchor(virtualItem)}
+	{@attach controller.item(virtualItem.key)}
 >
 	<svelte:boundary>
 		<ConversationFeedVirtualItem
