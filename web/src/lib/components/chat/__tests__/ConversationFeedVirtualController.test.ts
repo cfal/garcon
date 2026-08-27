@@ -237,11 +237,14 @@ describe('ConversationFeedVirtualController', () => {
 
 		await exposure.prependItems();
 		await settleController();
-		const record = exposure.transactions
+		const itemsTransaction = exposure.transactions
 			.slice(before)
 			.find((candidate) => candidate.source === 'items');
 
-		expect(record).toMatchObject({ anchorKind: 'item', anchorIndex: firstMountedIndex });
+		expect(itemsTransaction).toMatchObject({
+			anchorKind: 'item',
+			anchorIndex: firstMountedIndex,
+		});
 	});
 
 	it.each(['dragging', 'coasting'] as const)(

@@ -371,7 +371,7 @@ describe('VirtualListController', () => {
 
 		expect(test.writes).toBe(1);
 		expect(test.viewport.scrollTop).toBe(162);
-		expect((test.controller.snapshot.positions.itemAt(2)?.start ?? 0) - 162).toBe(138);
+		expect(test.controller.snapshot.positions.itemAt(2)?.start).toBe(test.viewport.scrollTop + 138);
 	});
 
 	it('keeps measured content fixed when prepended estimates settle after redemption', () => {

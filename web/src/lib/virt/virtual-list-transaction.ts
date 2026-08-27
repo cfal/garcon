@@ -76,7 +76,6 @@ export class VirtualListTransaction {
 	#replacementPending = false;
 	#suspended = false;
 	#destroyed = false;
-	#revision = 0;
 	#publishedGeometryRevision = -1;
 	#publishedDeviation = Number.NaN;
 
@@ -99,16 +98,12 @@ export class VirtualListTransaction {
 	get viewportPosition(): VirtualViewportPosition | null {
 		const dom = this.#driver?.read();
 		if (!dom || this.#suspended || this.#replacementPending) return null;
-		const logicalOffset = this.#pendingCommit
-			? clamp(
-					this.#logicalOffsetForTarget(this.#pendingCommit.target, dom),
-					0,
-					Math.max(0, this.geometry.totalSize() - dom.viewportSize),
-				)
+		const pendingTarget = this.#pendingCommit?.target;
+		const logicalOffset = pendingTarget
+			? this.#clampLogicalOffset(this.#logicalOffsetForTarget(pendingTarget, dom), dom)
 			: dom.scrollTop - dom.leadingOffset + this.#deviation.value;
-		const paintedOffset = logicalOffset - this.#deviation.value;
 		return {
-			paintedOffset,
+			paintedOffset: logicalOffset - this.#deviation.value,
 			logicalOffset,
 			distanceFromStart: Math.max(0, logicalOffset),
 			leadingContentReachable: dom.leadingOffset >= this.#deviation.value,
@@ -196,9 +191,8 @@ export class VirtualListTransaction {
 		const oldTotal = this.geometry.totalSize();
 		const firstMeasurements = new Set<string>();
 		for (const measurement of accepted) {
-			if (this.geometry.measuredSize(measurement.key) === undefined) {
+			if (this.geometry.measuredSize(measurement.key) === undefined)
 				firstMeasurements.add(measurement.key);
-			}
 		}
 		if (this.#replacementPending) {
 			this.geometry.measureMany(accepted);
@@ -300,9 +294,11 @@ export class VirtualListTransaction {
 	setScrollActivity(activity: VirtualScrollActivity): void {
 		this.#activity = activity;
 		if (activity !== 'idle' || this.#deviation.value === 0) return;
-		const epoch = this.#ownedEpoch;
+		const redemptionEpoch = this.#ownedEpoch;
 		this.options.environment.requestAnimationFrame(() => {
-			if (this.#ownedEpoch === epoch && this.#activity === 'idle') this.viewportChanged(false);
+			if (this.#ownedEpoch === redemptionEpoch && this.#activity === 'idle') {
+				this.viewportChanged(false);
+			}
 		});
 	}
 
@@ -452,10 +448,9 @@ export class VirtualListTransaction {
 		clampedRemainder?: number;
 	}): void {
 		const pendingCorrection = this.#pendingCommit;
-		const provenance =
-			pendingCorrection?.provenance === 'navigation' ? 'navigation' : input.provenance;
-		const source =
-			pendingCorrection?.provenance === 'navigation' ? pendingCorrection.source : input.source;
+		const pendingNavigation = pendingCorrection?.provenance === 'navigation';
+		const provenance = pendingNavigation ? 'navigation' : input.provenance;
+		const source = pendingNavigation ? pendingCorrection.source : input.source;
 		const record = this.#record(source, provenance, input.anchor, input.dom, input.started);
 		record.anchorIndex = input.anchorIndex;
 		record.anchorPaintedStartBefore = input.anchorStart;
@@ -566,9 +561,8 @@ export class VirtualListTransaction {
 				item = candidate;
 			}
 		}
-		return item
-			? { kind: 'item', key: item.key, index: item.index, start: item.start }
-			: { kind: 'none' };
+		if (!item) return { kind: 'none' };
+		return { kind: 'item', key: item.key, index: item.index, start: item.start };
 	}
 
 	#publish(
@@ -583,11 +577,7 @@ export class VirtualListTransaction {
 		const logicalOffset =
 			intendedLogicalOffset === undefined || !dom
 				? observedLogicalOffset
-				: clamp(
-						intendedLogicalOffset,
-						0,
-						Math.max(0, this.geometry.totalSize() - dom.viewportSize),
-					);
+				: this.#clampLogicalOffset(intendedLogicalOffset, dom);
 		const visibleRange =
 			!notReady && dom ? this.geometry.range(logicalOffset, dom.viewportSize) : null;
 		const overscanRange = visibleRange ? this.#overscanRange(visibleRange) : null;
@@ -605,9 +595,8 @@ export class VirtualListTransaction {
 			return;
 		}
 
-		this.#revision += 1;
 		this.#snapshot = {
-			revision: this.#revision,
+			revision: this.#snapshot.revision + 1,
 			visibleRange,
 			overscanRange,
 			sizerSize,
@@ -626,6 +615,10 @@ export class VirtualListTransaction {
 	#logicalOffsetForTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
 		if (target.kind === 'end') return Math.max(0, this.geometry.totalSize() - dom.viewportSize);
 		return target.kind === 'logical' ? target.offset : target.offset - target.leadingOffset;
+	}
+
+	#clampLogicalOffset(offset: number, dom: VirtualDomGeometry): number {
+		return clamp(offset, 0, Math.max(0, this.geometry.totalSize() - dom.viewportSize));
 	}
 
 	#physicalOffsetForTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
@@ -728,9 +721,8 @@ export class VirtualListTransaction {
 
 	#resolveTarget(target: PendingTarget, dom: VirtualDomGeometry): number {
 		if (target.kind === 'end') return dom.physicalMaximum;
-		if (target.kind === 'logical') {
+		if (target.kind === 'logical')
 			return clamp(dom.leadingOffset + target.offset, 0, dom.physicalMaximum);
-		}
 		return clamp(target.offset, 0, dom.physicalMaximum);
 	}
 
@@ -769,7 +761,7 @@ export class VirtualListTransaction {
 	): MutableTransactionRecord {
 		const operations = this.geometry.operationCounts;
 		return {
-			revision: this.#revision + 1,
+			revision: this.#snapshot.revision + 1,
 			source,
 			rejectionReason: null,
 			provenance,
@@ -815,9 +807,8 @@ function validateMutation(
 	while (prefix < geometry.count && geometry.keyAt(prefix) === mutation.keys[prefix]) prefix += 1;
 	const appended = prefix === geometry.count && mutation.keys.length >= geometry.count;
 	const newKeys = appended ? mutation.keys.slice(prefix) : mutation.keys;
-	const uniqueNewKeys = new Set(newKeys);
 	const duplicatesExisting = appended && newKeys.some((key) => geometry.indexOf(key) !== undefined);
-	if (duplicatesExisting || uniqueNewKeys.size !== newKeys.length)
+	if (duplicatesExisting || new Set(newKeys).size !== newKeys.length)
 		return { kind: 'rejected', reason: 'duplicate-key' };
 	if (mutation.estimates.some((estimate) => !Number.isFinite(estimate) || estimate < 0))
 		return { kind: 'rejected', reason: 'invalid-estimate' };

@@ -113,7 +113,7 @@ export function createVirtualListHarness(options?: {
 	let viewportSize = options?.viewportSize ?? 100;
 	let leadingOffset = 0;
 	let physicalScrollTop = 0;
-	let physicalScrollHeight: number | null = null;
+	let scrollHeightOverride: number | null = null;
 	let writes = 0;
 	const controller = new VirtualListController({
 		overscan: options?.overscan ?? 1,
@@ -132,7 +132,7 @@ export function createVirtualListHarness(options?: {
 		clientHeight: { get: () => viewportSize },
 		scrollHeight: {
 			get: () =>
-				physicalScrollHeight ??
+				scrollHeightOverride ??
 				Math.max(viewportSize, leadingOffset + controller.snapshot.sizerSize),
 		},
 		scrollTop: {
@@ -174,7 +174,7 @@ export function createVirtualListHarness(options?: {
 			physicalScrollTop = value;
 		},
 		setPhysicalScrollHeight(value: number | null) {
-			physicalScrollHeight = value;
+			scrollHeightOverride = value;
 		},
 		setViewportSize(value: number) {
 			viewportSize = value;
