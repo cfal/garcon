@@ -3,6 +3,7 @@ import {
   CliRowMessage,
   ErrorMessage,
   parseChatMessage,
+  TranscriptNoticeMessage,
 } from '../chat-types.ts';
 import {
   isChatIdDiscoveryFailureNoticeDetail,
@@ -111,12 +112,17 @@ describe('transcript notice contracts', () => {
   });
 
   it('does not reinterpret other message kinds as CLI rows', () => {
-    expect(parseChatMessage({
+    const formerCliNotice = parseChatMessage({
       type: 'transcript-notice',
       timestamp: AT,
       content: 'Former CLI notice shape.',
       detail: { type: 'cli-row' },
-    })).toBeNull();
+    });
+    expect(formerCliNotice).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Former CLI notice shape.',
+    ));
+    expect(formerCliNotice).not.toBeInstanceOf(CliRowMessage);
 
     const error = parseChatMessage({
       type: 'error',
@@ -132,6 +138,21 @@ describe('transcript notice contracts', () => {
       timestamp: AT,
       content: 'Former CLI error shape.',
     });
+  });
+
+  it('renders unknown semantic detail as a plain transcript notice', () => {
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Future notice shape.',
+      detail: { type: 'not-yet-known' },
+      title: 'Future notice',
+    })).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Future notice shape.',
+      undefined,
+      'Future notice',
+    ));
   });
 
   it('round-trips explicit preset and custom CLI rows', () => {

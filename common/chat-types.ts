@@ -1176,8 +1176,9 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new ErrorMessage(str(data.timestamp), str(data.content));
     case 'transcript-notice':
       {
-        const detail = data.detail === undefined ? undefined : parseTranscriptNoticeDetail(data.detail);
-        if (detail === null) return null;
+        const detail = data.detail === undefined
+          ? undefined
+          : parseTranscriptNoticeDetail(data.detail) ?? undefined;
         return new TranscriptNoticeMessage(
           str(data.timestamp),
           str(data.content),
