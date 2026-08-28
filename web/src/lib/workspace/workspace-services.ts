@@ -39,6 +39,7 @@ import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import {
 	singletonSurfaceId,
 	type DesktopPlacement,
+	type PaneId,
 	type PresentationHostId,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
@@ -47,6 +48,7 @@ export function resolveConfiguredFilePlacement(
 	settings: LocalSettingsStore,
 	mode: FileRendererMode,
 	origin: PresentationHostId,
+	defaultPaneId: PaneId,
 ): DesktopPlacement {
 	const preference: FileOpenPlacementPreference = (() => {
 		switch (mode) {
@@ -59,9 +61,12 @@ export function resolveConfiguredFilePlacement(
 		}
 	})();
 
-	if (preference === 'source') return origin === 'mobile' ? 'main' : origin;
-	if (preference === 'other') return origin === 'main' ? 'sidebar' : 'main';
-	return preference;
+	const originPaneId: PaneId | null = origin.startsWith('pane-') ? (origin as PaneId) : null;
+	if (preference === 'dialog') return { type: 'dialog' };
+	if (preference === 'new-pane') {
+		return { type: 'new-pane', anchorPaneId: originPaneId ?? defaultPaneId };
+	}
+	return { type: 'pane', paneId: originPaneId ?? defaultPaneId };
 }
 
 export interface WorkspaceRootDependencies {
@@ -78,6 +83,7 @@ export interface WorkspaceRootDependencies {
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
+	workspaceLayoutV1Raw?: string | null;
 }
 
 export interface WorkspaceServices {
@@ -105,7 +111,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		deps.workspaceLayoutRaw === undefined
 			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout)
 			: deps.workspaceLayoutRaw;
-	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
+	const workspaceLayoutV1Raw =
+		deps.workspaceLayoutV1Raw === undefined
+			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayoutV1)
+			: deps.workspaceLayoutV1Raw;
+	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw, workspaceLayoutV1Raw);
 	const layout = createWorkspaceLayoutStore(restore.snapshot);
 	const persistence = new WorkspaceLayoutPersistence({
 		onError: (_error, retry) => {
@@ -209,7 +219,12 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
-			resolveConfiguredFilePlacement(deps.localSettings, mode, origin),
+			resolveConfiguredFilePlacement(
+				deps.localSettings,
+				mode,
+				origin,
+				placement?.defaultPaneId ?? 'pane-main',
+			),
 		getEditorSettings: () => ({
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;

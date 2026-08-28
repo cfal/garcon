@@ -1,10 +1,12 @@
 import {
 	CHAT_SURFACE_ID,
 	MAX_MOBILE_RETURN_TARGETS,
-	type ActiveSurfaceKind,
-	type HostId,
-	type HostState,
+	MAX_WORKSPACE_PANES,
+	type DesktopLayoutNode,
 	type MobileReturnTarget,
+	type PaneId,
+	type PaneNode,
+	type PaneTabState,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutCommitPort,
 	type WorkspaceLayoutMutation,
@@ -13,48 +15,66 @@ import {
 	isPortableSingleton,
 	terminalSurfaceId,
 } from './surface-types.js';
-import { clampDesiredSidebarWidth } from './sidebar-sizing.js';
+import {
+	clampSplitRatio,
+	collectPaneNodes,
+	insertPaneSplit,
+	mapPanes,
+	mapSplits,
+	paneCount,
+	paneIdOfSurface,
+	paneNodeById,
+	removePaneAndCollapse,
+} from './pane-tree.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
 }
 
-function hostWithOrder(host: HostState, order: readonly string[]): HostState {
+function tabsWithOrder(tabs: PaneTabState, order: readonly string[]): PaneTabState {
 	const nextOrder = unique(order);
-	const nextMru = unique(host.mru).filter((id) => nextOrder.includes(id));
+	const nextMru = unique(tabs.mru).filter((id) => nextOrder.includes(id));
 	for (const id of nextOrder) {
 		if (!nextMru.includes(id)) nextMru.push(id);
 	}
 	const activeId =
-		host.activeId && nextOrder.includes(host.activeId)
-			? host.activeId
+		tabs.activeId && nextOrder.includes(tabs.activeId)
+			? tabs.activeId
 			: (nextMru[0] ?? nextOrder[0] ?? null);
 	return { order: nextOrder, activeId, mru: nextMru };
 }
 
-function activateHost(host: HostState, surfaceId: string): HostState {
-	if (!host.order.includes(surfaceId)) throw new Error(`Surface is not in host: ${surfaceId}`);
+function activateTab(tabs: PaneTabState, surfaceId: string): PaneTabState {
+	if (!tabs.order.includes(surfaceId)) throw new Error(`Surface is not in pane: ${surfaceId}`);
 	return {
-		order: [...host.order],
+		order: [...tabs.order],
 		activeId: surfaceId,
-		mru: [surfaceId, ...host.mru.filter((id) => id !== surfaceId)],
+		mru: [surfaceId, ...tabs.mru.filter((id) => id !== surfaceId)],
 	};
 }
 
-function insertIntoHost(host: HostState, surfaceId: string, index?: number): HostState {
-	const without = host.order.filter((id) => id !== surfaceId);
+function insertTab(tabs: PaneTabState, surfaceId: string, index?: number): PaneTabState {
+	const without = tabs.order.filter((id) => id !== surfaceId);
 	const insertionIndex =
 		index === undefined ? without.length : Math.max(0, Math.min(without.length, Math.trunc(index)));
 	without.splice(insertionIndex, 0, surfaceId);
-	return hostWithOrder(host, without);
+	return tabsWithOrder(tabs, without);
 }
 
-function removeFromHost(host: HostState, surfaceId: string): HostState {
-	return hostWithOrder(
-		{ ...host, mru: host.mru.filter((id) => id !== surfaceId) },
-		host.order.filter((id) => id !== surfaceId),
+function removeTab(tabs: PaneTabState, surfaceId: string): PaneTabState {
+	return tabsWithOrder(
+		{ ...tabs, mru: tabs.mru.filter((id) => id !== surfaceId) },
+		tabs.order.filter((id) => id !== surfaceId),
 	);
+}
+
+function singleTabPane(paneId: PaneId, surfaceId: string): PaneNode {
+	return {
+		type: 'pane',
+		id: paneId,
+		tabs: { order: [surfaceId], activeId: surfaceId, mru: [surfaceId] },
+	};
 }
 
 function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileReturnTarget[] {
@@ -62,12 +82,7 @@ function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileRetur
 	for (const target of stack) {
 		if (!target || typeof target.invokerSurfaceId !== 'string' || !target.invokerSurfaceId)
 			continue;
-		if (
-			target.invokerHost !== 'main' &&
-			target.invokerHost !== 'sidebar' &&
-			target.invokerHost !== 'mobile'
-		)
-			continue;
+		if (typeof target.invokerHost !== 'string' || !target.invokerHost) continue;
 		if (typeof target.routeIdentity !== 'string') continue;
 		const duplicateIndex = normalized.findIndex(
 			(item) =>
@@ -80,37 +95,32 @@ function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileRetur
 	return normalized.slice(-MAX_MOBILE_RETURN_TARGETS);
 }
 
+// Removes a surface from every pane and clears dialog/mobile-only ownership.
+// Panes left empty are collapsed unless they are the root pane; the caller
+// must guarantee the root pane never empties (chat is always present).
 function removeEveryPlacement(
 	snapshot: WorkspaceLayoutSnapshot,
 	surfaceId: string,
 ): WorkspaceLayoutSnapshot {
+	let root = mapPanes(snapshot.desktopRoot, (pane) =>
+		pane.tabs.order.includes(surfaceId) ? { ...pane, tabs: removeTab(pane.tabs, surfaceId) } : pane,
+	);
+	let fullscreenPaneId = snapshot.fullscreenPaneId;
+	for (const pane of collectPaneNodes(root)) {
+		if (pane.tabs.order.length > 0) continue;
+		const collapsed = removePaneAndCollapse(root, pane.id);
+		if (!collapsed) throw new Error(`Cannot empty the root pane: ${pane.id}`);
+		root = collapsed;
+		if (fullscreenPaneId === pane.id) fullscreenPaneId = null;
+	}
 	return {
 		...snapshot,
-		main: removeFromHost(snapshot.main, surfaceId),
-		sidebar: removeFromHost(snapshot.sidebar, surfaceId),
+		desktopRoot: root,
+		fullscreenPaneId,
 		dialogFileSurfaceId:
 			snapshot.dialogFileSurfaceId === surfaceId ? null : snapshot.dialogFileSurfaceId,
 		mobileOnlySurfaceIds: snapshot.mobileOnlySurfaceIds.filter((id) => id !== surfaceId),
 	};
-}
-
-function normalizeFullscreenHost(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
-	const sidebarOpen = snapshot.sidebar.order.length > 0 && snapshot.sidebarOpen;
-	const fullscreenHost =
-		snapshot.fullscreenHost === 'sidebar' && (!sidebarOpen || !snapshot.sidebar.activeId)
-			? null
-			: snapshot.fullscreenHost;
-	if (sidebarOpen === snapshot.sidebarOpen && fullscreenHost === snapshot.fullscreenHost) {
-		return snapshot;
-	}
-	return { ...snapshot, sidebarOpen, fullscreenHost };
-}
-
-function fullscreenAfterHostActivation(
-	snapshot: WorkspaceLayoutSnapshot,
-	host: HostId,
-): HostId | null {
-	return snapshot.fullscreenHost === host ? host : null;
 }
 
 function registerSurface(
@@ -121,7 +131,7 @@ function registerSurface(
 		throw new Error(`Surface already exists: ${mutation.surface.id}`);
 	}
 	if (
-		!mutation.host &&
+		!mutation.paneId &&
 		mutation.surface.type !== 'file' &&
 		!isPortableSingleton(mutation.surface)
 	) {
@@ -136,15 +146,54 @@ function registerSurface(
 			? snapshot.unplacedTerminalIds.filter((terminalId) => terminalId !== placedTerminalId)
 			: snapshot.unplacedTerminalIds,
 	};
-	if (!mutation.host) {
+	if (!mutation.paneId) {
 		return {
 			...next,
 			mobileOnlySurfaceIds: [...next.mobileOnlySurfaceIds, mutation.surface.id],
 		};
 	}
-	const host = insertIntoHost(next[mutation.host], mutation.surface.id, mutation.index);
-	next = { ...next, [mutation.host]: host };
+	const pane = paneNodeById(next.desktopRoot, mutation.paneId);
+	if (!pane) throw new Error(`Pane does not exist: ${mutation.paneId}`);
+	const root = mapPanes(next.desktopRoot, (candidate) =>
+		candidate.id === mutation.paneId
+			? { ...candidate, tabs: insertTab(candidate.tabs, mutation.surface.id, mutation.index) }
+			: candidate,
+	);
+	next = { ...next, desktopRoot: root };
 	return next;
+}
+
+function registerSurfaceInSplit(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'register-surface-in-split' }>,
+): WorkspaceLayoutSnapshot {
+	if (snapshot.surfaces[mutation.surface.id]) {
+		throw new Error(`Surface already exists: ${mutation.surface.id}`);
+	}
+	if (!paneNodeById(snapshot.desktopRoot, mutation.targetPaneId)) {
+		throw new Error(`Pane does not exist: ${mutation.targetPaneId}`);
+	}
+	if (paneCount(snapshot.desktopRoot) >= MAX_WORKSPACE_PANES) {
+		throw new Error('Pane count limit reached');
+	}
+	const placedTerminalId =
+		mutation.surface.type === 'terminal' ? mutation.surface.terminalId : null;
+	const root = insertPaneSplit(
+		snapshot.desktopRoot,
+		mutation.targetPaneId,
+		mutation.edge,
+		singleTabPane(mutation.newPaneId, mutation.surface.id),
+		mutation.splitId,
+	);
+	return {
+		...snapshot,
+		desktopRoot: root,
+		surfaces: { ...snapshot.surfaces, [mutation.surface.id]: mutation.surface },
+		fullscreenPaneId: fullscreenAfterActivation(snapshot, mutation.newPaneId),
+		unplacedTerminalIds: placedTerminalId
+			? snapshot.unplacedTerminalIds.filter((terminalId) => terminalId !== placedTerminalId)
+			: snapshot.unplacedTerminalIds,
+	};
 }
 
 function replaceSurface(
@@ -159,6 +208,12 @@ function replaceSurface(
 	}
 	const replaceId = (ids: readonly string[]) =>
 		ids.map((id) => (id === mutation.previousId ? mutation.surface.id : id));
+	const replaceTabs = (tabs: PaneTabState): PaneTabState => ({
+		order: replaceId(tabs.order),
+		activeId:
+			tabs.activeId === mutation.previousId ? mutation.surface.id : tabs.activeId,
+		mru: replaceId(tabs.mru),
+	});
 	const surfaces = { ...snapshot.surfaces };
 	const previous = surfaces[mutation.previousId];
 	delete surfaces[mutation.previousId];
@@ -178,22 +233,7 @@ function replaceSurface(
 	}
 	return {
 		...snapshot,
-		main: {
-			order: replaceId(snapshot.main.order),
-			activeId:
-				snapshot.main.activeId === mutation.previousId
-					? mutation.surface.id
-					: snapshot.main.activeId,
-			mru: replaceId(snapshot.main.mru),
-		},
-		sidebar: {
-			order: replaceId(snapshot.sidebar.order),
-			activeId:
-				snapshot.sidebar.activeId === mutation.previousId
-					? mutation.surface.id
-					: snapshot.sidebar.activeId,
-			mru: replaceId(snapshot.sidebar.mru),
-		},
+		desktopRoot: mapPanes(snapshot.desktopRoot, (pane) => ({ ...pane, tabs: replaceTabs(pane.tabs) })),
 		surfaces,
 		dialogFileSurfaceId:
 			snapshot.dialogFileSurfaceId === mutation.previousId
@@ -228,12 +268,12 @@ function updateTerminalPlacement(
 	const next = surface ? removeEveryPlacement(snapshot, surfaceId) : snapshot;
 	const surfaces = { ...next.surfaces };
 	delete surfaces[surfaceId];
-	return normalizeFullscreenHost({
+	return normalizeFullscreenPane({
 		...next,
 		surfaces,
 		mobileActiveSurfaceId:
 			next.mobileActiveSurfaceId === surfaceId
-				? (next.main.activeId ?? CHAT_SURFACE_ID)
+				? defaultActiveId(next)
 				: next.mobileActiveSurfaceId,
 		unplacedTerminalIds:
 			placement === 'unplaced'
@@ -256,15 +296,14 @@ function swapTerminalPlacements(
 		if (id === mutation.secondSurfaceId) return mutation.firstSurfaceId;
 		return id;
 	};
-	const swapHost = (host: HostState): HostState => ({
-		order: host.order.map(swapId),
-		activeId: host.activeId ? swapId(host.activeId) : null,
-		mru: host.mru.map(swapId),
+	const swapTabs = (tabs: PaneTabState): PaneTabState => ({
+		order: tabs.order.map(swapId),
+		activeId: tabs.activeId ? swapId(tabs.activeId) : null,
+		mru: tabs.mru.map(swapId),
 	});
 	return {
 		...snapshot,
-		main: swapHost(snapshot.main),
-		sidebar: swapHost(snapshot.sidebar),
+		desktopRoot: mapPanes(snapshot.desktopRoot, (pane) => ({ ...pane, tabs: swapTabs(pane.tabs) })),
 		mobileActiveSurfaceId: swapId(snapshot.mobileActiveSurfaceId),
 		mobileReturnStack: snapshot.mobileReturnStack.map((target) => ({
 			...target,
@@ -273,27 +312,132 @@ function swapTerminalPlacements(
 	};
 }
 
-function moveToHost(
+function moveTab(
 	snapshot: WorkspaceLayoutSnapshot,
-	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-to-host' }>,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-tab' }>,
 ): WorkspaceLayoutSnapshot {
-	if (mutation.surfaceId === CHAT_SURFACE_ID) throw new Error('Chat cannot move');
 	if (!snapshot.surfaces[mutation.surfaceId]) {
 		throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
 	}
+	if (!paneNodeById(snapshot.desktopRoot, mutation.destinationPaneId)) {
+		throw new Error(`Pane does not exist: ${mutation.destinationPaneId}`);
+	}
+	const sourcePaneId = paneIdOfSurface(snapshot.desktopRoot, mutation.surfaceId);
+	let next = snapshot;
+	if (sourcePaneId !== mutation.destinationPaneId) {
+		next = removeEveryPlacement(next, mutation.surfaceId);
+	}
+	const root = mapPanes(next.desktopRoot, (pane) =>
+		pane.id === mutation.destinationPaneId
+			? {
+					...pane,
+					tabs: activateTab(
+						insertTab(pane.tabs, mutation.surfaceId, mutation.index),
+						mutation.surfaceId,
+					),
+				}
+			: pane,
+	);
+	return {
+		...next,
+		desktopRoot: root,
+		fullscreenPaneId: fullscreenAfterActivation(next, mutation.destinationPaneId),
+	};
+}
+
+function splitTabToEdge(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'split-tab-to-edge' }>,
+): WorkspaceLayoutSnapshot {
+	if (!snapshot.surfaces[mutation.surfaceId]) {
+		throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
+	}
+	if (!paneNodeById(snapshot.desktopRoot, mutation.targetPaneId)) {
+		throw new Error(`Pane does not exist: ${mutation.targetPaneId}`);
+	}
+	const sourcePaneId = paneIdOfSurface(snapshot.desktopRoot, mutation.surfaceId);
+	if (!sourcePaneId) throw new Error(`Surface is not in a pane: ${mutation.surfaceId}`);
+	const sourceTabs = paneNodeById(snapshot.desktopRoot, sourcePaneId)?.tabs;
+	if (sourcePaneId === mutation.targetPaneId && sourceTabs?.order.length === 1) {
+		return snapshot;
+	}
+	// Moving the sole tab out of its pane collapses the source, so the
+	// projected pane count stays flat for that case.
+	const collapsesSource =
+		sourcePaneId !== mutation.targetPaneId && sourceTabs?.order.length === 1;
+	if (paneCount(snapshot.desktopRoot) - (collapsesSource ? 1 : 0) >= MAX_WORKSPACE_PANES) {
+		throw new Error('Pane count limit reached');
+	}
 	let next = removeEveryPlacement(snapshot, mutation.surfaceId);
-	const host = activateHost(
-		insertIntoHost(next[mutation.destination], mutation.surfaceId, mutation.index),
-		mutation.surfaceId,
+	if (!paneNodeById(next.desktopRoot, mutation.targetPaneId)) {
+		throw new Error(`Pane does not exist after collapsing the source pane: ${mutation.targetPaneId}`);
+	}
+	const root = insertPaneSplit(
+		next.desktopRoot,
+		mutation.targetPaneId,
+		mutation.edge,
+		singleTabPane(mutation.newPaneId, mutation.surfaceId),
+		mutation.splitId,
 	);
 	next = {
 		...next,
-		[mutation.destination]: host,
-		sidebarOpen:
-			mutation.destination === 'sidebar' ? true : next.sidebar.order.length > 0 && next.sidebarOpen,
-		fullscreenHost: fullscreenAfterHostActivation(next, mutation.destination),
+		desktopRoot: root,
+		fullscreenPaneId: fullscreenAfterActivation(next, mutation.newPaneId),
 	};
-	return normalizeFullscreenHost(next);
+	return next;
+}
+
+function mergePane(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'merge-pane' }>,
+): WorkspaceLayoutSnapshot {
+	if (mutation.sourcePaneId === mutation.destinationPaneId) {
+		throw new Error('Cannot merge a pane into itself');
+	}
+	const source = paneNodeById(snapshot.desktopRoot, mutation.sourcePaneId);
+	const destination = paneNodeById(snapshot.desktopRoot, mutation.destinationPaneId);
+	if (!source) throw new Error(`Pane does not exist: ${mutation.sourcePaneId}`);
+	if (!destination) throw new Error(`Pane does not exist: ${mutation.destinationPaneId}`);
+	const collapsed = removePaneAndCollapse(snapshot.desktopRoot, mutation.sourcePaneId);
+	if (!collapsed) throw new Error('Cannot merge away the root pane');
+	const root = mapPanes(collapsed, (pane) => {
+		if (pane.id !== mutation.destinationPaneId) return pane;
+		let tabs = pane.tabs;
+		for (const surfaceId of source.tabs.order) tabs = insertTab(tabs, surfaceId);
+		return { ...pane, tabs };
+	});
+	return normalizeFullscreenPane({
+		...snapshot,
+		desktopRoot: root,
+		fullscreenPaneId:
+			snapshot.fullscreenPaneId === mutation.sourcePaneId ? null : snapshot.fullscreenPaneId,
+	});
+}
+
+function normalizeFullscreenPane(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
+	if (
+		snapshot.fullscreenPaneId &&
+		!paneNodeById(snapshot.desktopRoot, snapshot.fullscreenPaneId)
+	) {
+		return { ...snapshot, fullscreenPaneId: null };
+	}
+	return snapshot;
+}
+
+// Activating a tab makes its pane the visible fullscreen target: activating
+// inside the fullscreened pane preserves fullscreen; activating elsewhere
+// exits it so the newly active surface is actually visible.
+function fullscreenAfterActivation(
+	snapshot: WorkspaceLayoutSnapshot,
+	paneId: PaneId,
+): PaneId | null {
+	return snapshot.fullscreenPaneId === paneId ? snapshot.fullscreenPaneId : null;
+}
+
+function defaultActiveId(snapshot: WorkspaceLayoutSnapshot): string {
+	const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
+	const chatPane = chatPaneId ? paneNodeById(snapshot.desktopRoot, chatPaneId) : null;
+	return chatPane?.tabs.activeId ?? CHAT_SURFACE_ID;
 }
 
 function applyMutation(
@@ -303,59 +447,100 @@ function applyMutation(
 	switch (mutation.type) {
 		case 'register-surface':
 			return registerSurface(snapshot, mutation);
+		case 'register-surface-in-split':
+			return registerSurfaceInSplit(snapshot, mutation);
 		case 'replace-surface':
 			return replaceSurface(snapshot, mutation);
 		case 'swap-terminal-placements':
 			return swapTerminalPlacements(snapshot, mutation);
-		case 'focus-host': {
-			if (!snapshot[mutation.host].order.includes(mutation.surfaceId)) {
-				throw new Error(`Surface is not in ${mutation.host}: ${mutation.surfaceId}`);
+		case 'activate-pane-tab': {
+			const pane = paneNodeById(snapshot.desktopRoot, mutation.paneId);
+			if (!pane) throw new Error(`Pane does not exist: ${mutation.paneId}`);
+			if (!pane.tabs.order.includes(mutation.surfaceId)) {
+				throw new Error(`Surface is not in pane ${mutation.paneId}: ${mutation.surfaceId}`);
 			}
 			return {
 				...snapshot,
-				[mutation.host]: activateHost(snapshot[mutation.host], mutation.surfaceId),
-				sidebarOpen: mutation.host === 'sidebar' ? true : snapshot.sidebarOpen,
-				fullscreenHost: fullscreenAfterHostActivation(snapshot, mutation.host),
+				desktopRoot: mapPanes(snapshot.desktopRoot, (candidate) =>
+					candidate.id === mutation.paneId
+						? { ...candidate, tabs: activateTab(candidate.tabs, mutation.surfaceId) }
+						: candidate,
+				),
+				fullscreenPaneId: fullscreenAfterActivation(snapshot, mutation.paneId),
 			};
 		}
-		case 'move-to-host':
-			return moveToHost(snapshot, mutation);
-		case 'assign-to-host': {
-			if (mutation.surfaceId === CHAT_SURFACE_ID) throw new Error('Chat cannot move');
+		case 'move-tab':
+			return moveTab(snapshot, mutation);
+		case 'assign-to-pane': {
 			if (!snapshot.surfaces[mutation.surfaceId]) {
 				throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
 			}
+			if (!paneNodeById(snapshot.desktopRoot, mutation.destinationPaneId)) {
+				throw new Error(`Pane does not exist: ${mutation.destinationPaneId}`);
+			}
+			// Reordering within the owning pane must not collapse it.
+			if (paneIdOfSurface(snapshot.desktopRoot, mutation.surfaceId) === mutation.destinationPaneId) {
+				return {
+					...snapshot,
+					desktopRoot: mapPanes(snapshot.desktopRoot, (pane) =>
+						pane.id === mutation.destinationPaneId
+							? { ...pane, tabs: insertTab(pane.tabs, mutation.surfaceId, mutation.index) }
+							: pane,
+					),
+				};
+			}
 			const next = removeEveryPlacement(snapshot, mutation.surfaceId);
-			return normalizeFullscreenHost({
+			return {
 				...next,
-				[mutation.destination]: insertIntoHost(
-					next[mutation.destination],
-					mutation.surfaceId,
-					mutation.index,
+				desktopRoot: mapPanes(next.desktopRoot, (pane) =>
+					pane.id === mutation.destinationPaneId
+						? { ...pane, tabs: insertTab(pane.tabs, mutation.surfaceId, mutation.index) }
+						: pane,
 				),
-			});
+			};
 		}
+		case 'split-tab-to-edge':
+			return splitTabToEdge(snapshot, mutation);
+		case 'merge-pane':
+			return mergePane(snapshot, mutation);
+		case 'set-split-ratio':
+			return {
+				...snapshot,
+				desktopRoot: mapSplits(snapshot.desktopRoot, (split) =>
+					split.id === mutation.splitId
+						? { ...split, ratio: clampSplitRatio(mutation.ratio) }
+						: split,
+				),
+			};
+		case 'set-fullscreen-pane':
+			if (mutation.paneId && !paneNodeById(snapshot.desktopRoot, mutation.paneId)) {
+				throw new Error(`Pane does not exist: ${mutation.paneId}`);
+			}
+			return { ...snapshot, fullscreenPaneId: mutation.paneId };
 		case 'place-in-dialog': {
 			const surface = snapshot.surfaces[mutation.surfaceId];
 			if (surface?.type !== 'file') throw new Error('Only file surfaces can enter dialog');
 			if (snapshot.dialogFileSurfaceId && snapshot.dialogFileSurfaceId !== mutation.surfaceId) {
 				throw new Error('Dialog capacity must be resolved before placement');
 			}
-			return normalizeFullscreenHost({
+			return normalizeFullscreenPane({
 				...removeEveryPlacement(snapshot, mutation.surfaceId),
 				dialogFileSurfaceId: mutation.surfaceId,
 			});
 		}
-		case 'move-dialog-to-host': {
+		case 'move-dialog-to-pane': {
 			if (snapshot.dialogFileSurfaceId !== mutation.surfaceId) {
 				throw new Error(`Surface is not in dialog: ${mutation.surfaceId}`);
 			}
-			return moveToHost(snapshot, {
-				type: 'move-to-host',
-				surfaceId: mutation.surfaceId,
-				destination: mutation.destination,
-				index: mutation.index,
-			});
+			return moveTab(
+				{ ...snapshot, dialogFileSurfaceId: null },
+				{
+					type: 'move-tab',
+					surfaceId: mutation.surfaceId,
+					destinationPaneId: mutation.destinationPaneId,
+					index: mutation.index,
+				},
+			);
 		}
 		case 'unplace-terminal':
 			return updateTerminalPlacement(snapshot, mutation.terminalId, 'unplaced');
@@ -367,31 +552,15 @@ function applyMutation(
 			const next = removeEveryPlacement(snapshot, mutation.surfaceId);
 			const surfaces = { ...next.surfaces };
 			delete surfaces[mutation.surfaceId];
-			return normalizeFullscreenHost({
+			return normalizeFullscreenPane({
 				...next,
 				surfaces,
 				mobileActiveSurfaceId:
 					next.mobileActiveSurfaceId === mutation.surfaceId
-						? (next.main.activeId ?? CHAT_SURFACE_ID)
+						? defaultActiveId(next)
 						: next.mobileActiveSurfaceId,
 			});
 		}
-		case 'set-sidebar-open': {
-			const sidebarOpen = mutation.open && snapshot.sidebar.order.length > 0;
-			return normalizeFullscreenHost({
-				...snapshot,
-				sidebarOpen,
-				fullscreenHost:
-					sidebarOpen && snapshot.fullscreenHost === 'main' ? null : snapshot.fullscreenHost,
-			});
-		}
-		case 'set-sidebar-width':
-			return { ...snapshot, desiredSidebarWidth: clampDesiredSidebarWidth(mutation.width) };
-		case 'set-fullscreen-host':
-			if (mutation.host === 'sidebar' && (!snapshot.sidebarOpen || !snapshot.sidebar.activeId)) {
-				throw new Error('Sidebar must be open and active before entering fullscreen');
-			}
-			return { ...snapshot, fullscreenHost: mutation.host };
 		case 'set-mobile-presentation':
 			if (!snapshot.surfaces[mutation.activeId]) {
 				throw new Error(`Unknown mobile surface: ${mutation.activeId}`);
@@ -415,16 +584,54 @@ export function reduceWorkspaceLayout(
 }
 
 export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapshot): void {
-	const chatCount = snapshot.main.order.filter((id) => id === CHAT_SURFACE_ID).length;
-	if (snapshot.main.order[0] !== CHAT_SURFACE_ID || chatCount !== 1) {
-		throw new Error('Chat must exist exactly once at the start of main');
+	const panes = collectPaneNodes(snapshot.desktopRoot);
+	const paneIds = new Set<PaneId>();
+	for (const pane of panes) {
+		if (paneIds.has(pane.id)) throw new Error(`Pane ID is duplicated: ${pane.id}`);
+		paneIds.add(pane.id);
 	}
-	if (snapshot.sidebar.order.includes(CHAT_SURFACE_ID))
-		throw new Error('Chat cannot enter sidebar');
-	if (snapshot.dialogFileSurfaceId === CHAT_SURFACE_ID) throw new Error('Chat cannot enter dialog');
+	if (panes.length > MAX_WORKSPACE_PANES) {
+		throw new Error(`Pane count exceeds ${MAX_WORKSPACE_PANES}`);
+	}
+	const splitIds = new Set<string>();
+	const collectSplitIds = (node: DesktopLayoutNode): void => {
+		if (node.type === 'pane') return;
+		if (splitIds.has(node.id)) throw new Error(`Split ID is duplicated: ${node.id}`);
+		splitIds.add(node.id);
+		if (clampSplitRatio(node.ratio) !== node.ratio) {
+			throw new Error(`Split ratio is not canonical: ${node.id}`);
+		}
+		collectSplitIds(node.children[0]);
+		collectSplitIds(node.children[1]);
+	};
+	collectSplitIds(snapshot.desktopRoot);
+
+	let chatCount = 0;
 	const buckets = new Map<string, number>();
-	for (const id of snapshot.main.order) buckets.set(id, (buckets.get(id) ?? 0) + 1);
-	for (const id of snapshot.sidebar.order) buckets.set(id, (buckets.get(id) ?? 0) + 1);
+	for (const pane of panes) {
+		if (pane.tabs.order.length === 0) throw new Error(`Pane is empty: ${pane.id}`);
+		if (unique(pane.tabs.order).length !== pane.tabs.order.length) {
+			throw new Error('Pane tab order is duplicated');
+		}
+		if (unique(pane.tabs.mru).length !== pane.tabs.mru.length) {
+			throw new Error('Pane MRU is duplicated');
+		}
+		if (pane.tabs.mru.some((id) => !pane.tabs.order.includes(id))) {
+			throw new Error('Pane MRU is stale');
+		}
+		if (pane.tabs.order.some((id) => !pane.tabs.mru.includes(id))) {
+			throw new Error('Pane MRU is incomplete');
+		}
+		if (!pane.tabs.activeId || !pane.tabs.order.includes(pane.tabs.activeId)) {
+			throw new Error(`Pane active surface must be present: ${pane.id}`);
+		}
+		for (const id of pane.tabs.order) {
+			if (id === CHAT_SURFACE_ID) chatCount += 1;
+			buckets.set(id, (buckets.get(id) ?? 0) + 1);
+		}
+	}
+	if (chatCount !== 1) throw new Error('Chat must exist exactly once in the pane tree');
+	if (snapshot.dialogFileSurfaceId === CHAT_SURFACE_ID) throw new Error('Chat cannot enter dialog');
 	if (snapshot.dialogFileSurfaceId) {
 		buckets.set(snapshot.dialogFileSurfaceId, (buckets.get(snapshot.dialogFileSurfaceId) ?? 0) + 1);
 	}
@@ -442,31 +649,11 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 	for (const id of buckets.keys()) {
 		if (!snapshot.surfaces[id]) throw new Error(`Placement references missing surface: ${id}`);
 	}
-	if (!snapshot.main.activeId || !snapshot.main.order.includes(snapshot.main.activeId)) {
-		throw new Error('Main active surface must be present');
-	}
 	if (
-		(snapshot.sidebar.order.length === 0 && snapshot.sidebar.activeId !== null) ||
-		(snapshot.sidebar.order.length > 0 &&
-			(!snapshot.sidebar.activeId || !snapshot.sidebar.order.includes(snapshot.sidebar.activeId)))
+		snapshot.fullscreenPaneId &&
+		!paneIds.has(snapshot.fullscreenPaneId)
 	) {
-		throw new Error('Sidebar active surface must match sidebar contents');
-	}
-	if (snapshot.sidebar.order.length === 0 && snapshot.sidebarOpen) {
-		throw new Error('Empty sidebar cannot be open');
-	}
-	if (
-		snapshot.fullscreenHost === 'sidebar' &&
-		(!snapshot.sidebarOpen || !snapshot.sidebar.activeId)
-	) {
-		throw new Error('Sidebar fullscreen requires an open active sidebar');
-	}
-	for (const host of [snapshot.main, snapshot.sidebar]) {
-		if (unique(host.order).length !== host.order.length)
-			throw new Error('Host order is duplicated');
-		if (unique(host.mru).length !== host.mru.length) throw new Error('Host MRU is duplicated');
-		if (host.mru.some((id) => !host.order.includes(id))) throw new Error('Host MRU is stale');
-		if (host.order.some((id) => !host.mru.includes(id))) throw new Error('Host MRU is incomplete');
+		throw new Error('Fullscreen pane must exist');
 	}
 	if (snapshot.dialogFileSurfaceId) {
 		if (snapshot.surfaces[snapshot.dialogFileSurfaceId]?.type !== 'file') {
@@ -489,9 +676,6 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 		if (snapshot.surfaces[terminalSurfaceId(terminalId)]) {
 			throw new Error(`Terminal cannot be both placed and unplaced: ${terminalId}`);
 		}
-	}
-	if (clampDesiredSidebarWidth(snapshot.desiredSidebarWidth) !== snapshot.desiredSidebarWidth) {
-		throw new Error('Sidebar width is not canonical');
 	}
 }
 
@@ -521,14 +705,14 @@ export class WorkspaceLayoutStore implements WorkspaceLayoutReader, WorkspaceLay
 		return this.#snapshot;
 	}
 
-	get activeMainId(): string {
-		return this.#snapshot.main.activeId ?? CHAT_SURFACE_ID;
+	get chatPaneId(): PaneId {
+		const paneId = paneIdOfSurface(this.#snapshot.desktopRoot, CHAT_SURFACE_ID);
+		if (!paneId) throw new Error('Chat pane is missing from the layout');
+		return paneId;
 	}
 
-	get activeMainKind(): ActiveSurfaceKind | null {
-		const surface = this.#snapshot.surfaces[this.activeMainId];
-		if (!surface) return null;
-		return surface.type === 'singleton' ? surface.kind : surface.type;
+	get defaultActiveId(): string {
+		return defaultActiveId(this.#snapshot);
 	}
 
 	surface(surfaceId: string): SurfaceDescriptor | null {

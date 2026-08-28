@@ -2,208 +2,257 @@ import { describe, expect, it } from 'vitest';
 import { parsePersistedWorkspaceLayout, serializeWorkspaceLayout } from '../layout-schema';
 import { canonicalWorkspaceSnapshot } from '../canonical-layout';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
+import { collectPaneNodes, paneNodeById } from '../pane-tree';
+import type { PaneId, WorkspaceLayoutSnapshot } from '../surface-types';
+
+function paneTabs(snapshot: WorkspaceLayoutSnapshot, paneId: string) {
+	return paneNodeById(snapshot.desktopRoot, paneId as PaneId)?.tabs;
+}
 
 describe('workspace layout persistence', () => {
 	it('distinguishes absent data from corrupt fallback', () => {
 		expect(parsePersistedWorkspaceLayout(null).source).toBe('absent');
 		expect(parsePersistedWorkspaceLayout('{').source).toBe('fallback');
-		expect(parsePersistedWorkspaceLayout('{"version":2}').source).toBe('fallback');
+		expect(parsePersistedWorkspaceLayout('{"version":1}').source).toBe('fallback');
+		expect(parsePersistedWorkspaceLayout('{"version":3}').source).toBe('fallback');
 	});
 
-	it('injects Chat and restores valid singleton and unresolved terminal references', () => {
+	it('round-trips a pane tree', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface-in-split',
+				surface: { id: 'terminal:abc', type: 'terminal', terminalId: 'abc' },
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
+			{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.7 },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+		]);
+		const restored = parsePersistedWorkspaceLayout(
+			JSON.stringify(serializeWorkspaceLayout(base)),
+		);
+		expect(restored.source).toBe('valid');
+		expect(restored.snapshot.desktopRoot).toEqual(base.desktopRoot);
+		expect(restored.snapshot.surfaces).toEqual(base.surfaces);
+	});
+
+	it('restores chat when the persisted tree lacks it', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'pane',
+					id: 'pane-a',
+					order: [{ type: 'singleton', kind: 'git' }],
+					active: { type: 'singleton', kind: 'git' },
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(result.source).toBe('valid');
+		expect(paneTabs(result.snapshot, 'pane-a')?.order).toEqual(['singleton:chat', 'singleton:git']);
+		expect(paneTabs(result.snapshot, 'pane-a')?.activeId).toBe('singleton:git');
+	});
+
+	it('drops panes with no durable tabs and collapses their splits', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'split',
+					id: 'split-1',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'pane',
+							id: 'pane-a',
+							order: [{ type: 'singleton', kind: 'chat' }],
+							active: { type: 'singleton', kind: 'chat' },
+						},
+						{ type: 'pane', id: 'pane-b', order: [], active: null },
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(result.source).toBe('valid');
+		expect(result.snapshot.desktopRoot.type).toBe('pane');
+		expect(collectPaneNodes(result.snapshot.desktopRoot)).toHaveLength(1);
+	});
+
+	it('deduplicates surfaces across panes and repairs invalid active refs', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'split',
+					id: 'split-1',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'pane',
+							id: 'pane-a',
+							order: [
+								{ type: 'singleton', kind: 'chat' },
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'singleton', kind: 'unknown' },
+							],
+							active: { type: 'singleton', kind: 'files' },
+						},
+						{
+							type: 'pane',
+							id: 'pane-b',
+							order: [
+								{ type: 'singleton', kind: 'git' },
+								{ type: 'singleton', kind: 'files' },
+							],
+							active: { type: 'singleton', kind: 'git' },
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(result.source).toBe('valid');
+		expect(paneTabs(result.snapshot, 'pane-a')?.order).toEqual(['singleton:chat', 'singleton:git']);
+		expect(paneTabs(result.snapshot, 'pane-a')?.activeId).toBe('singleton:chat');
+		expect(paneTabs(result.snapshot, 'pane-b')?.order).toEqual(['singleton:files']);
+		expect(paneTabs(result.snapshot, 'pane-b')?.activeId).toBe('singleton:files');
+	});
+
+	it('clamps out-of-range ratios', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'split',
+					id: 'split-1',
+					direction: 'horizontal',
+					ratio: 0.99,
+					children: [
+						{
+							type: 'pane',
+							id: 'pane-a',
+							order: [{ type: 'singleton', kind: 'chat' }],
+							active: { type: 'singleton', kind: 'chat' },
+						},
+						{
+							type: 'pane',
+							id: 'pane-b',
+							order: [{ type: 'singleton', kind: 'git' }],
+							active: { type: 'singleton', kind: 'git' },
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+		expect(result.source).toBe('valid');
+		const root = result.snapshot.desktopRoot;
+		expect(root.type === 'split' && root.ratio).toBe(0.85);
+	});
+
+	it('migrates an open v1 sidebar into a second pane', () => {
+		const result = parsePersistedWorkspaceLayout(
+			null,
+			JSON.stringify({
 				version: 1,
-				desiredSidebarWidth: 520,
+				desiredSidebarWidth: 480,
 				sidebarOpen: true,
 				main: {
 					order: [
-						{ type: 'terminal', terminalId: 'server-terminal' },
 						{ type: 'singleton', kind: 'git' },
+						{ type: 'terminal', terminalId: 'server-terminal' },
 					],
-					active: { type: 'terminal', terminalId: 'server-terminal' },
+					active: { type: 'singleton', kind: 'git' },
 				},
 				sidebar: {
 					order: [{ type: 'singleton', kind: 'files' }],
 					active: { type: 'singleton', kind: 'files' },
 				},
+				unplacedTerminalIds: [],
 			}),
 		);
-
-		expect(result.source).toBe('valid');
-		expect(result.snapshot.main.order).toEqual([
+		expect(result.source).toBe('migrated');
+		expect(collectPaneNodes(result.snapshot.desktopRoot)).toHaveLength(2);
+		expect(paneTabs(result.snapshot, 'pane-main')?.order).toEqual([
 			'singleton:chat',
-			'terminal:server-terminal',
 			'singleton:git',
+			'terminal:server-terminal',
 		]);
-		expect(result.snapshot.main.activeId).toBe('terminal:server-terminal');
-		expect(result.snapshot.sidebar.activeId).toBe('singleton:files');
-		expect(result.snapshot.sidebarOpen).toBe(true);
+		expect(paneTabs(result.snapshot, 'pane-main')?.activeId).toBe('singleton:git');
+		expect(paneTabs(result.snapshot, 'pane-sidebar')?.order).toEqual(['singleton:files']);
+		const root = result.snapshot.desktopRoot;
+		expect(root.type === 'split' && root.direction).toBe('horizontal');
 	});
 
-	it('repairs duplicates, unknown refs, invalid active values, and widths', () => {
+	it('merges a closed v1 sidebar into the main pane', () => {
 		const result = parsePersistedWorkspaceLayout(
-			JSON.stringify({
-				version: 1,
-				desiredSidebarWidth: -100,
-				sidebarOpen: true,
-				main: {
-					order: [
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'unknown' },
-					],
-					active: { type: 'singleton', kind: 'files' },
-				},
-				sidebar: {
-					order: [
-						{ type: 'singleton', kind: 'git' },
-						{ type: 'singleton', kind: 'files' },
-					],
-					active: { type: 'singleton', kind: 'git' },
-				},
-			}),
-		);
-
-		expect(result.source).toBe('valid');
-		expect(result.snapshot.main.order).toEqual(['singleton:chat', 'singleton:git']);
-		expect(result.snapshot.main.activeId).toBe('singleton:chat');
-		expect(result.snapshot.sidebar.order).toEqual(['singleton:files']);
-		expect(result.snapshot.sidebar.activeId).toBe('singleton:files');
-		expect(result.snapshot.desiredSidebarWidth).toBe(360);
-	});
-
-	it('repairs an empty sidebar host that was persisted open', () => {
-		const result = parsePersistedWorkspaceLayout(
+			null,
 			JSON.stringify({
 				version: 1,
 				desiredSidebarWidth: 480,
-				sidebarOpen: true,
-				main: { order: [], active: null },
-				sidebar: { order: [], active: null },
+				sidebarOpen: false,
+				main: {
+					order: [{ type: 'singleton', kind: 'git' }],
+					active: { type: 'singleton', kind: 'git' },
+				},
+				sidebar: {
+					order: [
+						{ type: 'singleton', kind: 'files' },
+						{ type: 'singleton', kind: 'commit' },
+					],
+					active: { type: 'singleton', kind: 'commit' },
+				},
+				unplacedTerminalIds: [],
 			}),
 		);
-
-		expect(result.source).toBe('valid');
-		expect(result.snapshot.sidebar.order).toEqual([]);
-		expect(result.snapshot.sidebarOpen).toBe(false);
+		expect(result.source).toBe('migrated');
+		expect(collectPaneNodes(result.snapshot.desktopRoot)).toHaveLength(1);
+		expect(paneTabs(result.snapshot, 'pane-main')?.order).toEqual([
+			'singleton:chat',
+			'singleton:git',
+			'singleton:files',
+			'singleton:commit',
+		]);
+		expect(paneTabs(result.snapshot, 'pane-main')?.activeId).toBe('singleton:git');
 	});
 
-	it('serializes only singleton and terminal placement data', () => {
-		const file = { id: 'file:a', type: 'file' as const, fileSessionId: 'a' };
-		const terminal = { id: 'terminal:a', type: 'terminal' as const, terminalId: 'a' };
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: file, host: 'main' },
-			{ type: 'place-in-dialog', surfaceId: file.id },
-			{ type: 'register-surface', surface: terminal, host: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: terminal.id },
-			{ type: 'set-fullscreen-host', host: 'main' },
-		]);
-		const serialized = serializeWorkspaceLayout(snapshot);
+	it('preserves unplaced terminal ids through migration', () => {
+		const result = parsePersistedWorkspaceLayout(
+			null,
+			JSON.stringify({
+				version: 1,
+				desiredSidebarWidth: 480,
+				sidebarOpen: false,
+				main: { order: [], active: null },
+				sidebar: { order: [], active: null },
+				unplacedTerminalIds: ['detached-terminal'],
+			}),
+		);
+		expect(result.source).toBe('migrated');
+		expect(result.snapshot.unplacedTerminalIds).toEqual(['detached-terminal']);
+	});
 
-		expect(serialized.main.order).toEqual([
+	it('serializes only durable surface references', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'file:session-1', type: 'file', fileSessionId: 'session-1' },
+				paneId: 'pane-main',
+			},
+		]);
+		const serialized = serializeWorkspaceLayout(base);
+		const root = serialized.root;
+		if (root.type !== 'pane') throw new Error('expected pane root');
+		expect(root.order).toEqual([
+			{ type: 'singleton', kind: 'chat' },
 			{ type: 'singleton', kind: 'git' },
 			{ type: 'singleton', kind: 'pull-requests' },
-			{ type: 'terminal', terminalId: 'a' },
 		]);
-		expect(serialized.main.active).toEqual({ type: 'terminal', terminalId: 'a' });
-		expect(JSON.stringify(serialized)).not.toContain('file:a');
-		expect(JSON.stringify(serialized)).not.toContain('fullscreenHost');
-		expect(
-			parsePersistedWorkspaceLayout(JSON.stringify(serialized)).snapshot.fullscreenHost,
-		).toBeNull();
-	});
-
-	it('preserves sidebar placement but not sidebar fullscreen', () => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-		]);
-		const serialized = serializeWorkspaceLayout(snapshot);
-		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized)).snapshot;
-
-		expect(serialized.sidebarOpen).toBe(true);
-		expect(restored.sidebarOpen).toBe(true);
-		expect(restored.sidebar.order).toEqual(snapshot.sidebar.order);
-		expect(restored.sidebar.activeId).toBe(snapshot.sidebar.activeId);
-		expect(restored.fullscreenHost).toBeNull();
-	});
-
-	it('round-trips intentionally unplaced terminal sessions', () => {
-		const terminal = { id: 'terminal:a', type: 'terminal' as const, terminalId: 'a' };
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: terminal, host: 'main' },
-			{ type: 'unplace-terminal', terminalId: terminal.terminalId },
-		]);
-
-		const serialized = serializeWorkspaceLayout(snapshot);
-		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
-
-		expect(serialized.unplacedTerminalIds).toEqual(['a']);
-		expect(restored.source).toBe('valid');
-		expect(restored.snapshot.unplacedTerminalIds).toEqual(['a']);
-		expect(restored.snapshot.surfaces[terminal.id]).toBeUndefined();
-	});
-
-	it('round-trips standalone History and Compare desktop placements', () => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-history',
-					type: 'singleton',
-					kind: 'git-history',
-				},
-				host: 'main',
-			},
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-compare',
-					type: 'singleton',
-					kind: 'git-compare',
-				},
-				host: 'sidebar',
-			},
-		]);
-
-		const serialized = serializeWorkspaceLayout(snapshot);
-		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
-
-		expect(serialized.main.order).toContainEqual({
-			type: 'singleton',
-			kind: 'git-history',
-		});
-		expect(serialized.sidebar.order).toContainEqual({
-			type: 'singleton',
-			kind: 'git-compare',
-		});
-		expect(restored.snapshot.main.order).toContain('singleton:git-history');
-		expect(restored.snapshot.sidebar.order).toContain('singleton:git-compare');
-	});
-
-	it('does not serialize mobile-only History or Compare', () => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-history',
-					type: 'singleton',
-					kind: 'git-history',
-				},
-			},
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-compare',
-					type: 'singleton',
-					kind: 'git-compare',
-				},
-			},
-		]);
-
-		expect(JSON.stringify(serializeWorkspaceLayout(snapshot))).not.toMatch(
-			/git-history|git-compare/,
-		);
 	});
 });

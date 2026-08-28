@@ -7,55 +7,72 @@ import {
 	visiblePresentationMap,
 	visiblePortablePresentations,
 } from '../visible-presentations';
+import type { PaneId, WorkspaceLayoutSnapshot } from '../surface-types';
+
+function twoPaneLayout(): WorkspaceLayoutSnapshot {
+	return reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+		{
+			type: 'split-tab-to-edge',
+			surfaceId: 'singleton:git',
+			targetPaneId: 'pane-main',
+			edge: 'right',
+			newPaneId: 'pane-2',
+			splitId: 'split-1',
+		},
+	]);
+}
 
 describe('visiblePortablePresentations', () => {
-	it('returns only the active main and presented sidebar surfaces on desktop', () => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-			{ type: 'set-sidebar-open', open: true },
-		]);
+	it('returns the active surface of every presented pane on desktop', () => {
+		const snapshot = twoPaneLayout();
 
 		expect(visiblePortablePresentations(snapshot, false)).toEqual([
-			{ surfaceId: 'singleton:git', presentation: 'main' },
-			{ surfaceId: 'singleton:files', presentation: 'sidebar' },
+			{ surfaceId: 'singleton:git', presentation: 'pane-2' },
 		]);
-		expect(
-			visiblePortablePresentations(snapshot, false).some(
-				({ surfaceId }) => surfaceId === 'singleton:pull-requests',
-			),
-		).toBe(false);
 	});
 
-	it('omits a hidden sidebar and projects exactly one portable mobile surface', () => {
-		const desktop = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-		]);
-		expect(visiblePortablePresentations(desktop, false)).toEqual([
-			{ surfaceId: 'singleton:git', presentation: 'main' },
-		]);
+	it('omits the chat surface and projects one mobile surface', () => {
+		const snapshot = twoPaneLayout();
+		expect(
+			visiblePortablePresentations(snapshot, false).some(
+				({ surfaceId }) => surfaceId === 'singleton:chat',
+			),
+		).toBe(false);
 
-		const mobile = reduceWorkspaceLayout(desktop, [
+		const mobile = reduceWorkspaceLayout(snapshot, [
 			{
 				type: 'set-mobile-presentation',
-				activeId: 'singleton:files',
+				activeId: 'singleton:git',
 				returnStack: [],
 			},
 		]);
 		expect(visiblePortablePresentations(mobile, true)).toEqual([
-			{ surfaceId: 'singleton:files', presentation: 'mobile' },
+			{ surfaceId: 'singleton:git', presentation: 'mobile' },
 		]);
 	});
 
-	it('retains activated desktop singleton renderers without retaining session surfaces', () => {
+	it('projects only the fullscreen pane on desktop and keeps mobile projection', () => {
+		const snapshot = reduceWorkspaceLayout(twoPaneLayout(), [
+			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
+		]);
+		expect([...visiblePresentationMap(snapshot, 'desktop')]).toEqual([
+			['pane-2', 'singleton:git'],
+		]);
+		expect([...visiblePresentationMap(snapshot, 'mobile')]).toEqual([
+			['mobile', 'singleton:chat'],
+		]);
+	});
+
+	it('retains activated singleton renderers per pane without retaining session surfaces', () => {
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-			{ type: 'set-sidebar-open', open: true },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
 		]);
 		const gitVisible = visiblePortablePresentations(gitActive, false);
 		const retained = nextRetainedSingletonPresentationKeys(gitActive, false, gitVisible, new Set());
+		expect([...retained]).toEqual(['pane-main:singleton:git']);
 
 		const chatActive = reduceWorkspaceLayout(gitActive, [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:chat' },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:chat' },
 		]);
 		const chatVisible = visiblePortablePresentations(chatActive, false);
 		const nextRetained = nextRetainedSingletonPresentationKeys(
@@ -66,69 +83,28 @@ describe('visiblePortablePresentations', () => {
 		);
 
 		expect(renderedPortablePresentations(chatActive, false, chatVisible, nextRetained)).toEqual([
-			{ surfaceId: 'singleton:git', presentation: 'main', visible: false },
-			{ surfaceId: 'singleton:files', presentation: 'sidebar', visible: true },
+			{
+				surfaceId: 'singleton:git',
+				presentation: 'pane-main' as PaneId,
+				paneId: 'pane-main' as PaneId,
+				visible: false,
+			},
 		]);
 	});
 
-	it('drops retained sidebar renderers when the sidebar hides and never retains them on mobile', () => {
-		const open = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-		]);
-		const visible = visiblePortablePresentations(open, false);
-		const retained = nextRetainedSingletonPresentationKeys(open, false, visible, new Set());
-		expect([...retained]).toEqual(['sidebar:singleton:files']);
+	it('drops retained renderers for panes hidden by fullscreen and never retains on mobile', () => {
+		const snapshot = twoPaneLayout();
+		const visible = visiblePortablePresentations(snapshot, false);
+		const retained = nextRetainedSingletonPresentationKeys(snapshot, false, visible, new Set());
+		expect([...retained].sort()).toEqual(['pane-2:singleton:git']);
 
-		const closed = reduceWorkspaceLayout(open, [{ type: 'set-sidebar-open', open: false }]);
-		expect(nextRetainedSingletonPresentationKeys(closed, false, [], retained).size).toBe(0);
-		expect(nextRetainedSingletonPresentationKeys(open, true, visible, retained).size).toBe(0);
-	});
-
-	it('projects only the fullscreen desktop host while preserving mobile projection', () => {
-		const open = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-			{ type: 'set-sidebar-open', open: true },
+		const fullscreen = reduceWorkspaceLayout(snapshot, [
+			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
 		]);
-		const mainFullscreen = reduceWorkspaceLayout(open, [
-			{ type: 'set-fullscreen-host', host: 'main' },
-		]);
-		expect([...visiblePresentationMap(mainFullscreen, 'desktop')]).toEqual([
-			['main', 'singleton:git'],
-		]);
-
-		const sidebarFullscreen = reduceWorkspaceLayout(open, [
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-		]);
-		expect([...visiblePresentationMap(sidebarFullscreen, 'desktop')]).toEqual([
-			['sidebar', 'singleton:files'],
-		]);
-		expect([...visiblePresentationMap(sidebarFullscreen, 'mobile')]).toEqual([
-			['mobile', 'singleton:chat'],
-		]);
-	});
-
-	it('drops retained singleton renderers from whichever host fullscreen hides', () => {
-		const open = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-			{ type: 'set-sidebar-open', open: true },
-		]);
-		const visible = visiblePortablePresentations(open, false);
-		const retained = nextRetainedSingletonPresentationKeys(open, false, visible, new Set());
-		expect([...retained]).toEqual(['main:singleton:git', 'sidebar:singleton:files']);
-
-		const sidebarFullscreen = reduceWorkspaceLayout(open, [
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-		]);
-		const sidebarVisible = visiblePortablePresentations(sidebarFullscreen, false);
-		const sidebarRetained = nextRetainedSingletonPresentationKeys(
-			sidebarFullscreen,
-			false,
-			sidebarVisible,
-			retained,
-		);
-		expect([...sidebarRetained]).toEqual(['sidebar:singleton:files']);
+		const fullscreenVisible = visiblePortablePresentations(fullscreen, false);
 		expect(
-			renderedPortablePresentations(sidebarFullscreen, false, sidebarVisible, sidebarRetained),
-		).toEqual([{ surfaceId: 'singleton:files', presentation: 'sidebar', visible: true }]);
+			nextRetainedSingletonPresentationKeys(fullscreen, false, fullscreenVisible, retained),
+		).toEqual(new Set(['pane-2:singleton:git']));
+		expect(nextRetainedSingletonPresentationKeys(snapshot, true, visible, retained).size).toBe(0);
 	});
 });

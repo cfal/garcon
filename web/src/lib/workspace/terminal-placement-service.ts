@@ -3,13 +3,16 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
+	MAX_WORKSPACE_PANES,
 	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
-	type HostId,
+	type PaneId,
+	type SplitId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
+import { collectPaneNodes, paneNodeById } from './pane-tree.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
@@ -42,9 +45,9 @@ interface TerminalPlacementServiceDeps {
 	isMobile(): boolean;
 	isChatPresented(): boolean;
 	cancelChatTransition(): void;
-	hostOf(surfaceId: string): HostId | null;
-	activeMainId(): string;
-	activeSidebarId(): string | null;
+	paneOf(surfaceId: string): PaneId | null;
+	defaultPaneId(): PaneId;
+	defaultActiveId(): string;
 	lastFocusedSurfaceId(): string;
 	focusSurface(surfaceId: string): Promise<void>;
 	present(surfaceId: string): void;
@@ -63,8 +66,8 @@ export class TerminalPlacementService {
 
 	constructor(private readonly deps: TerminalPlacementServiceDeps) {}
 
-	async create(host: HostId = 'main', requestKey?: string): Promise<string> {
-		if (host === 'main' && this.deps.isChatPresented()) {
+	async create(paneId: PaneId, requestKey?: string): Promise<string> {
+		if (this.deps.isChatPresented()) {
 			this.deps.cancelChatTransition();
 		}
 		const terminalId = requestKey
@@ -76,15 +79,11 @@ export class TerminalPlacementService {
 			current = await this.deps.commit(
 				(latest) => {
 					if (latest.surfaces[surfaceId]) {
-						const existingHost = latest.main.order.includes(surfaceId)
-							? 'main'
-							: latest.sidebar.order.includes(surfaceId)
-								? 'sidebar'
-								: null;
+						const existingPaneId = this.#paneOf(latest, surfaceId);
 						const mutations: WorkspaceLayoutMutation[] = [
-							existingHost === host
-								? { type: 'focus-host', host, surfaceId }
-								: { type: 'move-to-host', surfaceId, destination: host },
+							existingPaneId === paneId
+								? { type: 'activate-pane-tab', paneId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationPaneId: paneId },
 						];
 						if (this.deps.isMobile()) {
 							mutations.push({
@@ -95,6 +94,7 @@ export class TerminalPlacementService {
 						}
 						return mutations;
 					}
+					if (!paneNodeById(latest.desktopRoot, paneId)) return [];
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
 						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
@@ -106,9 +106,9 @@ export class TerminalPlacementService {
 						{
 							type: 'register-surface',
 							surface: { id: surfaceId, type: 'terminal', terminalId },
-							host,
+							paneId,
 						},
-						{ type: 'focus-host', host, surfaceId },
+						{ type: 'activate-pane-tab', paneId, surfaceId },
 					);
 					if (this.deps.isMobile()) {
 						mutations.push({
@@ -117,6 +117,59 @@ export class TerminalPlacementService {
 							returnStack: latest.mobileReturnStack,
 						});
 					}
+					return mutations;
+				},
+				{ requiredPublication: true },
+			);
+		} catch (error) {
+			await this.#rollbackUnplaced(terminalId, error);
+		}
+		if (!current) return terminalId;
+		this.deps.present(surfaceId);
+		return terminalId;
+	}
+
+	// Creates a terminal in a new pane split from the anchor pane.
+	async createInNewPane(anchorPaneId: PaneId, requestKey?: string): Promise<string> {
+		if (this.deps.isChatPresented()) {
+			this.deps.cancelChatTransition();
+		}
+		const terminalId = requestKey
+			? await this.#retryCreate(requestKey)
+			: await this.#createWithRequestId(createRandomId());
+		const surfaceId = terminalSurfaceId(terminalId);
+		const newPaneId = `pane-${createRandomId()}` as PaneId;
+		const splitId = `split-${createRandomId()}` as SplitId;
+		let current = false;
+		try {
+			current = await this.deps.commit(
+				(latest) => {
+					if (latest.surfaces[surfaceId]) {
+						const existingPaneId = this.#paneOf(latest, surfaceId);
+						if (!existingPaneId) return [];
+						return [{ type: 'activate-pane-tab', paneId: existingPaneId, surfaceId }];
+					}
+					if (!paneNodeById(latest.desktopRoot, anchorPaneId)) return [];
+					if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
+						throw new Error(
+							m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }),
+						);
+					}
+					const mutations: WorkspaceLayoutMutation[] = [];
+					if (
+						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
+						!this.deps.reservations.has(TERMINAL_LAUNCHER_ID)
+					) {
+						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
+					}
+					mutations.push({
+						type: 'register-surface-in-split',
+						surface: { id: surfaceId, type: 'terminal', terminalId },
+						targetPaneId: anchorPaneId,
+						edge: 'right',
+						newPaneId,
+						splitId,
+					});
 					return mutations;
 				},
 				{ requiredPublication: true },
@@ -170,7 +223,7 @@ export class TerminalPlacementService {
 		}
 	}
 
-	async open(terminalId: string, preferredHost: HostId = 'main'): Promise<void> {
+	async open(terminalId: string, preferredPaneId: PaneId): Promise<void> {
 		if (!this.deps.terminals.sessions[terminalId]) return;
 		const surfaceId = terminalSurfaceId(terminalId);
 		if (this.deps.layout.surface(surfaceId)) {
@@ -181,9 +234,9 @@ export class TerminalPlacementService {
 			{
 				type: 'register-surface',
 				surface: { id: surfaceId, type: 'terminal', terminalId },
-				host: preferredHost,
+				paneId: preferredPaneId,
 			},
-			{ type: 'focus-host', host: preferredHost, surfaceId },
+			{ type: 'activate-pane-tab', paneId: preferredPaneId, surfaceId },
 		];
 		if (this.deps.isMobile()) {
 			mutations.push({
@@ -286,7 +339,7 @@ export class TerminalPlacementService {
 		}
 		this.deps.reservations.add(surfaceId);
 		try {
-			const sourceHost = this.deps.hostOf(surfaceId);
+			const sourcePaneId = this.deps.paneOf(surfaceId);
 			let mobileFallbackId: string | null = null;
 			const current = await this.deps.commitDestroyedRemoval(surfaceId, (latest) => {
 				if (!latest.surfaces[surfaceId]) return [];
@@ -304,12 +357,10 @@ export class TerminalPlacementService {
 			});
 			this.deps.clearAttachmentError(surfaceId);
 			if (!current) return;
-			const fallbackSurfaceId =
-				mobileFallbackId ??
-				(sourceHost === 'sidebar' && this.deps.layout.snapshot.sidebarOpen
-					? this.deps.activeSidebarId()
-					: this.deps.activeMainId()) ??
-				this.deps.activeMainId();
+			const sourcePaneActive = sourcePaneId
+				? paneNodeById(this.deps.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+				: null;
+			const fallbackSurfaceId = mobileFallbackId ?? sourcePaneActive ?? this.deps.defaultActiveId();
 			this.deps.present(fallbackSurfaceId);
 		} finally {
 			this.deps.reservations.delete(surfaceId);
@@ -322,10 +373,10 @@ export class TerminalPlacementService {
 		}
 	}
 
-	async focusMostRecentOrCreate(preferredHost: HostId = 'main'): Promise<void> {
+	async focusMostRecentOrCreate(preferredPaneId: PaneId): Promise<void> {
 		const focused = this.deps.layout.surface(this.deps.lastFocusedSurfaceId());
 		if (focused?.type === 'terminal' && this.deps.terminals.sessions[focused.terminalId]) {
-			await this.open(focused.terminalId, preferredHost);
+			await this.open(focused.terminalId, preferredPaneId);
 			return;
 		}
 		let terminal = this.deps.terminals.orderedSessions.at(-1);
@@ -334,14 +385,14 @@ export class TerminalPlacementService {
 			terminal = this.deps.terminals.orderedSessions.at(-1);
 		}
 		if (terminal) {
-			await this.open(terminal.metadata.terminalId, preferredHost);
+			await this.open(terminal.metadata.terminalId, preferredPaneId);
 			return;
 		}
 		if (
 			this.deps.terminals.listStatus === 'ready' &&
 			this.deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
 		) {
-			await this.create(preferredHost, `terminal-empty-state:${preferredHost}`);
+			await this.create(preferredPaneId, `terminal-empty-state:${preferredPaneId}`);
 		}
 	}
 
@@ -387,7 +438,7 @@ export class TerminalPlacementService {
 				mutations.push({
 					type: 'register-surface',
 					surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-					host: 'main',
+					paneId: this.deps.defaultPaneId(),
 				});
 			}
 			const unrepresentedTerminalIds = [...live].filter(
@@ -403,7 +454,7 @@ export class TerminalPlacementService {
 							type: 'terminal',
 							terminalId,
 						},
-						host: 'main',
+						paneId: this.deps.defaultPaneId(),
 					});
 				}
 			} else {
@@ -425,14 +476,14 @@ export class TerminalPlacementService {
 		if (current && mobileFallbackId) this.deps.present(mobileFallbackId);
 	}
 
-	async activateLauncher(host: HostId): Promise<void> {
+	async activateLauncher(paneId: PaneId): Promise<void> {
 		const launcherId = TERMINAL_LAUNCHER_ID;
 		if (!this.deps.layout.surface(launcherId) || this.deps.reservations.has(launcherId)) {
 			return;
 		}
 		this.deps.reservations.add(launcherId);
 		try {
-			const terminalId = await this.#retryCreate(`launcher:${host}`);
+			const terminalId = await this.#retryCreate(`launcher:${paneId}`);
 			const surfaceId = terminalSurfaceId(terminalId);
 			let current = false;
 			try {
@@ -443,7 +494,7 @@ export class TerminalPlacementService {
 							previousId: launcherId,
 							surface: { id: surfaceId, type: 'terminal', terminalId },
 						},
-						{ type: 'focus-host', host, surfaceId },
+						{ type: 'activate-pane-tab', paneId, surfaceId },
 					],
 					{ requiredPublication: true },
 				);
@@ -454,6 +505,13 @@ export class TerminalPlacementService {
 		} finally {
 			this.deps.reservations.delete(launcherId);
 		}
+	}
+
+	#paneOf(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): PaneId | null {
+		for (const pane of collectPaneNodes(snapshot.desktopRoot)) {
+			if (pane.tabs.order.includes(surfaceId)) return pane.id;
+		}
+		return null;
 	}
 
 	async #retryCreate(requestKey: string): Promise<string> {

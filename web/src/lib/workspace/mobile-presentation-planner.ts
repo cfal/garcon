@@ -5,6 +5,7 @@ import {
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
+import { paneIdOfSurface, paneNodeById } from './pane-tree.js';
 
 interface MobileWorkspaceContext {
 	chatId: string;
@@ -73,9 +74,13 @@ export class MobilePresentationPlanner {
 		const recent = this.#mostRecentSurfaceIds.find(
 			(surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]),
 		);
-		const activeMain = snapshot.main.activeId;
+		const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
+		const chatPaneActive = chatPaneId
+			? paneNodeById(snapshot.desktopRoot, chatPaneId)?.tabs.activeId
+			: null;
 		return {
-			activeId: recent ?? (activeMain && !isExcluded(activeMain) ? activeMain : CHAT_SURFACE_ID),
+			activeId:
+				recent ?? (chatPaneActive && !isExcluded(chatPaneActive) ? chatPaneActive : CHAT_SURFACE_ID),
 			returnStack: [],
 		};
 	}

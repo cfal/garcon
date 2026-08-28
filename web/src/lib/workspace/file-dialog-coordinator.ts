@@ -6,10 +6,11 @@ import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import {
 	fileSurfaceId,
-	type HostId,
+	type PaneId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
+import { paneNodeById } from './pane-tree.js';
 import type { WorkspaceCommit, WorkspacePublication } from './workspace-commit.js';
 
 interface SurfaceReservations {
@@ -26,10 +27,9 @@ interface FileDialogCoordinatorDeps {
 	commit: WorkspaceCommit;
 	isMobile(): boolean;
 	responsiveGeneration(): number;
-	activeMainId(): string;
-	activeSidebarId(): string | null;
+	defaultActiveId(): string;
 	lastFocusedSurfaceId(): string;
-	hostOf(surfaceId: string): HostId | null;
+	paneOf(surfaceId: string): PaneId | null;
 	eligibleDesktopReturn(surfaceId: string | null): string | null;
 	present(surfaceId: string): void;
 	placeOnMobile(
@@ -78,7 +78,7 @@ export class FileDialogCoordinator {
 			});
 	}
 
-	moveToHost(destination: HostId): Promise<void> {
+	moveToPane(destination: PaneId): Promise<void> {
 		return this.#queue.enqueue(async () => {
 			if (this.deps.isMobile()) return;
 			const surfaceId = this.deps.layout.snapshot.dialogFileSurfaceId;
@@ -89,7 +89,8 @@ export class FileDialogCoordinator {
 					if (latest.dialogFileSurfaceId !== surfaceId) {
 						throw new Error('The dialog occupant changed before it could be moved');
 					}
-					return [{ type: 'move-dialog-to-host', surfaceId, destination }];
+					if (!paneNodeById(latest.desktopRoot, destination)) return [];
+					return [{ type: 'move-dialog-to-pane', surfaceId, destinationPaneId: destination }];
 				});
 				if (!current) return;
 				this.#returnSurfaceId = null;
@@ -110,7 +111,8 @@ export class FileDialogCoordinator {
 		}
 		const responsiveGeneration = this.deps.responsiveGeneration();
 		const returnSurfaceId =
-			this.deps.eligibleDesktopReturn(this.deps.lastFocusedSurfaceId()) ?? this.deps.activeMainId();
+			this.deps.eligibleDesktopReturn(this.deps.lastFocusedSurfaceId()) ??
+			this.deps.defaultActiveId();
 		return this.#replaceDialogOccupant(responsiveGeneration, {
 			occupantChangedMessage: 'The dialog occupant changed before replacement',
 			mutations: (occupantId) => [
@@ -132,7 +134,7 @@ export class FileDialogCoordinator {
 	async #pop(surfaceId: string): Promise<boolean> {
 		if (this.deps.isMobile()) return false;
 		const responsiveGeneration = this.deps.responsiveGeneration();
-		const sourceHost = this.deps.hostOf(surfaceId);
+		const sourcePaneId = this.deps.paneOf(surfaceId);
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		if (occupantId === surfaceId) return true;
 		const result = await this.#replaceDialogOccupant(responsiveGeneration, {
@@ -145,9 +147,9 @@ export class FileDialogCoordinator {
 			],
 			onCurrent: () => {
 				this.#returnSurfaceId =
-					sourceHost === 'sidebar' && this.deps.layout.snapshot.sidebarOpen
-						? this.deps.activeSidebarId()
-						: this.deps.activeMainId();
+					(sourcePaneId
+						? paneNodeById(this.deps.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+						: null) ?? this.deps.defaultActiveId();
 				this.deps.present(surfaceId);
 			},
 		});

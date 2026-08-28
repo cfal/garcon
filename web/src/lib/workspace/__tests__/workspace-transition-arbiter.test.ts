@@ -1,34 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkspaceLayoutStore } from '../workspace-layout.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
+import { paneNodeById } from '../pane-tree';
+import type { PaneId } from '../surface-types';
+
+function paneTabs(snapshot: ReturnType<typeof createWorkspaceLayoutStore>['snapshot']) {
+	return paneNodeById(snapshot.desktopRoot, 'pane-main' as PaneId)!.tabs;
+}
 
 describe('WorkspaceTransitionArbiter', () => {
 	it('publishes concurrent intents in FIFO order against the latest snapshot', async () => {
 		const layout = createWorkspaceLayoutStore();
 		const arbiter = new WorkspaceTransitionArbiter(layout, layout);
 		const first = arbiter.commit([
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
 		]);
 		const second = arbiter.commit([
-			{ type: 'move-to-host', surfaceId: 'singleton:git', destination: 'sidebar' },
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: 'singleton:git',
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
 		]);
 
 		await expect(first).resolves.toBe(true);
 		await expect(second).resolves.toBe(true);
 		expect(layout.revision).toBe(2);
-		expect(layout.snapshot.sidebar.activeId).toBe('singleton:git');
-		expect(layout.snapshot.main.activeId).toBe('singleton:chat');
+		expect(paneTabs(layout.snapshot).activeId).toBe('singleton:chat');
+		expect(
+			paneNodeById(layout.snapshot.desktopRoot, 'pane-2' as PaneId)?.tabs.activeId,
+		).toBe('singleton:git');
 	});
 
 	it('continues draining after an invalid intent fails', async () => {
 		const layout = createWorkspaceLayoutStore();
 		const arbiter = new WorkspaceTransitionArbiter(layout, layout);
-		const invalid = arbiter.commit([{ type: 'focus-host', host: 'sidebar', surfaceId: 'missing' }]);
-		const valid = arbiter.commit([{ type: 'set-sidebar-open', open: true }]);
+		const invalid = arbiter.commit([
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:missing' },
+		]);
+		const valid = arbiter.commit([
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+		]);
 
-		await expect(invalid).rejects.toThrow('Surface is not in sidebar: missing');
+		await expect(invalid).rejects.toThrow('Surface is not in pane');
 		await expect(valid).resolves.toBe(true);
-		expect(layout.snapshot.sidebarOpen).toBe(true);
+		expect(paneTabs(layout.snapshot).activeId).toBe('singleton:git');
 		expect(layout.revision).toBe(1);
 	});
 
@@ -42,9 +61,12 @@ describe('WorkspaceTransitionArbiter', () => {
 			return originalPublish(revision, snapshot);
 		}) as typeof layout.publish;
 
-		await arbiter.commit([{ type: 'set-sidebar-open', open: true }], {
-			beforePublish: () => order.push('domain'),
-		});
+		await arbiter.commit(
+			[{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' }],
+			{
+				beforePublish: () => order.push('domain'),
+			},
+		);
 
 		expect(order).toEqual(['domain', 'layout']);
 	});

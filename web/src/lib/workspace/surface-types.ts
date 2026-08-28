@@ -1,8 +1,9 @@
 export const CHAT_SURFACE_ID = 'singleton:chat' as const;
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
-export const MIN_WORKSPACE_SIDEBAR_WIDTH = 360;
-export const MAX_PERSISTED_WORKSPACE_SIDEBAR_WIDTH = 1200;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
+export const MAX_WORKSPACE_PANES = 4;
+export const MIN_SPLIT_RATIO = 0.15;
+export const MAX_SPLIT_RATIO = 0.85;
 export const PORTABLE_SINGLETON_KINDS = [
 	'git',
 	'git-history',
@@ -13,14 +14,23 @@ export const PORTABLE_SINGLETON_KINDS = [
 ] as const;
 export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
 
-export type HostId = 'main' | 'sidebar';
-export type PresentationHostId = HostId | 'mobile' | 'dialog';
-export type DesktopPlacement = HostId | 'dialog';
+// Pane and split IDs carry prefixes so they can never collide with the
+// reserved presentation hosts 'mobile' and 'dialog'.
+export type PaneId = `pane-${string}`;
+export type SplitId = `split-${string}`;
+export type SplitDirection = 'horizontal' | 'vertical';
+export type SplitEdge = 'left' | 'right' | 'top' | 'bottom';
+
+export type PresentationHostId = PaneId | 'mobile' | 'dialog';
+export type DesktopPlacement =
+	| { type: 'pane'; paneId: PaneId }
+	| { type: 'new-pane'; anchorPaneId: PaneId }
+	| { type: 'dialog' };
 
 export type FocusOwner =
 	| { kind: 'surface'; surfaceId: string }
 	| { kind: 'chat-list' }
-	| { kind: 'host-chrome'; host: HostId; surfaceId: string };
+	| { kind: 'pane-chrome'; paneId: PaneId; surfaceId: string };
 
 export type PortableSingletonKind = (typeof PORTABLE_SINGLETON_KINDS)[number];
 export type TransientMobileSingletonKind = (typeof TRANSIENT_MOBILE_SINGLETON_KINDS)[number];
@@ -43,28 +53,43 @@ export type SurfaceDescriptor =
 
 export type ActiveSurfaceKind = SingletonSurfaceKind | 'terminal' | 'file' | 'terminal-launcher';
 
-export interface HostState {
+// Tab state of a single pane: ordered tabs, the active tab, and a most
+// recently used stack kept as a complete permutation of order.
+export interface PaneTabState {
 	readonly order: readonly string[];
 	readonly activeId: string | null;
 	readonly mru: readonly string[];
 }
 
+export interface PaneNode {
+	readonly type: 'pane';
+	readonly id: PaneId;
+	readonly tabs: PaneTabState;
+}
+
+export interface WorkspaceSplitNode {
+	readonly type: 'split';
+	readonly id: SplitId;
+	readonly direction: SplitDirection;
+	readonly ratio: number;
+	readonly children: readonly [DesktopLayoutNode, DesktopLayoutNode];
+}
+
+export type DesktopLayoutNode = PaneNode | WorkspaceSplitNode;
+
 export interface MobileReturnTarget {
 	invokerSurfaceId: string;
-	invokerHost: HostId | 'mobile';
+	invokerHost: PaneId | 'mobile';
 	chatId: string | null;
 	effectiveProjectKey: string | null;
 	routeIdentity: string;
 }
 
 export interface WorkspaceLayoutSnapshot {
-	readonly main: HostState;
-	readonly sidebar: HostState;
+	readonly desktopRoot: DesktopLayoutNode;
 	readonly surfaces: Readonly<Record<string, SurfaceDescriptor>>;
-	readonly sidebarOpen: boolean;
-	readonly desiredSidebarWidth: number;
+	readonly fullscreenPaneId: PaneId | null;
 	readonly dialogFileSurfaceId: string | null;
-	readonly fullscreenHost: HostId | null;
 	readonly mobileActiveSurfaceId: string;
 	readonly mobileOnlySurfaceIds: readonly string[];
 	readonly mobileReturnStack: readonly MobileReturnTarget[];
@@ -74,8 +99,8 @@ export interface WorkspaceLayoutSnapshot {
 export interface WorkspaceLayoutReader {
 	readonly revision: number;
 	readonly snapshot: WorkspaceLayoutSnapshot;
-	readonly activeMainId: string;
-	readonly activeMainKind: ActiveSurfaceKind | null;
+	readonly chatPaneId: PaneId;
+	readonly defaultActiveId: string;
 	surface(surfaceId: string): SurfaceDescriptor | null;
 }
 
@@ -84,20 +109,36 @@ export interface WorkspaceLayoutCommitPort {
 }
 
 export type WorkspaceLayoutMutation =
-	| { type: 'register-surface'; surface: SurfaceDescriptor; host?: HostId; index?: number }
+	| { type: 'register-surface'; surface: SurfaceDescriptor; paneId?: PaneId; index?: number }
+	| {
+			type: 'register-surface-in-split';
+			surface: SurfaceDescriptor;
+			targetPaneId: PaneId;
+			edge: SplitEdge;
+			newPaneId: PaneId;
+			splitId: SplitId;
+	  }
 	| { type: 'replace-surface'; previousId: string; surface: SurfaceDescriptor }
 	| { type: 'swap-terminal-placements'; firstSurfaceId: string; secondSurfaceId: string }
-	| { type: 'focus-host'; host: HostId; surfaceId: string }
-	| { type: 'move-to-host'; surfaceId: string; destination: HostId; index?: number }
-	| { type: 'assign-to-host'; surfaceId: string; destination: HostId; index?: number }
+	| { type: 'activate-pane-tab'; paneId: PaneId; surfaceId: string }
+	| { type: 'move-tab'; surfaceId: string; destinationPaneId: PaneId; index?: number }
+	| { type: 'assign-to-pane'; surfaceId: string; destinationPaneId: PaneId; index?: number }
+	| {
+			type: 'split-tab-to-edge';
+			surfaceId: string;
+			targetPaneId: PaneId;
+			edge: SplitEdge;
+			newPaneId: PaneId;
+			splitId: SplitId;
+	  }
+	| { type: 'merge-pane'; sourcePaneId: PaneId; destinationPaneId: PaneId }
+	| { type: 'set-split-ratio'; splitId: SplitId; ratio: number }
+	| { type: 'set-fullscreen-pane'; paneId: PaneId | null }
 	| { type: 'place-in-dialog'; surfaceId: string }
-	| { type: 'move-dialog-to-host'; surfaceId: string; destination: HostId; index?: number }
+	| { type: 'move-dialog-to-pane'; surfaceId: string; destinationPaneId: PaneId; index?: number }
 	| { type: 'unplace-terminal'; terminalId: string }
 	| { type: 'forget-terminal'; terminalId: string }
 	| { type: 'remove-surface'; surfaceId: string }
-	| { type: 'set-sidebar-open'; open: boolean }
-	| { type: 'set-sidebar-width'; width: number }
-	| { type: 'set-fullscreen-host'; host: HostId | null }
 	| {
 			type: 'set-mobile-presentation';
 			activeId: string;
@@ -145,4 +186,12 @@ export function isPortableSingleton(
 	surface: SurfaceDescriptor,
 ): surface is Extract<SurfaceDescriptor, { type: 'singleton' }> & { kind: PortableSingletonKind } {
 	return surface.type === 'singleton' && surface.kind !== 'chat';
+}
+
+export function splitEdgeDirection(edge: SplitEdge): SplitDirection {
+	return edge === 'left' || edge === 'right' ? 'horizontal' : 'vertical';
+}
+
+export function splitEdgePosition(edge: SplitEdge): 'before' | 'after' {
+	return edge === 'left' || edge === 'top' ? 'before' : 'after';
 }

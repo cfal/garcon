@@ -12,6 +12,10 @@ describe('MobilePresentationPlanner', () => {
 		});
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+			},
+			{
 				type: 'set-mobile-presentation',
 				activeId: 'singleton:git',
 				returnStack: [],
@@ -49,6 +53,14 @@ describe('MobilePresentationPlanner', () => {
 			getRouteIdentity: () => routeIdentity,
 		});
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+			},
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:files', type: 'singleton', kind: 'files' },
+			},
 			{
 				type: 'set-mobile-presentation',
 				activeId: 'singleton:git',

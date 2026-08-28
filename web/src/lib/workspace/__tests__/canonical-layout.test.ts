@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	canOmitCanonicalPullRequests,
-	canOpenCanonicalSidebar,
 	canonicalWorkspaceSnapshot,
 	isCanonicalFirstRunLayout,
-	nextSidebarSeedKind,
 } from '../canonical-layout';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { CHAT_SURFACE_ID, TERMINAL_LAUNCHER_ID, singletonSurfaceId } from '../surface-types';
@@ -26,15 +24,30 @@ describe('canonical workspace layout', () => {
 			{
 				type: 'register-surface',
 				surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-				host: 'main',
+				paneId: 'pane-main',
 			},
 		]);
 		const focused = reduceWorkspaceLayout(canonical, [
-			{ type: 'focus-host', host: 'main', surfaceId: singletonSurfaceId('git') },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: singletonSurfaceId('git') },
 		]);
 
 		expect(isCanonicalFirstRunLayout(withLauncher)).toBe(false);
 		expect(isCanonicalFirstRunLayout(focused)).toBe(false);
+	});
+
+	it('rejects split layouts as first-run state', () => {
+		const split = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: singletonSurfaceId('git'),
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
+		]);
+		expect(isCanonicalFirstRunLayout(split)).toBe(false);
+		expect(canOmitCanonicalPullRequests(split)).toBe(false);
 	});
 
 	it('allows canonical Pull Requests omission while tolerating the launcher', () => {
@@ -42,45 +55,35 @@ describe('canonical workspace layout', () => {
 			{
 				type: 'register-surface',
 				surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-				host: 'main',
+				paneId: 'pane-main',
 			},
 		]);
 		expect(canOmitCanonicalPullRequests(withLauncher)).toBe(true);
 
 		const pullRequestsActive = reduceWorkspaceLayout(withLauncher, [
 			{
-				type: 'focus-host',
-				host: 'main',
+				type: 'activate-pane-tab',
+				paneId: 'pane-main',
 				surfaceId: singletonSurfaceId('pull-requests'),
 			},
 		]);
 		expect(canOmitCanonicalPullRequests(pullRequestsActive)).toBe(false);
 
 		const noncanonical = reduceWorkspaceLayout(withLauncher, [
-			{ type: 'move-to-host', surfaceId: singletonSurfaceId('files'), destination: 'main' },
+			{
+				type: 'register-surface',
+				surface: { id: singletonSurfaceId('files'), type: 'singleton', kind: 'files' },
+				paneId: 'pane-main',
+			},
 		]);
 		expect(canOmitCanonicalPullRequests(noncanonical)).toBe(false);
 	});
 
-	it('chooses the first missing sidebar default without moving an existing singleton', () => {
+	it('always places chat first in the canonical pane', () => {
 		const canonical = canonicalWorkspaceSnapshot();
-		expect(nextSidebarSeedKind(canonical)).toBeNull();
-
-		const withoutFiles = reduceWorkspaceLayout(canonical, [
-			{ type: 'remove-surface', surfaceId: singletonSurfaceId('files') },
-		]);
-		expect(nextSidebarSeedKind(withoutFiles)).toBe('files');
-
-		const withoutCommit = reduceWorkspaceLayout(canonical, [
-			{ type: 'remove-surface', surfaceId: singletonSurfaceId('commit') },
-		]);
-		expect(nextSidebarSeedKind(withoutCommit)).toBe('commit');
-
-		const defaultsInMain = reduceWorkspaceLayout(canonical, [
-			{ type: 'move-to-host', surfaceId: singletonSurfaceId('files'), destination: 'main' },
-			{ type: 'move-to-host', surfaceId: singletonSurfaceId('commit'), destination: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: CHAT_SURFACE_ID },
-		]);
-		expect(canOpenCanonicalSidebar(defaultsInMain)).toBe(false);
+		expect(canonical.desktopRoot.type).toBe('pane');
+		if (canonical.desktopRoot.type !== 'pane') throw new Error('expected pane root');
+		expect(canonical.desktopRoot.tabs.order[0]).toBe(CHAT_SURFACE_ID);
+		expect(canonical.desktopRoot.tabs.activeId).toBe(CHAT_SURFACE_ID);
 	});
 });

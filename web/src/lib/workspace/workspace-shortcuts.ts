@@ -27,9 +27,9 @@ export interface WorkspaceShortcutDeps {
 		WorkspaceCoordinator,
 		| 'focusOwner'
 		| 'isSurfacePresented'
-		| 'focusPreviousTabInFocusedHost'
-		| 'focusNextTabInFocusedHost'
-		| 'toggleFocusBetweenMainAndSidebar'
+		| 'focusPreviousTabInFocusedPane'
+		| 'focusNextTabInFocusedPane'
+		| 'cyclePaneFocus'
 	> & { layout: Pick<WorkspaceCoordinator['layout'], 'surface'> };
 	transients: Pick<
 		TransientLayerRegistry,
@@ -131,7 +131,7 @@ export class WorkspaceShortcutDispatcher {
 		if (this.#isLocallyOwned(event)) return;
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		const ownerDescriptor =
-			owner.kind === 'surface' || owner.kind === 'host-chrome'
+			owner.kind === 'surface' || owner.kind === 'pane-chrome'
 				? this.deps.workspace.layout.surface(owner.surfaceId)
 				: null;
 		const terminalOwnsInput =
@@ -173,13 +173,13 @@ export class WorkspaceShortcutDispatcher {
 		}
 		if (matches('toggle-main-sidebar-focus')) {
 			event.preventDefault();
-			this.deps.workspace.toggleFocusBetweenMainAndSidebar(owner);
+			this.deps.workspace.cyclePaneFocus(owner);
 			return;
 		}
 		if (matches('navigate-tab-left') || matches('navigate-tab-right')) {
 			const handled = matches('navigate-tab-left')
-				? this.deps.workspace.focusPreviousTabInFocusedHost(owner)
-				: this.deps.workspace.focusNextTabInFocusedHost(owner);
+				? this.deps.workspace.focusPreviousTabInFocusedPane(owner)
+				: this.deps.workspace.focusNextTabInFocusedPane(owner);
 			if (handled) event.preventDefault();
 			return;
 		}
@@ -191,7 +191,7 @@ export class WorkspaceShortcutDispatcher {
 			}
 			return;
 		}
-		if (owner.kind === 'surface' || owner.kind === 'host-chrome') {
+		if (owner.kind === 'surface' || owner.kind === 'pane-chrome') {
 			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
 			if (descriptor?.type === 'terminal') return;

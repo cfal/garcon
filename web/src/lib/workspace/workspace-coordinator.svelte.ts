@@ -4,16 +4,22 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
+	MAX_WORKSPACE_PANES,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
+	type ActiveSurfaceKind,
 	type DesktopPlacement,
-	type HostId,
+	type PaneId,
 	type FocusOwner,
 	type PortableSingletonKind,
+	type SplitEdge,
+	type SplitId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 	type PresentationHostId,
 } from './surface-types.js';
+import { collectPaneNodes, paneIdOfSurface, paneNodeById } from './pane-tree.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	WorkspaceTransitionArbiter,
 	type WorkspaceMutationPlan,
@@ -33,11 +39,7 @@ import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
-import {
-	canOmitCanonicalPullRequests,
-	canOpenCanonicalSidebar,
-	nextSidebarSeedKind,
-} from './canonical-layout.js';
+import { canOmitCanonicalPullRequests } from './canonical-layout.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 
 interface WorkspaceCoordinatorDeps {
@@ -56,10 +58,11 @@ interface WorkspaceCoordinatorDeps {
 	getRouteIdentity(): string;
 }
 
-function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] {
-	const mutations: WorkspaceLayoutMutation[] = [];
-	if (!snapshot.sidebarOpen) mutations.push({ type: 'set-sidebar-open', open: true });
-	return mutations;
+export class WorkspacePaneLimitError extends Error {
+	constructor() {
+		super(m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }));
+		this.name = 'WorkspacePaneLimitError';
+	}
 }
 
 export class WorkspaceCoordinator implements FilePlacementPort {
@@ -101,10 +104,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			commit,
 			isMobile: () => this.isMobile,
 			responsiveGeneration: () => this.#presentation.responsiveGeneration,
-			activeMainId: () => this.activeMainId,
-			activeSidebarId: () => this.activeSidebarId,
+			defaultActiveId: () => this.defaultActiveId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
-			hostOf: (surfaceId) => this.#presentation.hostOf(surfaceId),
+			paneOf: (surfaceId) => this.#presentation.paneOf(surfaceId),
 			eligibleDesktopReturn: (surfaceId) => this.#presentation.eligibleDesktopReturn(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 			placeOnMobile: (sessionId, surfaceId, publication) =>
@@ -121,9 +123,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			isMobile: () => this.isMobile,
 			isChatPresented: () => this.isChatPresented,
 			cancelChatTransition: () => deps.chatInteractionGate.cancelBeforeInertTransition(),
-			hostOf: (surfaceId) => this.#presentation.hostOf(surfaceId),
-			activeMainId: () => this.activeMainId,
-			activeSidebarId: () => this.activeSidebarId,
+			paneOf: (surfaceId) => this.#presentation.paneOf(surfaceId),
+			defaultPaneId: () => this.defaultPaneId,
+			defaultActiveId: () => this.defaultActiveId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
 			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
@@ -162,16 +164,24 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#presentation.isSurfacePresented(surfaceId);
 	}
 
-	get activeMainId(): string {
-		return this.#presentation.activeMainId;
+	get defaultActiveId(): string {
+		return this.#presentation.defaultActiveId;
 	}
 
-	get activeSidebarId(): string | null {
-		return this.#presentation.activeSidebarId;
+	get defaultPaneId(): PaneId {
+		return this.layout.chatPaneId;
 	}
 
-	get canOpenSidebar(): boolean {
-		return canOpenCanonicalSidebar(this.layout.snapshot);
+	get lastFocusedPaneId(): PaneId {
+		return this.#presentation.lastFocusedPaneId ?? this.defaultPaneId;
+	}
+
+	get paneCount(): number {
+		return collectPaneNodes(this.layout.snapshot.desktopRoot).length;
+	}
+
+	get canSplitPane(): boolean {
+		return this.paneCount < MAX_WORKSPACE_PANES;
 	}
 
 	get isChatPresented(): boolean {
@@ -180,6 +190,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	get isChatInteractive(): boolean {
 		return this.#presentation.isChatInteractive;
+	}
+
+	// Active tab kind of the pane that most recently held focus. Drives
+	// chrome that reacts to the focused view, like hiding the chat list
+	// while a Git surface is active.
+	get focusedPaneActiveKind(): ActiveSurfaceKind | null {
+		const snapshot = this.layout.snapshot;
+		const paneId =
+			this.#presentation.paneOf(this.#presentation.lastFocusedSurfaceId) ?? this.defaultPaneId;
+		const activeId = paneNodeById(snapshot.desktopRoot, paneId)?.tabs.activeId ?? null;
+		const surface = activeId ? snapshot.surfaces[activeId] : null;
+		if (!surface) return null;
+		return surface.type === 'singleton' ? surface.kind : surface.type;
 	}
 
 	frameVersion(surfaceId: string): number {
@@ -213,8 +236,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.noteChatListFocus();
 	}
 
-	noteHostChromeFocus(host: HostId, surfaceId: string): void {
-		this.#presentation.noteHostChromeFocus(host, surfaceId);
+	notePaneChromeFocus(paneId: PaneId, surfaceId: string): void {
+		this.#presentation.notePaneChromeFocus(paneId, surfaceId);
 	}
 
 	async focusChat(): Promise<void> {
@@ -225,82 +248,200 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.focusSurface(surfaceId, this.#reservedSurfaceIds);
 	}
 
-	focusPreviousTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
+	focusPreviousTabInFocusedPane(owner: FocusOwner = this.focusOwner): boolean {
 		return this.#presentation.focusPreviousTab(
 			owner,
 			(surfaceId) => void this.focusSurface(surfaceId),
 		);
 	}
 
-	focusNextTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
+	focusNextTabInFocusedPane(owner: FocusOwner = this.focusOwner): boolean {
 		return this.#presentation.focusNextTab(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
-	toggleFocusBetweenMainAndSidebar(owner: FocusOwner = this.focusOwner): void {
-		this.#presentation.toggleFocusBetweenMainAndSidebar(
-			owner,
-			(surfaceId) => void this.focusSurface(surfaceId),
-		);
+	cyclePaneFocus(owner: FocusOwner = this.focusOwner): void {
+		this.#presentation.cyclePaneFocus(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
-	async openSingleton(kind: PortableSingletonKind, preferredHostIfAbsent: HostId): Promise<void> {
-		const surfaceId = singletonSurfaceId(kind);
-		if (this.layout.surface(surfaceId)) {
-			if (this.isMobile || this.#presentation.hostOf(surfaceId)) {
-				await this.focusSurface(surfaceId);
-			} else {
-				await this.moveSurface(surfaceId, preferredHostIfAbsent);
-			}
+	// Opens a singleton as a tab in the given pane, moving it there when it
+	// already exists elsewhere.
+	async openSingletonAsTab(kind: PortableSingletonKind, paneId: PaneId): Promise<void> {
+		if (this.isMobile) {
+			await this.focusMobileSingleton(kind);
 			return;
 		}
-		const surface = portableSingletonDescriptor(kind);
-		if (preferredHostIfAbsent === 'main' && this.isChatPresented) {
+		const surfaceId = singletonSurfaceId(kind);
+		const surface = this.layout.surface(surfaceId);
+		if (surface) {
+			const currentPaneId = this.#presentation.paneOf(surfaceId);
+			if (currentPaneId === paneId) {
+				await this.focusSurface(surfaceId);
+				return;
+			}
+			if (this.isChatPresented) this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+			const current = await this.#presentation.commit((latest) =>
+				latest.surfaces[surfaceId]
+					? [{ type: 'move-tab', surfaceId, destinationPaneId: paneId }]
+					: [],
+			);
+			if (!current) return;
+			this.#presentation.presentSurface(surfaceId);
+			return;
+		}
+		await this.#openSingleton(kind, (latest) => {
+			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
+			return [
+				{ type: 'register-surface', surface: portableSingletonDescriptor(kind), paneId },
+				{ type: 'activate-pane-tab', paneId, surfaceId },
+			];
+		});
+	}
+
+	// Opens a singleton in a new pane split from the anchor pane. An existing
+	// singleton that already owns a pane is focused; otherwise it is detached
+	// into the new pane.
+	async openSingletonInNewPane(
+		kind: PortableSingletonKind,
+		anchorPaneId?: PaneId,
+	): Promise<void> {
+		if (this.isMobile) {
+			await this.focusMobileSingleton(kind);
+			return;
+		}
+		const anchor = anchorPaneId ?? this.lastFocusedPaneId;
+		const surfaceId = singletonSurfaceId(kind);
+		const surface = this.layout.surface(surfaceId);
+		if (surface) {
+			const currentPaneId = this.#presentation.paneOf(surfaceId);
+			if (!currentPaneId) {
+				await this.focusSurface(surfaceId);
+				return;
+			}
+			const currentPane = paneNodeById(this.layout.snapshot.desktopRoot, currentPaneId);
+			if (currentPane && currentPane.tabs.order.length === 1) {
+				await this.focusSurface(surfaceId);
+				return;
+			}
+			if (!this.canSplitPane) throw new WorkspacePaneLimitError();
+			await this.splitTabToEdge(surfaceId, anchor, 'right');
+			return;
+		}
+		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
+		const newPaneId = `pane-${createRandomId()}` as PaneId;
+		const splitId = `split-${createRandomId()}` as SplitId;
+		await this.#openSingleton(kind, (latest) => {
+			if (!paneNodeById(latest.desktopRoot, anchor)) return [];
+			if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
+				throw new WorkspacePaneLimitError();
+			}
+			return [
+				{
+					type: 'register-surface-in-split',
+					surface: portableSingletonDescriptor(kind),
+					targetPaneId: anchor,
+					edge: 'right',
+					newPaneId,
+					splitId,
+				},
+			];
+		});
+	}
+
+	async #openSingleton(
+		kind: PortableSingletonKind,
+		plan: (latest: WorkspaceLayoutSnapshot) => readonly WorkspaceLayoutMutation[],
+	): Promise<void> {
+		const surfaceId = singletonSurfaceId(kind);
+		if (this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const commit = () =>
-			this.#presentation.commit((latest) => {
-				const existingHost = this.#presentation.hostOfSnapshot(latest, surfaceId);
-				if (existingHost) {
-					return [
-						...(existingHost === 'sidebar' && !latest.sidebarOpen
-							? [{ type: 'set-sidebar-open', open: true } as const]
-							: []),
-						{ type: 'focus-host', host: existingHost, surfaceId },
-					];
-				}
-				if (latest.surfaces[surfaceId]) {
-					return [{ type: 'move-to-host', surfaceId, destination: preferredHostIfAbsent }];
-				}
+		const current = await this.#presentation.commit((latest) => {
+			const existingPaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
+			if (existingPaneId) {
+				return [{ type: 'activate-pane-tab', paneId: existingPaneId, surfaceId }];
+			}
+			if (latest.surfaces[surfaceId]) {
 				return [
-					{ type: 'register-surface', surface, host: preferredHostIfAbsent },
-					{ type: 'focus-host', host: preferredHostIfAbsent, surfaceId },
+					{
+						type: 'move-tab',
+						surfaceId,
+						destinationPaneId: paneIdOfSurface(latest.desktopRoot, CHAT_SURFACE_ID) ?? this.defaultPaneId,
+					},
 				];
-			});
-		const current =
-			preferredHostIfAbsent === 'sidebar'
-				? await this.#presentation.commitThroughSidebarOverlay(commit)
-				: await commit();
+			}
+			return plan(latest);
+		});
 		if (!current) return;
 		this.#presentation.presentSurface(surfaceId);
 	}
 
-	async moveSurface(surfaceId: string, destination: HostId): Promise<void> {
-		if (surfaceId === CHAT_SURFACE_ID) return;
+	async moveTabToPane(surfaceId: string, destinationPaneId: PaneId): Promise<void> {
 		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (this.isChatPresented && destination === 'main') {
+		if (this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const commit = () =>
-			this.#presentation.commit((latest) => {
-				if (!latest.surfaces[surfaceId]) return [];
-				return [{ type: 'move-to-host', surfaceId, destination }];
-			});
-		const current =
-			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
-				? await this.#presentation.commitThroughSidebarOverlay(commit)
-				: await commit();
+		const current = await this.#presentation.commit((latest) => {
+			if (!latest.surfaces[surfaceId]) return [];
+			if (!paneIdOfSurface(latest.desktopRoot, surfaceId)) return [];
+			return [{ type: 'move-tab', surfaceId, destinationPaneId }];
+		});
 		if (!current) return;
 		this.#presentation.presentSurface(surfaceId);
+	}
+
+	// Moves an existing tab into a new pane split from the target pane edge.
+	async splitTabToEdge(
+		surfaceId: string,
+		targetPaneId: PaneId,
+		edge: SplitEdge,
+	): Promise<void> {
+		if (this.#reservedSurfaceIds.has(surfaceId)) return;
+		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
+		if (this.isChatPresented) {
+			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		}
+		const newPaneId = `pane-${createRandomId()}` as PaneId;
+		const splitId = `split-${createRandomId()}` as SplitId;
+		const current = await this.#presentation.commit((latest) => {
+			if (!latest.surfaces[surfaceId]) return [];
+			if (!paneIdOfSurface(latest.desktopRoot, surfaceId)) return [];
+			return [
+				{
+					type: 'split-tab-to-edge',
+					surfaceId,
+					targetPaneId,
+					edge,
+					newPaneId,
+					splitId,
+				},
+			];
+		});
+		if (!current) return;
+		this.#presentation.presentSurface(surfaceId);
+	}
+
+	// Collapses a pane, merging its tabs into the destination pane.
+	async mergePaneInto(sourcePaneId: PaneId, destinationPaneId: PaneId): Promise<void> {
+		if (this.isChatPresented) {
+			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		}
+		const current = await this.#presentation.commit((latest) => {
+			if (
+				!paneNodeById(latest.desktopRoot, sourcePaneId) ||
+				!paneNodeById(latest.desktopRoot, destinationPaneId)
+			) {
+				return [];
+			}
+			return [{ type: 'merge-pane', sourcePaneId, destinationPaneId }];
+		});
+		if (!current) return;
+		const fallback = paneNodeById(this.layout.snapshot.desktopRoot, destinationPaneId)?.tabs
+			.activeId;
+		if (fallback) this.#presentation.presentSurface(fallback);
+	}
+
+	async setSplitRatio(splitId: SplitId, ratio: number): Promise<void> {
+		await this.#presentation.commit([{ type: 'set-split-ratio', splitId, ratio }]);
 	}
 
 	async closeSurface(surfaceId: string): Promise<boolean> {
@@ -333,7 +474,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				);
 				if (!canDestroy) return false;
 			}
-			const sourceHost = this.#presentation.hostOf(surfaceId);
+			const sourcePaneId = this.#presentation.paneOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			let mobileFallbackId: string | null = null;
 			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
@@ -369,14 +510,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#deps.singletons.disposeSurface(surface.kind);
 			}
 			if (!current) return true;
+			const sourcePaneActive = sourcePaneId
+				? paneNodeById(this.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+				: null;
 			const fallbackSurfaceId =
 				mobileFallbackId ??
 				(wasDialog
 					? this.#presentation.eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
-					: sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
-						? this.activeSidebarId
-						: this.activeMainId) ??
-				this.activeMainId;
+					: null) ??
+				sourcePaneActive ??
+				this.defaultActiveId;
 			this.lastFocusedSurfaceId = fallbackSurfaceId;
 			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
 			return true;
@@ -412,26 +555,60 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (this.isMobile) {
 			return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
 		}
-		const destination = target ?? 'dialog';
-		if (destination === 'dialog') {
+		const destination = target ?? { type: 'dialog' as const };
+		if (destination.type === 'dialog') {
 			return this.#fileDialog.placeNew(sessionId, publication);
 		}
-		if (destination === 'main' && this.isChatPresented) {
+		if (this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => [
-			...(destination === 'sidebar' ? revealSidebarMutations(latest) : []),
-			{
-				type: 'register-surface',
-				surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-				host: destination,
-			},
-			{ type: 'focus-host', host: destination, surfaceId },
-		];
-		const current =
-			destination === 'sidebar'
-				? await this.#presentation.commitSidebarReveal(plan, { publication })
-				: await this.#presentation.commit(plan, { publication });
+		if (destination.type === 'new-pane') {
+			const anchor = destination.anchorPaneId;
+			if (!this.canSplitPane) {
+				return this.placeFileSession(sessionId, { type: 'pane', paneId: anchor }, publication);
+			}
+			const newPaneId = `pane-${createRandomId()}` as PaneId;
+			const splitId = `split-${createRandomId()}` as SplitId;
+			const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
+				if (!paneNodeById(latest.desktopRoot, anchor)) return [];
+				if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
+					return [
+						{
+							type: 'register-surface',
+							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+							paneId: anchor,
+						},
+						{ type: 'activate-pane-tab', paneId: anchor, surfaceId },
+					];
+				}
+				return [
+					{
+						type: 'register-surface-in-split',
+						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+						targetPaneId: anchor,
+						edge: 'right',
+						newPaneId,
+						splitId,
+					},
+				];
+			};
+			const current = await this.#presentation.commit(plan, { publication });
+			if (current) this.#presentation.presentSurface(surfaceId);
+			return 'placed';
+		}
+		const paneId = destination.paneId;
+		const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
+			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
+			return [
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+					paneId,
+				},
+				{ type: 'activate-pane-tab', paneId, surfaceId },
+			];
+		};
+		const current = await this.#presentation.commit(plan, { publication });
 		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
 	}
@@ -465,20 +642,28 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#fileDialog.pop(surfaceId);
 	}
 
-	async moveDialogFileToHost(destination: HostId): Promise<void> {
-		await this.#fileDialog.moveToHost(destination);
+	async moveDialogFileToPane(destinationPaneId: PaneId): Promise<void> {
+		await this.#fileDialog.moveToPane(destinationPaneId);
 	}
 
-	async createTerminal(host: HostId = 'main', requestKey?: string): Promise<string> {
-		return this.#terminalPlacement.create(host, requestKey);
+	async createTerminal(paneId: PaneId = this.defaultPaneId, requestKey?: string): Promise<string> {
+		return this.#terminalPlacement.create(paneId, requestKey);
+	}
+
+	async createTerminalInNewPane(anchorPaneId?: PaneId, requestKey?: string): Promise<string> {
+		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
+		return this.#terminalPlacement.createInNewPane(anchorPaneId ?? this.lastFocusedPaneId, requestKey);
 	}
 
 	async createTerminalReplacing(currentTerminalId: string, requestKey?: string): Promise<string> {
 		return this.#terminalPlacement.createReplacing(currentTerminalId, requestKey);
 	}
 
-	async openTerminalSession(terminalId: string, preferredHost: HostId = 'main'): Promise<void> {
-		await this.#terminalPlacement.open(terminalId, preferredHost);
+	async openTerminalSession(
+		terminalId: string,
+		preferredPaneId: PaneId = this.defaultPaneId,
+	): Promise<void> {
+		await this.#terminalPlacement.open(terminalId, preferredPaneId);
 	}
 
 	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
@@ -489,44 +674,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#terminalPlacement.handleTerminated(terminalId);
 	}
 
-	async focusMostRecentTerminalOrCreate(preferredHost: HostId = 'main'): Promise<void> {
-		await this.#terminalPlacement.focusMostRecentOrCreate(preferredHost);
-	}
-
-	async openSidebar(): Promise<void> {
-		if (!this.canOpenSidebar) return;
-		const commit = () =>
-			this.#presentation.commit((latest) => {
-				if (latest.sidebar.order.length > 0) {
-					return [{ type: 'set-sidebar-open', open: true }];
-				}
-				const seedKind = nextSidebarSeedKind(latest);
-				if (!seedKind) return [];
-				const surfaceId = singletonSurfaceId(seedKind);
-				const mutations: WorkspaceLayoutMutation[] = [
-					{
-						type: 'register-surface',
-						surface: portableSingletonDescriptor(seedKind),
-						host: 'sidebar',
-					},
-					{ type: 'focus-host', host: 'sidebar', surfaceId },
-					{ type: 'set-sidebar-open', open: true },
-				];
-				return mutations;
-			});
-		const current = await this.#presentation.commitThroughSidebarOverlay(commit);
-		if (!current) return;
-		if (this.activeSidebarId) this.#presentation.presentSurface(this.activeSidebarId);
-	}
-
-	setSidebarOverlayMode(overlay: boolean): void {
-		this.#presentation.setSidebarOverlayMode(overlay);
-	}
-
-	async closeSidebar(): Promise<void> {
-		const current = await this.#presentation.commit([{ type: 'set-sidebar-open', open: false }]);
-		if (!current) return;
-		this.#presentation.presentSurface(this.activeMainId);
+	async focusMostRecentTerminalOrCreate(
+		preferredPaneId: PaneId = this.defaultPaneId,
+	): Promise<void> {
+		await this.#terminalPlacement.focusMostRecentOrCreate(preferredPaneId);
 	}
 
 	async enterMobilePresentation(): Promise<void> {
@@ -545,30 +696,24 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.mobileBack();
 	}
 
-	async setSidebarWidth(width: number): Promise<void> {
-		await this.#presentation.commit([{ type: 'set-sidebar-width', width }]);
-	}
-
-	async toggleFullscreen(host: HostId): Promise<void> {
+	async toggleFullscreen(paneId: PaneId): Promise<void> {
 		if (this.isMobile) return;
 		const snapshot = this.layout.snapshot;
-		if (host === 'sidebar' && (!snapshot.sidebarOpen || !snapshot.sidebar.activeId)) return;
-		if (host === 'sidebar' && snapshot.fullscreenHost !== 'sidebar' && this.isChatPresented) {
+		if (!paneNodeById(snapshot.desktopRoot, paneId)) return;
+		if (snapshot.fullscreenPaneId !== paneId && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
 		const current = await this.#presentation.commit((latest) => {
-			if (host === 'sidebar' && (!latest.sidebarOpen || !latest.sidebar.activeId)) {
-				return [];
-			}
+			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
 			return [
 				{
-					type: 'set-fullscreen-host',
-					host: latest.fullscreenHost === host ? null : host,
+					type: 'set-fullscreen-pane',
+					paneId: latest.fullscreenPaneId === paneId ? null : paneId,
 				},
 			];
 		});
 		if (!current) return;
-		const activeId = this.layout.snapshot[host].activeId;
+		const activeId = paneNodeById(this.layout.snapshot.desktopRoot, paneId)?.tabs.activeId;
 		if (activeId) this.#presentation.presentSurface(activeId);
 	}
 
@@ -590,8 +735,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.commit([{ type: 'remove-surface', surfaceId: pullRequestsSurfaceId }]);
 	}
 
-	async activateTerminalLauncher(host: HostId): Promise<void> {
-		await this.#terminalPlacement.activateLauncher(host);
+	async activateTerminalLauncher(paneId: PaneId): Promise<void> {
+		await this.#terminalPlacement.activateLauncher(paneId);
 	}
 
 	#confirmClose(request: NonNullable<WorkspaceCoordinator['closeGuardRequest']>): Promise<boolean> {

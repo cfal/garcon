@@ -5,7 +5,18 @@ import {
 	reduceWorkspaceLayout,
 } from '../workspace-layout.svelte';
 import { canonicalWorkspaceSnapshot } from '../canonical-layout';
-import type { SurfaceDescriptor, WorkspaceLayoutSnapshot } from '../surface-types';
+import { paneIdOfSurface, paneNodeById, collectPaneNodes } from '../pane-tree';
+import {
+	CHAT_SURFACE_ID,
+	MAX_WORKSPACE_PANES,
+	type DesktopLayoutNode,
+	type PaneId,
+	type PaneNode,
+	type SplitId,
+	type SurfaceDescriptor,
+	type WorkspaceLayoutMutation,
+	type WorkspaceLayoutSnapshot,
+} from '../surface-types';
 
 const FILE_A: SurfaceDescriptor = {
 	id: 'file:a',
@@ -25,474 +36,489 @@ const TERMINAL_B: SurfaceDescriptor = {
 	terminalId: 'b',
 };
 
+function pane(id: string, tabs: readonly string[]): PaneNode {
+	return {
+		type: 'pane',
+		id: id as PaneId,
+		tabs: { order: [...tabs], activeId: tabs[0] ?? null, mru: [...tabs] },
+	};
+}
+
+function split(
+	id: string,
+	direction: 'horizontal' | 'vertical',
+	children: [DesktopLayoutNode, DesktopLayoutNode],
+	ratio = 0.5,
+): DesktopLayoutNode {
+	return { type: 'split', id: id as SplitId, direction, ratio, children };
+}
+
+function withRoot(
+	snapshot: WorkspaceLayoutSnapshot,
+	root: DesktopLayoutNode,
+): WorkspaceLayoutSnapshot {
+	return { ...snapshot, desktopRoot: root };
+}
+
+// Builds a valid snapshot whose surfaces map exactly covers the tree's
+// placements, canonical chat/git/pull-requests descriptors included.
+function snapshotWith(
+	root: DesktopLayoutNode,
+	extraSurfaces: Record<string, SurfaceDescriptor> = {},
+): WorkspaceLayoutSnapshot {
+	const canonical = canonicalWorkspaceSnapshot();
+	const surfaces: Record<string, SurfaceDescriptor> = { ...extraSurfaces };
+	for (const pane of collectPaneNodes(root)) {
+		for (const surfaceId of pane.tabs.order) {
+			surfaces[surfaceId] ??= canonical.surfaces[surfaceId];
+		}
+	}
+	return { ...canonical, desktopRoot: root, surfaces };
+}
+
+function surfaceIds(snapshot: WorkspaceLayoutSnapshot, paneId: string): readonly string[] {
+	return paneNodeById(snapshot.desktopRoot, paneId as PaneId)?.tabs.order ?? [];
+}
+
+function activeOf(snapshot: WorkspaceLayoutSnapshot, paneId: string): string | null {
+	return paneNodeById(snapshot.desktopRoot, paneId as PaneId)?.tabs.activeId ?? null;
+}
+
+function mutate(
+	base: WorkspaceLayoutSnapshot,
+	mutations: readonly WorkspaceLayoutMutation[],
+): WorkspaceLayoutSnapshot {
+	return reduceWorkspaceLayout(base, mutations);
+}
+
 describe('workspace layout reducers', () => {
 	it('creates the canonical first-run layout', () => {
 		const snapshot = canonicalWorkspaceSnapshot();
 
-		expect(snapshot.main.order).toEqual([
+		expect(snapshot.desktopRoot.type).toBe('pane');
+		expect(surfaceIds(snapshot, 'pane-main')).toEqual([
 			'singleton:chat',
 			'singleton:git',
 			'singleton:pull-requests',
 		]);
-		expect(snapshot.sidebar.order).toEqual(['singleton:files', 'singleton:commit']);
-		expect(snapshot.sidebarOpen).toBe(false);
-		expect(snapshot.fullscreenHost).toBeNull();
-		expect(snapshot.desiredSidebarWidth).toBe(480);
+		expect(activeOf(snapshot, 'pane-main')).toBe(CHAT_SURFACE_ID);
+		expect(snapshot.fullscreenPaneId).toBeNull();
 		expect(() => assertWorkspaceLayoutInvariants(snapshot)).not.toThrow();
 	});
 
-	it('toggles host fullscreen through explicit layout mutations', () => {
-		const mainFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-fullscreen-host', host: 'main' },
+	it('registers surfaces into a pane and tracks mru', () => {
+		const next = mutate(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: TERMINAL_A, paneId: 'pane-main' },
+			{ type: 'register-surface', surface: TERMINAL_B, paneId: 'pane-main', index: 0 },
 		]);
-		expect(mainFullscreen.fullscreenHost).toBe('main');
-		expect(
-			reduceWorkspaceLayout(mainFullscreen, [{ type: 'set-fullscreen-host', host: null }])
-				.fullscreenHost,
-		).toBeNull();
-
-		const openSidebar = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-		]);
-		expect(
-			reduceWorkspaceLayout(openSidebar, [{ type: 'set-fullscreen-host', host: 'sidebar' }])
-				.fullscreenHost,
-		).toBe('sidebar');
-		expect(() =>
-			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-				{ type: 'set-fullscreen-host', host: 'sidebar' },
-			]),
-		).toThrow('Sidebar must be open and active before entering fullscreen');
-	});
-
-	it('preserves fullscreen within a host and clears it when focus crosses hosts', () => {
-		const mainFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-		]);
-		expect(mainFullscreen.fullscreenHost).toBe('main');
-
-		const sidebarFocused = reduceWorkspaceLayout(mainFullscreen, [
-			{ type: 'focus-host', host: 'sidebar', surfaceId: 'singleton:files' },
-		]);
-		expect(sidebarFocused.fullscreenHost).toBeNull();
-
-		const sidebarFullscreen = reduceWorkspaceLayout(sidebarFocused, [
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-			{ type: 'focus-host', host: 'sidebar', surfaceId: 'singleton:commit' },
-		]);
-		expect(sidebarFullscreen.fullscreenHost).toBe('sidebar');
-		expect(
-			reduceWorkspaceLayout(sidebarFullscreen, [
-				{ type: 'focus-host', host: 'main', surfaceId: 'singleton:chat' },
-			]).fullscreenHost,
-		).toBeNull();
-	});
-
-	it('normalizes fullscreen for active and background membership changes', () => {
-		const sidebarFullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-		]);
-		const movedActive = reduceWorkspaceLayout(sidebarFullscreen, [
-			{ type: 'move-to-host', surfaceId: 'singleton:files', destination: 'main' },
-		]);
-		expect(movedActive.fullscreenHost).toBeNull();
-		expect(movedActive.main.activeId).toBe('singleton:files');
-
-		const backgroundOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:files' },
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-			{
-				type: 'assign-to-host',
-				surfaceId: 'singleton:commit',
-				destination: 'main',
-			},
-		]);
-		expect(backgroundOnly.sidebar.order).toEqual([]);
-		expect(backgroundOnly.sidebarOpen).toBe(false);
-		expect(backgroundOnly.fullscreenHost).toBeNull();
-	});
-
-	it('normalizes fullscreen when the sidebar closes or loses its last terminal', () => {
-		const closed = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-			{ type: 'set-sidebar-open', open: false },
-		]);
-		expect(closed.fullscreenHost).toBeNull();
-
-		const terminalOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:files' },
-			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'sidebar' },
-			{ type: 'set-sidebar-open', open: true },
-			{ type: 'set-fullscreen-host', host: 'sidebar' },
-			{ type: 'unplace-terminal', terminalId: TERMINAL_A.terminalId },
-		]);
-		expect(terminalOnly.sidebar.order).toEqual([]);
-		expect(terminalOnly.sidebarOpen).toBe(false);
-		expect(terminalOnly.fullscreenHost).toBeNull();
-	});
-
-	it('rejects an externally constructed invalid sidebar fullscreen snapshot', () => {
-		expect(() =>
-			assertWorkspaceLayoutInvariants({
-				...canonicalWorkspaceSnapshot(),
-				fullscreenHost: 'sidebar',
-			}),
-		).toThrow('Sidebar fullscreen requires an open active sidebar');
-	});
-
-	it('focuses host surfaces and preserves MRU fallback order', () => {
-		const focused = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:pull-requests' },
-		]);
-
-		expect(focused.main.activeId).toBe('singleton:pull-requests');
-		expect(focused.main.mru).toEqual([
-			'singleton:pull-requests',
-			'singleton:git',
+		expect(surfaceIds(next, 'pane-main')).toEqual([
+			'terminal:b',
 			'singleton:chat',
-		]);
-
-		const closed = reduceWorkspaceLayout(focused, [
-			{ type: 'remove-surface', surfaceId: 'singleton:pull-requests' },
-		]);
-		expect(closed.main.activeId).toBe('singleton:git');
-	});
-
-	it('does not manufacture focus recency when registering or assigning a surface', () => {
-		const focused = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-		]);
-		const registered = reduceWorkspaceLayout(focused, [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
-		]);
-
-		expect(registered.main.activeId).toBe('singleton:git');
-		expect(registered.main.mru).toEqual([
 			'singleton:git',
-			'singleton:chat',
 			'singleton:pull-requests',
-			TERMINAL_A.id,
+			'terminal:a',
 		]);
-
-		const mobileOnly = reduceWorkspaceLayout(registered, [
-			{ type: 'register-surface', surface: FILE_A },
-		]);
-		const assigned = reduceWorkspaceLayout(mobileOnly, [
-			{ type: 'assign-to-host', surfaceId: FILE_A.id, destination: 'main' },
-		]);
-		expect(assigned.main.activeId).toBe('singleton:git');
-		expect(assigned.main.mru.at(-1)).toBe(FILE_A.id);
-
-		const activated = reduceWorkspaceLayout(assigned, [
-			{ type: 'focus-host', host: 'main', surfaceId: FILE_A.id },
-		]);
-		expect(activated.main.mru[0]).toBe(FILE_A.id);
+		const tabs = paneNodeById(next.desktopRoot, 'pane-main' as PaneId)!.tabs;
+		expect(tabs.activeId).toBe(CHAT_SURFACE_ID);
+		expect([...tabs.mru].sort()).toEqual([...tabs.order].sort());
 	});
 
-	it('moves one surface without duplicating or destroying it', () => {
-		const moved = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'move-to-host', surfaceId: 'singleton:git', destination: 'sidebar', index: 0 },
+	it('activates pane tabs', () => {
+		const next = mutate(canonicalWorkspaceSnapshot(), [
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
 		]);
-
-		expect(moved.main.order).not.toContain('singleton:git');
-		expect(moved.sidebar.order[0]).toBe('singleton:git');
-		expect(moved.sidebar.activeId).toBe('singleton:git');
-		expect(moved.sidebarOpen).toBe(true);
-		expect(moved.surfaces['singleton:git']).toBeDefined();
-	});
-
-	it('closes an emptied sidebar after moving its last tab', () => {
-		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
-			{ type: 'set-sidebar-open', open: true },
-		]);
-		const moved = reduceWorkspaceLayout(base, [
-			{ type: 'move-to-host', surfaceId: 'singleton:files', destination: 'main' },
-		]);
-
-		expect(moved.sidebar.order).toEqual([]);
-		expect(moved.sidebarOpen).toBe(false);
-		expect(moved.main.activeId).toBe('singleton:files');
-	});
-
-	it('does not open a sidebar without any tabs', () => {
-		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
-			{ type: 'remove-surface', surfaceId: 'singleton:files' },
-		]);
-		const next = reduceWorkspaceLayout(base, [{ type: 'set-sidebar-open', open: true }]);
-
-		expect(next.sidebar.order).toEqual([]);
-		expect(next.sidebarOpen).toBe(false);
-		expect(() => assertWorkspaceLayoutInvariants({ ...next, sidebarOpen: true })).toThrow(
-			'Empty sidebar cannot be open',
+		expect(activeOf(next, 'pane-main')).toBe('singleton:git');
+		expect(paneNodeById(next.desktopRoot, 'pane-main' as PaneId)!.tabs.mru[0]).toBe(
+			'singleton:git',
 		);
 	});
 
-	it('registers host and mobile-only surfaces with exclusive ownership', () => {
-		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
-			{ type: 'register-surface', surface: FILE_A },
-			{
-				type: 'set-mobile-presentation',
-				activeId: FILE_A.id,
-				returnStack: [],
-			},
-		]);
-
-		expect(next.main.order).toContain(TERMINAL_A.id);
-		expect(next.mobileOnlySurfaceIds).toEqual([FILE_A.id]);
-		expect(next.mobileActiveSurfaceId).toBe(FILE_A.id);
-		expect(() => assertWorkspaceLayoutInvariants(next)).not.toThrow();
-	});
-
-	it('keeps standalone History and Compare singleton ownership exclusive', () => {
-		const opened = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-history',
-					type: 'singleton',
-					kind: 'git-history',
-				},
-				host: 'main',
-			},
-			{
-				type: 'register-surface',
-				surface: {
-					id: 'singleton:git-compare',
-					type: 'singleton',
-					kind: 'git-compare',
-				},
-				host: 'sidebar',
-			},
-		]);
-
-		expect(opened.main.order).toContain('singleton:git-history');
-		expect(opened.sidebar.order).toContain('singleton:git-compare');
-
-		const moved = reduceWorkspaceLayout(opened, [
-			{
-				type: 'move-to-host',
-				surfaceId: 'singleton:git-history',
-				destination: 'sidebar',
-			},
-			{
-				type: 'move-to-host',
-				surfaceId: 'singleton:git-compare',
-				destination: 'main',
-			},
-		]);
-		expect(moved.main.order).toContain('singleton:git-compare');
-		expect(moved.main.order).not.toContain('singleton:git-history');
-		expect(moved.sidebar.order).toContain('singleton:git-history');
-		expect(moved.sidebar.order).not.toContain('singleton:git-compare');
-	});
-
-	it('rejects terminal and launcher registrations without a host', () => {
+	it('rejects activation of a surface that is not in the pane', () => {
 		expect(() =>
-			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-				{ type: 'register-surface', surface: TERMINAL_A },
+			mutate(canonicalWorkspaceSnapshot(), [
+				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:files' },
 			]),
-		).toThrow('Only file and portable singleton surfaces may be mobile-only');
+		).toThrow();
 	});
 
-	it('tracks intentionally unplaced terminals until they are reopened or forgotten', () => {
-		const unplaced = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
-			{ type: 'unplace-terminal', terminalId: TERMINAL_A.terminalId },
+	it('moves tabs between panes and activates them', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
+				pane('pane-2', ['singleton:files']),
+			]),
+			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
+		);
+		const moved = mutate(base, [
+			{ type: 'move-tab', surfaceId: 'singleton:git', destinationPaneId: 'pane-2' },
 		]);
+		expect(surfaceIds(moved, 'pane-2')).toEqual(['singleton:files', 'singleton:git']);
+		expect(activeOf(moved, 'pane-2')).toBe('singleton:git');
+		expect(surfaceIds(moved, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
+	});
 
-		expect(unplaced.surfaces[TERMINAL_A.id]).toBeUndefined();
-		expect(unplaced.unplacedTerminalIds).toEqual([TERMINAL_A.terminalId]);
-
-		const reopened = reduceWorkspaceLayout(unplaced, [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'sidebar' },
+	it('collapses a pane when its last tab moves out', () => {
+		const valid = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
+				pane('pane-2', ['singleton:pull-requests']),
+			]),
+		);
+		const next = mutate(valid, [
+			{ type: 'move-tab', surfaceId: 'singleton:pull-requests', destinationPaneId: 'pane-main' },
 		]);
-		expect(reopened.unplacedTerminalIds).toEqual([]);
-
-		const forgotten = reduceWorkspaceLayout(unplaced, [
-			{ type: 'forget-terminal', terminalId: TERMINAL_A.terminalId },
+		expect(next.desktopRoot.type).toBe('pane');
+		expect(surfaceIds(next, 'pane-main')).toEqual([
+			CHAT_SURFACE_ID,
+			'singleton:git',
+			'singleton:pull-requests',
 		]);
+	});
+
+	it('rejects moving the last tab out of the root pane', () => {
+		expect(() =>
+			mutate(canonicalWorkspaceSnapshot(), [
+				{ type: 'move-tab', surfaceId: 'singleton:git', destinationPaneId: 'pane-2' as PaneId },
+			]),
+		).toThrow('Pane does not exist');
+	});
+
+	it('splits a tab out to a new pane', () => {
+		const next = mutate(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: 'singleton:git',
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
+		]);
+		expect(next.desktopRoot.type).toBe('split');
+		expect(surfaceIds(next, 'pane-2')).toEqual(['singleton:git']);
+		expect(activeOf(next, 'pane-2')).toBe('singleton:git');
+		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
+		expect(paneIdOfSurface(next.desktopRoot, 'singleton:git')).toBe('pane-2');
+	});
+
+	it('keeps the pane count flat when the sole tab of a pane splits into another pane', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
+				pane('pane-2', ['singleton:files']),
+			]),
+			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
+		);
+		const next = mutate(base, [
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: 'singleton:files',
+				targetPaneId: 'pane-main',
+				edge: 'bottom',
+				newPaneId: 'pane-3',
+				splitId: 'split-2',
+			},
+		]);
+		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(2);
+		expect(paneIdOfSurface(next.desktopRoot, 'singleton:files')).toBe('pane-3');
+	});
+
+	it('treats splitting the sole tab of a pane onto its own edge as a no-op', () => {
+		const single = snapshotWith(pane('pane-main', [CHAT_SURFACE_ID]));
+		const next = mutate(single, [
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: CHAT_SURFACE_ID,
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
+		]);
+		expect(next).toBe(single);
+	});
+
+	it('enforces the pane cap on splits from multi-tab panes', () => {
+		let root: DesktopLayoutNode = pane('pane-main', [CHAT_SURFACE_ID, 'terminal:t5']);
+		const extraSurfaces: Record<string, SurfaceDescriptor> = {
+			'terminal:t5': { id: 'terminal:t5', type: 'terminal', terminalId: 't5' },
+		};
+		for (let index = 2; index <= MAX_WORKSPACE_PANES; index += 1) {
+			const surfaceId = `terminal:t${index}`;
+			extraSurfaces[surfaceId] = { id: surfaceId, type: 'terminal', terminalId: `t${index}` };
+			root = split(`split-${index}`, 'horizontal', [root, pane(`pane-${index}`, [surfaceId])]);
+		}
+		const base: WorkspaceLayoutSnapshot = {
+			...canonicalWorkspaceSnapshot(),
+			desktopRoot: root,
+			surfaces: {
+				[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
+				...extraSurfaces,
+			},
+		};
+		expect(() =>
+			mutate(base, [
+				{
+					type: 'split-tab-to-edge',
+					surfaceId: CHAT_SURFACE_ID,
+					targetPaneId: 'pane-2' as PaneId,
+					edge: 'right',
+					newPaneId: 'pane-99' as PaneId,
+					splitId: 'split-99' as SplitId,
+				},
+			]),
+		).toThrow('Pane count limit reached');
+	});
+
+	it('allows a net-zero split of a sole-tab pane at the pane cap', () => {
+		let root: DesktopLayoutNode = pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']);
+		const extraSurfaces: Record<string, SurfaceDescriptor> = {};
+		for (let index = 2; index <= MAX_WORKSPACE_PANES; index += 1) {
+			const surfaceId = `terminal:t${index}`;
+			extraSurfaces[surfaceId] = { id: surfaceId, type: 'terminal', terminalId: `t${index}` };
+			root = split(`split-${index}`, 'horizontal', [root, pane(`pane-${index}`, [surfaceId])]);
+		}
+		const base: WorkspaceLayoutSnapshot = {
+			...canonicalWorkspaceSnapshot(),
+			desktopRoot: root,
+			surfaces: {
+				[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
+				'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				...extraSurfaces,
+			},
+		};
+		const next = mutate(base, [
+			{
+				type: 'split-tab-to-edge',
+				surfaceId: 'terminal:t4',
+				targetPaneId: 'pane-main',
+				edge: 'right',
+				newPaneId: 'pane-99' as PaneId,
+				splitId: 'split-99' as SplitId,
+			},
+		]);
+		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(MAX_WORKSPACE_PANES);
+		expect(paneIdOfSurface(next.desktopRoot, 'terminal:t4')).toBe('pane-99');
+	});
+
+	it('keeps assign-to-pane stable when the surface already owns the destination', () => {
+		const base = snapshotWith(pane('pane-main', [CHAT_SURFACE_ID]));
+		const next = mutate(base, [
+			{
+				type: 'assign-to-pane',
+				surfaceId: CHAT_SURFACE_ID,
+				destinationPaneId: 'pane-main',
+			},
+		]);
+		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(1);
+		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID]);
+	});
+
+	it('registers a new surface directly into a new split pane', () => {
+		const next = mutate(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface-in-split',
+				surface: TERMINAL_A,
+				targetPaneId: 'pane-main',
+				edge: 'bottom',
+				newPaneId: 'pane-2',
+				splitId: 'split-1',
+			},
+		]);
+		expect(next.desktopRoot.type).toBe('split');
+		const splitNode = next.desktopRoot;
+		if (splitNode.type !== 'split') throw new Error('expected split');
+		expect(splitNode.direction).toBe('vertical');
+		expect(surfaceIds(next, 'pane-2')).toEqual(['terminal:a']);
+		expect(activeOf(next, 'pane-2')).toBe('terminal:a');
+	});
+
+	it('merges a pane into another pane', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
+				pane('pane-2', ['singleton:files']),
+			]),
+			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
+		);
+		const next = mutate(base, [
+			{ type: 'merge-pane', sourcePaneId: 'pane-2', destinationPaneId: 'pane-main' },
+		]);
+		expect(next.desktopRoot.type).toBe('pane');
+		expect(surfaceIds(next, 'pane-main')).toEqual([
+			CHAT_SURFACE_ID,
+			'singleton:git',
+			'singleton:pull-requests',
+			'singleton:files',
+		]);
+		expect(activeOf(next, 'pane-main')).toBe(CHAT_SURFACE_ID);
+	});
+
+	it('sets and clamps split ratios', () => {
+		const valid = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
+				pane('pane-2', ['singleton:pull-requests']),
+			]),
+		);
+		const resized = mutate(valid, [{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.7 }]);
+		expect(resized.desktopRoot.type === 'split' && resized.desktopRoot.ratio).toBe(0.7);
+		const clamped = mutate(valid, [{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.95 }]);
+		expect(clamped.desktopRoot.type === 'split' && clamped.desktopRoot.ratio).toBe(0.85);
+	});
+
+	it('toggles pane fullscreen and clears it when the pane disappears', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
+				pane('pane-2', ['singleton:pull-requests']),
+			]),
+		);
+		const fullscreen = mutate(base, [{ type: 'set-fullscreen-pane', paneId: 'pane-2' }]);
+		expect(fullscreen.fullscreenPaneId).toBe('pane-2');
+		const cleared = mutate(fullscreen, [
+			{ type: 'merge-pane', sourcePaneId: 'pane-2', destinationPaneId: 'pane-main' },
+		]);
+		expect(cleared.fullscreenPaneId).toBeNull();
+		expect(() =>
+			mutate(base, [{ type: 'set-fullscreen-pane', paneId: 'pane-missing' as PaneId }]),
+		).toThrow('Pane does not exist');
+	});
+
+	it('moves a dialog file into a pane', () => {
+		const withDialog = mutate(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: FILE_A },
+			{ type: 'place-in-dialog', surfaceId: 'file:a' },
+		]);
+		expect(withDialog.dialogFileSurfaceId).toBe('file:a');
+		expect(withDialog.mobileOnlySurfaceIds).not.toContain('file:a');
+		const docked = mutate(withDialog, [
+			{ type: 'move-dialog-to-pane', surfaceId: 'file:a', destinationPaneId: 'pane-main' },
+		]);
+		expect(docked.dialogFileSurfaceId).toBeNull();
+		expect(surfaceIds(docked, 'pane-main')).toContain('file:a');
+		expect(activeOf(docked, 'pane-main')).toBe('file:a');
+	});
+
+	it('rejects placing non-file surfaces in the dialog', () => {
+		expect(() =>
+			mutate(canonicalWorkspaceSnapshot(), [
+				{ type: 'place-in-dialog', surfaceId: 'singleton:git' },
+			]),
+		).toThrow('Only file surfaces can enter dialog');
+	});
+
+	it('unplaces and forgets terminals, collapsing emptied panes', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
+				pane('pane-2', ['terminal:a']),
+			]),
+			{ 'terminal:a': TERMINAL_A },
+		);
+		const unplaced = mutate(base, [{ type: 'unplace-terminal', terminalId: 'a' }]);
+		expect(unplaced.desktopRoot.type).toBe('pane');
+		expect(unplaced.unplacedTerminalIds).toEqual(['a']);
+		expect(unplaced.surfaces['terminal:a']).toBeUndefined();
+
+		const forgotten = mutate(unplaced, [{ type: 'forget-terminal', terminalId: 'a' }]);
 		expect(forgotten.unplacedTerminalIds).toEqual([]);
 	});
 
-	it('moves files through host and exclusive dialog placement', () => {
-		const inDialog = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: FILE_A, host: 'main' },
-			{ type: 'place-in-dialog', surfaceId: FILE_A.id },
-		]);
-
-		expect(inDialog.dialogFileSurfaceId).toBe(FILE_A.id);
-		expect(inDialog.main.order).not.toContain(FILE_A.id);
-
-		const inSidebar = reduceWorkspaceLayout(inDialog, [
-			{ type: 'move-dialog-to-host', surfaceId: FILE_A.id, destination: 'sidebar' },
-		]);
-		expect(inSidebar.dialogFileSurfaceId).toBeNull();
-		expect(inSidebar.sidebar.activeId).toBe(FILE_A.id);
-		expect(inSidebar.sidebarOpen).toBe(true);
-	});
-
-	it('atomically replaces the terminal launcher at its exact position', () => {
-		const launcher: SurfaceDescriptor = {
-			id: 'terminal-launcher',
-			type: 'terminal-launcher',
-		};
-		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: launcher, host: 'main', index: 1 },
-			{ type: 'focus-host', host: 'main', surfaceId: launcher.id },
-			{ type: 'replace-surface', previousId: launcher.id, surface: TERMINAL_A },
-		]);
-
-		expect(next.main.order[1]).toBe(TERMINAL_A.id);
-		expect(next.main.activeId).toBe(TERMINAL_A.id);
-		expect(next.surfaces[launcher.id]).toBeUndefined();
-	});
-
-	it('swaps two terminal sessions without adding or removing a tab', () => {
-		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: TERMINAL_A.id },
-			{ type: 'register-surface', surface: TERMINAL_B, host: 'sidebar' },
-			{ type: 'focus-host', host: 'sidebar', surfaceId: TERMINAL_B.id },
-		]);
-		const next = reduceWorkspaceLayout(base, [
+	it('swaps terminal placements across panes', () => {
+		const base = snapshotWith(
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'terminal:a']),
+				pane('pane-2', ['terminal:b']),
+			]),
+			{ 'terminal:a': TERMINAL_A, 'terminal:b': TERMINAL_B },
+		);
+		const swapped = mutate(base, [
 			{
 				type: 'swap-terminal-placements',
-				firstSurfaceId: TERMINAL_A.id,
-				secondSurfaceId: TERMINAL_B.id,
+				firstSurfaceId: 'terminal:a',
+				secondSurfaceId: 'terminal:b',
 			},
 		]);
-
-		expect(next.main.order).toContain(TERMINAL_B.id);
-		expect(next.main.order).not.toContain(TERMINAL_A.id);
-		expect(next.sidebar.order).toContain(TERMINAL_A.id);
-		expect(next.main.activeId).toBe(TERMINAL_B.id);
-		expect(next.sidebar.activeId).toBe(TERMINAL_A.id);
-		expect(Object.keys(next.surfaces)).toEqual(Object.keys(base.surfaces));
+		expect(surfaceIds(swapped, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'terminal:b']);
+		expect(surfaceIds(swapped, 'pane-2')).toEqual(['terminal:a']);
 	});
 
-	it('marks the previous terminal unplaced when replacing a tab session', () => {
-		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
-			{ type: 'unplace-terminal', terminalId: TERMINAL_B.terminalId },
-			{ type: 'replace-surface', previousId: TERMINAL_A.id, surface: TERMINAL_B },
+	it('replaces surfaces in place', () => {
+		const withTerminal = mutate(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: TERMINAL_A, paneId: 'pane-main' },
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'terminal:a' },
 		]);
-
-		expect(next.main.order).toContain(TERMINAL_B.id);
-		expect(next.unplacedTerminalIds).toEqual([TERMINAL_A.terminalId]);
-	});
-
-	it('bounds and deduplicates mobile return targets', () => {
-		const stack = Array.from({ length: 40 }, (_, index) => ({
-			invokerSurfaceId: `file:${index}`,
-			invokerHost: 'mobile' as const,
-			chatId: null,
-			effectiveProjectKey: null,
-			routeIdentity: `/chat/${index}`,
-		}));
-		stack.push({ ...stack[39] });
-		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'set-mobile-presentation', activeId: 'singleton:chat', returnStack: stack },
+		const replaced = mutate(withTerminal, [
+			{
+				type: 'replace-surface',
+				previousId: 'terminal:a',
+				surface: TERMINAL_B,
+			},
 		]);
-
-		expect(next.mobileReturnStack).toHaveLength(32);
-		expect(next.mobileReturnStack.at(-1)).toEqual(stack[39]);
+		expect(surfaceIds(replaced, 'pane-main')).toContain('terminal:b');
+		expect(activeOf(replaced, 'pane-main')).toBe('terminal:b');
+		expect(replaced.unplacedTerminalIds).toEqual(['a']);
 	});
 
-	it('does not mutate reducer inputs', () => {
-		const base = canonicalWorkspaceSnapshot();
-		const before = structuredClone(base);
-		const next = reduceWorkspaceLayout(base, [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+	it('removes surfaces and keeps chat', () => {
+		expect(() =>
+			mutate(canonicalWorkspaceSnapshot(), [{ type: 'remove-surface', surfaceId: CHAT_SURFACE_ID }]),
+		).toThrow('Chat cannot close');
+		const next = mutate(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: 'singleton:git' },
 		]);
-
-		expect(base).toEqual(before);
-		expect(next).not.toBe(base);
-		expect(next.main).not.toBe(base.main);
+		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
 	});
 
-	it('rejects invariant-invalid snapshots', () => {
-		const base = canonicalWorkspaceSnapshot();
-		const invalid: WorkspaceLayoutSnapshot = {
-			...base,
-			main: { ...base.main, order: ['singleton:git', ...base.main.order] },
-		};
+	it('rejects duplicate surfaces and duplicate pane ids', () => {
+		expect(() =>
+			mutate(canonicalWorkspaceSnapshot(), [
+				{
+					type: 'register-surface',
+					surface: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
+					paneId: 'pane-main',
+				},
+			]),
+		).toThrow('Surface already exists');
+		const duplicated = withRoot(
+			canonicalWorkspaceSnapshot(),
+			split('split-1', 'horizontal', [
+				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
+				pane('pane-main', ['singleton:git']),
+			]),
+		);
+		expect(() => assertWorkspaceLayoutInvariants(duplicated)).toThrow('Pane ID is duplicated');
+	});
 
-		expect(() => assertWorkspaceLayoutInvariants(invalid)).toThrow(
-			'Chat must exist exactly once at the start of main',
+	it('requires surfaces to have exactly one ownership bucket', () => {
+		const dangling = withRoot(
+			canonicalWorkspaceSnapshot(),
+			pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests', 'file:x']),
+		);
+		expect(() => assertWorkspaceLayoutInvariants(dangling)).toThrow(
+			'Placement references missing surface',
 		);
 	});
-});
 
-describe('WorkspaceLayoutStore', () => {
-	it('publishes one frozen whole snapshot per matching revision', () => {
+	it('tracks store revisions on publish', () => {
 		const store = new WorkspaceLayoutStore();
-		const next = reduceWorkspaceLayout(store.snapshot, [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-		]);
-
-		expect(store.publish(0, next)).toBe(true);
-		expect(store.revision).toBe(1);
-		expect(store.snapshot).toBe(next);
-		expect(Object.isFrozen(store.snapshot)).toBe(true);
-		expect(Object.isFrozen(store.snapshot.main.order)).toBe(true);
-		expect(store.activeMainKind).toBe('git');
-	});
-
-	it('rejects stale publishes without changing state', () => {
-		const store = new WorkspaceLayoutStore();
-		const original = store.snapshot;
-		const next = reduceWorkspaceLayout(original, [
-			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
-		]);
-
-		expect(store.publish(1, next)).toBe(false);
-		expect(store.snapshot).toBe(original);
 		expect(store.revision).toBe(0);
+		const next = mutate(store.snapshot, [
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+		]);
+		expect(store.publish(store.revision, next)).toBe(true);
+		expect(store.revision).toBe(1);
+		expect(store.chatPaneId).toBe('pane-main');
+		expect(store.defaultActiveId).toBe('singleton:git');
 	});
 
-	it.each([
-		['singleton:chat', 'chat'],
-		['singleton:git', 'git'],
-		['singleton:pull-requests', 'pull-requests'],
-		['singleton:files', 'files'],
-		['singleton:commit', 'commit'],
-	] as const)('reports active kind for %s', (surfaceId, kind) => {
-		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'focus-host',
-				host:
-					surfaceId === 'singleton:files' || surfaceId === 'singleton:commit' ? 'sidebar' : 'main',
-				surfaceId,
-			},
-			...(surfaceId === 'singleton:files' || surfaceId === 'singleton:commit'
-				? [{ type: 'move-to-host' as const, surfaceId, destination: 'main' as const }]
-				: []),
+	it('rejects stale revisions on publish', () => {
+		const store = new WorkspaceLayoutStore();
+		const next = mutate(store.snapshot, [
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
 		]);
-		const store = new WorkspaceLayoutStore(base);
-
-		expect(store.activeMainKind).toBe(kind);
-	});
-
-	it.each([
-		[TERMINAL_A, 'terminal'],
-		[FILE_A, 'file'],
-		[{ id: 'terminal-launcher', type: 'terminal-launcher' } as const, 'terminal-launcher'],
-	] as const)('reports dynamic active kind', (surface, kind) => {
-		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface, host: 'main' },
-			{ type: 'focus-host', host: 'main', surfaceId: surface.id },
-		]);
-
-		expect(new WorkspaceLayoutStore(snapshot).activeMainKind).toBe(kind);
+		expect(store.publish(5, next)).toBe(false);
+		expect(store.revision).toBe(0);
 	});
 });
