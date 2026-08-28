@@ -95,6 +95,38 @@ describe('CarryOverGarbageCollector', () => {
     await expect(segmentStat(FIRST)).resolves.toBeDefined();
   });
 
+  it('defers and coalesces scheduled sweeps', async () => {
+    let runScheduledSweep;
+    let sweepCount = 0;
+    const scheduled = new CarryOverGarbageCollector({
+      registry: { listAllChats: () => ({}) },
+      journal: { roots: () => new Set() },
+      store: {
+        cleanupTemporary: async () => 0,
+        sweep: async () => {
+          sweepCount += 1;
+          return {
+            reachableSegmentCount: 0,
+            unreachableSegmentCount: 0,
+            removedSegmentCount: 0,
+            compressedBytes: 0,
+            declaredUncompressedBytes: 0,
+            durationMs: 0,
+          };
+        },
+      },
+    }, { defer: (callback) => { runScheduledSweep = callback; } });
+
+    scheduled.schedule();
+    scheduled.schedule();
+    expect(sweepCount).toBe(0);
+    expect(runScheduledSweep).toBeFunction();
+
+    runScheduledSweep();
+    await Promise.resolve();
+    expect(sweepCount).toBe(1);
+  });
+
   async function prepareSegment(id) {
     return store.prepareSegment({
       operationId: `operation:${id}`,
