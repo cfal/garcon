@@ -89,7 +89,9 @@ export class FileDialogCoordinator {
 					if (latest.dialogFileSurfaceId !== surfaceId) {
 						throw new Error('The dialog occupant changed before it could be moved');
 					}
-					if (!paneNodeById(latest.desktopRoot, destination)) return [];
+					if (!paneNodeById(latest.desktopRoot, destination)) {
+						throw new Error('The destination pane is no longer available');
+					}
 					return [{ type: 'move-dialog-to-pane', surfaceId, destinationPaneId: destination }];
 				});
 				if (!current) return;

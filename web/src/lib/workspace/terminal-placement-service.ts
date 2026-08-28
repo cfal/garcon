@@ -78,12 +78,13 @@ export class TerminalPlacementService {
 		try {
 			current = await this.deps.commit(
 				(latest) => {
+					const destinationPaneId = this.#resolvePaneId(latest, paneId);
 					if (latest.surfaces[surfaceId]) {
 						const existingPaneId = this.#paneOf(latest, surfaceId);
 						const mutations: WorkspaceLayoutMutation[] = [
-							existingPaneId === paneId
-								? { type: 'activate-pane-tab', paneId, surfaceId }
-								: { type: 'move-tab', surfaceId, destinationPaneId: paneId },
+							existingPaneId === destinationPaneId
+								? { type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationPaneId },
 						];
 						if (this.deps.isMobile()) {
 							mutations.push({
@@ -94,7 +95,6 @@ export class TerminalPlacementService {
 						}
 						return mutations;
 					}
-					if (!paneNodeById(latest.desktopRoot, paneId)) return [];
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
 						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
@@ -106,9 +106,9 @@ export class TerminalPlacementService {
 						{
 							type: 'register-surface',
 							surface: { id: surfaceId, type: 'terminal', terminalId },
-							paneId,
+							paneId: destinationPaneId,
 						},
-						{ type: 'activate-pane-tab', paneId, surfaceId },
+						{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
 					);
 					if (this.deps.isMobile()) {
 						mutations.push({
@@ -121,6 +121,9 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
+			if (!this.deps.layout.surface(surfaceId)) {
+				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
+			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
@@ -131,6 +134,7 @@ export class TerminalPlacementService {
 
 	// Creates a terminal in a new pane split from the anchor pane.
 	async createInNewPane(anchorPaneId: PaneId, requestKey?: string): Promise<string> {
+		if (this.deps.isMobile()) return this.create(this.deps.defaultPaneId(), requestKey);
 		if (this.deps.isChatPresented()) {
 			this.deps.cancelChatTransition();
 		}
@@ -144,17 +148,7 @@ export class TerminalPlacementService {
 		try {
 			current = await this.deps.commit(
 				(latest) => {
-					if (latest.surfaces[surfaceId]) {
-						const existingPaneId = this.#paneOf(latest, surfaceId);
-						if (!existingPaneId) return [];
-						return [{ type: 'activate-pane-tab', paneId: existingPaneId, surfaceId }];
-					}
-					if (!paneNodeById(latest.desktopRoot, anchorPaneId)) return [];
-					if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
-						throw new Error(
-							m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }),
-						);
-					}
+					const currentAnchorPaneId = this.#resolvePaneId(latest, anchorPaneId);
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
 						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
@@ -162,10 +156,47 @@ export class TerminalPlacementService {
 					) {
 						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
 					}
+					if (latest.surfaces[surfaceId]) {
+						const existingPaneId = this.#paneOf(latest, surfaceId);
+						mutations.push(
+							existingPaneId === currentAnchorPaneId
+								? { type: 'activate-pane-tab', paneId: currentAnchorPaneId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationPaneId: currentAnchorPaneId },
+						);
+						if (this.deps.isMobile()) {
+							mutations.push({
+								type: 'set-mobile-presentation',
+								activeId: surfaceId,
+								returnStack: latest.mobileReturnStack,
+							});
+						}
+						return mutations;
+					}
+					if (this.deps.isMobile()) {
+						mutations.push(
+							{
+								type: 'register-surface',
+								surface: { id: surfaceId, type: 'terminal', terminalId },
+								paneId: currentAnchorPaneId,
+							},
+							{ type: 'activate-pane-tab', paneId: currentAnchorPaneId, surfaceId },
+							{
+								type: 'set-mobile-presentation',
+								activeId: surfaceId,
+								returnStack: latest.mobileReturnStack,
+							},
+						);
+						return mutations;
+					}
+					if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
+						throw new Error(
+							m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }),
+						);
+					}
 					mutations.push({
 						type: 'register-surface-in-split',
 						surface: { id: surfaceId, type: 'terminal', terminalId },
-						targetPaneId: anchorPaneId,
+						targetPaneId: currentAnchorPaneId,
 						edge: 'right',
 						newPaneId,
 						splitId,
@@ -174,6 +205,9 @@ export class TerminalPlacementService {
 				},
 				{ requiredPublication: true },
 			);
+			if (!this.deps.layout.surface(surfaceId)) {
+				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
+			}
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
@@ -230,22 +264,25 @@ export class TerminalPlacementService {
 			await this.deps.focusSurface(surfaceId);
 			return;
 		}
-		const mutations: WorkspaceLayoutMutation[] = [
-			{
-				type: 'register-surface',
-				surface: { id: surfaceId, type: 'terminal', terminalId },
-				paneId: preferredPaneId,
-			},
-			{ type: 'activate-pane-tab', paneId: preferredPaneId, surfaceId },
-		];
-		if (this.deps.isMobile()) {
-			mutations.push({
-				type: 'set-mobile-presentation',
-				activeId: surfaceId,
-				returnStack: this.deps.layout.snapshot.mobileReturnStack,
-			});
-		}
-		const current = await this.deps.commit(mutations);
+		const current = await this.deps.commit((latest) => {
+			const destinationPaneId = this.#resolvePaneId(latest, preferredPaneId);
+			const mutations: WorkspaceLayoutMutation[] = [
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'terminal', terminalId },
+					paneId: destinationPaneId,
+				},
+				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
+			];
+			if (this.deps.isMobile()) {
+				mutations.push({
+					type: 'set-mobile-presentation',
+					activeId: surfaceId,
+					returnStack: latest.mobileReturnStack,
+				});
+			}
+			return mutations;
+		});
 		if (current) this.deps.present(surfaceId);
 	}
 
@@ -512,6 +549,15 @@ export class TerminalPlacementService {
 			if (pane.tabs.order.includes(surfaceId)) return pane.id;
 		}
 		return null;
+	}
+
+	#resolvePaneId(snapshot: WorkspaceLayoutSnapshot, preferredPaneId: PaneId): PaneId {
+		if (paneNodeById(snapshot.desktopRoot, preferredPaneId)) return preferredPaneId;
+		const defaultPaneId = this.deps.defaultPaneId();
+		if (paneNodeById(snapshot.desktopRoot, defaultPaneId)) return defaultPaneId;
+		const firstPane = collectPaneNodes(snapshot.desktopRoot)[0];
+		if (!firstPane) throw new Error('Workspace has no destination pane');
+		return firstPane.id;
 	}
 
 	async #retryCreate(requestKey: string): Promise<string> {

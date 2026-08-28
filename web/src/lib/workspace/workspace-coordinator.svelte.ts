@@ -18,7 +18,12 @@ import {
 	type WorkspaceLayoutSnapshot,
 	type PresentationHostId,
 } from './surface-types.js';
-import { collectPaneNodes, paneIdOfSurface, paneNodeById } from './pane-tree.js';
+import {
+	collectPaneNodes,
+	paneIdOfSurface,
+	paneNodeById,
+	projectedPaneCountAfterTabSplit,
+} from './pane-tree.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	WorkspaceTransitionArbiter,
@@ -173,7 +178,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	get lastFocusedPaneId(): PaneId {
-		return this.#presentation.lastFocusedPaneId ?? this.defaultPaneId;
+		return this.#resolvePaneId(this.layout.snapshot, this.#presentation.lastFocusedPaneId);
 	}
 
 	get paneCount(): number {
@@ -197,8 +202,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	// while a Git surface is active.
 	get focusedPaneActiveKind(): ActiveSurfaceKind | null {
 		const snapshot = this.layout.snapshot;
-		const paneId =
-			this.#presentation.paneOf(this.#presentation.lastFocusedSurfaceId) ?? this.defaultPaneId;
+		const paneId = this.lastFocusedPaneId;
 		const activeId = paneNodeById(snapshot.desktopRoot, paneId)?.tabs.activeId ?? null;
 		const surface = activeId ? snapshot.surfaces[activeId] : null;
 		if (!surface) return null;
@@ -266,35 +270,32 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	// Opens a singleton as a tab in the given pane, moving it there when it
 	// already exists elsewhere.
 	async openSingletonAsTab(kind: PortableSingletonKind, paneId: PaneId): Promise<void> {
+		const surfaceId = singletonSurfaceId(kind);
+		if (this.#reservedSurfaceIds.has(surfaceId)) return;
 		if (this.isMobile) {
 			await this.focusMobileSingleton(kind);
 			return;
 		}
-		const surfaceId = singletonSurfaceId(kind);
-		const surface = this.layout.surface(surfaceId);
-		if (surface) {
-			const currentPaneId = this.#presentation.paneOf(surfaceId);
-			if (currentPaneId === paneId) {
-				await this.focusSurface(surfaceId);
-				return;
+		if (this.isChatPresented) this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		const current = await this.#presentation.commit((latest) => {
+			const destinationPaneId = this.#resolvePaneId(latest, paneId);
+			const existingPaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
+			if (existingPaneId === destinationPaneId) {
+				return [{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId }];
 			}
-			if (this.isChatPresented) this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-			const current = await this.#presentation.commit((latest) =>
-				latest.surfaces[surfaceId]
-					? [{ type: 'move-tab', surfaceId, destinationPaneId: paneId }]
-					: [],
-			);
-			if (!current) return;
-			this.#presentation.presentSurface(surfaceId);
-			return;
-		}
-		await this.#openSingleton(kind, (latest) => {
-			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
+			if (latest.surfaces[surfaceId]) {
+				return [{ type: 'move-tab', surfaceId, destinationPaneId }];
+			}
 			return [
-				{ type: 'register-surface', surface: portableSingletonDescriptor(kind), paneId },
-				{ type: 'activate-pane-tab', paneId, surfaceId },
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor(kind),
+					paneId: destinationPaneId,
+				},
+				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
 			];
 		});
+		if (current) this.#presentation.presentSurface(surfaceId);
 	}
 
 	// Opens a singleton in a new pane split from the anchor pane. An existing
@@ -375,7 +376,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.presentSurface(surfaceId);
 	}
 
-	async moveTabToPane(surfaceId: string, destinationPaneId: PaneId): Promise<void> {
+	async moveTabToPane(
+		surfaceId: string,
+		destinationPaneId: PaneId,
+		index?: number,
+	): Promise<void> {
 		if (this.#reservedSurfaceIds.has(surfaceId)) return;
 		if (this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
@@ -383,7 +388,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const current = await this.#presentation.commit((latest) => {
 			if (!latest.surfaces[surfaceId]) return [];
 			if (!paneIdOfSurface(latest.desktopRoot, surfaceId)) return [];
-			return [{ type: 'move-tab', surfaceId, destinationPaneId }];
+			return [{ type: 'move-tab', surfaceId, destinationPaneId, index }];
 		});
 		if (!current) return;
 		this.#presentation.presentSurface(surfaceId);
@@ -396,7 +401,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		edge: SplitEdge,
 	): Promise<void> {
 		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
 		if (this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
@@ -404,7 +408,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const splitId = `split-${createRandomId()}` as SplitId;
 		const current = await this.#presentation.commit((latest) => {
 			if (!latest.surfaces[surfaceId]) return [];
-			if (!paneIdOfSurface(latest.desktopRoot, surfaceId)) return [];
+			const sourcePaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
+			if (!sourcePaneId || !paneNodeById(latest.desktopRoot, targetPaneId)) return [];
+			if (
+				projectedPaneCountAfterTabSplit(latest.desktopRoot, sourcePaneId, targetPaneId) >
+				MAX_WORKSPACE_PANES
+			) {
+				throw new WorkspacePaneLimitError();
+			}
 			return [
 				{
 					type: 'split-tab-to-edge',
@@ -564,28 +575,25 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		if (destination.type === 'new-pane') {
 			const anchor = destination.anchorPaneId;
-			if (!this.canSplitPane) {
-				return this.placeFileSession(sessionId, { type: 'pane', paneId: anchor }, publication);
-			}
 			const newPaneId = `pane-${createRandomId()}` as PaneId;
 			const splitId = `split-${createRandomId()}` as SplitId;
 			const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
-				if (!paneNodeById(latest.desktopRoot, anchor)) return [];
+				const currentAnchor = this.#resolvePaneId(latest, anchor);
 				if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
 					return [
 						{
 							type: 'register-surface',
 							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-							paneId: anchor,
+							paneId: currentAnchor,
 						},
-						{ type: 'activate-pane-tab', paneId: anchor, surfaceId },
+						{ type: 'activate-pane-tab', paneId: currentAnchor, surfaceId },
 					];
 				}
 				return [
 					{
 						type: 'register-surface-in-split',
 						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-						targetPaneId: anchor,
+						targetPaneId: currentAnchor,
 						edge: 'right',
 						newPaneId,
 						splitId,
@@ -593,22 +601,28 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				];
 			};
 			const current = await this.#presentation.commit(plan, { publication });
+			if (!this.layout.surface(surfaceId)) {
+				throw new Error(`File surface was not placed: ${surfaceId}`);
+			}
 			if (current) this.#presentation.presentSurface(surfaceId);
 			return 'placed';
 		}
 		const paneId = destination.paneId;
 		const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
-			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
+			const destinationPaneId = this.#resolvePaneId(latest, paneId);
 			return [
 				{
 					type: 'register-surface',
 					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-					paneId,
+					paneId: destinationPaneId,
 				},
-				{ type: 'activate-pane-tab', paneId, surfaceId },
+				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
 			];
 		};
 		const current = await this.#presentation.commit(plan, { publication });
+		if (!this.layout.surface(surfaceId)) {
+			throw new Error(`File surface was not placed: ${surfaceId}`);
+		}
 		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
 	}
@@ -651,7 +665,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async createTerminalInNewPane(anchorPaneId?: PaneId, requestKey?: string): Promise<string> {
-		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
+		if (this.isMobile) return this.#terminalPlacement.create(this.defaultPaneId, requestKey);
 		return this.#terminalPlacement.createInNewPane(anchorPaneId ?? this.lastFocusedPaneId, requestKey);
 	}
 
@@ -772,5 +786,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		);
 		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
+	}
+
+	#resolvePaneId(snapshot: WorkspaceLayoutSnapshot, preferredPaneId: PaneId | null): PaneId {
+		if (preferredPaneId && paneNodeById(snapshot.desktopRoot, preferredPaneId)) return preferredPaneId;
+		const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
+		if (chatPaneId) return chatPaneId;
+		const firstPane = collectPaneNodes(snapshot.desktopRoot)[0];
+		if (!firstPane) throw new Error('Workspace has no destination pane');
+		return firstPane.id;
 	}
 }

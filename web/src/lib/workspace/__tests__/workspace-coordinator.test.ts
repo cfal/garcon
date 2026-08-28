@@ -202,6 +202,26 @@ describe('WorkspaceCoordinator', () => {
 		expect(paneTabs(layout.snapshot, paneId!).activeId).toBe(fileSurfaceId('split-file'));
 	});
 
+	it('falls back to a live pane when a file destination collapses before placement', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewPane('git-history');
+		const historyPaneId = paneIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+
+		const closing = coordinator.closeSurface('singleton:git-history');
+		const placing = coordinator.placeFileSession('stale-pane', {
+			type: 'pane',
+			paneId: historyPaneId,
+		});
+		await Promise.all([closing, placing]);
+
+		expect(paneIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('stale-pane'))).toBe(
+			'pane-main',
+		);
+	});
+
 	it('toggles fullscreen for a pane', async () => {
 		const { coordinator, layout } = createHarness();
 
@@ -214,10 +234,7 @@ describe('WorkspaceCoordinator', () => {
 	it('exits fullscreen when focus moves to another pane', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(
-			layout.snapshot.desktopRoot,
-			'singleton:git-history',
-		)!;
+		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
 		await coordinator.toggleFullscreen('pane-main');
 
 		expect(layout.snapshot.fullscreenPaneId).toBe('pane-main');
@@ -236,6 +253,17 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.closeSurface('singleton:git-history');
 		expect(layout.snapshot.fullscreenPaneId).toBeNull();
 		expect(paneCountOf(layout.snapshot)).toBe(1);
+	});
+
+	it('falls back from a collapsed last-focused pane', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewPane('git-history');
+		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		expect(coordinator.lastFocusedPaneId).toBe(historyPaneId);
+
+		await coordinator.closeSurface('singleton:git-history');
+
+		expect(coordinator.lastFocusedPaneId).toBe('pane-main');
 	});
 
 	it('cancels Chat interaction before fullscreen and restores state on publish failure', async () => {
@@ -353,6 +381,20 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('one'));
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(fileSurfaceId('one'));
 		expect(layout.surface(fileSurfaceId('two'))).toBeNull();
+	});
+
+	it('rejects moving a dialog file into a pane that collapsed before publication', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.placeFileSession('dialog-stale-pane', { type: 'dialog' });
+		await coordinator.openSingletonInNewPane('git-history');
+		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+
+		const closing = coordinator.closeSurface('singleton:git-history');
+		const moving = coordinator.moveDialogFileToPane(historyPaneId);
+		await closing;
+
+		await expect(moving).rejects.toThrow('destination pane is no longer available');
+		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('dialog-stale-pane'));
 	});
 
 	it('closes a terminal tab without terminating its session and can reopen it', async () => {
@@ -1046,6 +1088,46 @@ describe('WorkspaceCoordinator', () => {
 		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:commit');
 	});
 
+	it('lets an in-flight close win over a pane-local singleton reopen', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.openSingletonAsTab('commit', 'pane-main');
+
+		const closing = coordinator.closeSurface('singleton:commit');
+		const reopening = coordinator.openSingletonAsTab('commit', 'pane-main');
+		await Promise.all([closing, reopening]);
+
+		expect(layout.surface('singleton:commit')).toBeNull();
+		expect(singletons.disposeSurface).toHaveBeenCalledWith('commit');
+	});
+
+	it('applies concurrent singleton destinations against the latest layout', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewPane('git-history');
+		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+
+		await Promise.all([
+			coordinator.openSingletonAsTab('commit', 'pane-main'),
+			coordinator.openSingletonAsTab('commit', historyPaneId),
+		]);
+
+		expect(paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:commit')).toBe(historyPaneId);
+		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe('singleton:commit');
+	});
+
+	it('allows a net-zero edge move at the pane limit', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewPane('git-history');
+		await coordinator.openSingletonInNewPane('git-compare');
+		await coordinator.openSingletonInNewPane('files');
+		const sourcePaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
+		expect(paneCountOf(layout.snapshot)).toBe(4);
+
+		await coordinator.splitTabToEdge('singleton:files', 'pane-main', 'left');
+
+		expect(paneCountOf(layout.snapshot)).toBe(4);
+		expect(paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(sourcePaneId);
+	});
+
 	it('merges a pane into another pane and keeps its tabs', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewPane('git-history');
@@ -1164,6 +1246,41 @@ describe('WorkspaceCoordinator', () => {
 		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe(
 			terminalSurfaceId('terminal-race'),
 		);
+	});
+
+	it('falls back when a terminal destination collapses during creation', async () => {
+		const creation = deferred<string>();
+		const { coordinator, terminals, layout } = createHarness();
+		await coordinator.openSingletonInNewPane('git-history');
+		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		terminals.create.mockReturnValue(creation.promise);
+
+		const opening = coordinator.createTerminal(historyPaneId);
+		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
+		await coordinator.closeSurface('singleton:git-history');
+		creation.resolve('terminal-stale-pane');
+		await opening;
+
+		expect(
+			paneIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId('terminal-stale-pane')),
+		).toBe('pane-main');
+	});
+
+	it('does not create desktop pane topology when a New Terminal crosses into mobile', async () => {
+		const creation = deferred<string>();
+		const { coordinator, terminals, layout } = createHarness();
+		terminals.create.mockReturnValue(creation.promise);
+
+		const opening = coordinator.createTerminalInNewPane('pane-main');
+		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
+		await coordinator.enterMobilePresentation();
+		creation.resolve('terminal-mobile-transition');
+		await opening;
+
+		const surfaceId = terminalSurfaceId('terminal-mobile-transition');
+		expect(paneCountOf(layout.snapshot)).toBe(1);
+		expect(paneIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('pane-main');
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 	});
 
 	it('terminates a newly created terminal when its placement cannot publish', async () => {

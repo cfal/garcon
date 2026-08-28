@@ -28,6 +28,11 @@ describe('workspace layout persistence', () => {
 				splitId: 'split-1',
 			},
 			{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.7 },
+			{
+				type: 'activate-pane-tab',
+				paneId: 'pane-main',
+				surfaceId: 'singleton:pull-requests',
+			},
 			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
 		]);
 		const restored = parsePersistedWorkspaceLayout(
@@ -36,6 +41,11 @@ describe('workspace layout persistence', () => {
 		expect(restored.source).toBe('valid');
 		expect(restored.snapshot.desktopRoot).toEqual(base.desktopRoot);
 		expect(restored.snapshot.surfaces).toEqual(base.surfaces);
+		expect(paneTabs(restored.snapshot, 'pane-main')?.mru).toEqual([
+			'singleton:git',
+			'singleton:pull-requests',
+			'singleton:chat',
+		]);
 	});
 
 	it('restores chat when the persisted tree lacks it', () => {

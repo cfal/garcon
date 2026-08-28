@@ -24,6 +24,7 @@ import {
 	paneCount,
 	paneIdOfSurface,
 	paneNodeById,
+	projectedPaneCountAfterTabSplit,
 	removePaneAndCollapse,
 } from './pane-tree.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
@@ -361,11 +362,13 @@ function splitTabToEdge(
 	if (sourcePaneId === mutation.targetPaneId && sourceTabs?.order.length === 1) {
 		return snapshot;
 	}
-	// Moving the sole tab out of its pane collapses the source, so the
-	// projected pane count stays flat for that case.
-	const collapsesSource =
-		sourcePaneId !== mutation.targetPaneId && sourceTabs?.order.length === 1;
-	if (paneCount(snapshot.desktopRoot) - (collapsesSource ? 1 : 0) >= MAX_WORKSPACE_PANES) {
+	if (
+		projectedPaneCountAfterTabSplit(
+			snapshot.desktopRoot,
+			sourcePaneId,
+			mutation.targetPaneId,
+		) > MAX_WORKSPACE_PANES
+	) {
 		throw new Error('Pane count limit reached');
 	}
 	let next = removeEveryPlacement(snapshot, mutation.surfaceId);

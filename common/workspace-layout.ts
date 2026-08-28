@@ -31,6 +31,7 @@ export type PersistedWorkspaceLayoutNode =
       id: string;
       order: PersistedWorkspaceSurfaceRef[];
       active: PersistedWorkspaceSurfaceRef | null;
+      mru: PersistedWorkspaceSurfaceRef[];
     }
   | {
       type: 'split';

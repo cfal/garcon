@@ -102,7 +102,23 @@ function restoreNode(node: unknown, state: TreeBuildState): DesktopLayoutNode | 
 		const activeRef = parseRef(node.active);
 		const activeKey = activeRef ? refKey(activeRef) : null;
 		const activeId = activeKey && order.includes(activeKey) ? activeKey : order[0];
-		const mru = activeId ? [activeId, ...order.filter((id) => id !== activeId)] : [];
+		const persistedMru: string[] = [];
+		if (Array.isArray(node.mru)) {
+			for (const rawRef of node.mru) {
+				const ref = parseRef(rawRef);
+				if (!ref) continue;
+				const surfaceId = refKey(ref);
+				if (!order.includes(surfaceId) || persistedMru.includes(surfaceId)) continue;
+				persistedMru.push(surfaceId);
+			}
+		}
+		const mru = activeId
+			? [
+					activeId,
+					...persistedMru.filter((id) => id !== activeId),
+					...order.filter((id) => id !== activeId && !persistedMru.includes(id)),
+				]
+			: [];
 		return { type: 'pane', id, tabs: { order, activeId, mru } };
 	}
 	if (node.type === 'split') {
@@ -174,7 +190,7 @@ function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
 	if (!restored || collectPaneNodes(restored).length === 0) {
 		return { source: 'fallback', snapshot: base };
 	}
-	let root = ensureChatPlaced(enforcePaneCap(restored), state);
+	const root = ensureChatPlaced(enforcePaneCap(restored), state);
 	const unplacedTerminalIds = Array.isArray(value.unplacedTerminalIds)
 		? [
 				...new Set(
@@ -331,11 +347,16 @@ function serializeNode(
 			return ref ? [ref] : [];
 		});
 		const activeSurface = node.tabs.activeId ? surfaces[node.tabs.activeId] : null;
+		const mru = node.tabs.mru.flatMap((id) => {
+			const ref = surfaces[id] ? persistedRef(surfaces[id]) : null;
+			return ref ? [ref] : [];
+		});
 		return {
 			type: 'pane',
 			id: node.id,
 			order,
 			active: activeSurface ? persistedRef(activeSurface) : null,
+			mru,
 		};
 	}
 	return {

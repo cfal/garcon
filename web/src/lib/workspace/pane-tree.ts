@@ -29,6 +29,19 @@ export function paneCount(root: DesktopLayoutNode): number {
 	return collectPaneNodes(root).length;
 }
 
+export function projectedPaneCountAfterTabSplit(
+	root: DesktopLayoutNode,
+	sourcePaneId: PaneId,
+	targetPaneId: PaneId,
+): number {
+	const count = paneCount(root);
+	const source = paneNodeById(root, sourcePaneId);
+	if (!source) return count + 1;
+	if (sourcePaneId === targetPaneId && source.tabs.order.length === 1) return count;
+	const collapsesSource = sourcePaneId !== targetPaneId && source.tabs.order.length === 1;
+	return count - (collapsesSource ? 1 : 0) + 1;
+}
+
 export function paneNodeById(root: DesktopLayoutNode, paneId: PaneId): PaneNode | null {
 	if (root.type === 'pane') return root.id === paneId ? root : null;
 	return paneNodeById(root.children[0], paneId) ?? paneNodeById(root.children[1], paneId);

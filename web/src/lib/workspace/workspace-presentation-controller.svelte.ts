@@ -608,6 +608,13 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): void {
+		if (!this.lastFocusedPaneId || !paneNodeById(snapshot.desktopRoot, this.lastFocusedPaneId)) {
+			this.lastFocusedPaneId =
+				paneIdOfSurface(snapshot.desktopRoot, this.lastFocusedSurfaceId) ??
+				paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID) ??
+				collectPaneNodes(snapshot.desktopRoot)[0]?.id ??
+				null;
+		}
 		if (this.focusOwner.kind === 'chat-list') return;
 		const visible = new Set(this.#visiblePresentations(snapshot, mode).values());
 		if (visible.has(this.focusOwner.surfaceId)) return;

@@ -11,7 +11,7 @@ import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
-import { fileSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
+import type { PaneId } from '$lib/workspace/surface-types.js';
 import { paneIdOfSurface, paneNodeById } from '../pane-tree.js';
 import {
 	createWorkspaceServices,
