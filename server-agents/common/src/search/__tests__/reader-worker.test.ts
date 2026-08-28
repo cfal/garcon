@@ -51,18 +51,30 @@ describe('reader worker v9', () => {
 
     const worker = new Worker(new URL('../reader-main.ts', import.meta.url).href);
     const events: ReaderEvent[] = [];
-    let notify = () => {};
     worker.onmessage = (message: MessageEvent<ReaderEvent>) => {
       events.push(message.data);
-      notify();
     };
-    const waitForEvent = async (type: ReaderEvent['type']): Promise<ReaderEvent> => {
-      while (true) {
-        const found = events.find((event) => event.type === type);
-        if (found) return found;
-        await new Promise<void>((resolve) => { notify = resolve; });
-      }
-    };
+    const waitForEvent = (type: ReaderEvent['type']): Promise<ReaderEvent> => new Promise(
+      (resolve, reject) => {
+        let settled = false;
+        const deadline = setTimeout(() => {
+          settled = true;
+          reject(new Error(`timed out waiting for reader event: ${type}`));
+        }, 2_000);
+        const check = () => {
+          if (settled) return;
+          const found = events.find((event) => event.type === type);
+          if (found) {
+            settled = true;
+            clearTimeout(deadline);
+            resolve(found);
+            return;
+          }
+          setTimeout(check, 10);
+        };
+        check();
+      },
+    );
     const closed = new Promise<void>((resolve) => {
       worker.addEventListener('close', () => resolve(), { once: true });
     });
@@ -100,6 +112,7 @@ describe('reader worker v9', () => {
 
     post(worker, { type: 'close', requestId: 3, lifecycleEpoch });
     await expect(waitForEvent('closed')).resolves.toMatchObject({ type: 'closed' });
+    worker.terminate();
     await expect(closed).resolves.toBeUndefined();
   });
 });
