@@ -6,9 +6,11 @@ export type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
 export type ActiveSplitDropTarget = {
 	paneId: string;
 	zone: SplitDropZone;
-	rect: DOMRect;
+	rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>;
 	blockedReason?: 'max-panes';
 	focusReason?: 'already-open';
+	// Present for pane-origin drags: the whole target pane is a swap target.
+	swapReason?: 'pane-swap';
 };
 
 export type FocusedOverlayRect = {
@@ -87,6 +89,119 @@ export function resolveDropZone(
 
 function isSplitEdgeZone(zone: SplitDropZone): boolean {
 	return zone !== 'center';
+}
+
+export interface PaneDropGeometry {
+	paneId: string;
+	rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>;
+}
+
+export interface PaneDropResolution {
+	paneId: string;
+	zone: SplitDropZone;
+	rect: PaneDropGeometry['rect'];
+}
+
+// Resolves which pane a drop lands on. Pane-origin drags always target the
+// whole pane for a swap, and the dragged pane itself is never a valid target.
+export function resolvePaneDropTarget(
+	panes: PaneDropGeometry[],
+	clientX: number,
+	clientY: number,
+	draggedPaneId: string | null,
+): PaneDropResolution | null {
+	let fallback: PaneDropGeometry | null = null;
+	let fallbackDistance = Infinity;
+	for (const pane of panes) {
+		const { rect } = pane;
+		const containsPointer =
+			clientX >= rect.left &&
+			clientX <= rect.left + rect.width &&
+			clientY >= rect.top &&
+			clientY <= rect.top + rect.height;
+		if (containsPointer) {
+			if (pane.paneId === draggedPaneId) return null;
+			return {
+				paneId: pane.paneId,
+				zone: draggedPaneId ? 'center' : resolveDropZone(rect, clientX, clientY),
+				rect,
+			};
+		}
+		if (pane.paneId === draggedPaneId) continue;
+		const centerX = rect.left + rect.width / 2;
+		const centerY = rect.top + rect.height / 2;
+		const distance = Math.hypot(clientX - centerX, clientY - centerY);
+		if (distance < fallbackDistance) {
+			fallback = pane;
+			fallbackDistance = distance;
+		}
+	}
+
+	if (!fallback) return null;
+	return {
+		paneId: fallback.paneId,
+		zone: draggedPaneId ? 'center' : resolveDropZone(fallback.rect, clientX, clientY),
+		rect: fallback.rect,
+	};
+}
+
+// Pane swaps never add a pane, so the max-panes guard only applies to
+// sidebar-origin drags landing on an edge zone.
+export function splitDropBlockedReason(input: {
+	isPaneSwap: boolean;
+	isExistingSidebarChat: boolean;
+	zone: SplitDropZone;
+	paneCount: number;
+}): 'max-panes' | undefined {
+	if (input.isPaneSwap || input.isExistingSidebarChat) return undefined;
+	if (input.paneCount < 4) return undefined;
+	return isSplitEdgeZone(input.zone) ? 'max-panes' : undefined;
+}
+
+export interface SplitDropResultPresentation {
+	toneClass: string;
+	label: string;
+	labelClass: string;
+}
+
+// Presentation precedence for the drop outcome preview: blocked, then pane
+// swap, then already-open focus, then the hovered split zone.
+export function splitDropResultPresentation(
+	target: ActiveSplitDropTarget,
+): SplitDropResultPresentation {
+	if (target.blockedReason === 'max-panes') {
+		return {
+			toneClass: 'bg-destructive/15 border-2 border-destructive/50',
+			label: m.workspace_drop_zone_max_panes(),
+			labelClass: 'bg-destructive/15 text-destructive',
+		};
+	}
+	if (target.swapReason) {
+		return {
+			toneClass: 'bg-accent/20 border-2 border-accent/50',
+			label: m.workspace_drop_zone_swap(),
+			labelClass: 'bg-accent/20 text-accent-foreground',
+		};
+	}
+	if (target.focusReason === 'already-open') {
+		return {
+			toneClass: 'bg-accent/20 border-2 border-accent/50',
+			label: m.workspace_drop_zone_already_open(),
+			labelClass: 'bg-accent/20 text-accent-foreground',
+		};
+	}
+	const zonePresentation = SPLIT_DROP_ZONES.find((entry) => entry.zone === target.zone);
+	return {
+		toneClass:
+			target.zone === 'center'
+				? 'bg-accent/20 border-2 border-accent/50'
+				: 'bg-primary/20 border-2 border-primary/50',
+		label: zonePresentation?.label() ?? '',
+		labelClass:
+			target.zone === 'center'
+				? 'bg-accent/20 text-accent-foreground'
+				: 'bg-primary/15 text-primary',
+	};
 }
 
 // True when a dragleave event actually exits the container instead of
@@ -202,12 +317,12 @@ export class SplitDropController {
 	handleActiveSplitDragOver(event: DragEvent): void {
 		if (!this.#canHandleDrag() || !this.#showActiveSplitDropLayer) return;
 		const target = this.resolveActiveSplitDropTarget(event);
+		this.activeSplitDropTarget = target;
 		if (!target) return;
 
 		event.preventDefault();
 		event.stopPropagation();
 		if (event.dataTransfer) event.dataTransfer.dropEffect = target.blockedReason ? 'none' : 'move';
-		this.activeSplitDropTarget = target;
 	}
 
 	handleActiveSplitDrop(
@@ -240,39 +355,21 @@ export class SplitDropController {
 		const splitRootEl = this.#options.splitRootEl;
 		if (!splitRootEl) return null;
 
-		let fallback: { paneId: string; rect: DOMRect; distance: number } | null = null;
+		const geometries: PaneDropGeometry[] = [];
 		for (const pane of this.#options.splitLayout.panes) {
 			const paneEl = splitRootEl.querySelector<HTMLElement>(`[data-pane-id="${pane.id}"]`);
 			if (!paneEl) continue;
-
-			const rect = paneEl.getBoundingClientRect();
-			const containsPointer =
-				event.clientX >= rect.left &&
-				event.clientX <= rect.right &&
-				event.clientY >= rect.top &&
-				event.clientY <= rect.bottom;
-			if (containsPointer) {
-				return this.toActiveSplitDropTarget(
-					pane.id,
-					resolveDropZone(rect, event.clientX, event.clientY),
-					rect,
-				);
-			}
-
-			const centerX = rect.left + rect.width / 2;
-			const centerY = rect.top + rect.height / 2;
-			const distance = Math.hypot(event.clientX - centerX, event.clientY - centerY);
-			if (!fallback || distance < fallback.distance) {
-				fallback = { paneId: pane.id, rect, distance };
-			}
+			geometries.push({ paneId: pane.id, rect: paneEl.getBoundingClientRect() });
 		}
 
-		if (!fallback) return null;
-		return this.toActiveSplitDropTarget(
-			fallback.paneId,
-			resolveDropZone(fallback.rect, event.clientX, event.clientY),
-			fallback.rect,
+		const resolved = resolvePaneDropTarget(
+			geometries,
+			event.clientX,
+			event.clientY,
+			this.#options.splitLayout.draggedPaneId,
 		);
+		if (!resolved) return null;
+		return this.toActiveSplitDropTarget(resolved.paneId, resolved.zone, resolved.rect);
 	}
 
 	isActiveZone(zone: SplitDropZone): boolean {
@@ -297,30 +394,17 @@ export class SplitDropController {
 
 	resultToneClass(): string {
 		const target = this.activeSplitDropTarget;
-		if (!target) return '';
-		if (target.blockedReason === 'max-panes')
-			return 'bg-destructive/15 border-2 border-destructive/50';
-		if (target.focusReason === 'already-open') return 'bg-accent/20 border-2 border-accent/50';
-		return target.zone === 'center'
-			? 'bg-accent/20 border-2 border-accent/50'
-			: 'bg-primary/20 border-2 border-primary/50';
+		return target ? splitDropResultPresentation(target).toneClass : '';
 	}
 
 	resultLabel(): string {
 		const target = this.activeSplitDropTarget;
-		if (!target) return '';
-		if (target.blockedReason === 'max-panes') return m.workspace_drop_zone_max_panes();
-		if (target.focusReason === 'already-open') return m.workspace_drop_zone_already_open();
-		return SPLIT_DROP_ZONES.find((entry) => entry.zone === target.zone)?.label() ?? '';
+		return target ? splitDropResultPresentation(target).label : '';
 	}
 
 	resultLabelClass(): string {
 		const target = this.activeSplitDropTarget;
-		if (target?.blockedReason === 'max-panes') return 'bg-destructive/15 text-destructive';
-		if (target?.focusReason === 'already-open') return 'bg-accent/20 text-accent-foreground';
-		return target?.zone === 'center'
-			? 'bg-accent/20 text-accent-foreground'
-			: 'bg-primary/15 text-primary';
+		return target ? splitDropResultPresentation(target).labelClass : '';
 	}
 
 	activeTargetStyle(): string {
@@ -377,26 +461,27 @@ export class SplitDropController {
 		);
 	}
 
-	#toBlockedReason(isExistingSidebarChat: boolean, zone: SplitDropZone): 'max-panes' | undefined {
-		if (isExistingSidebarChat) return undefined;
-		const paneCount = this.#options.splitLayout.paneCount;
-		if (typeof paneCount !== 'number' || paneCount < 4) return undefined;
-		return isSplitEdgeZone(zone) ? 'max-panes' : undefined;
-	}
-
 	private toActiveSplitDropTarget(
 		paneId: string,
 		zone: SplitDropZone,
-		rect: DOMRect,
+		rect: PaneDropGeometry['rect'],
 	): ActiveSplitDropTarget {
-		const draggedChat = this.#options.splitLayout.draggedChatId;
+		const splitLayout = this.#options.splitLayout;
+		const draggedChat = splitLayout.draggedChatId;
+		const isPaneSwap = splitLayout.draggedPaneId !== null;
 		const isExistingSidebarChat = this.#isExistingSidebarChat(draggedChat);
 		return {
 			paneId,
 			zone,
 			rect,
 			focusReason: isExistingSidebarChat ? 'already-open' : undefined,
-			blockedReason: this.#toBlockedReason(isExistingSidebarChat, zone),
+			swapReason: isPaneSwap ? 'pane-swap' : undefined,
+			blockedReason: splitDropBlockedReason({
+				isPaneSwap,
+				isExistingSidebarChat,
+				zone,
+				paneCount: splitLayout.paneCount,
+			}),
 		};
 	}
 }

@@ -22,6 +22,7 @@
 		onRegisterReorder?: (reorder: SidebarChatReorderState) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
 		onSplitDragEnd?: (chatId: string) => void;
+		onRegisterSplitLayout?: (splitLayout: SplitLayoutStore) => void;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 	}
 
@@ -41,6 +42,7 @@
 		onRegisterReorder,
 		onPersistReorder = () => {},
 		onSplitDragEnd,
+		onRegisterSplitLayout,
 		onToggleProjectCollapsed,
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
@@ -97,7 +99,9 @@
 			if (chatId) onSplitDragEnd?.(chatId);
 		}
 	}
-	setSplitLayout(new TestSplitLayoutStore());
+	const splitLayout = new TestSplitLayoutStore();
+	setSplitLayout(splitLayout);
+	onMount(() => onRegisterSplitLayout?.(splitLayout));
 </script>
 
 <div

@@ -163,6 +163,11 @@
 	const sidebarOverlayInert = $derived(
 		sidebarPresented && !sidebarFullscreen && sidebarMetrics.mode === 'overlay',
 	);
+	// Split panes render their own title bar at the top of the chat surface;
+	// drop the floating taskbar below it so they don't overlap.
+	const lowerMainToolbarForSplit = $derived(
+		!isMobile && activeMain === CHAT_SURFACE_ID && splitLayout.isEnabled,
+	);
 	const renderedPresentations = $derived(
 		renderedPortablePresentations(
 			snapshot,
@@ -351,7 +356,9 @@
 				{#if !isMobile}
 					<div
 						data-floating-workspace-toolbar
-						class="pointer-events-none absolute inset-x-2 top-2 z-40 min-w-0"
+						class="pointer-events-none absolute inset-x-2 z-40 min-w-0"
+						class:top-2={!lowerMainToolbarForSplit}
+						class:top-9={lowerMainToolbarForSplit}
 					>
 						<WorkspaceTaskBar
 							host="main"

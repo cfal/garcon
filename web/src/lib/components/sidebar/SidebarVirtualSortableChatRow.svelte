@@ -34,7 +34,10 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions: SidebarDisplayOptions;
+		// The row can always be dragged to workspace panels when dragEnabled;
+		// reorderEnabled additionally allows it as a sidebar reorder target.
 		dragEnabled?: boolean;
+		reorderEnabled?: boolean;
 		isDragging?: boolean;
 		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
@@ -69,6 +72,7 @@
 		isMultiSelected = false,
 		displayOptions,
 		dragEnabled = true,
+		reorderEnabled = true,
 		isDragging = false,
 		dropIndicatorEdge = null,
 		onDragStart,
@@ -116,7 +120,7 @@
 			dropTargetForElements({
 				element: rowEl,
 				canDrop: ({ source }) => {
-					if (!dragEnabled || !isSidebarChatDragData(source.data)) return false;
+					if (!reorderEnabled || !isSidebarChatDragData(source.data)) return false;
 					const target = getSidebarChatDropTargetData({
 						chatId: row.chat.id,
 						list: row.list,

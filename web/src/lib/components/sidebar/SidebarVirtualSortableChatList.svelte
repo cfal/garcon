@@ -130,9 +130,11 @@
 	} | null = null;
 	let separatorPixelRatio = $state(1);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
-	// Manual drag/quick-move only applies to the manual sort order; the
+	// Reorder and quick-move only apply to the manual sort order; the
 	// recent-activity sort is derived, so reordering is disabled there.
-	let dragEnabled = $derived(!isMultiSelectMode && displayOptions.sortMode === 'manual');
+	// Dragging a chat onto a workspace panel stays available in every sort mode.
+	let dragEnabled = $derived(!isMultiSelectMode);
+	let reorderEnabled = $derived(dragEnabled && displayOptions.sortMode === 'manual');
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
 
 	type SidebarPointDropContext =
@@ -218,7 +220,7 @@
 				}
 				cleanup = module.autoScrollForElements({
 					element: viewportRef,
-					canScroll: ({ source }) => dragEnabled && isSidebarChatDragData(source.data),
+					canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
 					getAllowedAxis: () => 'vertical',
 				});
 			});
@@ -241,7 +243,9 @@
 		if (touchDrag) cancelTouchDrag();
 		clearDragPresentation();
 		draggingChatId = row.chat.id;
-		reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
+		if (reorderEnabled) {
+			reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
+		}
 		splitLayout.startDrag(row.chat.id);
 	}
 
@@ -250,6 +254,12 @@
 		const ownsNativeDrag = draggingChatId === chatId && !(ownsTouchDrag && touchDrag?.activated);
 		if (ownsTouchDrag) cancelTouchDrag();
 		if (!ownsNativeDrag) return;
+		// Split-only drags (derived sort modes) survive a source row unmount: a
+		// real drop still reaches the list-level monitor and ends the drag there,
+		// and a cancelled drag is recovered by pragmatic's broken-drag detection.
+		// Reorder drags need eager cleanup because their preview state is tied to
+		// the mounted rows.
+		if (!reorderEnabled) return;
 		if (reorder.activeList) reorder.cancel(reorder.activeList);
 		clearDragPresentation();
 		if (splitLayout.draggedChatId === chatId) splitLayout.endDrag();
@@ -386,6 +396,7 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
+		if (!reorderEnabled) return;
 		if (!inputIsInsideViewport(input)) {
 			activeDrop = null;
 			lastValidDrop = null;
@@ -419,20 +430,22 @@
 	): void {
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
-		const isInsideViewport = inputIsInsideViewport(input);
-		const currentInstruction = isInsideViewport
-			? resolveSidebarDropInstruction(sourceData, dropTargets)
-			: null;
-		const context = pointDropContext(sourceData, input.clientX, input.clientY);
-		const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-		// Uses the last valid row target when virtualization removes the current target at drop time.
-		const instruction = currentInstruction ?? fallbackInstruction;
+		if (reorderEnabled) {
+			const isInsideViewport = inputIsInsideViewport(input);
+			const currentInstruction = isInsideViewport
+				? resolveSidebarDropInstruction(sourceData, dropTargets)
+				: null;
+			const context = pointDropContext(sourceData, input.clientX, input.clientY);
+			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
+			// Uses the last valid row target when virtualization removes the current target at drop time.
+			const instruction = currentInstruction ?? fallbackInstruction;
 
-		if (instruction) {
-			applySidebarDropInstruction(instruction);
-			persistReorderRequest(reorder.finish(sourceData.list));
-		} else {
-			reorder.cancel(sourceData.list);
+			if (instruction) {
+				applySidebarDropInstruction(instruction);
+				persistReorderRequest(reorder.finish(sourceData.list));
+			} else {
+				reorder.cancel(sourceData.list);
+			}
 		}
 
 		clearDragPresentation();
@@ -644,7 +657,7 @@
 
 	function activateTouchDrag(): void {
 		const current = touchDrag;
-		if (!current || current.activated || !dragEnabled) return;
+		if (!current || current.activated || !reorderEnabled) return;
 		current.activated = true;
 		clearDocumentSelection();
 		clearDragPresentation();
@@ -658,7 +671,7 @@
 	}
 
 	function handleTouchStart(event: TouchEvent): void {
-		if (!dragEnabled || draggingChatId !== null || event.touches.length !== 1) return;
+		if (!reorderEnabled || draggingChatId !== null || event.touches.length !== 1) return;
 		const rowEl = rowElementFromTarget(event.target);
 		if (!rowEl) return;
 		const sourceChatId = rowEl.dataset.sidebarVirtualRow;
@@ -826,7 +839,7 @@
 	}
 
 	function getMoveToTop(row: SidebarVirtualChatRow): (() => void) | undefined {
-		if (!dragEnabled) return undefined;
+		if (!reorderEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
 		if (index <= 0) return undefined;
@@ -834,7 +847,7 @@
 	}
 
 	function getMoveToBottom(row: SidebarVirtualChatRow): (() => void) | undefined {
-		if (!dragEnabled) return undefined;
+		if (!reorderEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
 		if (index < 0 || index >= order.length - 1) return undefined;
@@ -881,7 +894,14 @@
 		};
 	});
 
-	onDestroy(() => virtual.destroy());
+	onDestroy(() => {
+		// The drag monitor is torn down with the list, so a drag the list still
+		// owns (its source row may already be unmounted) would leak otherwise.
+		if (draggingChatId && splitLayout.draggedChatId === draggingChatId) {
+			splitLayout.endDrag();
+		}
+		virtual.destroy();
+	});
 </script>
 
 <div
@@ -941,6 +961,7 @@
 							isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
 							{displayOptions}
 							{dragEnabled}
+							{reorderEnabled}
 							isDragging={draggingChatId === row.chat.id}
 							dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
 							onDragStart={startSidebarDrag}
