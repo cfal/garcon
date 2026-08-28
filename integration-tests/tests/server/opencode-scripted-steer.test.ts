@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
@@ -11,6 +14,7 @@ import {
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -116,6 +120,79 @@ describeOnLinux('scripted OpenCode steering', () => {
       })).rejects.toMatchObject({ status: 409 });
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('[TLV5-CHAT-ID-DISCOVERY.05-OPENCODE-SCRIPTED-01] immediately steers a requested chat ID without creating user input', async () => {
+    const testEnvironment = requireEnvironment();
+    let releasePath = '';
+    const receivedReply = marker('CHAT_ID_RECEIVED');
+    testEnvironment.model.scriptTurn(() => [
+      chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      chatCompletionsToolUse('call_oc_chat_id', 'bash', {
+        command: `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
+      }),
+    ]);
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(receivedReply),
+    ]);
+
+    try {
+      await withIntegrationFixture('opencode-scripted-chat-id-discovery', async (fixture) => {
+        const chatId = fixture.newChatId();
+        releasePath = path.join(fixture.dirs.project, 'release-chat-id-tool');
+        const cursor = fixture.client.markEvents();
+        const active = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: marker('CHAT_ID_FIRST_PROMPT'),
+        }));
+
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some((entry) => (
+              entry.message.type === 'transcript-notice'
+              && entry.message.detail?.type === 'chat-id-disclosure'
+            )),
+          `OpenCode chat ID disclosure for ${chatId}`,
+          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        await writeFile(releasePath, 'release', 'utf8');
+
+        const steeredRequest = await steeredHeld.requested;
+        expect(steeredRequest.userTexts.join('\n')).toContain(
+          `<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        );
+        steeredHeld.release();
+        expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+          afterIndex: cursor,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        })).type);
+
+        const page = await fixture.client.getMessages(chatId);
+        expect(userContents(page.messages)).toHaveLength(1);
+        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
+        expect(messagesOfType(page.messages, 'transcript-notice')
+          .filter((message) => message.detail?.type.startsWith('chat-id-')))
+          .toEqual([
+            expect.objectContaining({ detail: { type: 'chat-id-request' } }),
+            expect.objectContaining({
+              content: `Sent chat ID ${chatId} to agent`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+          ]);
+
+        await reloadUntilNativeContains(fixture, chatId, receivedReply);
+        const reloaded = await fixture.client.getMessages(chatId);
+        expect(userContents(reloaded.messages)).toHaveLength(1);
+        expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
+        testEnvironment.model.assertSettled();
+      }, withScriptedOpenCode());
+    } finally {
+      if (releasePath) await writeFile(releasePath, 'release', 'utf8').catch(() => undefined);
+      steeredHeld.release();
+    }
   }, 120_000);
 
   test('batches concurrent FIFO steers after a held reply without a restart', async () => {

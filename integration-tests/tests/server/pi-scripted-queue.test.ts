@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { assistantContents } from '../../support/chat-assertions.js';
-import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
+import {
+  chatCompletionsText,
+  chatCompletionsToolUse,
+} from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
 } from '../../support/live-agent.js';
 import {
   scriptedPiStartRequest,
@@ -98,6 +105,83 @@ describe('scripted Pi queue lifecycle', () => {
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
+  }, 120_000);
+
+  test('[TLV5-CHAT-ID-DISCOVERY.05-PI-SCRIPTED-01] immediately steers a requested chat ID without creating user input', async () => {
+    const testEnvironment = requireEnvironment();
+    const firstPrompt = marker('CHAT_ID_FIRST_PROMPT');
+    const receivedReply = marker('CHAT_ID_RECEIVED');
+    let releasePath = '';
+    testEnvironment.model.scriptTurn(() => [
+      chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      chatCompletionsToolUse('call_pi_chat_id', 'bash', {
+        command: `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
+      }),
+    ]);
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(receivedReply),
+    ]);
+
+    try {
+      await withIntegrationFixture('pi-scripted-chat-id-discovery', async (fixture) => {
+        const chatId = fixture.newChatId();
+        releasePath = path.join(fixture.dirs.project, 'release-chat-id-tool');
+        const cursor = fixture.client.markEvents();
+        const active = await fixture.client.startChat(scriptedPiStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: firstPrompt,
+        }));
+
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some((entry) => (
+              entry.message.type === 'transcript-notice'
+              && entry.message.detail?.type === 'chat-id-disclosure'
+            )),
+          `Pi chat ID disclosure for ${chatId}`,
+          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        await writeFile(releasePath, 'release', 'utf8');
+
+        const steeredRequest = await steeredHeld.requested;
+        expect(steeredRequest.userTexts.join('\n')).toContain(
+          `<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        );
+        steeredHeld.release();
+        expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+          afterIndex: cursor,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        })).type);
+
+        const page = await fixture.client.getMessages(chatId);
+        expect(userContents(page.messages)).toEqual([firstPrompt]);
+        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
+        expect(messagesOfType(page.messages, 'transcript-notice')
+          .filter((message) => message.detail?.type.startsWith('chat-id-')))
+          .toEqual([
+            expect.objectContaining({
+              content: 'Agent requested chat ID',
+              detail: { type: 'chat-id-request' },
+            }),
+            expect.objectContaining({
+              content: `Sent chat ID ${chatId} to agent`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+          ]);
+
+        await reloadUntilNativeContains(fixture, chatId, receivedReply);
+        const reloaded = await fixture.client.getMessages(chatId);
+        expect(userContents(reloaded.messages)).toEqual([firstPrompt]);
+        expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
+        testEnvironment.model.assertSettled();
+      }, withScriptedPi());
+    } finally {
+      if (releasePath) await writeFile(releasePath, 'release', 'utf8').catch(() => undefined);
+      steeredHeld.release();
+    }
   }, 120_000);
 
   test('holds queued entries while paused and dispatches on resume', async () => {

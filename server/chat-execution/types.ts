@@ -404,14 +404,6 @@ export interface ChatExecutionService
     options?: RunAgentTurnOptions,
     afterPendingRegistered?: () => Promise<void>,
   ): Promise<boolean>;
-  steerInput(
-    chatId: string,
-    content: string,
-    providerContent: string,
-    options: AgentSteerOptions,
-    target: CapturedSteerTarget,
-    afterPendingRegistered: (turnId: string) => Promise<void>,
-  ): Promise<AcceptedSteerOutcome>;
   requeueAndPauseChat(
     chatId: string,
     entryId: string,

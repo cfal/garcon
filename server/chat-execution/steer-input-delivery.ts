@@ -1,6 +1,6 @@
+import crypto from 'node:crypto';
 import type {
   AgentSteerRejectionReason,
-  AgentSteerResult,
 } from '@garcon/server-agent-interface';
 import type { AgentSteerOptions } from '../agents/session-types.ts';
 import { DomainError, SteerDeliveryError } from '../lib/domain-error.ts';
@@ -50,9 +50,7 @@ export class SteerInputDelivery {
     afterPendingRegistered: (turnId: string) => Promise<void>,
     userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
   ): Promise<AcceptedSteerOutcome> {
-    let deliveryPrepared = false;
     let inserted = false;
-    let result: AgentSteerResult;
     try {
       this.#assertTarget(chatId, target);
       inserted = await this.options.admitInput(chatId, content, {
@@ -65,9 +63,36 @@ export class SteerInputDelivery {
       });
       if (!inserted) return { turnId: target.identity.turnId, duplicate: true };
       await afterPendingRegistered(target.identity.turnId);
-      result = await this.options.turnRunner.steerInput(
+      await this.#deliverToProvider(chatId, providerContent, options, target);
+      return { turnId: target.identity.turnId, duplicate: false };
+    } catch (error) {
+      if (error instanceof DomainError) throw error;
+      throw new SteerDeliveryError(error, 'not-sent');
+    } finally {
+      if (inserted) this.options.discardPreparedInput(chatId, options.clientMessageId);
+    }
+  }
+
+  async deliverControl(
+    chatId: string, content: string, transcriptViewId: string, target: CapturedSteerTarget,
+  ): Promise<void> {
+    const clientMessageId = crypto.randomUUID();
+    await this.#deliverToProvider(chatId, content, {
+      clientRequestId: clientMessageId,
+      clientMessageId,
+      transcriptViewId,
+    }, target);
+  }
+
+  async #deliverToProvider(
+    chatId: string, content: string, options: AgentSteerOptions, target: CapturedSteerTarget,
+  ): Promise<void> {
+    let deliveryPrepared = false;
+    try {
+      this.#assertTarget(chatId, target);
+      const result = await this.options.turnRunner.steerInput(
         chatId,
-        providerContent,
+        content,
         options,
         target.providerTarget,
         async () => {
@@ -75,26 +100,21 @@ export class SteerInputDelivery {
           deliveryPrepared = true;
         },
       );
+      if (result.kind === 'accepted') {
+        if (!deliveryPrepared) {
+          throw new SteerDeliveryError(
+            new Error('Agent accepted steering without preparing delivery'),
+            'not-sent',
+          );
+        }
+        return;
+      }
+      if (result.kind === 'rejected') throw steerRejectionError(result.reason);
+      throw new SteerDeliveryError(new Error(result.message), result.outcome);
     } catch (error) {
       if (error instanceof DomainError) throw error;
       throw new SteerDeliveryError(error, deliveryPrepared ? 'unknown' : 'not-sent');
-    } finally {
-      if (inserted) this.options.discardPreparedInput(chatId, options.clientMessageId);
     }
-
-    if (result.kind === 'accepted') {
-      if (!deliveryPrepared) {
-        throw new SteerDeliveryError(
-          new Error('Agent accepted steering without preparing delivery'),
-          'not-sent',
-        );
-      }
-      return { turnId: target.identity.turnId, duplicate: false };
-    }
-    if (result.kind === 'rejected') {
-      throw steerRejectionError(result.reason);
-    }
-    throw new SteerDeliveryError(new Error(result.message), result.outcome);
   }
 
   #assertTarget(chatId: string, target: CapturedSteerTarget): void {

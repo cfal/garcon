@@ -55,6 +55,7 @@ import {
   CarryOverCompactionService,
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
+import { ChatIdDiscoveryController } from './chats/chat-id-discovery-controller.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -279,6 +280,11 @@ export async function startServer(): Promise<void> {
     });
     await chatRegistry.init();
     await settings.init();
+    let queue: ChatExecutionCoordinator | null = null;
+    const requireExecutionQueue = (): ChatExecutionCoordinator => {
+      if (!queue) throw new Error('Chat execution coordinator is not initialized');
+      return queue;
+    };
     const transcriptStore = new TranscriptLedgerStore(
       path.join(workspaceDir, 'transcript-ledgers'),
     );
@@ -290,12 +296,36 @@ export async function startServer(): Promise<void> {
       onListenerError(error) {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
+      chatIdRequests: {
+        enabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
+        request: (input) => chatIdDiscovery.request(input),
+      },
+    });
+    const chatIdDiscovery = new ChatIdDiscoveryController({
+      execution: {
+        captureSteerTarget: (chatId) => requireExecutionQueue().captureSteerTarget(chatId),
+        deliverControlSteer: (chatId, content, viewId, target) => (
+          requireExecutionQueue().deliverControlSteer(chatId, content, viewId, target)
+        ),
+      },
+      notices: transcriptLedger,
+      onError(error, chatId) {
+        logger.warn('Chat ID auto-discovery steering failed', {
+          chatId,
+          reason: errorMessage(error),
+        });
+      },
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
-      if (event.type === 'view-replaced') preparedCarryover.discard(event.chatId);
+      if (event.type !== 'view-replaced') return;
+      preparedCarryover.discard(event.chatId);
+      chatIdDiscovery.discard(event.chatId);
     });
-    chatRegistry.onChatRemoved((chatId) => preparedCarryover.discard(chatId));
+    chatRegistry.onChatRemoved((chatId) => {
+      preparedCarryover.discard(chatId);
+      chatIdDiscovery.discard(chatId);
+    });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
       registry: chatRegistry,
@@ -493,7 +523,7 @@ export async function startServer(): Promise<void> {
     await shareStore.init();
 
     const commandLedger = new CommandLedger(workspaceDir);
-    const queue = new ChatExecutionCoordinator(
+    queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
       agentRegistry,

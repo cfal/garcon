@@ -31,8 +31,32 @@ import {
   parseUserMessagePresentation,
   type UserMessagePresentation,
 } from './user-message-presentation.js';
+import {
+  isCarryoverMigrationQuarantineNoticeDetail,
+  isChatIdDisclosureNoticeDetail,
+  isChatIdDiscoveryFailureNoticeDetail,
+  isChatIdRequestNoticeDetail,
+  isHandoffSummaryNoticeDetail,
+  type TranscriptNoticeDetail,
+} from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
+export {
+  isCarryoverMigrationQuarantineNoticeDetail,
+  isChatIdDisclosureNoticeDetail,
+  isChatIdDiscoveryFailureNoticeDetail,
+  isChatIdRequestNoticeDetail,
+  isHandoffSummaryNoticeDetail,
+} from './transcript-notice-details.js';
+export type {
+  CarryoverMigrationQuarantineNoticeDetail,
+  ChatIdDisclosureNoticeDetail,
+  ChatIdDiscoveryFailureNoticeDetail,
+  ChatIdDiscoveryFailureReason,
+  ChatIdRequestNoticeDetail,
+  HandoffSummaryNoticeDetail,
+  TranscriptNoticeDetail,
+} from './transcript-notice-details.js';
 
 export interface ChatImage {
   data: string;
@@ -645,20 +669,6 @@ export class ErrorMessage {
   constructor(public timestamp: string, public content: string) {}
 }
 
-export interface CarryoverMigrationQuarantineNoticeDetail {
-  readonly type: 'carryover-migration-quarantine';
-  readonly artifactId: string;
-  readonly errorCode: string;
-}
-
-export interface HandoffSummaryNoticeDetail {
-  readonly type: 'handoff-summary';
-}
-
-export type TranscriptNoticeDetail =
-  | CarryoverMigrationQuarantineNoticeDetail
-  | HandoffSummaryNoticeDetail;
-
 export class TranscriptNoticeMessage {
   readonly type = 'transcript-notice' as const;
   constructor(
@@ -1143,27 +1153,6 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
   return TOOL_USE_MESSAGE_TYPES.has(message.type as ToolUseMessageType);
 }
 
-export function isCarryoverMigrationQuarantineNoticeDetail(
-  value: unknown,
-): value is CarryoverMigrationQuarantineNoticeDetail {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const detail = value as Record<string, unknown>;
-  return detail.type === 'carryover-migration-quarantine'
-    && typeof detail.artifactId === 'string'
-    && detail.artifactId.length > 0
-    && typeof detail.errorCode === 'string'
-    && detail.errorCode.length > 0;
-}
-
-export function isHandoffSummaryNoticeDetail(
-  value: unknown,
-): value is HandoffSummaryNoticeDetail {
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && (value as Record<string, unknown>).type === 'handoff-summary';
-}
-
 function isLegacyCliRowDetail(value: unknown): value is Record<string, unknown> {
   return value !== null
     && typeof value === 'object'
@@ -1194,6 +1183,11 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
     };
   }
   if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
+  if (isChatIdRequestNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDiscoveryFailureNoticeDetail(value)) {
+    return { type: value.type, reason: value.reason };
+  }
   return null;
 }
 

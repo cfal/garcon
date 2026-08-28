@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +17,77 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptLedgerService', () => {
+  describe('chat ID discovery requests', () => {
+    it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits and strips the marker before starting immediate delivery', async () => {
+      const requests = mock(() => undefined);
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const notifications = [];
+        ledger.subscribe((event) => notifications.push(event));
+        requests.mockImplementation((input) => {
+          expect(ledger.currentRows('chat-1')).toHaveLength(2);
+          expect(notifications).toEqual([]);
+          expect(input).toMatchObject({ chatId: 'chat-1', runId: 'run-1' });
+        });
+
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{
+            message: new AssistantMessage(
+              TS,
+              '<get-garcon-chat-id />\nContinuing the response.',
+            ),
+          }],
+        });
+
+        expect(requests).toHaveBeenCalledTimes(1);
+        expect(ledger.currentRows('chat-1')).toMatchObject([
+          {
+            kind: 'provider-row',
+            message: { type: 'assistant-message', content: 'Continuing the response.' },
+          },
+          {
+            kind: 'notice',
+            message: 'Agent requested chat ID',
+            detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+          },
+        ]);
+        await tick();
+        expect(notifications).toHaveLength(1);
+      }, {
+        chatIdRequests: { enabled: () => true, request: requests },
+      });
+    });
+
+    it('[TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01] records a disabled failure without dispatching', async () => {
+      const requests = mock(() => undefined);
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
+        });
+
+        expect(requests).not.toHaveBeenCalled();
+        expect(ledger.currentRows('chat-1')).toMatchObject([{
+          kind: 'notice',
+          message: 'Chat ID auto-discovery is disabled.',
+          detail: {
+            type: 'chat-id-discovery-failure',
+            reason: 'disabled',
+            title: 'Request: Garcon Chat ID',
+          },
+        }]);
+      }, {
+        chatIdRequests: { enabled: () => false, request: requests },
+      });
+    });
+  });
+
   it('[TLV5-L03.01-CORE-UNIT-01] commits producer events synchronously and notifies after publish returns', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');

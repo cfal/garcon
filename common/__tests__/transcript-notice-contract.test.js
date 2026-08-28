@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   CliRowMessage,
   ErrorMessage,
+  isChatIdDiscoveryFailureNoticeDetail,
   isHandoffSummaryNoticeDetail,
   parseChatMessage,
 } from '../chat-types.ts';
@@ -46,6 +47,31 @@ describe('transcript notice contracts', () => {
     })).toBe(true);
     expect(isHandoffSummaryNoticeDetail({ title: 'Handoff summary' })).toBe(false);
     expect(isHandoffSummaryNoticeDetail({ type: 'ordinary-notice' })).toBe(false);
+  });
+
+  it('round-trips typed chat ID discovery notices', () => {
+    for (const detail of [
+      { type: 'chat-id-request' },
+      { type: 'chat-id-disclosure' },
+      { type: 'chat-id-discovery-failure', reason: 'unsupported' },
+    ]) {
+      const message = {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Synthetic discovery notice.',
+        detail,
+        title: 'Garcon Chat ID',
+      };
+      expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
+    }
+    expect(isChatIdDiscoveryFailureNoticeDetail({
+      type: 'chat-id-discovery-failure',
+      reason: 'unsupported',
+    })).toBe(true);
+    expect(isChatIdDiscoveryFailureNoticeDetail({
+      type: 'chat-id-discovery-failure',
+      reason: 'invalid',
+    })).toBe(false);
   });
 
   it('upgrades legacy CLI provenance into explicit row messages', () => {

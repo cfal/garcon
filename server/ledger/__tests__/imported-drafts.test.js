@@ -10,9 +10,51 @@ import {
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
-import { frozenDrafts } from '../imported-drafts.ts';
+import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
+
+describe('imported transcript drafts', () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] canonicalizes chat ID requests and synthetic control steers as notices', () => {
+    expect(importedDrafts([
+      {
+        message: new AssistantMessage(
+          AT,
+          '<get-garcon-chat-id />\nContinuing the response.',
+        ),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        message: new UserMessage(
+          AT,
+          '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+        ),
+        providerMeta: { nativeIdentity: { id: 'user-1' } },
+      },
+    ], () => AT)).toEqual([
+      {
+        kind: 'provider-row',
+        at: AT,
+        message: new AssistantMessage(AT, 'Continuing the response.'),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+        providerMeta: null,
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Sent chat ID 1787836573296800 to agent',
+        detail: { type: 'chat-id-disclosure', title: 'Response: Garcon Chat ID' },
+        providerMeta: null,
+      },
+    ]);
+  });
+});
 
 describe('frozen transcript drafts', () => {
   it('[TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01] preserves user identity and provider-rendered rows without provider metadata', () => {

@@ -8,7 +8,6 @@ import {
 } from '../../common/chat-types.ts';
 import {
   type AgentExecutionAdmission,
-  type AgentSteerOptions,
   type RunAgentTurnOptions,
 } from '../agents/session-types.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -172,7 +171,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         deliverGoalControl: (chatId, content, options, beforeDelivery) => (
           this.deliverGoalControlInput(chatId, content, options, beforeDelivery)
         ),
-        steer: (...args) => this.steerInput(...args),
+        steer: (...args) => this.#steerInputDelivery.deliver(...args),
       },
     });
     this.#queueDrainer = new QueueDrainer({
@@ -381,24 +380,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#steerInputDelivery.captureTarget(chatId);
   }
 
-  async steerInput(
-    chatId: string,
-    content: string,
-    providerContent: string,
-    options: AgentSteerOptions,
-    target: CapturedSteerTarget,
-    afterPendingRegistered: (turnId: string) => Promise<void>,
-    userMessagePresentation?: UserInputAdmissionOptions['userMessagePresentation'],
-  ): Promise<AcceptedSteerOutcome> {
-    return this.#steerInputDelivery.deliver(
-      chatId,
-      content,
-      providerContent,
-      options,
-      target,
-      afterPendingRegistered,
-      userMessagePresentation,
-    );
+  async deliverControlSteer(
+    chatId: string, content: string, transcriptViewId: string, target: CapturedSteerTarget,
+  ): Promise<void> {
+    return this.#steerInputDelivery.deliverControl(chatId, content, transcriptViewId, target);
   }
 
   async deliverGoalControlInput(
