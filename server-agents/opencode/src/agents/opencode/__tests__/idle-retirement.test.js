@@ -264,4 +264,70 @@ describe('OpenCodeRuntime idle retirement', () => {
       timers.restore();
     }
   });
+
+  it('retires after an unexpectedly aborted turn settles', async () => {
+    const timers = captureIntervals();
+    const close = mock(() => {});
+    const events = [];
+    let now = 0;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          global: {
+            event: mock(({ signal }) => Promise.resolve({ stream: connectedStream(signal) })),
+          },
+          permission: { reply: mock(() => Promise.resolve({})) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock(() => Promise.resolve({
+              data: {
+                info: {
+                  id: 'assistant-aborted',
+                  role: 'assistant',
+                  error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+                  finish: 'error',
+                  time: { completed: Date.now() },
+                },
+                parts: [],
+              },
+            })),
+          },
+        },
+        server: { close },
+      })),
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      runtime.startPurgeTimer();
+      await runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: { runId: 'run-1', publish: (event) => events.push(event) },
+      });
+      for (let attempt = 0; attempt < 100 && runtime.isRunning('session-1'); attempt += 1) {
+        await Bun.sleep(0);
+      }
+      expect(runtime.isRunning('session-1')).toBe(false);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'run-ended',
+        outcome: 'failed',
+      }));
+
+      now = 99;
+      await timers.callback(10)();
+      expect(close).not.toHaveBeenCalled();
+
+      now = 100;
+      await timers.callback(10)();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      timers.restore();
+    }
+  });
 });

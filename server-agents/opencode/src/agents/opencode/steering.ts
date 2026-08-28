@@ -130,6 +130,7 @@ export class OpenCodeSteeringController {
         );
       } catch {
         preserveCorrelation = true;
+        turn.providerSteeringDeliveryUnconfirmed = true;
         session.providerWorkRequiresQuiescence = true;
         return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
       }
@@ -143,6 +144,7 @@ export class OpenCodeSteeringController {
           'OpenCode steering acknowledgement',
         );
       } catch {
+        turn.providerSteeringDeliveryUnconfirmed = true;
         session.providerWorkRequiresQuiescence = true;
         return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
       }
@@ -150,6 +152,7 @@ export class OpenCodeSteeringController {
     } catch (error) {
       if (!attempted) throw error;
       preserveCorrelation = true;
+      turn.providerSteeringDeliveryUnconfirmed = true;
       session.providerWorkRequiresQuiescence = true;
       return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
     } finally {
@@ -210,6 +213,9 @@ export class OpenCodeSteeringController {
     session.activeSteeringDeliveries = Math.max(0, session.activeSteeringDeliveries - 1);
     if (session.activeSteeringDeliveries > 0 || session.turn !== turn) return;
     this.options.releaseDeferredTerminal(agentSessionId, session);
+    if (turn.providerPromptRequestCompleted && !turn.providerSteeringDeliveryUnconfirmed) {
+      session.providerWorkRequiresQuiescence = false;
+    }
   }
 }
 

@@ -664,10 +664,6 @@ export class OpenCodeRuntime {
     session.lastActivityAt = Date.now();
     this.#decisions.cancelForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
-    // OpenCode stores a failed turn's provider error on its in-flight assistant
-    // message, whose id the native loader uses as the error occurrence's
-    // identity. Carrying that same id on the live error keeps one canonical
-    // occurrence across live and restart rather than a duplicate.
     const failedMessageId = lastValue(session.turn.assistantMessageIds);
     const errorRow = new ErrorMessage(new Date().toISOString(), message);
     this.#publishRows(
@@ -721,19 +717,20 @@ export class OpenCodeRuntime {
       return;
     }
     session.deferredTerminal = null;
-    if (terminal.outcome === 'aborted') {
-      this.#logger.debug('Ignoring OpenCode abort unwind for a Garcon-retired turn', {
-        agentSessionId,
-        messageId: terminal.messageId,
-      });
-      return;
-    }
     if (session.turn.pendingSteeringMessageIds.size > 0) {
       this.#failTurnForProviderError(
         agentSessionId,
         session,
         'OpenCode stopped before processing accepted steering input',
       );
+      return;
+    }
+    if (terminal.outcome === 'aborted') {
+      // OpenCode can abort later prompts after an early cancellation.
+      // https://github.com/anomalyco/opencode/issues/30144
+      const message = 'OpenCode interrupted the current turn unexpectedly';
+      this.#logger.warn(message, { agentSessionId, messageId: terminal.messageId });
+      this.#failTurnForProviderError(agentSessionId, session, message);
       return;
     }
     if (terminal.outcome === 'failed') {
@@ -996,7 +993,10 @@ export class OpenCodeRuntime {
     } finally {
       if (sourceRetired) {
         const session = this.#sessions.get(route.sessionId);
-        if (session?.turn === route.turn) session.providerWorkRequiresQuiescence = false;
+        if (session?.turn === route.turn) {
+          route.turn.providerPromptRequestCompleted = true;
+          if (!route.turn.providerSteeringDeliveryUnconfirmed) session.providerWorkRequiresQuiescence = false;
+        }
         this.#operationRoutes.unregister(route);
       }
     }

@@ -372,6 +372,156 @@ describe('OpenCodeRuntime steering', () => {
     await runtime.shutdown();
   });
 
+  it('keeps accepted-steering specificity for a deferred abort without retaining quiescence', async () => {
+    const steeringSubmission = deferred();
+    let submissionCount = 0;
+    const promptAsync = mock(() => {
+      submissionCount += 1;
+      return submissionCount === 2 ? steeringSubmission.promise : Promise.resolve({});
+    });
+    const abort = mock(() => Promise.resolve({ data: true }));
+    const { runtime, eventStream, revert } = createRuntime({ promptAsync, abort });
+    const published = await start(runtime);
+    await bindPrompt(eventStream, promptAsync, 0, 'hello');
+    const target = await waitForTarget(runtime);
+    const steering = runtime.steering.steer(steerRequest(target));
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+
+    const steerPartId = promptAsync.mock.calls[1][0].parts[0].id;
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: steerPartId,
+          messageID: 'user-steer',
+          type: 'text',
+          text: '/review the current approach',
+        },
+      },
+    }));
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-aborted',
+          role: 'assistant',
+          parentID: 'user-1',
+          finish: 'error',
+          time: { completed: Date.now() },
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      },
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminalEvents(published.events)).toEqual([]);
+
+    steeringSubmission.resolve({});
+    await expect(steering).resolves.toEqual({ kind: 'accepted' });
+    await waitFor(() => terminalEvents(published.events).length === 1);
+    const failureMessage = 'OpenCode stopped before processing accepted steering input';
+    expect(terminalEvents(published.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-default',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: failureMessage },
+    }]);
+    expect(publishedMessages(published.events)).toContainEqual(expect.objectContaining({
+      type: 'error',
+      content: failureMessage,
+    }));
+
+    const recoveryOperation = collectOperation('run-recovery');
+    const recovery = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      model: 'provider/model',
+      permissionMode: 'default',
+      operation: recoveryOperation.operation,
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 3);
+    expect(abort).not.toHaveBeenCalled();
+    expect(revert).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-1',
+      messageID: 'user-steer',
+      directory: '/repo',
+    }), expect.any(Object));
+
+    const recoveryMessageId = await bindPrompt(eventStream, promptAsync, 2, 'recover');
+    pushAssistant(eventStream, {
+      messageId: 'assistant-recovery',
+      parentId: recoveryMessageId,
+      text: 'recovered',
+      eventNumber: 7,
+      finish: 'stop',
+    });
+    await expect(recovery).resolves.toBeUndefined();
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('quiesces an unconfirmed steering delivery before the next turn', async () => {
+    let submissionCount = 0;
+    const promptAsync = mock(() => {
+      submissionCount += 1;
+      return submissionCount === 2
+        ? Promise.reject(new Error('steering transport failed'))
+        : Promise.resolve({});
+    });
+    const abort = mock(() => Promise.resolve({ data: true }));
+    const { runtime, eventStream } = createRuntime({ promptAsync, abort });
+    const published = await start(runtime);
+    await bindPrompt(eventStream, promptAsync, 0, 'hello');
+    const target = await waitForTarget(runtime);
+
+    await expect(runtime.steering.steer(steerRequest(target))).resolves.toEqual({
+      kind: 'failed',
+      outcome: 'unknown',
+      message: 'OpenCode steering delivery could not be confirmed',
+    });
+    pushAssistant(eventStream, {
+      messageId: 'assistant-initial',
+      parentId: 'user-1',
+      text: 'initial reply',
+      eventNumber: 3,
+      finish: 'stop',
+    });
+    await waitFor(() => terminalEvents(published.events).length === 1);
+
+    const recoveryOperation = collectOperation('run-recovery');
+    const recovery = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      model: 'provider/model',
+      permissionMode: 'default',
+      operation: recoveryOperation.operation,
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 3);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
+      promptAsync.mock.invocationCallOrder[2],
+    );
+
+    const recoveryMessageId = await bindPrompt(eventStream, promptAsync, 2, 'recover');
+    pushAssistant(eventStream, {
+      messageId: 'assistant-recovery',
+      parentId: recoveryMessageId,
+      text: 'recovered',
+      eventNumber: 7,
+      finish: 'stop',
+    });
+    await expect(recovery).resolves.toBeUndefined();
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
   it('reports a provider rejection after delivery preparation without accepting it', async () => {
     let promptCount = 0;
     const promptAsync = mock(() => {
