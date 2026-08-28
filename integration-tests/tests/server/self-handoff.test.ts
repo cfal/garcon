@@ -4,7 +4,7 @@
 // persisted registry, and that the continuation actually receives the archived
 // history as its carried context.
 import { describe, expect, test } from 'bun:test';
-import { userContents } from '../../support/chat-assertions.js';
+import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -62,6 +62,14 @@ describe('self handoff', () => {
 
       const sourceHistory = await client.getMessages(sourceChatId);
       expect(userContents(sourceHistory.messages)).toContain('the original request');
+      const targetHistory = await client.getMessages(targetChatId);
+      expect(messagesOfType(targetHistory.messages, 'transcript-notice')).toContainEqual(
+        expect.objectContaining({
+          title: 'History carried without compaction',
+          content: 'Earlier chat history was small enough to carry over as context.',
+          detail: undefined,
+        }),
+      );
     });
   }, 60_000);
 

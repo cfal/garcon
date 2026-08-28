@@ -417,7 +417,6 @@ export async function startServer(): Promise<void> {
           clientRequestId: input.clientRequestId,
         });
         if (prepared) return prepared;
-        if (input.messages.length === 0) return { context: null, summary: null };
         if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
         return carryOverCompaction.planFor({
           operation: 'fresh-start',

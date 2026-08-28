@@ -70,7 +70,9 @@ describe('transcript ledger read-fold matrix', () => {
           ordinal: 3,
           message: new TranscriptNoticeMessage(
             AT,
-            'Ordinary durable notice.',
+            'Earlier chat history was small enough to carry over as context.',
+            undefined,
+            'History carried without compaction',
           ),
         },
         {
@@ -487,8 +489,8 @@ function allRowKindDrafts() {
       kind: 'notice',
       at: AT,
       providerMeta: null,
-      message: 'Ordinary durable notice.',
-      detail: { type: 'ordinary-notice' },
+      message: 'Earlier chat history was small enough to carry over as context.',
+      detail: { title: 'History carried without compaction' },
     },
     {
       kind: 'notice',

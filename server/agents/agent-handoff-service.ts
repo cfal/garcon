@@ -19,8 +19,8 @@ import type { LedgerAgentSwitchRow, TranscriptWatermark } from '../ledger/contra
 import { frozenConversationDrafts } from '../ledger/projection.js';
 import type {
   CarryOverCompactionInput,
-  CarryOverCompactionResult,
 } from '../chats/carryover-compaction.js';
+import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { PreparedCarryover } from '../chats/prepared-carryover.js';
 
 const logger = createLogger('agents:handoff');
@@ -35,7 +35,7 @@ interface PendingHandoffRecovery {
 }
 
 interface CarryoverPlanningPort {
-  planFor(input: CarryOverCompactionInput): Promise<CarryOverCompactionResult>;
+  planFor(input: CarryOverCompactionInput): Promise<CarryOverOutcome>;
 }
 
 interface PreparedCarryoverPort {
@@ -266,7 +266,7 @@ export class AgentHandoffService {
           }
           const planningController = new AbortController();
           this.#carryoverPreparations.set(input.chatId, planningController);
-          let planned: CarryOverCompactionResult;
+          let planned: CarryOverOutcome;
           try {
             planned = await this.deps.carryover.planFor({
               operation: 'agent-switch',

@@ -28,7 +28,7 @@ interface RecordedProviderRequest {
 }
 
 describe('agent switch compaction', () => {
-  test('carries a small history in full without compaction or a summary notice', async () => {
+  test('carries a small history in full and records why no compaction ran', async () => {
     await withIntegrationFixture('compaction-small-history', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
@@ -51,7 +51,16 @@ describe('agent switch compaction', () => {
       expect(targetCall.releaseText('target answer')).toBeTrue();
       const accepted = await handoff;
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
-      expect(handoffNotices((await fixture.client.getMessages(chatId)).messages)).toEqual([]);
+      assertOneCompleteCarryoverNotice(
+        await fixture.client.getMessages(chatId),
+        'carry on',
+      );
+
+      await fixture.restartGarcon();
+      assertOneCompleteCarryoverNotice(
+        await fixture.client.getMessages(chatId),
+        'carry on',
+      );
     });
   }, 90_000);
 
@@ -442,6 +451,34 @@ function handoffNotices(messages: Parameters<typeof messagesOfType>[0]) {
     .filter((message) => message.title === 'Handoff summary');
 }
 
+function completeCarryoverNotices(messages: Parameters<typeof messagesOfType>[0]) {
+  return messagesOfType(messages, 'transcript-notice')
+    .filter((message) => message.title === 'History carried without compaction');
+}
+
+function assertOneCompleteCarryoverNotice(
+  page: Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>,
+  prompt: string,
+): void {
+  expect(completeCarryoverNotices(page.messages)).toEqual([
+    expect.objectContaining({
+      title: 'History carried without compaction',
+      content: 'Earlier chat history was small enough to carry over as context.',
+      detail: undefined,
+    }),
+  ]);
+  expect(handoffNotices(page.messages)).toEqual([]);
+  const input = page.messages.find((entry) => (
+    entry.message.type === 'user-message' && entry.message.content === prompt
+  ));
+  const notice = page.messages.find((entry) => (
+    entry.message.type === 'transcript-notice'
+    && entry.message.title === 'History carried without compaction'
+  ));
+  if (!input || !notice) throw new Error('Handoff input or carryover notice is missing.');
+  expect(input.ordinal).toBeLessThan(notice.ordinal);
+}
+
 function assertOneHandoffNotice(
   page: Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>,
   summary: string,
@@ -450,6 +487,7 @@ function assertOneHandoffNotice(
   expect(handoffNotices(page.messages)).toEqual([
     expect.objectContaining({ title: 'Handoff summary', content: summary }),
   ]);
+  expect(completeCarryoverNotices(page.messages)).toEqual([]);
   const input = page.messages.find((entry) => (
     entry.message.type === 'user-message' && entry.message.content === prompt
   ));

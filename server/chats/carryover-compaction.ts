@@ -32,6 +32,7 @@ import {
   fitEstimatedTokenDocument,
   reducedCompactionEntryBudget,
 } from './handoff-token-budget.js';
+import type { CarryOverOutcome } from './carryover-outcome.js';
 
 const logger = createLogger('chats:carryover-compaction');
 const SUMMARY_OPEN = '<summary>';
@@ -81,11 +82,6 @@ export interface CarryOverCompactionInput {
   readonly signal?: AbortSignal;
 }
 
-export interface CarryOverCompactionResult {
-  readonly context: CarriedContext | null;
-  readonly summary: string | null;
-}
-
 interface FittedCompactionPrompt {
   readonly assembled: CostedCarriedContext;
   readonly prompt: string;
@@ -96,14 +92,14 @@ const UNRESOLVED = Symbol('compaction-selection-unresolved');
 export class CarryOverCompactionService {
   constructor(private readonly deps: CarryOverCompactionDeps) {}
 
-  async planFor(input: CarryOverCompactionInput): Promise<CarryOverCompactionResult> {
+  async planFor(input: CarryOverCompactionInput): Promise<CarryOverOutcome> {
     const complete = createCarryoverTranscript(input.messages, 0);
-    if (!complete) return { context: null, summary: null };
+    if (!complete) return { kind: 'no-history' };
     if (
       estimateHandoffTokens(complete.prefix)
       <= SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS
     ) {
-      return { context: complete, summary: null };
+      return { kind: 'complete', context: complete };
     }
 
     const selectionSignal = createGenerationRequestSignal(input.signal);
@@ -192,7 +188,7 @@ export class CarryOverCompactionService {
         });
         const summary = validateCompactionSummary(raw);
         const context = projectSummaryWithSpine(summary, spine);
-        return { context, summary };
+        return { kind: 'compacted', context, summary };
       } catch (error) {
         input.signal?.throwIfAborted();
         lastFailure = error;

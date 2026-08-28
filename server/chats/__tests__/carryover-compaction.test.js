@@ -12,7 +12,10 @@ import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
 } from '../../../common/transcript-seed.js';
-import { usableHandoffTokenBudget } from '../../../common/handoff-sizing.js';
+import {
+  SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS,
+  usableHandoffTokenBudget,
+} from '../../../common/handoff-sizing.js';
 import {
   CARRYOVER_COMPACTION_TIMEOUT_MS,
   CarryOverCompactionService,
@@ -48,6 +51,19 @@ function spineOf(commands) {
   for (let index = 0; index < commands; index += 1) {
     messages.push(new BashToolUseMessage(TIME, `t${index}`, `command-${index} ${'x'.repeat(140)}`));
   }
+  return messages;
+}
+
+function historyAtExactUncompactedLimit() {
+  const messages = [];
+  for (let turn = 0; turn < 161; turn += 1) {
+    const marker = String(messages.length);
+    messages.push(
+      new UserMessage(TIME, `${'word '.repeat(300)}${marker}`),
+      new AssistantMessage(TIME, `${'word '.repeat(300)}${marker}`),
+    );
+  }
+  messages.push(new UserMessage(TIME, 'word '.repeat(447)));
   return messages;
 }
 
@@ -125,22 +141,33 @@ describe('carryover compaction', () => {
     );
   });
 
-  it('returns empty or small complete projections before reading Settings', async () => {
+  it('returns no history before reading Settings', async () => {
     const getUiSettings = mock(() => {
       throw new Error('Settings must not be read');
     });
     const { instance, agents } = service({ getUiSettings });
 
-    expect(await run(instance, { messages: [] })).toEqual({ context: null, summary: null });
-    const messages = shortHistory();
-    const result = await run(instance, { messages });
-
-    expect(result).toEqual({
-      context: createCarryoverTranscript(messages, 0),
-      summary: null,
-    });
+    expect(await run(instance, { messages: [] })).toEqual({ kind: 'no-history' });
+    expect(getUiSettings).not.toHaveBeenCalled();
     expect(agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'carries a small projection without consulting Settings when compaction enabled is %s',
+    async (enabled) => {
+      const { instance, agents, getUiSettings, runSingleQuery } = service({ enabled });
+      const messages = shortHistory();
+      const result = await run(instance, { messages });
+
+      expect(result).toEqual({
+        kind: 'complete',
+        context: createCarryoverTranscript(messages, 0),
+      });
+      expect(getUiSettings).not.toHaveBeenCalled();
+      expect(agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
+      expect(runSingleQuery).not.toHaveBeenCalled();
+    },
+  );
 
   it('carries a small projection above the compacted injection ceiling in full', async () => {
     const messages = turns(30, () => 'word '.repeat(1_500));
@@ -149,7 +176,21 @@ describe('carryover compaction', () => {
     expect(estimateHandoffTokens(complete.prefix)).toBeLessThan(100_000);
     const { instance, runSingleQuery } = service({ enabled: false });
 
-    expect(await run(instance, { messages })).toEqual({ context: complete, summary: null });
+    expect(await run(instance, { messages })).toEqual({ kind: 'complete', context: complete });
+    expect(runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('carries history at the exact uncompacted token limit without reading Settings', async () => {
+    const messages = historyAtExactUncompactedLimit();
+    const complete = createCarryoverTranscript(messages, 0);
+    expect(estimateHandoffTokens(complete.prefix))
+      .toBe(SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS);
+    const getUiSettings = mock(() => {
+      throw new Error('Settings must not be read at the uncompacted limit');
+    });
+    const { instance, runSingleQuery } = service({ getUiSettings });
+
+    expect(await run(instance, { messages })).toEqual({ kind: 'complete', context: complete });
     expect(runSingleQuery).not.toHaveBeenCalled();
   });
 
@@ -160,8 +201,11 @@ describe('carryover compaction', () => {
     expect(estimateHandoffTokens(createCarryoverTranscript(above, 0).prefix)).toBeGreaterThan(100_000);
     const { instance, onCompactionStarted, runSingleQuery } = service();
 
-    expect((await run(instance, { messages: below })).summary).toBeNull();
-    expect((await run(instance, { messages: above })).summary).toBe('objective: ship it');
+    expect(await run(instance, { messages: below })).toMatchObject({ kind: 'complete' });
+    expect(await run(instance, { messages: above })).toMatchObject({
+      kind: 'compacted',
+      summary: 'objective: ship it',
+    });
     expect(onCompactionStarted).toHaveBeenCalledOnce();
     expect(onCompactionStarted).toHaveBeenCalledWith('chat-1');
     expect(runSingleQuery).toHaveBeenCalledTimes(1);

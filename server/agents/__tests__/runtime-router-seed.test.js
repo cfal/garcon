@@ -38,7 +38,7 @@ function makeRouter(overrides = {}) {
     conversation,
     composition: overrides.composition,
     conversationMessages: overrides.conversationMessages,
-    appendHandoffSummary: overrides.appendHandoffSummary,
+    appendNotice: overrides.appendNotice,
     currentView: overrides.currentView,
   });
   const start = overrides.start ?? mock(async (request) => {
@@ -117,10 +117,10 @@ function makeRouter(overrides = {}) {
     endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
-    createCarriedContext: overrides.createCarriedContext ?? (async ({ messages }) => ({
-      context: renderCarriedContext(messages),
-      summary: null,
-    })),
+    createCarriedContext: overrides.createCarriedContext ?? (async ({ messages }) => {
+      const context = renderCarriedContext(messages);
+      return context ? { kind: 'complete', context } : { kind: 'no-history' };
+    }),
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
@@ -200,6 +200,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
   it('derives a new session seed from the authoritative ledger context', async () => {
     const createCarriedContext = mock(async ({ messages }) => ({
+      kind: 'compacted',
       context: {
         prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
       },
@@ -241,8 +242,9 @@ describe('AgentRuntimeRouter producer boundary', () => {
     });
     const { router, transcript } = makeRouter({
       start,
-      appendHandoffSummary: (_chatId, _viewId, content) => order.push(`notice:${content}`),
+      appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.content}`),
       createCarriedContext: async () => ({
+        kind: 'compacted',
         context: { prefix: 'compacted seed' },
         summary,
       }),
@@ -264,12 +266,41 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
   });
 
-  it('does not append a handoff notice for a complete projection', async () => {
+  it('appends a compact durable notice for a complete projection', async () => {
+    const order = [];
+    const start = mock(async (request) => {
+      order.push('provider-start');
+      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: 'start-handle' };
+    });
     const { router, transcript } = makeRouter({
+      start,
+      appendNotice: (_chatId, _viewId, notice) => order.push(`notice:${notice.title}`),
       createCarriedContext: async () => ({
+        kind: 'complete',
         context: { prefix: 'deterministic seed' },
-        summary: null,
       }),
+    });
+
+    await router.runAgentTurn('chat-1', 'continue', {
+      turnId: 'turn-1',
+    });
+
+    expect(order).toEqual(['notice:History carried without compaction', 'provider-start']);
+    expect(transcript.notices).toEqual([expect.objectContaining({
+      kind: 'notice',
+      message: 'Earlier chat history was small enough to carry over as context.',
+      detail: { title: 'History carried without compaction' },
+    })]);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      carriedContext: { prefix: 'deterministic seed' },
+    }));
+  });
+
+  it('appends no carryover notice when there is no projectable history', async () => {
+    const { router, transcript } = makeRouter({
+      conversation: [],
+      createCarriedContext: async () => ({ kind: 'no-history' }),
     });
 
     await router.runAgentTurn('chat-1', 'continue', {
@@ -288,8 +319,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const { router, start, transcript } = makeRouter({
       composition: () => ({ ...composition, inserted: takeCount++ === 0 }),
       createCarriedContext: async () => ({
-        context: { prefix: 'compacted seed' },
-        summary: 'One summary',
+        kind: 'complete',
+        context: { prefix: 'complete seed' },
       }),
     });
     const options = {
@@ -308,7 +339,10 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const { router, start, transcript } = makeRouter({
       createCarriedContext: async () => {
         admission.abort(new Error('handoff stopped'));
-        return { context: { prefix: 'compacted seed' }, summary: 'One summary' };
+        return {
+          kind: 'complete',
+          context: { prefix: 'complete seed' },
+        };
       },
     });
 
@@ -323,10 +357,10 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
   it('does not invoke the provider when the handoff notice cannot commit', async () => {
     const { router, start, transcript } = makeRouter({
-      appendHandoffSummary: () => { throw new Error('notice commit failed'); },
+      appendNotice: () => { throw new Error('notice commit failed'); },
       createCarriedContext: async () => ({
-        context: { prefix: 'compacted seed' },
-        summary: 'One summary',
+        kind: 'complete',
+        context: { prefix: 'complete seed' },
       }),
     });
 
@@ -365,7 +399,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(transcript.activeRunId()).toBeNull();
   });
 
-  it('fails closed when the transcript view changes during handoff compaction', async () => {
+  it('fails closed when the transcript view changes during carryover planning', async () => {
     let currentView = {
       viewId: 'view-1',
       status: 'current',
@@ -381,7 +415,10 @@ describe('AgentRuntimeRouter producer boundary', () => {
       currentView: () => currentView,
       createCarriedContext: async () => {
         currentView = { ...currentView, viewId: 'view-2' };
-        return { context: { prefix: 'compacted seed' }, summary: 'One summary' };
+        return {
+          kind: 'complete',
+          context: { prefix: 'complete seed' },
+        };
       },
     });
 
@@ -398,7 +435,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const conversationMessages = mock(() => {
       throw new Error('resume must not scan ledger context');
     });
-    const { router, resume } = makeRouter({
+    const { router, resume, transcript } = makeRouter({
       entry: {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
@@ -410,6 +447,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
 
     expect(conversationMessages).not.toHaveBeenCalled();
     expect(resume.mock.calls[0][0]).not.toHaveProperty('priorContext');
+    expect(transcript.notices).toEqual([]);
   });
 
   it('submits goal control without materializing the ledger conversation', async () => {

@@ -80,7 +80,7 @@ function makeRouter(fork) {
     },
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     getCarryOverRevision: () => 'carry-1',
-    createCarriedContext: async () => ({ context: null, summary: null }),
+    createCarriedContext: async () => ({ kind: 'no-history' }),
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,

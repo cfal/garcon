@@ -8,6 +8,7 @@ import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
 	AssistantMessage,
 	BashToolUseMessage,
+	TranscriptNoticeMessage,
 	UserMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
@@ -4324,6 +4325,27 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.hasEarlierMessages).toBe(true);
 		expect(chat.canLoadEarlier).toBe(true);
+	});
+
+	it('retains the durable uncompacted carryover notice across chat switches', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 3 });
+		const chat = new ActiveTranscriptState(transcriptCache);
+		const notice = new TranscriptNoticeMessage(
+			TS,
+			'Earlier chat history was small enough to carry over as context.',
+			undefined,
+			'History carried without compaction',
+		);
+		chat.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[entry(1, assistant('source answer')), entry(2, notice)],
+			{ lastOrdinal: 2, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+
+		chat.activateChat('chat-2');
+		expect(chat.activateChat('chat-1')).toEqual({ count: 2, stale: false });
+		expect(chat.entries).toEqual([entry(1, assistant('source answer')), entry(2, notice)]);
 	});
 });
 

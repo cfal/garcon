@@ -43,7 +43,7 @@ import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
-import type { CarryOverCompactionResult } from '../chats/carryover-compaction.js';
+import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
@@ -65,7 +65,7 @@ export interface AgentRuntimeRouterOptions {
   endpointResolver: ApiProviderEndpointResolver;
   events: AgentEventBus;
   getCarryOverRevision(entry: AgentChatEntry): string;
-  createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverCompactionResult>;
+  createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -164,22 +164,7 @@ export class AgentRuntimeRouter {
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-    const integration = this.#directory.require(entry.agentId);
-    const previous = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: persistedEntry?.model || entry.model,
-      apiProviderId: entry.apiProviderId,
-      modelEndpointId: entry.modelEndpointId,
-    });
-    const selection = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: opts.model ?? entry.model,
-      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
-      modelEndpointId:
-        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
-    });
-    assertSameApiProviderBoundary(previous, selection);
-    await this.#validateEndpoint(integration, selection);
+    const { integration, selection } = await this.#resolveExecutionTarget(persistedEntry, entry, opts);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
@@ -188,7 +173,7 @@ export class AgentRuntimeRouter {
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
       assertExecutionAdmissionOpen(opts);
-      const carryover = await this.#createCarriedContext({
+      const carryoverOutcome = await this.#createCarriedContext({
         chatId,
         entry,
         messages: this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
@@ -198,8 +183,9 @@ export class AgentRuntimeRouter {
         signal: opts.executionAdmission?.signal,
       });
       assertExecutionAdmissionOpen(opts);
-      if (carryover.summary) {
-        this.#ledger.appendHandoffSummary(chatId, prepared.viewId, carryover.summary);
+      const carryover = resolveCarryOverOutcome(carryoverOutcome);
+      if (carryover.notice) {
+        this.#ledger.appendNotice(chatId, prepared.viewId, carryover.notice);
       }
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
@@ -240,23 +226,7 @@ export class AgentRuntimeRouter {
       });
       return;
     }
-
-    const previous = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: persistedEntry?.model || entry.model,
-      apiProviderId: entry.apiProviderId,
-      modelEndpointId: entry.modelEndpointId,
-    });
-    const selection = this.#endpointResolver.resolveSelection({
-      agentId: entry.agentId,
-      model: opts.model ?? entry.model,
-      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
-      modelEndpointId:
-        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
-    });
-    assertSameApiProviderBoundary(previous, selection);
-    const integration = this.#directory.require(entry.agentId);
-    await this.#validateEndpoint(integration, selection);
+    const { integration, selection } = await this.#resolveExecutionTarget(persistedEntry, entry, opts);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
@@ -667,6 +637,30 @@ export class AgentRuntimeRouter {
     return commands
       ? [...(await commands.discover(projectPath, new AbortController().signal))]
       : [];
+  }
+
+  async #resolveExecutionTarget(
+    persistedEntry: AgentChatEntry | null | undefined,
+    entry: ReturnType<typeof requireAgentChatEntry>,
+    opts: Pick<RunAgentTurnOptions, 'model' | 'apiProviderId' | 'modelEndpointId'>,
+  ) {
+    const integration = this.#directory.require(entry.agentId);
+    const previous = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
+      model: persistedEntry?.model || entry.model,
+      apiProviderId: entry.apiProviderId,
+      modelEndpointId: entry.modelEndpointId,
+    });
+    const selection = this.#endpointResolver.resolveSelection({
+      agentId: entry.agentId,
+      model: opts.model ?? entry.model,
+      apiProviderId: opts.apiProviderId !== undefined ? opts.apiProviderId : entry.apiProviderId,
+      modelEndpointId:
+        opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
+    });
+    assertSameApiProviderBoundary(previous, selection);
+    await this.#validateEndpoint(integration, selection);
+    return { integration, selection };
   }
 
   async #validateEndpoint(

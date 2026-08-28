@@ -36,6 +36,24 @@ describe('ConversationMessage chat rows', () => {
 		expect(card?.querySelector('button')).toBeNull();
 	});
 
+	it('renders uncompacted carryover as a plain titled notice', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				'Earlier chat history was small enough to carry over as context.',
+				undefined,
+				'History carried without compaction',
+			),
+		});
+
+		const card = screen.getByText('History carried without compaction').closest('article');
+		expect(card?.querySelector('.whitespace-pre-wrap')?.textContent).toBe(
+			'Earlier chat history was small enough to carry over as context.',
+		);
+		expect(card?.querySelector('button')).toBeNull();
+		expect(container.querySelector('.markdown-body')).toBeNull();
+	});
+
 	it('renders handoff summaries as Markdown behind a body collapsed by default', () => {
 		const { container } = render(ConversationMessageHost, { message: handoffNotice() });
 

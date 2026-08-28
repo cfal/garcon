@@ -447,18 +447,6 @@ export class TranscriptLedgerService {
     });
   }
 
-  appendHandoffSummary(
-    chatId: string,
-    viewId: TranscriptViewId,
-    content: string,
-  ): LedgerNoticeRow {
-    return this.#appendInternalNotice(chatId, viewId, {
-      title: 'Handoff summary',
-      content,
-      detail: { type: 'handoff-summary' },
-    });
-  }
-
   #appendInternalNotice(
     chatId: string,
     viewId: TranscriptViewId,
