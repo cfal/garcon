@@ -21,6 +21,7 @@ export interface OpenCodeTurnContext {
   providerPromptPartId: string;
   providerPromptRequestCompleted: boolean;
   providerSteeringDeliveryUnconfirmed: boolean;
+  providerAbortIntent: 'user-stop' | 'quiescence' | null;
   // Identity of the last surfaced retry notice so stream replays and repeated
   // status frames for the same scheduled attempt append one row, not many.
   lastRetryNoticeKey: string | null;
@@ -49,8 +50,8 @@ export interface OpenCodeSession {
   directory?: string;
   startedAt: string;
   lastActivityAt: number;
-  // A transport or control-plane failure can retire Garcon's turn while OpenCode still owns
-  // provider work. The next turn aborts that work before submitting another prompt.
+  // Turn-derived uncertainty requires an abort before reuse; stream loss and an in-flight
+  // abort pin it true. Process closure clears it, while pending reverts remain purge-fenced.
   providerWorkRequiresQuiescence: boolean;
   activeSteeringDeliveries: number;
   deferredTerminal: OpenCodeAssistantTerminal | null;
@@ -63,6 +64,31 @@ export interface OpenCodeSession {
 export function relocateOpenCodeSession(session: OpenCodeSession, directory: string): void {
   session.directory = directory;
   session.lastActivityAt = Date.now();
+}
+
+export function activateOpenCodeSessionTurn(
+  session: OpenCodeSession,
+  input: {
+    chatId: string;
+    model: string | undefined;
+    thinkingVariant?: string;
+    permissionMode: PermissionMode;
+    directory: string | undefined;
+    turn: OpenCodeTurnContext;
+  },
+): void {
+  session.status = 'running';
+  session.aborting = false;
+  session.providerWorkRequiresQuiescence = false;
+  session.activeSteeringDeliveries = 0;
+  session.deferredTerminal = null;
+  session.chatId = input.chatId;
+  session.model = input.model;
+  session.thinkingVariant = input.thinkingVariant;
+  session.permissionMode = input.permissionMode;
+  session.directory = input.directory;
+  session.lastActivityAt = Date.now();
+  session.turn = input.turn;
 }
 
 // OpenCode assigns IDs before durable commits, so concurrent publishers can deliver unseen
@@ -82,6 +108,7 @@ export function createOpenCodeTurnContext(
     providerPromptPartId: createOpenCodePromptPartId(),
     providerPromptRequestCompleted: false,
     providerSteeringDeliveryUnconfirmed: false,
+    providerAbortIntent: null,
     lastRetryNoticeKey: null,
     providerContinuationMessageIds: new Set(),
     recentEventIds: new Set(),
@@ -94,6 +121,12 @@ export function createOpenCodeTurnContext(
     messageRoles: new Map(),
     assistantPartTypes: new Map(),
   };
+}
+
+export function openCodeTurnRequiresProviderQuiescence(turn: OpenCodeTurnContext): boolean {
+  return !turn.providerPromptRequestCompleted
+    || turn.providerSteeringDeliveryUnconfirmed
+    || turn.pendingSteeringMessageIds.size > 0;
 }
 
 export function createOpenCodePromptPartId(): string {
@@ -211,4 +244,13 @@ export function openCodeEventBelongsToTurn(
     return typeof messageId === 'string' && turn.assistantMessageIds.has(messageId);
   }
   return true;
+}
+
+export function shouldWarnForUnroutedOpenCodeEvent(eventType: string): boolean {
+  return eventType === 'message.updated'
+    || eventType === 'message.part.updated'
+    || eventType === 'message.part.delta'
+    || eventType === 'permission.asked'
+    || eventType === 'question.asked'
+    || eventType === 'session.error';
 }

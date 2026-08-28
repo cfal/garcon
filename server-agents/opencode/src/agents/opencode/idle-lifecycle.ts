@@ -44,7 +44,9 @@ export class OpenCodeIdleLifecycle {
     this.#sessionPurger = new IdleSessionPurger({
       sessions: options.sessions,
       isRunning: (session) => (
-        session.status === 'running' || session.providerWorkRequiresQuiescence
+        session.status === 'running'
+        || session.providerWorkRequiresQuiescence
+        || session.pendingSteeringRevertMessageId !== null
       ),
       lastActivityAt: (session) => session.lastActivityAt,
       purge: options.purgeSession,
@@ -114,9 +116,9 @@ export class OpenCodeIdleLifecycle {
       || !this.#options.decisionsIdle()
       || this.#options.hasPendingTurnWaiters()
     ) return false;
+    // Process retirement quiesces settled sessions; closeInstance clears their purge fence.
     return Array.from(this.#options.sessions()).every(([, session]) => (
       session.status !== 'running'
-      && !session.providerWorkRequiresQuiescence
       && !session.aborting
       && session.activeSteeringDeliveries === 0
       && session.deferredTerminal === null

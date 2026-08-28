@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { OpenCodeIdleLifecycle } from '../idle-lifecycle.js';
 import { OpenCodeRuntime } from '../opencode.js';
 
 function deferred() {
@@ -327,6 +328,207 @@ describe('OpenCodeRuntime idle retirement', () => {
       expect(close).toHaveBeenCalledTimes(1);
     } finally {
       await runtime.shutdown();
+      timers.restore();
+    }
+  });
+
+  it('retires after a rejected prompt request settles the turn', async () => {
+    const timers = captureIntervals();
+    const close = mock(() => {});
+    let now = 0;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          global: {
+            event: mock(({ signal }) => Promise.resolve({ stream: connectedStream(signal) })),
+          },
+          permission: { reply: mock(() => Promise.resolve({})) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock(() => Promise.reject(new Error('prompt transport closed'))),
+          },
+        },
+        server: { close },
+      })),
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      runtime.startPurgeTimer();
+      await runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: { runId: 'run-1', publish() {} },
+      });
+      for (let attempt = 0; attempt < 100 && runtime.isRunning('session-1'); attempt += 1) {
+        await Bun.sleep(0);
+      }
+      expect(runtime.isRunning('session-1')).toBe(false);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      timers.restore();
+    }
+  });
+
+  it('retires after an acknowledged Stop', async () => {
+    const timers = captureIntervals();
+    const close = mock(() => {});
+    let now = 0;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          global: {
+            event: mock(({ signal }) => Promise.resolve({ stream: connectedStream(signal) })),
+          },
+          permission: { reply: mock(() => Promise.resolve({})) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock((_, { signal }) => pendingUntilAborted(signal)),
+            abort: mock(() => Promise.resolve({ data: true })),
+          },
+        },
+        server: { close },
+      })),
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      runtime.startPurgeTimer();
+      await runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: { runId: 'run-1', publish() {} },
+      });
+      await expect(runtime.abort('session-1')).resolves.toBe(true);
+      expect(runtime.isRunning('session-1')).toBe(false);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      timers.restore();
+    }
+  });
+
+  it('retires after a rejected Stop settles a completed aborted prompt', async () => {
+    const timers = captureIntervals();
+    const close = mock(() => {});
+    const promptResponse = deferred();
+    const abortResponse = deferred();
+    let now = 0;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          global: {
+            event: mock(({ signal }) => Promise.resolve({ stream: connectedStream(signal) })),
+          },
+          permission: { reply: mock(() => Promise.resolve({})) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt: mock(() => promptResponse.promise),
+            abort: mock(() => abortResponse.promise),
+          },
+        },
+        server: { close },
+      })),
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      runtime.startPurgeTimer();
+      await runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: { runId: 'run-1', publish() {} },
+      });
+      const stopping = runtime.abort('session-1');
+      promptResponse.resolve({
+        data: {
+          info: {
+            id: 'assistant-aborted',
+            role: 'assistant',
+            error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+            finish: 'error',
+            time: { completed: Date.now() },
+          },
+          parts: [],
+        },
+      });
+      await Bun.sleep(0);
+      abortResponse.resolve({ error: { message: 'abort rejected' } });
+      await expect(stopping).resolves.toBe(false);
+      for (let attempt = 0; attempt < 100 && runtime.isRunning('session-1'); attempt += 1) {
+        await Bun.sleep(0);
+      }
+      expect(runtime.isRunning('session-1')).toBe(false);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.shutdown();
+      timers.restore();
+    }
+  });
+});
+
+describe('OpenCodeIdleLifecycle', () => {
+  it('retains a settled session until its pending steering revert is applied', () => {
+    const timers = captureIntervals();
+    const originalDateNow = Date.now;
+    const purgeSession = mock(() => undefined);
+    const session = {
+      status: 'completed',
+      providerWorkRequiresQuiescence: false,
+      pendingSteeringRevertMessageId: 'user-steer',
+      lastActivityAt: 0,
+    };
+    const lifecycle = new OpenCodeIdleLifecycle({
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      sessions: () => [['session-1', session]],
+      purgeSession,
+      hasInstance: () => false,
+      hasStartup: () => false,
+      endpointIdle: () => true,
+      routesIdle: () => true,
+      decisionsIdle: () => true,
+      hasPendingTurnWaiters: () => false,
+      isShuttingDown: () => false,
+      runTransition: (operation) => operation(),
+      invalidateModels() {},
+      closeInstance() {},
+      now: () => Date.now(),
+    });
+
+    try {
+      lifecycle.start();
+      Date.now = () => 31 * 60 * 1000;
+      timers.callback(5 * 60 * 1000)();
+      expect(purgeSession).not.toHaveBeenCalled();
+
+      session.pendingSteeringRevertMessageId = null;
+      timers.callback(5 * 60 * 1000)();
+      expect(purgeSession).toHaveBeenCalledWith('session-1', session);
+    } finally {
+      lifecycle.stop();
+      Date.now = originalDateNow;
       timers.restore();
     }
   });

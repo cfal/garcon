@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { OpenCodeRuntime } from '../opencode.js';
 
 function deferred() {
@@ -163,6 +164,7 @@ function createRuntime(
   const {
     turnPrompt,
     permissionReply = mock(() => Promise.resolve({})),
+    sessionOverrides = {},
     ...options
   } = runtimeOptions;
   const prompt = turnPrompt ?? mock((...args) => {
@@ -182,6 +184,7 @@ function createRuntime(
           prompt,
           promptAsync,
           abort,
+          ...sessionOverrides,
         },
       },
       server: { close: mock(() => undefined) },
@@ -1518,10 +1521,14 @@ describe('OpenCodeRuntime abort', () => {
       expect(failureMessages(published.events)).toEqual([
         'OpenCode interrupted the current turn unexpectedly',
       ]);
-      expect(publishedMessages(published.events)).toMatchObject([{
+      const [errorRow] = publishedMessages(published.events);
+      expect(errorRow).toMatchObject({
         type: 'error',
         content: 'OpenCode interrupted the current turn unexpectedly',
-      }]);
+      });
+      expect(getNativeMessageRevisionSource(errorRow)).toMatchObject({
+        entryId: 'assistant-aborted',
+      });
     } finally {
       eventStream.close();
       runtime.shutdown();
@@ -1634,6 +1641,92 @@ describe('OpenCodeRuntime abort', () => {
       outcome: 'finished',
     }]);
     expect(abort).not.toHaveBeenCalled();
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('fails an unexpectedly aborted manual compaction', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const summarizeResponse = deferred();
+    const summarize = mock(() => summarizeResponse.promise);
+    const runtime = createRuntime(
+      mock(() => Promise.resolve({ data: true })),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      {
+        turnPrompt: promptThrough(eventStream, promptAsync),
+        sessionOverrides: { summarize },
+      },
+    );
+    const initial = await start(runtime, { runId: 'run-a' });
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'initial',
+        },
+      },
+    }));
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+    }));
+    await waitFor(() => terminalEvents(initial.events).length === 1);
+
+    const compacted = collectOperation('run-compact');
+    const compaction = runtime.compact({
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      model: 'provider/model',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: compacted.operation,
+    });
+    await waitFor(() => summarize.mock.calls.length === 1);
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-compaction', messageID: 'user-compaction', type: 'compaction' },
+      },
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    summarizeResponse.resolve({ data: true });
+    eventStream.push(envelope({
+      id: 'evt_0004',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          id: 'assistant-summary',
+          role: 'assistant',
+          parentID: 'user-compaction',
+          summary: true,
+          finish: 'error',
+          time: { completed: Date.now() },
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      },
+    }));
+
+    await expect(compaction).rejects.toThrow(
+      'OpenCode interrupted the current turn unexpectedly',
+    );
+    expect(failureMessages(compacted.events)).toEqual([
+      'OpenCode interrupted the current turn unexpectedly',
+    ]);
+    const [errorRow] = publishedMessages(compacted.events);
+    expect(getNativeMessageRevisionSource(errorRow)).toMatchObject({
+      entryId: 'assistant-summary',
+    });
     eventStream.close();
     runtime.shutdown();
   });
@@ -2119,6 +2212,68 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
+  it('keeps a recorded abort silent when prompt transport fails during Stop', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const promptRequest = deferred();
+    const acknowledged = deferred();
+    const debug = mock(() => undefined);
+    const turnPrompt = mock((...args) => {
+      void promptAsync(...args);
+      return promptRequest.promise;
+    });
+    const runtime = createRuntime(
+      mock(() => acknowledged.promise),
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt, logger: { debug, info() {}, warn() {}, error() {} } },
+    );
+    const published = await start(runtime, { runId: 'run-a' });
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+
+    const aborting = runtime.abort('session-1');
+    await Promise.resolve();
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+      finish: 'error',
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminalEvents(published.events)).toEqual([]);
+    promptRequest.reject(new Error('prompt transport closed'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminalEvents(published.events)).toEqual([]);
+    expect(debug).toHaveBeenCalledWith(
+      'OpenCode prompt failed after an aborted terminal',
+      { error: 'prompt transport closed' },
+    );
+
+    acknowledged.resolve({ data: true });
+    await expect(aborting).resolves.toBe(true);
+    expect(failureMessages(published.events)).toEqual([]);
+    expect(terminalEvents(published.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-a',
+      outcome: 'finished',
+    }]);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
   it('does not finish the turn when its named completion arrives before abort resolves', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
@@ -2263,13 +2418,101 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('fails a deferred named abort when Stop is rejected and quiesces before recovery', async () => {
+  for (const { ordering, terminalBeforeRejection } of [
+    { ordering: 'before', terminalBeforeRejection: true },
+    { ordering: 'after', terminalBeforeRejection: false },
+  ]) {
+    it(`fails a named abort consistently when its terminal arrives ${ordering} Stop rejection`, async () => {
+      const eventStream = createEventStream();
+      const promptAsync = mock(() => Promise.resolve({}));
+      const acknowledged = deferred();
+      const abort = mock(() => acknowledged.promise);
+      const runtime = createRuntime(
+        abort,
+        promptAsync,
+        mock(() => Promise.resolve({ stream: eventStream.stream() })),
+        { turnPrompt: promptThrough(eventStream, promptAsync) },
+      );
+      const published = await start(runtime, { runId: 'run-a' });
+      eventStream.push(envelope({
+        id: 'evt_0001',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: promptAsync.mock.calls[0][0].parts[0].id,
+            messageID: 'user-a',
+            type: 'text',
+            text: 'hello',
+          },
+        },
+      }));
+
+      const aborting = runtime.abort('session-1');
+      await Promise.resolve();
+      const publishAbortedTerminal = () => eventStream.push(completedAssistantEnvelope({
+        eventId: 'evt_0002',
+        messageId: 'assistant-a',
+        parentId: 'user-a',
+        error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        finish: 'error',
+      }));
+      if (terminalBeforeRejection) {
+        publishAbortedTerminal();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(failureMessages(published.events)).toEqual([]);
+      }
+
+      acknowledged.resolve({ error: { message: 'abort rejected' } });
+      await expect(aborting).resolves.toBe(false);
+      if (!terminalBeforeRejection) publishAbortedTerminal();
+      await waitFor(() => failureMessages(published.events).length === 1);
+      expect(failureMessages(published.events)).toEqual([
+        'OpenCode interrupted the current turn without confirming the requested stop',
+      ]);
+      expect(runtime.isRunning('session-1')).toBe(false);
+
+      const recovered = collectOperation('run-b');
+      const recoveredTurn = runtime.runTurn({
+        command: 'recover',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: recovered.operation,
+      });
+      await waitFor(() => promptAsync.mock.calls.length === 2);
+      expect(abort).toHaveBeenCalledTimes(1);
+      eventStream.push(envelope({
+        id: 'evt_0003',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: promptAsync.mock.calls[1][0].parts[0].id,
+            messageID: 'user-b',
+            type: 'text',
+            text: 'recover',
+          },
+        },
+      }));
+      eventStream.push(completedAssistantEnvelope({
+        eventId: 'evt_0004',
+        messageId: 'assistant-b',
+        parentId: 'user-b',
+      }));
+      await expect(recoveredTurn).resolves.toBeUndefined();
+      expect(failureMessages(recovered.events)).toEqual([]);
+      eventStream.close();
+      runtime.shutdown();
+    });
+  }
+
+  it('describes internal successor quiescence separately from a user Stop', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
-    const acknowledged = deferred();
-    const abort = mock()
-      .mockImplementationOnce(() => acknowledged.promise)
-      .mockImplementationOnce(() => Promise.resolve({ data: true }));
+    const abortResponse = deferred();
+    const abort = mock(() => abortResponse.promise);
     const runtime = createRuntime(
       abort,
       promptAsync,
@@ -2291,24 +2534,6 @@ describe('OpenCodeRuntime abort', () => {
       },
     }));
 
-    const aborting = runtime.abort('session-1');
-    await Promise.resolve();
-    eventStream.push(completedAssistantEnvelope({
-      eventId: 'evt_0002',
-      messageId: 'assistant-a',
-      parentId: 'user-a',
-      error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
-      finish: 'error',
-    }));
-    await new Promise((resolve) => setImmediate(resolve));
-
-    acknowledged.resolve({ error: { message: 'abort rejected' } });
-    await expect(aborting).resolves.toBe(false);
-    expect(failureMessages(published.events)).toEqual([
-      'OpenCode interrupted the current turn unexpectedly',
-    ]);
-    expect(runtime.isRunning('session-1')).toBe(false);
-
     const recovered = collectOperation('run-b');
     const recoveredTurn = runtime.runTurn({
       command: 'recover',
@@ -2318,8 +2543,23 @@ describe('OpenCodeRuntime abort', () => {
       permissionMode: 'default',
       operation: recovered.operation,
     });
+    await waitFor(() => abort.mock.calls.length === 1);
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+      finish: 'error',
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(failureMessages(published.events)).toEqual([]);
+
+    abortResponse.resolve({ error: { message: 'abort rejected' } });
     await waitFor(() => promptAsync.mock.calls.length === 2);
-    expect(abort).toHaveBeenCalledTimes(2);
+    expect(failureMessages(published.events)).toEqual([
+      'OpenCode interrupted the previous turn while preparing the next message',
+    ]);
+
     eventStream.push(envelope({
       id: 'evt_0003',
       type: 'message.part.updated',
@@ -2339,7 +2579,83 @@ describe('OpenCodeRuntime abort', () => {
       parentId: 'user-b',
     }));
     await expect(recoveredTurn).resolves.toBeUndefined();
-    expect(failureMessages(recovered.events)).toEqual([]);
+    eventStream.close();
+    runtime.shutdown();
+  });
+
+  it('attributes a user Stop coalesced onto successor quiescence', async () => {
+    const eventStream = createEventStream();
+    const promptAsync = mock(() => Promise.resolve({}));
+    const abortResponse = deferred();
+    const abort = mock(() => abortResponse.promise);
+    const runtime = createRuntime(
+      abort,
+      promptAsync,
+      mock(() => Promise.resolve({ stream: eventStream.stream() })),
+      { turnPrompt: promptThrough(eventStream, promptAsync) },
+    );
+    const published = await start(runtime, { runId: 'run-a' });
+    eventStream.push(envelope({
+      id: 'evt_0001',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-a',
+          type: 'text',
+          text: 'hello',
+        },
+      },
+    }));
+
+    const recovered = collectOperation('run-b');
+    const recoveredTurn = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: recovered.operation,
+    });
+    await waitFor(() => abort.mock.calls.length === 1);
+    const stopping = runtime.abort('session-1');
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0002',
+      messageId: 'assistant-a',
+      parentId: 'user-a',
+      error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+      finish: 'error',
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(failureMessages(published.events)).toEqual([]);
+
+    abortResponse.resolve({ error: { message: 'abort rejected' } });
+    await expect(stopping).resolves.toBe(false);
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+    expect(failureMessages(published.events)).toEqual([
+      'OpenCode interrupted the current turn without confirming the requested stop',
+    ]);
+
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: promptAsync.mock.calls[1][0].parts[0].id,
+          messageID: 'user-b',
+          type: 'text',
+          text: 'recover',
+        },
+      },
+    }));
+    eventStream.push(completedAssistantEnvelope({
+      eventId: 'evt_0004',
+      messageId: 'assistant-b',
+      parentId: 'user-b',
+    }));
+    await expect(recoveredTurn).resolves.toBeUndefined();
     eventStream.close();
     runtime.shutdown();
   });
