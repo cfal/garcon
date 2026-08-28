@@ -153,7 +153,7 @@ describe('GitWorkbench', () => {
 		render(GitWorkbenchTestHost, {
 			props: {
 				target: makeTarget(),
-				presentation: 'main',
+				presentation: 'pane-main',
 				wb: makeWorkbenchStub(),
 				diffFontSize: 12,
 			},
@@ -168,7 +168,7 @@ describe('GitWorkbench', () => {
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				presentation: 'main',
+				presentation: 'pane-main',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},
@@ -227,7 +227,7 @@ describe('GitWorkbench', () => {
 		const { container } = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				presentation: 'main',
+				presentation: 'pane-main',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},
@@ -264,7 +264,7 @@ describe('GitWorkbench', () => {
 		const sidebar = render(GitWorkbenchTestHost, {
 			props: {
 				target,
-				presentation: 'sidebar',
+				presentation: 'pane-sidebar',
 				wb: makeWorkbenchStub(target),
 				diffFontSize: 12,
 			},

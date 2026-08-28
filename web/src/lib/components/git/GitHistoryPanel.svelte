@@ -14,7 +14,7 @@
 		getWorkspaceCoordinator,
 		getWorkspaceShortcuts,
 	} from '$lib/context';
-	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
+	import { singletonSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
 	import GitHistoryToolbar from './GitHistoryToolbar.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
@@ -27,7 +27,7 @@
 		onAppendToChatDraft,
 	}: {
 		controller: GitHistorySurfaceController;
-		presentation: 'main' | 'sidebar' | 'mobile';
+		presentation: PaneId | 'mobile';
 		visible?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
 	} = $props();

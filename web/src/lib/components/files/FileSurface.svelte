@@ -35,7 +35,7 @@
 
 	let { session, presentation, onClose, closeDisabled = false }: Props = $props();
 	const files = getFileSessions();
-	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
+	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		if (presentation !== 'mobile') {

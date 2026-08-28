@@ -22,7 +22,7 @@
 
 	let {
 		session,
-		presentation = 'main',
+		presentation = 'pane-main',
 		onOpen,
 		notifications = createNotificationsStore(),
 		workspaceLayout = createWorkspaceLayoutStore(),
@@ -38,7 +38,7 @@
 	localSettings.markdownViewerFontSize = '14';
 	const fileSessions = new FileSessionRegistry({
 		getIsMobile: () => presentation === 'mobile',
-		getDefaultPlacement: () => 'dialog',
+		getDefaultPlacement: () => ({ type: 'dialog' }),
 		getEditorSettings: () => ({
 			wordWrap: false,
 			showLineNumbers: true,

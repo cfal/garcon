@@ -23,7 +23,7 @@ function identity(path: string): CanonicalFileIdentity {
 	};
 }
 
-function request(path: string, origin: PresentationHostId = 'main'): FileOpenRequest {
+function request(path: string, origin: PresentationHostId = 'pane-main'): FileOpenRequest {
 	return {
 		fileRootPath: '/workspace',
 		relativePath: path,
@@ -91,7 +91,7 @@ function createHarness(
 	}));
 	const getDefaultPlacement = vi.fn(
 		(mode: FileRendererMode, _origin: PresentationHostId) =>
-			options.placements?.[mode] ?? 'dialog',
+			options.placements?.[mode] ?? ({ type: 'dialog' } as const),
 	);
 	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
@@ -142,7 +142,7 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.open({
 			...resolved,
 			mode: 'auto',
-			origin: 'main',
+			origin: 'pane-main',
 			reason: 'user-open',
 		});
 
@@ -153,31 +153,38 @@ describe('FileSessionRegistry', () => {
 	});
 
 	it.each([
-		['src/file.ts', 'code', 'main', 'main'],
-		['assets/logo.png', 'image', 'sidebar', 'sidebar'],
-		['docs/README.md', 'markdown', 'dialog', 'dialog'],
+		['src/file.ts', 'code', 'pane-main', { type: 'pane', paneId: 'pane-main' }],
+		['assets/logo.png', 'image', 'pane-sidebar', { type: 'pane', paneId: 'pane-sidebar' }],
+		['docs/README.md', 'markdown', 'dialog', { type: 'dialog' }],
 	] as const)('forwards %s as %s from %s origin', async (path, mode, origin, expected) => {
 		const harness = createHarness({
-			placements: { code: 'main', image: 'sidebar', markdown: 'dialog' },
+			placements: {
+				code: { type: 'pane', paneId: 'pane-main' },
+				image: { type: 'pane', paneId: 'pane-sidebar' },
+				markdown: { type: 'dialog' },
+			},
 		});
 
 		await harness.registry.open(request(path, origin));
 
 		expect(harness.getDefaultPlacement).toHaveBeenCalledWith(mode, origin);
-		expect(harness.placementCalls[0]?.target).toBe(expected);
+		expect(harness.placementCalls[0]?.target).toEqual(expected);
 	});
 
 	it('uses an explicit desktop target instead of the configured default', async () => {
-		const harness = createHarness({ placements: { code: 'dialog' } });
+		const harness = createHarness({ placements: { code: { type: 'dialog' } } });
 
-		await harness.registry.open({ ...request('src/file.ts'), target: 'sidebar' });
+		await harness.registry.open({
+			...request('src/file.ts'),
+			target: { type: 'pane', paneId: 'pane-sidebar' },
+		});
 
 		expect(harness.getDefaultPlacement).not.toHaveBeenCalled();
-		expect(harness.placementCalls[0]?.target).toBe('sidebar');
+		expect(harness.placementCalls[0]?.target).toEqual({ type: 'pane', paneId: 'pane-sidebar' });
 	});
 
 	it('ignores desktop placement preferences while mobile', async () => {
-		const harness = createHarness({ isMobile: true, placements: { code: 'main' } });
+		const harness = createHarness({ isMobile: true, placements: { code: { type: 'pane', paneId: 'pane-main' } } });
 
 		await harness.registry.open(request('src/mobile.ts'));
 
@@ -199,9 +206,9 @@ describe('FileSessionRegistry', () => {
 
 	it('joins concurrent canonical aliases and applies the latest requested location', async () => {
 		const harness = createHarness();
-		const first = harness.registry.open({ ...request('src/file.ts', 'main'), line: 2, col: 3 });
+		const first = harness.registry.open({ ...request('src/file.ts', 'pane-main'), line: 2, col: 3 });
 		const second = harness.registry.open({
-			...request('alias/src/file.ts', 'sidebar'),
+			...request('alias/src/file.ts', 'pane-sidebar'),
 			line: 8,
 			col: 4,
 		});
@@ -211,7 +218,7 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
 		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
-		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'pane-main');
 		expect(harness.focusCalls).toEqual([firstSession?.id]);
 		expect(firstSession?.requestedLine).toBe(8);
 		expect(firstSession?.requestedColumn).toBe(4);
@@ -290,17 +297,17 @@ describe('FileSessionRegistry', () => {
 
 	it('focuses an existing identity without moving or duplicating it', async () => {
 		const harness = createHarness();
-		const opened = await harness.registry.open(request('src/file.ts', 'main'));
+		const opened = await harness.registry.open(request('src/file.ts', 'pane-main'));
 		await harness.registry.open({
-			...request('src/file.ts', 'sidebar'),
-			target: 'sidebar',
+			...request('src/file.ts', 'pane-sidebar'),
+			target: { type: 'pane', paneId: 'pane-sidebar' },
 			line: 12,
 		});
 
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
 		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
-		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'pane-main');
 		expect(harness.focusCalls).toEqual([opened?.id]);
 		expect(opened?.requestedLine).toBe(12);
 	});

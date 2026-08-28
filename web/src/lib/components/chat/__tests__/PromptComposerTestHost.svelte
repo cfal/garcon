@@ -353,9 +353,9 @@
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: 'singleton:chat' },
 		isSurfacePresented: () => true,
-		focusPreviousTabInFocusedHost: () => false,
-		focusNextTabInFocusedHost: () => false,
-		toggleFocusBetweenMainAndSidebar: () => undefined,
+		focusPreviousTabInFocusedPane: () => false,
+		focusNextTabInFocusedPane: () => false,
+		cyclePaneFocus: () => undefined,
 		layout: {
 			surface: () => ({ id: 'singleton:chat', type: 'singleton' as const, kind: 'chat' as const }),
 		},

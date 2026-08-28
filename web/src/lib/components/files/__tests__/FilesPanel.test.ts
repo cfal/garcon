@@ -11,7 +11,7 @@ import { setFilesPanelTestContext } from './files-panel-test-context.js';
 afterEach(cleanup);
 
 describe('FilesPanel', () => {
-	it.each(['main', 'sidebar', 'mobile'] as const)(
+	it.each(['pane-main', 'pane-sidebar', 'mobile'] as const)(
 		'opens a sibling-project file from the %s presentation against the canonical project base',
 		async (presentation) => {
 		const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
@@ -23,7 +23,7 @@ describe('FilesPanel', () => {
 		}));
 		const fileSessions = new FileSessionRegistry({
 			getIsMobile: () => presentation === 'mobile',
-			getDefaultPlacement: () => 'dialog',
+			getDefaultPlacement: () => ({ type: 'dialog' }),
 			getEditorSettings: () => ({
 				get wordWrap() {
 					return false;

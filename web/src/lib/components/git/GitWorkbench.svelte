@@ -34,7 +34,7 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
-	import { singletonSurfaceId, type HostId } from '$lib/workspace/surface-types.js';
+	import { singletonSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
@@ -48,7 +48,7 @@
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
 		target?: GitWorkbenchTarget | null;
-		presentation: HostId | 'mobile';
+		presentation: PaneId | 'mobile';
 		active?: boolean;
 		wb: GitWorkbenchStore;
 		diffFontSize: number;
@@ -69,7 +69,7 @@
 		onOpenInEditor,
 	}: GitWorkbenchProps = $props();
 	let isMobile = $derived(presentation === 'mobile');
-	let fullscreenHost = $derived<HostId | null>(presentation === 'mobile' ? null : presentation);
+	let fullscreenPaneId = $derived<PaneId | null>(presentation === 'mobile' ? null : presentation);
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
@@ -415,8 +415,8 @@
 				{@render diffNavigation()}
 				{@render inspectorButtons()}
 				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={toggleFileTree} />
-				{#if fullscreenHost}
-					<WorkspaceFullscreenButton host={fullscreenHost} />
+				{#if fullscreenPaneId}
+					<WorkspaceFullscreenButton host={fullscreenPaneId} />
 				{/if}
 			</div>
 		</div>

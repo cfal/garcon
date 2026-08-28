@@ -26,7 +26,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
+	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings, getWorkspaceCoordinator } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
@@ -129,6 +129,7 @@
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
+	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
@@ -422,7 +423,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
+			origin: appShell.isMobile ? 'mobile' : workspace.defaultPaneId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
@@ -443,7 +444,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : 'main',
+			origin: appShell.isMobile ? 'mobile' : workspace.defaultPaneId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { HostId } from '$lib/workspace/surface-types';
+	import type { PaneId } from '$lib/workspace/surface-types';
 	import { setLocalSettings, setTerminalRegistry, setWorkspaceCoordinator } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import TerminalSurface from '../TerminalSurface.svelte';
 
 	interface Props {
-		host: HostId | 'mobile';
+		host: PaneId | 'mobile';
 		onClose?: (surfaceId: string) => void;
 		onModifier?: (modifier: 'ctrl' | 'alt') => void;
 		onToolbarKey?: (key: string) => void;

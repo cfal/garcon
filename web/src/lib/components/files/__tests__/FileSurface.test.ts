@@ -12,7 +12,7 @@ import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
 afterEach(cleanup);
 
 describe('FileSurface', () => {
-	const portablePresentations = ['main', 'sidebar', 'mobile'] as const;
+	const portablePresentations = ['pane-main', 'pane-sidebar', 'mobile'] as const;
 	const rendererModes = ['code', 'markdown', 'image'] as const;
 	const closeCases = portablePresentations.flatMap((presentation) =>
 		rendererModes.map((rendererMode) => ({ presentation, rendererMode })),
@@ -37,7 +37,7 @@ describe('FileSurface', () => {
 	it('invokes and disables the supplied Close intent', async () => {
 		const onClose = vi.fn();
 		const rendered = render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			onClose,
 			closeDisabled: false,
 		});
@@ -46,7 +46,7 @@ describe('FileSurface', () => {
 		expect(onClose).toHaveBeenCalledOnce();
 
 		await rendered.rerender({
-			presentation: 'main',
+			presentation: 'pane-main',
 			onClose,
 			closeDisabled: true,
 		});
@@ -65,7 +65,7 @@ describe('FileSurface', () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		try {
 			const { container } = render(FileSurfaceTestHost, {
-				presentation: 'main',
+				presentation: 'pane-main',
 				rendererMode: 'code',
 				dirty: true,
 				onClose: vi.fn(),
@@ -134,7 +134,7 @@ describe('FileSurface', () => {
 	});
 
 	it('retains File Sessions in desktop file chrome', () => {
-		const { container } = render(FileSurfaceTestHost, { presentation: 'main' });
+		const { container } = render(FileSurfaceTestHost, { presentation: 'pane-main' });
 
 		expect(container.querySelector('[data-surface-action-measure="open-files"]')).not.toBeNull();
 	});
@@ -143,7 +143,7 @@ describe('FileSurface', () => {
 		'exposes Refresh for the %s renderer',
 		(rendererMode) => {
 			const { container } = render(FileSurfaceTestHost, {
-				presentation: 'main',
+				presentation: 'pane-main',
 				rendererMode,
 			});
 
@@ -156,7 +156,7 @@ describe('FileSurface', () => {
 	it('refreshes from the stale banner without replacing current content', async () => {
 		const onRefresh = vi.fn();
 		render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			rendererMode: 'markdown',
 			loading: false,
 			stale: true,
@@ -173,7 +173,7 @@ describe('FileSurface', () => {
 
 	it('keeps the toolbar Refresh action focusable while busy', () => {
 		render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			loading: false,
 			refreshing: true,
 		});
@@ -186,7 +186,7 @@ describe('FileSurface', () => {
 
 	it('disables Save while a refresh is pending', () => {
 		render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			rendererMode: 'code',
 			loading: false,
 			refreshing: true,
@@ -199,7 +199,7 @@ describe('FileSurface', () => {
 	it('refreshes from the toolbar action', async () => {
 		const onRefresh = vi.fn();
 		render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			loading: false,
 			onRefresh,
 		});
@@ -211,7 +211,7 @@ describe('FileSurface', () => {
 	it('checks freshness immediately when the surface mounts', async () => {
 		const onCheckFreshness = vi.fn();
 		render(FileSurfaceTestHost, {
-			presentation: 'main',
+			presentation: 'pane-main',
 			onCheckFreshness,
 		});
 

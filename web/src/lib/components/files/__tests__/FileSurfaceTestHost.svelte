@@ -64,7 +64,7 @@
 
 	const fileSessions = new FileSessionRegistry({
 		getIsMobile: () => presentation === 'mobile',
-		getDefaultPlacement: () => 'dialog',
+		getDefaultPlacement: () => ({ type: 'dialog' }),
 		getEditorSettings: () => ({
 			wordWrap: false,
 			showLineNumbers: true,

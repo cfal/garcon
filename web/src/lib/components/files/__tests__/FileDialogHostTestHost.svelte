@@ -12,21 +12,15 @@
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import FileDialogHost from '../FileDialogHost.svelte';
-	import {
-		DEFAULT_DESKTOP_LAYOUT_ORDER,
-		type DesktopLayoutOrder,
-	} from '$lib/layout/desktop-layout.js';
 
 	let {
 		request,
 		onResolve = () => undefined,
 		isMobile = false,
-		desktopLayoutOrder = DEFAULT_DESKTOP_LAYOUT_ORDER,
 	}: {
 		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'open-files';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
-		desktopLayoutOrder?: DesktopLayoutOrder;
 	} = $props();
 
 	const initialRequest = untrack(() => request);
@@ -67,10 +61,6 @@
 	let openFilesVisible = $state(initialRequest === 'open-files');
 	const localSettings = createLocalSettingsStore();
 
-	$effect(() => {
-		localSettings.desktopLayoutOrder = [...desktopLayoutOrder];
-	});
-
 	setAppShell({
 		get isMobile() {
 			return isMobile;
@@ -88,7 +78,8 @@
 		},
 		attachmentErrors: {},
 		closeSurface: async () => true,
-		moveDialogFileToHost: async () => undefined,
+		moveDialogFileToPane: async () => undefined,
+		lastFocusedPaneId: 'pane-main',
 		isSurfaceCloseBlocked: () => false,
 		frameVersion: () => 0,
 		retryPresentation: async () => undefined,

@@ -17,7 +17,7 @@ function renderScreen(comparison: GitComparisonController, isLoading: boolean): 
 	render(GitComparisonScreen, {
 		comparison,
 		isLoading,
-		presentation: 'main',
+		presentation: 'pane-main',
 		fontSize: 12,
 		onEdit: vi.fn(),
 		onRefresh: vi.fn(),
@@ -53,7 +53,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison: new GitComparisonController(),
 			isLoading: true,
-			presentation: 'main',
+			presentation: 'pane-main',
 			fontSize: 12,
 			onEdit,
 			onRefresh: vi.fn(),
@@ -94,7 +94,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'main',
+			presentation: 'pane-main',
 			fontSize: 12,
 			onEdit,
 			onRefresh: vi.fn(),
@@ -116,7 +116,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'main',
+			presentation: 'pane-main',
 			fontSize: 12,
 			onRefresh: vi.fn(),
 			onOpenChat: vi.fn(),
@@ -156,7 +156,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'main',
+			presentation: 'pane-main',
 			fontSize: 12,
 			onBack,
 			onRefresh: vi.fn(),
@@ -168,7 +168,7 @@ describe('GitComparisonScreen', () => {
 		expect(onBack).toHaveBeenCalledOnce();
 	});
 
-	it.each(['main', 'sidebar'] as const)(
+	it.each(['pane-main', 'pane-sidebar'] as const)(
 		'keeps the %s summary beside top-aligned wide controls',
 		async (presentation) => {
 			const comparison = new GitComparisonController();
@@ -217,7 +217,7 @@ describe('GitComparisonScreen', () => {
 		const { container } = render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'main',
+			presentation: 'pane-main',
 			fontSize: 12,
 			onRefresh: vi.fn(),
 			onOpenChat: vi.fn(),

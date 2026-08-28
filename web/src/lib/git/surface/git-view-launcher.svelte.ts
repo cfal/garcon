@@ -1,10 +1,7 @@
-import {
-	singletonSurfaceId,
-	type HostId,
-} from '$lib/workspace/surface-types.js';
+import { singletonSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
 
 export interface GitViewLaunchOrigin {
-	presentation: HostId | 'mobile';
+	presentation: PaneId | 'mobile';
 }
 
 export interface GitViewWorkspacePort {
@@ -12,10 +9,7 @@ export interface GitViewWorkspacePort {
 		surface(surfaceId: string): unknown;
 	};
 	focusMobileSingleton(kind: 'git-history' | 'git-compare'): Promise<void>;
-	openSingleton(
-		kind: 'git-history' | 'git-compare',
-		host: HostId,
-	): Promise<void>;
+	openSingletonAsTab(kind: 'git-history' | 'git-compare', paneId: PaneId): Promise<void>;
 }
 
 export interface GitViewSurfacePort {
@@ -35,7 +29,7 @@ export class GitViewLauncher {
 			if (origin.presentation === 'mobile') {
 				await this.workspace.focusMobileSingleton('git-history');
 			} else {
-				await this.workspace.openSingleton('git-history', origin.presentation);
+				await this.workspace.openSingletonAsTab('git-history', origin.presentation);
 			}
 		} catch (error) {
 			if (!existed && !this.workspace.layout.surface(surfaceId)) {
@@ -52,7 +46,7 @@ export class GitViewLauncher {
 			if (origin.presentation === 'mobile') {
 				await this.workspace.focusMobileSingleton('git-compare');
 			} else {
-				await this.workspace.openSingleton('git-compare', origin.presentation);
+				await this.workspace.openSingletonAsTab('git-compare', origin.presentation);
 			}
 		} catch (error) {
 			if (!existed && !this.workspace.layout.surface(surfaceId)) {

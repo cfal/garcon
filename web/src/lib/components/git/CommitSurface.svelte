@@ -12,10 +12,11 @@
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
 	import CommitFileTree from './CommitFileTree.svelte';
 	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+	import type { PaneId } from '$lib/workspace/surface-types.js';
 
 	interface Props {
 		controller: CommitController;
-		presentation: 'main' | 'sidebar' | 'mobile';
+		presentation: PaneId | 'mobile';
 	}
 
 	let { controller, presentation }: Props = $props();

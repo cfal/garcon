@@ -14,7 +14,7 @@ describe('TerminalSurface', () => {
 	});
 
 	it('labels the terminal path as its initial directory rather than its current directory', () => {
-		render(TerminalSurfaceTestHost, { host: 'main' });
+		render(TerminalSurfaceTestHost, { host: 'pane-main' });
 
 		expect(screen.getByText('Started in /workspace/project')).toBeTruthy();
 	});
@@ -35,7 +35,7 @@ describe('TerminalSurface', () => {
 			})),
 		});
 		try {
-			render(TerminalSurfaceTestHost, { host: 'main' });
+			render(TerminalSurfaceTestHost, { host: 'pane-main' });
 			expect(screen.getByRole('button', { name: 'Ctrl' })).toBeTruthy();
 		} finally {
 			Object.defineProperty(window, 'matchMedia', {
@@ -50,7 +50,7 @@ describe('TerminalSurface', () => {
 		const onModifier = vi.fn();
 		const onToolbarKey = vi.fn();
 		const { rerender } = render(TerminalSurfaceTestHost, {
-			host: 'main',
+			host: 'pane-main',
 			onClose,
 			onModifier,
 			onToolbarKey,
@@ -70,7 +70,7 @@ describe('TerminalSurface', () => {
 	});
 
 	it('adds the mobile renderer inset only in mobile presentation', async () => {
-		const { container, rerender } = render(TerminalSurfaceTestHost, { host: 'main' });
+		const { container, rerender } = render(TerminalSurfaceTestHost, { host: 'pane-main' });
 		const terminalHost = container.querySelector<HTMLElement>('[data-terminal-host]');
 
 		expect(terminalHost?.classList.contains('mobile-terminal-host')).toBe(false);
@@ -86,7 +86,7 @@ describe('TerminalSurface', () => {
 
 	it('terminates the session only from the explicit toolbar action', async () => {
 		const onTerminate = vi.fn();
-		render(TerminalSurfaceTestHost, { host: 'main', onTerminate });
+		render(TerminalSurfaceTestHost, { host: 'pane-main', onTerminate });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Terminate' }));
 
@@ -95,7 +95,7 @@ describe('TerminalSurface', () => {
 
 	it('focuses the session picker when the server reports the terminal cap', async () => {
 		render(TerminalSurfaceTestHost, {
-			host: 'main',
+			host: 'pane-main',
 			createError: new ApiError(409, 'Limit reached', 'terminal-limit'),
 		});
 
@@ -106,7 +106,7 @@ describe('TerminalSurface', () => {
 
 	it('switches the current terminal tab instead of opening another tab', async () => {
 		const onSwitch = vi.fn();
-		render(TerminalSurfaceTestHost, { host: 'main', onSwitch });
+		render(TerminalSurfaceTestHost, { host: 'pane-main', onSwitch });
 
 		await fireEvent.change(screen.getByRole('combobox', { name: 'Terminal session' }), {
 			target: { value: 'terminal-2' },
@@ -117,7 +117,7 @@ describe('TerminalSurface', () => {
 
 	it('creates a terminal by replacing the current terminal tab', async () => {
 		const onCreateReplacing = vi.fn();
-		render(TerminalSurfaceTestHost, { host: 'main', onCreateReplacing });
+		render(TerminalSurfaceTestHost, { host: 'pane-main', onCreateReplacing });
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New terminal' }));
 
@@ -127,19 +127,19 @@ describe('TerminalSurface', () => {
 	it('delegates primary focus to the terminal runtime', async () => {
 		const onFocus = vi.fn();
 		const { rerender } = render(TerminalSurfaceTestHost, {
-			host: 'main',
+			host: 'pane-main',
 			onFocus,
 			focusRequestToken: 0,
 		});
 
-		await rerender({ host: 'main', onFocus, focusRequestToken: 1 });
+		await rerender({ host: 'pane-main', onFocus, focusRequestToken: 1 });
 
 		expect(onFocus).toHaveBeenCalledOnce();
 	});
 
 	it('changes and persists the terminal font size from the toolbar settings', async () => {
 		const onFontSize = vi.fn();
-		render(TerminalSurfaceTestHost, { host: 'main', onFontSize });
+		render(TerminalSurfaceTestHost, { host: 'pane-main', onFontSize });
 
 		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(13));
 		await fireEvent.click(screen.getByRole('button', { name: 'Terminal settings' }));

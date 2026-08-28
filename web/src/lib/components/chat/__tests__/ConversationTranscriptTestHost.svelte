@@ -43,7 +43,7 @@
 	setFileSessions(
 		new FileSessionRegistry({
 			getIsMobile: () => false,
-			getDefaultPlacement: () => 'main',
+			getDefaultPlacement: () => ({ type: 'pane', paneId: 'pane-main' }),
 			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
 			getPlacement: () => ({
 				async placeFileSession() {

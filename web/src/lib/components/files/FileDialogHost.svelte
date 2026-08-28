@@ -1,7 +1,6 @@
 <script lang="ts">
 	import X from '@lucide/svelte/icons/x';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
-	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -12,7 +11,6 @@
 	import {
 		getAppShell,
 		getFileSessions,
-		getLocalSettings,
 		getWorkspaceCoordinator,
 		getSurfaceFrames,
 	} from '$lib/context';
@@ -23,11 +21,9 @@
 	} from '$lib/workspace/surface-frame-context.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { shouldWaitForFileRenderer } from './file-renderer-frame.js';
-	import { resolveDesktopLayout } from '$lib/layout/desktop-layout.js';
 
 	const files = getFileSessions();
 	const appShell = getAppShell();
-	const localSettings = getLocalSettings();
 	const workspace = getWorkspaceCoordinator();
 	const surfaceFrames = getSurfaceFrames();
 	const frameBridge = new SurfaceFrameBridge();
@@ -39,9 +35,6 @@
 		descriptor?.type === 'file' ? files.get(descriptor.fileSessionId) : null,
 	);
 	const fileRenderer = lazyRenderer(() => import('./FileSurface.svelte'));
-	const workspaceSidebarBeforeMain = $derived(
-		resolveDesktopLayout(localSettings.desktopLayoutOrder).workspaceSidebarBeforeMain,
-	);
 	let rendererRetryKey = $state(0);
 
 	function retryFileSurface(): void {
@@ -68,28 +61,11 @@
 				<Button
 					variant="ghost"
 					size="icon-sm"
-					onclick={() => void workspace.moveDialogFileToHost('main')}
-					aria-label={m.file_session_move_main()}
-					title={m.file_session_move_main()}
+					onclick={() => void workspace.moveDialogFileToPane(workspace.lastFocusedPaneId)}
+					aria-label={m.file_session_move_to_pane()}
+					title={m.file_session_move_to_pane()}
 				>
-					{#if workspaceSidebarBeforeMain}
-						<PanelRight class="h-4 w-4 rtl:-scale-x-100" />
-					{:else}
-						<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
-					{/if}
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					onclick={() => void workspace.moveDialogFileToHost('sidebar')}
-					aria-label={m.file_session_move_sidebar()}
-					title={m.file_session_move_sidebar()}
-				>
-					{#if workspaceSidebarBeforeMain}
-						<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
-					{:else}
-						<PanelRight class="h-4 w-4 rtl:-scale-x-100" />
-					{/if}
+					<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
 				</Button>
 				<Button
 					variant="ghost"

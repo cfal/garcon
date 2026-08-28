@@ -14,6 +14,7 @@
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitWorkbenchToolbar from './GitWorkbenchToolbar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { PaneId } from '$lib/workspace/surface-types.js';
 
 	let {
 		controller,
@@ -22,7 +23,7 @@
 		onAppendToChatDraft,
 	}: {
 		controller: GitWorkbenchSurfaceController;
-		presentation: 'main' | 'sidebar' | 'mobile';
+		presentation: PaneId | 'mobile';
 		visible?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
 	} = $props();
@@ -80,7 +81,7 @@
 	function openCommit(): void {
 		void (presentation === 'mobile'
 			? workspace.focusMobileSingleton('commit')
-			: workspace.openSingleton('commit', 'sidebar'));
+			: workspace.openSingletonInNewPane('commit', presentation));
 	}
 
 	async function openPush(): Promise<void> {

@@ -7,7 +7,7 @@
 		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
 	import type { GitHistoryComparisonSelectionState } from '$lib/git/history/git-history-comparison-selection.svelte.js';
-	import type { HostId } from '$lib/workspace/surface-types.js';
+	import type { PaneId } from '$lib/workspace/surface-types.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 	import GitComparisonScreen from './GitComparisonScreen.svelte';
@@ -16,7 +16,7 @@
 		history: GitHistoryController;
 		comparisonSelection: GitHistoryComparisonSelectionState;
 		projectPath: string | null;
-		presentation: HostId | 'mobile';
+		presentation: PaneId | 'mobile';
 		active?: boolean;
 		diffMode: DiffMode;
 		contextLines: number;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { PaneId } from '$lib/workspace/surface-types.js';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitSurfaceToolbar from '../GitSurfaceToolbar.svelte';
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
@@ -16,7 +17,7 @@
 		showMenuLeadingContent = false,
 	}: {
 		target: GitTargetSessionController;
-		presentation: 'main' | 'sidebar' | 'mobile';
+		presentation: PaneId | 'mobile';
 		onClose?: () => void;
 		closeDisabled?: boolean;
 		showMenuLeadingContent?: boolean;

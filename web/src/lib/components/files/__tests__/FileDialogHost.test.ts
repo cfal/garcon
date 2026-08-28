@@ -4,22 +4,13 @@ import * as m from '$lib/paraglide/messages.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
-	it('points host-move icons toward the configured pane positions', async () => {
-		const rendered = render(FileDialogHostTestHost, { request: 'file' });
-		const moveMain = await screen.findByRole('button', { name: m.file_session_move_main() });
-		const moveSidebar = screen.getByRole('button', { name: m.file_session_move_sidebar() });
-		const defaultMainIcon = moveMain.querySelector('.lucide-panel-left');
-		expect(defaultMainIcon).toBeTruthy();
-		expect(defaultMainIcon?.classList).toContain('rtl:-scale-x-100');
-		expect(moveSidebar.querySelector('.lucide-panel-right')).toBeTruthy();
-
-		await rendered.rerender({
-			request: 'file',
-			desktopLayoutOrder: ['workspace-sidebar', 'main', 'chat-list'],
+	it('offers a single dock-to-pane control for the dialog file', async () => {
+		render(FileDialogHostTestHost, { request: 'file' });
+		const moveButtons = await screen.findAllByRole('button', {
+			name: m.file_session_move_to_pane(),
 		});
-
-		expect(moveMain.querySelector('.lucide-panel-right')).toBeTruthy();
-		expect(moveSidebar.querySelector('.lucide-panel-left')).toBeTruthy();
+		expect(moveButtons).toHaveLength(1);
+		expect(moveButtons[0].querySelector('.lucide-panel-left')).toBeTruthy();
 	});
 
 	it('overrides the shared responsive width cap in restored and maximized layouts', async () => {
