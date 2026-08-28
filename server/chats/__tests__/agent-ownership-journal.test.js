@@ -52,6 +52,7 @@ function createRegistry(initialEntries) {
   const entries = new Map(Object.entries(initialEntries));
   return {
     getChat: (chatId) => entries.get(chatId) ?? null,
+    setChat: (chatId, value) => entries.set(chatId, value),
     listAllChats: () => Object.fromEntries(entries),
     updateChat: mock(async (chatId, patch) => {
       const current = entries.get(chatId);
@@ -258,6 +259,92 @@ describe('AgentOwnershipJournal', () => {
     await expect(journal.initialize()).rejects.toThrow('Invalid agent ownership journal');
   });
 
+  it('removes registry ownership without waiting for provider release', async () => {
+    const registry = createRegistry({ chat: chat() });
+    let releaseStarted;
+    let releaseProvider;
+    const release = mock(() => new Promise((resolve) => {
+      releaseProvider = resolve;
+      releaseStarted?.();
+    }));
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger,
+    });
+    await journal.initialize();
+
+    const started = new Promise((resolve) => { releaseStarted = resolve; });
+    await journal.delete('chat');
+
+    expect(registry.getChat('chat')).toBeNull();
+    expect(ledger.deleteChat).toHaveBeenCalledWith('chat');
+    expect((await readJournal(workspaceDir)).ownershipIntents[0]).toMatchObject({
+      chatId: 'chat',
+      phase: 'registry-removed',
+    });
+    await started;
+    expect(release).toHaveBeenCalledTimes(1);
+    releaseProvider();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if ((await readJournal(workspaceDir)).ownershipIntents.length === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error('delete cleanup did not settle');
+  });
+
+  it('does not let blocked cleanup A delay delete B', async () => {
+    const registry = createRegistry({ chatA: chat(), chatB: chat('target-agent') });
+    let releaseA;
+    const release = mock((request) => {
+      if (request.chat.chatId === 'chatA') return new Promise((resolve) => { releaseA = resolve; });
+      return Promise.resolve();
+    });
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger: { deleteChat: mock(() => {}) },
+    });
+    await journal.initialize();
+
+    await journal.delete('chatA');
+    const deleteB = journal.delete('chatB');
+    await Promise.race([
+      deleteB,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('delete B blocked')), 100)),
+    ]);
+    expect(registry.getChat('chatB')).toBeNull();
+    releaseA();
+    await waitForEmptyJournal(workspaceDir);
+  });
+
+  it('does not delete a recreated same-id ledger during old provider cleanup', async () => {
+    const original = chat();
+    const replacement = chat('target-agent');
+    const registry = createRegistry({ chat: original });
+    let releaseProvider;
+    const release = mock(() => new Promise((resolve) => { releaseProvider = resolve; }));
+    const ledger = { deleteChat: mock(() => {}) };
+    const journal = new AgentOwnershipJournal({
+      workspaceDir,
+      registry,
+      integrations: createIntegrations(release),
+      ledger,
+    });
+    await journal.initialize();
+
+    await journal.delete('chat');
+    registry.setChat('chat', replacement);
+    releaseProvider();
+    await waitForEmptyJournal(workspaceDir);
+
+    expect(ledger.deleteChat).toHaveBeenCalledTimes(1);
+    expect(registry.getChat('chat')).toBe(replacement);
+  });
+
   it('retains delete cleanup when provider release fails', async () => {
     const reference = referenceFor('source-agent');
     await writeJournal(workspaceDir, {
@@ -320,6 +407,14 @@ function referenceFor(agentId) {
     settings: envelope(agentId),
     agentOwnershipEpoch: `${agentId}-epoch`,
   };
+}
+
+async function waitForEmptyJournal(workspaceDir) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if ((await readJournal(workspaceDir)).ownershipIntents.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('delete cleanup did not settle');
 }
 
 async function readJournal(workspaceDir) {
