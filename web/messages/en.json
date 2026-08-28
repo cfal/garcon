@@ -1017,6 +1017,7 @@
 	"workspace_drop_zone_left": "Left",
 	"workspace_drop_zone_right": "Right",
 	"workspace_drop_zone_replace": "Replace",
+	"workspace_drop_zone_swap": "Swap panes",
 	"workspace_drop_zone_max_panes": "4 panes max",
 	"workspace_drop_zone_already_open": "Already open",
 	"workspace_scroll_to_bottom": "Scroll to bottom",
