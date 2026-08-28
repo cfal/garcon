@@ -16,7 +16,8 @@ export class CarryOverGarbageCollector {
     readonly store: Pick<CarryOverTranscriptStore, 'cleanupTemporary' | 'sweep'>;
   }, options: { readonly defer?: (callback: () => void) => void } = {}) {
     this.#defer = options.defer ?? ((callback) => {
-      setTimeout(callback, CARRYOVER_GC_DELAY_MS);
+      const timer = setTimeout(callback, CARRYOVER_GC_DELAY_MS);
+      timer.unref?.();
     });
   }
 
