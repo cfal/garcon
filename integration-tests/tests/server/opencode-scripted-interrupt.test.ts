@@ -15,6 +15,7 @@ import {
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
+  type RecordedChatCompletionsRequest,
 } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -75,7 +76,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         command: marker('HELD_PROMPT'),
       }));
       if (!active.turnId) throw new Error('OpenCode start response omitted its turn id.');
-      await held.requested;
+      const heldRequest = await held.requested;
 
       const stopCursor = fixture.client.markEvents();
       const stopped = await fixture.client.stopChat({
@@ -103,9 +104,10 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         active.turnId,
       );
 
-      // Stop confirms the request, not provider quiescence. Releasing the model only after
-      // OpenCode persists its abort prevents a normal completion from winning that race.
+      // Stop confirms the request, not provider quiescence. The held response must stay
+      // unavailable until OpenCode has both persisted the abort and closed the model request.
       await waitForAbortedAssistant(fixture, chatId);
+      await waitForModelRequestAbort(heldRequest);
       held.release();
 
       testEnvironment.model.reset();
@@ -380,7 +382,7 @@ describeOnLinux('scripted OpenCode unrequested native abort', () => {
       const native = await openCodeNativeSession(fixture, chatId);
       const interruptedCursor = fixture.client.markEvents();
       // An out-of-band native abort reproduces the provider result, not the unknown upstream
-      // trigger: Garcon receives the same owned MessageAbortedError without entering Stop.
+      // trigger. Unlike Garcon Stop, this endpoint returns after OpenCode finalizes cancellation.
       try {
         await abortOpenCodeSessionOutOfBand(fixture, native.agentSessionId);
       } finally {
@@ -549,6 +551,15 @@ async function waitForAbortedAssistant(
     await Bun.sleep(25);
   }
   throw new Error('OpenCode never settled the aborted assistant message.');
+}
+
+async function waitForModelRequestAbort(request: RecordedChatCompletionsRequest): Promise<void> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (request.abortedAt !== null) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('OpenCode never closed the aborted turn model request.');
 }
 
 async function waitForFile(path: string): Promise<void> {

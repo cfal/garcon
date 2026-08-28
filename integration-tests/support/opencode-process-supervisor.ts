@@ -30,6 +30,7 @@ export interface OpenCodeProcessState {
   parentStartTimeTicks: string;
   mode: 'direct' | 'proxy';
   status: 'running' | 'stopping' | 'stopped';
+  // Proxy-only test access to the backend; shutdown clears it before persisting stopped state.
   backendUrl?: string;
   reason?: 'signal' | 'parent-exited' | 'provider-exited' | 'startup-failed';
   version?: string;
