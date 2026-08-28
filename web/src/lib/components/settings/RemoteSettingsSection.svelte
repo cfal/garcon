@@ -9,7 +9,6 @@
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
 	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
-	import ChatIdDiscoverySettingsCard from './ChatIdDiscoverySettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
 
@@ -68,7 +67,6 @@
 		</div>
 
 		<TranscriptSearchSettingsCard />
-		<ChatIdDiscoverySettingsCard />
 
 		<RemoteGenerationSettingsCard
 			settingsKey="chatTitle"

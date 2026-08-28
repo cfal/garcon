@@ -52,7 +52,6 @@ import {
   TranscriptViewNotInitializedError,
 } from './errors.js';
 import { statSizeIfExists } from './file-stat.js';
-import { readProviderActivityWatermark } from './native-activity-query.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -433,15 +432,32 @@ export class TranscriptLedgerStore {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
       const session = this.#currentSession(entry, current);
-      const watermark = readProviderActivityWatermark(
-        entry.db,
-        current.viewId,
-        current.contentStartOrdinal,
-      );
+      const watermark = entry.db.query<{ ordinal: number; at: string }, [string, number]>(`
+        SELECT ordinal, at
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal >= ? AND (
+          kind IN (
+            'provider-row',
+            'session',
+            'permission-requested',
+            'permission-cancelled',
+            'permission-expired'
+          )
+          OR (
+            kind = 'run-ended'
+            AND json_extract(payload_json, '$.value.origin') = 'provider'
+          )
+          OR (
+            kind = 'user-input'
+            AND client_message_id IS NULL
+          )
+        )
+        ORDER BY ordinal DESC LIMIT 1
+      `).get(current.viewId, current.contentStartOrdinal);
       return {
         viewId: current.viewId,
         session,
-        providerWatermark: watermark,
+        providerWatermark: watermark ?? null,
       };
     });
   }

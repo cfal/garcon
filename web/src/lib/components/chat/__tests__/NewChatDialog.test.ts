@@ -59,10 +59,7 @@ function deferredRefinement(): DeferredRefinement {
 function makeSnapshot(): RemoteSettingsSnapshot {
 	return {
 		version: 1,
-		features: {
-			transcriptSearch: { enabled: false },
-			chatIdDiscovery: { enabled: true },
-		},
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: {

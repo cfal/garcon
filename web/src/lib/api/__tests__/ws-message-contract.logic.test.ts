@@ -69,10 +69,7 @@ function makeSettingsSnapshot(
 ): RemoteSettingsSnapshot {
 	return {
 		version: 2,
-		features: {
-			transcriptSearch: { enabled: false },
-			chatIdDiscovery: { enabled: true },
-		},
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },

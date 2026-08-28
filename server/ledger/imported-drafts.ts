@@ -4,13 +4,6 @@ import {
   type ChatMessage,
 } from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
-import {
-  CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_TITLE,
-  sanitizeImportedChatIdDisclosure,
-  transformChatIdRequest,
-} from '../../common/chat-id-discovery.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {
@@ -18,23 +11,13 @@ export interface ImportedRow {
   readonly providerMeta: JsonObject | null;
 }
 
-interface ImportedDraftOptions {
-  readonly chatIdDiscoveryEnabled?: boolean;
-}
-
 // Turns provider-supplied history into ledger drafts. Adoption, reload, and native fork all
 // read a provider's own record and must agree on what it becomes, so they share this mapping.
 export function importedDrafts(
   rows: readonly ImportedRow[],
   now: () => string,
-  options: ImportedDraftOptions = {},
 ): LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(
-    message,
-    providerMeta,
-    now,
-    options.chatIdDiscoveryEnabled ?? true,
-  ));
+  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(message, providerMeta, now));
 }
 
 // Turns conversation carried over from an earlier agent into frozen drafts. No provider ever
@@ -49,32 +32,10 @@ export function frozenDrafts(
 
 // Permission lifecycle is reconstructed from its own durable rows, never from imported history.
 function importedDraftFor(
-  original: ChatMessage,
+  message: ChatMessage,
   providerMeta: JsonObject | null,
   now: () => string,
-  chatIdDiscoveryEnabled: boolean,
 ): LedgerRowDraft[] {
-  const request = transformChatIdRequest(original);
-  if (request) {
-    const at = original.timestamp || now();
-    return [
-      ...(request.message
-        ? [{ kind: 'provider-row' as const, at, message: request.message, providerMeta }]
-        : []),
-      {
-        kind: 'notice',
-        at,
-        message: chatIdDiscoveryEnabled
-          ? CHAT_ID_REQUEST_NOTICE_CONTENT
-          : CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
-        detail: chatIdDiscoveryEnabled
-          ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-          : { type: 'chat-id-discovery-disabled', title: CHAT_ID_REQUEST_NOTICE_TITLE },
-        providerMeta: null,
-      },
-    ];
-  }
-  const message = sanitizeImportedChatIdDisclosure(original);
   if (message.type === 'permission-request'
       || message.type === 'permission-resolved'
       || message.type === 'permission-cancelled'

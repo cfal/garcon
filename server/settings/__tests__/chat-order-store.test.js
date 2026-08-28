@@ -3,10 +3,7 @@ import { ChatOrderStore } from '../domain-stores.js';
 
 function projectSettings(overrides = {}) {
   return {
-    features: {
-      transcriptSearch: { enabled: false },
-      chatIdDiscovery: { enabled: true },
-    },
+    features: { transcriptSearch: { enabled: false } },
     ui: {},
     paths: {},
     chatNames: {},

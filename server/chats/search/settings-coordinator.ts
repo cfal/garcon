@@ -1,6 +1,5 @@
 import { KeyedPromiseLock } from '../../lib/keyed-lock.js';
 import type { SettingsStore } from '../../settings/store.js';
-import type { FeatureSettings } from '../../settings/types.js';
 import type { TranscriptSearchController } from './controller.js';
 
 const SETTINGS_LOCK_KEY = 'transcript-search-setting';
@@ -25,21 +24,12 @@ export class TranscriptSearchSettingsCoordinator {
     this.#controller = controller;
   }
 
-  async setEnabled(
-    enabled: boolean,
-    patch: Partial<FeatureSettings> = {},
-  ): Promise<void> {
+  async setEnabled(enabled: boolean): Promise<void> {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
-      const featurePatch = {
-        ...patch,
-        transcriptSearch: { enabled },
-      };
-      const hasAdditionalPatch = Object.keys(patch).length > 0;
       if (current === enabled) {
         if (!enabled) {
           await this.#disableAndDelete();
-          if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
         } else {
           try {
             await this.#controller.start();
@@ -49,14 +39,13 @@ export class TranscriptSearchSettingsCoordinator {
               error instanceof Error ? error.message : String(error),
             );
           }
-          if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
         }
         return;
       }
       if (enabled) {
         try {
           await this.#controller.start();
-          await this.#settings.setFeatureSettings(featurePatch);
+          await this.#settings.setTranscriptSearchEnabled(true);
         } catch (error) {
           await this.#controller.disableAndDelete().catch(() => undefined);
           throw new TranscriptSearchSettingsError(
@@ -67,9 +56,8 @@ export class TranscriptSearchSettingsCoordinator {
         return;
       }
 
-      await this.#settings.setFeatureSettings({ transcriptSearch: { enabled: false } });
+      await this.#settings.setTranscriptSearchEnabled(false);
       await this.#disableAndDelete();
-      if (hasAdditionalPatch) await this.#settings.setFeatureSettings(patch);
     });
   }
 

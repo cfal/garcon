@@ -19,10 +19,7 @@ vi.mock('$lib/ws/drain', () => ({
 function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
 	return {
 		version: 1,
-		features: {
-			transcriptSearch: { enabled: false },
-			chatIdDiscovery: { enabled: true },
-		},
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },

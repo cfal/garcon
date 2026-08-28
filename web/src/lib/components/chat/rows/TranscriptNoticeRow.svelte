@@ -2,11 +2,7 @@
 	// Renders a durable transcript notice. Handoff summaries collapse by default
 	// behind the shared clamp so very long summaries stay bounded, while the
 	// server-supplied title remains visible for orientation.
-	import {
-		isChatIdDiscoveryDisabledNoticeDetail,
-		isHandoffSummaryNoticeDetail,
-		TranscriptNoticeMessage,
-	} from '$shared/chat-types';
+	import { isHandoffSummaryNoticeDetail, TranscriptNoticeMessage } from '$shared/chat-types';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import Markdown from '../Markdown.svelte';
@@ -30,12 +26,9 @@
 	}: Props = $props();
 
 	const isHandoffSummary = $derived(isHandoffSummaryNoticeDetail(message.detail));
-	const isDiscoveryDisabled = $derived(
-		isChatIdDiscoveryDisabledNoticeDetail(message.detail),
-	);
 </script>
 
-<ChatEventCard variant={isDiscoveryDisabled ? 'error' : 'info'}>
+<ChatEventCard variant="info">
 	{#snippet body()}
 		{#if message.title}
 			<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>

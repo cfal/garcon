@@ -8,12 +8,6 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
 import {
-  CHAT_ID_REQUEST_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_TITLE,
-  CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
-  transformChatIdRequest,
-} from '../../common/chat-id-discovery.js';
-import {
   parseChatRowContent,
   parseChatRowTitle,
 } from '../../common/chat-row-contracts.js';
@@ -22,7 +16,6 @@ import type { CliBodyDisclosure, CliPresentation, CliRowFormat } from '../../com
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../common/chat-view.js';
 import type { JsonObject } from '../../common/json.js';
-import type { TranscriptNoticeDetail } from '../../common/transcript-notice-details.js';
 import type {
   AppendChatRowResult,
   InputComposition,
@@ -98,18 +91,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly createRunId?: () => string;
   readonly serverInstanceId?: string;
   readonly onListenerError?: (error: unknown) => void;
-  readonly chatIdRequests?: ChatIdRequestSink;
 }
-
-export interface ChatIdRequestSink {
-  enabled(): boolean;
-  request(chatId: string, viewId: TranscriptViewId): void;
-}
-
-const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
-  enabled: () => false,
-  request: () => undefined,
-});
 
 export interface PermissionResolutionClaim {
   readonly chatId: string;
@@ -133,7 +115,6 @@ export class TranscriptLedgerService {
   readonly #createRunId: () => string;
   readonly #serverInstanceId: string;
   readonly #onListenerError: (error: unknown) => void;
-  readonly #chatIdRequests: ChatIdRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -148,7 +129,6 @@ export class TranscriptLedgerService {
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
-    this.#chatIdRequests = options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK;
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -427,16 +407,11 @@ export class TranscriptLedgerService {
   appendNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    input: {
-      readonly title: string;
-      readonly content: string;
-      readonly detail?: TranscriptNoticeDetail;
-    },
+    input: { readonly title: string; readonly content: string },
   ): LedgerNoticeRow {
     return this.#appendInternalNotice(chatId, viewId, {
-      title: input.title,
-      content: input.content,
-      detail: input.detail ? { ...input.detail } : {},
+      ...input,
+      detail: {},
     });
   }
 
@@ -655,38 +630,13 @@ export class TranscriptLedgerService {
   ): void {
     switch (event.type) {
       case 'rows': {
-        const drafts: LedgerRowDraft[] = [];
-        let chatIdRequested = false;
-        const discoveryEnabled = this.#chatIdRequests.enabled();
-        for (const row of event.rows) {
-          const request = transformChatIdRequest(row.message);
-          const message = request ? request.message : row.message;
-          if (message) {
-            drafts.push({
-              kind: 'provider-row',
-              at: message.timestamp,
-              message,
-              providerMeta: row.providerMeta ?? null,
-            });
-          }
-          if (!request) continue;
-
-          if (discoveryEnabled) chatIdRequested = true;
-          drafts.push({
-            kind: 'notice',
-            at: row.message.timestamp,
-            message: discoveryEnabled
-              ? CHAT_ID_REQUEST_NOTICE_CONTENT
-              : CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
-            detail: discoveryEnabled
-              ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-              : { type: 'chat-id-discovery-disabled', title: CHAT_ID_REQUEST_NOTICE_TITLE },
-            providerMeta: null,
-          });
-        }
-        if (drafts.length === 0) return;
-        const rows = this.#store.append(chatId, viewId, drafts);
-        if (chatIdRequested) this.#chatIdRequests.request(chatId, viewId);
+        if (event.rows.length === 0) return;
+        const rows = this.#store.append(chatId, viewId, event.rows.map((row) => ({
+          kind: 'provider-row' as const,
+          at: row.message.timestamp,
+          message: row.message,
+          providerMeta: row.providerMeta ?? null,
+        })));
         this.#notify({ type: 'rows', chatId, viewId, rows });
         return;
       }

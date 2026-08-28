@@ -1,26 +1,10 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 26 integrated design. Supersedes
+Status: revision 25 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
-
-Revision 26 adds provider-neutral chat-ID auto-discovery as a core
-canonicalization rule. While enabled, an exact assistant-message prefix requests
-the current chat ID: core removes the marker before storage, atomically appends
-a typed presentation-only request notice, and arms one view-scoped ephemeral
-disclosure. The next provider-bound user input receives the ID as server-only
-prompt context and a successful provider admission appends a typed disclosure
-notice. While disclosure is disabled, core still removes the control marker and
-appends a typed error notice, but arms no reservation. Native import always
-removes recognized request and disclosure controls,
-including while live discovery is disabled, so server context never becomes
-user-authored history after Reload or native fork. Import reconstructs a typed
-request or disabled-error notice at the provider timestamp so a marker-only
-native tail remains represented in the activity watermark; disclosure notices
-have no native source and are not reconstructed. Discovery notices use the
-ordinary diagnostic notice folds and are not retained by frozen projection.
 
 Revision 25 makes enabled transcript search a second explicit genesis-adoption
 occasion alongside first open. Search maintenance probes current-view
@@ -525,7 +509,7 @@ by reload, continuation/fork seeding, and adoption.
 | Kind | Writer | Rendered |
 | --- | --- | --- |
 | `user-input` | core | yes |
-| `notice` | core, including `add-row`, chat-ID discovery, and accepted producer advisories | yes |
+| `notice` | core, including `add-row` and accepted producer advisories | yes |
 | `agent-switch` | core | yes |
 | `permission-resolved` | core | specialized |
 | `provider-row` | integration | yes |
@@ -550,13 +534,7 @@ Kind semantics:
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload. Chat-ID discovery uses `{type: 'chat-id-request'}` for each recognized
-  request, `{type: 'chat-id-discovery-disabled'}` when the request is denied, and
-  `{type: 'chat-id-disclosure', delivery: 'input' | 'steer'}` after successful
-  provider admission. They are presentation-only diagnostic notices: they
-  render, replay, share, and export, but do not enter search,
-  preview, model context, resend, carryover, or fork seeds. Rendered
-  `TranscriptNoticeMessage` and `ErrorMessage` instances own
+  Reload. Rendered `TranscriptNoticeMessage` and `ErrorMessage` instances own
   their optional top-level `title`; a rendered CLI row's detail is only the
   `{type: 'cli-row'}` provenance marker.
 - `agent-switch`: the durable ownership boundary written at in-place
@@ -574,15 +552,7 @@ Kind semantics:
   explicit provider-specific message type from `common/chat-types.ts`). An
   `ErrorMessage` is presentation-only even though its integration provenance
   keeps it in this row kind; every other provider row is conversational.
-  Streaming deltas are overlay, never rows. Core recognizes only an assistant
-  message beginning exactly with
-  `<get-garcon-chat-id />`, removes that prefix and leading remainder whitespace
-  before append, and omits the provider row when no non-whitespace remainder
-  exists. The original `providerMeta` remains attached when a cleaned row is
-  stored. The adjacent typed request or disabled-error notice is part of the
-  same append batch; only an enabled live request arms disclosure state. Native
-  import applies the same text transform and reconstructs the request or
-  disabled-error notice without arming runtime state.
+  Streaming deltas are overlay, never rows.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -997,8 +967,7 @@ durability:
   logged and not retried.
 - Acceptance snapshots: core canonicalizes the event into a core-owned
   immutable envelope; later mutation of the caller's object has no
-  effect. Chat-ID request recognition is part of this canonicalization, so the
-  cleaned provider row and request notice either commit together or not at all.
+  effect.
 - The commit executes inside `publish()` before it returns; observed
   order is the order synchronous mutation calls begin on the event loop,
   and no ledger transaction spans an `await`, so no lock or race
@@ -1125,16 +1094,6 @@ The guarantee is durable before provider dispatch, not durable at send:
   a still-queued entry only removes it from the queue. Restart
   intentionally loses queued entries and does not reconstruct them or
   mark them.
-
-Chat-ID disclosure is provider-only prompt decoration. One process-ephemeral,
-view-scoped request reservation may append
-`<garcon-chat-id>{chatId}</garcon-chat-id>` to the next direct, queued, steering,
-or goal-control input after its durable user row is admitted. The durable user
-row retains exactly the user's content. A successful provider admission appends
-one typed disclosure notice; rejected or unknown delivery releases the
-reservation for a later input. Restart intentionally loses an unanswered
-reservation. View replacement, chat deletion, in-place handoff, and disabling
-the feature clear it.
 
 Submission is idempotent by `(chatId, transcriptViewId,
 clientMessageId)`. The client generates `clientMessageId` once per

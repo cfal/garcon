@@ -124,7 +124,6 @@ function makeRouter(overrides = {}) {
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
-    chatIdDiscovery: overrides.chatIdDiscovery,
   });
   return {
     router,
@@ -139,7 +138,6 @@ function makeRouter(overrides = {}) {
     conversation,
     endpointResolver,
     transcript,
-    chatIdDiscovery: overrides.chatIdDiscovery,
   };
 }
 
@@ -171,36 +169,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
       sink: expect.objectContaining({ publish: expect.any(Function) }),
     }));
     expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
-  });
-
-  it('attaches chat ID disclosure after carryover planning and records delivery', async () => {
-    const chatIdDiscovery = discoveryController();
-    const createCarriedContext = mock(async ({ destinationPrompt }) => {
-      expect(destinationPrompt).toBe('continue');
-      expect(destinationPrompt).not.toContain('<garcon-chat-id>');
-      return { context: null, summary: 'Clean summary' };
-    });
-    const appendHandoffSummary = mock((_chatId, _viewId, summary) => {
-      expect(summary).not.toContain('<garcon-chat-id>');
-    });
-    const { router, start } = makeRouter({
-      chatIdDiscovery,
-      createCarriedContext,
-      appendHandoffSummary,
-      conversation: [],
-    });
-
-    await router.runAgentTurn('chat-1', 'continue', {
-      clientMessageId: 'message-1',
-      turnId: 'turn-1',
-    });
-
-    expect(start.mock.calls[0][0].prompt).toBe('continue\n\n<garcon-chat-id>chat-1</garcon-chat-id>');
-    expect(chatIdDiscovery.recordDelivered).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-      'input',
-    );
-    expect(chatIdDiscovery.release).not.toHaveBeenCalled();
   });
 
   it('excludes every composed prompt row from fresh-session carried context', async () => {
@@ -444,143 +412,20 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(resume.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
-  it('releases a reserved disclosure when resume fails', async () => {
-    const chatIdDiscovery = discoveryController();
-    const resume = mock(async () => { throw new Error('resume failed'); });
-    const { router } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      chatIdDiscovery,
-      resume,
-    });
-
-    await expect(router.runAgentTurn('chat-1', 'resume', {
-      turnId: 'turn-1',
-    })).rejects.toThrow('resume failed');
-
-    expect(chatIdDiscovery.recordDelivered).not.toHaveBeenCalled();
-    expect(chatIdDiscovery.release).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-    );
-  });
-
-  it('records only prepared and accepted steering disclosures', async () => {
-    const acceptedDiscovery = discoveryController();
-    const acceptedSteer = mock(async (request) => {
-      await request.prepareDelivery();
-      return { kind: 'accepted' };
-    });
-    const accepted = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      chatIdDiscovery: acceptedDiscovery,
-      steer: acceptedSteer,
-    });
-
-    await accepted.router.steerInput(
-      'chat-1',
-      'guidance',
-      {
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-1',
-        transcriptViewId: 'view-1',
-      },
-      accepted.providerTarget,
-      async () => undefined,
-    );
-
-    expect(acceptedSteer.mock.calls[0][0].input).toContain('<garcon-chat-id>chat-1</garcon-chat-id>');
-    expect(acceptedDiscovery.recordDelivered).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-      'steer',
-    );
-
-    const unpreparedDiscovery = discoveryController();
-    const unprepared = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      chatIdDiscovery: unpreparedDiscovery,
-      steer: mock(async () => ({ kind: 'accepted' })),
-    });
-    await unprepared.router.steerInput(
-      'chat-1',
-      'guidance',
-      {
-        clientRequestId: 'request-2',
-        clientMessageId: 'message-2',
-        transcriptViewId: 'view-1',
-      },
-      unprepared.providerTarget,
-      async () => undefined,
-    );
-    expect(unpreparedDiscovery.recordDelivered).not.toHaveBeenCalled();
-    expect(unpreparedDiscovery.release).toHaveBeenCalledTimes(1);
-  });
-
-  it('releases an unknown steer disclosure for the next input', async () => {
-    const chatIdDiscovery = discoveryController();
-    const resume = mock(async (request) => {
-      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
-      return { id: 'resume-handle' };
-    });
-    const { router } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      chatIdDiscovery,
-      resume,
-      steer: mock(async (request) => {
-        await request.prepareDelivery();
-        return { kind: 'failed', outcome: 'unknown', message: 'write outcome unknown' };
-      }),
-    });
-
-    await expect(router.steerInput(
-      'chat-1',
-      'guidance',
-      {
-        clientRequestId: 'request-1',
-        clientMessageId: 'message-1',
-        transcriptViewId: 'view-1',
-      },
-      {},
-      async () => undefined,
-    )).resolves.toMatchObject({ kind: 'failed', outcome: 'unknown' });
-    expect(chatIdDiscovery.recordDelivered).not.toHaveBeenCalled();
-    expect(chatIdDiscovery.release).toHaveBeenCalledTimes(1);
-
-    chatIdDiscovery.release.mockClear();
-    await router.runAgentTurn('chat-1', 'retry', { turnId: 'turn-2' });
-    expect(resume.mock.calls[0][0].prompt).toContain(
-      '<garcon-chat-id>chat-1</garcon-chat-id>',
-    );
-    expect(chatIdDiscovery.recordDelivered).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-      'input',
-    );
-  });
-
   it('submits goal control without materializing the ledger conversation', async () => {
     const conversationMessages = mock(() => {
       throw new Error('goal control must not scan ledger context');
     });
     const resume = mock(async () => ({ id: 'active-handle' }));
-    const submitGoalControl = mock(async (request) => {
-      await request.beforeDelivery({
-        validate: () => undefined,
-        commit: () => undefined,
-      });
-      return true;
-    });
-    const chatIdDiscovery = discoveryController();
-    const { router } = makeRouter({
+    const { router, submitGoalControl } = makeRouter({
       entry: {
         agentSessionId: 'native-1',
         nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
       },
       conversationMessages,
       resume,
-      submitGoalControl,
-      chatIdDiscovery,
     });
     await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
-    chatIdDiscovery.recordDelivered.mockClear();
-    chatIdDiscovery.release.mockClear();
 
     await expect(router.submitGoalControl(
       'chat-1',
@@ -590,45 +435,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     )).resolves.toBe(true);
 
     expect(conversationMessages).not.toHaveBeenCalled();
-    expect(chatIdDiscovery.reserve).toHaveBeenCalledWith(
-      'chat-1',
-      'view-1',
-      'update goal',
-    );
     expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
-    expect(submitGoalControl.mock.calls[0][0].prompt).toContain(
-      '<garcon-chat-id>chat-1</garcon-chat-id>',
-    );
-    expect(chatIdDiscovery.recordDelivered).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-      'input',
-    );
-  });
-
-  it('does not record goal disclosure when handled control skipped preparation', async () => {
-    const resume = mock(async () => ({ id: 'active-handle' }));
-    const chatIdDiscovery = discoveryController();
-    const { router } = makeRouter({
-      entry: { agentSessionId: 'native-1' },
-      resume,
-      submitGoalControl: mock(async () => true),
-      chatIdDiscovery,
-    });
-    await router.runAgentTurn('chat-1', 'start active run', { turnId: 'turn-1' });
-    chatIdDiscovery.recordDelivered.mockClear();
-    chatIdDiscovery.release.mockClear();
-
-    await expect(router.submitGoalControl(
-      'chat-1',
-      'update goal',
-      { turnId: 'turn-2', transcriptViewId: 'view-1' },
-      async () => undefined,
-    )).resolves.toBe(true);
-
-    expect(chatIdDiscovery.recordDelivered).not.toHaveBeenCalled();
-    expect(chatIdDiscovery.release).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'disclosure-1' }),
-    );
   });
 
   it('persists one coherent endpoint selection after a lazy start', async () => {
@@ -738,7 +545,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
-      transcriptViewId: 'view-1',
     }, target, prepareDelivery)).resolves.toEqual({ kind: 'accepted' });
 
     expect(captureTarget).toHaveBeenCalledWith(expect.objectContaining({
@@ -771,23 +577,6 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(sinks[1]).not.toBe(sinks[0]);
   });
 });
-
-function discoveryController() {
-  let reserved = false;
-  const reservation = { token: 'disclosure-1' };
-  return {
-    reserve: mock((_chatId, _viewId, prompt) => {
-      if (reserved) return { prompt, reservation: null };
-      reserved = true;
-      return {
-        prompt: `${prompt}\n\n<garcon-chat-id>chat-1</garcon-chat-id>`,
-        reservation,
-      };
-    }),
-    recordDelivered: mock(() => { reserved = false; }),
-    release: mock(() => { reserved = false; }),
-  };
-}
 
 function inputRow(ordinal, content) {
   const message = new UserMessage('2026-08-12T00:00:00.000Z', content);

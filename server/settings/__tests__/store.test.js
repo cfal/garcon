@@ -611,10 +611,7 @@ describe('settings store', () => {
     it('returns empty settings for missing file', async () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
-        features: {
-          transcriptSearch: { enabled: false },
-          chatIdDiscovery: { enabled: true },
-        },
+        features: { transcriptSearch: { enabled: false } },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -627,10 +624,7 @@ describe('settings store', () => {
       await fs.writeFile(settingsFile(), 'not json{{{', 'utf8');
       const settings = await store.loadSettings();
       expect(settings).toEqual({
-        features: {
-          transcriptSearch: { enabled: false },
-          chatIdDiscovery: { enabled: true },
-        },
+        features: { transcriptSearch: { enabled: false } },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -1037,70 +1031,25 @@ describe('settings store', () => {
     });
   });
 
-  describe('feature settings', () => {
-    it('defaults malformed transcript search to disabled and missing discovery to enabled', async () => {
+  describe('transcript search feature settings', () => {
+    it('defaults missing and malformed persisted values to disabled', async () => {
       await writeRaw({ features: { transcriptSearch: { enabled: 'yes' } } });
-      expect(store.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: true },
-      });
+      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: false } });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
-      expect(persisted.features).toEqual({
-        transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: true },
-      });
+      expect(persisted.features).toEqual({ transcriptSearch: { enabled: false } });
     });
 
     it('persists enabled and increments the remote settings version once', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
-      expect(store.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: true },
-      });
+      await store.setTranscriptSearchEnabled(true);
+      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
       expect(store.getRemoteSettingsVersion()).toBe(1);
       expect(events).toEqual(['changed']);
 
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
-      expect(reloaded.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: true },
-      });
-    });
-
-    it('persists disabled chat ID discovery and emits one remote change', async () => {
-      const events = [];
-      store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setFeatureSettings({ chatIdDiscovery: { enabled: false } });
-
-      expect(store.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: false },
-      });
-      expect(store.getRemoteSettingsVersion()).toBe(1);
-      expect(events).toEqual(['changed']);
-
-      const reloaded = new SettingsStore(tmpDir);
-      await reloaded.init();
-      expect(reloaded.getFeatureSettings().chatIdDiscovery).toEqual({ enabled: false });
-    });
-
-    it('persists a combined feature patch with one version and event', async () => {
-      const events = [];
-      store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setFeatureSettings({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
-      });
-
-      expect(store.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
-      });
-      expect(store.getRemoteSettingsVersion()).toBe(1);
-      expect(events).toEqual(['changed']);
+      expect(reloaded.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
     });
   });
 });

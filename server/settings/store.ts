@@ -163,10 +163,6 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
     ? rawFeatures.transcriptSearch
     : null;
   if (typeof rawTranscriptSearch?.enabled !== 'boolean') migrated = true;
-  const rawChatIdDiscovery = isRecord(rawFeatures?.chatIdDiscovery)
-    ? rawFeatures.chatIdDiscovery
-    : null;
-  if (typeof rawChatIdDiscovery?.enabled !== 'boolean') migrated = true;
   const features = normalizeRemoteFeatureSettings(raw.features);
   const chatFolders = Array.isArray(raw.chatFolders)
     ? raw.chatFolders.map(sanitizeFolder).filter((folder): folder is ChatFolder => Boolean(folder))
@@ -379,10 +375,8 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#featureSettings.getFeatureSettings();
   }
 
-  async setFeatureSettings(
-    patch: Partial<ProjectSettings['features']>,
-  ): Promise<ProjectSettings['features']> {
-    return this.#featureSettings.setFeatureSettings(patch);
+  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+    return this.#featureSettings.setTranscriptSearchEnabled(enabled);
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {

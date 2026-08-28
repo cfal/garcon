@@ -82,12 +82,7 @@
 
 	setNotifications(getNotificationsContext() as never);
 	setRemoteSettings({
-		snapshot: {
-			features: {
-				transcriptSearch: { enabled: true },
-				chatIdDiscovery: { enabled: true },
-			},
-		},
+		snapshot: { features: { transcriptSearch: { enabled: true } } },
 	} as never);
 	setLocalSettings({
 		get sidebarGroupByProject() {

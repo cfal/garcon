@@ -4,21 +4,11 @@ import {
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
-  normalizeRemoteFeatureSettings,
   normalizeRemoteSettingsSnapshot,
 } from '../settings.js';
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
-  it('defaults chat ID discovery to enabled and preserves an explicit disable', () => {
-    expect(normalizeRemoteFeatureSettings(undefined)).toEqual({
-      transcriptSearch: { enabled: false },
-      chatIdDiscovery: { enabled: true },
-    });
-    expect(normalizeRemoteFeatureSettings({
-      chatIdDiscovery: { enabled: false },
-    }).chatIdDiscovery).toEqual({ enabled: false });
-  });
   it('accepts only supported compaction context-window presets', () => {
     for (const contextWindowTokens of [200_000, 500_000, 1_000_000]) {
       expect(normalizeAgentSwitchCompactionUiSettings({ contextWindowTokens }))

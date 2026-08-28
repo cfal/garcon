@@ -12,7 +12,6 @@ import type {
   AppIdentityUiSettings,
   ChatTitleUiSettings,
   CommitMessageUiSettings,
-  ChatIdDiscoveryFeatureSettings,
   PromptRefinementUiSettings,
   TranscriptSearchFeatureSettings,
   AgentSwitchCompactionUiSettings,
@@ -73,7 +72,6 @@ export interface ProjectSettings {
 
 export interface FeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
-  chatIdDiscovery: ChatIdDiscoveryFeatureSettings;
 }
 
 export interface RecentAgentSetting {

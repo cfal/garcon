@@ -28,7 +28,6 @@ export interface TranscriptAdoptionOptions {
   readonly onAdopted?: (chatId: string) => void;
   readonly logger?: Pick<AgentLogger, 'warn'>;
   readonly now?: () => string;
-  readonly chatIdDiscoveryEnabled?: () => boolean;
 }
 
 export class TranscriptAdoptionService {
@@ -76,13 +75,7 @@ export class TranscriptAdoptionService {
       const session = sessionDraft(entry, this.#now());
       const view = this.options.ledger.initializeChat(
         chatId,
-        [
-          ...prefixRows,
-          ...(session ? [session] : []),
-          ...importedDrafts(legacyRows, this.#now, {
-            chatIdDiscoveryEnabled: this.options.chatIdDiscoveryEnabled?.() ?? true,
-          }),
-        ],
+        [...prefixRows, ...(session ? [session] : []), ...importedDrafts(legacyRows, this.#now)],
         contentStartOrdinal,
       );
       this.#notifyAdopted(chatId);

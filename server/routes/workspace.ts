@@ -20,7 +20,6 @@ import {
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
   type RemoteSettingsSnapshot,
-  type RemoteFeatureSettings,
   type RemoteUiEffectiveSettings,
 } from '../../common/settings.js';
 import {
@@ -163,33 +162,23 @@ export default function createWorkspaceRoutes(
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
   transcriptSearchSettings?: {
-    setEnabled(
-      enabled: boolean,
-      patch?: Partial<RemoteFeatureSettings>,
-    ): Promise<void>;
+    setEnabled(enabled: boolean): Promise<void>;
   },
 ): RouteMap {
 
-  function featureEnabledPatch(
-    input: Record<string, unknown>,
-    key: keyof RemoteFeatureSettings,
-  ): boolean | undefined | null {
+  function transcriptSearchEnabledPatch(input: Record<string, unknown>): boolean | undefined | null {
     if (!('features' in input)) return undefined;
     const features = input.features;
     if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
     const featureRecord = features as Record<string, unknown>;
-    if (!(key in featureRecord)) return undefined;
-    const feature = featureRecord[key];
-    if (!feature || typeof feature !== 'object' || Array.isArray(feature)) {
+    if (!('transcriptSearch' in featureRecord)) return undefined;
+    const transcriptSearch = featureRecord.transcriptSearch;
+    if (!transcriptSearch || typeof transcriptSearch !== 'object' || Array.isArray(transcriptSearch)) {
       return null;
     }
-    const setting = feature as Record<string, unknown>;
-    if (!('enabled' in setting) || typeof setting.enabled !== 'boolean') return null;
-    return setting.enabled;
-  }
-
-  function featureEnabledPatchError(key: keyof RemoteFeatureSettings): string {
-    return `features.${key}.enabled must be a boolean`;
+    const transcriptRecord = transcriptSearch as Record<string, unknown>;
+    if (!('enabled' in transcriptRecord) || typeof transcriptRecord.enabled !== 'boolean') return null;
+    return transcriptRecord.enabled;
   }
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
@@ -294,39 +283,21 @@ export default function createWorkspaceRoutes(
         return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
-      const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');
-      const chatIdDiscoveryEnabled = featureEnabledPatch(input, 'chatIdDiscovery');
+      const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
       if (transcriptSearchEnabled === null) {
         return jsonError(
-          featureEnabledPatchError('transcriptSearch'),
+          'features.transcriptSearch.enabled must be a boolean',
           400,
           'INVALID_REMOTE_SETTINGS',
           false,
         );
-      }
-      if (chatIdDiscoveryEnabled === null) {
-        return jsonError(
-          featureEnabledPatchError('chatIdDiscovery'),
-          400,
-          'INVALID_REMOTE_SETTINGS',
-          false,
-        );
-      }
-      const featurePatch: Partial<RemoteFeatureSettings> = {};
-      if (chatIdDiscoveryEnabled !== undefined) {
-        featurePatch.chatIdDiscovery = { enabled: chatIdDiscoveryEnabled };
       }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
-          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled, featurePatch);
+          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled);
         } else {
-          await settings.setFeatureSettings({
-            ...featurePatch,
-            transcriptSearch: { enabled: transcriptSearchEnabled },
-          });
+          await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
         }
-      } else if (chatIdDiscoveryEnabled !== undefined) {
-        await settings.setFeatureSettings(featurePatch);
       }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
