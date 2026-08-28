@@ -6,6 +6,8 @@ import {
 	ResizeObserverHarness,
 } from '../../shared/__tests__/resize-observer-harness.js';
 import type { DesktopLayoutNode, PaneId } from '$lib/workspace/surface-types.js';
+import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
+import { WorkspacePaneDndStore } from '$lib/workspace/pane-dnd.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const {
@@ -99,6 +101,19 @@ function paneTabs(order: string[], activeId = order[0] ?? null) {
 	return { order, activeId, mru: [...order] };
 }
 
+function dispatchDragEvent(
+	target: Element,
+	type: 'dragstart' | 'dragover' | 'drop',
+	dataTransfer: DataTransfer,
+	clientX = 0,
+): void {
+	const event = new Event(type, { bubbles: true, cancelable: true });
+	Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+	Object.defineProperty(event, 'clientX', { value: clientX });
+	Object.defineProperty(event, 'clientY', { value: 16 });
+	target.dispatchEvent(event);
+}
+
 describe('WorkspaceTaskBar', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -115,6 +130,42 @@ describe('WorkspaceTaskBar', () => {
 		cleanup();
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it('commits a native tab drop at the resolved destination index', async () => {
+		const dnd = new WorkspacePaneDndStore(createWorkspaceLayoutStore());
+		render(WorkspaceTaskBar, {
+			paneId: PANE_MAIN,
+			tabs: paneTabs(
+				['singleton:chat', 'singleton:git', 'singleton:pull-requests'],
+				'singleton:git',
+			),
+			singlePane: true,
+			labelFor: (surfaceId: string) =>
+				surfaceId === 'singleton:chat'
+					? 'Chat'
+					: surfaceId === 'singleton:git'
+						? 'Git'
+						: 'Pull requests',
+			onSelect: vi.fn(),
+			dnd,
+		});
+		const gitTab = screen.getByRole('tab', { name: 'Git' });
+		const pullRequestsTab = screen.getByRole('tab', { name: 'Pull requests' });
+		vi.spyOn(pullRequestsTab, 'getBoundingClientRect').mockReturnValue(
+			new DOMRect(-100, 0, 80, 32),
+		);
+		const dataTransfer = new DataTransfer();
+
+		dispatchDragEvent(gitTab, 'dragstart', dataTransfer);
+		expect(dnd.draggedSurfaceId).toBe('singleton:git');
+		dispatchDragEvent(pullRequestsTab, 'dragover', dataTransfer);
+		expect(dnd.activeTarget).toMatchObject({ kind: 'tab', paneId: PANE_MAIN, index: 2 });
+		dispatchDragEvent(pullRequestsTab, 'drop', dataTransfer);
+
+		await waitFor(() =>
+			expect(moveTabToPane).toHaveBeenCalledWith('singleton:git', PANE_MAIN, 2),
+		);
 	});
 
 	it('puts active-tab operations at the top of the pane menu', async () => {
@@ -151,6 +202,40 @@ describe('WorkspaceTaskBar', () => {
 		await fireEvent.click(moveItem);
 		expect(moveTabToPane).toHaveBeenCalledWith('singleton:git', PANE_TWO);
 	});
+
+	it.each([
+		{ direction: 'left', label: () => m.workspace_move_tab_left(), destinationIndex: 0 },
+		{ direction: 'right', label: () => m.workspace_move_tab_right(), destinationIndex: 2 },
+	])(
+		'reorders the active tab $direction with the keyboard',
+		async ({ label, destinationIndex }) => {
+			render(WorkspaceTaskBar, {
+				paneId: PANE_MAIN,
+				tabs: paneTabs(['singleton:chat', 'singleton:git', 'file:one'], 'singleton:git'),
+				singlePane: false,
+				labelFor: (surfaceId: string) =>
+					surfaceId === 'singleton:chat'
+						? 'Chat'
+						: surfaceId === 'singleton:git'
+							? 'Git'
+							: surfaceId === 'singleton:files'
+								? 'Files'
+								: 'one.ts',
+				onSelect: vi.fn(),
+			});
+
+			const trigger = screen.getByRole('button', { name: m.workspace_taskbar_actions() });
+			trigger.focus();
+			await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+			const action = await screen.findByRole('menuitem', { name: label() });
+			action.focus();
+			await fireEvent.keyDown(action, { key: 'Enter' });
+
+			await waitFor(() =>
+				expect(moveTabToPane).toHaveBeenCalledWith('singleton:git', PANE_MAIN, destinationIndex),
+			);
+		},
+	);
 
 	it('offers edge splits for a tab in a multi-tab pane', async () => {
 		render(WorkspaceTaskBar, {

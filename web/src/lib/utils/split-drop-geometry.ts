@@ -1,5 +1,3 @@
-import * as m from '$lib/paraglide/messages.js';
-
 export type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
 
 export interface SplitDropZonePresentation {
@@ -9,7 +7,6 @@ export interface SplitDropZonePresentation {
 	hitInsetClass: string;
 	// Strong outcome preview showing the half (or whole) the drop will fill.
 	resultInsetClass: string;
-	label: () => string;
 }
 
 export const SPLIT_DROP_ZONES: SplitDropZonePresentation[] = [
@@ -17,31 +14,26 @@ export const SPLIT_DROP_ZONES: SplitDropZonePresentation[] = [
 		zone: 'top',
 		hitInsetClass: 'top-1.5 inset-x-1.5 bottom-[75%]',
 		resultInsetClass: 'top-1.5 inset-x-1.5 bottom-[50%]',
-		label: m.workspace_drop_zone_top,
 	},
 	{
 		zone: 'bottom',
 		hitInsetClass: 'bottom-1.5 inset-x-1.5 top-[75%]',
 		resultInsetClass: 'bottom-1.5 inset-x-1.5 top-[50%]',
-		label: m.workspace_drop_zone_bottom,
 	},
 	{
 		zone: 'left',
 		hitInsetClass: 'left-1.5 top-[25%] bottom-[25%] right-[75%]',
 		resultInsetClass: 'left-1.5 inset-y-1.5 right-[50%]',
-		label: m.workspace_drop_zone_left,
 	},
 	{
 		zone: 'right',
 		hitInsetClass: 'right-1.5 top-[25%] bottom-[25%] left-[75%]',
 		resultInsetClass: 'right-1.5 inset-y-1.5 left-[50%]',
-		label: m.workspace_drop_zone_right,
 	},
 	{
 		zone: 'center',
 		hitInsetClass: 'inset-[25%]',
 		resultInsetClass: 'inset-1.5',
-		label: m.workspace_drop_zone_replace,
 	},
 ];
 

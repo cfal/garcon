@@ -4,7 +4,12 @@
 	import SubagentManagementControl from '$lib/components/chat/SubagentManagementControl.svelte';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
-	import { getSurfaceFrames, getWorkspaceCoordinator, getWorkspacePanesContext } from '$lib/context';
+	import {
+		getNotifications,
+		getSurfaceFrames,
+		getWorkspaceCoordinator,
+		getWorkspacePanesContext,
+	} from '$lib/context';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
 	import { CHAT_SURFACE_ID, type PaneNode } from '$lib/workspace/surface-types.js';
 	import { isSplitEdgeZone, SPLIT_DROP_ZONES } from '$lib/utils/split-drop-geometry.js';
@@ -35,6 +40,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const notifications = getNotifications();
 	const surfaceFrames = getSurfaceFrames();
 	const panesContext = getWorkspacePanesContext();
 	const dnd = $derived(panesContext.dnd);
@@ -47,9 +53,10 @@
 	);
 	const panePresentations = $derived(presentations.filter((item) => item.paneId === pane.id));
 	const dropZones = SPLIT_DROP_ZONES;
-	const activeDropTarget = $derived(
-		dnd.activeTarget?.paneId === pane.id ? dnd.activeTarget : null,
-	);
+	const activeDropTarget = $derived.by(() => {
+		const target = dnd.activeTarget;
+		return target?.kind === 'pane' && target.paneId === pane.id ? target : null;
+	});
 	const activeResultInset = $derived(
 		activeDropTarget
 			? (dropZones.find((zone) => zone.zone === activeDropTarget.zone)?.resultInsetClass ?? null)
@@ -57,8 +64,18 @@
 	);
 
 	function dropZoneLabel(zone: (typeof SPLIT_DROP_ZONES)[number]): string {
-		if (zone.zone === 'center') return m.workspace_drop_zone_add_tab();
-		return zone.label();
+		switch (zone.zone) {
+			case 'top':
+				return m.workspace_drop_zone_top();
+			case 'bottom':
+				return m.workspace_drop_zone_bottom();
+			case 'left':
+				return m.workspace_drop_zone_left();
+			case 'right':
+				return m.workspace_drop_zone_right();
+			case 'center':
+				return m.workspace_drop_zone_add_tab();
+		}
 	}
 
 	function zoneMapClass(zone: (typeof SPLIT_DROP_ZONES)[number]): string {
@@ -71,6 +88,9 @@
 		if (activeDropTarget?.blockedReason === 'max-panes') {
 			return 'bg-destructive/15 border-2 border-destructive/50';
 		}
+		if (activeDropTarget?.blockedReason === 'same-pane') {
+			return 'bg-muted/80 border-2 border-border';
+		}
 		return activeDropTarget?.zone === 'center'
 			? 'bg-accent/20 border-2 border-accent/50'
 			: 'bg-primary/20 border-2 border-primary/50';
@@ -79,21 +99,22 @@
 	function resultLabel(): string {
 		if (!activeDropTarget) return '';
 		if (activeDropTarget.blockedReason === 'max-panes') return m.workspace_drop_zone_max_panes();
+		if (activeDropTarget.blockedReason === 'same-pane') return m.workspace_drop_zone_same_pane();
 		const zone = dropZones.find((entry) => entry.zone === activeDropTarget.zone);
 		return zone ? dropZoneLabel(zone) : '';
 	}
 
-	function handleDrop(event: DragEvent): void {
-		const target = dnd.handlePaneDrop(pane.id, event);
-		if (!target) return;
-		const surfaceId = dnd.draggedSurfaceId;
-		if (!surfaceId) return;
-		if (target.zone === 'center') {
-			void workspace.moveTabToPane(surfaceId, pane.id);
-		} else {
-			void workspace.splitTabToEdge(surfaceId, pane.id, target.zone).catch(() => {
-				// The reducer rejects no-op and over-capacity drops.
-			});
+	async function handleDrop(event: DragEvent): Promise<void> {
+		const commit = dnd.handlePaneDrop(pane.id, event);
+		if (!commit || commit.target.kind !== 'pane') return;
+		try {
+			if (commit.target.zone === 'center') {
+				await workspace.moveTabToPane(commit.surfaceId, pane.id);
+			} else {
+				await workspace.splitTabToEdge(commit.surfaceId, pane.id, commit.target.zone);
+			}
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		}
 	}
 </script>
@@ -107,7 +128,7 @@
 	{style}
 	ondragover={isMobile ? undefined : (event) => dnd.handlePaneDragOver(pane.id, event)}
 	ondragleave={isMobile ? undefined : (event) => dnd.handlePaneDragLeave(event)}
-	ondrop={isMobile ? undefined : handleDrop}
+		ondrop={isMobile ? undefined : (event) => void handleDrop(event)}
 >
 	{#if !isMobile}
 			<div
@@ -230,6 +251,8 @@
 							'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
 							activeDropTarget.blockedReason === 'max-panes'
 								? 'bg-destructive/15 text-destructive'
+								: activeDropTarget.blockedReason === 'same-pane'
+									? 'bg-muted text-muted-foreground'
 								: activeDropTarget.zone === 'center'
 									? 'bg-accent/20 text-accent-foreground'
 									: 'bg-primary/15 text-primary',

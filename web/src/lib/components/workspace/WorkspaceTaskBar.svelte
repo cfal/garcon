@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Files from '@lucide/svelte/icons/files';
@@ -130,6 +132,7 @@
 		),
 	);
 	const activeSurfaceId = $derived(tabs.activeId);
+	const containsChat = $derived(tabs.order.includes(CHAT_SURFACE_ID));
 	const fullscreen = $derived(workspace.layout.snapshot.fullscreenPaneId === paneId);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
 	const unplacedTerminalSessions = $derived(
@@ -209,6 +212,40 @@
 		});
 	}
 
+	function moveTab(surfaceId: string, destinationPaneId: PaneId, index?: number): void {
+		const moving =
+			index === undefined
+				? workspace.moveTabToPane(surfaceId, destinationPaneId)
+				: workspace.moveTabToPane(surfaceId, destinationPaneId, index);
+		void moving.catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
+	}
+
+	function moveTabLeft(surfaceId: string): void {
+		const index = tabs.order.indexOf(surfaceId);
+		if (index <= 0) return;
+		moveTab(surfaceId, paneId, index - 1);
+	}
+
+	function moveTabRight(surfaceId: string): void {
+		const index = tabs.order.indexOf(surfaceId);
+		if (index < 0 || index >= tabs.order.length - 1) return;
+		moveTab(surfaceId, paneId, index + 1);
+	}
+
+	function splitTab(surfaceId: string, edge: 'left' | 'right' | 'top' | 'bottom'): void {
+		void workspace.splitTabToEdge(surfaceId, paneId, edge).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
+	}
+
+	function mergePane(destinationPaneId: PaneId): void {
+		void workspace.mergePaneInto(paneId, destinationPaneId).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
+	}
+
 	function recomputeVisibleTabs(): void {
 		if (!taskbarRoot || !measurementRail || !startControls || !endControls) return;
 		const widths = new Map<string, number>();
@@ -272,8 +309,32 @@
 		dnd.startTabDrag(surfaceId, paneId, event);
 	}
 
+	function handleTabDragOver(event: DragEvent, surfaceId: string): void {
+		dnd?.handleTabDragOver(paneId, surfaceId, event);
+	}
+
+	function handleTabListDragOver(event: DragEvent): void {
+		dnd?.handleTabListDragOver(paneId, event);
+	}
+
+	async function commitTabDrop(referenceSurfaceId: string | null, event: DragEvent): Promise<void> {
+		const commit = dnd?.handleTabDrop(paneId, referenceSurfaceId, event);
+		if (!commit || commit.target.kind !== 'tab') return;
+		try {
+			await workspace.moveTabToPane(commit.surfaceId, commit.target.paneId, commit.target.index);
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
+	}
+
 	function handleTabDragEnd(): void {
 		dnd?.endDrag();
+	}
+
+	function tabDropPosition(surfaceId: string): 'before' | 'after' | null {
+		const target = dnd?.activeTarget;
+		if (target?.kind !== 'tab' || target.paneId !== paneId) return null;
+		return target.referenceSurfaceId === surfaceId ? target.position : null;
 	}
 </script>
 
@@ -292,34 +353,40 @@
 
 {#snippet moveTabItems(surfaceId: string, Item: typeof DropdownMenuItem)}
 	{#if canMoveTab(surfaceId)}
+		{@const tabIndex = tabs.order.indexOf(surfaceId)}
+		<Item disabled={tabIndex <= 0} onclick={() => moveTabLeft(surfaceId)}>
+			<ArrowLeft />
+			{m.workspace_move_tab_left()}
+		</Item>
+		<Item
+			disabled={tabIndex < 0 || tabIndex >= tabs.order.length - 1}
+			onclick={() => moveTabRight(surfaceId)}
+		>
+			<ArrowRight />
+			{m.workspace_move_tab_right()}
+		</Item>
 		{#each otherPanes as pane (pane.id)}
 			{@const paneLabel = pane.tabs.activeId ? labelFor(pane.tabs.activeId) : pane.id}
-			<Item onclick={() => void workspace.moveTabToPane(surfaceId, pane.id)}>
+			<Item onclick={() => moveTab(surfaceId, pane.id)}>
 				<PanelRight class="rtl:-scale-x-100" />
 				{m.workspace_move_to_pane({ pane: paneLabel })}
 			</Item>
 		{/each}
 		{#if workspace.canSplitPane && tabs.order.length > 1}
-			<Item
-				onclick={() =>
-					void workspace.splitTabToEdge(surfaceId, paneId, 'right').catch((error) => {
-						notifications.error(
-							error instanceof Error ? error.message : m.workspace_open_failed(),
-						);
-					})}
-			>
+			<Item onclick={() => splitTab(surfaceId, 'left')}>
+				<PanelRight class="rotate-180 rtl:rotate-0" />
+				{m.workspace_split_tab_left()}
+			</Item>
+			<Item onclick={() => splitTab(surfaceId, 'right')}>
 				<PanelRight class="rtl:-scale-x-100" />
 				{m.workspace_split_tab_right()}
 			</Item>
-			<Item
-				onclick={() =>
-					void workspace.splitTabToEdge(surfaceId, paneId, 'bottom').catch((error) => {
-						notifications.error(
-							error instanceof Error ? error.message : m.workspace_open_failed(),
-						);
-					})}
-			>
+			<Item onclick={() => splitTab(surfaceId, 'top')}>
 				<PanelTop />
+				{m.workspace_split_tab_up()}
+			</Item>
+			<Item onclick={() => splitTab(surfaceId, 'bottom')}>
+				<PanelTop class="rotate-180" />
 				{m.workspace_split_tab_down()}
 			</Item>
 		{/if}
@@ -347,6 +414,7 @@
 {/snippet}
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
+	{@const dropPosition = measurement ? null : tabDropPosition(surfaceId)}
 	<button
 		{...triggerProps}
 		type="button"
@@ -368,12 +436,24 @@
 		title={labelFor(surfaceId)}
 		draggable={!measurement && dnd && canMoveTab(surfaceId) ? true : undefined}
 		ondragstart={!measurement && dnd ? (event) => handleTabDragStart(event, surfaceId) : undefined}
+		ondragover={!measurement && dnd ? (event) => handleTabDragOver(event, surfaceId) : undefined}
+		ondrop={!measurement && dnd
+			? (event) => void commitTabDrop(surfaceId, event)
+			: undefined}
 		ondragend={!measurement && dnd ? handleTabDragEnd : undefined}
 		onclick={measurement ? undefined : () => onSelect(surfaceId)}
 		onfocus={measurement ? undefined : () => onFocus?.(surfaceId)}
 		onpointerdown={measurement ? undefined : () => onFocus?.(surfaceId)}
 		onkeydown={measurement ? undefined : (event) => handleKeydown(event, surfaceId)}
 	>
+		{#if dropPosition}
+			<span
+				data-workspace-tab-drop-position={dropPosition}
+				class="pointer-events-none absolute inset-y-1 w-0.5 rounded-full bg-primary"
+				class:left-0={dropPosition === 'before'}
+				class:right-0={dropPosition === 'after'}
+			></span>
+		{/if}
 		{@render icon(surfaceId)}
 		<span class="hidden min-w-0 truncate lg:inline">{labelFor(surfaceId)}</span>
 	</button>
@@ -421,7 +501,10 @@
 					bind:this={tabViewport}
 					class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
 					role="tablist"
+					tabindex="-1"
 					aria-label={m.workspace_pane_views()}
+					ondragover={dnd ? handleTabListDragOver : undefined}
+					ondrop={dnd ? (event) => void commitTabDrop(null, event) : undefined}
 				>
 					{#each displayedSurfaceIds as surfaceId (surfaceId)}
 						{@render tab(surfaceId)}
@@ -499,6 +582,16 @@
 				{/each}
 				<DropdownMenuSeparator />
 				{@render layoutMenuItems?.()}
+				{#if !containsChat && otherPanes.length > 0}
+					<DropdownMenuLabel>{m.workspace_pane_layout()}</DropdownMenuLabel>
+					{#each otherPanes as pane (pane.id)}
+						{@const paneLabel = pane.tabs.activeId ? labelFor(pane.tabs.activeId) : pane.id}
+						<DropdownMenuItem onclick={() => mergePane(pane.id)}>
+							<PanelRight class="rtl:-scale-x-100" />
+							{m.workspace_merge_pane_into({ pane: paneLabel })}
+						</DropdownMenuItem>
+					{/each}
+				{/if}
 				<DropdownMenuItem
 					data-workspace-fullscreen-menu-item={paneId}
 					onclick={() => void workspace.toggleFullscreen(paneId)}

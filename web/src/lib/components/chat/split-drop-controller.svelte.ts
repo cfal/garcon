@@ -11,6 +11,21 @@ import {
 export type { SplitDropZone };
 export { dragLeftContainer, resolveDropZone, SPLIT_DROP_ZONES };
 
+function splitDropZoneLabel(zone: SplitDropZone): string {
+	switch (zone) {
+		case 'top':
+			return m.workspace_drop_zone_top();
+		case 'bottom':
+			return m.workspace_drop_zone_bottom();
+		case 'left':
+			return m.workspace_drop_zone_left();
+		case 'right':
+			return m.workspace_drop_zone_right();
+		case 'center':
+			return m.workspace_drop_zone_replace();
+	}
+}
+
 export type ActiveSplitDropTarget = {
 	paneId: string;
 	zone: SplitDropZone;
@@ -134,13 +149,12 @@ export function splitDropResultPresentation(
 			labelClass: 'bg-accent/20 text-accent-foreground',
 		};
 	}
-	const zonePresentation = SPLIT_DROP_ZONES.find((entry) => entry.zone === target.zone);
 	return {
 		toneClass:
 			target.zone === 'center'
 				? 'bg-accent/20 border-2 border-accent/50'
 				: 'bg-primary/20 border-2 border-primary/50',
-		label: zonePresentation?.label() ?? '',
+		label: splitDropZoneLabel(target.zone),
 		labelClass:
 			target.zone === 'center'
 				? 'bg-accent/20 text-accent-foreground'

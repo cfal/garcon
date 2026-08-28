@@ -1,6 +1,11 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { cn } from '$lib/utils/cn';
-	import type { SplitDirection } from '$lib/workspace/surface-types.js';
+	import {
+		MAX_SPLIT_RATIO,
+		MIN_SPLIT_RATIO,
+		type SplitDirection,
+	} from '$lib/workspace/surface-types.js';
 	import { clampSplitRatio } from '$lib/workspace/pane-tree.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -23,7 +28,9 @@
 		$props();
 
 	let isDragging = $state(false);
+	let previewRatio = $state<number | null>(null);
 	let trackElement: HTMLDivElement | null = $state(null);
+	let pointerCleanup: (() => void) | null = null;
 
 	const isHorizontal = $derived(direction === 'horizontal');
 
@@ -34,7 +41,8 @@
 		return (isHorizontal ? rect.width : rect.height) * boundsFraction;
 	}
 
-	function handlePointerDown(e: PointerEvent) {
+	function handlePointerDown(e: PointerEvent): void {
+		if (e.button !== 0 || !e.isPrimary || pointerCleanup) return;
 		e.preventDefault();
 		isDragging = true;
 		const startPos = isHorizontal ? e.clientX : e.clientY;
@@ -42,12 +50,14 @@
 		const size = containerSize();
 		const target = e.currentTarget as HTMLElement;
 		target.setPointerCapture?.(e.pointerId);
+		const previousUserSelect = document.body.style.userSelect;
+		const previousCursor = document.body.style.cursor;
 
 		document.body.style.userSelect = 'none';
 		document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize';
 
-		let previewRatio = startRatio;
-		function handlePointerMove(ev: PointerEvent) {
+		function handlePointerMove(ev: PointerEvent): void {
+			if (ev.pointerId !== e.pointerId) return;
 			ev.preventDefault();
 			if (size <= 0) return;
 			const currentPos = isHorizontal ? ev.clientX : ev.clientY;
@@ -55,23 +65,38 @@
 			onPreview(previewRatio);
 		}
 
-		function handlePointerUp(ev: PointerEvent) {
+		function finish(commit: boolean, ev?: PointerEvent): void {
+			if (ev && ev.pointerId !== e.pointerId) return;
+			const committedRatio = previewRatio;
+			pointerCleanup = null;
 			isDragging = false;
-			document.body.style.userSelect = '';
-			document.body.style.cursor = '';
+			document.body.style.userSelect = previousUserSelect;
+			document.body.style.cursor = previousCursor;
 			document.removeEventListener('pointermove', handlePointerMove);
 			document.removeEventListener('pointerup', handlePointerUp);
-			document.removeEventListener('pointercancel', handlePointerUp);
-			if (target.hasPointerCapture?.(ev.pointerId)) {
-				target.releasePointerCapture(ev.pointerId);
+			document.removeEventListener('pointercancel', handlePointerCancel);
+			if (target.hasPointerCapture?.(e.pointerId)) {
+				target.releasePointerCapture(e.pointerId);
 			}
+			previewRatio = null;
 			onPreview(null);
-			if (previewRatio !== startRatio) onCommit(previewRatio);
+			if (commit && committedRatio !== null && committedRatio !== startRatio) {
+				onCommit(committedRatio);
+			}
+		}
+
+		function handlePointerUp(ev: PointerEvent): void {
+			finish(true, ev);
+		}
+
+		function handlePointerCancel(ev: PointerEvent): void {
+			finish(false, ev);
 		}
 
 		document.addEventListener('pointermove', handlePointerMove);
 		document.addEventListener('pointerup', handlePointerUp);
-		document.addEventListener('pointercancel', handlePointerUp);
+		document.addEventListener('pointercancel', handlePointerCancel);
+		pointerCleanup = () => finish(false);
 	}
 
 	// Each key press is an independent preview+commit pair so held keys
@@ -86,6 +111,8 @@
 		const delta = (e.key === increaseKey ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP) / size;
 		onCommit(clampSplitRatio(ratio + delta));
 	}
+
+	onDestroy(() => pointerCleanup?.());
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -- WAI-ARIA window splitter is a focusable separator resized via arrow keys; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
@@ -103,6 +130,9 @@
 	role="separator"
 	aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
 	aria-label={m.layout_resize_panes()}
+	aria-valuemin={Math.round(MIN_SPLIT_RATIO * 100)}
+	aria-valuemax={Math.round(MAX_SPLIT_RATIO * 100)}
+	aria-valuenow={Math.round((previewRatio ?? ratio) * 100)}
 	tabindex="0"
 >
 	<!-- Wide invisible hit area for easy grabbing -->
