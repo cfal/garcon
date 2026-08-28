@@ -1054,7 +1054,7 @@ describe('settings store', () => {
     it('persists enabled and increments the remote settings version once', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setTranscriptSearchEnabled(true);
+      await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: true },
         chatIdDiscovery: { enabled: true },
@@ -1073,7 +1073,7 @@ describe('settings store', () => {
     it('persists disabled chat ID discovery and emits one remote change', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setChatIdDiscoveryEnabled(false);
+      await store.setFeatureSettings({ chatIdDiscovery: { enabled: false } });
 
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: false },

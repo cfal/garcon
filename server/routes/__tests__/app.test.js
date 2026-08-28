@@ -51,8 +51,10 @@ function createMockCtx() {
       getRemoteSettingsVersion: mock(() => 0),
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
-      setTranscriptSearchEnabled: mock(() => Promise.resolve({ transcriptSearch: { enabled: false } })),
-      setChatIdDiscoveryEnabled: mock(() => Promise.resolve({ chatIdDiscovery: { enabled: true } })),
+      setFeatureSettings: mock(() => Promise.resolve({
+        transcriptSearch: { enabled: false },
+        chatIdDiscovery: { enabled: true },
+      })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => []),
@@ -103,7 +105,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
-    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    ctx.settings.setFeatureSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -629,7 +631,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
-    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    ctx.settings.setFeatureSettings.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -676,7 +678,9 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(body.settings.features.transcriptSearch.enabled).toBe(true);
-    expect(ctx.settings.setTranscriptSearchEnabled).toHaveBeenCalledWith(true);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      transcriptSearch: { enabled: true },
+    });
   });
 
   it('rejects malformed transcript search settings', async () => {
@@ -689,7 +693,7 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
-    expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
   it('patches chat ID discovery only with a boolean setting', async () => {
@@ -708,12 +712,59 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(body.settings.features.chatIdDiscovery.enabled).toBe(false);
-    expect(ctx.settings.setChatIdDiscoveryEnabled).toHaveBeenCalledWith(false);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      chatIdDiscovery: { enabled: false },
+    });
+  });
+
+  it('persists both feature toggles in one mutation', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        chatIdDiscovery: { enabled: false },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      transcriptSearch: { enabled: true },
+      chatIdDiscovery: { enabled: false },
+    });
+  });
+
+  it('forwards the chat ID patch through the transcript search coordinator', async () => {
+    const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
+    const routes = createWorkspaceRoutes(
+      ctx.settings,
+      ctx.agents,
+      undefined,
+      undefined,
+      undefined,
+      transcriptSearchSettings,
+    );
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        transcriptSearch: { enabled: true },
+        chatIdDiscovery: { enabled: false },
+      },
+    }));
+
+    const response = await routes['/api/v1/app/settings'].PUT(
+      makeRequest('http://localhost/api/app/settings', 'PUT', {}),
+    );
+
+    expect(response.status).toBe(200);
+    expect(transcriptSearchSettings.setEnabled).toHaveBeenCalledWith(true, {
+      chatIdDiscovery: { enabled: false },
+    });
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
   it('rejects malformed chat ID discovery settings', async () => {
-    ctx.settings.setChatIdDiscoveryEnabled.mockClear();
-    ctx.settings.setTranscriptSearchEnabled.mockClear();
+    ctx.settings.setFeatureSettings.mockClear();
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },
@@ -727,8 +778,7 @@ describe('PUT /api/app/settings', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('features.chatIdDiscovery.enabled must be a boolean');
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
-    expect(ctx.settings.setChatIdDiscoveryEnabled).not.toHaveBeenCalled();
-    expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
   it('patches ui.chatTitle settings', async () => {

@@ -320,25 +320,14 @@ export class FeatureSettingsStore {
     return structuredClone(features);
   }
 
-  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+  async setFeatureSettings(
+    patch: Partial<ProjectSettings['features']>,
+  ): Promise<ProjectSettings['features']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       settings.features = {
         ...normalizeRemoteFeatureSettings(settings.features),
-        transcriptSearch: { enabled },
-      };
-      bumpRemoteSettingsVersion(settings);
-      await this.#context.saveAndMaybeEmitRemote(settings, true);
-      return structuredClone(settings.features);
-    });
-  }
-
-  async setChatIdDiscoveryEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
-    return this.#context.mutate(async () => {
-      const settings = this.#context.readSettings();
-      settings.features = {
-        ...normalizeRemoteFeatureSettings(settings.features),
-        chatIdDiscovery: { enabled },
+        ...patch,
       };
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);

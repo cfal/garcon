@@ -205,15 +205,15 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('disables chat ID discovery through the inverted remote feature patch', async () => {
+	it('disables chat ID discovery through the positive remote feature patch', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		const toggle = screen.getByRole('switch', { name: 'Disable chat ID auto-discovery' });
-		expect(toggle.getAttribute('aria-checked')).toBe('false');
+		const toggle = screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' });
+		expect(toggle.getAttribute('aria-checked')).toBe('true');
 		expect(screen.getByText(/Allows an agent to automatically discover their own chat ID/)).toBeTruthy();
 		expect(screen.getByRole('link', { name: 'See Garcon Skills' }).getAttribute('href')).toBe(
 			'https://github.com/cfal/garcon-skills',

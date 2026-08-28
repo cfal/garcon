@@ -7,17 +7,17 @@
 	const remoteSettings = getRemoteSettings();
 	let isSaving = $state(false);
 	let saveError = $state<string | null>(null);
-	let discoveryDisabled = $derived(
-		remoteSettings.snapshot?.features?.chatIdDiscovery?.enabled === false,
+	let discoveryEnabled = $derived(
+		remoteSettings.snapshot?.features?.chatIdDiscovery?.enabled !== false,
 	);
 
-	async function setDisabled(disabled: boolean): Promise<void> {
-		if (isSaving || disabled === discoveryDisabled) return;
+	async function setEnabled(enabled: boolean): Promise<void> {
+		if (isSaving || enabled === discoveryEnabled) return;
 		isSaving = true;
 		saveError = null;
 		try {
 			await remoteSettings.update({
-				features: { chatIdDiscovery: { enabled: !disabled } },
+				features: { chatIdDiscovery: { enabled } },
 			});
 		} catch (error) {
 			saveError = error instanceof Error ? error.message : m.settings_save_failed();
@@ -30,8 +30,8 @@
 <div class="border border-border bg-muted/50 rounded-lg px-4 py-3 space-y-2">
 	<div class="flex items-center justify-between gap-4">
 		<div class="min-w-0">
-			<label for="chat-id-discovery-disabled" class="text-sm font-medium text-foreground">
-				{m.settings_disable_chat_id_discovery()}
+			<label for="chat-id-discovery-enabled" class="text-sm font-medium text-foreground">
+				{m.settings_enable_chat_id_discovery()}
 			</label>
 			<div class="mt-0.5 text-xs text-muted-foreground">
 				{m.settings_chat_id_discovery_description()}{' '}
@@ -46,10 +46,10 @@
 			</div>
 		</div>
 		<Switch
-			id="chat-id-discovery-disabled"
-			checked={discoveryDisabled}
+			id="chat-id-discovery-enabled"
+			checked={discoveryEnabled}
 			disabled={isSaving}
-			onCheckedChange={(checked) => void setDisabled(checked)}
+			onCheckedChange={(checked) => void setEnabled(checked)}
 		/>
 	</div>
 	{#if saveError}
