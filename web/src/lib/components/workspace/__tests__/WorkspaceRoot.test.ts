@@ -20,6 +20,7 @@ import {
 	type WorkspaceLayoutSnapshot,
 } from '$lib/workspace/surface-types.js';
 import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
+import { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 import type { DesktopLayoutOrder } from '$lib/layout/desktop-layout.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
@@ -781,6 +782,41 @@ describe('WorkspaceRoot', () => {
 		expect(
 			screen.getByTestId('chat-surface-stub').getAttribute('data-reserve-top-floating-toolbar'),
 		).toBe('false');
+	});
+
+	it('lowers the desktop taskbar below split pane headers while split view is active', async () => {
+		installContext(canonicalWorkspaceSnapshot());
+		const splitLayout = new SplitLayoutStore();
+		testContext.current!.splitLayout = splitLayout;
+		const { container } = render(WorkspaceRoot, { isMobile: false, chatActions });
+		const toolbar = () => container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+
+		expect(toolbar()?.classList.contains('top-2')).toBe(true);
+		expect(toolbar()?.classList.contains('top-9')).toBe(false);
+
+		splitLayout.enableWithChat('chat-1');
+		await tick();
+
+		expect(toolbar()?.classList.contains('top-9')).toBe(true);
+		expect(toolbar()?.classList.contains('top-2')).toBe(false);
+
+		splitLayout.disable();
+		await tick();
+
+		expect(toolbar()?.classList.contains('top-2')).toBe(true);
+		expect(toolbar()?.classList.contains('top-9')).toBe(false);
+	});
+
+	it('keeps the desktop taskbar raised when a non-chat main surface is active during split view', async () => {
+		installContext(minimalGitSnapshot());
+		const splitLayout = new SplitLayoutStore();
+		splitLayout.enableWithChat('chat-1');
+		testContext.current!.splitLayout = splitLayout;
+		const { container } = render(WorkspaceRoot, { isMobile: false, chatActions });
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+
+		expect(toolbar?.classList.contains('top-2')).toBe(true);
+		expect(toolbar?.classList.contains('top-9')).toBe(false);
 	});
 
 	it('centers tabs independently from end-aligned desktop toolbar controls', () => {
