@@ -91,7 +91,7 @@ import {
 import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
 import {
-  openCodeAbortedTurnFailureMessage,
+  OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
   openCodeProviderFailureRow,
 } from './turn-failure.js';
 
@@ -717,6 +717,8 @@ export class OpenCodeRuntime {
     }
     const active = this.#sessions.get(route.sessionId);
     if (active?.turn !== route.turn || active.status !== 'running') {
+      // Settled routes either observed a terminal or require quiescence before provider reuse;
+      // retaining either route blocks idle retirement indefinitely.
       this.#operationRoutes.unregister(route);
     }
     if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
@@ -743,11 +745,15 @@ export class OpenCodeRuntime {
       return;
     }
     if (terminal.outcome === 'aborted') {
-      const message = openCodeAbortedTurnFailureMessage(session.turn);
       this.#logger.warn('OpenCode interrupted the current turn', {
-        agentSessionId, messageId: terminal.messageId, detail: message,
+        agentSessionId, messageId: terminal.messageId,
       });
-      this.#failTurnForProviderError(agentSessionId, session, message, terminal.messageId);
+      this.#failTurnForProviderError(
+        agentSessionId,
+        session,
+        OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+        terminal.messageId,
+      );
       return;
     }
     if (terminal.outcome === 'failed') {
@@ -769,6 +775,7 @@ export class OpenCodeRuntime {
     if (!terminal) return;
     session.deferredTerminal = null;
     this.#settleTurnTerminal(agentSessionId, session, terminal);
+    if (session.status !== 'running') this.#operationRoutes.retireTurn(session.turn);
   }
 
   #clearTurnWaiter(agentSessionId: string): void {
@@ -1300,7 +1307,7 @@ export class OpenCodeRuntime {
       await pending;
       return;
     }
-    if (session.status === 'running') await this.#abortSession(agentSessionId, 'quiescence');
+    if (session.status === 'running') await this.abort(agentSessionId);
   }
 
   async startSession(request: OpenCodeStartRequest): Promise<string> {
@@ -1692,15 +1699,8 @@ export class OpenCodeRuntime {
   }
 
   abort(agentSessionId: string): Promise<boolean> {
-    return this.#abortSession(agentSessionId, 'user-stop');
-  }
-
-  #abortSession(agentSessionId: string, intent: 'user-stop' | 'quiescence'): Promise<boolean> {
     const session = this.#sessions.get(agentSessionId);
     if (!session || session.status !== 'running') return Promise.resolve(false);
-    if (intent === 'user-stop' || session.turn.providerAbortIntent === null) {
-      session.turn.providerAbortIntent = intent;
-    }
     const existing = this.#pendingSessionAborts.get(session);
     if (existing) return existing;
 

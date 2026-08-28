@@ -395,7 +395,7 @@ describeOnLinux('scripted OpenCode unrequested native abort', () => {
       });
       expect(terminal).toMatchObject({
         type: 'agent-run-failed',
-        error: 'OpenCode interrupted the current turn unexpectedly',
+        error: 'OpenCode interrupted the turn',
       });
       await fixture.client.waitForProcessing(chatId, false, {
         afterIndex: interruptedCursor,

@@ -21,7 +21,6 @@ export interface OpenCodeTurnContext {
   providerPromptPartId: string;
   providerPromptRequestCompleted: boolean;
   providerSteeringDeliveryUnconfirmed: boolean;
-  providerAbortIntent: 'user-stop' | 'quiescence' | null;
   // Identity of the last surfaced retry notice so stream replays and repeated
   // status frames for the same scheduled attempt append one row, not many.
   lastRetryNoticeKey: string | null;
@@ -50,8 +49,9 @@ export interface OpenCodeSession {
   directory?: string;
   startedAt: string;
   lastActivityAt: number;
-  // Turn-derived uncertainty requires an abort before reuse; stream loss and an in-flight
-  // abort pin it true. Process closure clears it, while pending reverts remain purge-fenced.
+  // Turn-derived uncertainty requires an abort before reuse. Stream loss pins it until process
+  // closure; abort start sets it eagerly, while steering release and settlement may recompute it.
+  // Pending reverts remain purge-fenced.
   providerWorkRequiresQuiescence: boolean;
   activeSteeringDeliveries: number;
   deferredTerminal: OpenCodeAssistantTerminal | null;
@@ -108,7 +108,6 @@ export function createOpenCodeTurnContext(
     providerPromptPartId: createOpenCodePromptPartId(),
     providerPromptRequestCompleted: false,
     providerSteeringDeliveryUnconfirmed: false,
-    providerAbortIntent: null,
     lastRetryNoticeKey: null,
     providerContinuationMessageIds: new Set(),
     recentEventIds: new Set(),

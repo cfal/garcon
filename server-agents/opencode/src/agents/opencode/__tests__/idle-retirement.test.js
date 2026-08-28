@@ -4,10 +4,12 @@ import { OpenCodeRuntime } from '../opencode.js';
 
 function deferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function pendingUntilAborted(signal) {
@@ -21,6 +23,31 @@ function pendingUntilAborted(signal) {
 async function* connectedStream(signal) {
   yield { payload: { type: 'server.connected', properties: {} } };
   await pendingUntilAborted(signal);
+}
+
+function createEventStream() {
+  const events = [{ payload: { type: 'server.connected', properties: {} } }];
+  const waiters = [];
+  let closed = false;
+  return {
+    push(payload) {
+      events.push({ directory: '/repo', payload });
+      for (const resolve of waiters.splice(0)) resolve();
+    },
+    close() {
+      closed = true;
+      for (const resolve of waiters.splice(0)) resolve();
+    },
+    async *stream() {
+      while (!closed || events.length > 0) {
+        if (events.length > 0) {
+          yield events.shift();
+          continue;
+        }
+        await new Promise((resolve) => waiters.push(resolve));
+      }
+    },
+  };
 }
 
 function configuredProvidersResult(model) {
@@ -483,6 +510,93 @@ describe('OpenCodeRuntime idle retirement', () => {
       await timers.callback(10)();
       expect(close).toHaveBeenCalledTimes(1);
     } finally {
+      await runtime.shutdown();
+      timers.restore();
+    }
+  });
+
+  it('retires after a rejected Stop releases a deferred terminal from a failed prompt', async () => {
+    const timers = captureIntervals();
+    const eventStream = createEventStream();
+    const close = mock(() => eventStream.close());
+    const promptResponse = deferred();
+    const abortResponse = deferred();
+    const prompt = mock(() => promptResponse.promise);
+    let now = 0;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(() => Promise.resolve({
+        client: {
+          global: {
+            event: mock(() => Promise.resolve({ stream: eventStream.stream() })),
+          },
+          permission: { reply: mock(() => Promise.resolve({})) },
+          session: {
+            create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
+            prompt,
+            abort: mock(() => abortResponse.promise),
+          },
+        },
+        server: { close },
+      })),
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      runtime.startPurgeTimer();
+      await runtime.startSession({
+        command: 'hello',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        permissionMode: 'default',
+        operation: { runId: 'run-1', publish() {} },
+      });
+      eventStream.push({
+        id: 'evt-user',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: prompt.mock.calls[0][0].parts[0].id,
+            messageID: 'user-a',
+            type: 'text',
+            text: 'hello',
+          },
+        },
+      });
+
+      const stopping = runtime.abort('session-1');
+      eventStream.push({
+        id: 'evt-assistant',
+        type: 'message.updated',
+        properties: {
+          sessionID: 'session-1',
+          info: {
+            id: 'assistant-aborted',
+            role: 'assistant',
+            parentID: 'user-a',
+            error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+            finish: 'error',
+            time: { completed: Date.now() },
+          },
+        },
+      });
+      await Bun.sleep(0);
+      promptResponse.reject(new Error('prompt transport closed'));
+      await Bun.sleep(0);
+      abortResponse.resolve({ error: { message: 'abort rejected' } });
+      await expect(stopping).resolves.toBe(false);
+      for (let attempt = 0; attempt < 100 && runtime.isRunning('session-1'); attempt += 1) {
+        await Bun.sleep(0);
+      }
+      expect(runtime.isRunning('session-1')).toBe(false);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      eventStream.close();
       await runtime.shutdown();
       timers.restore();
     }

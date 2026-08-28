@@ -1519,12 +1519,12 @@ describe('OpenCodeRuntime abort', () => {
       await waitFor(() => terminalEvents(published.events).length === 1);
       expect(runtime.isRunning('session-1')).toBe(false);
       expect(failureMessages(published.events)).toEqual([
-        'OpenCode interrupted the current turn unexpectedly',
+        'OpenCode interrupted the turn',
       ]);
       const [errorRow] = publishedMessages(published.events);
       expect(errorRow).toMatchObject({
         type: 'error',
-        content: 'OpenCode interrupted the current turn unexpectedly',
+        content: 'OpenCode interrupted the turn',
       });
       expect(getNativeMessageRevisionSource(errorRow)).toMatchObject({
         entryId: 'assistant-aborted',
@@ -1598,11 +1598,11 @@ describe('OpenCodeRuntime abort', () => {
     }));
 
     await expect(interruptedTurn).rejects.toThrow(
-      'OpenCode interrupted the current turn unexpectedly',
+      'OpenCode interrupted the turn',
     );
     expect(runtime.isRunning('session-1')).toBe(false);
     expect(failureMessages(interrupted.events)).toEqual([
-      'OpenCode interrupted the current turn unexpectedly',
+      'OpenCode interrupted the turn',
     ]);
 
     const recovered = collectOperation('run-c');
@@ -1718,10 +1718,10 @@ describe('OpenCodeRuntime abort', () => {
     }));
 
     await expect(compaction).rejects.toThrow(
-      'OpenCode interrupted the current turn unexpectedly',
+      'OpenCode interrupted the turn',
     );
     expect(failureMessages(compacted.events)).toEqual([
-      'OpenCode interrupted the current turn unexpectedly',
+      'OpenCode interrupted the turn',
     ]);
     const [errorRow] = publishedMessages(compacted.events);
     expect(getNativeMessageRevisionSource(errorRow)).toMatchObject({
@@ -2468,7 +2468,7 @@ describe('OpenCodeRuntime abort', () => {
       if (!terminalBeforeRejection) publishAbortedTerminal();
       await waitFor(() => failureMessages(published.events).length === 1);
       expect(failureMessages(published.events)).toEqual([
-        'OpenCode interrupted the current turn without confirming the requested stop',
+        'OpenCode interrupted the turn',
       ]);
       expect(runtime.isRunning('session-1')).toBe(false);
 
@@ -2508,7 +2508,7 @@ describe('OpenCodeRuntime abort', () => {
     });
   }
 
-  it('describes internal successor quiescence separately from a user Stop', async () => {
+  it('fails a deferred abort when successor quiescence is rejected', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const abortResponse = deferred();
@@ -2557,7 +2557,7 @@ describe('OpenCodeRuntime abort', () => {
     abortResponse.resolve({ error: { message: 'abort rejected' } });
     await waitFor(() => promptAsync.mock.calls.length === 2);
     expect(failureMessages(published.events)).toEqual([
-      'OpenCode interrupted the previous turn while preparing the next message',
+      'OpenCode interrupted the turn',
     ]);
 
     eventStream.push(envelope({
@@ -2583,7 +2583,7 @@ describe('OpenCodeRuntime abort', () => {
     runtime.shutdown();
   });
 
-  it('attributes a user Stop coalesced onto successor quiescence', async () => {
+  it('coalesces a user Stop onto successor quiescence', async () => {
     const eventStream = createEventStream();
     const promptAsync = mock(() => Promise.resolve({}));
     const abortResponse = deferred();
@@ -2634,7 +2634,7 @@ describe('OpenCodeRuntime abort', () => {
     await expect(stopping).resolves.toBe(false);
     await waitFor(() => promptAsync.mock.calls.length === 2);
     expect(failureMessages(published.events)).toEqual([
-      'OpenCode interrupted the current turn without confirming the requested stop',
+      'OpenCode interrupted the turn',
     ]);
 
     eventStream.push(envelope({
