@@ -722,7 +722,7 @@
 			void workspace.focusMobileSingleton('commit');
 			return;
 		}
-		void workspace.openSingleton('commit', 'sidebar');
+		void workspace.openSingletonInNewPane('commit');
 	}
 
 	function toggleCommitBranchDropdown(): void {

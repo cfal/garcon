@@ -29,9 +29,9 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import {
 		SPLIT_DROP_ZONES,
-		SplitDropController,
 		type SplitDropZone,
-	} from './split-drop-controller.svelte';
+	} from '$lib/utils/split-drop-geometry.js';
+	import { SplitDropController } from './split-drop-controller.svelte';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 

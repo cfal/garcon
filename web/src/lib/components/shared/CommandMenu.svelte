@@ -56,6 +56,10 @@
 		});
 	}
 
+	function reportOpenError(error: unknown): void {
+		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+	}
+
 	let commands = $derived.by<CommandItem[]>(() => {
 		return [
 			{
@@ -100,7 +104,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('files')
-						: workspace.openSingleton('files', 'sidebar')),
+						: workspace.openSingletonInNewPane('files').catch(reportOpenError)),
 			},
 			...(!workspace.isMobile
 				? [
@@ -118,7 +122,7 @@
 				label: m.command_switch_to_terminal(),
 				description: m.command_open_panel({ panel: m.workspace_surface_terminal() }),
 				category: categories.workspace,
-				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate('main')),
+				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate()),
 			},
 			...(terminals.listStatus === 'ready' &&
 			terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
@@ -129,7 +133,7 @@
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
 							action: () =>
-								reportTerminalAction(workspace.createTerminal('main', 'command-menu:new-terminal')),
+								reportTerminalAction(workspace.createTerminalInNewPane(undefined, 'command-menu:new-terminal')),
 						},
 					]
 				: []),
@@ -141,7 +145,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git')
-						: workspace.openSingleton('git', 'main')),
+						: workspace.openSingletonInNewPane('git').catch(reportOpenError)),
 			},
 			{
 				id: 'workspace-git-history',
@@ -151,7 +155,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git-history')
-						: workspace.openSingleton('git-history', 'main')),
+						: workspace.openSingletonInNewPane('git-history').catch(reportOpenError)),
 			},
 			{
 				id: 'workspace-git-compare',
@@ -161,7 +165,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git-compare')
-						: workspace.openSingleton('git-compare', 'main')),
+						: workspace.openSingletonInNewPane('git-compare').catch(reportOpenError)),
 			},
 			...(ghCapability.available || !ghCapability.hasChecked
 				? [
@@ -173,7 +177,7 @@
 							action: () =>
 								void (workspace.isMobile
 									? workspace.focusMobileSingleton('pull-requests')
-									: workspace.openSingleton('pull-requests', 'main')),
+									: workspace.openSingletonInNewPane('pull-requests').catch(reportOpenError)),
 						},
 					]
 				: []),
@@ -185,7 +189,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('commit')
-						: workspace.openSingleton('commit', 'sidebar')),
+						: workspace.openSingletonInNewPane('commit').catch(reportOpenError)),
 			},
 		];
 	});

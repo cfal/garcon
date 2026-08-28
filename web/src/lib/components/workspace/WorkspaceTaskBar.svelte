@@ -12,8 +12,8 @@
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
+	import PanelTop from '@lucide/svelte/icons/panel-top';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import X from '@lucide/svelte/icons/x';
 	import {
@@ -42,10 +42,12 @@
 		PORTABLE_SINGLETON_KINDS,
 		singletonSurfaceId,
 		terminalSurfaceId,
-		type HostId,
-		type HostState,
+		type PaneId,
+		type PaneTabState,
 		type PortableSingletonKind,
 	} from '$lib/workspace/surface-types.js';
+	import { collectPaneNodes } from '$lib/workspace/pane-tree.js';
+	import type { WorkspacePaneDndStore } from '$lib/workspace/pane-dnd.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 	import {
 		FLOATING_ICON_TRIGGER_CLASS,
@@ -62,23 +64,25 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
-		host,
-		hostState,
-		workspaceSidebarBeforeMain = false,
+		paneId,
+		tabs,
+		singlePane,
 		labelFor,
 		onSelect,
 		onFocus,
+		dnd,
 		startActions,
 		layoutMenuItems,
 		menuItems,
 		endActions,
 	}: {
-		host: HostId;
-		hostState: HostState;
-		workspaceSidebarBeforeMain?: boolean;
+		paneId: PaneId;
+		tabs: PaneTabState;
+		singlePane: boolean;
 		labelFor: (surfaceId: string) => string;
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
+		dnd?: WorkspacePaneDndStore;
 		startActions?: Snippet;
 		layoutMenuItems?: Snippet;
 		menuItems?: Snippet;
@@ -108,34 +112,37 @@
 	let centeredContentWidth: number | null = $state(null);
 	let visibleSurfaceIds = $state.raw<readonly string[] | null>(null);
 	let creatingTerminal = $state(false);
-	const hideSingleMainTab = $derived(host === 'main' && hostState.order.length === 1);
-	const displayedSurfaceIds = $derived(visibleSurfaceIds ?? hostState.order);
+	const hideSingleTab = $derived(singlePane && tabs.order.length === 1);
+	const displayedSurfaceIds = $derived(visibleSurfaceIds ?? tabs.order);
 	const hiddenSurfaceIds = $derived(
-		hostState.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
+		tabs.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
 	);
 	const gitViewKinds = ['git-history', 'git-compare'] as const;
 	const availableGitViewKinds = $derived(
-		gitViewKinds.filter((kind) => !hostState.order.includes(singletonSurfaceId(kind))),
+		gitViewKinds.filter((kind) => !tabs.order.includes(singletonSurfaceId(kind))),
 	);
 	const otherAvailableSingletonKinds = $derived(
 		PORTABLE_SINGLETON_KINDS.filter(
 			(kind) =>
 				!gitViewKinds.includes(kind as (typeof gitViewKinds)[number]) &&
 				canOffer(kind) &&
-				!hostState.order.includes(singletonSurfaceId(kind)),
+				!tabs.order.includes(singletonSurfaceId(kind)),
 		),
 	);
-	const activeSurfaceId = $derived(hostState.activeId);
-	const fullscreen = $derived(workspace.layout.snapshot.fullscreenHost === host);
+	const activeSurfaceId = $derived(tabs.activeId);
+	const fullscreen = $derived(workspace.layout.snapshot.fullscreenPaneId === paneId);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
 		),
 	);
+	const otherPanes = $derived(
+		collectPaneNodes(workspace.layout.snapshot.desktopRoot).filter((pane) => pane.id !== paneId),
+	);
 
 	$effect(() => {
-		hostState.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
+		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
 		const root = taskbarRoot;
 		const rail = measurementRail;
 		const start = startControls;
@@ -154,7 +161,7 @@
 	});
 
 	$effect(() => {
-		hostState.activeId;
+		tabs.activeId;
 		untrack(() => queueMicrotask(recomputeVisibleTabs));
 	});
 
@@ -191,21 +198,15 @@
 
 	function hasTabActions(surfaceId: string | null): surfaceId is string {
 		return Boolean(
-			surfaceId && (canMoveTab(surfaceId) || canPopOutTab(surfaceId) || canCloseTab(surfaceId)),
+			surfaceId &&
+				(canMoveTab(surfaceId) || canPopOutTab(surfaceId) || canCloseTab(surfaceId)),
 		);
 	}
 
-	function moveTab(surfaceId: string): void {
-		void workspace.moveSurface(surfaceId, host === 'main' ? 'sidebar' : 'main');
-	}
-
-	function openSingletonInHost(kind: PortableSingletonKind): void {
-		const surfaceId = singletonSurfaceId(kind);
-		if (workspace.layout.surface(surfaceId)) {
-			void workspace.moveSurface(surfaceId, host);
-			return;
-		}
-		void workspace.openSingleton(kind, host);
+	function openSingletonInPane(kind: PortableSingletonKind): void {
+		void workspace.openSingletonAsTab(kind, paneId).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
 	}
 
 	function recomputeVisibleTabs(): void {
@@ -225,9 +226,9 @@
 		centeredRailMaxWidth = capacity.railWidth;
 		centeredContentWidth = capacity.contentWidth;
 		visibleSurfaceIds = selectVisibleTaskbarSurfaceIds({
-			order: hostState.order,
-			activeId: hostState.activeId,
-			pinnedIds: host === 'main' ? [CHAT_SURFACE_ID] : [],
+			order: tabs.order,
+			activeId: tabs.activeId,
+			pinnedIds: [],
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: 2,
@@ -238,7 +239,7 @@
 		if (creatingTerminal) return;
 		creatingTerminal = true;
 		try {
-			await workspace.createTerminal(host, `workspace-taskbar:${host}`);
+			await workspace.createTerminal(paneId, `workspace-taskbar:${paneId}`);
 		} catch (error) {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 		} finally {
@@ -247,21 +248,32 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
-		const tabs = Array.from(tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
-		const index = tabs.indexOf(event.currentTarget as HTMLButtonElement);
-		if (index < 0 || tabs.length === 0) return;
+		const tabsList = Array.from(
+			tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+		);
+		const index = tabsList.indexOf(event.currentTarget as HTMLButtonElement);
+		if (index < 0 || tabsList.length === 0) return;
 		let nextIndex: number;
-		if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
-		else if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+		if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabsList.length) % tabsList.length;
+		else if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabsList.length;
 		else if (event.key === 'Home') nextIndex = 0;
-		else if (event.key === 'End') nextIndex = tabs.length - 1;
+		else if (event.key === 'End') nextIndex = tabsList.length - 1;
 		else if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
 			onSelect(surfaceId);
 			return;
 		} else return;
 		event.preventDefault();
-		tabs[nextIndex]?.focus();
+		tabsList[nextIndex]?.focus();
+	}
+
+	function handleTabDragStart(event: DragEvent, surfaceId: string): void {
+		if (!dnd) return;
+		dnd.startTabDrag(surfaceId, paneId, event);
+	}
+
+	function handleTabDragEnd(): void {
+		dnd?.endDrag();
 	}
 </script>
 
@@ -278,47 +290,44 @@
 	{:else}<FileCode class="h-3.5 w-3.5 shrink-0" />{/if}
 {/snippet}
 
-{#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
-	<button
-		{...triggerProps}
-		type="button"
-		role={measurement ? undefined : 'tab'}
-		id={measurement ? undefined : `${host}-tab-${surfaceId}`}
-		aria-controls={measurement ? undefined : `${host}-panel-${surfaceId}`}
-		aria-selected={measurement ? undefined : hostState.activeId === surfaceId}
-		tabindex={measurement ? -1 : hostState.activeId === surfaceId ? 0 : -1}
-		data-taskbar-measure-id={measurement ? surfaceId : undefined}
-		class={cn(
-			FLOATING_TAB_TRIGGER_CLASS,
-			!measurement && hostState.activeId === surfaceId
-				? FLOATING_TAB_ACTIVE_CLASS
-				: FLOATING_TAB_IDLE_CLASS,
-		)}
-		style:max-width={measurement || centeredContentWidth == null
-			? undefined
-			: `${Math.min(160, centeredContentWidth)}px`}
-		title={labelFor(surfaceId)}
-		onclick={measurement ? undefined : () => onSelect(surfaceId)}
-		onfocus={measurement ? undefined : () => onFocus?.(surfaceId)}
-		onpointerdown={measurement ? undefined : () => onFocus?.(surfaceId)}
-		onkeydown={measurement ? undefined : (event) => handleKeydown(event, surfaceId)}
-	>
-		{@render icon(surfaceId)}
-		<span class="hidden min-w-0 truncate lg:inline">{labelFor(surfaceId)}</span>
-	</button>
+{#snippet moveTabItems(surfaceId: string, Item: typeof DropdownMenuItem)}
+	{#if canMoveTab(surfaceId)}
+		{#each otherPanes as pane (pane.id)}
+			{@const paneLabel = pane.tabs.activeId ? labelFor(pane.tabs.activeId) : pane.id}
+			<Item onclick={() => void workspace.moveTabToPane(surfaceId, pane.id)}>
+				<PanelRight class="rtl:-scale-x-100" />
+				{m.workspace_move_to_pane({ pane: paneLabel })}
+			</Item>
+		{/each}
+		{#if workspace.canSplitPane && tabs.order.length > 1}
+			<Item
+				onclick={() =>
+					void workspace.splitTabToEdge(surfaceId, paneId, 'right').catch((error) => {
+						notifications.error(
+							error instanceof Error ? error.message : m.workspace_open_failed(),
+						);
+					})}
+			>
+				<PanelRight class="rtl:-scale-x-100" />
+				{m.workspace_split_tab_right()}
+			</Item>
+			<Item
+				onclick={() =>
+					void workspace.splitTabToEdge(surfaceId, paneId, 'bottom').catch((error) => {
+						notifications.error(
+							error instanceof Error ? error.message : m.workspace_open_failed(),
+						);
+					})}
+			>
+				<PanelTop />
+				{m.workspace_split_tab_down()}
+			</Item>
+		{/if}
+	{/if}
 {/snippet}
 
 {#snippet tabActions(surfaceId: string, Item: typeof DropdownMenuItem)}
-	{#if canMoveTab(surfaceId)}
-		<Item onclick={() => moveTab(surfaceId)}>
-			{#if (host === 'main') === workspaceSidebarBeforeMain}
-				<PanelLeft class="rtl:-scale-x-100" />
-			{:else}
-				<PanelRight class="rtl:-scale-x-100" />
-			{/if}
-			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
-		</Item>
-	{/if}
+	{@render moveTabItems(surfaceId, Item)}
 	{#if canPopOutTab(surfaceId)}
 		<Item onclick={() => void workspace.popOutFile(surfaceId)}>
 			<Maximize2 />
@@ -335,6 +344,39 @@
 			{m.workspace_close_tab()}
 		</Item>
 	{/if}
+{/snippet}
+
+{#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
+	<button
+		{...triggerProps}
+		type="button"
+		role={measurement ? undefined : 'tab'}
+		id={measurement ? undefined : `${paneId}-tab-${surfaceId}`}
+		aria-controls={measurement ? undefined : `${paneId}-panel-${surfaceId}`}
+		aria-selected={measurement ? undefined : tabs.activeId === surfaceId}
+		tabindex={measurement ? -1 : tabs.activeId === surfaceId ? 0 : -1}
+		data-taskbar-measure-id={measurement ? surfaceId : undefined}
+		class={cn(
+			FLOATING_TAB_TRIGGER_CLASS,
+			!measurement && tabs.activeId === surfaceId
+				? FLOATING_TAB_ACTIVE_CLASS
+				: FLOATING_TAB_IDLE_CLASS,
+		)}
+		style:max-width={measurement || centeredContentWidth == null
+			? undefined
+			: `${Math.min(160, centeredContentWidth)}px`}
+		title={labelFor(surfaceId)}
+		draggable={!measurement && dnd && canMoveTab(surfaceId) ? true : undefined}
+		ondragstart={!measurement && dnd ? (event) => handleTabDragStart(event, surfaceId) : undefined}
+		ondragend={!measurement && dnd ? handleTabDragEnd : undefined}
+		onclick={measurement ? undefined : () => onSelect(surfaceId)}
+		onfocus={measurement ? undefined : () => onFocus?.(surfaceId)}
+		onpointerdown={measurement ? undefined : () => onFocus?.(surfaceId)}
+		onkeydown={measurement ? undefined : (event) => handleKeydown(event, surfaceId)}
+	>
+		{@render icon(surfaceId)}
+		<span class="hidden min-w-0 truncate lg:inline">{labelFor(surfaceId)}</span>
+	</button>
 {/snippet}
 
 {#snippet tab(surfaceId: string, measurement = false)}
@@ -357,6 +399,7 @@
 <div
 	bind:this={taskbarRoot}
 	data-workspace-taskbar
+	data-workspace-taskbar-pane={paneId}
 	class="pointer-events-none relative grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-x-1.5"
 >
 	<div
@@ -372,13 +415,13 @@
 		class="pointer-events-auto min-w-0 max-w-full justify-self-center overflow-hidden"
 		style:max-width={centeredRailMaxWidth == null ? undefined : `${centeredRailMaxWidth}px`}
 	>
-		{#if !hideSingleMainTab && displayedSurfaceIds.length > 0}
+		{#if !hideSingleTab && displayedSurfaceIds.length > 0}
 			<div class={FLOATING_TOOLBAR_RAIL_CLASS}>
 				<div
 					bind:this={tabViewport}
 					class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
 					role="tablist"
-					aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
+					aria-label={m.workspace_pane_views()}
 				>
 					{#each displayedSurfaceIds as surfaceId (surfaceId)}
 						{@render tab(surfaceId)}
@@ -403,11 +446,7 @@
 					<EllipsisVertical class="h-3.5 w-3.5" />
 				</DropdownMenuTrigger>
 			</div>
-			<DropdownMenuContent
-				align="end"
-				class="w-64"
-				data-workspace-taskbar-menu={host}
-			>
+			<DropdownMenuContent align="end" class="w-64" data-workspace-taskbar-menu={paneId}>
 				{#if hasTabActions(activeSurfaceId)}
 					{@render tabActions(activeSurfaceId, DropdownMenuItem)}
 					<DropdownMenuSeparator />
@@ -432,7 +471,7 @@
 					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 				</DropdownMenuItem>
 				{#each availableGitViewKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => openSingletonInHost(kind)}>
+					<DropdownMenuItem onclick={() => openSingletonInPane(kind)}>
 						{@render icon(singletonSurfaceId(kind), kind)}
 						{kind === 'git-history'
 							? m.workspace_open_git_history()
@@ -443,7 +482,7 @@
 					<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
 					{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
 						<DropdownMenuItem
-							onclick={() => void workspace.openTerminalSession(session.metadata.terminalId, host)}
+							onclick={() => void workspace.openTerminalSession(session.metadata.terminalId, paneId)}
 						>
 							<SquareTerminal />
 							{m.workspace_surface_terminal_number({
@@ -453,7 +492,7 @@
 					{/each}
 				{/if}
 				{#each otherAvailableSingletonKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => openSingletonInHost(kind)}>
+					<DropdownMenuItem onclick={() => openSingletonInPane(kind)}>
 						{@render icon(singletonSurfaceId(kind), kind)}
 						{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
 					</DropdownMenuItem>
@@ -461,8 +500,8 @@
 				<DropdownMenuSeparator />
 				{@render layoutMenuItems?.()}
 				<DropdownMenuItem
-					data-workspace-fullscreen-menu-item={host}
-					onclick={() => void workspace.toggleFullscreen(host)}
+					data-workspace-fullscreen-menu-item={paneId}
+					onclick={() => void workspace.toggleFullscreen(paneId)}
 				>
 					{#if fullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
 					{fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
@@ -491,7 +530,7 @@
 		class="pointer-events-none invisible absolute -left-[10000px] top-0 flex items-center gap-0.5"
 		aria-hidden="true"
 	>
-		{#each hostState.order as surfaceId (surfaceId)}
+		{#each tabs.order as surfaceId (surfaceId)}
 			{@render tab(surfaceId, true)}
 		{/each}
 	</div>

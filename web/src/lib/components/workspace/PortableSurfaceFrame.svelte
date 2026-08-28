@@ -6,7 +6,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-	import type { HostId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import type { PaneId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -15,16 +15,14 @@
 		surface,
 		presentation,
 		visible,
-		mainInert = false,
 		style,
 		onSendToChat,
 		onAppendToChatDraft,
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
-		presentation: HostId | 'mobile';
+		presentation: PaneId | 'mobile';
 		visible: boolean;
-		mainInert?: boolean;
 		style: string;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
@@ -46,10 +44,8 @@
 	id={`${presentation}-panel-${surface.id}`}
 	role="tabpanel"
 	tabindex="-1"
-	aria-labelledby={presentation === 'main' || presentation === 'sidebar'
-		? `${presentation}-tab-${surface.id}`
-		: undefined}
-	inert={!visible || (presentation === 'main' && mainInert)}
+	aria-labelledby={presentation !== 'mobile' ? `${presentation}-tab-${surface.id}` : undefined}
+	inert={!visible}
 	aria-hidden={!visible}
 	class="absolute z-20 min-h-0 min-w-0 overflow-hidden bg-background"
 	class:invisible={!visible}

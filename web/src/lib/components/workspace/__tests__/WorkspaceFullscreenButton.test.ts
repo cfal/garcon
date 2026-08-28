@@ -5,7 +5,7 @@ import WorkspaceFullscreenButtonTestHost from './WorkspaceFullscreenButtonTestHo
 describe('WorkspaceFullscreenButton', () => {
 	afterEach(cleanup);
 
-	it.each(['main', 'sidebar'] as const)('targets the %s host', async (host) => {
+	it.each(['pane-main', 'pane-sidebar'] as const)('targets the %s host', async (host) => {
 		const onToggleFullscreen = vi.fn();
 		render(WorkspaceFullscreenButtonTestHost, {
 			host,
@@ -25,8 +25,8 @@ describe('WorkspaceFullscreenButton', () => {
 	it('shows the exit state only for the fullscreen host', () => {
 		const onToggleFullscreen = vi.fn();
 		const { unmount } = render(WorkspaceFullscreenButtonTestHost, {
-			host: 'sidebar',
-			fullscreenHost: 'sidebar',
+			host: 'pane-sidebar',
+			fullscreenPaneId: 'pane-sidebar',
 			onToggleFullscreen,
 		});
 
@@ -37,8 +37,8 @@ describe('WorkspaceFullscreenButton', () => {
 
 		unmount();
 		render(WorkspaceFullscreenButtonTestHost, {
-			host: 'main',
-			fullscreenHost: 'sidebar',
+			host: 'pane-main',
+			fullscreenPaneId: 'pane-sidebar',
 			onToggleFullscreen,
 		});
 		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();

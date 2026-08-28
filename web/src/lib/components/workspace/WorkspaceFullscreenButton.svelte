@@ -2,12 +2,12 @@
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import { getWorkspaceCoordinator } from '$lib/context';
-	import type { HostId } from '$lib/workspace/surface-types.js';
+	import type { PaneId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { host }: { host: HostId } = $props();
+	let { host }: { host: PaneId } = $props();
 	const workspace = getWorkspaceCoordinator();
-	const fullscreen = $derived(workspace.layout.snapshot.fullscreenHost === host);
+	const fullscreen = $derived(workspace.layout.snapshot.fullscreenPaneId === host);
 	const label = $derived(fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen());
 </script>
 

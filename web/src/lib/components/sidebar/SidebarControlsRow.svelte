@@ -21,8 +21,24 @@
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import Clock from '@lucide/svelte/icons/clock';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
+	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
+	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
+	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
+	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import History from '@lucide/svelte/icons/history';
+	import Files from '@lucide/svelte/icons/files';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import {
+		getGhCapability,
+		getNotifications,
+		getTerminalRegistry,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
+	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
+	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -77,6 +93,47 @@
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
 
+	const workspace = getWorkspaceCoordinator();
+	const notifications = getNotifications();
+	const terminals = getTerminalRegistry();
+	const ghCapability = getGhCapability();
+	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
+	const newPaneSingletonKinds = $derived(
+		(
+			[
+				'git',
+				'git-history',
+				'git-compare',
+				'pull-requests',
+				'files',
+				'commit',
+			] as const satisfies readonly PortableSingletonKind[]
+		).filter(
+			(kind) =>
+				kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
+		),
+	);
+	const newPaneSingletonLabels: Record<PortableSingletonKind, () => string> = {
+		git: m.workspace_surface_git_workbench,
+		'git-history': m.workspace_surface_git_history,
+		'git-compare': m.workspace_surface_git_compare,
+		'pull-requests': m.workspace_surface_pull_requests,
+		files: m.workspace_surface_files,
+		commit: m.workspace_surface_commit,
+	};
+
+	function openInNewPane(kind: PortableSingletonKind): void {
+		void workspace.openSingletonInNewPane(kind).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
+	}
+
+	function createTerminalInNewPane(): void {
+		void workspace.createTerminalInNewPane().catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
+		});
+	}
+
 	function handleMarkAllRead() {
 		onMarkAllRead?.();
 	}
@@ -127,6 +184,38 @@
 		>
 			<Search class="h-4 w-4" />
 		</Button>
+
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+				aria-label={m.workspace_new_pane()}
+				title={m.workspace_new_pane()}
+				data-workspace-new-pane-menu
+			>
+				<PanelsTopLeft class="h-4 w-4" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" class="w-56">
+				<DropdownMenuItem
+					disabled={terminalLimitReached}
+					title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
+					onclick={createTerminalInNewPane}
+				>
+					<SquareTerminal class="h-3.5 w-3.5" />
+					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
+				</DropdownMenuItem>
+				{#each newPaneSingletonKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => openInNewPane(kind)}>
+						{#if kind === 'git'}<GitBranch class="h-3.5 w-3.5" />
+						{:else if kind === 'git-history'}<History class="h-3.5 w-3.5" />
+						{:else if kind === 'git-compare'}<GitCompareArrows class="h-3.5 w-3.5" />
+						{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5" />
+						{:else if kind === 'files'}<Files class="h-3.5 w-3.5" />
+						{:else}<GitCommitHorizontal class="h-3.5 w-3.5" />{/if}
+						{m.workspace_open_surface({ surface: newPaneSingletonLabels[kind]() })}
+					</DropdownMenuItem>
+				{/each}
+			</DropdownMenuContent>
+		</DropdownMenu>
 
 		<DropdownMenu>
 			<DropdownMenuTrigger

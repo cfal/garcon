@@ -11,8 +11,8 @@
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { UpdateRemoteSettingsInput } from '$shared/settings';
 	import {
-		normalizeDesktopLayoutOrder,
-		type DesktopLayoutOrder,
+		normalizeChatListDock,
+		type ChatListDock,
 	} from '$lib/layout/desktop-layout.js';
 	import type { GlobalShortcutOverrides } from '$lib/workspace/global-shortcuts.js';
 
@@ -29,7 +29,7 @@
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
 	}: SettingsTestHostProps = $props();
-	let desktopLayoutOrder = $state<DesktopLayoutOrder>(['chat-list', 'main', 'workspace-sidebar']);
+	let chatListDock = $state<ChatListDock>('left');
 	let globalShortcuts = $state<GlobalShortcutOverrides>({});
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
@@ -189,8 +189,8 @@
 		colorblindMode: false,
 		overlayBackdropEffects: true,
 		hideChatListWhenGitInMain: false,
-		get desktopLayoutOrder() {
-			return desktopLayoutOrder;
+		get chatListDock() {
+			return chatListDock;
 		},
 		autoExpandTools: false,
 		alwaysExpandCliMessages: false,
@@ -210,7 +210,7 @@
 		imageViewerOpenPlacement: 'source',
 		markdownViewerOpenPlacement: 'source',
 		set(key: string, value: unknown) {
-			if (key === 'desktopLayoutOrder') desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
+			if (key === 'chatListDock') chatListDock = normalizeChatListDock(value);
 			if (key === 'globalShortcuts') globalShortcuts = value as GlobalShortcutOverrides;
 			onLocalSet(key, value);
 		},

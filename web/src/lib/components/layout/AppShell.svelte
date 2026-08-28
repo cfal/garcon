@@ -10,7 +10,7 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
+	import { chatListDividerEdge, type DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
@@ -85,20 +85,20 @@
 	});
 
 	let isMobile = $derived(workspace.isMobile);
-	let workspaceOverlayOpen = $state(false);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	const workspaceFullscreen = $derived(
-		!isMobile && workspace.layout.snapshot.fullscreenHost !== null,
+		!isMobile && workspace.layout.snapshot.fullscreenPaneId !== null,
 	);
+	const focusedPaneKind = $derived(workspace.focusedPaneActiveKind);
 	const hideLeftForGit = $derived(
 		!isMobile &&
 			localSettings.hideChatListWhenGitInMain &&
-			(workspace.layout.activeMainKind === 'git' ||
-				workspace.layout.activeMainKind === 'git-history' ||
-				workspace.layout.activeMainKind === 'git-compare'),
+			(focusedPaneKind === 'git' ||
+				focusedPaneKind === 'git-history' ||
+				focusedPaneKind === 'git-compare'),
 	);
 	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
 	const mobileActiveDescriptor = $derived(
@@ -122,7 +122,11 @@
 					mobileActiveDescriptor.kind === 'git-history' ||
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
-	let notificationDesktopInlineStartPx = $state(16);
+	let notificationDesktopInlineStartPx = $derived(
+		!isMobile && !hideLeftSidebar && localSettings.chatListDock === 'left'
+			? localSettings.sidebarWidth + 16
+			: 16,
+	);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
 	const displayedSidebarChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
@@ -334,7 +338,7 @@
 			void workspace.focusMobileSingleton('files');
 			return;
 		}
-		void workspace.focusMostRecentTerminalOrCreate('main').catch((error) => {
+		void workspace.focusMostRecentTerminalOrCreate().catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 		});
 	}
@@ -455,10 +459,10 @@
 		class="relative h-full shrink-0 overflow-hidden border-border"
 		class:border-s={placement.dividerEdge === 'start' && !hideLeftSidebar}
 		class:border-e={placement.dividerEdge === 'end' && !hideLeftSidebar}
-		class:pointer-events-none={hideLeftSidebar || workspaceOverlayOpen}
+		class:pointer-events-none={hideLeftSidebar}
 		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
-		aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
-		inert={hideLeftSidebar || workspaceOverlayOpen}
+		aria-hidden={hideLeftSidebar}
+		inert={hideLeftSidebar}
 	>
 		{@render sidebarContent(false, handleChatSelect)}
 		{#if !hideLeftSidebar}
@@ -497,28 +501,30 @@
 		</div>
 	{/if}
 
-	<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-		<div class="min-h-0 flex-1 overflow-hidden">
-			<WorkspaceRoot
-				{isMobile}
-				desktopLayoutOrder={localSettings.desktopLayoutOrder}
-				desktopChatListWidth={localSettings.sidebarWidth}
-				desktopChatListHidden={hideLeftSidebar}
-				{desktopChatList}
-				onMainInlineStartChange={(pixels) => (notificationDesktopInlineStartPx = pixels + 16)}
-				onMenuClick={isMobile ? toggleMobileSidebar : undefined}
-				onRegisterReload={handleRegisterReload}
-				onOverlayModalChange={(open) => (workspaceOverlayOpen = open)}
-				chatActions={workspaceChatActions}
-			/>
+	<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+		{#if !isMobile && localSettings.chatListDock === 'left'}
+			{@render desktopChatList({ dividerEdge: chatListDividerEdge('left') })}
+		{/if}
+		<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+			<div class="min-h-0 flex-1 overflow-hidden">
+				<WorkspaceRoot
+					{isMobile}
+					onMenuClick={isMobile ? toggleMobileSidebar : undefined}
+					onRegisterReload={handleRegisterReload}
+					chatActions={workspaceChatActions}
+				/>
+			</div>
+			{#if isMobile && !mobileKeyboardVisible && !mobileTransientSurface}
+				<BottomTabBar
+					activeItem={mobileActiveTab}
+					pullRequestsAvailable={ghCapability.available}
+					onTabChange={handleMobileTabChange}
+					onMenuClick={toggleMobileSidebar}
+				/>
+			{/if}
 		</div>
-		{#if isMobile && !mobileKeyboardVisible && !mobileTransientSurface}
-			<BottomTabBar
-				activeItem={mobileActiveTab}
-				pullRequestsAvailable={ghCapability.available}
-				onTabChange={handleMobileTabChange}
-				onMenuClick={toggleMobileSidebar}
-			/>
+		{#if !isMobile && localSettings.chatListDock === 'right'}
+			{@render desktopChatList({ dividerEdge: chatListDividerEdge('right') })}
 		{/if}
 	</div>
 </div>

@@ -1,33 +1,33 @@
 <script lang="ts">
 	import { setWorkspaceCoordinator } from '$lib/context';
 	import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
-	import type { HostId, WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
+	import type { PaneId, WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
 	import WorkspaceFullscreenButton from '../WorkspaceFullscreenButton.svelte';
 
 	let {
 		host,
-		fullscreenHost = null,
+		fullscreenPaneId = null,
 		onToggleFullscreen,
 	}: {
-		host: HostId;
-		fullscreenHost?: HostId | null;
-		onToggleFullscreen: (host: HostId) => void;
+		host: PaneId;
+		fullscreenPaneId?: PaneId | null;
+		onToggleFullscreen: (host: PaneId) => void;
 	} = $props();
 
 	type FullscreenWorkspacePort = {
 		readonly layout: {
-			readonly snapshot: Pick<WorkspaceLayoutSnapshot, 'fullscreenHost'>;
+			readonly snapshot: Pick<WorkspaceLayoutSnapshot, 'fullscreenPaneId'>;
 		};
-		toggleFullscreen(host: HostId): Promise<void>;
+		toggleFullscreen(host: PaneId): Promise<void>;
 	};
 
 	const workspace = {
 		layout: {
 			get snapshot() {
-				return { fullscreenHost };
+				return { fullscreenPaneId };
 			},
 		},
-		async toggleFullscreen(nextHost: HostId) {
+		async toggleFullscreen(nextHost: PaneId) {
 			onToggleFullscreen(nextHost);
 		},
 	} satisfies FullscreenWorkspacePort;

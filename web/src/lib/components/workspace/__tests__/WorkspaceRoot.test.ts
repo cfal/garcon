@@ -14,14 +14,17 @@ import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 import {
 	CHAT_SURFACE_ID,
-	type HostId,
+	portableSingletonDescriptor,
+	isPortableSingleton,
+	type PaneId,
+	type PortableSingletonKind,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from '$lib/workspace/surface-types.js';
-import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
+import { paneIdOfSurface, paneNodeById, collectPaneNodes } from '$lib/workspace/pane-tree.js';
 import { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
-import type { DesktopLayoutOrder } from '$lib/layout/desktop-layout.js';
+import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -47,6 +50,11 @@ vi.mock('$lib/context', () => ({
 	getTransientLayers: () => testContext.current?.transientLayers,
 	getWorkspaceContext: () => testContext.current?.workspaceContext,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getWorkspacePanesContext: () => testContext.current?.panesContext,
+	setWorkspacePanesContext: (value: unknown) => {
+		if (testContext.current) testContext.current.panesContext = value;
+		return value;
+	},
 }));
 
 vi.mock('$lib/components/chat/ChatSurface.svelte', async () => ({
@@ -83,45 +91,6 @@ vi.mock('$lib/components/git/CommitSurface.svelte', async () => ({
 
 const PortableSurfaceContent = (await import('../PortableSurfaceContent.svelte')).default;
 const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
-const WorkspaceRootDesktopLayoutTestHost = (
-	await import('./WorkspaceRootDesktopLayoutTestHost.svelte')
-).default;
-
-class TestResizeObserver implements ResizeObserver {
-	static instances: TestResizeObserver[] = [];
-	readonly callback: ResizeObserverCallback;
-	readonly observed = new Set<Element>();
-
-	constructor(callback: ResizeObserverCallback) {
-		this.callback = callback;
-		TestResizeObserver.instances.push(this);
-	}
-
-	disconnect(): void {
-		this.observed.clear();
-	}
-
-	observe(target: Element): void {
-		this.observed.add(target);
-	}
-
-	unobserve(target: Element): void {
-		this.observed.delete(target);
-	}
-
-	emit(target: Element, width: number): void {
-		if (!this.observed.has(target)) return;
-		this.callback(
-			[
-				{
-					target,
-					contentRect: { width } as DOMRectReadOnly,
-				} as ResizeObserverEntry,
-			],
-			this,
-		);
-	}
-}
 
 function createSingletonSurfaces(): SingletonSurfaceRegistry {
 	const gitSurfaceDeps = createGitSurfaceTestDeps();
@@ -152,45 +121,55 @@ function singletonController(
 	}
 }
 
+// Two panes: pane-main holds chat+git+pull-requests+terminal, pane-2 holds
+// files+commit+file session.
 function withAdditionalSurfaces(): WorkspaceLayoutSnapshot {
 	const base = canonicalWorkspaceSnapshot();
-	return {
-		...base,
-		main: {
-			order: [...base.main.order, 'terminal:one'],
-			activeId: CHAT_SURFACE_ID,
-			mru: [...base.main.mru, 'terminal:one'],
+	return reduceWorkspaceLayout(base, [
+		{
+			type: 'register-surface',
+			surface: { id: 'terminal:one', type: 'terminal', terminalId: 'one' },
+			paneId: 'pane-main',
 		},
-		sidebar: {
-			order: [...base.sidebar.order, 'file:one'],
-			activeId: 'singleton:files',
-			mru: [...base.sidebar.mru, 'file:one'],
+		{
+			type: 'register-surface-in-split',
+			surface: portableSingletonDescriptor('files'),
+			targetPaneId: 'pane-main',
+			edge: 'right',
+			newPaneId: 'pane-2',
+			splitId: 'split-1',
 		},
-		surfaces: {
-			...base.surfaces,
-			'terminal:one': { id: 'terminal:one', type: 'terminal', terminalId: 'one' },
-			'file:one': { id: 'file:one', type: 'file', fileSessionId: 'one' },
+		{
+			type: 'register-surface',
+			surface: portableSingletonDescriptor('commit'),
+			paneId: 'pane-2',
 		},
-		sidebarOpen: true,
-	};
+		{
+			type: 'register-surface',
+			surface: { id: 'file:one', type: 'file', fileSessionId: 'one' },
+			paneId: 'pane-2',
+		},
+		{ type: 'activate-pane-tab', paneId: 'pane-2', surfaceId: 'singleton:files' },
+	]);
 }
 
 function minimalGitSnapshot(): WorkspaceLayoutSnapshot {
 	return {
-		main: {
-			order: [CHAT_SURFACE_ID, 'singleton:git'],
-			activeId: 'singleton:git',
-			mru: ['singleton:git', CHAT_SURFACE_ID],
+		desktopRoot: {
+			type: 'pane',
+			id: 'pane-main',
+			tabs: {
+				order: [CHAT_SURFACE_ID, 'singleton:git'],
+				activeId: 'singleton:git',
+				mru: ['singleton:git', CHAT_SURFACE_ID],
+			},
 		},
-		sidebar: { order: [], activeId: null, mru: [] },
 		surfaces: {
 			[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
 			'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
 		},
-		sidebarOpen: false,
-		desiredSidebarWidth: 480,
+		fullscreenPaneId: null,
 		dialogFileSurfaceId: null,
-		fullscreenHost: null,
 		mobileActiveSurfaceId: 'singleton:git',
 		mobileOnlySurfaceIds: [],
 		mobileReturnStack: [],
@@ -212,10 +191,17 @@ function mobileFileSnapshot(): WorkspaceLayoutSnapshot {
 }
 
 function mobileCommitSnapshot(): WorkspaceLayoutSnapshot {
-	return {
-		...canonicalWorkspaceSnapshot(),
-		mobileActiveSurfaceId: 'singleton:commit',
-	};
+	return reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+		{
+			type: 'register-surface',
+			surface: portableSingletonDescriptor('commit'),
+		},
+		{
+			type: 'set-mobile-presentation',
+			activeId: 'singleton:commit',
+			returnStack: [],
+		},
+	]);
 }
 
 function selectedChat(): ChatSessionRecord {
@@ -252,60 +238,83 @@ function createWorkspace(initial: WorkspaceLayoutSnapshot) {
 		const next = reduceWorkspaceLayout(layout.snapshot, mutations);
 		if (!layout.publish(layout.revision, next)) throw new Error('Test layout publication failed');
 	};
-	const hostFor = (surfaceId: string): HostId | null => {
-		if (layout.snapshot.main.order.includes(surfaceId)) return 'main';
-		if (layout.snapshot.sidebar.order.includes(surfaceId)) return 'sidebar';
-		return null;
-	};
+	const paneOf = (surfaceId: string): PaneId | null =>
+		paneIdOfSurface(layout.snapshot.desktopRoot, surfaceId);
 
 	return {
 		layout,
 		attachmentErrors: {} as Record<string, string>,
-		get activeMainId() {
-			return layout.activeMainId;
+		get defaultActiveId() {
+			return layout.defaultActiveId;
 		},
-		get canOpenSidebar() {
-			return layout.snapshot.sidebar.order.length > 0;
+		get defaultPaneId() {
+			return layout.chatPaneId;
+		},
+		get lastFocusedPaneId() {
+			return layout.chatPaneId;
+		},
+		get paneCount() {
+			return collectPaneNodes(layout.snapshot.desktopRoot).length;
+		},
+		get canSplitPane() {
+			return this.paneCount < 4;
 		},
 		get isChatPresented() {
+			const chatPaneId = paneOf(CHAT_SURFACE_ID);
+			if (!chatPaneId) return false;
+			if (layout.snapshot.fullscreenPaneId && layout.snapshot.fullscreenPaneId !== chatPaneId) {
+				return false;
+			}
 			return (
-				layout.snapshot.fullscreenHost !== 'sidebar' && layout.activeMainId === CHAT_SURFACE_ID
+				paneNodeById(layout.snapshot.desktopRoot, chatPaneId)?.tabs.activeId === CHAT_SURFACE_ID
 			);
 		},
 		get isChatInteractive() {
 			return this.isChatPresented;
 		},
-		setSidebarOverlayMode: vi.fn(),
 		noteSurfaceFocus: vi.fn(),
-		noteHostChromeFocus: vi.fn(),
+		notePaneChromeFocus: vi.fn(),
 		frameVersion: vi.fn(() => 0),
 		isSurfaceCloseBlocked: vi.fn(() => false),
 		retryPresentation: vi.fn(async () => undefined),
-		setSidebarWidth: vi.fn(async (width: number) => commit([{ type: 'set-sidebar-width', width }])),
-		openSidebar: vi.fn(async () => commit([{ type: 'set-sidebar-open', open: true }])),
-		closeSidebar: vi.fn(async () => commit([{ type: 'set-sidebar-open', open: false }])),
-		toggleFullscreen: vi.fn(async (host: HostId) =>
+		setSplitRatio: vi.fn(async () => undefined),
+		toggleFullscreen: vi.fn(async (paneId: PaneId) =>
 			commit([
 				{
-					type: 'set-fullscreen-host',
-					host: layout.snapshot.fullscreenHost === host ? null : host,
+					type: 'set-fullscreen-pane',
+					paneId: layout.snapshot.fullscreenPaneId === paneId ? null : paneId,
 				},
 			]),
 		),
 		focusSurface: vi.fn(async (surfaceId: string) => {
-			const host = hostFor(surfaceId);
-			if (host) commit([{ type: 'focus-host', host, surfaceId }]);
+			const paneId = paneOf(surfaceId);
+			if (paneId) commit([{ type: 'activate-pane-tab', paneId, surfaceId }]);
 		}),
-		moveSurface: vi.fn(async (surfaceId: string, destination: HostId) => {
-			commit([{ type: 'move-to-host', surfaceId, destination }]);
-			return true;
+		moveTabToPane: vi.fn(async (surfaceId: string, destinationPaneId: PaneId) => {
+			commit([{ type: 'move-tab', surfaceId, destinationPaneId }]);
+		}),
+		splitTabToEdge: vi.fn(async () => undefined),
+		mergePaneInto: vi.fn(async () => undefined),
+		openSingletonAsTab: vi.fn(async (kind: PortableSingletonKind, paneId: PaneId) => {
+			const surfaceId = `singleton:${kind}`;
+			const mutations: WorkspaceLayoutMutation[] = [];
+			if (!layout.snapshot.surfaces[surfaceId]) {
+				mutations.push({
+					type: 'register-surface',
+					surface: portableSingletonDescriptor(kind),
+					paneId,
+				});
+			} else if (paneOf(surfaceId) !== paneId) {
+				mutations.push({ type: 'move-tab', surfaceId, destinationPaneId: paneId });
+			}
+			mutations.push({ type: 'activate-pane-tab', paneId, surfaceId });
+			commit(mutations);
 		}),
 		closeSurface: vi.fn(async (surfaceId: string) => {
 			commit([{ type: 'remove-surface', surfaceId }]);
 			return true;
 		}),
 		popOutFile: vi.fn(async () => true),
-		openSingleton: vi.fn(async () => undefined),
 		focusMobileSingleton: vi.fn(async () => undefined),
 		createTerminal: vi.fn(async () => undefined),
 		openTerminalSession: vi.fn(async () => undefined),
@@ -420,10 +429,11 @@ const portableSurfaces: Array<{ name: string; descriptor: SurfaceDescriptor }> =
 
 beforeEach(() => {
 	surfaceRendererTestProbe.reset();
-	TestResizeObserver.instances = [];
-	document.body.style.overflow = '';
-	document.body.style.touchAction = '';
-	vi.stubGlobal('ResizeObserver', TestResizeObserver);
+	vi.stubGlobal('ResizeObserver', class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	});
 	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_400);
 });
 
@@ -432,8 +442,6 @@ afterEach(() => {
 	(testContext.current?.surfaceFrames as SurfaceFrameRegistry | undefined)?.destroy();
 	(testContext.current?.singletonSurfaces as SingletonSurfaceRegistry | undefined)?.destroy();
 	testContext.current = null;
-	document.body.style.overflow = '';
-	document.body.style.touchAction = '';
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
@@ -447,7 +455,7 @@ describe('PortableSurfaceContent', () => {
 		}
 		const props = {
 			surface: descriptor,
-			presentation: 'main' as const,
+			presentation: 'pane-main' as PaneId,
 			visible: true,
 			onSendToChat: vi.fn(async () => true),
 			onAppendToChatDraft: vi.fn(() => 'appended' as const),
@@ -468,44 +476,46 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
-	it('moves a singleton through the other host Open command in both directions', async () => {
+	it('opens a singleton as a tab in another pane through that pane’s Open command', async () => {
 		const { workspace } = installContext(withAdditionalSurfaces());
 		const { container } = render(WorkspaceRoot, { isMobile: false, chatActions });
-		const mainMenu = container.querySelector<HTMLButtonElement>(
-			'[data-floating-workspace-toolbar] [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
-		);
-		const sidebarMenu = container.querySelector<HTMLButtonElement>(
-			'[data-floating-sidebar-toolbar] [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
-		);
 		const openGitWorkbench = m.workspace_open_surface({
 			surface: m.workspace_surface_git_workbench(),
 		});
-		expect(mainMenu).toBeTruthy();
-		expect(sidebarMenu).toBeTruthy();
-		if (!mainMenu || !sidebarMenu) return;
+		const taskbarFor = (paneId: string) =>
+			container.querySelector(`[data-workspace-pane-id="${paneId}"]`);
+		const paneMain = taskbarFor('pane-main');
+		const paneTwo = taskbarFor('pane-2');
+		expect(paneMain).toBeTruthy();
+		expect(paneTwo).toBeTruthy();
+		if (!paneMain || !paneTwo) return;
 
-		await fireEvent.click(mainMenu);
+		// pane-main already hosts Git Workbench, so its menu omits it.
+		await fireEvent.click(
+			paneMain.querySelector<HTMLButtonElement>(
+				'[data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+			)!,
+		);
 		expect(screen.queryByRole('menuitem', { name: openGitWorkbench })).toBeNull();
 		await fireEvent.keyDown(document, { key: 'Escape' });
 
-		await fireEvent.click(sidebarMenu);
+		await fireEvent.click(
+			paneTwo.querySelector<HTMLButtonElement>(
+				'[data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+			)!,
+		);
 		await fireEvent.click(screen.getByRole('menuitem', { name: openGitWorkbench }));
 		await waitFor(() => {
-			expect(workspace.layout.snapshot.main.order).not.toContain('singleton:git');
-			expect(workspace.layout.snapshot.sidebar.order).toContain('singleton:git');
-			expect(workspace.layout.snapshot.sidebar.activeId).toBe('singleton:git');
-		});
-
-		await fireEvent.click(mainMenu);
-		await fireEvent.click(screen.getByRole('menuitem', { name: openGitWorkbench }));
-		await waitFor(() => {
-			expect(workspace.layout.snapshot.main.order).toContain('singleton:git');
-			expect(workspace.layout.snapshot.main.activeId).toBe('singleton:git');
-			expect(workspace.layout.snapshot.sidebar.order).not.toContain('singleton:git');
+			expect(
+				paneNodeById(workspace.layout.snapshot.desktopRoot, 'pane-main' as PaneId)?.tabs.order,
+			).not.toContain('singleton:git');
+			expect(
+				paneNodeById(workspace.layout.snapshot.desktopRoot, 'pane-2' as PaneId)?.tabs.activeId,
+			).toBe('singleton:git');
 		});
 	});
 
-	it('opens the user-message navigator from the active Chat taskbar menu', async () => {
+	it('opens the user-message navigator from the active Chat pane menu', async () => {
 		installContext(canonicalWorkspaceSnapshot());
 		testContext.current!.workspaceContext = {
 			currentProject: '/workspace/project',
@@ -524,7 +534,7 @@ describe('WorkspaceRoot', () => {
 		await waitFor(() => expect(chatSurface.dataset.navigatorOpenCount).toBe('1'));
 	});
 
-	it('does not expose the user-message navigator when Chat is not the active main surface', async () => {
+	it('does not expose the user-message navigator when Chat is not the active pane tab', async () => {
 		installContext(minimalGitSnapshot());
 		testContext.current!.workspaceContext = {
 			currentProject: '/workspace/project',
@@ -560,176 +570,160 @@ describe('WorkspaceRoot', () => {
 		expect(items.indexOf(fullscreen)).toBe(items.indexOf(split) + 1);
 	});
 
-	it.each([
-		[['chat-list', 'main', 'workspace-sidebar']],
-		[['chat-list', 'workspace-sidebar', 'main']],
-		[['main', 'chat-list', 'workspace-sidebar']],
-		[['main', 'workspace-sidebar', 'chat-list']],
-		[['workspace-sidebar', 'chat-list', 'main']],
-		[['workspace-sidebar', 'main', 'chat-list']],
-	] satisfies Array<[DesktopLayoutOrder]>)(
-		'orders all desktop panes in DOM order for %j',
-		(order) => {
-			installContext();
-			const { container } = render(WorkspaceRootDesktopLayoutTestHost, {
-				desktopLayoutOrder: order,
-				chatActions,
-			});
-			const panes = Array.from(
-				container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
+	it('renders one taskbar per pane with its own tabs', async () => {
+		installContext(withAdditionalSurfaces());
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const paneMain = container.querySelector<HTMLElement>('[data-workspace-pane-id="pane-main"]');
+		const paneTwo = container.querySelector<HTMLElement>('[data-workspace-pane-id="pane-2"]');
+
+		expect(paneMain?.querySelector('[data-workspace-taskbar-center] [role="tablist"]')).toBeTruthy();
+		expect(paneTwo?.querySelector('[data-workspace-taskbar-center] [role="tablist"]')).toBeTruthy();
+		expect(
+			paneTwo?.querySelector(`[aria-label="${m.workspace_taskbar_actions()}"]`),
+		).toBeTruthy();
+		expect(document.getElementById('pane-main-tab-singleton:chat')).toBeTruthy();
+		expect(document.getElementById('pane-2-tab-singleton:files')).toBeTruthy();
+	});
+
+	it('hides non-fullscreen panes without unmounting them', async () => {
+		const { workspace } = installContext(withAdditionalSurfaces());
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const paneMain = container.querySelector<HTMLElement>('[data-workspace-pane-id="pane-main"]');
+		const paneTwo = container.querySelector<HTMLElement>('[data-workspace-pane-id="pane-2"]');
+		expect(paneMain && paneTwo).toBeTruthy();
+		if (!paneMain || !paneTwo) return;
+
+		await workspace.toggleFullscreen('pane-2');
+		await tick();
+
+		expect(paneMain.classList).toContain('hidden');
+		expect(paneMain.hasAttribute('inert')).toBe(true);
+		expect(paneTwo.classList).not.toContain('hidden');
+		expect(
+			container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
+		).toBeTruthy();
+
+		await workspace.toggleFullscreen('pane-2');
+		await tick();
+		expect(paneMain.classList).not.toContain('hidden');
+		expect(paneMain.hasAttribute('inert')).toBe(false);
+	});
+
+	it('keeps Chat mounted, inert, and draft-capable during another pane’s fullscreen', async () => {
+		// Git lives in the fullscreened pane so its content stays interactive.
+		const initial = reduceWorkspaceLayout(withAdditionalSurfaces(), [
+			{ type: 'move-tab', surfaceId: 'singleton:git', destinationPaneId: 'pane-2' },
+		]);
+		const { workspace } = installContext(initial);
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const paneMain = container.querySelector<HTMLElement>('[data-workspace-pane-id="pane-main"]');
+		const chatSurface = screen.getByTestId('chat-surface-stub');
+		const chatInput = screen.getByRole('textbox', {
+			name: 'Chat focus target',
+		}) as HTMLTextAreaElement;
+		expect(paneMain).toBeTruthy();
+		if (!paneMain) return;
+
+		await fireEvent.input(chatInput, { target: { value: 'Retain this draft' } });
+		await workspace.toggleFullscreen('pane-2');
+		await tick();
+
+		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
+		expect(chatInput.value).toBe('Retain this draft');
+		expect(paneMain.classList).toContain('hidden');
+		expect(chatSurface.getAttribute('data-visible')).toBe('false');
+		expect(chatSurface.getAttribute('data-interactive')).toBe('false');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Append review comment' }));
+		expect(chatInput.value).toContain('Retain this draft');
+		expect(chatInput.value).toContain('Git review comment');
+
+		await workspace.toggleFullscreen('pane-2');
+		await tick();
+		expect(paneMain.classList).not.toContain('hidden');
+		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
+		expect(chatInput.value).toContain('Git review comment');
+	});
+
+	it('shows Agents only while the Chat feed is the active tab of its pane', async () => {
+		installContext(minimalGitSnapshot());
+		testContext.current!.sessions = { selectedChat: selectedChat() };
+		const snapshot = reduceWorkspaceLayout(minimalGitSnapshot(), [
+			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: CHAT_SURFACE_ID },
+		]);
+		installContext(snapshot);
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const start = container.querySelector('[data-workspace-taskbar-start]');
+		const end = container.querySelector('[data-workspace-taskbar-end]');
+		const agents = await screen.findByRole('button', { name: /Agents/ });
+
+		expect(start?.contains(agents)).toBe(true);
+		expect(end?.contains(agents)).toBe(false);
+
+		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_git() }));
+		await waitFor(() => expect(screen.queryByRole('button', { name: /Agents/ })).toBeNull());
+
+		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_chat() }));
+		expect(await screen.findByRole('button', { name: /Agents/ })).toBeTruthy();
+	});
+
+	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {
+		const { workspace } = installContext();
+		const { container } = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
+		expect(chatNode).toBeTruthy();
+
+		for (const surfaceId of [
+			'singleton:git',
+			'singleton:pull-requests',
+			'singleton:files',
+			'singleton:commit',
+			'terminal:one',
+			'file:one',
+		]) {
+			const source = paneIdOfSurface(workspace.layout.snapshot.desktopRoot, surfaceId);
+			expect(source).toBeTruthy();
+			if (!source) continue;
+			const destination: PaneId = source === 'pane-main' ? 'pane-2' : 'pane-main';
+			const tab = document.getElementById(`${source}-tab-${surfaceId}`);
+			expect(tab).toBeTruthy();
+			await fireEvent.click(tab!);
+			await waitFor(() =>
+				expect(
+					paneNodeById(workspace.layout.snapshot.desktopRoot, source)?.tabs.activeId,
+				).toBe(surfaceId),
+			);
+			expect(container.querySelector(`[data-workspace-surface-id="${surfaceId}"]`)).toBeTruthy();
+
+			await workspace.moveTabToPane(surfaceId, destination);
+			await tick();
+			expect(document.getElementById(`${destination}-panel-${surfaceId}`)).toBeTruthy();
+			expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
+				chatNode,
 			);
 
-			expect(panes.map((pane) => pane.dataset.desktopLayoutPane)).toEqual(order);
-			expect(panes.every((pane) => pane.style.order === '')).toBe(true);
-		},
-	);
-
-	it('reorders stable pane instances without replacing stateful content', async () => {
-		const snapshot = withAdditionalSurfaces();
-		installContext({
-			...snapshot,
-			main: {
-				...snapshot.main,
-				activeId: 'terminal:one',
-				mru: ['terminal:one', ...snapshot.main.mru.filter((id) => id !== 'terminal:one')],
-			},
-		});
-		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
-			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
-			chatActions,
-		});
-		const chatList = rendered.container.querySelector('[data-desktop-layout-pane="chat-list"]');
-		const main = rendered.container.querySelector('[data-desktop-layout-pane="main"]');
-		const workspaceSidebar = rendered.container.querySelector(
-			'[data-desktop-layout-pane="workspace-sidebar"]',
-		);
-		const chatSurface = rendered.container.querySelector(
-			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
-		);
-		const portableMainSurface = await waitFor(() => {
-			const element = rendered.container.querySelector(
-				'[data-workspace-surface-id="terminal:one"]',
+			await workspace.closeSurface(surfaceId);
+			await tick();
+			expect(container.querySelector(`[data-workspace-surface-id="${surfaceId}"]`)).toBeNull();
+			expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
+				chatNode,
 			);
-			expect(element).toBeTruthy();
-			return element;
-		});
-		expect(main?.contains(portableMainSurface)).toBe(true);
-
-		await rendered.rerender({
-			desktopLayoutOrder: ['workspace-sidebar', 'main', 'chat-list'],
-			chatActions,
-		});
-
-		expect(rendered.container.querySelector('[data-desktop-layout-pane="chat-list"]')).toBe(
-			chatList,
-		);
-		expect(rendered.container.querySelector('[data-desktop-layout-pane="main"]')).toBe(main);
-		expect(rendered.container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(
-			workspaceSidebar,
-		);
-		expect(
-			rendered.container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
-		).toBe(chatSurface);
-		expect(rendered.container.querySelector('[data-workspace-surface-id="terminal:one"]')).toBe(
-			portableMainSurface,
-		);
-		expect(main?.contains(portableMainSurface)).toBe(true);
-		expect(
-			Array.from(
-				rendered.container.querySelectorAll<HTMLElement>('[data-desktop-layout-pane]'),
-				(pane) => pane.dataset.desktopLayoutPane,
-			),
-		).toEqual(['workspace-sidebar', 'main', 'chat-list']);
-	});
-
-	it('restores workspace focus after an external pane-order update', async () => {
-		installContext();
-		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
-			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
-			chatActions,
-		});
-		const focusTarget = screen.getByRole('textbox', { name: 'Chat focus target' });
-		focusTarget.focus();
-		expect(document.activeElement).toBe(focusTarget);
-
-		await rendered.rerender({
-			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
-			chatActions,
-		});
-
-		await waitFor(() => expect(document.activeElement).toBe(focusTarget));
-	});
-
-	it('anchors overlay mode at the configured workspace position and reports the main inset', async () => {
-		installContext();
-		const onMainInlineStartChange = vi.fn();
-		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
-			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-		const hostRegion = rendered.container.querySelector<HTMLElement>('.workspace-host-region')!;
-		const rootObserver = TestResizeObserver.instances.find((observer) =>
-			observer.observed.has(hostRegion),
-		);
-		rootObserver!.emit(hostRegion, 700);
-
-		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
-		expect(dialog.classList).toContain('absolute');
-		expect(dialog.classList).toContain('z-50');
-		expect(dialog.classList).not.toContain('z-40');
-		expect(dialog.classList).not.toContain('relative');
-		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('0px');
-		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('');
-		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(320));
-
-		await rendered.rerender({
-			desktopLayoutOrder: ['main', 'chat-list', 'workspace-sidebar'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('');
-		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('0px');
-		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(0));
-
-		await rendered.rerender({
-			desktopLayoutOrder: ['chat-list', 'workspace-sidebar', 'main'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-		expect(dialog.style.getPropertyValue('inset-inline-start')).toBe('320px');
-
-		await rendered.rerender({
-			desktopLayoutOrder: ['main', 'workspace-sidebar', 'chat-list'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-		expect(dialog.style.getPropertyValue('inset-inline-end')).toBe('320px');
-	});
-
-	it('resets the desktop notification inset when switching to mobile', async () => {
-		installContext();
-		const onMainInlineStartChange = vi.fn();
-		const rendered = render(WorkspaceRootDesktopLayoutTestHost, {
-			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-
-		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(800));
-		await rendered.rerender({
-			isMobile: true,
-			desktopLayoutOrder: ['workspace-sidebar', 'chat-list', 'main'],
-			desktopChatListWidth: 320,
-			chatActions,
-			onMainInlineStartChange,
-		});
-		await waitFor(() => expect(onMainInlineStartChange).toHaveBeenLastCalledWith(0));
+		}
 	});
 
 	it('offers one destructive Close without non-destructive Back for a mobile file', async () => {
@@ -784,7 +778,7 @@ describe('WorkspaceRoot', () => {
 		).toBe('false');
 	});
 
-	it('lowers the desktop taskbar below split pane headers while split view is active', async () => {
+	it('lowers the Chat pane taskbar below split pane headers while split view is active', async () => {
 		installContext(canonicalWorkspaceSnapshot());
 		const splitLayout = new SplitLayoutStore();
 		testContext.current!.splitLayout = splitLayout;
@@ -807,7 +801,7 @@ describe('WorkspaceRoot', () => {
 		expect(toolbar()?.classList.contains('top-9')).toBe(false);
 	});
 
-	it('keeps the desktop taskbar raised when a non-chat main surface is active during split view', async () => {
+	it('keeps a non-Chat pane taskbar raised while chat split view is active', () => {
 		installContext(minimalGitSnapshot());
 		const splitLayout = new SplitLayoutStore();
 		splitLayout.enableWithChat('chat-1');
@@ -819,323 +813,9 @@ describe('WorkspaceRoot', () => {
 		expect(toolbar?.classList.contains('top-9')).toBe(false);
 	});
 
-	it('centers tabs independently from end-aligned desktop toolbar controls', () => {
-		installContext(withAdditionalSurfaces());
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-		});
-		const mainToolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
-		const sidebarToolbar = container.querySelector<HTMLElement>('[data-floating-sidebar-toolbar]');
-		const mainCenter = mainToolbar?.querySelector('[data-workspace-taskbar-center]');
-		const mainEnd = mainToolbar?.querySelector('[data-workspace-taskbar-end]');
-		const sidebarCenter = sidebarToolbar?.querySelector('[data-workspace-taskbar-center]');
-		const sidebarEnd = sidebarToolbar?.querySelector('[data-workspace-taskbar-end]');
-
-		expect(mainToolbar?.classList.contains('justify-center')).toBe(false);
-		expect(mainToolbar?.classList.contains('justify-end')).toBe(false);
-		expect(sidebarToolbar?.classList.contains('justify-center')).toBe(false);
-		expect(sidebarToolbar?.classList.contains('justify-start')).toBe(false);
-		expect(mainCenter?.querySelector('[role="tablist"]')).toBeTruthy();
-		expect(mainEnd?.querySelector(`[aria-label="${m.workspace_taskbar_actions()}"]`)).toBeTruthy();
-		expect(sidebarCenter?.querySelector('[role="tablist"]')).toBeTruthy();
-		expect(sidebarEnd?.querySelector(`[aria-label="${m.workspace_close_sidebar()}"]`)).toBeTruthy();
-	});
-
-	it('shows Agents only while the Chat feed is the active main tab', async () => {
-		const snapshot = minimalGitSnapshot();
-		installContext({
-			...snapshot,
-			main: {
-				...snapshot.main,
-				activeId: CHAT_SURFACE_ID,
-				mru: [CHAT_SURFACE_ID, 'singleton:git'],
-			},
-			mobileActiveSurfaceId: CHAT_SURFACE_ID,
-		});
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-		});
-		const start = container.querySelector('[data-workspace-taskbar-start]');
-		const end = container.querySelector('[data-workspace-taskbar-end]');
-		const agents = await screen.findByRole('button', { name: /Agents/ });
-
-		expect(start?.contains(agents)).toBe(true);
-		expect(end?.contains(agents)).toBe(false);
-
-		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_git() }));
-		await waitFor(() => expect(screen.queryByRole('button', { name: /Agents/ })).toBeNull());
-
-		await fireEvent.click(screen.getByRole('tab', { name: m.workspace_surface_chat() }));
-		expect(await screen.findByRole('button', { name: /Agents/ })).toBeTruthy();
-	});
-
-	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {
-		const { workspace } = installContext();
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-		});
-		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
-		expect(chatNode).toBeTruthy();
-
-		for (const surfaceId of [
-			'singleton:git',
-			'singleton:pull-requests',
-			'singleton:files',
-			'singleton:commit',
-			'terminal:one',
-			'file:one',
-		]) {
-			const source: HostId = workspace.layout.snapshot.main.order.includes(surfaceId)
-				? 'main'
-				: 'sidebar';
-			const destination: HostId = source === 'main' ? 'sidebar' : 'main';
-			const tab = document.getElementById(`${source}-tab-${surfaceId}`);
-			expect(tab).toBeTruthy();
-			await fireEvent.click(tab!);
-			await waitFor(() => expect(workspace.layout.snapshot[source].activeId).toBe(surfaceId));
-			expect(container.querySelector(`[data-workspace-surface-id="${surfaceId}"]`)).toBeTruthy();
-
-			await workspace.moveSurface(surfaceId, destination);
-			await tick();
-			expect(document.getElementById(`${destination}-panel-${surfaceId}`)).toBeTruthy();
-			expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-				chatNode,
-			);
-
-			await workspace.closeSurface(surfaceId);
-			await tick();
-			expect(container.querySelector(`[data-workspace-surface-id="${surfaceId}"]`)).toBeNull();
-			expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-				chatNode,
-			);
-		}
-	});
-
-	it('keeps Chat mounted across push, overlay, sidebar close, and sidebar reopen', async () => {
-		const { workspace } = installContext();
-		const onOverlayModalChange = vi.fn();
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-			onOverlayModalChange,
-		});
-		const hostRegion = container.querySelector<HTMLElement>('.workspace-host-region')!;
-		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
-		expect(chatNode).toBeTruthy();
-		const resizeBoundary = container.querySelector<HTMLElement>(
-			'[data-workspace-sidebar-resize-boundary]',
-		);
-		expect(resizeBoundary).toBeTruthy();
-		expect(
-			container
-				.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')
-				?.classList.contains('border-s'),
-		).toBe(true);
-		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
-		expect(onOverlayModalChange).not.toHaveBeenCalled();
-
-		const rootObserver = TestResizeObserver.instances.find((observer) =>
-			observer.observed.has(hostRegion),
-		);
-		expect(rootObserver).toBeTruthy();
-		rootObserver!.emit(hostRegion, 700);
-		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
-		expect(dialog.classList).toContain('z-50');
-		const backdrop = container.querySelector<HTMLButtonElement>(
-			'[data-workspace-sidebar-backdrop]',
-		)!;
-		expect(backdrop).toBeTruthy();
-		expect(backdrop.classList.contains('transient-backdrop')).toBe(true);
-		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(true));
-		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-			chatNode,
-		);
-		const dialogFocusable = Array.from(
-			dialog.querySelectorAll<HTMLElement>(
-				'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-			),
-		);
-		for (const element of [backdrop, ...dialogFocusable]) {
-			Object.defineProperty(element, 'offsetParent', {
-				configurable: true,
-				value: dialog,
-			});
-		}
-		const lastDialogControl = dialogFocusable.at(-1)!;
-		backdrop.focus();
-		await fireEvent.keyDown(backdrop, { key: 'Tab', shiftKey: true });
-		expect(document.activeElement).toBe(lastDialogControl);
-		await fireEvent.keyDown(lastDialogControl, { key: 'Tab' });
-		expect(document.activeElement).toBe(backdrop);
-
-		rootObserver!.emit(hostRegion, 1_400);
-		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-		expect(container.querySelector('aside')?.classList).toContain('relative');
-		expect(container.querySelector('aside')?.classList).not.toContain('absolute');
-		expect(container.querySelector('aside')?.classList).toContain('z-40');
-		expect(container.querySelector('aside')?.classList).not.toContain('z-50');
-		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeTruthy();
-		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
-		expect(onOverlayModalChange.mock.calls).toEqual([[true], [false]]);
-
-		await workspace.closeSidebar();
-		await tick();
-		expect(container.querySelector('aside')?.getAttribute('aria-hidden') ?? 'true').toBe('true');
-		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-			chatNode,
-		);
-
-		await workspace.openSidebar();
-		await tick();
-		expect(container.querySelector('aside')?.getAttribute('aria-hidden')).toBe('false');
-		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-			chatNode,
-		);
-		expect(screen.queryByText(/unsafe state mutation/i)).toBeNull();
-	});
-
-	it('releases overlay modality while the sidebar is fullscreen and restores it once', async () => {
-		const { workspace } = installContext();
-		const register = testContext.current!.transientLayers as {
-			register: ReturnType<typeof vi.fn>;
-		};
-		const onOverlayModalChange = vi.fn();
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-			onOverlayModalChange,
-		});
-		const hostRegion = container.querySelector<HTMLElement>('.workspace-host-region');
-		expect(hostRegion).toBeTruthy();
-		if (!hostRegion) return;
-		const rootObserver = TestResizeObserver.instances.find((observer) =>
-			observer.observed.has(hostRegion),
-		);
-		expect(rootObserver).toBeTruthy();
-		if (!rootObserver) return;
-
-		rootObserver.emit(hostRegion, 700);
-		await screen.findByRole('dialog', { name: 'Workspace sidebar' });
-		expect(document.body.style.overflow).toBe('hidden');
-		expect(document.body.style.touchAction).toBe('none');
-		expect(register.register).toHaveBeenCalledTimes(1);
-		const unregisterFirst = register.register.mock.results[0]?.value as ReturnType<typeof vi.fn>;
-
-		await workspace.toggleFullscreen('sidebar');
-		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-		const sidebar = container.querySelector<HTMLElement>(
-			'[data-desktop-layout-pane="workspace-sidebar"]',
-		);
-		expect(sidebar?.getAttribute('data-workspace-host-fullscreen')).toBe('sidebar');
-		expect(sidebar?.style.width).toBe('100%');
-		expect(sidebar?.classList).toContain('relative');
-		expect(sidebar?.classList).not.toContain('absolute');
-		expect(container.querySelector('[data-workspace-sidebar-backdrop]')).toBeNull();
-		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeNull();
-		await waitFor(() => expect(document.body.style.overflow).toBe(''));
-		expect(document.body.style.touchAction).toBe('');
-		expect(unregisterFirst).toHaveBeenCalledOnce();
-		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
-
-		rootObserver.emit(hostRegion, 1_400);
-		rootObserver.emit(hostRegion, 700);
-		expect(register.register).toHaveBeenCalledTimes(1);
-
-		await workspace.toggleFullscreen('sidebar');
-		await screen.findByRole('dialog', { name: 'Workspace sidebar' });
-		expect(register.register).toHaveBeenCalledTimes(2);
-	});
-
-	it('retains the hidden sidebar host while main is fullscreen', async () => {
-		const { workspace } = installContext();
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-		});
-		const sidebar = container.querySelector<HTMLElement>(
-			'[data-desktop-layout-pane="workspace-sidebar"]',
-		);
-		expect(sidebar).toBeTruthy();
-		if (!sidebar) return;
-
-		await workspace.toggleFullscreen('main');
-		await tick();
-
-		expect(container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(sidebar);
-		expect(sidebar.hasAttribute('inert')).toBe(true);
-		expect(sidebar.getAttribute('aria-hidden')).toBe('true');
-		expect(sidebar.classList).toContain('invisible');
-
-		await workspace.toggleFullscreen('main');
-		await tick();
-		expect(container.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')).toBe(sidebar);
-		expect(sidebar.hasAttribute('inert')).toBe(false);
-		expect(sidebar.getAttribute('aria-hidden')).toBe('false');
-	});
-
-	it('keeps Chat mounted, inert, and draft-capable during sidebar fullscreen', async () => {
-		const initial = reduceWorkspaceLayout(withAdditionalSurfaces(), [
-			{ type: 'move-to-host', surfaceId: 'singleton:git', destination: 'sidebar' },
-		]);
-		const { workspace } = installContext(initial);
-		const { container } = render(WorkspaceRoot, {
-			isMobile: false,
-			chatActions,
-		});
-		const mainPane = container.querySelector<HTMLElement>('[data-desktop-layout-pane="main"]');
-		const chatPanel = container.querySelector<HTMLElement>(
-			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
-		);
-		const chatSurface = screen.getByTestId('chat-surface-stub');
-		const chatInput = screen.getByRole('textbox', {
-			name: 'Chat focus target',
-		}) as HTMLTextAreaElement;
-		expect(mainPane && chatPanel).toBeTruthy();
-		if (!mainPane || !chatPanel) return;
-
-		await fireEvent.input(chatInput, { target: { value: 'Retain this draft' } });
-		await workspace.toggleFullscreen('sidebar');
-		await tick();
-
-		expect(container.querySelector('[data-desktop-layout-pane="main"]')).toBe(mainPane);
-		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
-			chatPanel,
-		);
-		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
-		expect(chatInput.value).toBe('Retain this draft');
-		expect(mainPane.classList).toContain('hidden');
-		expect(mainPane.hasAttribute('inert')).toBe(true);
-		expect(mainPane.getAttribute('aria-hidden')).toBe('true');
-		expect(chatSurface.getAttribute('data-visible')).toBe('false');
-		expect(chatSurface.getAttribute('data-interactive')).toBe('false');
-		expect(
-			container
-				.querySelector('[data-desktop-layout-pane="workspace-sidebar"]')
-				?.getAttribute('data-workspace-host-fullscreen'),
-		).toBe('sidebar');
-		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
-		expect(container.querySelector('[data-workspace-sidebar-backdrop]')).toBeNull();
-		expect(container.querySelector('[data-workspace-sidebar-resize-boundary]')).toBeNull();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Append review comment' }));
-		expect(chatInput.value).toContain('Retain this draft');
-		expect(chatInput.value).toContain('Git review comment');
-
-		await workspace.toggleFullscreen('sidebar');
-		await tick();
-		expect(mainPane.classList).not.toContain('hidden');
-		expect(mainPane.hasAttribute('inert')).toBe(false);
-		expect(mainPane.getAttribute('aria-hidden')).toBe('false');
-		expect(screen.getByTestId('chat-surface-stub')).toBe(chatSurface);
-		expect(chatInput.value).toContain('Git review comment');
-	});
-
 	it('hands a retained renderer across desktop and mobile without duplicate attachment', async () => {
 		const { workspace, surfaceFrames } = installContext(minimalGitSnapshot());
-		const desktopExpectation = surfaceFrames.beginTransfer('singleton:git', 'main');
+		const desktopExpectation = surfaceFrames.beginTransfer('singleton:git', 'pane-main');
 		const rendered = render(WorkspaceRoot, {
 			isMobile: false,
 			chatActions,
@@ -1153,19 +833,21 @@ describe('WorkspaceRoot', () => {
 		await mobileFrame.attachRetainedRenderer();
 		await waitFor(() => expect(surfaceRendererTestProbe.attached).toBe(1));
 		expect(
-			rendered.container.querySelectorAll('[data-workspace-surface-id="singleton:git"]'),
+		rendered.container.querySelectorAll('[data-workspace-surface-id="singleton:git"]'),
 		).toHaveLength(1);
 		expect(
 			rendered.container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`),
 		).toBe(chatNode);
 
-		const returnedDesktopExpectation = surfaceFrames.beginTransfer('singleton:git', 'main');
+		const returnedDesktopExpectation = surfaceFrames.beginTransfer('singleton:git', 'pane-main');
 		await rendered.rerender({ isMobile: false, chatActions });
 		const returnedDesktopFrame = await surfaceFrames.waitFor(returnedDesktopExpectation);
 		await returnedDesktopFrame.attachRetainedRenderer();
 		await waitFor(() => expect(surfaceRendererTestProbe.attached).toBe(1));
 		expect(surfaceRendererTestProbe.maximumAttached).toBe(1);
-		expect(workspace.layout.snapshot.main.activeId).toBe('singleton:git');
+		expect(
+			paneNodeById(workspace.layout.snapshot.desktopRoot, 'pane-main' as PaneId)?.tabs.activeId,
+		).toBe('singleton:git');
 		expect(screen.queryByText(/unsafe state mutation/i)).toBeNull();
 	});
 
@@ -1180,7 +862,7 @@ describe('WorkspaceRoot', () => {
 
 		expect(await screen.findByText('Test attachment failure')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-		expect(workspace.retryPresentation).toHaveBeenCalledWith('singleton:git', 'main');
+		expect(workspace.retryPresentation).toHaveBeenCalledWith('singleton:git', 'pane-main');
 		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
 			chatNode,
 		);

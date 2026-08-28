@@ -32,7 +32,7 @@
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import type { HostId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import type { PaneId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		setSurfaceFrameBridge,
@@ -52,7 +52,7 @@
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
-		presentation: HostId | 'mobile';
+		presentation: PaneId | 'mobile';
 		visible: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
@@ -78,7 +78,9 @@
 		{/await}
 	{:else if surface.type === 'terminal-launcher'}
 		{#await terminalLauncherRenderer() then TerminalLauncherSurface}
-			<TerminalLauncherSurface host={presentation === 'mobile' ? 'main' : presentation} />
+			<TerminalLauncherSurface
+				host={presentation === 'mobile' ? workspace.defaultPaneId : presentation}
+			/>
 		{/await}
 	{:else if surface.type === 'file'}
 		{@const session = files.get(surface.fileSessionId)}

@@ -6,12 +6,11 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
-import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 import { parseFontSizeOption, type FontSizeOption } from '$lib/utils/font-size.js';
 import {
-	DEFAULT_DESKTOP_LAYOUT_ORDER,
-	normalizeDesktopLayoutOrder,
-	type DesktopLayoutOrder,
+	DEFAULT_CHAT_LIST_DOCK,
+	normalizeChatListDock,
+	type ChatListDock,
 } from '$lib/layout/desktop-layout.js';
 import {
 	sanitizeGlobalShortcutOverrides,
@@ -30,13 +29,11 @@ export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 
 export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
 export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
-export type FileOpenPlacementPreference = DesktopPlacement | 'source' | 'other';
+export type FileOpenPlacementPreference = 'source' | 'new-pane' | 'dialog';
 export const FILE_OPEN_PLACEMENT_VALUES = [
 	'source',
-	'other',
+	'new-pane',
 	'dialog',
-	'main',
-	'sidebar',
 ] as const satisfies readonly FileOpenPlacementPreference[];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
@@ -110,7 +107,7 @@ export interface LocalSettingsSnapshot {
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
 	hideChatListWhenGitInMain: boolean;
-	desktopLayoutOrder: DesktopLayoutOrder;
+	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
@@ -166,7 +163,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
 	hideChatListWhenGitInMain: false,
-	desktopLayoutOrder: [...DEFAULT_DESKTOP_LAYOUT_ORDER],
+	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
@@ -235,11 +232,16 @@ export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementP
 	);
 }
 
+// Maps retired host-based placements onto pane semantics: main becomes the
+// origin pane, and sidebar/other become a new pane split from the origin.
 function parseFileOpenPlacement(
 	value: unknown,
 	fallback: FileOpenPlacementPreference,
 ): FileOpenPlacementPreference {
-	return isFileOpenPlacement(value) ? value : fallback;
+	if (isFileOpenPlacement(value)) return value;
+	if (value === 'main') return 'source';
+	if (value === 'sidebar' || value === 'other') return 'new-pane';
+	return fallback;
 }
 
 function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
@@ -276,7 +278,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.hideChatListWhenGitInMain,
 			DEFAULTS.hideChatListWhenGitInMain,
 		),
-		desktopLayoutOrder: normalizeDesktopLayoutOrder(parsed.desktopLayoutOrder),
+		chatListDock: normalizeChatListDock(parsed.chatListDock ?? parsed.desktopLayoutOrder),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGroupByProject: parseBoolean(
@@ -355,7 +357,7 @@ export class LocalSettingsStore {
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
-	desktopLayoutOrder = $state<DesktopLayoutOrder>([...DEFAULT_DESKTOP_LAYOUT_ORDER]);
+	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
@@ -400,8 +402,8 @@ export class LocalSettingsStore {
 		const next = { ...this.snapshot(), [key]: value };
 		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
-		if (key === 'desktopLayoutOrder') {
-			next.desktopLayoutOrder = normalizeDesktopLayoutOrder(value);
+		if (key === 'chatListDock') {
+			next.chatListDock = normalizeChatListDock(value);
 		}
 		if (key === 'globalShortcuts') {
 			next.globalShortcuts = sanitizeGlobalShortcutOverrides(value);
@@ -443,7 +445,7 @@ export class LocalSettingsStore {
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
 			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
-			desktopLayoutOrder: [...this.desktopLayoutOrder],
+			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
@@ -481,7 +483,7 @@ export class LocalSettingsStore {
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
-		this.desktopLayoutOrder = [...snap.desktopLayoutOrder];
+		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;

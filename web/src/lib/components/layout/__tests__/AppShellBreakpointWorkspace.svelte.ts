@@ -3,6 +3,8 @@ import {
 	reduceWorkspaceLayout,
 } from '$lib/workspace/workspace-layout.svelte';
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout';
+import { paneNodeById } from '$lib/workspace/pane-tree';
+import type { ActiveSurfaceKind, PaneId } from '$lib/workspace/surface-types';
 
 export class AppShellBreakpointWorkspace {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());
@@ -21,11 +23,19 @@ export class AppShellBreakpointWorkspace {
 		this.isMobile = false;
 	}
 
-	async toggleFullscreen(host: 'main' | 'sidebar'): Promise<void> {
+	get focusedPaneActiveKind(): ActiveSurfaceKind | null {
+		const pane = paneNodeById(this.layout.snapshot.desktopRoot, 'pane-main' as PaneId);
+		const activeId = pane?.tabs.activeId;
+		const surface = activeId ? this.layout.snapshot.surfaces[activeId] : null;
+		if (!surface) return null;
+		return surface.type === 'singleton' ? surface.kind : surface.type;
+	}
+
+	async toggleFullscreen(paneId: PaneId): Promise<void> {
 		const next = reduceWorkspaceLayout(this.layout.snapshot, [
 			{
-				type: 'set-fullscreen-host',
-				host: this.layout.snapshot.fullscreenHost === host ? null : host,
+				type: 'set-fullscreen-pane',
+				paneId: this.layout.snapshot.fullscreenPaneId === paneId ? null : paneId,
 			},
 		]);
 		this.layout.publish(this.layout.revision, next);

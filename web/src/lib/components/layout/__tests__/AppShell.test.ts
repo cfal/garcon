@@ -170,7 +170,7 @@ function installContext(): AppShellBreakpointWorkspace {
 		},
 		localSettings: {
 			hideChatListWhenGitInMain: false,
-			desktopLayoutOrder: ['chat-list', 'main', 'workspace-sidebar'],
+			chatListDock: 'left',
 			sidebarWidth: 320,
 			sidebarGroupByProject: false,
 			sidebarGroupNestedProjectPaths: false,
@@ -295,13 +295,13 @@ describe('AppShell responsive workspace binding', () => {
 					{
 						type: 'register-surface',
 						surface: portableSingletonDescriptor(kind),
-						host: 'main',
+						paneId: 'pane-main',
 					},
 				]);
 				workspace.layout.publish(workspace.layout.revision, registered);
 			}
 			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'focus-host', host: 'main', surfaceId },
+				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId },
 			]);
 			workspace.layout.publish(workspace.layout.revision, focused);
 
@@ -314,39 +314,24 @@ describe('AppShell responsive workspace binding', () => {
 		},
 	);
 
-	it.each(['main', 'sidebar'] as const)(
-		'hides and restores the desktop chat list for %s fullscreen',
-		async (host) => {
-			const workspace = installContext();
-			if (host === 'sidebar') {
-				const open = reduceWorkspaceLayout(workspace.layout.snapshot, [
-					{ type: 'set-sidebar-open', open: true },
-				]);
-				workspace.layout.publish(workspace.layout.revision, open);
-			}
-			await workspace.toggleFullscreen(host);
-			render(AppShell);
+	it('hides and restores the desktop chat list for pane fullscreen', async () => {
+		const workspace = installContext();
+		await workspace.toggleFullscreen('pane-main');
+		render(AppShell);
 
-			await waitFor(() =>
-				expect(
-					screen.getByTestId('workspace-root-stub').getAttribute('data-desktop-chat-list-hidden'),
-				).toBe('true'),
-			);
+		await waitFor(() =>
 			expect(
 				document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
-			).toBe('true');
+			).toBe('true'),
+		);
 
-			await workspace.toggleFullscreen(host);
-			await waitFor(() =>
-				expect(
-					screen.getByTestId('workspace-root-stub').getAttribute('data-desktop-chat-list-hidden'),
-				).toBe('false'),
-			);
+		await workspace.toggleFullscreen('pane-main');
+		await waitFor(() =>
 			expect(
 				document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
-			).toBe('false');
-		},
-	);
+			).toBe('false'),
+		);
+	});
 
 	it.each(['commit', 'files', 'pull-requests'] as const)(
 		'keeps the desktop chat list visible when %s is active',
@@ -356,8 +341,18 @@ describe('AppShell responsive workspace binding', () => {
 				testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean }
 			).hideChatListWhenGitInMain = true;
 			const surfaceId = `singleton:${kind}`;
+			if (!workspace.layout.surface(surfaceId)) {
+				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
+					{
+						type: 'register-surface',
+						surface: portableSingletonDescriptor(kind),
+						paneId: 'pane-main',
+					},
+				]);
+				workspace.layout.publish(workspace.layout.revision, registered);
+			}
 			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'focus-host', host: kind === 'pull-requests' ? 'main' : 'sidebar', surfaceId },
+				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId },
 			]);
 			workspace.layout.publish(workspace.layout.revision, focused);
 

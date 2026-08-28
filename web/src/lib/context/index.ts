@@ -39,6 +39,13 @@ import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svel
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
+import type { WorkspacePaneDndStore } from '$lib/workspace/pane-dnd.svelte.js';
+import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+import type { SplitId } from '$lib/workspace/surface-types.js';
+import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
+import type { UserMessageNavigatorRegistration } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
+import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -89,6 +96,39 @@ export const [getGitReviewDisplay, setGitReviewDisplay] =
 export const [getGitViewLauncher, setGitViewLauncher] = createContext<GitViewLauncher>();
 export const [getSingletonSurfaces, setSingletonSurfaces] =
 	createContext<SingletonSurfaceRegistry>();
+
+// Workspace pane tree context (set in WorkspaceRoot.svelte). Shared by the
+// recursive pane components so callbacks and drag state are not drilled
+// through every split level.
+export interface WorkspaceChatActions {
+	requestDelete: (chat: ChatSessionRecord) => void;
+	requestRename: (chat: ChatSessionRecord) => void;
+	requestDetails: (chat: ChatSessionRecord) => void;
+	requestShare: (chat: ChatSessionRecord) => void;
+	requestProjectPath: (chat: ChatSessionRecord) => void;
+	fork: (chat: ChatSessionRecord) => void;
+	reload: (chat: ChatSessionRecord) => void;
+}
+
+export interface WorkspacePanesContextValue {
+	readonly dnd: WorkspacePaneDndStore;
+	readonly subagentToolbar: SubagentToolbarState;
+	readonly chatActions: WorkspaceChatActions;
+	labelFor(surfaceId: string): string;
+	frameBridge(surfaceId: string): SurfaceFrameBridge;
+	surfaceStyle(presentation: string): string;
+	splitRatio(splitId: SplitId, fallback: number): number;
+	setSplitRatioPreview(splitId: SplitId, ratio: number | null): void;
+	onSendToChat(message: string): Promise<boolean>;
+	onAppendToChatDraft: ChatDraftAppend;
+	onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+	onRegisterSubmit(submit: (message: string) => Promise<boolean>): void;
+	onRegisterUserMessageNavigator(command: UserMessageNavigatorRegistration): void;
+	onRegisterAppendToDraft(append: ChatDraftAppend): void;
+	readonly onMobileMenuClick?: () => void;
+}
+export const [getWorkspacePanesContext, setWorkspacePanesContext] =
+	createContext<WorkspacePanesContextValue>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
