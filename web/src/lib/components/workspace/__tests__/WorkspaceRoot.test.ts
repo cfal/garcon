@@ -15,7 +15,6 @@ import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svel
 import {
 	CHAT_SURFACE_ID,
 	portableSingletonDescriptor,
-	isPortableSingleton,
 	type PaneId,
 	type PortableSingletonKind,
 	type SurfaceDescriptor,

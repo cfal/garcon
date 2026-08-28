@@ -10,7 +10,7 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { chatListDividerEdge, type DesktopLayoutEdge } from '$lib/layout/desktop-layout.js';
+	import { chatListDividerEdge, type ChatListDock } from '$lib/layout/desktop-layout.js';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
@@ -25,6 +25,7 @@
 		getSidebarSearch,
 		getSidebarProjectCollapse,
 		getGhCapability,
+		getTerminalRegistry,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -43,6 +44,9 @@
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
+	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -53,6 +57,7 @@
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
 	const ghCapability = getGhCapability();
+	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
 		notifications,
@@ -101,6 +106,32 @@
 				focusedPaneKind === 'git-compare'),
 	);
 	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
+	const newPaneActions = $derived.by<WorkspaceNewPaneActions>(() => ({
+		terminalLimitReached: terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT,
+		singletonKinds: (
+			[
+				'git',
+				'git-history',
+				'git-compare',
+				'pull-requests',
+				'files',
+				'commit',
+			] as const satisfies readonly PortableSingletonKind[]
+		).filter(
+			(kind) =>
+				kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
+		),
+		createTerminal(): void {
+			void workspace.createTerminalInNewPane().catch((error) => {
+				notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
+			});
+		},
+		openSingleton(kind): void {
+			void workspace.openSingletonInNewPane(kind).catch((error) => {
+				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+			});
+		},
+	}));
 	const mobileActiveDescriptor = $derived(
 		workspace.layout.surface(workspace.layout.snapshot.mobileActiveSurfaceId),
 	);
@@ -447,18 +478,23 @@
 		onManageTags={requestTagsChat}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowSettings={() => appShell.openSettings()}
+		{newPaneActions}
 	/>
 {/snippet}
 
-{#snippet desktopChatList(placement: { dividerEdge: DesktopLayoutEdge })}
+
+{#snippet desktopChatList(dock: ChatListDock)}
+	{@const dividerEdge = chatListDividerEdge(dock)}
 	<div
 		data-desktop-layout-pane="chat-list"
 		data-workspace-chat-list
 		onfocusin={() => workspace.noteChatListFocus()}
 		onpointerdown={() => workspace.noteChatListFocus()}
 		class="relative h-full shrink-0 overflow-hidden border-border"
-		class:border-s={placement.dividerEdge === 'start' && !hideLeftSidebar}
-		class:border-e={placement.dividerEdge === 'end' && !hideLeftSidebar}
+		class:order-first={dock === 'left'}
+		class:order-last={dock === 'right'}
+		class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
+		class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
 		class:pointer-events-none={hideLeftSidebar}
 		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
 		aria-hidden={hideLeftSidebar}
@@ -467,7 +503,7 @@
 		{@render sidebarContent(false, handleChatSelect)}
 		{#if !hideLeftSidebar}
 			<ResizeHandle
-				edge={placement.dividerEdge}
+				edge={dividerEdge}
 				width={localSettings.sidebarWidth}
 				onResize={(width) => localSettings.set('sidebarWidth', width)}
 			/>
@@ -502,8 +538,8 @@
 	{/if}
 
 	<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-		{#if !isMobile && localSettings.chatListDock === 'left'}
-			{@render desktopChatList({ dividerEdge: chatListDividerEdge('left') })}
+		{#if !isMobile}
+			{@render desktopChatList(localSettings.chatListDock)}
 		{/if}
 		<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 			<div class="min-h-0 flex-1 overflow-hidden">
@@ -523,9 +559,6 @@
 				/>
 			{/if}
 		</div>
-		{#if !isMobile && localSettings.chatListDock === 'right'}
-			{@render desktopChatList({ dividerEdge: chatListDividerEdge('right') })}
-		{/if}
 	</div>
 </div>
 

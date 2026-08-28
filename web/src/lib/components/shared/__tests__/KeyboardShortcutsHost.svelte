@@ -36,7 +36,7 @@
 		onFileSave?: () => void;
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
-		onToggleMainSidebarFocus?: () => void;
+		onCyclePaneFocus?: () => void;
 		onTransientEscape?: () => void;
 		onSurfaceEscape?: () => void;
 		onPrimaryScroll?: (direction: WorkspaceHalfPageDirection) => void;
@@ -58,7 +58,7 @@
 		onFileSave = () => undefined,
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
-		onToggleMainSidebarFocus = () => undefined,
+		onCyclePaneFocus = () => undefined,
 		onTransientEscape = () => undefined,
 		onSurfaceEscape = () => undefined,
 		onPrimaryScroll,
@@ -111,11 +111,11 @@
 
 	const workspace = {
 		isSurfacePresented: () => true,
-		focusPreviousTabInFocusedHost: (owner: { kind: string }) =>
+		focusPreviousTabInFocusedPane: (owner: { kind: string }) =>
 			owner.kind === 'chat-list' ? false : onFocusPreviousTab(),
-		focusNextTabInFocusedHost: (owner: { kind: string }) =>
+		focusNextTabInFocusedPane: (owner: { kind: string }) =>
 			owner.kind === 'chat-list' ? false : onFocusNextTab(),
-		toggleFocusBetweenMainAndSidebar: () => onToggleMainSidebarFocus(),
+		cyclePaneFocus: () => onCyclePaneFocus(),
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }

@@ -29,6 +29,8 @@ describe('desktop layout', () => {
 		expect(normalizeChatListDock(['chat-list', 'main'])).toBe('left');
 		expect(normalizeChatListDock(['chat-list', 'main', 'unknown'])).toBe('left');
 		expect(normalizeChatListDock(['workspace-sidebar', 'unknown', 'chat-list'])).toBe('left');
+		expect(normalizeChatListDock([42, 'main', 'chat-list'])).toBe('left');
+		expect(normalizeChatListDock(['main', 'chat-list', 'chat-list'])).toBe('left');
 	});
 
 	it('resolves the divider edge from the dock side', () => {

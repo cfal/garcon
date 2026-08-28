@@ -127,64 +127,15 @@ describe('Settings', () => {
 			await fireEvent.click(screen.getByRole('tab', { name: 'Local Settings' }));
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
-			expect(screen.getByRole('heading', { name: 'Desktop layout' })).toBeTruthy();
-			const desktopLayoutRows = document.querySelectorAll('[data-desktop-layout-setting-pane]');
-			expect(
-				Array.from(desktopLayoutRows, (row) =>
-					row.getAttribute('data-desktop-layout-setting-pane'),
-				),
-			).toEqual(['chat-list', 'main', 'workspace-sidebar']);
-			expect(
-				(screen.getByRole('button', { name: 'Move Chat list up' }) as HTMLButtonElement).disabled,
-			).toBe(true);
-			expect(
-				(
-					screen.getByRole('button', {
-						name: 'Move Workspace sidebar down',
-					}) as HTMLButtonElement
-				).disabled,
-			).toBe(true);
-			const moveChatDown = screen.getByRole('button', { name: 'Move Chat list down' });
-			const moveChatDownFocus = vi.spyOn(moveChatDown, 'focus');
-			moveChatDown.focus();
-			await fireEvent.click(moveChatDown);
-			await waitFor(() => {
-				expect(
-					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
-						row.getAttribute('data-desktop-layout-setting-pane'),
-					),
-				).toEqual(['main', 'chat-list', 'workspace-sidebar']);
-			});
-			expect(moveChatDownFocus).toHaveBeenCalled();
-			expect(document.activeElement).toBe(moveChatDown);
-
-			await fireEvent.click(screen.getByRole('button', { name: 'Move Chat list up' }));
-			await waitFor(() => {
-				expect(
-					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
-						row.getAttribute('data-desktop-layout-setting-pane'),
-					),
-				).toEqual(['chat-list', 'main', 'workspace-sidebar']);
-			});
-			const moveMainUp = screen.getByRole('button', { name: 'Move Main view up' });
-			moveMainUp.focus();
-			await fireEvent.click(moveMainUp);
-			expect(onLocalSet).toHaveBeenCalledWith('desktopLayoutOrder', [
-				'main',
-				'chat-list',
-				'workspace-sidebar',
-			]);
-			await waitFor(() => {
-				expect(
-					Array.from(document.querySelectorAll('[data-desktop-layout-setting-pane]'), (row) =>
-						row.getAttribute('data-desktop-layout-setting-pane'),
-					),
-				).toEqual(['main', 'chat-list', 'workspace-sidebar']);
-			});
-			expect((moveMainUp as HTMLButtonElement).disabled).toBe(true);
-			expect(document.activeElement).toBe(
-				screen.getByRole('button', { name: 'Move Main view down' }),
-			);
+			const chatListPosition = screen.getByRole('combobox', { name: 'Chat list position' });
+			expect((chatListPosition as HTMLSelectElement).value).toBe('left');
+			expect(chatListPosition.className).toContain('text-base');
+			expect(chatListPosition.className).toContain('sm:pointer-fine:text-sm');
+			expect(screen.getByRole('option', { name: 'Left' })).toBeTruthy();
+			expect(screen.getByRole('option', { name: 'Right' })).toBeTruthy();
+			await fireEvent.change(chatListPosition, { target: { value: 'right' } });
+			expect(onLocalSet).toHaveBeenCalledWith('chatListDock', 'right');
+			expect((chatListPosition as HTMLSelectElement).value).toBe('right');
 			expect(screen.getByText('Max chat width')).toBeTruthy();
 			const alwaysExpandCliMessages = screen.getByRole('switch', {
 				name: 'Always expand CLI messages',
@@ -228,19 +179,17 @@ describe('Settings', () => {
 			const markdownViewerPlacement = screen.getByRole('combobox', {
 				name: 'Markdown viewers',
 			});
-			expect(screen.getAllByRole('option', { name: 'Same view' })).toHaveLength(3);
-			expect(screen.getAllByRole('option', { name: 'Other view' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Same pane' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'New pane' })).toHaveLength(3);
 			expect(screen.getAllByRole('option', { name: 'Dialog' })).toHaveLength(3);
-			expect(screen.getAllByRole('option', { name: 'Main view' })).toHaveLength(3);
-			expect(screen.getAllByRole('option', { name: 'Sidebar view' })).toHaveLength(3);
 			expect((textEditorPlacement as HTMLSelectElement).value).toBe('source');
 			expect((imageViewerPlacement as HTMLSelectElement).value).toBe('source');
 			expect((markdownViewerPlacement as HTMLSelectElement).value).toBe('source');
-			await fireEvent.change(textEditorPlacement, { target: { value: 'other' } });
-			await fireEvent.change(imageViewerPlacement, { target: { value: 'sidebar' } });
+			await fireEvent.change(textEditorPlacement, { target: { value: 'new-pane' } });
+			await fireEvent.change(imageViewerPlacement, { target: { value: 'new-pane' } });
 			await fireEvent.change(markdownViewerPlacement, { target: { value: 'dialog' } });
-			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'other');
-			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'sidebar');
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'new-pane');
+			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'new-pane');
 			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'dialog');
 			await fireEvent.change(textEditorPlacement, { target: { value: 'source' } });
 			await fireEvent.change(imageViewerPlacement, { target: { value: 'source' } });

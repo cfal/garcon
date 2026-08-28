@@ -31,14 +31,8 @@
 	import Files from '@lucide/svelte/icons/files';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import {
-		getGhCapability,
-		getNotifications,
-		getTerminalRegistry,
-		getWorkspaceCoordinator,
-	} from '$lib/context';
 	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
-	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -60,6 +54,7 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
+		newPaneActions: WorkspaceNewPaneActions;
 	}
 
 	let {
@@ -82,6 +77,7 @@
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
 		onShowSettings,
+		newPaneActions,
 	}: SidebarControlsRowProps = $props();
 
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
@@ -93,26 +89,6 @@
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
 
-	const workspace = getWorkspaceCoordinator();
-	const notifications = getNotifications();
-	const terminals = getTerminalRegistry();
-	const ghCapability = getGhCapability();
-	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
-	const newPaneSingletonKinds = $derived(
-		(
-			[
-				'git',
-				'git-history',
-				'git-compare',
-				'pull-requests',
-				'files',
-				'commit',
-			] as const satisfies readonly PortableSingletonKind[]
-		).filter(
-			(kind) =>
-				kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
-		),
-	);
 	const newPaneSingletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
 		'git-history': m.workspace_surface_git_history,
@@ -121,18 +97,6 @@
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
 	};
-
-	function openInNewPane(kind: PortableSingletonKind): void {
-		void workspace.openSingletonInNewPane(kind).catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
-	}
-
-	function createTerminalInNewPane(): void {
-		void workspace.createTerminalInNewPane().catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
-		});
-	}
 
 	function handleMarkAllRead() {
 		onMarkAllRead?.();
@@ -196,15 +160,17 @@
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" class="w-56">
 				<DropdownMenuItem
-					disabled={terminalLimitReached}
-					title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
-					onclick={createTerminalInNewPane}
+					disabled={newPaneActions.terminalLimitReached}
+					title={newPaneActions.terminalLimitReached ? m.terminal_limit_reached() : undefined}
+					onclick={newPaneActions.createTerminal}
 				>
 					<SquareTerminal class="h-3.5 w-3.5" />
-					{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
+					{newPaneActions.terminalLimitReached
+						? m.terminal_limit_reached()
+						: m.workspace_new_terminal()}
 				</DropdownMenuItem>
-				{#each newPaneSingletonKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => openInNewPane(kind)}>
+				{#each newPaneActions.singletonKinds as kind (kind)}
+					<DropdownMenuItem onclick={() => newPaneActions.openSingleton(kind)}>
 						{#if kind === 'git'}<GitBranch class="h-3.5 w-3.5" />
 						{:else if kind === 'git-history'}<History class="h-3.5 w-3.5" />
 						{:else if kind === 'git-compare'}<GitCompareArrows class="h-3.5 w-3.5" />

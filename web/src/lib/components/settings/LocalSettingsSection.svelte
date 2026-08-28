@@ -137,7 +137,7 @@
 		</label>
 		<select
 			id={`local-${key}`}
-			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-sm text-foreground"
+			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 			{value}
 			onchange={(event) =>
 				setFileOpenPlacement(key, (event.currentTarget as HTMLSelectElement).value)}
@@ -191,7 +191,7 @@
 				</label>
 				<select
 					id="local-chat-list-dock"
-					class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-sm text-foreground"
+					class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 					value={ls.chatListDock}
 					onchange={(event) =>
 						setChatListDock((event.currentTarget as HTMLSelectElement).value)}
@@ -204,7 +204,7 @@
 			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select
-					class="text-sm bg-muted border border-border rounded-md px-2 py-1 text-foreground"
+					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 					aria-label={m.settings_chat_max_width()}
 					value={ls.chatMaxWidth}
 					onchange={(event) => setChatMaxWidth((event.currentTarget as HTMLSelectElement).value)}

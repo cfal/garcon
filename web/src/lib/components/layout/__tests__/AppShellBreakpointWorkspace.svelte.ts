@@ -5,6 +5,17 @@ import {
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout';
 import { paneNodeById } from '$lib/workspace/pane-tree';
 import type { ActiveSurfaceKind, PaneId } from '$lib/workspace/surface-types';
+import type { ChatListDock } from '$lib/layout/desktop-layout.js';
+
+export class AppShellLocalSettingsState {
+	hideChatListWhenGitInMain = $state(false);
+	chatListDock = $state<ChatListDock>('left');
+	sidebarWidth = $state(320);
+	sidebarGroupByProject = $state(false);
+	sidebarGroupNestedProjectPaths = $state(false);
+
+	set(): void {}
+}
 
 export class AppShellBreakpointWorkspace {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());

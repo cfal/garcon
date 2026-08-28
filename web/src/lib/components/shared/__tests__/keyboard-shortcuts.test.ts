@@ -464,8 +464,8 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
-	it('toggles focus between the main view and workspace sidebar on Ctrl-Shift-O', () => {
-		const onToggleMainSidebarFocus = vi.fn();
+	it('cycles workspace pane focus on Ctrl-Shift-O', () => {
+		const onCyclePaneFocus = vi.fn();
 		const event = new KeyboardEvent('keydown', {
 			key: 'o',
 			ctrlKey: true,
@@ -476,12 +476,12 @@ describe('KeyboardShortcuts', () => {
 		render(KeyboardShortcutsHost, {
 			appShell: createMockAppShell(),
 			navigation: createMockNavigation(),
-			onToggleMainSidebarFocus,
+			onCyclePaneFocus,
 		});
 
 		window.dispatchEvent(event);
 
-		expect(onToggleMainSidebarFocus).toHaveBeenCalledOnce();
+		expect(onCyclePaneFocus).toHaveBeenCalledOnce();
 		expect(event.defaultPrevented).toBe(true);
 	});
 

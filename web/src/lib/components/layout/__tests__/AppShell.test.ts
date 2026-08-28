@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppShellBreakpointWorkspace } from './AppShellBreakpointWorkspace.svelte.js';
+import {
+	AppShellBreakpointWorkspace,
+	AppShellLocalSettingsState,
+} from './AppShellBreakpointWorkspace.svelte.js';
 import { reduceWorkspaceLayout } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 
@@ -22,6 +25,7 @@ vi.mock('$lib/context', () => ({
 	getNotifications: () => testContext.current?.notifications,
 	getSidebarProjectCollapse: () => testContext.current?.projectCollapse,
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
+	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
 	getWs: () => testContext.current?.ws,
 }));
@@ -168,14 +172,8 @@ function installContext(): AppShellBreakpointWorkspace {
 				lastConnectedAt: null,
 			},
 		},
-		localSettings: {
-			hideChatListWhenGitInMain: false,
-			chatListDock: 'left',
-			sidebarWidth: 320,
-			sidebarGroupByProject: false,
-			sidebarGroupNestedProjectPaths: false,
-			set: vi.fn(),
-		},
+		localSettings: new AppShellLocalSettingsState(),
+		terminals: { orderedSessions: [] },
 		notifications: {
 			error: vi.fn(),
 			info: vi.fn(),
@@ -313,6 +311,21 @@ describe('AppShell responsive workspace binding', () => {
 			);
 		},
 	);
+
+	it('reorders one mounted desktop chat list when its dock side changes', async () => {
+		installContext();
+		render(AppShell);
+		const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+		const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+		const sidebarButton = screen.getByRole('button', { name: 'Select test chat' });
+		expect(chatList?.classList.contains('order-first')).toBe(true);
+
+		localSettings.chatListDock = 'right';
+
+		await waitFor(() => expect(chatList?.classList.contains('order-last')).toBe(true));
+		expect(document.querySelector('[data-workspace-chat-list]')).toBe(chatList);
+		expect(screen.getByRole('button', { name: 'Select test chat' })).toBe(sidebarButton);
+	});
 
 	it('hides and restores the desktop chat list for pane fullscreen', async () => {
 		const workspace = installContext();

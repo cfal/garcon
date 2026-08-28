@@ -31,6 +31,7 @@
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -65,6 +66,7 @@
 		onManageTags: (chat: ChatSessionRecord) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
+		newPaneActions: WorkspaceNewPaneActions;
 	}
 
 	let {
@@ -86,6 +88,7 @@
 		onManageTags,
 		onShowScheduledPrompts,
 		onShowSettings,
+		newPaneActions,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -460,6 +463,7 @@
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
 			{onShowSettings}
+			{newPaneActions}
 		/>
 	</div>
 

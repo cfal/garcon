@@ -19,6 +19,7 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import { workspaceNewPaneActionsTestFixture } from './workspace-new-pane-actions-test-fixture.js';
 
 	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
@@ -198,5 +199,6 @@
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
 		onShowSettings={() => {}}
+		newPaneActions={workspaceNewPaneActionsTestFixture}
 	/>
 {/if}
