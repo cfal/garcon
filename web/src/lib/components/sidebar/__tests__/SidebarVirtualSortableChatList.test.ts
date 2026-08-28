@@ -12,6 +12,7 @@ import {
 } from '../sidebar-virtual-chat-list';
 import { sidebarProjectKey } from '../sidebar-row-model';
 import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
+import type { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
@@ -986,6 +987,110 @@ describe('SidebarVirtualSortableChatList', () => {
 			touches: [],
 			changedTouches: [touchAt(1, 20, 150)],
 		});
+	});
+
+	it('drags a chat toward workspace panels without reordering under recent sort', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+		const splitDragEnd = vi.fn();
+		const registered = {
+			reorder: null as SidebarChatReorderState | null,
+			splitLayout: null as SplitLayoutStore | null,
+		};
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			rowHeight,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode: 'recent',
+			},
+			onRegisterReorder: (value) => (registered.reorder = value),
+			onRegisterSplitLayout: (value) => (registered.splitLayout = value),
+			onPersistReorder: persist,
+			onSplitDragEnd: splitDragEnd,
+		});
+		await tick();
+
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
+		if (!row0 || !row1) throw new Error('expected source and target rows to be rendered');
+		expect(row0.dataset.sidebarDragDisabled).toBeUndefined();
+		const dataTransfer = new DataTransfer();
+
+		await fireEvent.dragStart(row0, { clientX: 20, clientY: 44, dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+
+		expect(row0.className).toContain('opacity-45');
+		expect(registered.reorder?.activeList).toBeNull();
+		expect(registered.splitLayout?.draggedChatId).toBe('chat-0');
+
+		// Rows are not reorder targets under the derived recent sort, so a drop
+		// inside the sidebar persists nothing and only ends the split drag.
+		await fireEvent.drop(row1, { clientX: 20, clientY: rowHeight + 44, dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+		expect(splitDragEnd).toHaveBeenCalledWith('chat-0');
+		expect(registered.splitLayout?.draggedChatId).toBeNull();
+	});
+
+	it('keeps a recent-sort split drag alive when virtualization unmounts its source', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+		const splitDragEnd = vi.fn();
+		const registered = {
+			reorder: null as SidebarChatReorderState | null,
+			splitLayout: null as SplitLayoutStore | null,
+		};
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(500),
+			rowHeight,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode: 'recent',
+			},
+			onRegisterReorder: (value) => (registered.reorder = value),
+			onRegisterSplitLayout: (value) => (registered.splitLayout = value),
+			onPersistReorder: persist,
+			onSplitDragEnd: splitDragEnd,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		if (!row0) throw new Error('expected source row to be rendered');
+		const dataTransfer = new DataTransfer();
+
+		await fireEvent.dragStart(row0, { clientX: 20, clientY: 44, dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.splitLayout?.draggedChatId).toBe('chat-0');
+
+		// The recent sort is derived from live activity, so a background update
+		// can push the dragged row out of the virtual window mid-drag. The split
+		// drag must survive so the drop on a workspace panel still lands.
+		viewport.scrollTop = rowHeight * 120;
+		await fireEvent.scroll(viewport);
+		await tick();
+
+		expect(row0.isConnected).toBe(false);
+		expect(splitDragEnd).not.toHaveBeenCalled();
+		expect(registered.splitLayout?.draggedChatId).toBe('chat-0');
+
+		await fireEvent.drop(window, { dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+
+		expect(splitDragEnd).toHaveBeenCalledWith('chat-0');
+		expect(persist).not.toHaveBeenCalled();
 	});
 
 	it('cancels a native drag when virtualization unmounts its source', async () => {
