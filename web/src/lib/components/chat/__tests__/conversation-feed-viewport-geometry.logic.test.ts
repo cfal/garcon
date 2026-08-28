@@ -1,12 +1,93 @@
-import type { VirtualItem } from '@tanstack/svelte-virtual';
 import { describe, expect, it } from 'vitest';
-import { isConversationVirtualViewportCovered } from '../conversation-feed-viewport-geometry';
+import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
+import {
+	attainableConversationTargetOffset,
+	classifyConversationVirtualStructure,
+	classifyMeasuredConversationViewportFill,
+	isConversationVirtualViewportCovered,
+	retainedConversationRange,
+	shouldPreserveConversationVirtualEdge,
+} from '../conversation-feed-viewport-geometry';
 
 function virtualItem(key: string, index: number, start: number, size: number): VirtualItem {
-	return { key, index, start, end: start + size, size, lane: 0 };
+	return { key, index, start, end: start + size, size };
 }
 
 describe('conversation virtual viewport geometry', () => {
+	it('classifies identity, edge, interior, and unchanged geometry separately', () => {
+		const base = {
+			previousKeys: ['a', 'b', 'c'],
+			previousEstimates: [10, 10, 10],
+			nextKeys: ['a', 'b', 'c'],
+			nextEstimates: [10, 10, 10],
+		};
+
+		expect(classifyConversationVirtualStructure({ ...base, identityChanged: true })).toBe(
+			'identity',
+		);
+		expect(classifyConversationVirtualStructure({ ...base, identityChanged: false })).toBe('none');
+		expect(
+			classifyConversationVirtualStructure({
+				...base,
+				identityChanged: false,
+				nextKeys: ['before', ...base.nextKeys],
+				nextEstimates: [10, ...base.nextEstimates],
+			}),
+		).toBe('edge-qualified');
+		expect(
+			classifyConversationVirtualStructure({
+				...base,
+				identityChanged: false,
+				nextEstimates: [10, 20, 10],
+			}),
+		).toBe('interior-only');
+	});
+
+	it('preserves only consumer-owned reading edges', () => {
+		expect(
+			shouldPreserveConversationVirtualEdge({
+				structure: 'edge-qualified',
+				endBehavior: 'preserve-reading-position',
+				restorePolicyEnd: false,
+			}),
+		).toBe(true);
+		expect(
+			shouldPreserveConversationVirtualEdge({
+				structure: 'edge-qualified',
+				endBehavior: 'restore-if-pinned',
+				restorePolicyEnd: true,
+			}),
+		).toBe(false);
+		expect(
+			shouldPreserveConversationVirtualEdge({
+				structure: 'edge-qualified',
+				endBehavior: 'explicit-navigation',
+				restorePolicyEnd: false,
+			}),
+		).toBe(false);
+	});
+
+	it('overlaps overscan and following rows while merging retained and trailing indexes', () => {
+		expect(
+			retainedConversationRange({
+				overscanRange: { startIndex: 1, endIndex: 5 },
+				visibleRange: { startIndex: 2, endIndex: 3 },
+				count: 10,
+				retainedIndexes: [0, 8],
+				trailingStartIndex: 7,
+				followingRowCount: 2,
+			}),
+		).toEqual([0, 1, 2, 3, 4, 5, 7, 8, 9]);
+		expect(
+			retainedConversationRange({
+				overscanRange: null,
+				visibleRange: null,
+				count: 4,
+				retainedIndexes: [1, 9],
+			}),
+		).toEqual([1]);
+	});
+
 	it('keeps a switched feed concealed while its committed range leaves visible space uncovered', () => {
 		const staleRange = [
 			virtualItem('seq-29', 29, 2_136.984_375, 58),
@@ -18,10 +99,9 @@ describe('conversation virtual viewport geometry', () => {
 			virtualItem('end-spacer', 35, 2_718, 57),
 		];
 		const viewport = {
-			scrollOffset: 2_017,
+			paintedOffset: 2_017,
 			viewportSize: 758,
-			scrollMargin: 0,
-			totalSize: 2_775,
+			sizerSize: 2_775,
 		};
 
 		expect(isConversationVirtualViewportCovered(staleRange, viewport)).toBe(false);
@@ -36,8 +116,8 @@ describe('conversation virtual viewport geometry', () => {
 	it('accepts an underfilled list after all visible list content commits', () => {
 		expect(
 			isConversationVirtualViewportCovered(
-				[virtualItem('first', 0, 60, 100), virtualItem('second', 1, 160, 132)],
-				{ scrollOffset: 0, viewportSize: 758, scrollMargin: 60, totalSize: 232 },
+				[virtualItem('first', 0, 0, 100), virtualItem('second', 1, 100, 132)],
+				{ paintedOffset: 0, viewportSize: 758, sizerSize: 232 },
 			),
 		).toBe(true);
 	});
@@ -50,8 +130,48 @@ describe('conversation virtual viewport geometry', () => {
 					virtualItem('visible-start', 5, 500, 100),
 					virtualItem('retained-end', 10, 1_000, 100),
 				],
-				{ scrollOffset: 500, viewportSize: 500, scrollMargin: 0, totalSize: 1_100 },
+				{ paintedOffset: 500, viewportSize: 500, sizerSize: 1_100 },
 			),
 		).toBe(false);
+	});
+
+	it('classifies fill only after every row has a physical measurement', () => {
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b'],
+				measuredSizes: new Map([['a', 80]]),
+				viewportHeight: 100,
+			}),
+		).toBeNull();
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b'],
+				measuredSizes: new Map([
+					['a', 80],
+					['b', 30],
+				]),
+				viewportHeight: 100,
+			}),
+		).toBe('overflow');
+		expect(
+			classifyMeasuredConversationViewportFill({
+				keys: ['a', 'b'],
+				measuredSizes: new Map([
+					['a', 40],
+					['b', 30],
+				]),
+				viewportHeight: 100,
+			}),
+		).toBe('underfilled');
+	});
+
+	it('clamps targets', () => {
+		expect(
+			attainableConversationTargetOffset({
+				currentOffset: 80,
+				alignmentDelta: 50,
+				maximumOffset: 100,
+			}),
+		).toBe(100);
 	});
 });

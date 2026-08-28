@@ -1,4 +1,4 @@
-import { defaultRangeExtractor, type Range, type Rect } from '@tanstack/svelte-virtual';
+import type { VirtualRange } from '$lib/virt/virtual-list-types.js';
 import type { ConversationVirtualGeometrySnapshot } from './ConversationFeedProjectionState.svelte.js';
 
 export const CHAT_GEOMETRY_END_THRESHOLD_PX = 1;
@@ -44,77 +44,17 @@ export function shouldPreserveConversationVirtualEdge(input: {
 	);
 }
 
-function conversationVirtualGeometryChangesBeforeAnchor(input: {
-	previousKeys: readonly string[];
-	previousEstimates: readonly number[];
-	nextKeys: readonly string[];
-	nextEstimates: readonly number[];
-	anchorKey: string;
-}): boolean {
-	const previousAnchorIndex = input.previousKeys.indexOf(input.anchorKey);
-	const nextAnchorIndex = input.nextKeys.indexOf(input.anchorKey);
-	if (previousAnchorIndex < 0 || nextAnchorIndex < 0) return true;
-
-	return (
-		!arraysEqual(
-			input.previousKeys.slice(0, previousAnchorIndex),
-			input.nextKeys.slice(0, nextAnchorIndex),
-		) ||
-		!arraysEqual(
-			input.previousEstimates.slice(0, previousAnchorIndex),
-			input.nextEstimates.slice(0, nextAnchorIndex),
-		)
-	);
-}
-
-export function selectConversationReadingRestoreAnchor<T extends { key: string }>(input: {
-	candidateAnchor: T | null;
-	pendingAnchor: T | null;
-	previous: Pick<ConversationVirtualGeometrySnapshot, 'keys' | 'estimates'>;
-	next: Pick<ConversationVirtualGeometrySnapshot, 'keys' | 'estimates'>;
-}): T | null {
-	const anchor = input.candidateAnchor;
-	if (!anchor) return null;
-	// Avoids a redundant keyed restore when TanStack already anchors an unaffected tail append.
-	const shouldRestore =
-		input.pendingAnchor !== null ||
-		conversationVirtualGeometryChangesBeforeAnchor({
-			previousKeys: input.previous.keys,
-			previousEstimates: input.previous.estimates,
-			nextKeys: input.next.keys,
-			nextEstimates: input.next.estimates,
-			anchorKey: anchor.key,
-		});
-	return shouldRestore ? anchor : null;
-}
-
-export function selectConversationReadingAnchor<T extends { key: unknown; end: number }>(
-	items: readonly T[],
-	scrollOffset: number,
-	eligibleKeys: ReadonlySet<string>,
-): T | undefined {
-	const eligibleItems = items.filter((item) => eligibleKeys.has(String(item.key)));
-	return (
-		eligibleItems.find((item) => item.end > scrollOffset + CHAT_GEOMETRY_END_THRESHOLD_PX) ??
-		eligibleItems.at(-1)
-	);
-}
-
 // Rejects a stale or disjoint range that could add a visible row after reveal.
 export function isConversationVirtualViewportCovered(
 	virtualItems: readonly { start: number; end: number }[],
 	input: {
-		scrollOffset: number;
+		paintedOffset: number;
 		viewportSize: number;
-		scrollMargin: number;
-		totalSize: number;
+		sizerSize: number;
 	},
 ): boolean {
-	const visibleStart = Math.max(input.scrollOffset, input.scrollMargin);
-	const visibleEnd = Math.min(
-		input.scrollOffset + input.viewportSize,
-		input.scrollMargin + input.totalSize,
-	);
+	const visibleStart = Math.max(input.paintedOffset, 0);
+	const visibleEnd = Math.min(input.paintedOffset + input.viewportSize, input.sizerSize);
 	if (visibleEnd <= visibleStart + CHAT_GEOMETRY_END_THRESHOLD_PX) return true;
 
 	let coveredThrough = visibleStart;
@@ -127,56 +67,54 @@ export function isConversationVirtualViewportCovered(
 	return false;
 }
 
-export function retainedConversationRange(
-	range: Range,
-	retainedIndexes: readonly number[],
-	trailingStartIndex?: number,
-	followingRowCount = 0,
-): number[] {
-	const indexes = new Set(defaultRangeExtractor(range));
-	const followingEndIndex = Math.min(range.count - 1, range.endIndex + followingRowCount);
-	for (let index = range.endIndex + 1; index <= followingEndIndex; index += 1) {
-		indexes.add(index);
+export function retainedConversationRange(input: {
+	readonly overscanRange: VirtualRange | null;
+	readonly visibleRange: VirtualRange | null;
+	readonly count: number;
+	readonly retainedIndexes: readonly number[];
+	readonly trailingStartIndex?: number | null;
+	readonly followingRowCount?: number;
+}): number[] {
+	const {
+		overscanRange,
+		visibleRange,
+		count,
+		retainedIndexes,
+		trailingStartIndex = null,
+		followingRowCount = 0,
+	} = input;
+	const indexes = new Set<number>();
+	if (overscanRange) {
+		for (let index = overscanRange.startIndex; index <= overscanRange.endIndex; index += 1) {
+			indexes.add(index);
+		}
+	}
+	if (visibleRange) {
+		const followingEndIndex = Math.min(count - 1, visibleRange.endIndex + followingRowCount);
+		for (let index = visibleRange.endIndex + 1; index <= followingEndIndex; index += 1) {
+			indexes.add(index);
+		}
 	}
 	for (const index of retainedIndexes) {
-		if (index >= 0 && index < range.count) indexes.add(index);
+		if (index >= 0 && index < count) indexes.add(index);
 	}
-	if (trailingStartIndex !== undefined) {
-		for (let index = Math.max(0, trailingStartIndex); index < range.count; index += 1) {
+	if (trailingStartIndex !== null) {
+		for (let index = Math.max(0, trailingStartIndex); index < count; index += 1) {
 			indexes.add(index);
 		}
 	}
 	return [...indexes].sort((left, right) => left - right);
 }
 
-export function createRetainedConversationRangeExtractor(
-	retainedIndexes: readonly number[],
-	trailingStartIndex?: number,
-	followingRowCount = CHAT_VIRTUAL_FOLLOWING_BUFFER_ROWS,
-): (range: Range) => number[] {
-	return (range) =>
-		retainedConversationRange(range, retainedIndexes, trailingStartIndex, followingRowCount);
-}
-
 export function classifyMeasuredConversationViewportFill(input: {
 	keys: readonly string[];
 	measuredSizes: { get(key: string): number | undefined };
-	renderedKeys: { has(key: string): boolean };
-	estimates: readonly number[];
-	leadingSize: number;
 	viewportHeight: number;
 }): 'overflow' | 'underfilled' | null {
-	let physicalSize = input.leadingSize;
-	let allMeasured = true;
-	for (const [index, key] of input.keys.entries()) {
-		// TanStack omits a cache entry when a wrapper renders exactly at its estimate,
-		// so a rendered key without a cache entry is measured at that estimate.
-		const size =
-			input.measuredSizes.get(key) ??
-			(input.renderedKeys.has(key) ? input.estimates[index] : undefined);
+	let physicalSize = 0;
+	for (const key of input.keys) {
+		const size = input.measuredSizes.get(key);
 		if (size === undefined) {
-			allMeasured = false;
-			physicalSize = 0;
 			continue;
 		}
 		physicalSize += size;
@@ -184,7 +122,9 @@ export function classifyMeasuredConversationViewportFill(input: {
 			return 'overflow';
 		}
 	}
-	return allMeasured ? 'underfilled' : null;
+	return input.keys.every((key) => input.measuredSizes.get(key) !== undefined)
+		? 'underfilled'
+		: null;
 }
 
 export function attainableConversationTargetOffset(input: {
@@ -193,11 +133,6 @@ export function attainableConversationTargetOffset(input: {
 	maximumOffset: number;
 }): number {
 	return Math.max(0, Math.min(input.maximumOffset, input.currentOffset + input.alignmentDelta));
-}
-
-export function resolveConversationViewportRect(previous: Rect, observed: Rect): Rect {
-	// Retains the last geometry only while the viewport is fully collapsed.
-	return observed.width > 0 && observed.height > 0 ? observed : previous;
 }
 
 export function isConversationTargetLayoutReady(node: HTMLElement): boolean {

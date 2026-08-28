@@ -1,5 +1,4 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import type { PartialKeys, VirtualizerOptions } from '@tanstack/svelte-virtual';
 import type { ComponentProps } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -12,55 +11,16 @@ import type {
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import { measureVirtualRow } from '../git-virtual-row-measurement.js';
+import {
+	FakeVirtualListController,
+	publishVirtualDiffRange,
+	resetVirtualDiffControllerFake,
+	virtualDiffControllerCalls,
+} from './git-virtual-diff-controller-fake.svelte.js';
 
-type TestInitialVirtualizerOptions = PartialKeys<
-	VirtualizerOptions<HTMLElement, HTMLDivElement>,
-	'observeElementRect' | 'observeElementOffset' | 'scrollToFn'
->;
-type TestRefreshedVirtualizerOptions = Partial<VirtualizerOptions<HTMLElement, HTMLDivElement>>;
-
-let initialVirtualizerOptions: TestInitialVirtualizerOptions | null;
-let refreshedVirtualizerOptions: TestRefreshedVirtualizerOptions | null;
-let measureCalls: number;
-let setOptionsCalls: number;
-let scrollToIndexCalls: number[];
-let publishVisibleRange: (startIndex: number, endIndex?: number) => void;
-
-vi.mock('@tanstack/svelte-virtual', async () => {
-	const { writable } = await import('svelte/store');
-	return {
-		createVirtualizer: (options: TestInitialVirtualizerOptions) => {
-			initialVirtualizerOptions = options;
-			const virtualItems = [0, 1, 2].map((index) => ({
-				index,
-				key: `file:${index}:header`,
-				start: index * 42,
-				size: 42,
-				end: (index + 1) * 42,
-			}));
-			const virtualizer = {
-				range: { startIndex: 0, endIndex: 2 },
-				getVirtualItems: () => virtualItems,
-				getTotalSize: () => 126,
-				setOptions: (next: TestRefreshedVirtualizerOptions) => {
-					setOptionsCalls += 1;
-					refreshedVirtualizerOptions = next;
-				},
-				measureElement: () => undefined,
-				scrollToIndex: (index: number) => scrollToIndexCalls.push(index),
-				measure: () => {
-					measureCalls += 1;
-				},
-			};
-			const store = writable(virtualizer);
-			publishVisibleRange = (startIndex, endIndex = startIndex) => {
-				virtualizer.range = { startIndex, endIndex };
-				store.set(virtualizer);
-			};
-			return store;
-		},
-	};
-});
+vi.mock('$lib/virt/virtual-list-controller.svelte.js', () => ({
+	VirtualListController: FakeVirtualListController,
+}));
 
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
@@ -220,11 +180,7 @@ function makeSurfaceProps(
 
 describe('Git virtual diff refresh', () => {
 	beforeEach(() => {
-		initialVirtualizerOptions = null;
-		refreshedVirtualizerOptions = null;
-		measureCalls = 0;
-		setOptionsCalls = 0;
-		scrollToIndexCalls = [];
+		resetVirtualDiffControllerFake();
 	});
 
 	it('keeps shared measurement options while refreshed rows reconcile', async () => {
@@ -268,11 +224,8 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
-		expect(initialVirtualizerOptions?.measureElement).toBe(measureVirtualRow);
-		await waitFor(() => {
-			expect(refreshedVirtualizerOptions?.measureElement).toBe(measureVirtualRow);
-		});
-		await waitFor(() => expect(measureCalls).toBe(1));
+		expect(virtualDiffControllerCalls.options[0]?.measureElement).toBe(measureVirtualRow);
+		await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(1));
 
 		await rerender({
 			...props,
@@ -281,7 +234,6 @@ describe('Git virtual diff refresh', () => {
 
 		expect(screen.getByText('file-2.ts')).toBeTruthy();
 		expect(viewport.scrollTop).toBe(300);
-		expect(measureCalls).toBe(1);
 		const rowWindow = container.querySelector<HTMLElement>('[data-git-virtual-row-window]');
 		expect(rowWindow).toBeTruthy();
 		if (!rowWindow) return;
@@ -329,7 +281,7 @@ describe('Git virtual diff refresh', () => {
 		};
 		const { rerender } = render(GitVirtualDiffSurface, { props });
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
 
 		const movedRows = [
 			makeHeaderRow(0),
@@ -345,7 +297,7 @@ describe('Git virtual diff refresh', () => {
 			source: arrayGitVirtualReviewRowSource(movedRows, fileIndexes(movedRows)),
 		});
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 5]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4, 5]));
 	});
 
 	it('repositions a requested file after its lazy body expands in place', async () => {
@@ -387,7 +339,7 @@ describe('Git virtual diff refresh', () => {
 		};
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
 
 		const expandedRows = [...initialRows.slice(0, -1), makeUnifiedRow(2)];
 		await rerender({
@@ -395,7 +347,7 @@ describe('Git virtual diff refresh', () => {
 			source: arrayGitVirtualReviewRowSource(expandedRows, fileIndexes(expandedRows)),
 		});
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 4]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4, 4]));
 
 		const shiftedRows = [
 			...expandedRows.slice(0, 2),
@@ -407,7 +359,7 @@ describe('Git virtual diff refresh', () => {
 			source: arrayGitVirtualReviewRowSource(shiftedRows, fileIndexes(shiftedRows)),
 		});
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4, 4, 5]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4, 4, 5]));
 
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(viewport).toBeTruthy();
@@ -424,7 +376,24 @@ describe('Git virtual diff refresh', () => {
 			source: arrayGitVirtualReviewRowSource(shiftedAgainRows, fileIndexes(shiftedAgainRows)),
 		});
 
-		expect(scrollToIndexCalls).toEqual([4, 4, 5]);
+		expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4, 4, 5]);
+	});
+
+	it('does not replay a clamped request while its target geometry is unchanged', async () => {
+		const rows = makeUnloadedRows();
+		const props = makeSurfaceProps(rows, {
+			scrollToRequest: { filePath: 'file-2.ts', token: 1 },
+		});
+		const { container } = render(GitVirtualDiffSurface, { props });
+
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
+		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+		expect(viewport).toBeTruthy();
+		if (!viewport) return;
+		viewport.scrollTop = 0;
+		publishVirtualDiffRange(0);
+
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
 	});
 
 	it('does not replay a serviced scroll when a pending file becomes stale', async () => {
@@ -466,13 +435,13 @@ describe('Git virtual diff refresh', () => {
 		};
 		const { rerender } = render(GitVirtualDiffSurface, { props });
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
 		await rerender({
 			...props,
 			source: arrayGitVirtualReviewRowSource([...initialRows.slice(0, -1), makeLimitRow(2)]),
 		});
 
-		expect(scrollToIndexCalls).toEqual([4]);
+		expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]);
 	});
 
 	it('defers an inactive navigation request until the viewport becomes active', async () => {
@@ -515,19 +484,19 @@ describe('Git virtual diff refresh', () => {
 		};
 		const { rerender } = render(GitVirtualDiffSurface, { props });
 
-		await waitFor(() => expect(measureCalls).toBe(1));
-		expect(scrollToIndexCalls).toEqual([]);
+		await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(1));
+		expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([]);
 		expect(props.onBodyDemand).not.toHaveBeenCalled();
 
 		await rerender({ ...props, active: true });
 
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([4]));
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([4]));
 		expect(props.onBodyDemand).toHaveBeenCalledWith(
 			expect.objectContaining({ kind: 'navigation', documentId: 'doc-a' }),
 		);
 	});
 
-	it('keeps measurement callbacks stable for presentation-only source rebuilds', async () => {
+	it('does not republish geometry for presentation-only source rebuilds', async () => {
 		const rows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
 		const props = {
 			layoutIdentity: 'layout-a',
@@ -565,10 +534,8 @@ describe('Git virtual diff refresh', () => {
 			onOpenChat: vi.fn(),
 		};
 		const { rerender } = render(GitVirtualDiffSurface, { props });
-		await waitFor(() => expect(refreshedVirtualizerOptions?.estimateSize).toBeTruthy());
-		const estimateSize = refreshedVirtualizerOptions?.estimateSize;
-		const getItemKey = refreshedVirtualizerOptions?.getItemKey;
-		const initialSetOptionsCalls = setOptionsCalls;
+		await waitFor(() => expect(virtualDiffControllerCalls.mutations).toHaveLength(1));
+		const initialMutationCount = virtualDiffControllerCalls.mutations.length;
 
 		await rerender({
 			...props,
@@ -577,10 +544,8 @@ describe('Git virtual diff refresh', () => {
 			),
 		});
 
-		expect(refreshedVirtualizerOptions?.estimateSize).toBe(estimateSize);
-		expect(refreshedVirtualizerOptions?.getItemKey).toBe(getItemKey);
-		expect(setOptionsCalls).toBe(initialSetOptionsCalls);
-		expect(measureCalls).toBe(1);
+		expect(virtualDiffControllerCalls.mutations).toHaveLength(initialMutationCount);
+		expect(virtualDiffControllerCalls.options[0]?.measureElement).toBe(measureVirtualRow);
 	});
 
 	it('restores scroll after presentation-only rows update the rendered DOM', async () => {
@@ -730,7 +695,7 @@ describe('Git virtual diff refresh', () => {
 			),
 		);
 		expect(viewport.scrollTop).toBe(300);
-		expect(measureCalls).toBe(1);
+		expect(virtualDiffControllerCalls.options).toHaveLength(1);
 	});
 
 	it('recomputes the pinned file after a placeholder expands and moves later headers', async () => {
@@ -743,7 +708,7 @@ describe('Git virtual diff refresh', () => {
 		const props = makeSurfaceProps(initialRows);
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 
-		publishVisibleRange(1);
+		publishVirtualDiffRange(1);
 		await waitFor(() =>
 			expect(
 				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
@@ -761,7 +726,7 @@ describe('Git virtual diff refresh', () => {
 			...props,
 			source: arrayGitVirtualReviewRowSource(expandedRows, fileIndexes(expandedRows)),
 		});
-		publishVisibleRange(4);
+		publishVirtualDiffRange(4);
 
 		await waitFor(() =>
 			expect(
@@ -776,7 +741,7 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
-		publishVisibleRange(1);
+		publishVirtualDiffRange(1);
 		await waitFor(() =>
 			expect(
 				container.querySelector<HTMLElement>('[data-git-pinned-file-header]')?.dataset.filePath,
@@ -796,14 +761,14 @@ describe('Git virtual diff refresh', () => {
 			).toBe('file-9.ts'),
 		);
 		expect(viewport.scrollTop).toBe(300);
-		expect(measureCalls).toBe(1);
+		expect(virtualDiffControllerCalls.options).toHaveLength(1);
 	});
 
 	it('removes the pinned copy when navigation returns the real header to the visible range', async () => {
 		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
 		const props = makeSurfaceProps(rows);
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
-		publishVisibleRange(1);
+		publishVirtualDiffRange(1);
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
 		);
@@ -812,8 +777,8 @@ describe('Git virtual diff refresh', () => {
 			...props,
 			scrollToRequest: { filePath: 'file-0.ts', token: 1 },
 		});
-		await waitFor(() => expect(scrollToIndexCalls).toEqual([0]));
-		publishVisibleRange(0);
+		await waitFor(() => expect(virtualDiffControllerCalls.scrollToIndexes).toEqual([0]));
+		publishVirtualDiffRange(0);
 
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
@@ -824,12 +789,12 @@ describe('Git virtual diff refresh', () => {
 		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeCollectionLimitRow()];
 		const props = makeSurfaceProps(rows);
 		const { container } = render(GitVirtualDiffSurface, { props });
-		publishVisibleRange(1);
+		publishVirtualDiffRange(1);
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
 		);
 
-		publishVisibleRange(2);
+		publishVirtualDiffRange(2);
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
 		);
@@ -876,7 +841,7 @@ describe('Git virtual diff refresh', () => {
 		const { container, rerender } = render(GitVirtualDiffSurface, { props });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 300;
-		publishVisibleRange(1);
+		publishVirtualDiffRange(1);
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeTruthy(),
 		);
@@ -890,13 +855,17 @@ describe('Git virtual diff refresh', () => {
 			reviewDocumentId: 'doc-b',
 			source: arrayGitVirtualReviewRowSource(replacementRows),
 		});
-		publishVisibleRange(0);
+		publishVirtualDiffRange(0);
 
 		expect(viewport.scrollTop).toBe(0);
 		await waitFor(() =>
 			expect(container.querySelector('[data-git-pinned-file-header]')).toBeNull(),
 		);
-		expect(measureCalls).toBeGreaterThanOrEqual(2);
+		expect(
+			virtualDiffControllerCalls.mutations.filter(
+				(mutation) => mutation.kind === 'reset-measurements',
+			),
+		).toHaveLength(2);
 		await waitFor(() => expect(onBodyDemand).toHaveBeenCalled());
 	});
 });

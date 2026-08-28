@@ -53,6 +53,10 @@ describe('ConversationFeed', () => {
 		HTMLElement.prototype,
 		'offsetHeight',
 	);
+	const originalClientHeight = Object.getOwnPropertyDescriptor(
+		HTMLElement.prototype,
+		'clientHeight',
+	);
 
 	beforeEach(() => {
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
@@ -85,6 +89,13 @@ describe('ConversationFeed', () => {
 				return itemHeights[Number(this.dataset.index ?? 0) % itemHeights.length];
 			},
 		});
+		Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+			configurable: true,
+			get() {
+				if (this.hasAttribute('data-chat-scroll-viewport')) return 720;
+				return originalClientHeight?.get?.call(this) ?? 0;
+			},
+		});
 	});
 
 	afterEach(() => {
@@ -92,6 +103,9 @@ describe('ConversationFeed', () => {
 		vi.restoreAllMocks();
 		if (originalOffsetHeight) {
 			Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
+		}
+		if (originalClientHeight) {
+			Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight);
 		}
 	});
 
@@ -476,9 +490,10 @@ describe('ConversationFeed', () => {
 			}
 			const survivorKey = measuredRow.dataset.chatVirtualItem;
 			expect(survivorKey).toBeTruthy();
-			ResizeObserverHarness.emit(measuredRow, 900, 600);
 			const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
 			if (!viewport) throw new Error('Expected the Chat viewport');
+			ResizeObserverHarness.emit(viewport, 900, 720);
+			ResizeObserverHarness.emit(measuredRow, 900, 600);
 			viewport.scrollTop += 37;
 			await fireEvent.scroll(viewport);
 

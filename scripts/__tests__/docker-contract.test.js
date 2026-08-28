@@ -29,16 +29,16 @@ const persistedPaths = [
 
 let dockerfile;
 let composeFile;
-let readme;
+let dockerGuide;
 let dockerignore;
 let rootPackage;
 let integrationPackage;
 
 beforeAll(async () => {
-  [dockerfile, composeFile, readme, dockerignore, rootPackage, integrationPackage] = await Promise.all([
+  [dockerfile, composeFile, dockerGuide, dockerignore, rootPackage, integrationPackage] = await Promise.all([
     readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'README.md'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
     readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
     readFile(path.join(repositoryRoot, 'package.json'), 'utf8').then(JSON.parse),
     readFile(path.join(repositoryRoot, 'integration-tests/package.json'), 'utf8').then(JSON.parse),
@@ -69,7 +69,12 @@ describe('Docker contract', () => {
   });
 
   test('copies declared patches before installing the workspace', () => {
-    expect(Object.keys(rootPackage.patchedDependencies)).not.toHaveLength(0);
+    const patchedDependencies = rootPackage.patchedDependencies ?? {};
+    if (Object.keys(patchedDependencies).length === 0) {
+      expect(dockerfile).not.toContain('COPY patches/ patches/');
+      return;
+    }
+
     expect(dockerfile.indexOf('COPY patches/ patches/')).toBeGreaterThan(-1);
     expect(dockerfile.indexOf('COPY patches/ patches/')).toBeLessThan(
       dockerfile.indexOf('RUN bun install --frozen-lockfile'),
@@ -123,7 +128,7 @@ describe('Docker contract', () => {
 
   test('documents every persistent container path', () => {
     for (const target of persistedPaths) {
-      expect(readme).toContain(`\`${target}\``);
+      expect(dockerGuide).toContain(`\`${target}\``);
     }
   });
 

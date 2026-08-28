@@ -90,6 +90,23 @@ function mockFinePointerViewport(
 			},
 		},
 	});
+	installFileTreeRects(treegrid);
+}
+
+function installFileTreeRects(treegrid: HTMLElement): void {
+	const sizer = treegrid.querySelector<HTMLElement>('[data-file-tree-virtual-sizer]');
+	if (!sizer) throw new Error('Expected file tree virtual sizer');
+	Object.defineProperty(treegrid, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => new DOMRect(0, 0, 0, treegrid.clientHeight),
+	});
+	Object.defineProperty(sizer, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => {
+			const headerHeight = treegrid.querySelector('[data-file-tree-column-grid]') ? 32 : 0;
+			return new DOMRect(0, headerHeight - treegrid.scrollTop, 0, sizer.offsetHeight);
+		},
+	});
 }
 
 function scrollOnNextAnimationFrame(element: HTMLElement, offset: number): Promise<void> {
@@ -394,6 +411,9 @@ describe('FileTreeVirtualRows', () => {
 
 	it('cancels a stale long-distance focus transfer when a newer request wins', async () => {
 		const { container } = renderRows(10_000);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		const firstPath = '/workspace/file-000000.ts';
 		const first = await waitFor(() => {
 			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${firstPath}"]`);
@@ -411,6 +431,7 @@ describe('FileTreeVirtualRows', () => {
 		await waitFor(() =>
 			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(firstPath),
 		);
+		expect(treegrid.scrollTop).toBe(0);
 	});
 
 	it('reconciles removed DOM focus to the nearest surviving actionable row', async () => {
@@ -463,6 +484,7 @@ describe('FileTreeVirtualRows', () => {
 				value: FILE_TREE_HEADER_HEIGHT + items.length * FILE_TREE_ROW_HEIGHT,
 			},
 		});
+		installFileTreeRects(treegrid);
 		const outside = document.createElement('button');
 		document.body.append(outside);
 		first.focus();
@@ -542,6 +564,7 @@ describe('FileTreeVirtualRows', () => {
 		const { container, store } = renderRows(500);
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
+		mockFinePointerViewport(treegrid);
 		treegrid.scrollTop = 640;
 		await fireEvent.scroll(treegrid);
 		expect(treegrid.scrollTop).toBe(640);

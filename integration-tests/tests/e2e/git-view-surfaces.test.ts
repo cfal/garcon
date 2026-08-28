@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { setLightpandaVirtualScrollTop } from '../../support/lightpanda-virtual-scroll.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 const COMPARE_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
@@ -89,12 +90,10 @@ async function pinnedHeaderSnapshot(page: Page, panelSelector: string) {
 }
 
 async function scrollDiffTo(page: Page, panelSelector: string, scrollTop: number): Promise<void> {
-  await page.$eval(
+  await setLightpandaVirtualScrollTop(
+    page,
     `${panelSelector} [data-git-virtual-diff-root]`,
-    (element, top) => {
-      element.scrollTop = top;
-      element.dispatchEvent(new Event('scroll'));
-    },
+    '[data-git-virtual-diff-sizer]',
     scrollTop,
   );
 }

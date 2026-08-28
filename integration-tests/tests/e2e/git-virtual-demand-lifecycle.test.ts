@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { setLightpandaVirtualScrollTop } from '../../support/lightpanda-virtual-scroll.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 async function runGit(projectPath: string, args: string[]): Promise<void> {
@@ -182,12 +183,12 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
         { timeout: 20_000 },
       );
 
-      await fixture.page.evaluate(() => {
-        const viewport = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
-        if (!viewport) throw new Error('Missing Git virtual viewport.');
-        viewport.scrollTop = Math.max(2_000, viewport.scrollHeight * 0.2);
-        viewport.dispatchEvent(new Event('scroll'));
-      });
+      await setLightpandaVirtualScrollTop(
+        fixture.page,
+        '[data-git-virtual-diff-root]',
+        '[data-git-virtual-diff-sizer]',
+        2_000,
+      );
       await fixture.page.waitForFunction(
         () =>
           Number(
@@ -207,12 +208,12 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
         },
         { timeout: 20_000 },
       );
-      await fixture.page.evaluate(() => {
-        const viewport = document.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
-        if (!viewport) throw new Error('Missing settled Git virtual viewport.');
-        viewport.scrollTop = Math.max(2_000, viewport.scrollHeight * 0.2);
-        viewport.dispatchEvent(new Event('scroll'));
-      });
+      await setLightpandaVirtualScrollTop(
+        fixture.page,
+        '[data-git-virtual-diff-root]',
+        '[data-git-virtual-diff-sizer]',
+        2_000,
+      );
       await fixture.page.waitForFunction(
         () =>
           Number(
@@ -276,7 +277,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       expect(retainedAfter.firstIndex).toBe(retainedBefore.firstIndex);
       expect(retainedAfter.spacerHeight).toBeTruthy();
 
-      await fixture.page.evaluate(() => {
+      const farScrollTop = await fixture.page.evaluate(() => {
         const scope = globalThis as typeof globalThis & {
           __garconHoldFarGitBodyRequest?: boolean;
         };
@@ -287,9 +288,14 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
         const virtualHeight = Number.parseFloat(rowWindow?.parentElement?.style.height ?? '');
         if (!Number.isFinite(virtualHeight) || virtualHeight <= 0)
           throw new Error('Missing Git virtual spacer height.');
-        viewport.scrollTop = Math.max(60_000, virtualHeight * 0.75);
-        viewport.dispatchEvent(new Event('scroll'));
+        return Math.max(60_000, virtualHeight * 0.75);
       });
+      await setLightpandaVirtualScrollTop(
+        fixture.page,
+        '[data-git-virtual-diff-root]',
+        '[data-git-virtual-diff-sizer]',
+        farScrollTop,
+      );
       await fixture.page.waitForFunction(
         (previousIndex) =>
           Number(

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
@@ -89,17 +90,18 @@
 		},
 		activateEntry,
 	});
+	onDestroy(() => controller.destroy());
 	const interaction = controller.interaction;
-	const virtualizer = controller.virtualizer;
-	const measureVirtualRow = controller.measureVirtualRow;
 	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
 	let activeFocusKey = $derived(controller.activeFocusKey);
-	let virtualItems = $derived($virtualizer.getVirtualItems());
-	let totalHeight = $derived($virtualizer.getTotalSize());
+	let virtualSnapshot = $derived(controller.snapshot);
+	let virtualItems = $derived(controller.renderedItems(virtualSnapshot));
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
 </script>
 
 <div
 	bind:this={viewportRef}
+	{@attach controller.viewport}
 	{@attach primaryScrollRegion}
 	role="treegrid"
 	aria-label={`${m.filetree_project_files()}: ${store.currentDirectoryLabel}`}
@@ -128,15 +130,16 @@
 				role="presentation"
 				class="relative w-full overflow-clip"
 				style:height={`${totalHeight}px`}
+				data-file-tree-virtual-sizer
+				{@attach controller.sizer}
 			>
 				{#each virtualItems as virtualItem (virtualItem.key)}
-					{@const row = model.rows[virtualItem.index]}
+					{@const row = controller.rowAt(virtualItem.index)}
 					{#if row}
 						<div
 							role="presentation"
 							data-index={virtualItem.index}
 							data-file-tree-virtual-row
-							use:measureVirtualRow
 							class="absolute left-0 top-0 w-full"
 							style:transform={`translateY(${controller.getVirtualRowOffset(virtualItem.index)}px)`}
 						>

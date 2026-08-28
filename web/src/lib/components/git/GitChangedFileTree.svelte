@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { createVirtualizer } from '@tanstack/svelte-virtual';
+	import { onDestroy, untrack } from 'svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Folder from '@lucide/svelte/icons/folder';
@@ -13,6 +12,12 @@
 		type GitChangedFileTreeRow,
 	} from '$lib/git/review/git-changed-file-tree.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
+	import {
+		virtualItems as selectVirtualItems,
+		type VirtualMutationAnchor,
+		type VirtualRange,
+	} from '$lib/virt/virtual-list-types.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitChangedFileTreeProps {
@@ -45,15 +50,19 @@
 			? focusedRowKey
 			: (rows[0]?.key ?? null),
 	);
-	const virtualizer = createVirtualizer<HTMLElement, HTMLDivElement>({
-		count: 0,
-		getScrollElement: () => listRef,
-		estimateSize: () => rowHeight,
-		initialRect: { width: 300, height: 720 },
-		overscan: 12,
-		getItemKey: (index) => rows[index]?.key ?? index,
+	const virtual = new VirtualListController({
+		initialViewportSize: 720,
+		get overscan() {
+			return 12;
+		},
+		get measurementAnchor() {
+			return 'geometric' as const;
+		},
 	});
-	let virtualItems = $derived($virtualizer.getVirtualItems());
+	let virtualSnapshot = $derived(virtual.snapshot);
+	let virtualItems = $derived(
+		selectVirtualItems(virtualSnapshot, indexesInRange(virtualSnapshot.overscanRange)),
+	);
 	let renderedItems = $derived.by(() => {
 		if (virtualItems.length > 0 || rows.length === 0) return virtualItems;
 		return rows.slice(0, 24).map((row, index) => ({
@@ -64,7 +73,7 @@
 			end: (index + 1) * rowHeight,
 		}));
 	});
-	let totalHeight = $derived($virtualizer.getTotalSize());
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
 	let activeRowIndex = $derived(rows.findIndex((row) => row.key === activeFocusKey));
 	let activeDescendantId = $derived(
 		activeRowIndex >= 0 && renderedItems.some((virtualItem) => virtualItem.index === activeRowIndex)
@@ -72,17 +81,14 @@
 			: undefined,
 	);
 
-	$effect(() => {
-		const count = rows.length;
-		const scrollElement = listRef;
+	$effect.pre(() => {
+		const nextRows = rows;
 		untrack(() => {
-			$virtualizer.setOptions({
-				count,
-				getScrollElement: () => scrollElement,
-				estimateSize: () => rowHeight,
-				initialRect: { width: 300, height: 720 },
-				overscan: 12,
-				getItemKey: (index) => rows[index]?.key ?? index,
+			virtual.apply({
+				kind: 'update',
+				keys: nextRows.map((row) => row.key),
+				estimates: nextRows.map(() => rowHeight),
+				anchor: currentAnchor(),
 			});
 		});
 	});
@@ -97,6 +103,23 @@
 
 	function rowElementId(index: number): string {
 		return `${treeId}-row-${index}`;
+	}
+
+	function indexesInRange(range: VirtualRange | null): number[] {
+		return range
+			? Array.from(
+					{ length: range.endIndex - range.startIndex + 1 },
+					(_, offset) => range.startIndex + offset,
+				)
+			: [];
+	}
+
+	function currentAnchor(): VirtualMutationAnchor {
+		const position = virtual.viewportPosition;
+		const item = position
+			? virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
+			: undefined;
+		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
 	}
 
 	function statusCode(status: GitCommitFileStatus): string {
@@ -167,7 +190,13 @@
 		if (!row) return;
 		focusedRowKey = row.key;
 		listRef?.focus({ preventScroll: true });
-		$virtualizer.scrollToIndex(index, { align: 'auto' });
+		const item = virtual.snapshot.positions.itemAt(index);
+		const position = virtual.viewportPosition;
+		if (!item || !position || !listRef) return;
+		if (item.start < position.paintedOffset) virtual.scrollToIndex(index, { align: 'start' });
+		else if (item.end > position.paintedOffset + listRef.clientHeight) {
+			virtual.scrollToIndex(index, { align: 'end' });
+		}
 	}
 
 	function focusParent(row: GitChangedFileTreeRow): void {
@@ -231,6 +260,8 @@
 				break;
 		}
 	}
+
+	onDestroy(() => virtual.destroy());
 </script>
 
 <aside class="flex min-h-0 flex-1 flex-col bg-background">
@@ -250,8 +281,10 @@
 	</div>
 	<div
 		bind:this={listRef}
+		{@attach virtual.viewport}
 		{@attach contextualScrollRegion}
 		class="min-h-0 flex-1 overflow-y-auto py-1 focus-visible:outline-none"
+		style:overflow-anchor="none"
 		role="tree"
 		tabindex="0"
 		aria-label={m.git_diff_document_files()}
@@ -265,7 +298,13 @@
 				{fileFilter.trim() ? m.git_history_no_filter_matches() : m.git_changes_no_changes()}
 			</div>
 		{:else}
-			<div class="relative w-full" style:height={`${totalHeight}px`} role="none">
+			<div
+				class="relative w-full"
+				style:height={`${totalHeight}px`}
+				role="none"
+				data-git-changed-file-tree-sizer
+				{@attach virtual.sizer}
+			>
 				{#each renderedItems as virtualItem (virtualItem.key)}
 					{@const row = rows[virtualItem.index]}
 					{#if row}

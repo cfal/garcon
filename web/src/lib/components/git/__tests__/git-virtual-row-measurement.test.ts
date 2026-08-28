@@ -1,19 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	measureVirtualRow,
-	type VirtualRowKey,
-	type VirtualRowMeasurementContext,
-} from '../git-virtual-row-measurement.js';
-
-function measurementContext(
-	itemSizeCache: ReadonlyMap<VirtualRowKey, number> = new Map(),
-): VirtualRowMeasurementContext {
-	return {
-		indexFromElement: () => 7,
-		options: { getItemKey: () => 'row-7' },
-		itemSizeCache,
-	} satisfies VirtualRowMeasurementContext;
-}
+import { measureVirtualRow } from '../git-virtual-row-measurement.js';
 
 function rowRect(height: number): DOMRect {
 	return {
@@ -41,28 +27,18 @@ describe('measureVirtualRow', () => {
 			borderBoxSize: [{ blockSize: 63.5, inlineSize: 800 }],
 		} satisfies Pick<ResizeObserverEntry, 'borderBoxSize'>;
 
-		expect(measureVirtualRow(element, entry, measurementContext())).toBe(63.5);
-		expect(rect).not.toHaveBeenCalled();
-	});
-
-	it('reuses a cached size without reading layout', () => {
-		const element = document.createElement('div');
-		const rect = vi.spyOn(element, 'getBoundingClientRect');
-		const cache = new Map<VirtualRowKey, number>([['row-7', 54]]);
-
-		expect(measureVirtualRow(element, undefined, measurementContext(cache))).toBe(54);
+		expect(measureVirtualRow(element, entry)).toBe(63.5);
 		expect(rect).not.toHaveBeenCalled();
 	});
 
 	it('reads layout when an observer entry omits its border box', () => {
 		const element = document.createElement('div');
 		const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rowRect(84));
-		const cache = new Map<VirtualRowKey, number>([['row-7', 54]]);
 		const entry = {
 			borderBoxSize: [],
 		} satisfies Pick<ResizeObserverEntry, 'borderBoxSize'>;
 
-		expect(measureVirtualRow(element, entry, measurementContext(cache))).toBe(84);
+		expect(measureVirtualRow(element, entry)).toBe(84);
 		expect(rect).toHaveBeenCalledOnce();
 	});
 
@@ -70,6 +46,6 @@ describe('measureVirtualRow', () => {
 		const element = document.createElement('div');
 		vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rowRect(84));
 
-		expect(measureVirtualRow(element, undefined, measurementContext())).toBe(84);
+		expect(measureVirtualRow(element, undefined)).toBe(84);
 	});
 });

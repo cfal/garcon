@@ -153,11 +153,30 @@ describe('GitChangedFileTree', () => {
 		const files = Array.from({ length: 5_000 }, (_, index) => changedFile(`src/file-${index}.ts`));
 
 		const { container } = renderTree(files);
-		const treeRoot = screen.getByRole('tree', { name: 'Files' });
+		const treeRoot = screen.getByRole('tree', { name: 'Files' }) as HTMLElement;
+		const sizer = container.querySelector<HTMLElement>('[data-git-changed-file-tree-sizer]')!;
+		Object.defineProperties(treeRoot, {
+			clientHeight: { configurable: true, value: 120 },
+			scrollHeight: {
+				configurable: true,
+				get: () => Number.parseFloat(sizer.style.height) || 0,
+			},
+		});
+		treeRoot.getBoundingClientRect = () => new DOMRect(0, 0, 300, 120);
+		sizer.getBoundingClientRect = () =>
+			new DOMRect(0, -treeRoot.scrollTop, 300, Number.parseFloat(sizer.style.height) || 0);
+		await waitFor(() =>
+			expect(container.querySelectorAll('[data-git-file-list-row]').length).toBeGreaterThan(0),
+		);
 		treeRoot.focus();
 		await fireEvent.keyDown(treeRoot, { key: 'End' });
 
-		expect(container.querySelectorAll('[data-git-file-list-row]').length).toBeLessThan(50);
+		await waitFor(() => {
+			const activeRow = container.querySelector<HTMLElement>('[data-git-tree-row-active]');
+			expect(activeRow?.title).toBe('src/file-4999.ts');
+			expect(treeRoot.getAttribute('aria-activedescendant')).toBe(activeRow?.id);
+		});
+		expect(container.querySelectorAll('[data-git-file-list-row]').length).toBeLessThan(40);
 		expect(document.activeElement).toBe(treeRoot);
 	});
 });

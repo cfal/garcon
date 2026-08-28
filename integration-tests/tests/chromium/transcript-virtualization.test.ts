@@ -76,6 +76,11 @@ interface TranscriptTouchDrag {
   y: number;
 }
 
+interface TranscriptScrollTopWrite {
+  duringCoasting: boolean;
+  value: number;
+}
+
 interface TouchPrependScenario {
   caseId: string;
   clampBeforeRelease: boolean;
@@ -1098,6 +1103,139 @@ async function finishTranscriptTouchDrag(drag: TranscriptTouchDrag): Promise<voi
   }
 }
 
+async function installTranscriptScrollTopWriteTrap(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+    const feed = feedElement as HTMLElement;
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatScrollTopWriteTrap?: {
+        coasting: boolean;
+        feed: HTMLElement;
+        restore(): void;
+        writes: TranscriptScrollTopWrite[];
+      };
+    };
+    browserGlobal.__chatScrollTopWriteTrap?.restore();
+    const ownDescriptor = Object.getOwnPropertyDescriptor(feed, 'scrollTop');
+    let owner: object | null = feed;
+    let descriptor: PropertyDescriptor | undefined;
+    while (owner && !descriptor) {
+      descriptor = Object.getOwnPropertyDescriptor(owner, 'scrollTop');
+      owner = Object.getPrototypeOf(owner);
+    }
+    if (!descriptor?.get || !descriptor.set) {
+      throw new Error('The transcript scrollTop descriptor is unavailable.');
+    }
+    const trap = {
+      coasting: false,
+      feed,
+      restore() {
+        if (ownDescriptor) Object.defineProperty(feed, 'scrollTop', ownDescriptor);
+        else Reflect.deleteProperty(feed, 'scrollTop');
+        if (browserGlobal.__chatScrollTopWriteTrap === trap) {
+          delete browserGlobal.__chatScrollTopWriteTrap;
+        }
+      },
+      writes: [] as TranscriptScrollTopWrite[],
+    };
+    Object.defineProperty(feed, 'scrollTop', {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get: () => descriptor.get!.call(feed) as number,
+      set: (value: number) => {
+        trap.writes.push({ duringCoasting: trap.coasting, value });
+        descriptor.set!.call(feed, value);
+      },
+    });
+    browserGlobal.__chatScrollTopWriteTrap = trap;
+  });
+}
+
+async function transcriptScrollTopWrites(page: Page): Promise<TranscriptScrollTopWrite[]> {
+  return page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+    };
+    const writes = browserGlobal.__chatScrollTopWriteTrap?.writes;
+    if (!writes) throw new Error('The transcript scrollTop write trap is missing.');
+    return [...writes];
+  });
+}
+
+async function startTranscriptCoastingHeartbeat(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatCoastingHeartbeat?: { active: boolean; frame: number };
+      __chatScrollTopWriteTrap?: { coasting: boolean };
+    };
+    const trap = browserGlobal.__chatScrollTopWriteTrap;
+    if (!trap) throw new Error('The transcript scrollTop write trap is missing.');
+    if (browserGlobal.__chatCoastingHeartbeat) {
+      browserGlobal.__chatCoastingHeartbeat.active = false;
+    }
+    const heartbeat = { active: true, frame: 0 };
+    browserGlobal.__chatCoastingHeartbeat = heartbeat;
+    trap.coasting = true;
+    const feed = feedElement as HTMLElement;
+    const pulse = () => {
+      if (!heartbeat.active) return;
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      heartbeat.frame += 1;
+      requestAnimationFrame(pulse);
+    };
+    requestAnimationFrame(pulse);
+  });
+  await page.waitForFunction(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatCoastingHeartbeat?: { frame: number };
+    };
+    return (browserGlobal.__chatCoastingHeartbeat?.frame ?? 0) >= 2;
+  });
+}
+
+async function waitForTranscriptCoastingFrames(
+  page: Page,
+  additionalFrames: number,
+): Promise<void> {
+  const target = await page.evaluate((frames) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatCoastingHeartbeat?: { frame: number };
+    };
+    return (browserGlobal.__chatCoastingHeartbeat?.frame ?? 0) + frames;
+  }, additionalFrames);
+  await page.waitForFunction((minimum) => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatCoastingHeartbeat?: { frame: number };
+    };
+    return (browserGlobal.__chatCoastingHeartbeat?.frame ?? 0) >= minimum;
+  }, target);
+}
+
+async function stopTranscriptCoastingHeartbeat(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatCoastingHeartbeat?: { active: boolean };
+      __chatScrollTopWriteTrap?: { coasting: boolean };
+    };
+    if (browserGlobal.__chatCoastingHeartbeat) {
+      browserGlobal.__chatCoastingHeartbeat.active = false;
+      delete browserGlobal.__chatCoastingHeartbeat;
+    }
+    if (browserGlobal.__chatScrollTopWriteTrap) {
+      browserGlobal.__chatScrollTopWriteTrap.coasting = false;
+    }
+  });
+}
+
+async function uninstallTranscriptScrollTopWriteTrap(page: Page): Promise<void> {
+  await stopTranscriptCoastingHeartbeat(page);
+  await page.evaluate(() => {
+    const browserGlobal = globalThis as typeof globalThis & {
+      __chatScrollTopWriteTrap?: { restore(): void };
+    };
+    browserGlobal.__chatScrollTopWriteTrap?.restore();
+  });
+}
+
 async function startTranscriptMomentum(page: Page): Promise<void> {
   await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
     const browserGlobal = globalThis as typeof globalThis & {
@@ -1145,9 +1283,20 @@ async function stopTranscriptMomentum(page: Page): Promise<void> {
     };
     if (browserGlobal.__chatMomentum) browserGlobal.__chatMomentum.active = false;
   });
-  await page.evaluate(
-    () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-  );
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    const feed = feedElement as HTMLElement;
+    let previous = feed.scrollTop;
+    let stableFrames = 0;
+    for (let frame = 0; stableFrames < 3; frame += 1) {
+      if (frame > 300) {
+        throw new Error('Transcript scroll never settled after momentum stop.');
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = feed.scrollTop;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+    }
+  });
 }
 
 async function finishReadingAnchorFrameSampler(page: Page): Promise<ReadingAnchorFrameSample[]> {
@@ -1748,97 +1897,74 @@ async function interruptNavigatorJump(page: Page, marker: string): Promise<void>
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
   await installDelayedTargetGrowth(page, rowId);
-  await page.locator(FEED_SELECTOR).evaluate((feedElement) => {
-    const feed = feedElement as HTMLElement;
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-      __restoreChatScrollTo?: () => void;
-    };
-    browserGlobal.__chatProgrammaticScrollWrites = [];
-    const originalScrollTo = feed.scrollTo.bind(feed);
-    browserGlobal.__restoreChatScrollTo = () => {
-      feed.scrollTo = originalScrollTo;
-    };
-    feed.scrollTo = ((options: ScrollToOptions | number, y?: number) => {
-      const top =
-        typeof options === 'number' ? (y ?? feed.scrollTop) : (options.top ?? feed.scrollTop);
-      browserGlobal.__chatProgrammaticScrollWrites?.push(top);
-      if (typeof options === 'number') originalScrollTo(options, y ?? feed.scrollTop);
-      else originalScrollTo(options);
-    }) as typeof feed.scrollTo;
-  });
-  await clickUserMessageNavigatorRowContaining(page, marker);
-  await page.waitForFunction(
-    (expectedRowId) =>
-      [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
-        (candidate) => candidate.dataset.chatRowId === expectedRowId,
-      ),
-    rowId,
-    { timeout: 20_000 },
-  );
-  const writesAtMount = await page.evaluate(() => {
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-    };
-    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-  });
-  await page.waitForFunction(
-    (minimumWrites) => {
+  let trapInstalled = false;
+  try {
+    await installTranscriptScrollTopWriteTrap(page);
+    trapInstalled = true;
+    await clickUserMessageNavigatorRowContaining(page, marker);
+    await page.waitForFunction(
+      (expectedRowId) =>
+        [...document.querySelectorAll<HTMLElement>('[data-chat-row-id]')].some(
+          (candidate) => candidate.dataset.chatRowId === expectedRowId,
+        ),
+      rowId,
+      { timeout: 20_000 },
+    );
+    const writesAtMount = (await transcriptScrollTopWrites(page)).length;
+    await page.waitForFunction(
+      (minimumWrites) => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatDelayedTargetGrowthFrame?: number;
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        return (
+          (browserGlobal.__chatDelayedTargetGrowthFrame ?? 0) >= 5 &&
+          (browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0) > minimumWrites
+        );
+      },
+      writesAtMount,
+      { timeout: 20_000 },
+    );
+    const writesBeforeIntent = (await transcriptScrollTopWrites(page)).length;
+    const box = await page.locator(FEED_SELECTOR).boundingBox();
+    if (!box) throw new Error('Transcript viewport has no interaction bounds.');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -600);
+    const writes = await withDiagnosticTimeout(
+      'the cancelled navigator jump to stop writing',
+      page.evaluate(async () => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatDelayedTargetGrowthFrame?: number;
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        for (let frame = 0; frame < 2; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const afterCancellation = browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0;
+        for (let frame = 0; frame < 45; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        return {
+          afterCancellation,
+          final: browserGlobal.__chatScrollTopWriteTrap?.writes.length ?? 0,
+          growthFrames: browserGlobal.__chatDelayedTargetGrowthFrame ?? 0,
+        };
+      }),
+    );
+    expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
+    expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
+    expect(writes.final).toBe(writes.afterCancellation);
+    await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+  } finally {
+    await page.evaluate(() => {
       const browserGlobal = globalThis as typeof globalThis & {
-        __chatDelayedTargetGrowthFrame?: number;
-        __chatProgrammaticScrollWrites?: number[];
-      };
-      return (
-        (browserGlobal.__chatDelayedTargetGrowthFrame ?? 0) >= 5 &&
-        (browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0) > minimumWrites
-      );
-    },
-    writesAtMount,
-    { timeout: 20_000 },
-  );
-  const writesBeforeIntent = await page.evaluate(() => {
-    const browserGlobal = globalThis as typeof globalThis & {
-      __chatProgrammaticScrollWrites?: number[];
-    };
-    return browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-  });
-  const box = await page.locator(FEED_SELECTOR).boundingBox();
-  if (!box) throw new Error('Transcript viewport has no interaction bounds.');
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -600);
-  const writes = await withDiagnosticTimeout(
-    'the cancelled navigator jump to stop writing',
-    page.evaluate(async () => {
-      const browserGlobal = globalThis as typeof globalThis & {
-        __chatProgrammaticScrollWrites?: number[];
-        __chatDelayedTargetGrowthFrame?: number;
-        __restoreChatScrollTo?: () => void;
         __stopDelayedTargetGrowth?: () => void;
       };
-      for (let frame = 0; frame < 2; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      const afterCancellation = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-      for (let frame = 0; frame < 45; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      const final = browserGlobal.__chatProgrammaticScrollWrites?.length ?? 0;
-      const growthFrames = browserGlobal.__chatDelayedTargetGrowthFrame ?? 0;
-      browserGlobal.__restoreChatScrollTo?.();
       browserGlobal.__stopDelayedTargetGrowth?.();
-      delete browserGlobal.__restoreChatScrollTo;
       delete browserGlobal.__stopDelayedTargetGrowth;
-      return {
-        afterCancellation,
-        final,
-        growthFrames,
-      };
-    }),
-  );
-  expect(writesBeforeIntent).toBeGreaterThan(writesAtMount);
-  expect(writes.growthFrames).toBeGreaterThanOrEqual(5);
-  expect(writes.final).toBe(writes.afterCancellation);
-  await page.getByText('User messages', { exact: true }).waitFor({ state: 'hidden' });
+    });
+    if (trapInstalled) await uninstallTranscriptScrollTopWriteTrap(page);
+  }
 }
 
 async function transcriptGeometry(page: Page): Promise<TranscriptGeometry> {
@@ -2475,6 +2601,182 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     await stopTranscriptMomentum(fixture.page).catch(() => undefined);
     if (drag) await finishTranscriptTouchDrag(drag);
     await fixture.page.unroute('**/api/v1/chats/messages?**');
+  }
+}
+
+async function verifyNoOwnedScrollWritesDuringCoasting(
+  fixture: ChromiumFixture,
+): Promise<void> {
+  await fixture.context.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      get: () =>
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) '
+        + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    });
+  });
+  await fixture.page.setViewportSize({ width: 390, height: 700 });
+  const chatId = await seedTranscript(
+    fixture.integration,
+    90,
+    'chromium-coasting-write-gate',
+  );
+  const prependChatId = await seedTranscript(
+    fixture.integration,
+    90,
+    'chromium-coasting-prepend',
+  );
+  let drag: TranscriptTouchDrag | null = null;
+  let trapInstalled = false;
+  let routeInstalled = false;
+  let releaseEarlierPage!: () => void;
+  const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
+  let resolveEarlierRequest!: () => void;
+  const earlierRequest = new Promise<void>((resolve) => (resolveEarlierRequest = resolve));
+  let earlierRequestStarted = false;
+  const prompt = 'chromium-coasting-stream';
+  const streaming = fixture.integration.fakeProviders.openAi.holdNext({
+    lastUserText: prompt,
+  });
+  let turnId: string | null = null;
+
+  try {
+    await prepareTranscript(fixture, chatId);
+    await scrollToPosition(fixture.page, 'end');
+    await waitForStablePinnedTranscriptLayout(fixture.page, 'coasting-write-gate');
+    await installTranscriptScrollTopWriteTrap(fixture.page);
+    trapInstalled = true;
+
+    drag = await beginTranscriptTouchDrag(fixture.page);
+    await moveTranscriptTouch(fixture.page, drag, -24);
+    expect(
+      await fixture.page
+        .locator(FEED_SELECTOR)
+        .getAttribute('data-chat-pinned-to-bottom'),
+    ).toBe('true');
+    await finishTranscriptTouchDrag(drag);
+    drag = null;
+    await startTranscriptCoastingHeartbeat(fixture.page);
+
+    const accepted = await fixture.integration.client.runDirectChat({
+      chatId,
+      content: prompt,
+      agent: fixture.integration.directAgents.openAi,
+    });
+    turnId = accepted.turnId ?? null;
+    if (!turnId) throw new Error('The coasting streaming turn has no turn ID.');
+    await withDiagnosticTimeout('the coasting streaming turn', streaming.received);
+    const streamingText = 'Streaming content grows while coasting.';
+    expect(streaming.releaseText(streamingText)).toBe(true);
+    await fixture.page.getByText(streamingText, { exact: true }).waitFor();
+    await waitForTranscriptCoastingFrames(fixture.page, 12);
+    const followWrites = await transcriptScrollTopWrites(fixture.page);
+    expect(
+      followWrites.filter((write) => write.duringCoasting),
+      JSON.stringify(followWrites),
+    ).toEqual([]);
+
+    await stopTranscriptCoastingHeartbeat(fixture.page);
+    await fixture.page.waitForFunction(
+      () => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        return browserGlobal.__chatScrollTopWriteTrap?.writes.some(
+          (write) => !write.duringCoasting,
+        );
+      },
+      undefined,
+      { timeout: 20_000 },
+    );
+    streaming.releaseEcho();
+    expect((await fixture.integration.client.waitForTurnTerminal(chatId, turnId)).type).toBe(
+      'agent-run-finished',
+    );
+    await waitForStablePinnedTranscriptLayout(fixture.page, 'coasting-stream-settled');
+    await uninstallTranscriptScrollTopWriteTrap(fixture.page);
+    trapInstalled = false;
+
+    await prepareTranscript(fixture, prependChatId);
+
+    await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        !earlierRequestStarted
+        && url.searchParams.get('chatId') === prependChatId
+        && url.searchParams.has('beforeOrdinal')
+      ) {
+        earlierRequestStarted = true;
+        resolveEarlierRequest();
+        await earlierPageGate;
+      }
+      await route.continue();
+    });
+    routeInstalled = true;
+    await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+      const feed = feedElement as HTMLElement;
+      feed.scrollTop = Math.min(
+        feed.clientHeight * 2.5,
+        Math.max(0, feed.scrollHeight - feed.clientHeight),
+      );
+      feed.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    drag = await beginTranscriptTouchDrag(fixture.page);
+    for (let step = 0; step < 24; step += 1) {
+      await moveTranscriptTouch(fixture.page, drag, 24);
+      if (earlierRequestStarted) break;
+    }
+    await withDiagnosticTimeout('the coasting earlier-page request', earlierRequest);
+    const entryCountBeforePrepend = await transcriptEntryCount(fixture.page);
+    await installTranscriptScrollTopWriteTrap(fixture.page);
+    trapInstalled = true;
+    await finishTranscriptTouchDrag(drag);
+    drag = null;
+    await startTranscriptCoastingHeartbeat(fixture.page);
+    const response = fixture.page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return (
+        url.pathname === '/api/v1/chats/messages'
+        && url.searchParams.get('chatId') === prependChatId
+        && url.searchParams.has('beforeOrdinal')
+      );
+    });
+    releaseEarlierPage();
+    await (await response).finished();
+    await waitForTranscriptCoastingFrames(fixture.page, 12);
+    expect(await transcriptEntryCount(fixture.page)).toBe(entryCountBeforePrepend);
+    const prependWrites = await transcriptScrollTopWrites(fixture.page);
+    expect(
+      prependWrites.filter((write) => write.duringCoasting),
+      JSON.stringify(prependWrites),
+    ).toEqual([]);
+
+    await stopTranscriptCoastingHeartbeat(fixture.page);
+    expect(await waitForTranscriptEntryCount(fixture.page, entryCountBeforePrepend + 50)).toBe(
+      entryCountBeforePrepend + 50,
+    );
+    await waitForTranscriptReady(fixture.page);
+    await fixture.page.waitForFunction(
+      () => {
+        const browserGlobal = globalThis as typeof globalThis & {
+          __chatScrollTopWriteTrap?: { writes: TranscriptScrollTopWrite[] };
+        };
+        return browserGlobal.__chatScrollTopWriteTrap?.writes.some(
+          (write) => !write.duringCoasting,
+        );
+      },
+      undefined,
+      { timeout: 20_000 },
+    );
+    fixture.assertNoBrowserErrors();
+  } finally {
+    releaseEarlierPage();
+    streaming.releaseEcho();
+    if (drag) await finishTranscriptTouchDrag(drag);
+    if (trapInstalled) await uninstallTranscriptScrollTopWriteTrap(fixture.page);
+    if (routeInstalled) await fixture.page.unroute('**/api/v1/chats/messages?**');
   }
 }
 
@@ -4918,6 +5220,20 @@ describe('Chromium transcript virtualization', () => {
       async (fixture, markPhase) => {
         markPhase('continuing mobile momentum while an earlier page finishes loading');
         await verifyPostTouchMomentumPrepend(fixture);
+      },
+      diagnostics,
+      { serverEnvironment: environment.serverEnvironment },
+      browser,
+    );
+  }, 180_000);
+
+  test('does not assign scrollTop for follow or prepend work while coasting', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    await withChromiumFixture(
+      'transcript-coasting-scroll-write-gate',
+      async (fixture, markPhase) => {
+        markPhase('trapping transcript scroll writes during coasting corrections');
+        await verifyNoOwnedScrollWritesDuringCoasting(fixture);
       },
       diagnostics,
       { serverEnvironment: environment.serverEnvironment },
