@@ -9,6 +9,7 @@
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		onDecision: (
@@ -18,6 +19,7 @@
 	}
 
 	let { onDecision }: Props = $props();
+	setCanonicalWorkspaceLayout();
 
 	const timestamp = '2026-08-15T00:00:00.000Z';
 	const itemState = new ConversationFeedItemState();

@@ -1,9 +1,19 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { PaneId } from '$lib/workspace/surface-types';
-	import { setLocalSettings, setTerminalRegistry, setWorkspaceCoordinator } from '$lib/context';
+	import { terminalSurfaceId, type PaneId } from '$lib/workspace/surface-types';
+	import { setLocalSettings } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
+	import {
+		createWorkspaceLayoutStore,
+		reduceWorkspaceLayout,
+	} from '$lib/workspace/workspace-layout.svelte.js';
+	import type {
+		TerminalSurfaceRegistryPort,
+		TerminalSurfaceRuntimePort,
+		TerminalSurfaceWorkspacePort,
+	} from '../terminal-surface-ports.js';
+	import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 	import TerminalSurface from '../TerminalSurface.svelte';
 
 	interface Props {
@@ -35,7 +45,7 @@
 	}: Props = $props();
 	const terminalId = 'terminal-1';
 	const localSettings = createLocalSettingsStore();
-	const session = {
+	const session: TerminalClientSession = {
 		metadata: {
 			terminalId,
 			displaySequence: 1,
@@ -47,13 +57,14 @@
 			latestOutputSequence: 0,
 		},
 		attachmentState: 'attached',
+		lastReceivedSequence: 0,
 		replayTruncatedAt: null,
 	};
 	const secondSession = {
 		...session,
 		metadata: { ...session.metadata, terminalId: 'terminal-2', displaySequence: 2 },
 	};
-	const runtime = {
+	const runtime: TerminalSurfaceRuntimePort = {
 		inputControls: {
 			ctrlMode: 'inactive',
 			altMode: 'inactive',
@@ -68,30 +79,32 @@
 		applyFontSize: (fontSize: number) => onFontSize(fontSize),
 	};
 	const frameBridge = new SurfaceFrameBridge();
-
-	$effect(() => {
-		if (focusRequestToken > 0) frameBridge.focusPrimary();
-	});
-
-	setSurfaceFrameBridge(() => frameBridge);
-	setLocalSettings(localSettings);
-	setTerminalRegistry({
+	const layout = createWorkspaceLayoutStore();
+	layout.publish(
+		layout.revision,
+		reduceWorkspaceLayout(layout.snapshot, [
+			{
+				type: 'register-surface',
+				surface: {
+					id: terminalSurfaceId(terminalId),
+					type: 'terminal',
+					terminalId,
+				},
+				paneId: 'pane-main',
+			},
+		]),
+	);
+	const terminals = {
 		sessions: { [terminalId]: session, 'terminal-2': secondSession },
 		orderedSessions: [session, secondSession],
 		listStatus: 'ready',
 		listError: null,
 		ensureRuntime: () => runtime,
-		runtimeIfPresent: () => runtime,
 		reattach: () => undefined,
 		list: () => Promise.resolve(),
-	} as never);
-	setWorkspaceCoordinator({
-		layout: {
-			snapshot: {
-				main: { order: ['terminal:terminal-1'] },
-				sidebar: { order: [] },
-			},
-		},
+	} satisfies TerminalSurfaceRegistryPort;
+	const workspace = {
+		layout,
 		switchTerminalSurface: async (currentTerminalId: string, nextTerminalId: string) => {
 			onSwitch(currentTerminalId, nextTerminalId);
 		},
@@ -108,9 +121,16 @@
 			return true;
 		},
 		isSurfaceCloseBlocked: () => false,
-	} as never);
+	} satisfies TerminalSurfaceWorkspacePort;
+
+	$effect(() => {
+		if (focusRequestToken > 0) frameBridge.focusPrimary();
+	});
+
+	setSurfaceFrameBridge(() => frameBridge);
+	setLocalSettings(localSettings);
 
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<TerminalSurface {terminalId} {host} />
+<TerminalSurface {terminalId} {host} {terminals} {workspace} />

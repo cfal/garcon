@@ -21,7 +21,7 @@ describe('ConversationMessage file links', () => {
 			expect.objectContaining({
 				fileRootPath: '/workspace',
 				relativePath: 'other/README.md',
-				origin: 'main',
+				origin: 'pane-main',
 				reason: 'user-open',
 			}),
 		);

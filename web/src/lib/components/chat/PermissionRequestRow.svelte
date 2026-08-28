@@ -28,7 +28,7 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
-	import { getChatSessions, getFileSessions, getAppShell, getWorkspaceCoordinator } from '$lib/context';
+	import { getAppShell, getChatSessions, getFileSessions, getWorkspaceLayout } from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
@@ -67,7 +67,7 @@
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
-	const workspace = getWorkspaceCoordinator();
+	const workspaceLayout = getWorkspaceLayout();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -115,7 +115,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : workspace.defaultPaneId,
+			origin: appShell.isMobile ? 'mobile' : workspaceLayout.chatPaneId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,

@@ -183,7 +183,7 @@ describe('GitWorkbench', () => {
 		const fileTreeToggle = screen.getByRole('button', { name: 'Hide file tree' });
 		expect(
 			fileTreeToggle.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-		).toBe('main');
+		).toBe('pane-main');
 		const diffSurface = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
 		expect(diffSurface).toBeTruthy();
 		expect(diffSurface?.dataset.workspaceScrollRegion).toBe('primary');
@@ -278,7 +278,7 @@ describe('GitWorkbench', () => {
 			screen
 				.getByRole('button', { name: 'Hide file tree' })
 				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-		).toBe('sidebar');
+		).toBe('pane-sidebar');
 
 		sidebar.unmount();
 		const mobile = render(GitWorkbenchTestHost, {

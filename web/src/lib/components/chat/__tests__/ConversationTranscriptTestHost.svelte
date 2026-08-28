@@ -9,6 +9,7 @@
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		rows: ChatDisplayRow[];
@@ -24,6 +25,7 @@
 		pendingPermissionRequests = [],
 		onPermissionDecision,
 	}: Props = $props();
+	setCanonicalWorkspaceLayout();
 
 	const chatSessions = createChatSessionsStore();
 	chatSessions.createDraft({

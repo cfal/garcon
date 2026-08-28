@@ -14,6 +14,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { ExitPlanModeToolUseMessage } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		pendingPermissionRequests: PendingPermissionRequest[];
@@ -25,6 +26,7 @@
 	}
 
 	let { pendingPermissionRequests, onExitPlanMode }: Props = $props();
+	setCanonicalWorkspaceLayout();
 
 	const message = new ExitPlanModeToolUseMessage(
 		'2026-08-15T00:00:00.000Z',

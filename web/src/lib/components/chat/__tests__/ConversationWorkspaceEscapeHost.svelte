@@ -6,6 +6,7 @@
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
+		setNotifications,
 		setReadReceiptOutbox,
 		setRemoteSettings,
 		setWs,
@@ -16,6 +17,7 @@
 		setGitBranchActions,
 		setChatProcessingReconciler,
 	} from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
 	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
@@ -91,6 +93,7 @@
 		showQuickCommitTray: false,
 		chatMaxWidth: 'default',
 	} as never);
+	setNotifications(createNotificationsStore());
 	setAppShell({
 		isMobile: false,
 		requestComposerFocus: () => {},

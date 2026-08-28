@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 		isMobile: false,
 		focusChat: vi.fn(),
 		focusMobileSingleton: vi.fn(),
-		openSingleton: vi.fn(),
+		openSingletonInNewPane: vi.fn(async () => undefined),
 		focusMostRecentTerminalOrCreate: vi.fn(async () => undefined),
 		createTerminal: vi.fn(async () => undefined),
 	},
@@ -79,12 +79,12 @@ describe('CommandMenu', () => {
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
-	] as const)('opens standalone %s in desktop main', async (label, kind) => {
+	] as const)('opens standalone %s in a new desktop pane', async (label, kind) => {
 		const { component } = render(CommandMenu);
 		component.toggle();
 
 		await fireEvent.click(await screen.findByText(label));
-		expect(mocks.workspace.openSingleton).toHaveBeenCalledWith(kind, 'main');
+		expect(mocks.workspace.openSingletonInNewPane).toHaveBeenCalledWith(kind);
 	});
 
 	it.each([

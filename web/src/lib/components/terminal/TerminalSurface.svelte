@@ -17,18 +17,26 @@
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
+	import type {
+		TerminalSurfaceRegistryPort,
+		TerminalSurfaceWorkspacePort,
+	} from './terminal-surface-ports.js';
 
 	let {
 		terminalId,
 		host,
 		visible = true,
+		terminals: providedTerminals,
+		workspace: providedWorkspace,
 	}: {
 		terminalId: string;
 		host: PaneId | 'mobile';
 		visible?: boolean;
+		terminals?: TerminalSurfaceRegistryPort;
+		workspace?: TerminalSurfaceWorkspacePort;
 	} = $props();
-	const terminals = getTerminalRegistry();
-	const workspace = getWorkspaceCoordinator();
+	const terminals = untrack(() => providedTerminals) ?? getTerminalRegistry();
+	const workspace = untrack(() => providedWorkspace) ?? getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
 	const frame = getSurfaceFrameBridge();
 	let terminalHost = $state<HTMLDivElement | null>(null);

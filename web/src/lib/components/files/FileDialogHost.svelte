@@ -11,6 +11,7 @@
 	import {
 		getAppShell,
 		getFileSessions,
+		getNotifications,
 		getWorkspaceCoordinator,
 		getSurfaceFrames,
 	} from '$lib/context';
@@ -24,6 +25,7 @@
 
 	const files = getFileSessions();
 	const appShell = getAppShell();
+	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
 	const surfaceFrames = getSurfaceFrames();
 	const frameBridge = new SurfaceFrameBridge();
@@ -39,6 +41,16 @@
 
 	function retryFileSurface(): void {
 		rendererRetryKey += 1;
+	}
+
+	async function moveDialogFileToPane(): Promise<void> {
+		try {
+			await workspace.moveDialogFileToPane(workspace.lastFocusedPaneId);
+		} catch (error) {
+			notifications.error(
+				error instanceof Error ? error.message : m.file_session_move_to_pane_failed(),
+			);
+		}
 	}
 </script>
 
@@ -61,7 +73,7 @@
 				<Button
 					variant="ghost"
 					size="icon-sm"
-					onclick={() => void workspace.moveDialogFileToPane(workspace.lastFocusedPaneId)}
+					onclick={() => void moveDialogFileToPane()}
 					aria-label={m.file_session_move_to_pane()}
 					title={m.file_session_move_to_pane()}
 				>

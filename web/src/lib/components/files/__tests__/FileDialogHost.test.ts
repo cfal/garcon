@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import * as m from '$lib/paraglide/messages.js';
+import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
@@ -11,6 +12,25 @@ describe('FileDialogHost', () => {
 		});
 		expect(moveButtons).toHaveLength(1);
 		expect(moveButtons[0].querySelector('.lucide-panel-left')).toBeTruthy();
+	});
+
+	it('reports a failed move to the destination pane', async () => {
+		const notifications = createNotificationsStore();
+		render(FileDialogHostTestHost, {
+			request: 'file',
+			moveError: new Error('Destination pane is no longer available'),
+			notifications,
+		});
+
+		await fireEvent.click(
+			await screen.findByRole('button', { name: m.file_session_move_to_pane() }),
+		);
+
+		await waitFor(() => expect(notifications.items).toHaveLength(1));
+		expect(notifications.items[0]).toMatchObject({
+			tone: 'error',
+			message: 'Destination pane is no longer available',
+		});
 	});
 
 	it('overrides the shared responsive width cap in restored and maximized layouts', async () => {

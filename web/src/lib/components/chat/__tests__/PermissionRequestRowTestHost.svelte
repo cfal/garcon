@@ -5,6 +5,7 @@
 	import type { PermissionRequestMessage } from '$shared/chat-types';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { PermissionQuestionDraft } from '../ConversationFeedItemState.svelte.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		request: PermissionRequestMessage;
@@ -18,6 +19,7 @@
 	}
 
 	let { request, terminal, onDecision, draft, onDraftChange }: Props = $props();
+	setCanonicalWorkspaceLayout();
 
 	setChatSessions({
 		get selectedChat() {

@@ -435,7 +435,7 @@ describe('GitHistoryView', () => {
 		expect(primaryHeader?.contains(fileTreeToggle)).toBe(true);
 		expect(
 			fileTreeToggle.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-		).toBe('main');
+		).toBe('pane-main');
 		expect(panes?.style.gridTemplateColumns).toContain('300px 6px');
 
 		await fireEvent.keyDown(resizer, { key: 'ArrowRight' });
@@ -907,7 +907,7 @@ describe('GitHistoryView', () => {
 			screen
 				.getByRole('button', { name: 'Hide file tree' })
 				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-		).toBe('main');
+		).toBe('pane-main');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit selection' }));
 
@@ -952,6 +952,6 @@ describe('GitHistoryView', () => {
 			screen
 				.getByRole('button', { name: 'Hide file tree' })
 				.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-		).toBe('sidebar');
+		).toBe('pane-sidebar');
 	});
 });

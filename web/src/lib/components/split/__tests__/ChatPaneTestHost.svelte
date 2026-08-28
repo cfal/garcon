@@ -6,9 +6,11 @@
 			setFileSessions,
 			setLocalSettings,
 			setSplitLayout,
+			setWorkspaceLayout,
 		} from '$lib/context';
 		import { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 		import type { HideableToolType } from '$lib/stores/local-settings.svelte';
+		import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 
 	interface Props {
 		isFocused?: boolean;
@@ -67,6 +69,8 @@
 		endDrag() {},
 		swapPanes() {},
 	} as never);
+
+	setWorkspaceLayout(createWorkspaceLayoutStore());
 </script>
 
 {#snippet focusedContent()}

@@ -18,6 +18,7 @@
 		setChatSessions,
 		setFileSessions,
 	} from '$lib/context';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -143,6 +144,7 @@
 			error: chatState.pageStates.earlier.error,
 		};
 	}
+	setCanonicalWorkspaceLayout();
 	setActiveTranscriptState(chatState);
 	setAgentState(new AgentState());
 	const localSettings = createLocalSettingsStore();

@@ -74,6 +74,7 @@
 		getReadReceiptOutbox,
 		getModelCatalog,
 		getRemoteSettings,
+		getNotifications,
 		getWorkspaceCoordinator,
 		getWorkspaceShortcuts,
 		getGitQuickSummary,
@@ -161,6 +162,7 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
+	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
 	const workspaceShortcuts = getWorkspaceShortcuts();
 
@@ -718,11 +720,12 @@
 
 	function openCommit(): void {
 		if (!projectPath || !quickGitSummaryForProject) return;
-		if (appShell.isMobile) {
-			void workspace.focusMobileSingleton('commit');
-			return;
-		}
-		void workspace.openSingletonInNewPane('commit');
+		const opening = appShell.isMobile
+			? workspace.focusMobileSingleton('commit')
+			: workspace.openSingletonInNewPane('commit');
+		void opening.catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
 	}
 
 	function toggleCommitBranchDropdown(): void {
