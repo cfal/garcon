@@ -203,7 +203,7 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
-  it('keeps chat ID discovery notices visible but presentation-only across folds', async () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01] keeps chat ID discovery notices visible but presentation-only across folds', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-id-notice-fold-'));
     const store = new TranscriptLedgerStore(root, {
       createViewId: () => VIEW_ID,
@@ -218,6 +218,16 @@ describe('transcript ledger read-fold matrix', () => {
           at: AT,
           message: 'Agent requested chat ID',
           detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+          providerMeta: null,
+        },
+        {
+          kind: 'notice',
+          at: AT,
+          message: 'Chat ID auto-discovery is disabled.',
+          detail: {
+            type: 'chat-id-discovery-disabled',
+            title: 'Request: Garcon Chat ID',
+          },
           providerMeta: null,
         },
         {
@@ -247,6 +257,15 @@ describe('transcript ledger read-fold matrix', () => {
           ordinal: 2,
           message: new TranscriptNoticeMessage(
             AT,
+            'Chat ID auto-discovery is disabled.',
+            { type: 'chat-id-discovery-disabled' },
+            'Request: Garcon Chat ID',
+          ),
+        },
+        {
+          ordinal: 3,
+          message: new TranscriptNoticeMessage(
+            AT,
             'Sent chat ID 1787836573296800 to agent (steer)',
             { type: 'chat-id-disclosure', delivery: 'steer' },
             'Response: Garcon Chat ID',
@@ -257,6 +276,7 @@ describe('transcript ledger read-fold matrix', () => {
       expect(frozenConversationDrafts(rows)).toEqual([]);
       expect((await initializeSearchFold(ledger, rows))).toEqual([]);
       expect(foldRowsForExport(rows).map((entry) => entry.category)).toEqual([
+        'diagnostics',
         'diagnostics',
         'diagnostics',
       ]);

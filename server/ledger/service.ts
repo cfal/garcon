@@ -10,6 +10,7 @@ import type { AgentAttachment } from '../../common/agent-execution.js';
 import {
   CHAT_ID_REQUEST_NOTICE_CONTENT,
   CHAT_ID_REQUEST_NOTICE_TITLE,
+  CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
 import {
@@ -658,9 +659,7 @@ export class TranscriptLedgerService {
         let chatIdRequested = false;
         const discoveryEnabled = this.#chatIdRequests.enabled();
         for (const row of event.rows) {
-          const request = discoveryEnabled
-            ? transformChatIdRequest(row.message)
-            : null;
+          const request = transformChatIdRequest(row.message);
           const message = request ? request.message : row.message;
           if (message) {
             drafts.push({
@@ -672,15 +671,16 @@ export class TranscriptLedgerService {
           }
           if (!request) continue;
 
-          chatIdRequested = true;
+          if (discoveryEnabled) chatIdRequested = true;
           drafts.push({
             kind: 'notice',
             at: row.message.timestamp,
-            message: CHAT_ID_REQUEST_NOTICE_CONTENT,
-            detail: {
-              type: 'chat-id-request',
-              title: CHAT_ID_REQUEST_NOTICE_TITLE,
-            },
+            message: discoveryEnabled
+              ? CHAT_ID_REQUEST_NOTICE_CONTENT
+              : CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
+            detail: discoveryEnabled
+              ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
+              : { type: 'chat-id-discovery-disabled', title: CHAT_ID_REQUEST_NOTICE_TITLE },
             providerMeta: null,
           });
         }

@@ -17,10 +17,15 @@ export interface ChatIdDisclosureNoticeDetail {
   readonly delivery: 'input' | 'steer';
 }
 
+export interface ChatIdDiscoveryDisabledNoticeDetail {
+  readonly type: 'chat-id-discovery-disabled';
+}
+
 export type TranscriptNoticeDetail =
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
   | ChatIdRequestNoticeDetail
+  | ChatIdDiscoveryDisabledNoticeDetail
   | ChatIdDisclosureNoticeDetail;
 
 export function isCarryoverMigrationQuarantineNoticeDetail(
@@ -51,6 +56,15 @@ export function isChatIdRequestNoticeDetail(
     && typeof value === 'object'
     && !Array.isArray(value)
     && (value as Record<string, unknown>).type === 'chat-id-request';
+}
+
+export function isChatIdDiscoveryDisabledNoticeDetail(
+  value: unknown,
+): value is ChatIdDiscoveryDisabledNoticeDetail {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>).type === 'chat-id-discovery-disabled';
 }
 
 export function isChatIdDisclosureNoticeDetail(

@@ -45,7 +45,7 @@ export class ChatIdDiscoveryState {
     });
   }
 
-  reserve(chatId: string, viewId: string): ReservedChatIdDisclosure | null {
+  reserve(chatId: string, viewId: TranscriptViewId): ReservedChatIdDisclosure | null {
     if (!this.isEnabled()) {
       this.discard(chatId);
       return null;

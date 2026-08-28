@@ -379,12 +379,10 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#featureSettings.getFeatureSettings();
   }
 
-  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
-    return this.#featureSettings.setTranscriptSearchEnabled(enabled);
-  }
-
-  async setChatIdDiscoveryEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
-    return this.#featureSettings.setChatIdDiscoveryEnabled(enabled);
+  async setFeatureSettings(
+    patch: Partial<ProjectSettings['features']>,
+  ): Promise<ProjectSettings['features']> {
+    return this.#featureSettings.setFeatureSettings(patch);
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {

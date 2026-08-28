@@ -84,7 +84,7 @@ describe('frozen transcript drafts', () => {
 });
 
 describe('imported transcript drafts', () => {
-  it('removes chat ID controls while preserving provider metadata', () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] removes chat ID controls while preserving provider metadata', () => {
     const providerMeta = { providerOccurrence: 'provider-1' };
     expect(importedDrafts([
       {
@@ -110,6 +110,20 @@ describe('imported transcript drafts', () => {
         providerMeta,
       },
       {
+        kind: 'notice',
+        at: AT,
+        message: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+        providerMeta: null,
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+        providerMeta: null,
+      },
+      {
         kind: 'user-input',
         at: AT,
         detail: {
@@ -123,7 +137,7 @@ describe('imported transcript drafts', () => {
     ]);
   });
 
-  it('does not synthesize discovery notices or alter malformed controls', () => {
+  it('does not synthesize discovery notices for malformed controls', () => {
     const assistant = new AssistantMessage(AT, ' <get-garcon-chat-id />answer');
     const user = new UserMessage(
       AT,
@@ -142,6 +156,26 @@ describe('imported transcript drafts', () => {
           message: user,
           attachments: [],
           steer: false,
+        },
+        providerMeta: null,
+      },
+    ]);
+  });
+
+  it('preserves a disabled marker timestamp through an error notice', () => {
+    expect(importedDrafts([
+      {
+        message: new AssistantMessage(AT, '<get-garcon-chat-id />'),
+        providerMeta: { providerOccurrence: 'provider-1' },
+      },
+    ], () => AT, { chatIdDiscoveryEnabled: false })).toEqual([
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Chat ID auto-discovery is disabled.',
+        detail: {
+          type: 'chat-id-discovery-disabled',
+          title: 'Request: Garcon Chat ID',
         },
         providerMeta: null,
       },

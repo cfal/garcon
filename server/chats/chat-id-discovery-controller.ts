@@ -5,6 +5,7 @@ import {
   type ChatIdDisclosureDelivery,
 } from '../../common/chat-id-discovery.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import type { TranscriptViewId } from '../ledger/contracts.js';
 import type { ChatIdDiscoveryState, ReservedChatIdDisclosure } from './chat-id-discovery-state.js';
 
 export interface PreparedChatIdDisclosure {
@@ -13,7 +14,7 @@ export interface PreparedChatIdDisclosure {
 }
 
 export interface ChatIdDiscoveryControllerPort {
-  reserve(chatId: string, viewId: string, prompt: string): PreparedChatIdDisclosure;
+  reserve(chatId: string, viewId: TranscriptViewId, prompt: string): PreparedChatIdDisclosure;
   recordDelivered(
     reservation: ReservedChatIdDisclosure | null,
     delivery: ChatIdDisclosureDelivery,
@@ -39,7 +40,7 @@ interface ChatIdDiscoveryControllerDeps {
 export class ChatIdDiscoveryController implements ChatIdDiscoveryControllerPort {
   constructor(private readonly deps: ChatIdDiscoveryControllerDeps) {}
 
-  reserve(chatId: string, viewId: string, prompt: string): PreparedChatIdDisclosure {
+  reserve(chatId: string, viewId: TranscriptViewId, prompt: string): PreparedChatIdDisclosure {
     const reservation = this.deps.state.reserve(chatId, viewId);
     return {
       reservation,

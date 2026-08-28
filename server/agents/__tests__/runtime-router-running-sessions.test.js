@@ -9,7 +9,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function makeRouter(execution) {
+function makeRouter(execution, chatIdDiscovery) {
   const transcript = createRuntimeTranscriptFixture();
   const entry = {
     id: 'chat-1',
@@ -67,6 +67,7 @@ function makeRouter(execution) {
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
+    chatIdDiscovery,
   });
   return { router, transcript };
 }
@@ -100,7 +101,13 @@ describe('AgentRuntimeRouter execution handles', () => {
       resume: mock(async () => handle),
       abort: mock(async () => undefined),
     };
-    const { router } = makeRouter(execution);
+    const reservation = { id: 'chat-id-reservation' };
+    const chatIdDiscovery = {
+      reserve: mock((_chatId, _viewId, prompt) => ({ prompt, reservation })),
+      recordDelivered: mock(() => undefined),
+      release: mock(() => undefined),
+    };
+    const { router } = makeRouter(execution, chatIdDiscovery);
 
     const launching = router.startSession('chat-1', 'hello', { turnId: 'turn-1' });
     await launchStarted.promise;
@@ -111,6 +118,8 @@ describe('AgentRuntimeRouter execution handles', () => {
     await launching;
 
     expect(execution.abort).toHaveBeenCalledWith(handle);
+    expect(chatIdDiscovery.recordDelivered).not.toHaveBeenCalled();
+    expect(chatIdDiscovery.release).toHaveBeenCalledWith(reservation);
     expect(router.getRunningChatIdsSnapshot()).toEqual([]);
   });
 });

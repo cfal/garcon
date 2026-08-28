@@ -163,7 +163,10 @@ export default function createWorkspaceRoutes(
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
   transcriptSearchSettings?: {
-    setEnabled(enabled: boolean): Promise<void>;
+    setEnabled(
+      enabled: boolean,
+      patch?: Partial<RemoteFeatureSettings>,
+    ): Promise<void>;
   },
 ): RouteMap {
 
@@ -309,15 +312,21 @@ export default function createWorkspaceRoutes(
           false,
         );
       }
+      const featurePatch: Partial<RemoteFeatureSettings> = {};
+      if (chatIdDiscoveryEnabled !== undefined) {
+        featurePatch.chatIdDiscovery = { enabled: chatIdDiscoveryEnabled };
+      }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
-          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled);
+          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled, featurePatch);
         } else {
-          await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
+          await settings.setFeatureSettings({
+            ...featurePatch,
+            transcriptSearch: { enabled: transcriptSearchEnabled },
+          });
         }
-      }
-      if (chatIdDiscoveryEnabled !== undefined) {
-        await settings.setChatIdDiscoveryEnabled(chatIdDiscoveryEnabled);
+      } else if (chatIdDiscoveryEnabled !== undefined) {
+        await settings.setFeatureSettings(featurePatch);
       }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);

@@ -389,6 +389,7 @@ export async function startServer(): Promise<void> {
       onAdopted(chatId) {
         chatSearch?.catalogMayHaveChanged(chatId);
       },
+      chatIdDiscoveryEnabled: () => chatIdDiscoveryEnabled,
     });
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
       ledger: transcriptLedger,
@@ -551,6 +552,7 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine,
       ),
+      chatIdDiscoveryEnabled: () => chatIdDiscoveryEnabled,
       chatMutationLock,
     });
     const chatRows = new ChatRowService({
@@ -610,6 +612,7 @@ export async function startServer(): Promise<void> {
           carryOverRevision: carryOver.revision([]),
           signal: new AbortController().signal,
           now: () => new Date().toISOString(),
+          chatIdDiscoveryEnabled,
         });
       },
       transcripts: transcriptLedger,

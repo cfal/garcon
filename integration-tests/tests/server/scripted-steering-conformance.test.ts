@@ -13,6 +13,7 @@ import {
   expectStoppedTurnEventOrder,
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
@@ -238,6 +239,10 @@ function defineSteeringConformance(
               content: `Sent chat ID ${chatId} to agent`,
               detail: { type: 'chat-id-disclosure', delivery: 'input' },
             })]);
+
+          await reloadUntilNativeContains(fixture, chatId, queuedReply);
+          const reloaded = await fixture.client.getMessages(chatId);
+          expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
           driver.assertSettled();
         }, {
           serverEnvironment: driver.serverEnvironment,

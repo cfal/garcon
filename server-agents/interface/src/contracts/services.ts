@@ -104,7 +104,7 @@ export type AgentSteerResult =
     };
 
 export interface AgentGoals {
-  // Returns true only after beforeDelivery has completed successfully.
+  // Reports provider handling; beforeDelivery remains the delivery witness.
   submitControl(request: AgentGoalControlRequest): Promise<boolean>;
 }
 

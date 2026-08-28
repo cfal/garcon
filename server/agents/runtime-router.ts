@@ -52,7 +52,7 @@ import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
-import type { TranscriptViewId } from '../ledger/contracts.js';
+import { transcriptViewId, type TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
 } from './runtime-router-errors.js';
@@ -209,7 +209,9 @@ export class AgentRuntimeRouter {
       if (carryover.summary) {
         this.#ledger.appendHandoffSummary(chatId, prepared.viewId, carryover.summary);
       }
-      const handle = await this.#dispatchInputWithChatId(
+      const retainHandle = (handle: AgentExecutionHandle) =>
+        this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      await this.#dispatchInputWithChatId(
         chatId,
         prepared.viewId,
         prepared.prompt,
@@ -220,8 +222,8 @@ export class AgentRuntimeRouter {
           attachments: prepared.attachments,
           carriedContext: carryover.context,
         }),
+        retainHandle,
       );
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
         model: selection.model,
@@ -279,7 +281,9 @@ export class AgentRuntimeRouter {
     const producer = this.#producer(chatId);
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
-      const handle = await this.#dispatchInputWithChatId(
+      const retainHandle = (handle: AgentExecutionHandle) =>
+        this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      await this.#dispatchInputWithChatId(
         chatId,
         prepared.viewId,
         prepared.prompt,
@@ -291,8 +295,8 @@ export class AgentRuntimeRouter {
           prompt: providerPrompt,
           attachments: prepared.attachments,
         }),
+        retainHandle,
       );
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       this.#pendingAbortRuns.delete(runKey(chatId, runId));
       this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
@@ -325,7 +329,7 @@ export class AgentRuntimeRouter {
     }
     const disclosure = this.#chatIdDiscovery.reserve(
       chatId,
-      options.transcriptViewId,
+      transcriptViewId(options.transcriptViewId),
       input,
     );
     let disclosureDeliveryPrepared = false;
@@ -392,9 +396,9 @@ export class AgentRuntimeRouter {
     if (!previousRunId) return false;
     const producer = this.#producer(chatId);
     const resolved = await resolveFileMentionsInCommand(prompt, entry.projectPath);
-    const disclosure = opts.transcriptViewId
-      ? this.#chatIdDiscovery.reserve(chatId, opts.transcriptViewId, resolved)
-      : { prompt: resolved, reservation: null };
+    const view = this.#ledger.currentView(chatId);
+    if (!view) throw new Error(`Transcript view is not initialized for ${chatId}`);
+    const disclosure = this.#chatIdDiscovery.reserve(chatId, view.viewId, resolved);
     let disclosureDeliveryPrepared = false;
     try {
       const handled = await integration.goals.submitControl({
@@ -742,11 +746,16 @@ export class AgentRuntimeRouter {
     viewId: TranscriptViewId,
     prompt: string,
     dispatch: (providerPrompt: string) => Promise<T>,
+    confirmDelivery: (result: T) => Promise<boolean>,
   ): Promise<T> {
     const disclosure = this.#chatIdDiscovery.reserve(chatId, viewId, prompt);
     try {
       const result = await dispatch(disclosure.prompt);
-      this.#chatIdDiscovery.recordDelivered(disclosure.reservation, 'input');
+      if (await confirmDelivery(result)) {
+        this.#chatIdDiscovery.recordDelivered(disclosure.reservation, 'input');
+      } else {
+        this.#chatIdDiscovery.release(disclosure.reservation);
+      }
       return result;
     } catch (error) {
       this.#chatIdDiscovery.release(disclosure.reservation);
@@ -826,14 +835,15 @@ export class AgentRuntimeRouter {
     agentId: string,
     runId: string,
     handle: AgentExecutionHandle,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.#pendingAbortRuns.delete(runKey(chatId, runId))) {
       this.#abortHandleBestEffort(chatId, agentId, handle, 'interrupted launch');
-      return;
+      return false;
     }
     if (this.#ledger.isRunActive(chatId, runId)) {
       this.#executionHandles.set(chatId, { agentId, runId, handle });
     }
+    return true;
   }
 
   #abortHandleBestEffort(

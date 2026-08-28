@@ -18,6 +18,7 @@ export interface NativeHistorySeedInput {
   readonly carryOverRevision: string;
   readonly signal: AbortSignal;
   readonly now: () => string;
+  readonly chatIdDiscoveryEnabled?: boolean;
 }
 
 // Reads a session's native history as ledger drafts. Reload and native fork both rebuild a feed
@@ -32,6 +33,7 @@ export async function importNativeHistoryDrafts({
   carryOverRevision,
   signal,
   now,
+  chatIdDiscoveryEnabled = true,
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
   const imported: ImportedRow[] = [];
   const chat = toAgentChatReference(
@@ -72,5 +74,6 @@ export async function importNativeHistoryDrafts({
       providerMeta: imported[index]!.providerMeta,
     })),
     now,
+    { chatIdDiscoveryEnabled },
   );
 }

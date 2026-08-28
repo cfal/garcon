@@ -3,7 +3,7 @@ import {
   appendChatIdDisclosure,
   CHAT_ID_DISCLOSURE_CLOSE,
   CHAT_ID_DISCLOSURE_OPEN,
-  sanitizeImportedChatIdMessage,
+  sanitizeImportedChatIdDisclosure,
   stripImportedChatIdDisclosure,
   transformChatIdRequest,
 } from '../chat-id-discovery.ts';
@@ -28,7 +28,13 @@ describe('chat ID discovery protocol', () => {
     )).toEqual({ message: null });
     expect(transformChatIdRequest(
       new AssistantMessage(AT, '<get-garcon-chat-id /> '),
-    )).toEqual({ message: new AssistantMessage(AT, ' ') });
+    )).toEqual({ message: null });
+    expect(transformChatIdRequest(
+      new AssistantMessage(AT, '<get-garcon-chat-id />\n'),
+    )).toEqual({ message: null });
+    expect(transformChatIdRequest(
+      new AssistantMessage(AT, '<get-garcon-chat-id />\n\nworking'),
+    )).toEqual({ message: new AssistantMessage(AT, 'working') });
 
     for (const content of [
       ' <get-garcon-chat-id />',
@@ -59,21 +65,19 @@ describe('chat ID discovery protocol', () => {
     for (const content of [
       `continue${CHAT_ID_DISCLOSURE_OPEN}invalid${CHAT_ID_DISCLOSURE_CLOSE}`,
       `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}`,
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE} later`,
       `<garcon-chat-id>${CHAT_ID}</garcon-chat-id>`,
     ]) {
       expect(stripImportedChatIdDisclosure(content)).toBe(content);
     }
+    expect(stripImportedChatIdDisclosure(
+      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE} later`,
+    )).toBe('continue later');
+    expect(stripImportedChatIdDisclosure(
+      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE}\n\n<attached-file>body</attached-file>`,
+    )).toBe('continue\n\n<attached-file>body</attached-file>');
   });
 
-  it('sanitizes imported messages without losing user fields', () => {
-    expect(sanitizeImportedChatIdMessage(
-      new AssistantMessage(AT, '<get-garcon-chat-id />answer'),
-    )).toEqual(new AssistantMessage(AT, 'answer'));
-    expect(sanitizeImportedChatIdMessage(
-      new AssistantMessage(AT, '<get-garcon-chat-id />'),
-    )).toBeNull();
-
+  it('sanitizes imported disclosures without losing user fields', () => {
     const user = new UserMessage(
       AT,
       appendChatIdDisclosure('continue', CHAT_ID),
@@ -81,7 +85,7 @@ describe('chat ID discovery protocol', () => {
       { clientMessageId: 'message-1' },
       { style: 'info' },
     );
-    expect(sanitizeImportedChatIdMessage(user)).toEqual(new UserMessage(
+    expect(sanitizeImportedChatIdDisclosure(user)).toEqual(new UserMessage(
       AT,
       'continue',
       user.images,

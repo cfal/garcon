@@ -27,6 +27,7 @@ export interface TranscriptReloadServiceOptions {
   readonly getCarryOverRevision: (entry: AgentChatEntry) => string;
   readonly chatMutationLock: KeyedPromiseLock;
   readonly now?: () => string;
+  readonly chatIdDiscoveryEnabled?: () => boolean;
 }
 
 export class TranscriptReloadService {
@@ -112,6 +113,7 @@ export class TranscriptReloadService {
         carryOverRevision: this.options.getCarryOverRevision(entry),
         signal,
         now: this.#now,
+        chatIdDiscoveryEnabled: this.options.chatIdDiscoveryEnabled?.() ?? true,
       });
       const contentStartOrdinal = prefix.length + 1;
       staging = this.options.ledger.stageView(

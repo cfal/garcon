@@ -5,6 +5,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
 } from '../../support/live-agent.js';
 import {
   scriptedPiStartRequest,
@@ -104,11 +105,12 @@ describe('scripted Pi queue lifecycle', () => {
     const testEnvironment = requireEnvironment();
     const firstPrompt = marker('CHAT_ID_FIRST_PROMPT');
     const queuedPrompt = marker('CHAT_ID_QUEUED_PROMPT');
+    const queuedReply = marker('CHAT_ID_QUEUED_REPLY');
     const firstHeld = testEnvironment.model.scriptHeldTurn([
       chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
     ]);
     const queuedHeld = testEnvironment.model.scriptHeldTurn([
-      chatCompletionsText(marker('CHAT_ID_QUEUED_REPLY')),
+      chatCompletionsText(queuedReply),
     ]);
 
     try {
@@ -145,6 +147,10 @@ describe('scripted Pi queue lifecycle', () => {
             content: `Sent chat ID ${chatId} to agent`,
             detail: { type: 'chat-id-disclosure', delivery: 'input' },
           })]);
+
+        await reloadUntilNativeContains(fixture, chatId, queuedReply);
+        const reloaded = await fixture.client.getMessages(chatId);
+        expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
         testEnvironment.model.assertSettled();
       }, withScriptedPi());
     } finally {

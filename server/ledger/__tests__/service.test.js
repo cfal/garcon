@@ -17,7 +17,7 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptLedgerService', () => {
-  it('commits cleaned chat ID requests and notices in one provider batch', async () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits cleaned chat ID requests and notices in one provider batch', async () => {
     const requests = [];
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('1787836573296800');
@@ -83,7 +83,7 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('leaves near matches and disabled discovery untouched', async () => {
+  it('leaves near matches untouched and reports disabled discovery requests', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
       const lease = ledger.openProducer('chat-1', 'test');
@@ -94,9 +94,46 @@ describe('TranscriptLedgerService', () => {
           { message: new AssistantMessage(TS, '<get-garcon-chat-id />raw') },
         ],
       });
-      expect(ledger.currentRows('chat-1').map((row) => row.message?.content)).toEqual([
-        ' <get-garcon-chat-id />working',
-        '<get-garcon-chat-id />raw',
+      expect(ledger.currentRows('chat-1')).toMatchObject([
+        {
+          kind: 'provider-row',
+          message: { content: ' <get-garcon-chat-id />working' },
+        },
+        {
+          kind: 'provider-row',
+          message: { content: 'raw' },
+        },
+        {
+          kind: 'notice',
+          message: 'Chat ID auto-discovery is disabled.',
+          detail: {
+            type: 'chat-id-discovery-disabled',
+            title: 'Request: Garcon Chat ID',
+          },
+        },
+      ]);
+    });
+  });
+
+  it('commits only an error notice for a marker-only disabled request', async () => {
+    await withService(async ({ ledger }) => {
+      ledger.initializeChat('chat-1');
+      const lease = ledger.openProducer('chat-1', 'test');
+
+      lease.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
+      });
+
+      expect(ledger.currentRows('chat-1')).toMatchObject([
+        {
+          kind: 'notice',
+          message: 'Chat ID auto-discovery is disabled.',
+          detail: {
+            type: 'chat-id-discovery-disabled',
+            title: 'Request: Garcon Chat ID',
+          },
+        },
       ]);
     });
   });

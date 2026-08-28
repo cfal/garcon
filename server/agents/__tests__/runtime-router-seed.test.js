@@ -585,11 +585,16 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.submitGoalControl(
       'chat-1',
       'update goal',
-      { turnId: 'turn-2', transcriptViewId: 'view-1' },
+      { turnId: 'turn-2' },
       async () => undefined,
     )).resolves.toBe(true);
 
     expect(conversationMessages).not.toHaveBeenCalled();
+    expect(chatIdDiscovery.reserve).toHaveBeenCalledWith(
+      'chat-1',
+      'view-1',
+      'update goal',
+    );
     expect(submitGoalControl.mock.calls[0][0]).not.toHaveProperty('priorContext');
     expect(submitGoalControl.mock.calls[0][0].prompt).toContain(
       '<garcon-chat-id>chat-1</garcon-chat-id>',
@@ -733,6 +738,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
     }, target, prepareDelivery)).resolves.toEqual({ kind: 'accepted' });
 
     expect(captureTarget).toHaveBeenCalledWith(expect.objectContaining({

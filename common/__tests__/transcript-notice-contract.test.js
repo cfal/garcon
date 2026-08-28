@@ -71,6 +71,13 @@ describe('transcript notice contracts', () => {
         detail: { type: 'chat-id-disclosure', delivery: 'steer' },
         title: 'Response: Garcon Chat ID',
       },
+      {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Chat ID auto-discovery is disabled.',
+        detail: { type: 'chat-id-discovery-disabled' },
+        title: 'Request: Garcon Chat ID',
+      },
     ]) {
       expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
     }
