@@ -1,10 +1,24 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 25 integrated design. Supersedes
+Status: revision 26 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 26 adds provider-neutral chat-ID auto-discovery as a core
+canonicalization and control-steering rule. An assistant message beginning
+exactly with `<get-garcon-chat-id />` has that prefix removed before storage;
+the cleaned provider row and a typed request notice commit together. When the
+default-enabled remote setting is enabled, core synchronously captures the
+emitting run's active steering target and starts one provider-only steer carrying
+`<garcon-chat-id>{chatId}</garcon-chat-id>`. This control creates no
+`user-input`, queue entry, next-turn latch, or prompt decoration. Delivery
+completion appends a typed success or failure notice, and repeated requests in
+one run dispatch only once. Disabled requests still remove the marker and append
+a typed error notice but dispatch nothing. Native import canonicalizes request
+markers and exact synthetic disclosure inputs back into notices so Reload and
+native forks never expose server control as user-authored conversation.
 
 Revision 25 makes enabled transcript search a second explicit genesis-adoption
 occasion alongside first open. Search maintenance probes current-view
@@ -509,7 +523,7 @@ by reload, continuation/fork seeding, and adoption.
 | Kind | Writer | Rendered |
 | --- | --- | --- |
 | `user-input` | core | yes |
-| `notice` | core, including `add-row` and accepted producer advisories | yes |
+| `notice` | core, including `add-row`, chat-ID discovery, and accepted producer advisories | yes |
 | `agent-switch` | core | yes |
 | `permission-resolved` | core | specialized |
 | `provider-row` | integration | yes |
@@ -534,7 +548,13 @@ Kind semantics:
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload. Rendered `TranscriptNoticeMessage` and `ErrorMessage` instances own
+  Reload. Chat-ID discovery uses `{type: 'chat-id-request'}` for a recognized
+  request, `{type: 'chat-id-disclosure'}` after accepted control steering, and
+  `{type: 'chat-id-discovery-failure', reason}` for disabled, unsupported,
+  unavailable-turn, or failed delivery outcomes. They are presentation-only
+  diagnostics: they render, replay, share, and export, but do not enter search,
+  preview, model context, resend, carryover, or fork seeds. Rendered
+  `TranscriptNoticeMessage` and `ErrorMessage` instances own
   their optional top-level `title`; a rendered CLI row's detail is only the
   `{type: 'cli-row'}` provenance marker.
 - `agent-switch`: the durable ownership boundary written at in-place
@@ -552,7 +572,12 @@ Kind semantics:
   explicit provider-specific message type from `common/chat-types.ts`). An
   `ErrorMessage` is presentation-only even though its integration provenance
   keeps it in this row kind; every other provider row is conversational.
-  Streaming deltas are overlay, never rows.
+  Streaming deltas are overlay, never rows. Core recognizes only an assistant
+  message beginning exactly with `<get-garcon-chat-id />`, removes that prefix
+  and leading remainder whitespace before append, and omits the provider row
+  when no non-whitespace remainder exists. The original `providerMeta` remains
+  attached to a cleaned row. The adjacent request or disabled-error notice is
+  part of the same append batch.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -1084,6 +1109,16 @@ The guarantee is durable before provider dispatch, not durable at send:
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
   fold.
+- A **chat-ID discovery control steer** is server-originated rather than a user
+  submission. Its typed request notice commits before delivery starts, but the
+  control itself creates no `user-input` row and does not participate in resend,
+  queueing, or command idempotency. Core captures the active run target
+  synchronously, sends only the disclosure envelope, and appends a typed outcome
+  notice asynchronously. Provider correlation uses an ephemeral generated
+  `clientMessageId`; no prepared transcript input exists to consume or discard.
+  Provider delivery reuses the same steering transport as
+  `garcon-cli send --allow-steer`, whose prepared-input lookup is therefore an
+  inert miss for this generated identity.
 - A **future-turn queued input** remains only in the process-ephemeral
   queue, indexed by `clientMessageId`. It is not a transcript row.
   Dequeue is one synchronous block: commit the `user-input` row (the
@@ -1605,6 +1640,21 @@ notice, while dropping other lifecycle rows. The replaced view is deleted,
 and there is no undo. That lossiness is expected and is part of why reload is
 manual and confirmed; shares published earlier are unaffected because they
 are self-contained snapshots.
+
+Native import treats an exact synthetic chat-ID disclosure input as server
+control rather than user conversation and reconstructs a typed disclosure
+notice at its provider timestamp. It applies the same assistant request-marker
+canonicalization without dispatching control. Request, disabled-request, and
+disclosure notices may therefore serve as native-activity watermarks; the live
+disclosure starts from the requesting provider row's timestamp for the same reason.
+Core clamps it forward to the current provider watermark so an asynchronously
+accepted disclosure cannot regress that watermark. An asynchronous failed-delivery
+notice cannot serve as a watermark because it proves no provider-native entry.
+
+The native marker does not encode whether discovery was disabled at the time it
+was emitted. A manual Reload therefore reconstructs the request notice but not
+the live core-only disabled failure; this is ordinary native-import lossiness,
+not a claim that the request was delivered.
 
 The product rule for history: external or crash-missed native activity
 is adoptable only while its session is the current binding. Once
