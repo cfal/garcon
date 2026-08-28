@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   CliRowMessage,
   ErrorMessage,
-  parseChatMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../common/chat-types.ts';
@@ -12,22 +11,6 @@ const AT = '2026-08-18T12:00:00.000Z';
 
 describe('shared transcript chat rows', () => {
   it('[TLV5-CHAT-ROW.07-SHARE-UNIT-01] formats notice and error rows without losing content', () => {
-    const legacyNotice = parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Legacy shared notice.',
-      detail: { type: 'cli-row' },
-    });
-    const legacyError = parseChatMessage({
-      type: 'error',
-      timestamp: AT,
-      content: 'Legacy shared error.',
-      detail: { type: 'cli-row' },
-    });
-    expect(legacyNotice).toBeInstanceOf(CliRowMessage);
-    expect(legacyError).toBeInstanceOf(CliRowMessage);
-    if (!legacyNotice || !legacyError) throw new Error('Legacy CLI rows did not parse.');
-
     const rendered = renderSharedChatText({
       shareToken: 'synthetic-share-token',
       chatId: 'synthetic-chat',
@@ -62,8 +45,8 @@ describe('shared transcript chat rows', () => {
           'markdown',
           'Custom deployment',
         ),
-        legacyNotice,
-        legacyError,
+        new CliRowMessage(AT, 'Additional shared notice.', { style: 'notice' }, 'plain'),
+        new CliRowMessage(AT, 'Additional shared error.', { style: 'error' }, 'plain'),
         new TranscriptNoticeMessage(AT, 'Internal notice.'),
         new ErrorMessage(AT, 'Provider error.'),
       ],
@@ -73,8 +56,8 @@ describe('shared transcript chat rows', () => {
     expect(rendered).toContain(`[CLI Notice — Deployment] ${AT}\nShared notice.\nSecond line.`);
     expect(rendered).toContain(`[CLI Error] ${AT}\nShared error.`);
     expect(rendered).toContain(`[CLI Custom — Custom deployment] ${AT}\n**Shared custom.**`);
-    expect(rendered).toContain(`[CLI Notice] ${AT}\nLegacy shared notice.`);
-    expect(rendered).toContain(`[CLI Error] ${AT}\nLegacy shared error.`);
+    expect(rendered).toContain(`[CLI Notice] ${AT}\nAdditional shared notice.`);
+    expect(rendered).toContain(`[CLI Error] ${AT}\nAdditional shared error.`);
     expect(rendered).toContain(`[Notice] ${AT}\nInternal notice.`);
     expect(rendered).toContain(`[Error] ${AT}\nProvider error.`);
   });

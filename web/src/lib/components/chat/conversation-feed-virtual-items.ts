@@ -1,8 +1,8 @@
 import {
 	isToolUseMessage,
-	isHandoffSummaryNoticeDetail,
 	ToolResultMessage,
 } from '$shared/chat-types';
+import { isHandoffSummaryNoticeDetail } from '$shared/transcript-notice-details';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import {
 	conversationFeedItemLayout,

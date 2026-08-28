@@ -5,12 +5,12 @@ import {
 	setLocalStorageWithCacheRecovery,
 } from '$lib/utils/local-storage-cache-recovery';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const MAX_ENTRIES = 25;
 const MAX_SNAPSHOT_CHARACTERS = 1_500_000;
 
 interface ChatSnapshotEnvelope {
-	version: 5;
+	version: 6;
 	chatId: string;
 	savedAt: string;
 	transcriptViewId: string;
@@ -23,12 +23,12 @@ interface ChatSnapshotIndexEntry {
 	chatId: string;
 	lastAccessedAt: string;
 	lastValidatedAt: string | null;
-	schemaVersion: 5;
+	schemaVersion: 6;
 	stale: boolean;
 }
 
 interface ChatSnapshotIndex {
-	version: 5;
+	version: 6;
 	entries: ChatSnapshotIndexEntry[];
 }
 

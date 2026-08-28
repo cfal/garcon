@@ -1,8 +1,8 @@
 import {
-  isCarryoverMigrationQuarantineNoticeDetail,
   isToolUseMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
+import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
 import {
   chatIdDisclosureNoticeContent,
   CHAT_ID_DISCLOSURE_NOTICE_TITLE,

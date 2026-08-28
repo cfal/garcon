@@ -94,7 +94,7 @@ describe('LocalChatTranscriptStorage', () => {
 		localStorage.setItem(
 			snapshotKey('chat-1'),
 			JSON.stringify({
-				version: 2,
+				version: 5,
 				chatId: 'chat-1',
 				savedAt: TS,
 				logId: 'log-1',

@@ -52,13 +52,13 @@ export function isHandoffSummaryNoticeDetail(
   return hasType(value, 'handoff-summary');
 }
 
-export function isChatIdRequestNoticeDetail(
+function isChatIdRequestNoticeDetail(
   value: unknown,
 ): value is ChatIdRequestNoticeDetail {
   return hasType(value, 'chat-id-request');
 }
 
-export function isChatIdDisclosureNoticeDetail(
+function isChatIdDisclosureNoticeDetail(
   value: unknown,
 ): value is ChatIdDisclosureNoticeDetail {
   return hasType(value, 'chat-id-disclosure');
@@ -80,4 +80,21 @@ function hasType(value: unknown, type: string): boolean {
     && typeof value === 'object'
     && !Array.isArray(value)
     && (value as Record<string, unknown>).type === type;
+}
+
+export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (isCarryoverMigrationQuarantineNoticeDetail(value)) {
+    return {
+      type: value.type,
+      artifactId: value.artifactId,
+      errorCode: value.errorCode,
+    };
+  }
+  if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
+  if (isChatIdRequestNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDiscoveryFailureNoticeDetail(value)) {
+    return { type: value.type, reason: value.reason };
+  }
+  return null;
 }

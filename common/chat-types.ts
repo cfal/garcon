@@ -24,7 +24,6 @@ import {
   isCliRowFormat,
   type CliBodyDisclosure,
   type CliPresentation,
-  type CliPresentationStyle,
   type CliRowFormat,
 } from './cli-presentation.js';
 import {
@@ -32,31 +31,11 @@ import {
   type UserMessagePresentation,
 } from './user-message-presentation.js';
 import {
-  isCarryoverMigrationQuarantineNoticeDetail,
-  isChatIdDisclosureNoticeDetail,
-  isChatIdDiscoveryFailureNoticeDetail,
-  isChatIdRequestNoticeDetail,
-  isHandoffSummaryNoticeDetail,
+  parseTranscriptNoticeDetail,
   type TranscriptNoticeDetail,
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
-export {
-  isCarryoverMigrationQuarantineNoticeDetail,
-  isChatIdDisclosureNoticeDetail,
-  isChatIdDiscoveryFailureNoticeDetail,
-  isChatIdRequestNoticeDetail,
-  isHandoffSummaryNoticeDetail,
-} from './transcript-notice-details.js';
-export type {
-  CarryoverMigrationQuarantineNoticeDetail,
-  ChatIdDisclosureNoticeDetail,
-  ChatIdDiscoveryFailureNoticeDetail,
-  ChatIdDiscoveryFailureReason,
-  ChatIdRequestNoticeDetail,
-  HandoffSummaryNoticeDetail,
-  TranscriptNoticeDetail,
-} from './transcript-notice-details.js';
 
 export interface ChatImage {
   data: string;
@@ -1153,42 +1132,15 @@ export function isToolUseMessage(message: ChatMessage): message is ToolUseChatMe
   return TOOL_USE_MESSAGE_TYPES.has(message.type as ToolUseMessageType);
 }
 
-function isLegacyCliRowDetail(value: unknown): value is Record<string, unknown> {
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && (value as Record<string, unknown>).type === 'cli-row';
-}
-
-function parseDurableCliRow(
-  data: Record<string, unknown>,
-  fallbackStyle: CliPresentationStyle = 'notice',
-): CliRowMessage {
+function parseDurableCliRow(data: Record<string, unknown>): CliRowMessage {
   return new CliRowMessage(
     str(data.timestamp),
     str(data.content),
-    coerceDurableCliPresentation(data.presentation, fallbackStyle),
+    coerceDurableCliPresentation(data.presentation),
     isCliRowFormat(data.format) ? data.format : 'plain',
     typeof data.title === 'string' && data.title ? data.title : undefined,
     coerceDurableCliBodyDisclosure(data.disclosure),
   );
-}
-
-function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
-  if (isCarryoverMigrationQuarantineNoticeDetail(value)) {
-    return {
-      type: value.type,
-      artifactId: value.artifactId,
-      errorCode: value.errorCode,
-    };
-  }
-  if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
-  if (isChatIdRequestNoticeDetail(value)) return { type: value.type };
-  if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
-  if (isChatIdDiscoveryFailureNoticeDetail(value)) {
-    return { type: value.type, reason: value.reason };
-  }
-  return null;
 }
 
 // Constructs a typed ChatMessage class instance from raw data.
@@ -1221,12 +1173,9 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
     case 'tool-result':
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
     case 'error':
-      return isLegacyCliRowDetail(data.detail)
-        ? parseDurableCliRow(data, 'error')
-        : new ErrorMessage(str(data.timestamp), str(data.content));
+      return new ErrorMessage(str(data.timestamp), str(data.content));
     case 'transcript-notice':
       {
-        if (isLegacyCliRowDetail(data.detail)) return parseDurableCliRow(data, 'notice');
         const detail = data.detail === undefined ? undefined : parseTranscriptNoticeDetail(data.detail);
         if (detail === null) return null;
         return new TranscriptNoticeMessage(

@@ -3,10 +3,10 @@ import type {
   TranscriptExportOmittedCount,
 } from '../../common/chat-export-contracts.js';
 import {
-  isCarryoverMigrationQuarantineNoticeDetail,
   isToolUseMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
+import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
 import type { AgentRunFailureDetail } from '@garcon/server-agent-interface';
 import type { LedgerRow } from './contracts.js';
 import { ledgerRowToMessage } from './presentation.js';

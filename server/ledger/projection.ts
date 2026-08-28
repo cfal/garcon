@@ -1,4 +1,4 @@
-import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/chat-types.js';
+import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
 import { isPresentationOnlyProviderRow } from './contracts.js';
 

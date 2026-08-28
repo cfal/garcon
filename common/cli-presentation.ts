@@ -74,7 +74,6 @@ export function coerceDurableCliBodyDisclosure(value: unknown): CliBodyDisclosur
 
 export function coerceDurableCliPresentation(
   value: unknown,
-  fallbackStyle: CliPresentationStyle = 'notice',
 ): CliPresentation {
   if (isCliPresentation(value)) return value;
   if (isCliPresentationStyle(value)) {
@@ -87,7 +86,7 @@ export function coerceDurableCliPresentation(
     };
     if (isCliPresentation(candidate)) return candidate;
   }
-  return fallbackStyle === 'custom' ? { style: 'notice' } : { style: fallbackStyle };
+  return { style: 'notice' };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
