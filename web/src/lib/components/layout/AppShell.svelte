@@ -25,7 +25,6 @@
 		getSidebarSearch,
 		getSidebarProjectCollapse,
 		getGhCapability,
-		getTerminalRegistry,
 		getWorkspaceCoordinator,
 		setChatDrafts,
 	} from '$lib/context';
@@ -48,10 +47,8 @@
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
-	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-	import type { PortableSingletonKind, WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import { windowNodeById } from '$lib/workspace/window-tree.js';
-	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 
 	const navigation = getNavigation();
@@ -63,7 +60,6 @@
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
 	const ghCapability = getGhCapability();
-	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
 	const chatDrafts = new ChatDraftStore();
 	setChatDrafts(chatDrafts);
@@ -114,32 +110,6 @@
 				focusedWindowKind === 'git-compare'),
 	);
 	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
-	const newWindowActions = $derived.by<WorkspaceNewWindowActions>(() => ({
-		windowLimitReached: !workspace.canOpenNewWindow,
-		terminalLimitReached: terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT,
-		singletonKinds: (
-			[
-				'git',
-				'git-history',
-				'git-compare',
-				'pull-requests',
-				'files',
-				'commit',
-			] as const satisfies readonly PortableSingletonKind[]
-		).filter(
-			(kind) => kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
-		),
-		createTerminal(): void {
-			void workspace.createTerminalInNewWindow().catch((error) => {
-				notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
-			});
-		},
-		openSingleton(kind): void {
-			void workspace.openSingletonInNewWindow(kind).catch((error) => {
-				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-			});
-		},
-	}));
 	const mobileActiveDescriptor = $derived(
 		workspace.layout.surface(workspace.layout.snapshot.mobileActiveSurfaceId),
 	);
@@ -563,7 +533,7 @@
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowSettings={() => appShell.openSettings()}
-		{newWindowActions}
+		newWindowBlocked={!workspace.canOpenNewWindow}
 	/>
 {/snippet}
 

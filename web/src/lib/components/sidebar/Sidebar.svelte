@@ -31,7 +31,6 @@
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -68,7 +67,7 @@
 		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
-		newWindowActions: WorkspaceNewWindowActions;
+		newWindowBlocked: boolean;
 	}
 
 	let {
@@ -91,7 +90,7 @@
 		onOpenChatInNewWindow,
 		onShowScheduledPrompts,
 		onShowSettings,
-		newWindowActions,
+		newWindowBlocked,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -466,7 +465,6 @@
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
 			{onShowSettings}
-			{newWindowActions}
 		/>
 	</div>
 
@@ -503,7 +501,7 @@
 			onTagClick={handleTagClick}
 			{onManageTags}
 			onOpenInNewWindow={onOpenChatInNewWindow}
-			newWindowBlocked={newWindowActions.windowLimitReached}
+			{newWindowBlocked}
 			onQuickMove={handleQuickMove}
 		/>
 	</div>

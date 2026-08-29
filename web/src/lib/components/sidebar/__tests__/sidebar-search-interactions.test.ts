@@ -8,7 +8,6 @@ import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
-import { workspaceNewWindowActionsTestFixture } from './workspace-new-window-actions-test-fixture.js';
 import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 
 import type { SavedChatSearch } from '$lib/api/settings';
@@ -60,6 +59,18 @@ function createSavedSearch(id: string, title: string, query: string): SavedChatS
 describe('sidebar search interactions', () => {
 	afterEach(() => {
 		cleanup();
+	});
+
+	it('omits the separate New Window control from the sidebar toolbar', () => {
+		const { container } = render(SidebarControlsRow, {
+			isLoading: false,
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onShowScheduledPrompts: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
 	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
@@ -392,7 +403,6 @@ describe('sidebar search interactions', () => {
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
 		const onShowScheduledPrompts = vi.fn();
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [
@@ -449,7 +459,6 @@ describe('sidebar search interactions', () => {
 		const onSetChatItemLayout = vi.fn();
 		const onToggleSortByRecent = vi.fn();
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 1,
 			groupByProject: true,
@@ -522,7 +531,6 @@ describe('sidebar search interactions', () => {
 	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {
 		const onToggleSortByRecent = vi.fn();
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sortByRecent: false,
@@ -551,7 +559,6 @@ describe('sidebar search interactions', () => {
 		const onToggleGroupNestedProjectPaths = vi.fn();
 
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			groupByProject: false,
@@ -579,7 +586,6 @@ describe('sidebar search interactions', () => {
 
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			hasAdjacentSearchContext: true,
@@ -598,7 +604,6 @@ describe('sidebar search interactions', () => {
 
 	it('omits the saved-search separator when no sidebar menu searches are shown', async () => {
 		render(SidebarControlsRow, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
@@ -708,7 +713,6 @@ describe('sidebar search interactions', () => {
 
 	it('renders the controls row above the search context', () => {
 		render(SidebarSearchDock, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sidebarMenuSearches: [],
@@ -733,7 +737,6 @@ describe('sidebar search interactions', () => {
 
 	it('shows a recent-activity indicator below the controls row when recent sort is active', () => {
 		render(SidebarSearchDock, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sortByRecent: true,
@@ -760,7 +763,6 @@ describe('sidebar search interactions', () => {
 
 	it('hides the recent-activity indicator when recent sort is off', () => {
 		render(SidebarSearchDock, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sortByRecent: false,
@@ -783,7 +785,6 @@ describe('sidebar search interactions', () => {
 	it('disables recent sort when the indicator is clicked', async () => {
 		const onToggleSortByRecent = vi.fn();
 		render(SidebarSearchDock, {
-			newWindowActions: workspaceNewWindowActionsTestFixture,
 			isLoading: false,
 			visibleUnreadCount: 0,
 			sortByRecent: true,

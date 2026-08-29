@@ -21,18 +21,8 @@
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import Clock from '@lucide/svelte/icons/clock';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
-	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
-	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
-	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
-	import GitCompareArrows from '@lucide/svelte/icons/git-compare-arrows';
-	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
-	import History from '@lucide/svelte/icons/history';
-	import Files from '@lucide/svelte/icons/files';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
-	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -54,7 +44,6 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
-		newWindowActions: WorkspaceNewWindowActions;
 	}
 
 	let {
@@ -77,7 +66,6 @@
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
 		onShowSettings,
-		newWindowActions,
 	}: SidebarControlsRowProps = $props();
 
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
@@ -88,15 +76,6 @@
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
-
-	const newWindowSingletonLabels: Record<PortableSingletonKind, () => string> = {
-		git: m.workspace_surface_git_workbench,
-		'git-history': m.workspace_surface_git_history,
-		'git-compare': m.workspace_surface_git_compare,
-		'pull-requests': m.workspace_surface_pull_requests,
-		files: m.workspace_surface_files,
-		commit: m.workspace_surface_commit,
-	};
 
 	function handleMarkAllRead() {
 		onMarkAllRead?.();
@@ -148,50 +127,6 @@
 		>
 			<Search class="h-4 w-4" />
 		</Button>
-
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-				aria-label={m.workspace_new_window()}
-				title={newWindowActions.windowLimitReached
-					? m.workspace_drop_zone_max_windows()
-					: m.workspace_new_window()}
-				data-workspace-new-window-menu
-				disabled={newWindowActions.windowLimitReached}
-			>
-				<PanelsTopLeft class="h-4 w-4" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class="w-56">
-				<DropdownMenuItem
-					disabled={newWindowActions.windowLimitReached || newWindowActions.terminalLimitReached}
-					title={newWindowActions.windowLimitReached
-						? m.workspace_drop_zone_max_windows()
-						: newWindowActions.terminalLimitReached
-							? m.terminal_limit_reached()
-							: undefined}
-					onclick={newWindowActions.createTerminal}
-				>
-					<SquareTerminal class="h-3.5 w-3.5" />
-					{newWindowActions.terminalLimitReached
-						? m.terminal_limit_reached()
-						: m.workspace_new_terminal()}
-				</DropdownMenuItem>
-				{#each newWindowActions.singletonKinds as kind (kind)}
-					<DropdownMenuItem
-						disabled={newWindowActions.windowLimitReached}
-						onclick={() => newWindowActions.openSingleton(kind)}
-					>
-						{#if kind === 'git'}<GitBranch class="h-3.5 w-3.5" />
-						{:else if kind === 'git-history'}<History class="h-3.5 w-3.5" />
-						{:else if kind === 'git-compare'}<GitCompareArrows class="h-3.5 w-3.5" />
-						{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5" />
-						{:else if kind === 'files'}<Files class="h-3.5 w-3.5" />
-						{:else}<GitCommitHorizontal class="h-3.5 w-3.5" />{/if}
-						{m.workspace_open_surface({ surface: newWindowSingletonLabels[kind]() })}
-					</DropdownMenuItem>
-				{/each}
-			</DropdownMenuContent>
-		</DropdownMenu>
 
 		<DropdownMenu>
 			<DropdownMenuTrigger
