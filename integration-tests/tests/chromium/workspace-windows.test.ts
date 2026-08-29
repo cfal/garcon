@@ -500,7 +500,8 @@ async function dragChatToWindow(
   input: {
     chatId: string;
     windowId: string;
-    edge?: 'right' | 'bottom';
+    target?: 'center' | 'right' | 'bottom';
+    expectedLabel?: string;
     expectBlocked?: boolean;
   },
 ): Promise<void> {
@@ -512,11 +513,13 @@ async function dragChatToWindow(
 
   const sourceX = sourceBox.x + sourceBox.width / 2;
   const sourceY = sourceBox.y + sourceBox.height / 2;
-  const edge = input.edge ?? 'right';
+  const targetKind = input.target ?? 'right';
   const targetX =
-    edge === 'right' ? targetBox.x + targetBox.width - 12 : targetBox.x + targetBox.width / 2;
+    targetKind === 'right' ? targetBox.x + targetBox.width - 12 : targetBox.x + targetBox.width / 2;
   const targetY =
-    edge === 'bottom' ? targetBox.y + targetBox.height - 12 : targetBox.y + targetBox.height / 2;
+    targetKind === 'bottom'
+      ? targetBox.y + targetBox.height - 12
+      : targetBox.y + targetBox.height / 2;
   await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
   try {
@@ -526,12 +529,16 @@ async function dragChatToWindow(
     if (input.expectBlocked) {
       await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
     } else {
-      await target
-        .getByText(edge === 'right' ? 'Open new window right' : 'Open new window below', {
-          exact: true,
-        })
-        .waitFor({ state: 'visible' });
+      const expectedLabel =
+        input.expectedLabel ??
+        (targetKind === 'center'
+          ? 'Add as tab'
+          : targetKind === 'right'
+            ? 'Open new window right'
+            : 'Open new window below');
+      await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
     }
+    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
   } finally {
     await page.mouse.up();
   }
@@ -569,6 +576,7 @@ async function dragWorkspaceTabToWindow(
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
     await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
+    await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
   } finally {
     await page.mouse.up();
   }
@@ -718,14 +726,12 @@ describe('Chromium workspace windows', () => {
         'close-tab',
       ]);
       expect(
-        (
-          (await fixture.page
-            .locator(
-              `[data-workspace-window-menu="${chatWindowId}"] [data-workspace-window-tab-action="close-tab"]`,
-            )
-            .getAttribute('class')) ?? ''
-        ).includes('text-destructive'),
-      ).toBe(false);
+        await fixture.page
+          .locator(
+            `[data-workspace-window-menu="${chatWindowId}"] [data-workspace-window-tab-action="close-tab"]`,
+          )
+          .getAttribute('data-variant'),
+      ).toBe('default');
       expect(
         await fixture.page.locator('[data-workspace-window-tab-actions-separator]').count(),
       ).toBe(1);
@@ -776,13 +782,49 @@ describe('Chromium workspace windows', () => {
       expect(focusedChatGeometry.titleBarHeight).toBe(40);
       expect(Math.abs(focusedChatGeometry.liveChatTopDelta)).toBeLessThan(0.5);
 
-      markPhase('dragging a sole Chat tab into a Chat-less window');
+      markPhase('adding a sidebar Chat to a Chat-less window center');
+      await dragChatToWindow(fixture.page, {
+        chatId: chatB,
+        windowId: filesWindowId,
+        target: 'center',
+        expectedLabel: 'Add as tab',
+      });
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document.querySelectorAll('[data-workspace-window-id]').length === 3 &&
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface') ===
+            `chat-view:${expectedWindowId}`,
+        filesWindowId,
+      );
+      await fixture.page
+        .getByLabel('Chat messages')
+        .getByText('echo:workspace-window-chat-b', { exact: true })
+        .waitFor();
+
+      markPhase('replacing an occupied Chat with a sidebar Chat center drop');
+      await dragChatToWindow(fixture.page, {
+        chatId: chatA,
+        windowId: filesWindowId,
+        target: 'center',
+        expectedLabel: 'Replace existing chat',
+      });
+      await fixture.page
+        .getByLabel('Chat messages')
+        .getByText(
+          'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
+          { exact: true },
+        )
+        .waitFor();
+
+      markPhase('dragging a sole Chat tab into an occupied window');
       await dragWorkspaceTabToWindow(fixture.page, {
         sourceWindowId: movedChatWindowId,
         surfaceId: `chat-view:${movedChatWindowId}`,
         targetWindowId: filesWindowId,
         target: 'center',
-        expectedLabel: 'Add as tab',
+        expectedLabel: 'Replace existing chat',
       });
       await fixture.page.waitForFunction(
         ({ removedWindowId, destinationWindowId }) =>
@@ -797,45 +839,12 @@ describe('Chromium workspace windows', () => {
           destinationWindowId: filesWindowId,
         },
       );
-
-      markPhase('opening another Chat window from the sidebar');
-      const beforeSidebarChatWindowIds = new Set(await workspaceWindowIds(fixture.page));
-      await dragChatToWindow(fixture.page, {
-        chatId: chatB,
-        windowId: filesWindowId,
-      });
-      await fixture.page.waitForFunction(
-        () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
-      );
-      const sidebarChatWindowId = (await workspaceWindowIds(fixture.page)).find(
-        (windowId) => !beforeSidebarChatWindowIds.has(windowId),
-      );
-      if (!sidebarChatWindowId) throw new Error('Sidebar Chat drag did not create a window.');
-
-      markPhase('replacing an occupied destination Chat by native tab drag');
-      await dragWorkspaceTabToWindow(fixture.page, {
-        sourceWindowId: sidebarChatWindowId,
-        surfaceId: `chat-view:${sidebarChatWindowId}`,
-        targetWindowId: filesWindowId,
-        target: 'center',
-        expectedLabel: 'Replace existing chat',
-      });
-      await fixture.page.waitForFunction(
-        ({ removedWindowId, destinationWindowId }) =>
-          document.querySelectorAll('[data-workspace-window-id]').length === 2 &&
-          !document.querySelector(`[data-workspace-window-id="${removedWindowId}"]`) &&
-          document
-            .querySelector(`[data-workspace-window-id="${destinationWindowId}"]`)
-            ?.getAttribute('data-workspace-window-active-surface') ===
-            `chat-view:${destinationWindowId}`,
-        {
-          removedWindowId: sidebarChatWindowId,
-          destinationWindowId: filesWindowId,
-        },
-      );
       await fixture.page
         .getByLabel('Chat messages')
-        .getByText('echo:workspace-window-chat-b', { exact: true })
+        .getByText(
+          'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
+          { exact: true },
+        )
         .waitFor();
 
       markPhase('moving the Chat tab to a new adjacent window');
@@ -878,6 +887,8 @@ describe('Chromium workspace windows', () => {
       );
 
       markPhase('verifying separator geometry and focused-window treatment');
+      await openWindowTab(fixture.page, filesWindowId, 'Open Git History');
+      await openWindowTab(fixture.page, chatWindowId, 'Open Git Workbench');
       await verifySeparators(fixture.page);
       await verifyFocusedWindow(fixture.page, filesWindowId, chatWindowId);
       await verifyWorkspaceChromeThemes(fixture.page, filesWindowId, chatWindowId);
@@ -898,8 +909,25 @@ describe('Chromium workspace windows', () => {
           .getAttribute('aria-valuenow'),
       ).toBe(resized.value);
 
-      markPhase('blocking Chat drag at four windows');
+      markPhase('keeping sidebar Chat center placement available at four windows');
       expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(4);
+      await dragChatToWindow(fixture.page, {
+        chatId: chatB,
+        windowId: filesWindowId,
+        target: 'center',
+        expectedLabel: 'Add as tab',
+      });
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document.querySelectorAll('[data-workspace-window-id]').length === 4 &&
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface') ===
+            `chat-view:${expectedWindowId}`,
+        filesWindowId,
+      );
+
+      markPhase('blocking Chat edge drag at four windows');
       await dragChatToWindow(fixture.page, {
         chatId: chatB,
         windowId: filesWindowId,
