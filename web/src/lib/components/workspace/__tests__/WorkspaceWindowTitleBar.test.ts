@@ -237,8 +237,8 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
 		expect(toolbar.classList.contains('h-10')).toBe(true);
-		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(true);
-		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(false);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(true);
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_fullscreen() })).toBeTruthy();

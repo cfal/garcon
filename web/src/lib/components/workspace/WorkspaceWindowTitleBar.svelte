@@ -37,7 +37,7 @@
 	let visibleSurfaceIds = $state.raw<readonly string[]>([]);
 	const snapshot = $derived(workspace.layout.snapshot);
 	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
-	const showActiveTreatment = $derived(isCurrent && workspace.windowCount > 1 && !fullscreen);
+	const showActiveTreatment = $derived(isCurrent && !fullscreen);
 	const hiddenSurfaceIds = $derived(
 		workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId)),
 	);
