@@ -29,7 +29,7 @@
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
-	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
+	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
@@ -43,6 +43,7 @@
 		getNotifications,
 		getSnippets,
 		getTransientLayers,
+		getWorkspaceLayout,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
@@ -92,6 +93,8 @@
 	const notifications = getNotifications();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
+	const workspaceLayout = getWorkspaceLayout();
+	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
 	const newChatAgentIds = $derived.by(() => {
 		const allAgentIds = modelCatalog.getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
@@ -876,7 +879,7 @@
 		selection={composerEditor.selection}
 		focusRequestId={composerEditor.focusRequestId}
 		readOnly={promptTransformPending}
-		surfaceId={CHAT_SURFACE_ID}
+		surfaceId={newChatSurfaceId}
 		headerStatus={expandedEditorHeaderStatus}
 		canRefinePrompt={promptRefinement.canStart}
 		isPromptRefinementPending={promptRefinement.pending}

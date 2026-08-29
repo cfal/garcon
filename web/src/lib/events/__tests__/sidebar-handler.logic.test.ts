@@ -26,6 +26,7 @@ interface SidebarContextMocks extends SidebarContext {
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
+	clearChatPresentations: Mock<(chatId: string) => void>;
 }
 
 function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): SidebarContextMocks {
@@ -40,6 +41,7 @@ function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): Sid
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),
+		clearChatPresentations: vi.fn<(chatId: string) => void>(),
 		...overrides,
 	};
 	return context;
@@ -79,6 +81,7 @@ describe('handleChatDeleted', () => {
 
 		expect(ctx.navigateAwayFromChat).toHaveBeenCalledWith('chat-1');
 		expect(ctx.removeChat).toHaveBeenCalledWith('chat-1');
+		expect(ctx.clearChatPresentations).toHaveBeenCalledWith('chat-1');
 		expect(ctx.removeChatTranscript).toHaveBeenCalledWith('chat-1');
 		// Navigate must happen before remove so the order lookup works.
 		const navOrder = ctx.navigateAwayFromChat.mock.invocationCallOrder[0];
@@ -93,6 +96,7 @@ describe('handleChatDeleted', () => {
 
 		expect(ctx.navigateAwayFromChat).not.toHaveBeenCalled();
 		expect(ctx.removeChat).not.toHaveBeenCalled();
+		expect(ctx.clearChatPresentations).not.toHaveBeenCalled();
 		expect(ctx.removeChatTranscript).not.toHaveBeenCalled();
 	});
 });

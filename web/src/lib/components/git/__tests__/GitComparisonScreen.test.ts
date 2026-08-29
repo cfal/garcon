@@ -9,15 +9,11 @@ import {
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness.js';
 
-vi.mock('$lib/components/workspace/WorkspaceFullscreenButton.svelte', async () => ({
-	default: (await import('./WorkspaceFullscreenButtonStub.svelte')).default,
-}));
-
 function renderScreen(comparison: GitComparisonController, isLoading: boolean): void {
 	render(GitComparisonScreen, {
 		comparison,
 		isLoading,
-		presentation: 'pane-main',
+		presentation: 'window-main',
 		fontSize: 12,
 		onEdit: vi.fn(),
 		onRefresh: vi.fn(),
@@ -53,7 +49,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison: new GitComparisonController(),
 			isLoading: true,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			fontSize: 12,
 			onEdit,
 			onRefresh: vi.fn(),
@@ -94,7 +90,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			fontSize: 12,
 			onEdit,
 			onRefresh: vi.fn(),
@@ -116,7 +112,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			fontSize: 12,
 			onRefresh: vi.fn(),
 			onOpenChat: vi.fn(),
@@ -156,7 +152,7 @@ describe('GitComparisonScreen', () => {
 		render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			fontSize: 12,
 			onBack,
 			onRefresh: vi.fn(),
@@ -168,8 +164,8 @@ describe('GitComparisonScreen', () => {
 		expect(onBack).toHaveBeenCalledOnce();
 	});
 
-	it.each(['pane-main', 'pane-sidebar'] as const)(
-		'keeps the %s summary beside top-aligned wide controls',
+	it.each(['window-main', 'window-sidebar'] as const)(
+		'keeps the %s summary beside top-aligned wide controls without duplicate window chrome',
 		async (presentation) => {
 			const comparison = new GitComparisonController();
 			comparison.snapshot = readySnapshot();
@@ -203,11 +199,7 @@ describe('GitComparisonScreen', () => {
 			expect(separator?.getAttribute('aria-hidden')).toBe('true');
 			expect(actions?.parentElement).toBe(headerRow);
 			expect(actions?.classList.contains('self-start')).toBe(true);
-			expect(
-				screen
-					.getByRole('button', { name: 'Hide file tree' })
-					.nextElementSibling?.getAttribute('data-workspace-fullscreen-toggle'),
-			).toBe(presentation);
+			expect(container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
 		},
 	);
 
@@ -217,7 +209,7 @@ describe('GitComparisonScreen', () => {
 		const { container } = render(GitComparisonScreen, {
 			comparison,
 			isLoading: false,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			fontSize: 12,
 			onRefresh: vi.fn(),
 			onOpenChat: vi.fn(),

@@ -18,11 +18,11 @@ describe('surfaceFrame', () => {
 		const action = surfaceFrame(surface, {
 			registry,
 			surfaceId: 'test-surface',
-			host: 'pane-main',
+			host: 'window-main',
 			version: 0,
 		});
 
-		expect(registry.focus('test-surface', 'pane-main')).toBe(true);
+		expect(registry.focus('test-surface', 'window-main')).toBe(true);
 		expect(document.activeElement).toBe(primaryTarget);
 
 		action.destroy();

@@ -27,9 +27,9 @@ export interface WorkspaceShortcutDeps {
 		WorkspaceCoordinator,
 		| 'focusOwner'
 		| 'isSurfacePresented'
-		| 'focusPreviousTabInFocusedPane'
-		| 'focusNextTabInFocusedPane'
-		| 'cyclePaneFocus'
+		| 'focusPreviousTabInFocusedWindow'
+		| 'focusNextTabInFocusedWindow'
+		| 'cycleWindowFocus'
 	> & { layout: Pick<WorkspaceCoordinator['layout'], 'surface'> };
 	transients: Pick<
 		TransientLayerRegistry,
@@ -131,7 +131,7 @@ export class WorkspaceShortcutDispatcher {
 		if (this.#isLocallyOwned(event)) return;
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		const ownerDescriptor =
-			owner.kind === 'surface' || owner.kind === 'pane-chrome'
+			owner.kind === 'surface' || owner.kind === 'window-chrome'
 				? this.deps.workspace.layout.surface(owner.surfaceId)
 				: null;
 		const terminalOwnsInput =
@@ -171,15 +171,15 @@ export class WorkspaceShortcutDispatcher {
 			);
 			return;
 		}
-		if (matches('toggle-main-sidebar-focus')) {
+		if (matches('cycle-window-focus')) {
 			event.preventDefault();
-			this.deps.workspace.cyclePaneFocus(owner);
+			this.deps.workspace.cycleWindowFocus(owner);
 			return;
 		}
 		if (matches('navigate-tab-left') || matches('navigate-tab-right')) {
 			const handled = matches('navigate-tab-left')
-				? this.deps.workspace.focusPreviousTabInFocusedPane(owner)
-				: this.deps.workspace.focusNextTabInFocusedPane(owner);
+				? this.deps.workspace.focusPreviousTabInFocusedWindow(owner)
+				: this.deps.workspace.focusNextTabInFocusedWindow(owner);
 			if (handled) event.preventDefault();
 			return;
 		}
@@ -191,7 +191,7 @@ export class WorkspaceShortcutDispatcher {
 			}
 			return;
 		}
-		if (owner.kind === 'surface' || owner.kind === 'pane-chrome') {
+		if (owner.kind === 'surface' || owner.kind === 'window-chrome') {
 			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
 			if (descriptor?.type === 'terminal') return;
@@ -203,20 +203,12 @@ export class WorkspaceShortcutDispatcher {
 				void this.deps.files.save(descriptor.fileSessionId);
 				return;
 			}
-			if (
-				descriptor?.type === 'singleton' &&
-				descriptor.kind === 'chat' &&
-				matches('open-sidebar-search')
-			) {
+			if (descriptor?.type === 'chat' && matches('open-sidebar-search')) {
 				event.preventDefault();
 				this.deps.appShell.openSidebarSearch();
 				return;
 			}
-			if (
-				descriptor?.type === 'singleton' &&
-				descriptor.kind === 'chat' &&
-				matches('delete-chat')
-			) {
+			if (descriptor?.type === 'chat' && matches('delete-chat')) {
 				event.preventDefault();
 				this.deps.appShell.requestDeleteSelectedChat();
 				return;

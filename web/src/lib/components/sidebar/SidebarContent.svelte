@@ -11,6 +11,7 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -35,6 +36,8 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onQuickMove: (
@@ -69,6 +72,8 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		onTogglePinned,
 		onToggleArchive,
 		onQuickMove,
@@ -112,6 +117,8 @@
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}
+		{onOpenInNewWindow}
+		{newWindowBlocked}
 		{onTogglePinned}
 		{onToggleArchive}
 		{onQuickMove}

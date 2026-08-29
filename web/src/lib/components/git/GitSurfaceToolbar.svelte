@@ -7,7 +7,7 @@
 	import type { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
 	import GitTargetSelector from './GitTargetSelector.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 	let {
 		target,
@@ -18,7 +18,7 @@
 		closeDisabled = false,
 	}: {
 		target: GitTargetSessionController;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		actions: readonly ResponsiveSurfaceAction[];
 		menuLeadingContent?: Snippet;
 		onClose?: () => void;

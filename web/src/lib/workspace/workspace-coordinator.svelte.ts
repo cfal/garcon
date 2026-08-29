@@ -3,56 +3,56 @@ import { SvelteSet } from 'svelte/reactivity';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
-	CHAT_SURFACE_ID,
-	MAX_WORKSPACE_PANES,
+	MAX_WORKSPACE_WINDOWS,
+	chatViewSurfaceId,
+	fileSurfaceId,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type ActiveSurfaceKind,
 	type DesktopPlacement,
-	type PaneId,
 	type FocusOwner,
 	type PortableSingletonKind,
-	type SplitEdge,
-	type SplitId,
+	type PresentationHostId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
-	type PresentationHostId,
+	type WorkspacePartitionId,
+	type WorkspaceWindowEdge,
+	type WorkspaceWindowId,
 } from './surface-types.js';
 import {
-	collectPaneNodes,
-	paneIdOfSurface,
-	paneNodeById,
-	projectedPaneCountAfterTabSplit,
-} from './pane-tree.js';
+	collectWindowNodes,
+	projectedWindowCountAfterTabMove,
+	windowIdOfSurface,
+	windowNodeById,
+} from './window-tree.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	WorkspaceTransitionArbiter,
 	type WorkspaceMutationPlan,
 } from './workspace-transition-arbiter.js';
-import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type {
 	FilePlacementPort,
 	FilePlacementResult,
 	FileSessionRegistry,
 } from '$lib/files/sessions/file-session-registry.svelte.js';
-import { fileSurfaceId } from './surface-types.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
+import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
-import { canOmitCanonicalPullRequests } from './canonical-layout.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
+import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
 	appShell: AppShellStore;
-	chatInteractionGate: ChatInteractionGate;
+	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	files: FileSessionRegistry;
 	singletons: SingletonSurfaceRegistry;
@@ -63,19 +63,21 @@ interface WorkspaceCoordinatorDeps {
 	getRouteIdentity(): string;
 }
 
-export class WorkspacePaneLimitError extends Error {
+export class WorkspaceWindowLimitError extends Error {
 	constructor() {
-		super(m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }));
-		this.name = 'WorkspacePaneLimitError';
+		super(m.workspace_window_limit_reached({ count: MAX_WORKSPACE_WINDOWS }));
+		this.name = 'WorkspaceWindowLimitError';
 	}
 }
 
 export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #deps: WorkspaceCoordinatorDeps;
 	#reservedSurfaceIds = new SvelteSet<string>();
+	#reservedWindowIds = new SvelteSet<WorkspaceWindowId>();
 	readonly #presentation: WorkspacePresentationController;
 	readonly #fileDialog: FileDialogCoordinator;
 	readonly #terminalPlacement: TerminalPlacementService;
+	readonly #windowDestruction: WorkspaceWindowDestructionService;
 	closeGuardRequest = $state<{
 		surfaceId: string;
 		title: string;
@@ -91,7 +93,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			terminals: deps.terminals,
 			workspaceContext: deps.workspaceContext,
 			appShell: deps.appShell,
-			chatInteractionGate: deps.chatInteractionGate,
+			workspaceInteractionGate: deps.workspaceInteractionGate,
 			transientLayers: deps.transientLayers,
 			files: deps.files,
 			singletons: deps.singletons,
@@ -104,14 +106,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#fileDialog = new FileDialogCoordinator({
 			layout: deps.arbiter.layout,
 			files: deps.files,
-			chatInteractionGate: deps.chatInteractionGate,
+			workspaceInteractionGate: deps.workspaceInteractionGate,
 			reservations: this.#reservedSurfaceIds,
 			commit,
+			isWindowReserved: (windowId) => this.#reservedWindowIds.has(windowId),
 			isMobile: () => this.isMobile,
 			responsiveGeneration: () => this.#presentation.responsiveGeneration,
 			defaultActiveId: () => this.defaultActiveId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
-			paneOf: (surfaceId) => this.#presentation.paneOf(surfaceId),
+			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),
 			eligibleDesktopReturn: (surfaceId) => this.#presentation.eligibleDesktopReturn(surfaceId),
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 			placeOnMobile: (sessionId, surfaceId, publication) =>
@@ -121,15 +124,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			layout: deps.arbiter.layout,
 			terminals: deps.terminals,
 			reservations: this.#reservedSurfaceIds,
+			isWindowReserved: (windowId) => this.#reservedWindowIds.has(windowId),
 			commit,
 			commitDestroyedRemoval: (surfaceId, mutations) =>
 				this.#presentation.commitDestroyedRemovals([surfaceId], mutations),
 			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
 			isMobile: () => this.isMobile,
-			isChatPresented: () => this.isChatPresented,
-			cancelChatTransition: () => deps.chatInteractionGate.cancelBeforeInertTransition(),
-			paneOf: (surfaceId) => this.#presentation.paneOf(surfaceId),
-			defaultPaneId: () => this.defaultPaneId,
+			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
+			windowOf: (surfaceId) => this.#presentation.windowOf(surfaceId),
+			defaultWindowId: () => this.defaultWindowId,
 			defaultActiveId: () => this.defaultActiveId,
 			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
 			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
@@ -138,6 +141,22 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#presentation.resolveMobileReturn(excluding, snapshot),
 			confirmClose: (request) => this.#confirmClose(request),
 			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
+		});
+		this.#windowDestruction = new WorkspaceWindowDestructionService({
+			layout: deps.arbiter.layout,
+			files: deps.files,
+			singletons: deps.singletons,
+			gitMutations: deps.gitMutations,
+			surfaceReservations: this.#reservedSurfaceIds,
+			windowReservations: this.#reservedWindowIds,
+			commitDestroyedRemovals: (surfaceIds, plan) =>
+				this.#presentation.commitDestroyedRemovals(surfaceIds, plan),
+			confirmClose: (request) => this.#confirmClose(request),
+			clearAttachmentError: (surfaceId) => this.#presentation.clearAttachmentError(surfaceId),
+			afterTerminalReleased: (terminalId) =>
+				this.#terminalPlacement.afterPlacementReleased(terminalId),
+			onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
+			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 	}
 
@@ -165,28 +184,40 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#presentation.isMobile;
 	}
 
-	isSurfacePresented(surfaceId: string): boolean {
-		return this.#presentation.isSurfacePresented(surfaceId);
-	}
-
 	get defaultActiveId(): string {
 		return this.#presentation.defaultActiveId;
 	}
 
-	get defaultPaneId(): PaneId {
-		return this.layout.chatPaneId;
+	get defaultWindowId(): WorkspaceWindowId {
+		return this.#presentation.defaultWindowId;
 	}
 
-	get lastFocusedPaneId(): PaneId {
-		return this.#resolvePaneId(this.layout.snapshot, this.#presentation.lastFocusedPaneId);
+	get currentWindowId(): WorkspaceWindowId {
+		return this.#presentation.currentWindowId;
 	}
 
-	get paneCount(): number {
-		return collectPaneNodes(this.layout.snapshot.desktopRoot).length;
+	get currentChatSurfaceId(): `chat-view:${WorkspaceWindowId}` {
+		const mobileSurface = this.layout.snapshot.surfaces[this.layout.snapshot.mobileActiveSurfaceId];
+		if (this.isMobile && mobileSurface?.type === 'chat') return mobileSurface.id;
+		const workspaceWindow = windowNodeById(this.layout.snapshot.desktopRoot, this.currentWindowId);
+		const activeSurface = workspaceWindow
+			? this.layout.snapshot.surfaces[workspaceWindow.tabs.activeId]
+			: null;
+		return activeSurface?.type === 'chat'
+			? activeSurface.id
+			: chatViewSurfaceId(this.currentWindowId);
 	}
 
-	get canSplitPane(): boolean {
-		return this.paneCount < MAX_WORKSPACE_PANES;
+	get lastFocusedWindowId(): WorkspaceWindowId {
+		return this.#resolveWindowId(this.layout.snapshot, this.#presentation.lastFocusedWindowId);
+	}
+
+	get windowCount(): number {
+		return collectWindowNodes(this.layout.snapshot.desktopRoot).length;
+	}
+
+	get canOpenNewWindow(): boolean {
+		return this.windowCount < MAX_WORKSPACE_WINDOWS;
 	}
 
 	get isChatPresented(): boolean {
@@ -197,13 +228,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#presentation.isChatInteractive;
 	}
 
-	// Active tab kind of the pane that most recently held focus. Drives
-	// chrome that reacts to the focused view, like hiding the chat list
-	// while a Git surface is active.
-	get focusedPaneActiveKind(): ActiveSurfaceKind | null {
+	isSurfacePresented(surfaceId: string): boolean {
+		return this.#presentation.isSurfacePresented(surfaceId);
+	}
+
+	get focusedWindowActiveKind(): ActiveSurfaceKind | null {
 		const snapshot = this.layout.snapshot;
-		const paneId = this.lastFocusedPaneId;
-		const activeId = paneNodeById(snapshot.desktopRoot, paneId)?.tabs.activeId ?? null;
+		const activeId = windowNodeById(snapshot.desktopRoot, this.lastFocusedWindowId)?.tabs.activeId;
 		const surface = activeId ? snapshot.surfaces[activeId] : null;
 		if (!surface) return null;
 		return surface.type === 'singleton' ? surface.kind : surface.type;
@@ -219,8 +250,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	isSurfaceCloseBlocked(surfaceId: string): boolean {
 		const surface = this.layout.surface(surfaceId);
-		if (!surface || surfaceId === CHAT_SURFACE_ID || this.#reservedSurfaceIds.has(surfaceId)) {
-			return true;
+		if (!surface || surface.type === 'chat' || this.#reservedSurfaceIds.has(surfaceId)) return true;
+		const ownerWindowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
+		if (ownerWindowId && this.#reservedWindowIds.has(ownerWindowId)) return true;
+		if (ownerWindowId) {
+			const owner = windowNodeById(this.layout.snapshot.desktopRoot, ownerWindowId);
+			if (owner?.tabs.order.length === 1 && this.windowCount === 1) return true;
 		}
 		if (this.#deps.gitMutations?.pendingCount(surfaceId)) return true;
 		if (surface.type === 'file') {
@@ -232,6 +267,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return false;
 	}
 
+	isWindowCloseBlocked(windowId: WorkspaceWindowId): boolean {
+		return this.windowCount === 1 || this.#windowDestruction.isWindowBlocked(windowId);
+	}
+
 	noteSurfaceFocus(surfaceId: string): void {
 		this.#presentation.noteSurfaceFocus(surfaceId);
 	}
@@ -240,8 +279,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.noteChatListFocus();
 	}
 
-	notePaneChromeFocus(paneId: PaneId, surfaceId: string): void {
-		this.#presentation.notePaneChromeFocus(paneId, surfaceId);
+	noteWindowChromeFocus(windowId: WorkspaceWindowId, surfaceId: string): void {
+		this.#presentation.noteWindowChromeFocus(windowId, surfaceId);
 	}
 
 	async focusChat(): Promise<void> {
@@ -252,207 +291,245 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.focusSurface(surfaceId, this.#reservedSurfaceIds);
 	}
 
-	focusPreviousTabInFocusedPane(owner: FocusOwner = this.focusOwner): boolean {
+	focusPreviousTabInFocusedWindow(owner: FocusOwner = this.focusOwner): boolean {
 		return this.#presentation.focusPreviousTab(
 			owner,
 			(surfaceId) => void this.focusSurface(surfaceId),
 		);
 	}
 
-	focusNextTabInFocusedPane(owner: FocusOwner = this.focusOwner): boolean {
+	focusNextTabInFocusedWindow(owner: FocusOwner = this.focusOwner): boolean {
 		return this.#presentation.focusNextTab(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
-	cyclePaneFocus(owner: FocusOwner = this.focusOwner): void {
-		this.#presentation.cyclePaneFocus(owner, (surfaceId) => void this.focusSurface(surfaceId));
+	cycleWindowFocus(owner: FocusOwner = this.focusOwner): void {
+		this.#presentation.cycleWindowFocus(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
-	// Opens a singleton as a tab in the given pane, moving it there when it
-	// already exists elsewhere.
-	async openSingletonAsTab(kind: PortableSingletonKind, paneId: PaneId): Promise<void> {
+	async showChatInCurrentWindow(chatId: string): Promise<`chat-view:${WorkspaceWindowId}`> {
+		let destinationWindowId: WorkspaceWindowId | null = null;
+		let surfaceId: `chat-view:${WorkspaceWindowId}` | null = null;
+		let applied = false;
+		const current = await this.#presentation.commit((latest) => {
+			destinationWindowId = this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId);
+			if (this.#reservedWindowIds.has(destinationWindowId)) return [];
+			surfaceId = chatViewSurfaceId(destinationWindowId);
+			applied = true;
+			const mutations: WorkspaceLayoutMutation[] = [
+				{ type: 'set-window-chat', windowId: destinationWindowId, chatId },
+			];
+			if (this.isMobile) {
+				mutations.push({ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] });
+			}
+			return mutations;
+		});
+		if (!destinationWindowId || !surfaceId) throw new Error('Workspace has no current window');
+		if (!applied) throw new Error(m.workspace_open_failed());
+		if (current) this.#presentation.presentSurface(surfaceId);
+		return surfaceId;
+	}
+
+	async openChatInNewWindow(
+		chatId: string,
+		targetWindowId?: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge = 'right',
+	): Promise<WorkspaceWindowId> {
+		if (this.isMobile) {
+			await this.showChatInCurrentWindow(chatId);
+			return this.currentWindowId;
+		}
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		let opened = false;
+		const current = await this.#presentation.commit((latest) => {
+			if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+				throw new WorkspaceWindowLimitError();
+			}
+			const anchor = this.#resolveWindowId(
+				latest,
+				targetWindowId ?? this.#presentation.lastFocusedWindowId,
+			);
+			if (this.#reservedWindowIds.has(anchor)) return [];
+			opened = true;
+			return [
+				{
+					type: 'open-chat-in-new-window',
+					chatId,
+					targetWindowId: anchor,
+					edge,
+					newWindowId,
+					partitionId,
+				},
+			];
+		});
+		if (!opened || !this.layout.surface(chatViewSurfaceId(newWindowId))) {
+			throw new Error(m.workspace_open_failed());
+		}
+		if (current) this.#presentation.presentSurface(chatViewSurfaceId(newWindowId));
+		return newWindowId;
+	}
+
+	async clearDeletedChat(chatId: string): Promise<void> {
+		await this.#presentation.commit((latest) =>
+			collectWindowNodes(latest.desktopRoot).flatMap((workspaceWindow) => {
+				const surfaceId = chatViewSurfaceId(workspaceWindow.id);
+				const surface = latest.surfaces[surfaceId];
+				return surface?.type === 'chat' && surface.chatId === chatId
+					? [{ type: 'set-window-chat' as const, windowId: workspaceWindow.id, chatId: null }]
+					: [];
+			}),
+		);
+	}
+
+	async openSingletonAsTab(
+		kind: PortableSingletonKind,
+		windowId: WorkspaceWindowId,
+	): Promise<void> {
 		const surfaceId = singletonSurfaceId(kind);
 		if (this.#reservedSurfaceIds.has(surfaceId)) return;
 		if (this.isMobile) {
 			await this.focusMobileSingleton(kind);
 			return;
 		}
-		if (this.isChatPresented) this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const current = await this.#presentation.commit((latest) => {
-			const destinationPaneId = this.#resolvePaneId(latest, paneId);
-			const existingPaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
-			if (existingPaneId === destinationPaneId) {
-				return [{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId }];
+			if (!windowNodeById(latest.desktopRoot, windowId) || this.#reservedWindowIds.has(windowId)) {
+				return [];
+			}
+			const existingWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+			if (existingWindowId === windowId) {
+				return [{ type: 'activate-window-tab', windowId, surfaceId }];
 			}
 			if (latest.surfaces[surfaceId]) {
-				return [{ type: 'move-tab', surfaceId, destinationPaneId }];
+				return [{ type: 'move-tab', surfaceId, destinationWindowId: windowId }];
 			}
 			return [
 				{
 					type: 'register-surface',
 					surface: portableSingletonDescriptor(kind),
-					paneId: destinationPaneId,
+					windowId,
 				},
-				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
+				{ type: 'activate-window-tab', windowId, surfaceId },
 			];
 		});
-		if (current) this.#presentation.presentSurface(surfaceId);
+		if (current && this.layout.surface(surfaceId)) this.#presentation.presentSurface(surfaceId);
 	}
 
-	// Opens a singleton in a new pane split from the anchor pane. An existing
-	// singleton that already owns a pane is focused; otherwise it is detached
-	// into the new pane.
-	async openSingletonInNewPane(
+	async openSingletonInNewWindow(
 		kind: PortableSingletonKind,
-		anchorPaneId?: PaneId,
+		anchorWindowId?: WorkspaceWindowId,
 	): Promise<void> {
 		if (this.isMobile) {
 			await this.focusMobileSingleton(kind);
 			return;
 		}
-		const anchor = anchorPaneId ?? this.lastFocusedPaneId;
 		const surfaceId = singletonSurfaceId(kind);
-		const surface = this.layout.surface(surfaceId);
-		if (surface) {
-			const currentPaneId = this.#presentation.paneOf(surfaceId);
-			if (!currentPaneId) {
-				await this.focusSurface(surfaceId);
-				return;
-			}
-			const currentPane = paneNodeById(this.layout.snapshot.desktopRoot, currentPaneId);
-			if (currentPane && currentPane.tabs.order.length === 1) {
-				await this.focusSurface(surfaceId);
-				return;
-			}
-			if (!this.canSplitPane) throw new WorkspacePaneLimitError();
-			await this.splitTabToEdge(surfaceId, anchor, 'right');
+		if (this.#reservedSurfaceIds.has(surfaceId)) return;
+		if (this.layout.surface(surfaceId)) {
+			await this.focusSurface(surfaceId);
 			return;
 		}
-		if (!this.canSplitPane) throw new WorkspacePaneLimitError();
-		const newPaneId = `pane-${createRandomId()}` as PaneId;
-		const splitId = `split-${createRandomId()}` as SplitId;
-		await this.#openSingleton(kind, (latest) => {
-			if (!paneNodeById(latest.desktopRoot, anchor)) return [];
-			if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
-				throw new WorkspacePaneLimitError();
-			}
-			return [
-				{
-					type: 'register-surface-in-split',
-					surface: portableSingletonDescriptor(kind),
-					targetPaneId: anchor,
-					edge: 'right',
-					newPaneId,
-					splitId,
-				},
-			];
-		});
-	}
-
-	async #openSingleton(
-		kind: PortableSingletonKind,
-		plan: (latest: WorkspaceLayoutSnapshot) => readonly WorkspaceLayoutMutation[],
-	): Promise<void> {
-		const surfaceId = singletonSurfaceId(kind);
-		if (this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const current = await this.#presentation.commit((latest) => {
-			const existingPaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
-			if (existingPaneId) {
-				return [{ type: 'activate-pane-tab', paneId: existingPaneId, surfaceId }];
+			if (latest.surfaces[surfaceId] || this.#reservedSurfaceIds.has(surfaceId)) return [];
+			if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+				throw new WorkspaceWindowLimitError();
 			}
-			if (latest.surfaces[surfaceId]) {
-				return [
-					{
-						type: 'move-tab',
-						surfaceId,
-						destinationPaneId: paneIdOfSurface(latest.desktopRoot, CHAT_SURFACE_ID) ?? this.defaultPaneId,
-					},
-				];
-			}
-			return plan(latest);
-		});
-		if (!current) return;
-		this.#presentation.presentSurface(surfaceId);
-	}
-
-	async moveTabToPane(
-		surfaceId: string,
-		destinationPaneId: PaneId,
-		index?: number,
-	): Promise<void> {
-		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		const current = await this.#presentation.commit((latest) => {
-			if (!latest.surfaces[surfaceId]) return [];
-			if (!paneIdOfSurface(latest.desktopRoot, surfaceId)) return [];
-			return [{ type: 'move-tab', surfaceId, destinationPaneId, index }];
-		});
-		if (!current) return;
-		this.#presentation.presentSurface(surfaceId);
-	}
-
-	// Moves an existing tab into a new pane split from the target pane edge.
-	async splitTabToEdge(
-		surfaceId: string,
-		targetPaneId: PaneId,
-		edge: SplitEdge,
-	): Promise<void> {
-		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		const newPaneId = `pane-${createRandomId()}` as PaneId;
-		const splitId = `split-${createRandomId()}` as SplitId;
-		const current = await this.#presentation.commit((latest) => {
-			if (!latest.surfaces[surfaceId]) return [];
-			const sourcePaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
-			if (!sourcePaneId || !paneNodeById(latest.desktopRoot, targetPaneId)) return [];
 			if (
-				projectedPaneCountAfterTabSplit(latest.desktopRoot, sourcePaneId, targetPaneId) >
-				MAX_WORKSPACE_PANES
-			) {
-				throw new WorkspacePaneLimitError();
-			}
-			return [
-				{
-					type: 'split-tab-to-edge',
-					surfaceId,
-					targetPaneId,
-					edge,
-					newPaneId,
-					splitId,
-				},
-			];
-		});
-		if (!current) return;
-		this.#presentation.presentSurface(surfaceId);
-	}
-
-	// Collapses a pane, merging its tabs into the destination pane.
-	async mergePaneInto(sourcePaneId: PaneId, destinationPaneId: PaneId): Promise<void> {
-		if (this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		const current = await this.#presentation.commit((latest) => {
-			if (
-				!paneNodeById(latest.desktopRoot, sourcePaneId) ||
-				!paneNodeById(latest.desktopRoot, destinationPaneId)
+				collectWindowNodes(latest.desktopRoot).every((workspaceWindow) =>
+					this.#reservedWindowIds.has(workspaceWindow.id),
+				)
 			) {
 				return [];
 			}
-			return [{ type: 'merge-pane', sourcePaneId, destinationPaneId }];
+			const anchor = this.#resolveWindowId(
+				latest,
+				anchorWindowId ?? this.#presentation.lastFocusedWindowId,
+			);
+			if (this.#reservedWindowIds.has(anchor)) return [];
+			return [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor(kind),
+					targetWindowId: anchor,
+					edge: 'right',
+					newWindowId,
+					partitionId,
+				},
+			];
 		});
-		if (!current) return;
-		const fallback = paneNodeById(this.layout.snapshot.desktopRoot, destinationPaneId)?.tabs
-			.activeId;
-		if (fallback) this.#presentation.presentSurface(fallback);
+		if (current && this.layout.surface(surfaceId)) this.#presentation.presentSurface(surfaceId);
 	}
 
-	async setSplitRatio(splitId: SplitId, ratio: number): Promise<void> {
-		await this.#presentation.commit([{ type: 'set-split-ratio', splitId, ratio }]);
+	async moveTabToWindow(
+		surfaceId: string,
+		destinationWindowId: WorkspaceWindowId,
+		index?: number,
+	): Promise<void> {
+		if (
+			this.#reservedSurfaceIds.has(surfaceId) ||
+			this.#reservedWindowIds.has(destinationWindowId)
+		) {
+			return;
+		}
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const current = await this.#presentation.commit((latest) => {
+			if (
+				!latest.surfaces[surfaceId] ||
+				!windowIdOfSurface(latest.desktopRoot, surfaceId) ||
+				!windowNodeById(latest.desktopRoot, destinationWindowId)
+			) {
+				return [];
+			}
+			return [{ type: 'move-tab', surfaceId, destinationWindowId, index }];
+		});
+		if (current) this.#presentation.presentSurface(surfaceId);
+	}
+
+	async openTabInNewWindow(
+		surfaceId: string,
+		targetWindowId: WorkspaceWindowId,
+		edge: WorkspaceWindowEdge,
+	): Promise<void> {
+		if (this.#reservedSurfaceIds.has(surfaceId) || this.#reservedWindowIds.has(targetWindowId)) {
+			return;
+		}
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		const current = await this.#presentation.commit((latest) => {
+			const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+			if (
+				!latest.surfaces[surfaceId] ||
+				!sourceWindowId ||
+				!windowNodeById(latest.desktopRoot, targetWindowId)
+			) {
+				return [];
+			}
+			if (
+				projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
+				MAX_WORKSPACE_WINDOWS
+			) {
+				throw new WorkspaceWindowLimitError();
+			}
+			return [
+				{
+					type: 'open-tab-in-new-window',
+					surfaceId,
+					targetWindowId,
+					edge,
+					newWindowId,
+					partitionId,
+				},
+			];
+		});
+		if (current) this.#presentation.presentSurface(surfaceId);
+	}
+
+	async setPartitionRatio(partitionId: WorkspacePartitionId, ratio: number): Promise<void> {
+		await this.#presentation.commit([{ type: 'set-partition-ratio', partitionId, ratio }]);
 	}
 
 	async closeSurface(surfaceId: string): Promise<boolean> {
@@ -475,17 +552,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 								: m.commit_surface_close_drafts_plural({ count: draftCount }),
 						confirmLabel: m.commit_surface_discard_close(),
 					}))
-				)
+				) {
 					return false;
+				}
 			}
 			if (surface.type === 'file') {
-				const canDestroy = await this.#deps.files.confirmDestructive(
-					surface.fileSessionId,
-					'close',
-				);
-				if (!canDestroy) return false;
+				if (!(await this.#deps.files.confirmDestructive(surface.fileSessionId, 'close')))
+					return false;
 			}
-			const sourcePaneId = this.#presentation.paneOf(surfaceId);
+			const sourceWindowId = this.#presentation.windowOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			let mobileFallbackId: string | null = null;
 			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
@@ -514,22 +589,20 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
-			if (surface.type === 'singleton' && surface.kind !== 'chat') {
-				if (surface.kind === 'commit') {
-					this.#deps.singletons.commitIfPresent()?.discardDrafts();
-				}
+			if (surface.type === 'singleton') {
+				if (surface.kind === 'commit') this.#deps.singletons.commitIfPresent()?.discardDrafts();
 				this.#deps.singletons.disposeSurface(surface.kind);
 			}
 			if (!current) return true;
-			const sourcePaneActive = sourcePaneId
-				? paneNodeById(this.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+			const sourceWindowActive = sourceWindowId
+				? windowNodeById(this.layout.snapshot.desktopRoot, sourceWindowId)?.tabs.activeId
 				: null;
 			const fallbackSurfaceId =
 				mobileFallbackId ??
 				(wasDialog
 					? this.#presentation.eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
 					: null) ??
-				sourcePaneActive ??
+				sourceWindowActive ??
 				this.defaultActiveId;
 			this.lastFocusedSurfaceId = fallbackSurfaceId;
 			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
@@ -539,6 +612,30 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (surface.type === 'terminal') {
 				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);
 			}
+		}
+	}
+
+	async closeWindow(windowId: WorkspaceWindowId): Promise<boolean> {
+		return this.#windowDestruction.close(windowId);
+	}
+
+	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<boolean> {
+		if (this.isMobile) return false;
+		if (this.layout.snapshot.fullscreenWindowId === windowId) return true;
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		return this.#windowDestruction.fullscreen(windowId);
+	}
+
+	async exitWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {
+		if (this.isMobile || this.layout.snapshot.fullscreenWindowId !== windowId) return;
+		const current = await this.#presentation.commit((latest) =>
+			latest.fullscreenWindowId === windowId
+				? [{ type: 'set-fullscreen-window', windowId: null }]
+				: [],
+		);
+		if (current) {
+			const activeId = windowNodeById(this.layout.snapshot.desktopRoot, windowId)?.tabs.activeId;
+			if (activeId) this.#presentation.presentSurface(activeId);
 		}
 	}
 
@@ -563,66 +660,55 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			await this.focusFileSession(sessionId);
 			return 'placed';
 		}
-		if (this.isMobile) {
-			return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
-		}
+		if (this.isMobile) return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
 		const destination = target ?? { type: 'dialog' as const };
-		if (destination.type === 'dialog') {
-			return this.#fileDialog.placeNew(sessionId, publication);
-		}
-		if (this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		if (destination.type === 'new-pane') {
-			const anchor = destination.anchorPaneId;
-			const newPaneId = `pane-${createRandomId()}` as PaneId;
-			const splitId = `split-${createRandomId()}` as SplitId;
-			const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
-				const currentAnchor = this.#resolvePaneId(latest, anchor);
-				if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
+		if (destination.type === 'dialog') return this.#fileDialog.placeNew(sessionId, publication);
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		if (destination.type === 'new-window') {
+			const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+			const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+			const current = await this.#presentation.commit(
+				(latest) => {
+					if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+						throw new WorkspaceWindowLimitError();
+					}
+					const anchor = this.#resolveWindowId(latest, destination.anchorWindowId);
+					if (this.#reservedWindowIds.has(anchor)) return [];
 					return [
 						{
-							type: 'register-surface',
+							type: 'register-surface-in-new-window',
 							surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-							paneId: currentAnchor,
+							targetWindowId: anchor,
+							edge: 'right',
+							newWindowId,
+							partitionId,
 						},
-						{ type: 'activate-pane-tab', paneId: currentAnchor, surfaceId },
 					];
-				}
-				return [
-					{
-						type: 'register-surface-in-split',
-						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-						targetPaneId: currentAnchor,
-						edge: 'right',
-						newPaneId,
-						splitId,
-					},
-				];
-			};
-			const current = await this.#presentation.commit(plan, { publication });
-			if (!this.layout.surface(surfaceId)) {
+				},
+				{ publication },
+			);
+			if (!this.layout.surface(surfaceId))
 				throw new Error(`File surface was not placed: ${surfaceId}`);
-			}
 			if (current) this.#presentation.presentSurface(surfaceId);
 			return 'placed';
 		}
-		const paneId = destination.paneId;
-		const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => {
-			const destinationPaneId = this.#resolvePaneId(latest, paneId);
-			return [
-				{
-					type: 'register-surface',
-					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-					paneId: destinationPaneId,
-				},
-				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
-			];
-		};
-		const current = await this.#presentation.commit(plan, { publication });
-		if (!this.layout.surface(surfaceId)) {
+		const current = await this.#presentation.commit(
+			(latest) => {
+				const windowId = this.#resolveWindowId(latest, destination.windowId);
+				if (this.#reservedWindowIds.has(windowId)) return [];
+				return [
+					{
+						type: 'register-surface',
+						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+						windowId,
+					},
+					{ type: 'activate-window-tab', windowId, surfaceId },
+				];
+			},
+			{ publication },
+		);
+		if (!this.layout.surface(surfaceId))
 			throw new Error(`File surface was not placed: ${surfaceId}`);
-		}
 		if (current) this.#presentation.presentSurface(surfaceId);
 		return 'placed';
 	}
@@ -634,17 +720,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return;
 		}
 		if (this.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId) || this.isMobile) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+			this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 			const returnStack = this.#presentation.returnStackForTransient(surfaceId);
 			const current = await this.#presentation.commit([
-				{
-					type: 'set-mobile-presentation',
-					activeId: surfaceId,
-					returnStack,
-				},
+				{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack },
 			]);
-			if (!current) return;
-			this.#presentation.presentSurface(surfaceId);
+			if (current) this.#presentation.presentSurface(surfaceId);
 			return;
 		}
 		await this.focusSurface(surfaceId);
@@ -656,17 +737,26 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#fileDialog.pop(surfaceId);
 	}
 
-	async moveDialogFileToPane(destinationPaneId: PaneId): Promise<void> {
-		await this.#fileDialog.moveToPane(destinationPaneId);
+	async moveDialogFileToWindow(destinationWindowId: WorkspaceWindowId): Promise<void> {
+		await this.#fileDialog.moveToWindow(destinationWindowId);
 	}
 
-	async createTerminal(paneId: PaneId = this.defaultPaneId, requestKey?: string): Promise<string> {
-		return this.#terminalPlacement.create(paneId, requestKey);
+	async createTerminal(
+		windowId: WorkspaceWindowId = this.defaultWindowId,
+		requestKey?: string,
+	): Promise<string> {
+		return this.#terminalPlacement.create(windowId, requestKey);
 	}
 
-	async createTerminalInNewPane(anchorPaneId?: PaneId, requestKey?: string): Promise<string> {
-		if (this.isMobile) return this.#terminalPlacement.create(this.defaultPaneId, requestKey);
-		return this.#terminalPlacement.createInNewPane(anchorPaneId ?? this.lastFocusedPaneId, requestKey);
+	async createTerminalInNewWindow(
+		anchorWindowId?: WorkspaceWindowId,
+		requestKey?: string,
+	): Promise<string> {
+		if (this.isMobile) return this.#terminalPlacement.create(this.defaultWindowId, requestKey);
+		return this.#terminalPlacement.createInNewWindow(
+			anchorWindowId ?? this.lastFocusedWindowId,
+			requestKey,
+		);
 	}
 
 	async createTerminalReplacing(currentTerminalId: string, requestKey?: string): Promise<string> {
@@ -675,9 +765,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async openTerminalSession(
 		terminalId: string,
-		preferredPaneId: PaneId = this.defaultPaneId,
+		preferredWindowId: WorkspaceWindowId = this.defaultWindowId,
 	): Promise<void> {
-		await this.#terminalPlacement.open(terminalId, preferredPaneId);
+		await this.#terminalPlacement.open(terminalId, preferredWindowId);
 	}
 
 	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
@@ -689,9 +779,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async focusMostRecentTerminalOrCreate(
-		preferredPaneId: PaneId = this.defaultPaneId,
+		preferredWindowId: WorkspaceWindowId = this.defaultWindowId,
 	): Promise<void> {
-		await this.#terminalPlacement.focusMostRecentOrCreate(preferredPaneId);
+		await this.#terminalPlacement.focusMostRecentOrCreate(preferredWindowId);
 	}
 
 	async enterMobilePresentation(): Promise<void> {
@@ -710,27 +800,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentation.mobileBack();
 	}
 
-	async toggleFullscreen(paneId: PaneId): Promise<void> {
-		if (this.isMobile) return;
-		const snapshot = this.layout.snapshot;
-		if (!paneNodeById(snapshot.desktopRoot, paneId)) return;
-		if (snapshot.fullscreenPaneId !== paneId && this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		const current = await this.#presentation.commit((latest) => {
-			if (!paneNodeById(latest.desktopRoot, paneId)) return [];
-			return [
-				{
-					type: 'set-fullscreen-pane',
-					paneId: latest.fullscreenPaneId === paneId ? null : paneId,
-				},
-			];
-		});
-		if (!current) return;
-		const activeId = paneNodeById(this.layout.snapshot.desktopRoot, paneId)?.tabs.activeId;
-		if (activeId) this.#presentation.presentSurface(activeId);
-	}
-
 	async retryPresentation(surfaceId: string, host: PresentationHostId): Promise<void> {
 		await this.#presentation.retryPresentation(surfaceId, host);
 	}
@@ -742,15 +811,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#terminalPlacement.reconcile(liveTerminalIds, options);
 	}
 
-	async omitCanonicalPullRequests(): Promise<void> {
-		const snapshot = this.layout.snapshot;
-		const pullRequestsSurfaceId = singletonSurfaceId('pull-requests');
-		if (!canOmitCanonicalPullRequests(snapshot)) return;
-		await this.#presentation.commit([{ type: 'remove-surface', surfaceId: pullRequestsSurfaceId }]);
-	}
-
-	async activateTerminalLauncher(paneId: PaneId): Promise<void> {
-		await this.#terminalPlacement.activateLauncher(paneId);
+	async activateTerminalLauncher(windowId: WorkspaceWindowId): Promise<void> {
+		await this.#terminalPlacement.activateLauncher(windowId);
 	}
 
 	#confirmClose(request: NonNullable<WorkspaceCoordinator['closeGuardRequest']>): Promise<boolean> {
@@ -768,7 +830,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		surfaceId: string,
 		publication?: { publish(): void; rollback(): void },
 	): Promise<FilePlacementResult> {
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const returnStack = this.#presentation.returnStackForTransient(surfaceId);
 		const current = await this.#presentation.commit(
 			[
@@ -776,11 +838,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					type: 'register-surface',
 					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
 				},
-				{
-					type: 'set-mobile-presentation',
-					activeId: surfaceId,
-					returnStack,
-				},
+				{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack },
 			],
 			{ publication },
 		);
@@ -788,12 +846,29 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return 'placed';
 	}
 
-	#resolvePaneId(snapshot: WorkspaceLayoutSnapshot, preferredPaneId: PaneId | null): PaneId {
-		if (preferredPaneId && paneNodeById(snapshot.desktopRoot, preferredPaneId)) return preferredPaneId;
-		const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
-		if (chatPaneId) return chatPaneId;
-		const firstPane = collectPaneNodes(snapshot.desktopRoot)[0];
-		if (!firstPane) throw new Error('Workspace has no destination pane');
-		return firstPane.id;
+	#resolveWindowId(
+		snapshot: WorkspaceLayoutSnapshot,
+		preferredWindowId: WorkspaceWindowId | null | undefined,
+	): WorkspaceWindowId {
+		if (
+			preferredWindowId &&
+			windowNodeById(snapshot.desktopRoot, preferredWindowId) &&
+			!this.#reservedWindowIds.has(preferredWindowId)
+		) {
+			return preferredWindowId;
+		}
+		const lastFocusedWindowId = this.#presentation.lastFocusedWindowId;
+		if (
+			lastFocusedWindowId &&
+			windowNodeById(snapshot.desktopRoot, lastFocusedWindowId) &&
+			!this.#reservedWindowIds.has(lastFocusedWindowId)
+		) {
+			return lastFocusedWindowId;
+		}
+		const first = collectWindowNodes(snapshot.desktopRoot).find(
+			(workspaceWindow) => !this.#reservedWindowIds.has(workspaceWindow.id),
+		);
+		if (!first) throw new Error('Workspace has no destination window');
+		return first.id;
 	}
 }

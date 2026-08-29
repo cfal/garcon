@@ -521,12 +521,12 @@ describe('GitBranchSelectorState', () => {
 			'/project-a',
 			'feature-a',
 			undefined,
-			'singleton:chat',
+			'chat-view:window-main',
 			'/canonical/a',
 		);
 
 		expect(runMutation).toHaveBeenCalledWith(
-			'singleton:chat',
+			'chat-view:window-main',
 			'/project-a',
 			'/canonical/a',
 			expect.any(Function),

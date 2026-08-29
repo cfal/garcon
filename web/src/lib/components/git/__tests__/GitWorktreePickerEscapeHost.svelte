@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { setTransientLayers } from '$lib/context';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
 
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 
 	let isOpen = $state(true);

@@ -23,6 +23,7 @@
 	} from './sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface SidebarVirtualSortableChatRowProps {
 		row: SidebarVirtualChatRow;
@@ -34,7 +35,7 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions: SidebarDisplayOptions;
-		// The row can always be dragged to workspace panels when dragEnabled;
+		// The row can always be dragged to workspace windows when dragEnabled;
 		// reorderEnabled additionally allows it as a sidebar reorder target.
 		dragEnabled?: boolean;
 		reorderEnabled?: boolean;
@@ -57,6 +58,8 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		onDragUpdate: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 		onDropOnRow: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 	}
@@ -91,6 +94,8 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		onDragUpdate,
 		onDropOnRow,
 		hasPinnedChats = false,
@@ -226,6 +231,8 @@
 				{onMultiSelectToggle}
 				{onMoveToTop}
 				{onMoveToBottom}
+				{onOpenInNewWindow}
+				{newWindowBlocked}
 				{hasPinnedChats}
 			/>
 			{#snippet failed()}

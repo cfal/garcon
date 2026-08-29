@@ -365,11 +365,11 @@ function createDeps(chat = createRunningChat()) {
 			chatState.optimisticUserInputs = [...chatState.optimisticUserInputs, input];
 		}),
 		markOptimisticUserInputDelivered: vi.fn((clientMessageId: string) => {
-			chatState.optimisticUserInputs = chatState.optimisticUserInputs.map((input) => (
+			chatState.optimisticUserInputs = chatState.optimisticUserInputs.map((input) =>
 				input.clientMessageId === clientMessageId
 					? { ...input, delivery: 'delivered' as const }
-					: input
-			));
+					: input,
+			);
 		}),
 		clearOptimisticUserInput: vi.fn((clientMessageId: string) => {
 			chatState.optimisticUserInputs = chatState.optimisticUserInputs.filter(
@@ -444,7 +444,50 @@ function createDeps(chat = createRunningChat()) {
 			contentRevision: 0,
 			isSubmitting: false as boolean,
 			clearImages: vi.fn(),
-			clearAfterSubmit: vi.fn(),
+			clearAfterSubmit: vi.fn(function (this: {
+				inputText: string;
+				images: File[];
+				contentRevision: number;
+			}) {
+				this.inputText = '';
+				this.images = [];
+				this.contentRevision += 1;
+				return this.contentRevision;
+			}),
+			draftSnapshot: vi.fn(function (this: {
+				inputText: string;
+				images: File[];
+				contentRevision: number;
+			}) {
+				return {
+					text: this.inputText,
+					attachments: [...this.images],
+					revision: this.contentRevision,
+				};
+			}),
+			draftRevision: vi.fn(function (this: { contentRevision: number }) {
+				return this.contentRevision;
+			}),
+			isDraftEmpty: vi.fn(function (this: { inputText: string; images: File[] }) {
+				return this.inputText.length === 0 && this.images.length === 0;
+			}),
+			restoreDraftIfRevision: vi.fn(function (
+				this: {
+					inputText: string;
+					images: File[];
+					contentRevision: number;
+				},
+				_chatId: string,
+				expectedRevision: number,
+				text: string,
+				images: readonly File[],
+			) {
+				if (this.contentRevision !== expectedRevision) return false;
+				this.inputText = text;
+				this.images = [...images];
+				this.contentRevision += 1;
+				return true;
+			}),
 			saveDraft: vi.fn(),
 			restoreDraft: vi.fn(),
 		},
@@ -853,10 +896,9 @@ describe('ConversationSessionController', () => {
 
 	it('restores a selected chat live permission capability with its initial snapshot', async () => {
 		const permission = transientPermission('permission-live', 'run-live', 28);
-		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(
-			transientFeed([permission], 1),
-			[{ ordinal: 28, message: permission.message }],
-		));
+		mockGetChatSnapshot.mockResolvedValue(
+			chatSnapshot(transientFeed([permission], 1), [{ ordinal: 28, message: permission.message }]),
+		);
 		const conversationUi = new ConversationUiState();
 		conversationUi.activateTransientFeed('chat-1');
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
@@ -892,9 +934,9 @@ describe('ConversationSessionController', () => {
 		mockGetChatSnapshot.mockReturnValue(delayedSnapshot.promise);
 		const conversationUi = new ConversationUiState();
 		conversationUi.activateTransientFeed('chat-1');
-		expect(conversationUi.setTransientFeedFromSnapshot(
-			transientFeed([initialPermission], 1),
-		)).toMatchObject({ kind: 'applied' });
+		expect(
+			conversationUi.setTransientFeedFromSnapshot(transientFeed([initialPermission], 1)),
+		).toMatchObject({ kind: 'applied' });
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([initialPermission.message]);
 		const controller = new ConversationSessionController({ ...deps, conversationUi });
@@ -909,10 +951,11 @@ describe('ConversationSessionController', () => {
 			mutation: { kind: 'upsert', row: newerPermission },
 		};
 		expect(conversationUi.applyTransientFeedMutation(mutation)).toMatchObject({ kind: 'applied' });
-		delayedSnapshot.resolve(chatSnapshot(
-			transientFeed([initialPermission], 1),
-			[{ ordinal: 28, message: initialPermission.message }],
-		));
+		delayedSnapshot.resolve(
+			chatSnapshot(transientFeed([initialPermission], 1), [
+				{ ordinal: 28, message: initialPermission.message },
+			]),
+		);
 		await load;
 
 		expect(conversationUi.getTransientFeed('chat-1')).toMatchObject({
@@ -922,9 +965,9 @@ describe('ConversationSessionController', () => {
 				{ permissionOccurrenceId: 'permission-newer' },
 			],
 		});
-		expect(conversationUi.pendingPermissionRequests.map((request) => (
-			request.permissionOccurrenceId
-		))).toEqual(['permission-initial', 'permission-newer']);
+		expect(
+			conversationUi.pendingPermissionRequests.map((request) => request.permissionOccurrenceId),
+		).toEqual(['permission-initial', 'permission-newer']);
 
 		const replacedViewPermission = transientPermission(
 			'permission-replaced-view',
@@ -932,10 +975,11 @@ describe('ConversationSessionController', () => {
 			28,
 			'generation-replaced',
 		);
-		mockGetChatSnapshot.mockResolvedValue(chatSnapshot(
-			transientFeed([replacedViewPermission], 1, 'generation-replaced'),
-			[{ ordinal: 28, message: replacedViewPermission.message }],
-		));
+		mockGetChatSnapshot.mockResolvedValue(
+			chatSnapshot(transientFeed([replacedViewPermission], 1, 'generation-replaced'), [
+				{ ordinal: 28, message: replacedViewPermission.message },
+			]),
+		);
 		await controller.loadChat('chat-1');
 
 		expect(conversationUi.getTransientFeed('chat-1')).toMatchObject({
@@ -1026,7 +1070,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
 	});
 
-	it('clears stale selected-chat state when the selected record has no project path', () => {
+	it('clears transient state without discarding the selected chat draft when project data is absent', () => {
 		const chat = createRunningChat({ projectPath: undefined });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'stale draft';
@@ -1036,8 +1080,9 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.chatState.activateChat).toHaveBeenCalledWith(null);
-		expect(deps.composerState.inputText).toBe('');
-		expect(deps.composerState.clearImages).toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('stale draft');
+		expect(deps.composerState.images).toHaveLength(1);
+		expect(deps.composerState.clearImages).not.toHaveBeenCalled();
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith(null);
 		expect(deps.conversationUi.activateTransientFeed).toHaveBeenCalledWith(null);
@@ -1428,10 +1473,12 @@ describe('ConversationSessionController', () => {
 	it('submits in-chat fork actions with the clicked message ordinal', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
-		deps.chatState.entries = [{
-			ordinal: 9,
-			message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Fork here'),
-		}];
+		deps.chatState.entries = [
+			{
+				ordinal: 9,
+				message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Fork here'),
+			},
+		];
 		mockForkChat.mockResolvedValue({
 			success: true,
 			chat: createServerEntry('456'),
@@ -1497,9 +1544,7 @@ describe('ConversationSessionController', () => {
 
 		// The row survives until the ledger echo; the accepted request only settles its
 		// delivery state.
-		expect(deps.chatState.optimisticUserInputs).toEqual([
-			{ ...optimistic, delivery: 'delivered' },
-		]);
+		expect(deps.chatState.optimisticUserInputs).toEqual([{ ...optimistic, delivery: 'delivered' }]);
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -1580,6 +1625,7 @@ describe('ConversationSessionController', () => {
 			deps.composerState.inputText = '';
 			deps.composerState.images = [];
 			deps.composerState.contentRevision += 2;
+			return deps.composerState.contentRevision;
 		});
 		const controller = new ConversationSessionController(deps);
 		controller.handleChatSwitch('chat-1');
@@ -1796,6 +1842,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = 'retry this request';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockStartChat.mockRejectedValueOnce(
 			new ApiError(400, 'startup unavailable', 'VALIDATION_FAILED'),
@@ -1805,7 +1853,7 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.sessions.byId['draft-1'].status).toBe('draft');
 		expect(deps.composerState.inputText).toBe('retry this request');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('draft-1');
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 			'error',
 			expect.stringContaining('startup unavailable'),
@@ -1827,6 +1875,7 @@ describe('ConversationSessionController', () => {
 			deps.composerState.inputText = '';
 			deps.composerState.images = [];
 			deps.composerState.contentRevision += 2;
+			return deps.composerState.contentRevision;
 		});
 		mockStartChat.mockResolvedValueOnce({
 			success: true,
@@ -1911,11 +1960,7 @@ describe('ConversationSessionController', () => {
 		};
 		const controller = new ConversationSessionController(deps);
 
-		controller.handleExitPlanMode(
-			'plan-exit-1',
-			'bypass',
-			'Use the approved design.',
-		);
+		controller.handleExitPlanMode('plan-exit-1', 'bypass', 'Use the approved design.');
 		await flushPromises();
 
 		expect(mockRunChat).toHaveBeenCalledWith(
@@ -1963,23 +2008,31 @@ describe('ConversationSessionController', () => {
 		controller.handlePermissionDecision('incarnation-1', { allow: true });
 		controller.handlePermissionDecision('incarnation-2', { allow: false });
 
-		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(1, expect.objectContaining({
-			permissionOccurrenceId: 'incarnation-1',
-			control: firstControl,
-			allow: true,
-		}));
-		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(2, expect.objectContaining({
-			permissionOccurrenceId: 'incarnation-2',
-			control: secondControl,
-			allow: false,
-		}));
+		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				permissionOccurrenceId: 'incarnation-1',
+				control: firstControl,
+				allow: true,
+			}),
+		);
+		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				permissionOccurrenceId: 'incarnation-2',
+				control: secondControl,
+				allow: false,
+			}),
+		);
 		expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(2);
 
 		secondResponse.resolve(permissionDecisionAccepted('decision-2'));
 		await flushPromises();
-		expect(deps.conversationUi.pendingPermissionRequests.map((request) => request.permissionOccurrenceId)).toEqual([
-			'incarnation-1',
-		]);
+		expect(
+			deps.conversationUi.pendingPermissionRequests.map(
+				(request) => request.permissionOccurrenceId,
+			),
+		).toEqual(['incarnation-1']);
 
 		firstResponse.resolve(permissionDecisionAccepted('decision-1'));
 		await flushPromises();
@@ -2029,7 +2082,7 @@ describe('ConversationSessionController', () => {
 			content: 'Failed to send message: request rejected',
 		});
 		expect(deps.composerState.inputText).toBe('please send');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 		expect(deps.sessions.applyProcessingEvent).not.toHaveBeenCalledWith('chat-1', false);
 	});
@@ -2064,6 +2117,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = 'possibly delivered';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
@@ -2278,6 +2333,7 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockSteerChat.mockRejectedValueOnce(
 			new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'),
@@ -2289,7 +2345,7 @@ describe('ConversationSessionController', () => {
 
 		expect(outcome).toBe('rejected');
 		expect(deps.composerState.inputText).toBe('  keep this guidance  ');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 	});
 
 	it('does not admit Ctrl+Enter steering for an empty or non-selected composer', async () => {
@@ -2312,6 +2368,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = 'possibly queued';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockCreateQueuedInput.mockRejectedValue(new TypeError('connection closed'));
 
@@ -2320,7 +2378,7 @@ describe('ConversationSessionController', () => {
 		expect(mockCreateQueuedInput).toHaveBeenCalledTimes(2);
 		expect(mockCreateQueuedInput.mock.calls[1][0]).toEqual(mockCreateQueuedInput.mock.calls[0][0]);
 		expect(deps.composerState.inputText).toBe('');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
 			content:
@@ -2531,6 +2589,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 			deps.composerState.images = [];
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -2560,6 +2620,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 			deps.composerState.images = [];
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		const controller = new ConversationSessionController(deps);
 
@@ -2591,7 +2653,7 @@ describe('ConversationSessionController', () => {
 		await secondSubmission;
 
 		expect(deps.composerState.inputText).toBe('first queued message');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 			'error',
 			expect.stringContaining('first queued message'),
@@ -2896,22 +2958,24 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/steer Focus on the failing contract test';
-		deps.conversationUi.getExecutionControl.mockReturnValue(controlWithQueue(
-			{
-				entries: [{
-					id: 'future-entry',
-					content: 'Run this later',
-					revision: 1,
-					createdAt: '2026-07-11T00:00:00.000Z',
-					updatedAt: '2026-07-11T00:00:00.000Z',
-				}],
+		deps.conversationUi.getExecutionControl.mockReturnValue(
+			controlWithQueue({
+				entries: [
+					{
+						id: 'future-entry',
+						content: 'Run this later',
+						revision: 1,
+						createdAt: '2026-07-11T00:00:00.000Z',
+						updatedAt: '2026-07-11T00:00:00.000Z',
+					},
+				],
 				pause: {
 					id: 'pause-1',
 					kind: 'manual',
 					pausedAt: '2026-07-11T00:00:00.000Z',
 				},
-			},
-		));
+			}),
+		);
 		mockSteerChat.mockResolvedValueOnce({
 			success: true,
 			commandType: 'steer',
@@ -2946,17 +3010,21 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
-		mockSteerChat.mockRejectedValueOnce(new ApiError(
-			409,
-			'The active turn changed before steering could be applied',
-			'STEER_TURN_CHANGED',
-		));
+		mockSteerChat.mockRejectedValueOnce(
+			new ApiError(
+				409,
+				'The active turn changed before steering could be applied',
+				'STEER_TURN_CHANGED',
+			),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
 		expect(deps.composerState.inputText).toBe('/steer Keep the current turn');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 		expect(deps.chatState.optimisticUserInputs).toEqual([]);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
@@ -2969,12 +3037,12 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
-		mockSteerChat.mockRejectedValueOnce(new ApiError(
-			409,
-			'No active turn',
-			'STEER_TURN_UNAVAILABLE',
-		));
+		mockSteerChat.mockRejectedValueOnce(
+			new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
@@ -2989,12 +3057,12 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
-		mockSteerChat.mockRejectedValueOnce(new ApiError(
-			503,
-			'Steering capacity exhausted',
-			'STEER_CAPACITY_EXHAUSTED',
-		));
+		mockSteerChat.mockRejectedValueOnce(
+			new ApiError(503, 'Steering capacity exhausted', 'STEER_CAPACITY_EXHAUSTED'),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
@@ -3012,17 +3080,20 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockSteerChat.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
 		await flushPromises();
 		deps.composerState.inputText = 'newer draft';
+		deps.composerState.contentRevision += 1;
 		pending.reject(new ApiError(409, 'No active turn', 'STEER_TURN_UNAVAILABLE'));
 
 		await submission;
 
 		expect(deps.composerState.inputText).toBe('newer draft');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
 	});
 
 	it('does not restore an older failed steer after a newer steer succeeds', async () => {
@@ -3031,18 +3102,17 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
-		mockSteerChat
-			.mockReturnValueOnce(first.promise)
-			.mockResolvedValueOnce({
-				success: true,
-				commandType: 'steer',
-				clientRequestId: 'request-second',
-				chatId: 'chat-1',
-				turnId: 'turn-1',
-				status: 'accepted',
-				acceptedAt: '2026-07-11T00:00:00.000Z',
-			});
+		mockSteerChat.mockReturnValueOnce(first.promise).mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'request-second',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-11T00:00:00.000Z',
+		});
 		const controller = new ConversationSessionController(deps);
 
 		deps.composerState.inputText = '/steer first';
@@ -3054,7 +3124,7 @@ describe('ConversationSessionController', () => {
 		await firstSubmission;
 
 		expect(deps.composerState.inputText).toBe('');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
 	});
 
 	it('does not restore steering after the user types and deletes newer text', async () => {
@@ -3064,6 +3134,7 @@ describe('ConversationSessionController', () => {
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
 			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockSteerChat.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
@@ -3077,7 +3148,7 @@ describe('ConversationSessionController', () => {
 		await submission;
 
 		expect(deps.composerState.inputText).toBe('');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
 	});
 
 	it('does not append a failed steer notice to a newly selected chat', async () => {
@@ -3086,6 +3157,8 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer first';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
 		mockSteerChat.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSessionController(deps).submitForChat('chat-1');
@@ -3103,18 +3176,18 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = '/steer Keep the current turn';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
+			deps.composerState.contentRevision += 1;
+			return deps.composerState.contentRevision;
 		});
-		mockSteerChat.mockRejectedValue(new ApiError(
-			500,
-			'Steering delivery could not be confirmed',
-			'STEER_OUTCOME_UNKNOWN',
-		));
+		mockSteerChat.mockRejectedValue(
+			new ApiError(500, 'Steering delivery could not be confirmed', 'STEER_OUTCOME_UNKNOWN'),
+		);
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
 		expect(mockSteerChat).toHaveBeenCalledTimes(2);
 		expect(deps.composerState.inputText).toBe('');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 		expect(deps.chatState.optimisticUserInputs).toHaveLength(1);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
 			noticeType: 'error',
@@ -3201,11 +3274,13 @@ describe('ConversationSessionController', () => {
 		});
 
 		it('submits the persisted target as one fenced handoff and rebases from the response', async () => {
-			const { deps } = createDeps(createRunningChat({
-				agentId: 'claude',
-				model: 'sonnet',
-				agentOwnershipEpoch: 'epoch-source',
-			}));
+			const { deps } = createDeps(
+				createRunningChat({
+					agentId: 'claude',
+					model: 'sonnet',
+					agentOwnershipEpoch: 'epoch-source',
+				}),
+			);
 			const controller = new ConversationSessionController(deps);
 			const acceptedChat = {
 				...createServerEntry('chat-1'),

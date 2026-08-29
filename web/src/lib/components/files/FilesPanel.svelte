@@ -2,9 +2,9 @@
 	import FileTree from './FileTree.svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import { getFileSessions, getSingletonSurfaces } from '$lib/context';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
-	let { presentation }: { presentation: PaneId | 'mobile' } = $props();
+	let { presentation }: { presentation: WorkspaceWindowId | 'mobile' } = $props();
 
 	const files = getFileSessions();
 	const tree = getSingletonSurfaces().files().tree;

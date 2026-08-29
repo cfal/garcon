@@ -197,19 +197,6 @@
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	onMount(() => {
-		const flushDraft = () => composerState.flushDraftSave();
-		const flushHiddenDraft = () => {
-			if (document.visibilityState === 'hidden') flushDraft();
-		};
-		window.addEventListener('pagehide', flushDraft);
-		document.addEventListener('visibilitychange', flushHiddenDraft);
-		return () => {
-			window.removeEventListener('pagehide', flushDraft);
-			document.removeEventListener('visibilitychange', flushHiddenDraft);
-		};
-	});
-
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
 	const promptRefinement = new PromptComposerRefinementController({
@@ -218,17 +205,29 @@
 		notifications,
 		ui,
 		transientLayers,
-		get textarea() { return textarea; },
-		get visible() { return isVisible; },
-		get presented() { return isPresented; },
-		get startBlocked() { return isDisabled || directAdmissionPending || snippetExpansion.pending; },
+		get textarea() {
+			return textarea;
+		},
+		get visible() {
+			return isVisible;
+		},
+		get presented() {
+			return isPresented;
+		},
+		get startBlocked() {
+			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+		},
 		resizeTextarea: autoResize,
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
-		get promptTransformPending() { return promptTransformPending; },
-		get attachmentSupport() { return attachmentSupport; },
+		get promptTransformPending() {
+			return promptTransformPending;
+		},
+		get attachmentSupport() {
+			return attachmentSupport;
+		},
 	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
@@ -291,15 +290,17 @@
 	const imageAttachments = new ImageAttachmentState();
 
 	$effect(() => {
-		imageAttachments.images = composerState.images;
-		imageAttachments.syncUrls();
+		const images = composerState.images;
+		untrack(() => {
+			imageAttachments.images = images;
+			imageAttachments.syncUrls();
+		});
 	});
 
 	onDestroy(() => {
 		destroyed = true;
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
-		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
 

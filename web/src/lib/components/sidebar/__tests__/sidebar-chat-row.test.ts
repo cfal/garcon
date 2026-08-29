@@ -243,9 +243,7 @@ describe('shared sidebar chat row', () => {
 		expect(timestampBadge?.className).toContain('group-hover:opacity-0');
 		expect(timestampBadge?.className).toContain('group-focus-within:opacity-0');
 		expect(timestampBadge?.className).toContain('mr-6');
-		expect(timestampBadge?.className).toContain(
-			'[@media(hover:hover)_and_(pointer:fine)]:mr-0',
-		);
+		expect(timestampBadge?.className).toContain('[@media(hover:hover)_and_(pointer:fine)]:mr-0');
 		expect(timestampBadge?.getAttribute('title')).toBeTruthy();
 
 		const stateBadge = document.querySelector<HTMLElement>(
@@ -256,9 +254,7 @@ describe('shared sidebar chat row', () => {
 		expect(stateBadge?.getAttribute('aria-hidden')).toBeNull();
 		expect(screen.getByText('Pinned').className).toContain('sr-only');
 		if (!stateBadge || !timestampBadge) throw new Error('expected badges');
-		expect(title.compareDocumentPosition(stateBadge)).toBe(
-			Node.DOCUMENT_POSITION_FOLLOWING,
-		);
+		expect(title.compareDocumentPosition(stateBadge)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(stateBadge.compareDocumentPosition(timestampBadge)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);
@@ -319,9 +315,7 @@ describe('shared sidebar chat row', () => {
 		expect(processingIndicator?.parentElement?.className).toContain('ml-auto');
 		expect(processingIndicator?.parentElement?.className).toContain('pr-0.5');
 		expect(processingIndicator?.parentElement?.className).toContain('group-hover:opacity-0');
-		expect(processingIndicator?.parentElement?.className).toContain(
-			'group-focus-within:opacity-0',
-		);
+		expect(processingIndicator?.parentElement?.className).toContain('group-focus-within:opacity-0');
 		const processingLabel = screen.getByText('Chat is processing');
 		expect(processingLabel.className).toContain('sr-only');
 		expect(processingIndicator?.contains(processingLabel)).toBe(false);
@@ -481,6 +475,37 @@ describe('shared sidebar chat row', () => {
 		expect(forkItem.hasAttribute('data-disabled')).toBe(false);
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
+	});
+
+	it('opens a sidebar chat in a new workspace window from the keyboard menu', async () => {
+		const onOpenInNewWindow = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onOpenInNewWindow,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new window' }));
+
+		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('disables sidebar Chat window placement at the window cap', async () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onOpenInNewWindow: vi.fn(),
+			newWindowBlocked: true,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
+		expect(openItem.getAttribute('aria-disabled')).toBe('true');
+		expect(openItem.getAttribute('title')).toBe('4 windows max');
+		expect(
+			screen
+				.getByRole('menuitem', { name: 'Open in new window at edge' })
+				.getAttribute('aria-disabled'),
+		).toBe('true');
 	});
 
 	it('disables sidebar fork while processing when running fork is unsupported', async () => {

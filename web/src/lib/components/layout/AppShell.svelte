@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
@@ -27,11 +27,15 @@
 		getGhCapability,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
+		setChatDrafts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
-	import { resolveAdjacentChatId } from './app-shell-chat-navigation';
+	import {
+		resolveAdjacentChatId,
+		shouldSynchronizeFocusedChat,
+	} from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileDialogHost from '../files/FileDialogHost.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
@@ -45,8 +49,10 @@
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
-	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
-	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
+	import type { PortableSingletonKind, WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import { windowNodeById } from '$lib/workspace/window-tree.js';
+	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
+	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -59,6 +65,8 @@
 	const ghCapability = getGhCapability();
 	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
+	const chatDrafts = new ChatDraftStore();
+	setChatDrafts(chatDrafts);
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
 		notifications,
 	});
@@ -95,18 +103,19 @@
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	const workspaceFullscreen = $derived(
-		!isMobile && workspace.layout.snapshot.fullscreenPaneId !== null,
+		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
-	const focusedPaneKind = $derived(workspace.focusedPaneActiveKind);
+	const focusedWindowKind = $derived(workspace.focusedWindowActiveKind);
 	const hideLeftForGit = $derived(
 		!isMobile &&
-			localSettings.hideChatListWhenGitInMain &&
-			(focusedPaneKind === 'git' ||
-				focusedPaneKind === 'git-history' ||
-				focusedPaneKind === 'git-compare'),
+			localSettings.hideChatListWhenGitFocused &&
+			(focusedWindowKind === 'git' ||
+				focusedWindowKind === 'git-history' ||
+				focusedWindowKind === 'git-compare'),
 	);
 	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
-	const newPaneActions = $derived.by<WorkspaceNewPaneActions>(() => ({
+	const newWindowActions = $derived.by<WorkspaceNewWindowActions>(() => ({
+		windowLimitReached: !workspace.canOpenNewWindow,
 		terminalLimitReached: terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT,
 		singletonKinds: (
 			[
@@ -118,16 +127,15 @@
 				'commit',
 			] as const satisfies readonly PortableSingletonKind[]
 		).filter(
-			(kind) =>
-				kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
+			(kind) => kind !== 'pull-requests' || !ghCapability.hasChecked || ghCapability.available,
 		),
 		createTerminal(): void {
-			void workspace.createTerminalInNewPane().catch((error) => {
+			void workspace.createTerminalInNewWindow().catch((error) => {
 				notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 			});
 		},
 		openSingleton(kind): void {
-			void workspace.openSingletonInNewPane(kind).catch((error) => {
+			void workspace.openSingletonInNewWindow(kind).catch((error) => {
 				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 			});
 		},
@@ -138,9 +146,10 @@
 	const mobileActiveTab = $derived.by<MobileWorkspaceTabId>(() => {
 		const surface = mobileActiveDescriptor;
 		if (surface?.type === 'terminal' || surface?.type === 'terminal-launcher') return 'terminal';
+		if (surface?.type === 'chat') return 'chat';
 		if (surface?.type === 'singleton') {
 			if (surface.kind === 'pull-requests') return 'pull-requests';
-			if (surface.kind === 'git' || surface.kind === 'files' || surface.kind === 'chat') {
+			if (surface.kind === 'git' || surface.kind === 'files') {
 				return surface.kind;
 			}
 		}
@@ -167,16 +176,20 @@
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
+	let chatNavigationGeneration = 0;
+	let pendingChatTarget = $state<string | null>(null);
 
-	// Syncs URL params to selected chat ID. The session store is the
-	// single source of truth; this effect keeps it in sync with the URL.
 	$effect(() => {
 		const chatId = page.params.id as string | undefined;
 		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
 		if (selectedChatId === undefined) return;
-		const changed = untrack(() => selectedChatId !== sessions.selectedChatId);
-		sessions.setSelectedChatId(selectedChatId);
-		if (changed && selectedChatId) appShell.requestComposerFocus();
+		untrack(() => {
+			if (selectedChatId) {
+				void showChatInCurrentWindow(selectedChatId, { navigate: false });
+			} else if (!pendingChatTarget) {
+				sessions.setSelectedChatId(null);
+			}
+		});
 	});
 
 	$effect(() => {
@@ -188,10 +201,29 @@
 			selectedChatId: sessions.selectedChatId,
 		});
 		if (!target) return;
-		untrack(() => {
-			sessions.setSelectedChatId(target);
-			void gotoChat(target);
-		});
+		untrack(() => void showChatInCurrentWindow(target, { navigate: true }));
+	});
+
+	$effect(() => {
+		const currentWindowId = workspace.currentWindowId;
+		const currentSnapshot = workspace.layout.snapshot;
+		const resolvedActiveId = isMobile
+			? currentSnapshot.mobileActiveSurfaceId
+			: windowNodeById(currentSnapshot.desktopRoot, currentWindowId)?.tabs.activeId;
+		const surface = resolvedActiveId ? currentSnapshot.surfaces[resolvedActiveId] : null;
+		const chatId = surface?.type === 'chat' ? surface.chatId : null;
+		if (
+			!chatId ||
+			!shouldSynchronizeFocusedChat({
+				focusedChatId: chatId,
+				focusedChatExists: sessions.hasChat(chatId),
+				selectedChatId: sessions.selectedChatId,
+				pendingChatTarget,
+			})
+		) {
+			return;
+		}
+		untrack(() => void synchronizeFocusedChat(chatId));
 	});
 
 	$effect(() => {
@@ -204,17 +236,31 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const mql = window.matchMedia('(max-width: 768px)');
-		if (mql.matches) void workspace.enterMobilePresentation();
-		else void workspace.exitMobilePresentation();
+
+		function applyBreakpoint(matches: boolean): void {
+			if (matches) void workspace.enterMobilePresentation();
+			else {
+				void workspace.exitMobilePresentation();
+				appShell.setSidebarOpen(false);
+			}
+		}
+
+		applyBreakpoint(mql.matches);
 
 		function onChange(e: MediaQueryListEvent) {
-			if (e.matches) void workspace.enterMobilePresentation();
-			else void workspace.exitMobilePresentation();
-			if (!e.matches) appShell.setSidebarOpen(false);
+			applyBreakpoint(e.matches);
+		}
+
+		function onResize(): void {
+			applyBreakpoint(mql.matches);
 		}
 
 		mql.addEventListener('change', onChange);
-		return () => mql.removeEventListener('change', onChange);
+		window.addEventListener('resize', onResize);
+		return () => {
+			mql.removeEventListener('change', onChange);
+			window.removeEventListener('resize', onResize);
+		};
 	});
 
 	// Tracks virtual keyboard height via visualViewport for mobile layout.
@@ -279,18 +325,48 @@
 		void sessions.refreshChats();
 	});
 
-	function requestComposerFocusAfterNavigation(navigation: Promise<void>): void {
-		void navigation.finally(() => appShell.requestComposerFocus());
+	async function showChatInCurrentWindow(
+		chatId: string,
+		options: { navigate: boolean },
+	): Promise<void> {
+		const generation = ++chatNavigationGeneration;
+		pendingChatTarget = chatId;
+		try {
+			await workspace.showChatInCurrentWindow(chatId);
+			if (generation !== chatNavigationGeneration) return;
+			sessions.setSelectedChatId(chatId);
+			if (options.navigate && page.params.id !== chatId) await gotoChat(chatId);
+			if (generation !== chatNavigationGeneration) return;
+			appShell.requestComposerFocus();
+		} catch (error) {
+			if (generation === chatNavigationGeneration) {
+				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+			}
+		} finally {
+			if (generation === chatNavigationGeneration) pendingChatTarget = null;
+		}
 	}
 
-	function selectAndNavigateChat(chatId: string): void {
-		sessions.setSelectedChatId(chatId);
-		requestComposerFocusAfterNavigation(gotoChat(chatId));
+	async function synchronizeFocusedChat(chatId: string): Promise<void> {
+		const generation = ++chatNavigationGeneration;
+		pendingChatTarget = chatId;
+		try {
+			sessions.setSelectedChatId(chatId);
+			if (page.params.id !== chatId) await gotoChat(chatId);
+			if (generation === chatNavigationGeneration) appShell.requestComposerFocus();
+		} finally {
+			if (generation === chatNavigationGeneration) pendingChatTarget = null;
+		}
 	}
 
-	function handleChatSelect(chatId: string) {
-		selectAndNavigateChat(chatId);
-		void workspace.focusChat();
+	function handleChatSelect(chatId: string): void {
+		void showChatInCurrentWindow(chatId, { navigate: true });
+	}
+
+	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
+		void workspace.openChatInNewWindow(chatId, undefined, edge).catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
 	}
 
 	function handleNewChat() {
@@ -310,7 +386,7 @@
 			offset,
 		});
 		if (!targetId) return;
-		selectAndNavigateChat(targetId);
+		void showChatInCurrentWindow(targetId, { navigate: true });
 	}
 
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
@@ -318,17 +394,22 @@
 	// the sidebar and URL update without waiting for the HTTP round-trip.
 	function locallyDeleteChat(chatId: string) {
 		if (!sessions.hasChat(chatId)) return;
-		if (sessions.selectedChatId === chatId) {
-			const idx = sessions.order.indexOf(chatId);
-			const neighborId = sessions.order[idx - 1] ?? sessions.order[idx + 1] ?? null;
-			if (neighborId) {
-				selectAndNavigateChat(neighborId);
-			} else {
-				sessions.setSelectedChatId(null);
-				goto('/');
-			}
-		}
+		const wasSelected = sessions.selectedChatId === chatId;
+		const index = sessions.order.indexOf(chatId);
+		const neighborId = sessions.order[index - 1] ?? sessions.order[index + 1] ?? null;
 		sessions.removeChat(chatId);
+		chatDrafts.discardChat(chatId);
+		void workspace.clearDeletedChat(chatId).then(() => {
+			if (!wasSelected) return;
+			if (neighborId) {
+				void showChatInCurrentWindow(neighborId, { navigate: true });
+				return;
+			}
+			chatNavigationGeneration += 1;
+			pendingChatTarget = null;
+			sessions.setSelectedChatId(null);
+			void goto('/');
+		});
 	}
 
 	function handleChatDelete(chatId: string) {
@@ -456,6 +537,9 @@
 			for (const unsubscribe of unsubscribers) unsubscribe();
 		};
 	});
+
+	onMount(() => chatDrafts.mountPersistenceLifecycle());
+	onDestroy(() => chatDrafts.destroy());
 </script>
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
@@ -476,17 +560,16 @@
 		onForkChat={(id) => chatActionController.forkChat(id)}
 		onShareChat={requestShareChat}
 		onManageTags={requestTagsChat}
+		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowSettings={() => appShell.openSettings()}
-		{newPaneActions}
+		{newWindowActions}
 	/>
 {/snippet}
-
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
 	<div
-		data-desktop-layout-pane="chat-list"
 		data-workspace-chat-list
 		onfocusin={() => workspace.noteChatListFocus()}
 		onpointerdown={() => workspace.noteChatListFocus()}
@@ -545,7 +628,6 @@
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<WorkspaceRoot
 					{isMobile}
-					onMenuClick={isMobile ? toggleMobileSidebar : undefined}
 					onRegisterReload={handleRegisterReload}
 					chatActions={workspaceChatActions}
 				/>

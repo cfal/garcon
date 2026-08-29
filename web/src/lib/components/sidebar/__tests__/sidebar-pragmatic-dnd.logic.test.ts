@@ -39,7 +39,6 @@ describe('sidebar pragmatic drag data', () => {
 		expect(
 			isSidebarChatDragData({
 				kind: 'sidebar-chat',
-				splitPaneDragKind: 'split-pane-chat',
 				chatId: 'chat-1',
 				list: 'normal',
 				index: 0,

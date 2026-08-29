@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalWorkspaceSnapshot } from '../canonical-layout';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { planDesktopReturnMutations, selectMobileEntrySurface } from '../responsive-handoff';
-import { paneIdOfSurface } from '../pane-tree';
+import { windowIdOfSurface } from '../window-tree';
 
 describe('selectMobileEntrySurface', () => {
 	it('gives an open file dialog unconditional precedence', () => {
@@ -10,60 +10,67 @@ describe('selectMobileEntrySurface', () => {
 			{
 				type: 'register-surface',
 				surface: { id: 'file:dialog', type: 'file', fileSessionId: 'dialog' },
-				paneId: 'pane-main',
+				windowId: 'window-main',
 			},
 			{ type: 'place-in-dialog', surfaceId: 'file:dialog' },
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
 		]);
 
 		expect(selectMobileEntrySurface(snapshot, 'singleton:git')).toBe('file:dialog');
 	});
 
-	it('accepts the last focused surface when it is a pane-active tab', () => {
-		const split = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+	it('accepts the last focused surface when it is a window-active tab', () => {
+		const windows = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: 'singleton:git',
-				targetPaneId: 'pane-main',
+				type: 'register-surface-in-new-window',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				targetWindowId: 'window-main',
 				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				newWindowId: 'window-2',
+				partitionId: 'partition-1',
 			},
 		]);
-		expect(selectMobileEntrySurface(split, 'singleton:git')).toBe('singleton:git');
-		expect(selectMobileEntrySurface(split, 'singleton:pull-requests')).toBe('singleton:chat');
+		expect(selectMobileEntrySurface(windows, 'singleton:git')).toBe('singleton:git');
+		expect(selectMobileEntrySurface(windows, 'singleton:pull-requests')).toBe(
+			'chat-view:window-main',
+		);
 	});
 
-	it('projects the fullscreen pane surface ahead of pane actives', () => {
+	it('projects the fullscreen window surface ahead of other window actives', () => {
 		const fullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: 'singleton:git',
-				targetPaneId: 'pane-main',
+				type: 'register-surface-in-new-window',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				targetWindowId: 'window-main',
 				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				newWindowId: 'window-2',
+				partitionId: 'partition-1',
 			},
-			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
+			{ type: 'retain-only-window', windowId: 'window-2' },
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
-		expect(selectMobileEntrySurface(fullscreen, 'singleton:chat')).toBe('singleton:git');
+		expect(selectMobileEntrySurface(fullscreen, 'chat-view:window-main')).toBe('singleton:git');
 	});
 
-	it('keeps a dialog ahead of the fullscreen pane', () => {
+	it('keeps a dialog ahead of the fullscreen window', () => {
 		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: 'singleton:git',
-				targetPaneId: 'pane-main',
+				type: 'register-surface-in-new-window',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				targetWindowId: 'window-main',
 				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				newWindowId: 'window-2',
+				partitionId: 'partition-1',
 			},
-			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
+			{ type: 'retain-only-window', windowId: 'window-2' },
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 			{
 				type: 'register-surface',
 				surface: { id: 'file:dialog', type: 'file', fileSessionId: 'dialog' },
-				paneId: 'pane-main',
 			},
 			{ type: 'place-in-dialog', surfaceId: 'file:dialog' },
 		]);
@@ -73,7 +80,7 @@ describe('selectMobileEntrySurface', () => {
 });
 
 describe('planDesktopReturnMutations', () => {
-	it('assigns mobile-only surfaces to the chat pane and the most recent file to dialog', () => {
+	it('assigns mobile-only surfaces to the Chat window and the most recent file to dialog', () => {
 		const mobile = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
@@ -93,22 +100,26 @@ describe('planDesktopReturnMutations', () => {
 
 		expect(mutations).toEqual([
 			{ type: 'place-in-dialog', surfaceId: 'file:b' },
-			{ type: 'assign-to-pane', surfaceId: 'singleton:files', destinationPaneId: 'pane-main' },
-			{ type: 'assign-to-pane', surfaceId: 'file:a', destinationPaneId: 'pane-main' },
+			{
+				type: 'assign-to-window',
+				surfaceId: 'singleton:files',
+				destinationWindowId: 'window-main',
+			},
+			{ type: 'assign-to-window', surfaceId: 'file:a', destinationWindowId: 'window-main' },
 		]);
 		const restored = reduceWorkspaceLayout(mobile, mutations);
 		expect(restored.mobileOnlySurfaceIds).toEqual([]);
 		expect(restored.dialogFileSurfaceId).toBe('file:b');
-		expect(paneIdOfSurface(restored.desktopRoot, 'file:a')).toBe('pane-main');
-		expect(paneIdOfSurface(restored.desktopRoot, 'singleton:files')).toBe('pane-main');
+		expect(windowIdOfSurface(restored.desktopRoot, 'file:a')).toBe('window-main');
+		expect(windowIdOfSurface(restored.desktopRoot, 'singleton:files')).toBe('window-main');
 	});
 
-	it('preserves an existing desktop dialog occupant and sends mobile files to the chat pane', () => {
+	it('preserves an existing desktop dialog occupant and sends mobile files to the Chat window', () => {
 		const layout = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
 				surface: { id: 'file:desktop', type: 'file', fileSessionId: 'desktop' },
-				paneId: 'pane-main',
+				windowId: 'window-main',
 			},
 			{ type: 'place-in-dialog', surfaceId: 'file:desktop' },
 			{
@@ -118,7 +129,7 @@ describe('planDesktopReturnMutations', () => {
 		]);
 
 		expect(planDesktopReturnMutations(layout, ['file:mobile'])).toEqual([
-			{ type: 'assign-to-pane', surfaceId: 'file:mobile', destinationPaneId: 'pane-main' },
+			{ type: 'assign-to-window', surfaceId: 'file:mobile', destinationWindowId: 'window-main' },
 		]);
 	});
 

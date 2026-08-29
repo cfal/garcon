@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+	import {
+		getSurfaceFrameBridge,
+		setSurfaceFrameBridge,
+		type SurfaceFrameBridge,
+	} from '$lib/workspace/surface-frame-context.js';
 	import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
@@ -8,12 +12,15 @@
 		onClose,
 		closeDisabled = false,
 		onAppendToChatDraft,
+		frameBridge,
 	}: {
 		onClose?: () => void;
 		closeDisabled?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
+		frameBridge: SurfaceFrameBridge;
 	} = $props();
 
+	setSurfaceFrameBridge(() => frameBridge);
 	const unregister = getSurfaceFrameBridge().provideRenderer({
 		attach: () => surfaceRendererTestProbe.attach(),
 		detach: () => surfaceRendererTestProbe.detach(),

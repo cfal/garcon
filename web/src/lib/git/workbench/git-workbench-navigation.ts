@@ -1,5 +1,5 @@
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
-import type { PaneId } from '$lib/workspace/surface-types.js';
+import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 type GitWorkbenchNavigationPort = Pick<
 	WorkspaceCoordinator,
@@ -8,7 +8,7 @@ type GitWorkbenchNavigationPort = Pick<
 
 export function openCommitFromGitWorkbench(
 	workspace: GitWorkbenchNavigationPort,
-	presentation: PaneId | 'mobile',
+	presentation: WorkspaceWindowId | 'mobile',
 ): Promise<void> {
 	return presentation === 'mobile'
 		? workspace.focusMobileSingleton('commit')

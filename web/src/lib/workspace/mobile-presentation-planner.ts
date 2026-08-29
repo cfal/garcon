@@ -1,11 +1,10 @@
 import { planDesktopReturnMutations } from './responsive-handoff.js';
-import {
-	CHAT_SURFACE_ID,
-	type MobileReturnTarget,
-	type WorkspaceLayoutMutation,
-	type WorkspaceLayoutSnapshot,
+import type {
+	MobileReturnTarget,
+	WorkspaceLayoutMutation,
+	WorkspaceLayoutSnapshot,
 } from './surface-types.js';
-import { paneIdOfSurface, paneNodeById } from './pane-tree.js';
+import { collectWindowNodes } from './window-tree.js';
 
 interface MobileWorkspaceContext {
 	chatId: string;
@@ -23,7 +22,7 @@ export interface MobileReturnPlan {
 }
 
 export class MobilePresentationPlanner {
-	#mostRecentSurfaceIds: string[] = [CHAT_SURFACE_ID];
+	#mostRecentSurfaceIds: string[] = [];
 
 	constructor(private readonly deps: MobilePresentationPlannerDeps) {}
 
@@ -74,13 +73,11 @@ export class MobilePresentationPlanner {
 		const recent = this.#mostRecentSurfaceIds.find(
 			(surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]),
 		);
-		const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
-		const chatPaneActive = chatPaneId
-			? paneNodeById(snapshot.desktopRoot, chatPaneId)?.tabs.activeId
-			: null;
+		const fallback = collectWindowNodes(snapshot.desktopRoot)
+			.map((workspaceWindow) => workspaceWindow.tabs.activeId)
+			.find((surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]));
 		return {
-			activeId:
-				recent ?? (chatPaneActive && !isExcluded(chatPaneActive) ? chatPaneActive : CHAT_SURFACE_ID),
+			activeId: recent ?? fallback ?? snapshot.mobileActiveSurfaceId,
 			returnStack: [],
 		};
 	}

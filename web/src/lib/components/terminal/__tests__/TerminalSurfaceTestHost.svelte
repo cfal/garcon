@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { terminalSurfaceId, type PaneId } from '$lib/workspace/surface-types';
+	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { setLocalSettings } from '$lib/context';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
@@ -17,7 +17,7 @@
 	import TerminalSurface from '../TerminalSurface.svelte';
 
 	interface Props {
-		host: PaneId | 'mobile';
+		host: WorkspaceWindowId | 'mobile';
 		onClose?: (surfaceId: string) => void;
 		onModifier?: (modifier: 'ctrl' | 'alt') => void;
 		onToolbarKey?: (key: string) => void;
@@ -90,7 +90,7 @@
 					type: 'terminal',
 					terminalId,
 				},
-				paneId: 'pane-main',
+				windowId: 'window-main',
 			},
 		]),
 	);

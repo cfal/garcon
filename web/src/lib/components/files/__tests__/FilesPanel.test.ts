@@ -11,104 +11,104 @@ import { setFilesPanelTestContext } from './files-panel-test-context.js';
 afterEach(cleanup);
 
 describe('FilesPanel', () => {
-	it.each(['pane-main', 'pane-sidebar', 'mobile'] as const)(
+	it.each(['window-main', 'window-sidebar', 'mobile'] as const)(
 		'opens a sibling-project file from the %s presentation against the canonical project base',
 		async (presentation) => {
-		const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
-			success: true as const,
-			identity: {
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: relativePath,
-			},
-		}));
-		const fileSessions = new FileSessionRegistry({
-			getIsMobile: () => presentation === 'mobile',
-			getDefaultPlacement: () => ({ type: 'dialog' }),
-			getEditorSettings: () => ({
-				get wordWrap() {
-					return false;
-				},
-				get showLineNumbers() {
-					return true;
-				},
-				get fontSize() {
-					return 12;
-				},
-			}),
-			getPlacement: () => ({
-				async placeFileSession(_sessionId, _target, publication) {
-					publication.publish();
-					return 'placed';
-				},
-				async focusFileSession() {},
-			}),
-			resolveFileIdentity,
-			readText: vi.fn(async () => ({
-				content: 'hello',
-				path: '/workspace/sibling-project/file.ts',
-				revision: 'v1:loaded',
-			})),
-			saveText: vi.fn(async () => ({
+			const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
 				success: true as const,
-				path: '/workspace/sibling-project/file.ts',
-				message: 'saved',
-				revision: 'v1:saved',
-			})),
-			readContent: vi.fn(async () => ({ blob: new Blob(['content']), revision: 'v1:image' })),
-		});
-		const open = vi.spyOn(fileSessions, 'open');
-		const gitSurfaceDeps = createGitSurfaceTestDeps();
-		const singletonSurfaces = new SingletonSurfaceRegistry({
-			...gitSurfaceDeps,
-			createCommit: () => new CommitController(gitSurfaceDeps),
-			createPullRequests: () => new PullRequestsStore(),
-		});
-		const tree = singletonSurfaces.files().tree;
-		tree.navigation = {
-			kind: 'ready',
-			response: {
-				fileRootPath: '/workspace',
-				directory: {
-					path: '/workspace/sibling-project',
-					relativePath: 'sibling-project',
-					parentPath: '/workspace',
-					breadcrumbs: [
-						{ name: 'workspace', path: '/workspace' },
-						{ name: 'sibling-project', path: '/workspace/sibling-project' },
+				identity: {
+					canonicalFileRootPath: '/workspace',
+					normalizedRelativePath: relativePath,
+				},
+			}));
+			const fileSessions = new FileSessionRegistry({
+				getIsMobile: () => presentation === 'mobile',
+				getDefaultPlacement: () => ({ type: 'dialog' }),
+				getEditorSettings: () => ({
+					get wordWrap() {
+						return false;
+					},
+					get showLineNumbers() {
+						return true;
+					},
+					get fontSize() {
+						return 12;
+					},
+				}),
+				getPlacement: () => ({
+					async placeFileSession(_sessionId, _target, publication) {
+						publication.publish();
+						return 'placed';
+					},
+					async focusFileSession() {},
+				}),
+				resolveFileIdentity,
+				readText: vi.fn(async () => ({
+					content: 'hello',
+					path: '/workspace/sibling-project/file.ts',
+					revision: 'v1:loaded',
+				})),
+				saveText: vi.fn(async () => ({
+					success: true as const,
+					path: '/workspace/sibling-project/file.ts',
+					message: 'saved',
+					revision: 'v1:saved',
+				})),
+				readContent: vi.fn(async () => ({ blob: new Blob(['content']), revision: 'v1:image' })),
+			});
+			const open = vi.spyOn(fileSessions, 'open');
+			const gitSurfaceDeps = createGitSurfaceTestDeps();
+			const singletonSurfaces = new SingletonSurfaceRegistry({
+				...gitSurfaceDeps,
+				createCommit: () => new CommitController(gitSurfaceDeps),
+				createPullRequests: () => new PullRequestsStore(),
+			});
+			const tree = singletonSurfaces.files().tree;
+			tree.navigation = {
+				kind: 'ready',
+				response: {
+					fileRootPath: '/workspace',
+					directory: {
+						path: '/workspace/sibling-project',
+						relativePath: 'sibling-project',
+						parentPath: '/workspace',
+						breadcrumbs: [
+							{ name: 'workspace', path: '/workspace' },
+							{ name: 'sibling-project', path: '/workspace/sibling-project' },
+						],
+					},
+					entries: [
+						{
+							name: 'file.ts',
+							path: '/workspace/sibling-project/file.ts',
+							relativePath: 'sibling-project/file.ts',
+							type: 'file',
+							size: 5,
+							modified: null,
+							permissionsRwx: 'rw-r--r--',
+						},
 					],
 				},
-				entries: [
-					{
-						name: 'file.ts',
-						path: '/workspace/sibling-project/file.ts',
-						relativePath: 'sibling-project/file.ts',
-						type: 'file',
-						size: 5,
-						modified: null,
-						permissionsRwx: 'rw-r--r--',
-					},
-				],
-			},
-		};
+			};
 
-		setFilesPanelTestContext({ fileSessions, singletonSurfaces });
-		render(FilesPanelTestHost, { presentation });
-		await fireEvent.click(screen.getByRole('rowheader', { name: /^file\.ts/ }));
+			setFilesPanelTestContext({ fileSessions, singletonSurfaces });
+			render(FilesPanelTestHost, { presentation });
+			await fireEvent.click(screen.getByRole('rowheader', { name: /^file\.ts/ }));
 
-		expect(open).toHaveBeenCalledWith(
-			expect.objectContaining({
-				fileRootPath: '/workspace',
-				relativePath: 'sibling-project/file.ts',
-				origin: presentation,
-			}),
-		);
+			expect(open).toHaveBeenCalledWith(
+				expect.objectContaining({
+					fileRootPath: '/workspace',
+					relativePath: 'sibling-project/file.ts',
+					origin: presentation,
+				}),
+			);
 
-		await waitFor(() =>
-			expect(resolveFileIdentity).toHaveBeenCalledWith({
-				projectPath: '/workspace',
-				relativePath: 'sibling-project/file.ts',
-			}),
-		);
+			await waitFor(() =>
+				expect(resolveFileIdentity).toHaveBeenCalledWith({
+					projectPath: '/workspace',
+					relativePath: 'sibling-project/file.ts',
+				}),
+			);
 		},
 	);
 });

@@ -6,13 +6,9 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 export interface SubmissionSettlementDeps {
 	chatState: Pick<
 		SessionControllerDeps['chatState'],
-		| 'appendLocalNotice'
-		| 'clearOptimisticUserInput'
+		'appendLocalNotice' | 'clearOptimisticUserInput'
 	>;
-	composerState: Pick<
-		SessionControllerDeps['composerState'],
-		'inputText' | 'images' | 'contentRevision' | 'saveDraft'
-	>;
+	composerState: Pick<SessionControllerDeps['composerState'], 'restoreDraftIfRevision'>;
 }
 
 export interface SubmissionFailureContext {
@@ -49,19 +45,16 @@ export async function settleSubmissionFailure(
 	}
 
 	if (!outcomeUnknown) await options.onRejected?.();
-	const composerCanBeRestored =
-		options.composerRevisionAfterClear === undefined
-		|| (
-			typeof options.composerRevisionAfterClear === 'number'
-			&& deps.composerState.contentRevision === options.composerRevisionAfterClear
-		);
-	if (context.ownsComposer && !outcomeUnknown && composerCanBeRestored) {
+	if (context.ownsComposer && !outcomeUnknown) {
 		if (options.restoreRejected) {
 			options.restoreRejected();
-		} else {
-			deps.composerState.inputText = context.previousText;
-			deps.composerState.images = context.previousImages;
-			deps.composerState.saveDraft(context.chatId);
+		} else if (typeof options.composerRevisionAfterClear === 'number') {
+			deps.composerState.restoreDraftIfRevision(
+				context.chatId,
+				options.composerRevisionAfterClear,
+				context.previousText,
+				context.previousImages,
+			);
 		}
 	}
 
@@ -74,9 +67,5 @@ export async function settleSubmissionFailure(
 }
 
 function isExecutionControlAdmissionConflict(error: unknown): boolean {
-	return (
-		error instanceof ApiError &&
-		error.retryable &&
-		error.errorCode === 'SESSION_BUSY'
-	);
+	return error instanceof ApiError && error.retryable && error.errorCode === 'SESSION_BUSY';
 }

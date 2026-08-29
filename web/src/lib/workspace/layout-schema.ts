@@ -1,36 +1,39 @@
 import type {
-	PersistedWorkspaceHost,
 	PersistedWorkspaceLayoutNode,
-	PersistedWorkspaceLayoutV1,
 	PersistedWorkspaceLayoutV2,
 	PersistedWorkspaceSurfaceRef,
 } from '$shared/workspace-layout';
+import { isRecord } from '$shared/json';
 import {
-	CHAT_SURFACE_ID,
-	MAX_WORKSPACE_PANES,
-	type DesktopLayoutNode,
-	type PaneId,
-	type PaneNode,
-	type SplitId,
-	type SurfaceDescriptor,
-	type WorkspaceLayoutSnapshot,
+	MAX_WORKSPACE_WINDOWS,
+	chatViewSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
+	type DesktopWorkspaceNode,
+	type PortableSingletonKind,
+	type SurfaceDescriptor,
+	type WorkspaceLayoutSnapshot,
+	type WorkspacePartitionId,
+	type WorkspaceWindowId,
+	type WorkspaceWindowNode,
 } from './surface-types.js';
 import { assertWorkspaceLayoutInvariants } from './workspace-layout.svelte.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
-import { clampSplitRatio, collectPaneNodes, removePaneAndCollapse } from './pane-tree.js';
-import { isRecord } from '$shared/json';
+import {
+	clampPartitionRatio,
+	collectWindowNodes,
+	mapWindows,
+	removeWindowAndCollapse,
+} from './window-tree.js';
 
-export type WorkspaceLayoutRestoreSource = 'absent' | 'valid' | 'migrated' | 'fallback';
+export type WorkspaceLayoutRestoreSource = 'absent' | 'valid' | 'fallback';
 
 export interface WorkspaceLayoutParseResult {
 	source: WorkspaceLayoutRestoreSource;
 	snapshot: WorkspaceLayoutSnapshot;
 }
 
-const SINGLETON_REF_KINDS = new Set([
-	'chat',
+const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>([
 	'git',
 	'git-history',
 	'git-compare',
@@ -39,10 +42,17 @@ const SINGLETON_REF_KINDS = new Set([
 	'commit',
 ]);
 
-function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {
+function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {
 	if (!isRecord(value)) return null;
-	if (value.type === 'singleton' && SINGLETON_REF_KINDS.has(String(value.kind))) {
-		return { type: 'singleton', kind: value.kind as 'chat' };
+	if (value.type === 'chat' && (value.chatId === null || typeof value.chatId === 'string')) {
+		return { type: 'chat', chatId: value.chatId };
+	}
+	if (
+		value.type === 'singleton' &&
+		typeof value.kind === 'string' &&
+		PORTABLE_SINGLETON_REF_KINDS.has(value.kind as PortableSingletonKind)
+	) {
+		return { type: 'singleton', kind: value.kind as PortableSingletonKind };
 	}
 	if (value.type === 'terminal' && typeof value.terminalId === 'string' && value.terminalId) {
 		return { type: 'terminal', terminalId: value.terminalId };
@@ -50,266 +60,190 @@ function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {
 	return null;
 }
 
-function refKey(ref: PersistedWorkspaceSurfaceRef): string {
-	return ref.type === 'singleton'
-		? singletonSurfaceIdForRef(ref.kind)
-		: terminalSurfaceId(ref.terminalId);
+function globalRefKey(ref: Exclude<PersistedWorkspaceSurfaceRef, { type: 'chat' }>): string {
+	return ref.type === 'singleton' ? `singleton:${ref.kind}` : terminalSurfaceId(ref.terminalId);
 }
 
-function singletonSurfaceIdForRef(kind: string): string {
-	return `singleton:${kind}`;
-}
-
-function descriptorFor(ref: PersistedWorkspaceSurfaceRef): SurfaceDescriptor {
+function descriptorForGlobalRef(
+	ref: Exclude<PersistedWorkspaceSurfaceRef, { type: 'chat' }>,
+): SurfaceDescriptor {
 	if (ref.type === 'terminal') {
 		return { id: terminalSurfaceId(ref.terminalId), type: 'terminal', terminalId: ref.terminalId };
 	}
-	if (ref.kind === 'chat') return { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' };
 	return portableSingletonDescriptor(ref.kind);
 }
 
-function asPaneId(id: unknown): PaneId | null {
-	return typeof id === 'string' && id.startsWith('pane-') ? (id as PaneId) : null;
+function asWindowId(id: unknown): WorkspaceWindowId | null {
+	return typeof id === 'string' && id.startsWith('window-') ? (id as WorkspaceWindowId) : null;
 }
 
-function asSplitId(id: unknown): SplitId | null {
-	return typeof id === 'string' && id.startsWith('split-') ? (id as SplitId) : null;
+function asPartitionId(id: unknown): WorkspacePartitionId | null {
+	return typeof id === 'string' && id.startsWith('partition-')
+		? (id as WorkspacePartitionId)
+		: null;
 }
 
 interface TreeBuildState {
 	surfaces: Record<string, SurfaceDescriptor>;
-	seen: Set<string>;
-	chatPlaced: boolean;
+	seenGlobalSurfaceIds: Set<string>;
 }
 
-function restoreNode(node: unknown, state: TreeBuildState): DesktopLayoutNode | null {
-	if (!isRecord(node)) return null;
-	if (node.type === 'pane') {
-		const id = asPaneId(node.id);
-		if (!id || !Array.isArray(node.order)) return null;
-		const order: string[] = [];
-		for (const rawRef of node.order) {
-			const ref = parseRef(rawRef);
-			if (!ref) continue;
-			const surfaceId = refKey(ref);
-			if (state.seen.has(surfaceId)) continue;
-			state.seen.add(surfaceId);
-			if (surfaceId === CHAT_SURFACE_ID) state.chatPlaced = true;
-			state.surfaces[surfaceId] = descriptorFor(ref);
+function restoredRefSurfaceId(
+	ref: PersistedWorkspaceSurfaceRef,
+	windowId: WorkspaceWindowId,
+): string {
+	return ref.type === 'chat' ? chatViewSurfaceId(windowId) : globalRefKey(ref);
+}
+
+function restoreWindow(
+	node: Record<string, unknown>,
+	state: TreeBuildState,
+): WorkspaceWindowNode | null {
+	const id = asWindowId(node.id);
+	if (!id || !Array.isArray(node.order)) return null;
+	const order: string[] = [];
+	let chatPlaced = false;
+	for (const rawRef of node.order) {
+		const ref = parseV2Ref(rawRef);
+		if (!ref) continue;
+		if (ref.type === 'chat') {
+			if (chatPlaced) continue;
+			chatPlaced = true;
+			const surfaceId = chatViewSurfaceId(id);
+			state.surfaces[surfaceId] = { id: surfaceId, type: 'chat', chatId: ref.chatId };
 			order.push(surfaceId);
+			continue;
 		}
-		if (order.length === 0) return null;
-		const activeRef = parseRef(node.active);
-		const activeKey = activeRef ? refKey(activeRef) : null;
-		const activeId = activeKey && order.includes(activeKey) ? activeKey : order[0];
-		const persistedMru: string[] = [];
-		if (Array.isArray(node.mru)) {
-			for (const rawRef of node.mru) {
-				const ref = parseRef(rawRef);
-				if (!ref) continue;
-				const surfaceId = refKey(ref);
-				if (!order.includes(surfaceId) || persistedMru.includes(surfaceId)) continue;
-				persistedMru.push(surfaceId);
-			}
+		const surfaceId = globalRefKey(ref);
+		if (state.seenGlobalSurfaceIds.has(surfaceId)) continue;
+		state.seenGlobalSurfaceIds.add(surfaceId);
+		state.surfaces[surfaceId] = descriptorForGlobalRef(ref);
+		order.push(surfaceId);
+	}
+	if (order.length === 0) return null;
+	const activeRef = parseV2Ref(node.active);
+	const activeKey = activeRef ? restoredRefSurfaceId(activeRef, id) : null;
+	const activeId = activeKey && order.includes(activeKey) ? activeKey : order[0];
+	const persistedMru: string[] = [];
+	if (Array.isArray(node.mru)) {
+		for (const rawRef of node.mru) {
+			const ref = parseV2Ref(rawRef);
+			if (!ref) continue;
+			const surfaceId = restoredRefSurfaceId(ref, id);
+			if (!order.includes(surfaceId) || persistedMru.includes(surfaceId)) continue;
+			persistedMru.push(surfaceId);
 		}
-		const mru = activeId
-			? [
-					activeId,
-					...persistedMru.filter((id) => id !== activeId),
-					...order.filter((id) => id !== activeId && !persistedMru.includes(id)),
-				]
-			: [];
-		return { type: 'pane', id, tabs: { order, activeId, mru } };
 	}
-	if (node.type === 'split') {
-		const id = asSplitId(node.id);
-		if (!id || !Array.isArray(node.children) || node.children.length !== 2) return null;
-		const first = restoreNode(node.children[0], state);
-		const second = restoreNode(node.children[1], state);
-		if (!first) return second;
-		if (!second) return first;
-		if (node.direction !== 'horizontal' && node.direction !== 'vertical') return null;
-		return {
-			type: 'split',
-			id,
-			direction: node.direction,
-			ratio: clampSplitRatio(typeof node.ratio === 'number' ? node.ratio : 0.5),
-			children: [first, second],
-		};
-	}
-	return null;
+	const mru = [
+		activeId,
+		...persistedMru.filter((surfaceId) => surfaceId !== activeId),
+		...order.filter((surfaceId) => surfaceId !== activeId && !persistedMru.includes(surfaceId)),
+	];
+	return { type: 'window', id, tabs: { order, activeId, mru } };
 }
 
-// Collapses panes beyond the cap by moving their tabs into the first pane.
-function enforcePaneCap(root: DesktopLayoutNode): DesktopLayoutNode {
+function restoreNode(node: unknown, state: TreeBuildState): DesktopWorkspaceNode | null {
+	if (!isRecord(node)) return null;
+	if (node.type === 'window') return restoreWindow(node, state);
+	if (node.type !== 'partition') return null;
+	const id = asPartitionId(node.id);
+	if (!id || !Array.isArray(node.children) || node.children.length !== 2) return null;
+	const first = restoreNode(node.children[0], state);
+	const second = restoreNode(node.children[1], state);
+	if (!first) return second;
+	if (!second) return first;
+	if (node.direction !== 'horizontal' && node.direction !== 'vertical') return null;
+	return {
+		type: 'partition',
+		id,
+		direction: node.direction,
+		ratio: clampPartitionRatio(typeof node.ratio === 'number' ? node.ratio : 0.5),
+		children: [first, second],
+	};
+}
+
+function appendTabsToWindow(
+	root: DesktopWorkspaceNode,
+	windowId: WorkspaceWindowId,
+	tabIds: readonly string[],
+): DesktopWorkspaceNode {
+	return mapWindows(root, (workspaceWindow) => {
+		if (workspaceWindow.id !== windowId || tabIds.length === 0) return workspaceWindow;
+		const order = [...workspaceWindow.tabs.order, ...tabIds];
+		return {
+			...workspaceWindow,
+			tabs: {
+				order,
+				activeId: workspaceWindow.tabs.activeId,
+				mru: [...workspaceWindow.tabs.mru, ...tabIds],
+			},
+		};
+	});
+}
+
+function enforceWindowCap(root: DesktopWorkspaceNode): DesktopWorkspaceNode {
 	let next = root;
-	while (collectPaneNodes(next).length > MAX_WORKSPACE_PANES) {
-		const panes = collectPaneNodes(next);
-		const overflow = panes[panes.length - 1];
-		const collapsed = removePaneAndCollapse(next, overflow.id);
+	while (collectWindowNodes(next).length > MAX_WORKSPACE_WINDOWS) {
+		const windows = collectWindowNodes(next);
+		const overflow = windows[windows.length - 1];
+		const collapsed = removeWindowAndCollapse(next, overflow.id);
 		if (!collapsed) break;
-		const firstPaneId = collectPaneNodes(collapsed)[0].id;
-		next = mapPaneTabs(collapsed, firstPaneId, (tabs) => ({
-			...tabs,
-			order: [...tabs.order, ...overflow.tabs.order],
-			mru: [...tabs.mru, ...overflow.tabs.order],
-		}));
+		const first = collectWindowNodes(collapsed)[0];
+		const movable = overflow.tabs.order.filter((surfaceId) => !surfaceId.startsWith('chat-view:'));
+		next = appendTabsToWindow(collapsed, first.id, movable);
 	}
 	return next;
 }
 
-function mapPaneTabs(
-	node: DesktopLayoutNode,
-	paneId: PaneId,
-	map: (tabs: PaneNode['tabs']) => PaneNode['tabs'],
-): DesktopLayoutNode {
-	if (node.type === 'pane') {
-		return node.id === paneId ? { ...node, tabs: map(node.tabs) } : node;
+function pruneUnplacedDescriptors(root: DesktopWorkspaceNode, state: TreeBuildState): void {
+	const placed = new Set(
+		collectWindowNodes(root).flatMap((workspaceWindow) => workspaceWindow.tabs.order),
+	);
+	for (const surfaceId of Object.keys(state.surfaces)) {
+		if (!placed.has(surfaceId)) delete state.surfaces[surfaceId];
 	}
-	return {
-		...node,
-		children: [mapPaneTabs(node.children[0], paneId, map), mapPaneTabs(node.children[1], paneId, map)],
-	};
 }
 
-function ensureChatPlaced(root: DesktopLayoutNode, state: TreeBuildState): DesktopLayoutNode {
-	if (state.chatPlaced) return root;
-	state.surfaces[CHAT_SURFACE_ID] = { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' };
-	const firstPane = collectPaneNodes(root)[0];
-	return mapPaneTabs(root, firstPane.id, (tabs) => ({
-		order: [CHAT_SURFACE_ID, ...tabs.order],
-		activeId: tabs.activeId ?? CHAT_SURFACE_ID,
-		mru: [CHAT_SURFACE_ID, ...tabs.mru],
-	}));
+function parseUnplacedTerminalIds(
+	value: unknown,
+	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
+): string[] {
+	if (!Array.isArray(value)) return [];
+	return [
+		...new Set(
+			value.filter(
+				(terminalId): terminalId is string =>
+					typeof terminalId === 'string' &&
+					Boolean(terminalId) &&
+					!surfaces[terminalSurfaceId(terminalId)],
+			),
+		),
+	];
 }
 
 function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
-	const base = canonicalWorkspaceSnapshot();
-	const state: TreeBuildState = { surfaces: {}, seen: new Set(), chatPlaced: false };
+	const state: TreeBuildState = { surfaces: {}, seenGlobalSurfaceIds: new Set() };
 	const restored = restoreNode(value.root, state);
-	if (!restored || collectPaneNodes(restored).length === 0) {
-		return { source: 'fallback', snapshot: base };
-	}
-	const root = ensureChatPlaced(enforcePaneCap(restored), state);
-	const unplacedTerminalIds = Array.isArray(value.unplacedTerminalIds)
-		? [
-				...new Set(
-					value.unplacedTerminalIds.filter(
-						(terminalId): terminalId is string =>
-							typeof terminalId === 'string' &&
-							Boolean(terminalId) &&
-							!state.surfaces[terminalSurfaceId(terminalId)],
-					),
-				),
-			]
-		: [];
+	if (!restored) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
+	const root = enforceWindowCap(restored);
+	pruneUnplacedDescriptors(root, state);
+	const firstWindow = collectWindowNodes(root)[0];
+	if (!firstWindow) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 	const snapshot: WorkspaceLayoutSnapshot = {
 		desktopRoot: root,
 		surfaces: state.surfaces,
-		fullscreenPaneId: null,
+		fullscreenWindowId: null,
 		dialogFileSurfaceId: null,
-		mobileActiveSurfaceId: CHAT_SURFACE_ID,
+		mobileActiveSurfaceId: firstWindow.tabs.activeId,
 		mobileOnlySurfaceIds: [],
 		mobileReturnStack: [],
-		unplacedTerminalIds,
+		unplacedTerminalIds: parseUnplacedTerminalIds(value.unplacedTerminalIds, state.surfaces),
 	};
 	assertWorkspaceLayoutInvariants(snapshot);
 	return { source: 'valid', snapshot };
 }
 
-function hostSurfaceIds(
-	host: PersistedWorkspaceHost,
-	state: TreeBuildState,
-): { order: string[]; activeId: string | null } {
-	const order: string[] = [];
-	for (const rawRef of host.order) {
-		const ref = parseRef(rawRef);
-		if (!ref) continue;
-		const surfaceId = refKey(ref);
-		if (surfaceId === CHAT_SURFACE_ID || state.seen.has(surfaceId)) continue;
-		state.seen.add(surfaceId);
-		state.surfaces[surfaceId] = descriptorFor(ref);
-		order.push(surfaceId);
-	}
-	const activeRef = parseRef(host.active);
-	const activeKey = activeRef ? refKey(activeRef) : null;
-	return { order, activeId: activeKey && order.includes(activeKey) ? activeKey : null };
-}
-
-function migrateV1(value: PersistedWorkspaceLayoutV1): WorkspaceLayoutParseResult {
-	const state: TreeBuildState = { surfaces: {}, seen: new Set(), chatPlaced: true };
-	state.surfaces[CHAT_SURFACE_ID] = { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' };
-	const main = hostSurfaceIds(value.main, state);
-	const sidebar = hostSurfaceIds(value.sidebar, state);
-	const mainOrder = [CHAT_SURFACE_ID, ...main.order];
-	const mainActive =
-		main.activeId ?? (mainOrder.includes(CHAT_SURFACE_ID) ? CHAT_SURFACE_ID : mainOrder[0]);
-	const mainPane: PaneNode = {
-		type: 'pane',
-		id: 'pane-main',
-		tabs: {
-			order: mainOrder,
-			activeId: mainActive,
-			mru: [mainActive, ...mainOrder.filter((id) => id !== mainActive)],
-		},
-	};
-	let root: DesktopLayoutNode = mainPane;
-	if (value.sidebarOpen && sidebar.order.length > 0) {
-		const sidebarActive = sidebar.activeId ?? sidebar.order[0];
-		const sidebarPane: PaneNode = {
-			type: 'pane',
-			id: 'pane-sidebar',
-			tabs: {
-				order: sidebar.order,
-				activeId: sidebarActive,
-				mru: [sidebarActive, ...sidebar.order.filter((id) => id !== sidebarActive)],
-			},
-		};
-		const width = typeof value.desiredSidebarWidth === 'number' ? value.desiredSidebarWidth : 480;
-		root = {
-			type: 'split',
-			id: 'split-root',
-			direction: 'horizontal',
-			ratio: clampSplitRatio(1 - width / 1440),
-			children: [mainPane, sidebarPane],
-		};
-	} else if (sidebar.order.length > 0) {
-		root = mapPaneTabs(mainPane, mainPane.id, (tabs) => ({
-			order: [...tabs.order, ...sidebar.order],
-			activeId: tabs.activeId,
-			mru: [...tabs.mru, ...sidebar.order],
-		}));
-	}
-	const unplacedTerminalIds = Array.isArray(value.unplacedTerminalIds)
-		? [
-				...new Set(
-					value.unplacedTerminalIds.filter(
-						(terminalId): terminalId is string =>
-							typeof terminalId === 'string' &&
-							Boolean(terminalId) &&
-							!state.surfaces[terminalSurfaceId(terminalId)],
-					),
-				),
-			]
-		: [];
-	const snapshot: WorkspaceLayoutSnapshot = {
-		desktopRoot: root,
-		surfaces: state.surfaces,
-		fullscreenPaneId: null,
-		dialogFileSurfaceId: null,
-		mobileActiveSurfaceId: CHAT_SURFACE_ID,
-		mobileOnlySurfaceIds: [],
-		mobileReturnStack: [],
-		unplacedTerminalIds,
-	};
-	assertWorkspaceLayoutInvariants(snapshot);
-	return { source: 'migrated', snapshot };
-}
-
-export function parsePersistedWorkspaceLayout(
-	rawV2: string | null,
-	rawV1: string | null = null,
-): WorkspaceLayoutParseResult {
+export function parsePersistedWorkspaceLayout(rawV2: string | null): WorkspaceLayoutParseResult {
 	if (rawV2 !== null) {
 		try {
 			const value: unknown = JSON.parse(rawV2);
@@ -319,40 +253,32 @@ export function parsePersistedWorkspaceLayout(
 			return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
 		}
 	}
-	if (rawV1 !== null) {
-		try {
-			const value: unknown = JSON.parse(rawV1);
-			if (!isRecord(value) || value.version !== 1) throw new Error('Unsupported layout version');
-			return migrateV1(value as unknown as PersistedWorkspaceLayoutV1);
-		} catch {
-			return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
-		}
-	}
 	return { source: 'absent', snapshot: canonicalWorkspaceSnapshot() };
 }
 
 function persistedRef(surface: SurfaceDescriptor): PersistedWorkspaceSurfaceRef | null {
+	if (surface.type === 'chat') return { type: 'chat', chatId: surface.chatId };
 	if (surface.type === 'terminal') return { type: 'terminal', terminalId: surface.terminalId };
-	if (surface.type !== 'singleton') return null;
-	return { type: 'singleton', kind: surface.kind };
+	if (surface.type === 'singleton') return { type: 'singleton', kind: surface.kind };
+	return null;
 }
 
 function serializeNode(
-	node: DesktopLayoutNode,
+	node: DesktopWorkspaceNode,
 	surfaces: Readonly<Record<string, SurfaceDescriptor>>,
 ): PersistedWorkspaceLayoutNode {
-	if (node.type === 'pane') {
-		const order = node.tabs.order.flatMap((id) => {
-			const ref = surfaces[id] ? persistedRef(surfaces[id]) : null;
+	if (node.type === 'window') {
+		const order = node.tabs.order.flatMap((surfaceId) => {
+			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
-		const activeSurface = node.tabs.activeId ? surfaces[node.tabs.activeId] : null;
-		const mru = node.tabs.mru.flatMap((id) => {
-			const ref = surfaces[id] ? persistedRef(surfaces[id]) : null;
+		const activeSurface = surfaces[node.tabs.activeId];
+		const mru = node.tabs.mru.flatMap((surfaceId) => {
+			const ref = surfaces[surfaceId] ? persistedRef(surfaces[surfaceId]) : null;
 			return ref ? [ref] : [];
 		});
 		return {
-			type: 'pane',
+			type: 'window',
 			id: node.id,
 			order,
 			active: activeSurface ? persistedRef(activeSurface) : null,
@@ -360,11 +286,14 @@ function serializeNode(
 		};
 	}
 	return {
-		type: 'split',
+		type: 'partition',
 		id: node.id,
 		direction: node.direction,
 		ratio: node.ratio,
-		children: [serializeNode(node.children[0], surfaces), serializeNode(node.children[1], surfaces)],
+		children: [
+			serializeNode(node.children[0], surfaces),
+			serializeNode(node.children[1], surfaces),
+		],
 	};
 }
 

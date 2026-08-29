@@ -3,16 +3,16 @@ import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
-	MAX_WORKSPACE_PANES,
+	MAX_WORKSPACE_WINDOWS,
 	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
-	type PaneId,
-	type SplitId,
+	type WorkspaceWindowId,
+	type WorkspacePartitionId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
-import { collectPaneNodes, paneNodeById } from './pane-tree.js';
+import { collectWindowNodes, windowNodeById } from './window-tree.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
@@ -39,14 +39,14 @@ interface TerminalPlacementServiceDeps {
 	layout: WorkspaceLayoutReader;
 	terminals: TerminalRegistry;
 	reservations: SurfaceReservations;
+	isWindowReserved(windowId: WorkspaceWindowId): boolean;
 	commit: WorkspaceCommit;
 	commitDestroyedRemoval(surfaceId: string, mutations: WorkspaceMutationPlan): Promise<boolean>;
 	currentProjectPath(): string | null;
 	isMobile(): boolean;
-	isChatPresented(): boolean;
-	cancelChatTransition(): void;
-	paneOf(surfaceId: string): PaneId | null;
-	defaultPaneId(): PaneId;
+	cancelWorkspaceDrag(): void;
+	windowOf(surfaceId: string): WorkspaceWindowId | null;
+	defaultWindowId(): WorkspaceWindowId;
 	defaultActiveId(): string;
 	lastFocusedSurfaceId(): string;
 	focusSurface(surfaceId: string): Promise<void>;
@@ -66,10 +66,8 @@ export class TerminalPlacementService {
 
 	constructor(private readonly deps: TerminalPlacementServiceDeps) {}
 
-	async create(paneId: PaneId, requestKey?: string): Promise<string> {
-		if (this.deps.isChatPresented()) {
-			this.deps.cancelChatTransition();
-		}
+	async create(windowId: WorkspaceWindowId, requestKey?: string): Promise<string> {
+		this.deps.cancelWorkspaceDrag();
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
 			: await this.#createWithRequestId(createRandomId());
@@ -78,13 +76,13 @@ export class TerminalPlacementService {
 		try {
 			current = await this.deps.commit(
 				(latest) => {
-					const destinationPaneId = this.#resolvePaneId(latest, paneId);
+					const destinationWindowId = this.#resolveWindowId(latest, windowId);
 					if (latest.surfaces[surfaceId]) {
-						const existingPaneId = this.#paneOf(latest, surfaceId);
+						const existingWindowId = this.#windowOf(latest, surfaceId);
 						const mutations: WorkspaceLayoutMutation[] = [
-							existingPaneId === destinationPaneId
-								? { type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId }
-								: { type: 'move-tab', surfaceId, destinationPaneId },
+							existingWindowId === destinationWindowId
+								? { type: 'activate-window-tab', windowId: destinationWindowId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationWindowId },
 						];
 						if (this.deps.isMobile()) {
 							mutations.push({
@@ -106,9 +104,9 @@ export class TerminalPlacementService {
 						{
 							type: 'register-surface',
 							surface: { id: surfaceId, type: 'terminal', terminalId },
-							paneId: destinationPaneId,
+							windowId: destinationWindowId,
 						},
-						{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
+						{ type: 'activate-window-tab', windowId: destinationWindowId, surfaceId },
 					);
 					if (this.deps.isMobile()) {
 						mutations.push({
@@ -132,23 +130,21 @@ export class TerminalPlacementService {
 		return terminalId;
 	}
 
-	// Creates a terminal in a new pane split from the anchor pane.
-	async createInNewPane(anchorPaneId: PaneId, requestKey?: string): Promise<string> {
-		if (this.deps.isMobile()) return this.create(this.deps.defaultPaneId(), requestKey);
-		if (this.deps.isChatPresented()) {
-			this.deps.cancelChatTransition();
-		}
+	// Creates a terminal in a new window adjacent to the anchor window.
+	async createInNewWindow(anchorWindowId: WorkspaceWindowId, requestKey?: string): Promise<string> {
+		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey);
+		this.deps.cancelWorkspaceDrag();
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey)
 			: await this.#createWithRequestId(createRandomId());
 		const surfaceId = terminalSurfaceId(terminalId);
-		const newPaneId = `pane-${createRandomId()}` as PaneId;
-		const splitId = `split-${createRandomId()}` as SplitId;
+		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
+		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		let current = false;
 		try {
 			current = await this.deps.commit(
 				(latest) => {
-					const currentAnchorPaneId = this.#resolvePaneId(latest, anchorPaneId);
+					const currentAnchorWindowId = this.#resolveWindowId(latest, anchorWindowId);
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
 						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
@@ -157,11 +153,11 @@ export class TerminalPlacementService {
 						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
 					}
 					if (latest.surfaces[surfaceId]) {
-						const existingPaneId = this.#paneOf(latest, surfaceId);
+						const existingWindowId = this.#windowOf(latest, surfaceId);
 						mutations.push(
-							existingPaneId === currentAnchorPaneId
-								? { type: 'activate-pane-tab', paneId: currentAnchorPaneId, surfaceId }
-								: { type: 'move-tab', surfaceId, destinationPaneId: currentAnchorPaneId },
+							existingWindowId === currentAnchorWindowId
+								? { type: 'activate-window-tab', windowId: currentAnchorWindowId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationWindowId: currentAnchorWindowId },
 						);
 						if (this.deps.isMobile()) {
 							mutations.push({
@@ -177,9 +173,9 @@ export class TerminalPlacementService {
 							{
 								type: 'register-surface',
 								surface: { id: surfaceId, type: 'terminal', terminalId },
-								paneId: currentAnchorPaneId,
+								windowId: currentAnchorWindowId,
 							},
-							{ type: 'activate-pane-tab', paneId: currentAnchorPaneId, surfaceId },
+							{ type: 'activate-window-tab', windowId: currentAnchorWindowId, surfaceId },
 							{
 								type: 'set-mobile-presentation',
 								activeId: surfaceId,
@@ -188,18 +184,16 @@ export class TerminalPlacementService {
 						);
 						return mutations;
 					}
-					if (collectPaneNodes(latest.desktopRoot).length >= MAX_WORKSPACE_PANES) {
-						throw new Error(
-							m.workspace_pane_limit_reached({ count: MAX_WORKSPACE_PANES }),
-						);
+					if (collectWindowNodes(latest.desktopRoot).length >= MAX_WORKSPACE_WINDOWS) {
+						throw new Error(m.workspace_window_limit_reached({ count: MAX_WORKSPACE_WINDOWS }));
 					}
 					mutations.push({
-						type: 'register-surface-in-split',
+						type: 'register-surface-in-new-window',
 						surface: { id: surfaceId, type: 'terminal', terminalId },
-						targetPaneId: currentAnchorPaneId,
+						targetWindowId: currentAnchorWindowId,
 						edge: 'right',
-						newPaneId,
-						splitId,
+						newWindowId,
+						partitionId,
 					});
 					return mutations;
 				},
@@ -257,7 +251,7 @@ export class TerminalPlacementService {
 		}
 	}
 
-	async open(terminalId: string, preferredPaneId: PaneId): Promise<void> {
+	async open(terminalId: string, preferredWindowId: WorkspaceWindowId): Promise<void> {
 		if (!this.deps.terminals.sessions[terminalId]) return;
 		const surfaceId = terminalSurfaceId(terminalId);
 		if (this.deps.layout.surface(surfaceId)) {
@@ -265,14 +259,14 @@ export class TerminalPlacementService {
 			return;
 		}
 		const current = await this.deps.commit((latest) => {
-			const destinationPaneId = this.#resolvePaneId(latest, preferredPaneId);
+			const destinationWindowId = this.#resolveWindowId(latest, preferredWindowId);
 			const mutations: WorkspaceLayoutMutation[] = [
 				{
 					type: 'register-surface',
 					surface: { id: surfaceId, type: 'terminal', terminalId },
-					paneId: destinationPaneId,
+					windowId: destinationWindowId,
 				},
-				{ type: 'activate-pane-tab', paneId: destinationPaneId, surfaceId },
+				{ type: 'activate-window-tab', windowId: destinationWindowId, surfaceId },
 			];
 			if (this.deps.isMobile()) {
 				mutations.push({
@@ -376,7 +370,7 @@ export class TerminalPlacementService {
 		}
 		this.deps.reservations.add(surfaceId);
 		try {
-			const sourcePaneId = this.deps.paneOf(surfaceId);
+			const sourceWindowId = this.deps.windowOf(surfaceId);
 			let mobileFallbackId: string | null = null;
 			const current = await this.deps.commitDestroyedRemoval(surfaceId, (latest) => {
 				if (!latest.surfaces[surfaceId]) return [];
@@ -394,10 +388,11 @@ export class TerminalPlacementService {
 			});
 			this.deps.clearAttachmentError(surfaceId);
 			if (!current) return;
-			const sourcePaneActive = sourcePaneId
-				? paneNodeById(this.deps.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+			const sourceWindowActive = sourceWindowId
+				? windowNodeById(this.deps.layout.snapshot.desktopRoot, sourceWindowId)?.tabs.activeId
 				: null;
-			const fallbackSurfaceId = mobileFallbackId ?? sourcePaneActive ?? this.deps.defaultActiveId();
+			const fallbackSurfaceId =
+				mobileFallbackId ?? sourceWindowActive ?? this.deps.defaultActiveId();
 			this.deps.present(fallbackSurfaceId);
 		} finally {
 			this.deps.reservations.delete(surfaceId);
@@ -410,10 +405,10 @@ export class TerminalPlacementService {
 		}
 	}
 
-	async focusMostRecentOrCreate(preferredPaneId: PaneId): Promise<void> {
+	async focusMostRecentOrCreate(preferredWindowId: WorkspaceWindowId): Promise<void> {
 		const focused = this.deps.layout.surface(this.deps.lastFocusedSurfaceId());
 		if (focused?.type === 'terminal' && this.deps.terminals.sessions[focused.terminalId]) {
-			await this.open(focused.terminalId, preferredPaneId);
+			await this.open(focused.terminalId, preferredWindowId);
 			return;
 		}
 		let terminal = this.deps.terminals.orderedSessions.at(-1);
@@ -422,14 +417,14 @@ export class TerminalPlacementService {
 			terminal = this.deps.terminals.orderedSessions.at(-1);
 		}
 		if (terminal) {
-			await this.open(terminal.metadata.terminalId, preferredPaneId);
+			await this.open(terminal.metadata.terminalId, preferredWindowId);
 			return;
 		}
 		if (
 			this.deps.terminals.listStatus === 'ready' &&
 			this.deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
 		) {
-			await this.create(preferredPaneId, `terminal-empty-state:${preferredPaneId}`);
+			await this.create(preferredWindowId, `terminal-empty-state:${preferredWindowId}`);
 		}
 	}
 
@@ -475,7 +470,7 @@ export class TerminalPlacementService {
 				mutations.push({
 					type: 'register-surface',
 					surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-					paneId: this.deps.defaultPaneId(),
+					windowId: this.deps.defaultWindowId(),
 				});
 			}
 			const unrepresentedTerminalIds = [...live].filter(
@@ -491,7 +486,7 @@ export class TerminalPlacementService {
 							type: 'terminal',
 							terminalId,
 						},
-						paneId: this.deps.defaultPaneId(),
+						windowId: this.deps.defaultWindowId(),
 					});
 				}
 			} else {
@@ -513,14 +508,14 @@ export class TerminalPlacementService {
 		if (current && mobileFallbackId) this.deps.present(mobileFallbackId);
 	}
 
-	async activateLauncher(paneId: PaneId): Promise<void> {
+	async activateLauncher(windowId: WorkspaceWindowId): Promise<void> {
 		const launcherId = TERMINAL_LAUNCHER_ID;
 		if (!this.deps.layout.surface(launcherId) || this.deps.reservations.has(launcherId)) {
 			return;
 		}
 		this.deps.reservations.add(launcherId);
 		try {
-			const terminalId = await this.#retryCreate(`launcher:${paneId}`);
+			const terminalId = await this.#retryCreate(`launcher:${windowId}`);
 			const surfaceId = terminalSurfaceId(terminalId);
 			let current = false;
 			try {
@@ -531,7 +526,7 @@ export class TerminalPlacementService {
 							previousId: launcherId,
 							surface: { id: surfaceId, type: 'terminal', terminalId },
 						},
-						{ type: 'activate-pane-tab', paneId, surfaceId },
+						{ type: 'activate-window-tab', windowId, surfaceId },
 					],
 					{ requiredPublication: true },
 				);
@@ -544,20 +539,35 @@ export class TerminalPlacementService {
 		}
 	}
 
-	#paneOf(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): PaneId | null {
-		for (const pane of collectPaneNodes(snapshot.desktopRoot)) {
-			if (pane.tabs.order.includes(surfaceId)) return pane.id;
+	#windowOf(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): WorkspaceWindowId | null {
+		for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
+			if (workspaceWindow.tabs.order.includes(surfaceId)) return workspaceWindow.id;
 		}
 		return null;
 	}
 
-	#resolvePaneId(snapshot: WorkspaceLayoutSnapshot, preferredPaneId: PaneId): PaneId {
-		if (paneNodeById(snapshot.desktopRoot, preferredPaneId)) return preferredPaneId;
-		const defaultPaneId = this.deps.defaultPaneId();
-		if (paneNodeById(snapshot.desktopRoot, defaultPaneId)) return defaultPaneId;
-		const firstPane = collectPaneNodes(snapshot.desktopRoot)[0];
-		if (!firstPane) throw new Error('Workspace has no destination pane');
-		return firstPane.id;
+	#resolveWindowId(
+		snapshot: WorkspaceLayoutSnapshot,
+		preferredWindowId: WorkspaceWindowId,
+	): WorkspaceWindowId {
+		if (
+			windowNodeById(snapshot.desktopRoot, preferredWindowId) &&
+			!this.deps.isWindowReserved(preferredWindowId)
+		) {
+			return preferredWindowId;
+		}
+		const defaultWindowId = this.deps.defaultWindowId();
+		if (
+			windowNodeById(snapshot.desktopRoot, defaultWindowId) &&
+			!this.deps.isWindowReserved(defaultWindowId)
+		) {
+			return defaultWindowId;
+		}
+		const firstWindow = collectWindowNodes(snapshot.desktopRoot).find(
+			(workspaceWindow) => !this.deps.isWindowReserved(workspaceWindow.id),
+		);
+		if (!firstWindow) throw new Error('Workspace has no destination window');
+		return firstWindow.id;
 	}
 
 	async #retryCreate(requestKey: string): Promise<string> {

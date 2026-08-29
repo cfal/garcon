@@ -11,7 +11,6 @@ const expectedConcerns = {
 		'new-chat',
 		'project-paths',
 		'sessions',
-		'split',
 		'tools',
 		'transcript',
 	],

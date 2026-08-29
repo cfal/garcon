@@ -4,7 +4,7 @@
 	import { setAppShell, setLocalSettings, setSnippets, setTransientLayers } from '$lib/context';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import type { Snippet } from '$shared/snippets';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
@@ -62,7 +62,7 @@
 	const appShell = new AppShellStore();
 	appShell.isMobile = untrack(() => mobile);
 	appShell.keyboardHeight = untrack(() => keyboardHeight);
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	const localSettings = new LocalSettingsStore();
 	localSettings.set('snippetTrigger', ';;');
 	setAppShell(appShell);

@@ -19,7 +19,7 @@
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitWorkbenchToolbar from './GitWorkbenchToolbar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { openCommitFromGitWorkbench } from '$lib/git/workbench/git-workbench-navigation.js';
 
 	let {
@@ -29,7 +29,7 @@
 		onAppendToChatDraft,
 	}: {
 		controller: GitWorkbenchSurfaceController;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		visible?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
 	} = $props();

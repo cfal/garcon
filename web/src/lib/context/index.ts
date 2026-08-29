@@ -12,12 +12,12 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { ReadReceiptOutboxStore } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-import type { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
@@ -29,7 +29,6 @@ import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
-import type { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 import type { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
@@ -39,12 +38,7 @@ import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svel
 import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import type { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
-import type { WorkspacePaneDndStore } from '$lib/workspace/pane-dnd.svelte.js';
-import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-import type { SplitId } from '$lib/workspace/surface-types.js';
-import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
-import type { UserMessageNavigatorRegistration } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
-import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 // Root-level contexts (set in +layout.svelte)
@@ -58,7 +52,6 @@ export const [getChatProcessingReconciler, setChatProcessingReconciler] =
 export const [getFileSessions, setFileSessions] = createContext<FileSessionRegistry>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();
-export const [getSplitLayout, setSplitLayout] = createContext<SplitLayoutStore>();
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();
 export const [getGhCapability, setGhCapability] = createContext<GhCapabilityContext>();
@@ -72,8 +65,8 @@ export const [getWorkspaceContext, setWorkspaceContext] = createContext<Workspac
 export const [getTerminalRegistry, setTerminalRegistry] = createContext<TerminalRegistry>();
 export const [getWorkspaceCoordinator, setWorkspaceCoordinator] =
 	createContext<WorkspaceCoordinator>();
-export const [getChatInteractionGate, setChatInteractionGate] =
-	createContext<ChatInteractionGate>();
+export const [getWorkspaceWindowDnd, setWorkspaceWindowDnd] =
+	createContext<WorkspaceWindowDndController>();
 const [getRequiredTransientLayers, setTransientLayersContext] =
 	createContext<TransientLayerRegistry>();
 export const getTransientLayers = getRequiredTransientLayers;
@@ -97,9 +90,7 @@ export const [getGitViewLauncher, setGitViewLauncher] = createContext<GitViewLau
 export const [getSingletonSurfaces, setSingletonSurfaces] =
 	createContext<SingletonSurfaceRegistry>();
 
-// Workspace pane tree context (set in WorkspaceRoot.svelte). Shared by the
-// recursive pane components so callbacks and drag state are not drilled
-// through every split level.
+// Workspace Chat actions supplied by the root layout.
 export interface WorkspaceChatActions {
 	requestDelete: (chat: ChatSessionRecord) => void;
 	requestRename: (chat: ChatSessionRecord) => void;
@@ -110,26 +101,6 @@ export interface WorkspaceChatActions {
 	reload: (chat: ChatSessionRecord) => void;
 }
 
-export interface WorkspacePanesContextValue {
-	readonly dnd: WorkspacePaneDndStore;
-	readonly subagentToolbar: SubagentToolbarState;
-	readonly chatActions: WorkspaceChatActions;
-	labelFor(surfaceId: string): string;
-	frameBridge(surfaceId: string): SurfaceFrameBridge;
-	surfaceStyle(presentation: string): string;
-	splitRatio(splitId: SplitId, fallback: number): number;
-	setSplitRatioPreview(splitId: SplitId, ratio: number | null): void;
-	onSendToChat(message: string): Promise<boolean>;
-	onAppendToChatDraft: ChatDraftAppend;
-	onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
-	onRegisterSubmit(submit: (message: string) => Promise<boolean>): void;
-	onRegisterUserMessageNavigator(command: UserMessageNavigatorRegistration): void;
-	onRegisterAppendToDraft(append: ChatDraftAppend): void;
-	readonly onMobileMenuClick?: () => void;
-}
-export const [getWorkspacePanesContext, setWorkspacePanesContext] =
-	createContext<WorkspacePanesContextValue>();
-
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
 
@@ -137,6 +108,7 @@ export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettin
 export const [getActiveTranscriptState, setActiveTranscriptState] =
 	createContext<ActiveTranscriptState>();
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
+export const [getChatDrafts, setChatDrafts] = createContext<ChatDraftStore>();
 export const [getAgentState, setAgentState] = createContext<AgentState>();
 export const [getConversationLifecycle, setConversationLifecycle] =
 	createContext<ConversationLifecycleState>();

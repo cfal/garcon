@@ -3,14 +3,14 @@ import type {
 	FileSessionRegistry,
 } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
-import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import {
 	fileSurfaceId,
-	type PaneId,
+	type WorkspaceWindowId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
-import { paneNodeById } from './pane-tree.js';
+import { windowNodeById } from './window-tree.js';
 import type { WorkspaceCommit, WorkspacePublication } from './workspace-commit.js';
 
 interface SurfaceReservations {
@@ -22,14 +22,15 @@ interface SurfaceReservations {
 interface FileDialogCoordinatorDeps {
 	layout: WorkspaceLayoutReader;
 	files: FileSessionRegistry;
-	chatInteractionGate: ChatInteractionGate;
+	workspaceInteractionGate: WorkspaceInteractionGate;
 	reservations: SurfaceReservations;
 	commit: WorkspaceCommit;
+	isWindowReserved(windowId: WorkspaceWindowId): boolean;
 	isMobile(): boolean;
 	responsiveGeneration(): number;
 	defaultActiveId(): string;
 	lastFocusedSurfaceId(): string;
-	paneOf(surfaceId: string): PaneId | null;
+	windowOf(surfaceId: string): WorkspaceWindowId | null;
 	eligibleDesktopReturn(surfaceId: string | null): string | null;
 	present(surfaceId: string): void;
 	placeOnMobile(
@@ -78,9 +79,9 @@ export class FileDialogCoordinator {
 			});
 	}
 
-	moveToPane(destination: PaneId): Promise<void> {
+	moveToWindow(destination: WorkspaceWindowId): Promise<void> {
 		return this.#queue.enqueue(async () => {
-			if (this.deps.isMobile()) return;
+			if (this.deps.isMobile() || this.deps.isWindowReserved(destination)) return;
 			const surfaceId = this.deps.layout.snapshot.dialogFileSurfaceId;
 			if (!surfaceId || this.deps.reservations.has(surfaceId)) return;
 			this.deps.reservations.add(surfaceId);
@@ -89,10 +90,11 @@ export class FileDialogCoordinator {
 					if (latest.dialogFileSurfaceId !== surfaceId) {
 						throw new Error('The dialog occupant changed before it could be moved');
 					}
-					if (!paneNodeById(latest.desktopRoot, destination)) {
-						throw new Error('The destination pane is no longer available');
+					if (!windowNodeById(latest.desktopRoot, destination)) {
+						throw new Error('The destination window is no longer available');
 					}
-					return [{ type: 'move-dialog-to-pane', surfaceId, destinationPaneId: destination }];
+					if (this.deps.isWindowReserved(destination)) return [];
+					return [{ type: 'move-dialog-to-window', surfaceId, destinationWindowId: destination }];
 				});
 				if (!current) return;
 				this.#returnSurfaceId = null;
@@ -136,7 +138,7 @@ export class FileDialogCoordinator {
 	async #pop(surfaceId: string): Promise<boolean> {
 		if (this.deps.isMobile()) return false;
 		const responsiveGeneration = this.deps.responsiveGeneration();
-		const sourcePaneId = this.deps.paneOf(surfaceId);
+		const sourceWindowId = this.deps.windowOf(surfaceId);
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		if (occupantId === surfaceId) return true;
 		const result = await this.#replaceDialogOccupant(responsiveGeneration, {
@@ -149,8 +151,8 @@ export class FileDialogCoordinator {
 			],
 			onCurrent: () => {
 				this.#returnSurfaceId =
-					(sourcePaneId
-						? paneNodeById(this.deps.layout.snapshot.desktopRoot, sourcePaneId)?.tabs.activeId
+					(sourceWindowId
+						? windowNodeById(this.deps.layout.snapshot.desktopRoot, sourceWindowId)?.tabs.activeId
 						: null) ?? this.deps.defaultActiveId();
 				this.deps.present(surfaceId);
 			},
@@ -179,7 +181,7 @@ export class FileDialogCoordinator {
 				}
 				occupantSessionId = occupant.fileSessionId;
 			}
-			this.deps.chatInteractionGate.cancelBeforeInertTransition();
+			this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
 			const current = await this.deps.commit(
 				(latest) => {
 					if (latest.dialogFileSurfaceId !== occupantId) {

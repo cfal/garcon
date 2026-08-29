@@ -104,7 +104,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('files')
-						: workspace.openSingletonInNewPane('files').catch(reportOpenError)),
+						: workspace.openSingletonInNewWindow('files').catch(reportOpenError)),
 			},
 			...(!workspace.isMobile
 				? [
@@ -133,7 +133,9 @@
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
 							action: () =>
-								reportTerminalAction(workspace.createTerminalInNewPane(undefined, 'command-menu:new-terminal')),
+								reportTerminalAction(
+									workspace.createTerminalInNewWindow(undefined, 'command-menu:new-terminal'),
+								),
 						},
 					]
 				: []),
@@ -145,7 +147,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git')
-						: workspace.openSingletonInNewPane('git').catch(reportOpenError)),
+						: workspace.openSingletonInNewWindow('git').catch(reportOpenError)),
 			},
 			{
 				id: 'workspace-git-history',
@@ -155,7 +157,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git-history')
-						: workspace.openSingletonInNewPane('git-history').catch(reportOpenError)),
+						: workspace.openSingletonInNewWindow('git-history').catch(reportOpenError)),
 			},
 			{
 				id: 'workspace-git-compare',
@@ -165,7 +167,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('git-compare')
-						: workspace.openSingletonInNewPane('git-compare').catch(reportOpenError)),
+						: workspace.openSingletonInNewWindow('git-compare').catch(reportOpenError)),
 			},
 			...(ghCapability.available || !ghCapability.hasChecked
 				? [
@@ -177,7 +179,7 @@
 							action: () =>
 								void (workspace.isMobile
 									? workspace.focusMobileSingleton('pull-requests')
-									: workspace.openSingletonInNewPane('pull-requests').catch(reportOpenError)),
+									: workspace.openSingletonInNewWindow('pull-requests').catch(reportOpenError)),
 						},
 					]
 				: []),
@@ -189,7 +191,7 @@
 				action: () =>
 					void (workspace.isMobile
 						? workspace.focusMobileSingleton('commit')
-						: workspace.openSingletonInNewPane('commit').catch(reportOpenError)),
+						: workspace.openSingletonInNewWindow('commit').catch(reportOpenError)),
 			},
 		];
 	});

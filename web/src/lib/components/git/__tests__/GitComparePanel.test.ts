@@ -58,7 +58,7 @@ describe('GitComparePanel', () => {
 
 		render(GitComparePanel, {
 			controller,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			visible: false,
 		});
 

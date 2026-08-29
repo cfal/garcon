@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
-	import { getChatSessions, getComposerState, getLocalSettings } from '$lib/context';
-	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
+	import {
+		getChatSessions,
+		getComposerState,
+		getLocalSettings,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
 	import { PromptComposerEditorController } from './prompt-composer-editor-controller.js';
@@ -38,6 +42,8 @@
 	const composer = getComposerState();
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
+	const workspace = getWorkspaceCoordinator();
+	const chatSurfaceId = $derived(workspace.currentChatSurfaceId);
 	const controller = new PromptComposerEditorController({
 		get ui() {
 			return ui;
@@ -103,7 +109,7 @@
 		selection={ui.composerEditorSelection}
 		focusRequestId={ui.composerEditorFocusRequestId}
 		readOnly={promptTransformPending}
-		surfaceId={CHAT_SURFACE_ID}
+		surfaceId={chatSurfaceId}
 		headerStatus={expandedEditorHeaderStatus}
 		{canRefinePrompt}
 		{isPromptRefinementPending}

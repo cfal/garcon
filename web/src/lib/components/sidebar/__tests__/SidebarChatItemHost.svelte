@@ -1,8 +1,10 @@
 <script lang="ts">
 	import SidebarChatItem from '../SidebarChatItem.svelte';
-	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import { setAppShell, setModelCatalog } from '$lib/context';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface SidebarChatItemHostProps {
 		session: ChatSessionRecord;
@@ -20,6 +22,8 @@
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onForkChat?: (sourceChatId: string) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		supportsFork?: boolean;
 		supportsForkWhileRunning?: boolean;
 	}
@@ -45,6 +49,8 @@
 		onMoveToTop,
 		onMoveToBottom,
 		onForkChat = () => {},
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
@@ -67,11 +73,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext();
 </script>
 
 <SidebarChatItem
@@ -97,4 +99,6 @@
 	{onEnterMultiSelect}
 	{onMoveToTop}
 	{onMoveToBottom}
+	{onOpenInNewWindow}
+	{newWindowBlocked}
 />

@@ -1,524 +1,504 @@
 import { describe, expect, it } from 'vitest';
 import {
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_WINDOW_ID,
+	canonicalWorkspaceSnapshot,
+} from '../canonical-layout';
+import {
+	MAX_WORKSPACE_WINDOWS,
+	TERMINAL_LAUNCHER_ID,
+	chatViewSurfaceId,
+	fileSurfaceId,
+	portableSingletonDescriptor,
+	terminalSurfaceId,
+	type DesktopWorkspaceNode,
+	type SurfaceDescriptor,
+	type WorkspaceLayoutSnapshot,
+	type WorkspaceWindowId,
+	type WorkspaceWindowNode,
+} from '../surface-types';
+import {
 	WorkspaceLayoutStore,
 	assertWorkspaceLayoutInvariants,
 	reduceWorkspaceLayout,
 } from '../workspace-layout.svelte';
-import { canonicalWorkspaceSnapshot } from '../canonical-layout';
-import { paneIdOfSurface, paneNodeById, collectPaneNodes } from '../pane-tree';
-import {
-	CHAT_SURFACE_ID,
-	MAX_WORKSPACE_PANES,
-	type DesktopLayoutNode,
-	type PaneId,
-	type PaneNode,
-	type SplitId,
-	type SurfaceDescriptor,
-	type WorkspaceLayoutMutation,
-	type WorkspaceLayoutSnapshot,
-} from '../surface-types';
+import { collectWindowNodes, windowNodeById } from '../window-tree';
 
-const FILE_A: SurfaceDescriptor = {
-	id: 'file:a',
-	type: 'file',
-	fileSessionId: 'file-session-a',
-};
-
-const TERMINAL_A: SurfaceDescriptor = {
-	id: 'terminal:a',
-	type: 'terminal',
-	terminalId: 'a',
-};
-
-const TERMINAL_B: SurfaceDescriptor = {
-	id: 'terminal:b',
-	type: 'terminal',
-	terminalId: 'b',
-};
-
-function pane(id: string, tabs: readonly string[]): PaneNode {
+function workspaceWindow(
+	id: WorkspaceWindowId,
+	order: readonly string[],
+	activeId = order[0],
+): WorkspaceWindowNode {
 	return {
-		type: 'pane',
-		id: id as PaneId,
-		tabs: { order: [...tabs], activeId: tabs[0] ?? null, mru: [...tabs] },
+		type: 'window',
+		id,
+		tabs: { order, activeId, mru: [activeId, ...order.filter((item) => item !== activeId)] },
 	};
 }
 
-function split(
-	id: string,
-	direction: 'horizontal' | 'vertical',
-	children: [DesktopLayoutNode, DesktopLayoutNode],
+function partition(
+	id: `partition-${string}`,
+	first: DesktopWorkspaceNode,
+	second: DesktopWorkspaceNode,
+	direction: 'horizontal' | 'vertical' = 'horizontal',
 	ratio = 0.5,
-): DesktopLayoutNode {
-	return { type: 'split', id: id as SplitId, direction, ratio, children };
+): DesktopWorkspaceNode {
+	return { type: 'partition', id, direction, ratio, children: [first, second] };
 }
 
-function withRoot(
-	snapshot: WorkspaceLayoutSnapshot,
-	root: DesktopLayoutNode,
-): WorkspaceLayoutSnapshot {
-	return { ...snapshot, desktopRoot: root };
-}
-
-// Builds a valid snapshot whose surfaces map exactly covers the tree's
-// placements, canonical chat/git/pull-requests descriptors included.
-function snapshotWith(
-	root: DesktopLayoutNode,
-	extraSurfaces: Record<string, SurfaceDescriptor> = {},
-): WorkspaceLayoutSnapshot {
-	const canonical = canonicalWorkspaceSnapshot();
-	const surfaces: Record<string, SurfaceDescriptor> = { ...extraSurfaces };
-	for (const pane of collectPaneNodes(root)) {
-		for (const surfaceId of pane.tabs.order) {
-			surfaces[surfaceId] ??= canonical.surfaces[surfaceId];
-		}
+function descriptorFor(surfaceId: string): SurfaceDescriptor {
+	if (surfaceId.startsWith('chat-view:window-')) {
+		return { id: surfaceId as `chat-view:window-${string}`, type: 'chat', chatId: null };
 	}
-	return { ...canonical, desktopRoot: root, surfaces };
+	if (surfaceId.startsWith('singleton:')) {
+		return portableSingletonDescriptor(
+			surfaceId.slice('singleton:'.length) as Parameters<typeof portableSingletonDescriptor>[0],
+		);
+	}
+	if (surfaceId.startsWith('terminal:')) {
+		return { id: surfaceId, type: 'terminal', terminalId: surfaceId.slice('terminal:'.length) };
+	}
+	if (surfaceId.startsWith('file:')) {
+		return { id: surfaceId, type: 'file', fileSessionId: surfaceId.slice('file:'.length) };
+	}
+	if (surfaceId === TERMINAL_LAUNCHER_ID) return { id: surfaceId, type: 'terminal-launcher' };
+	throw new Error(`Unknown test surface: ${surfaceId}`);
 }
 
-function surfaceIds(snapshot: WorkspaceLayoutSnapshot, paneId: string): readonly string[] {
-	return paneNodeById(snapshot.desktopRoot, paneId as PaneId)?.tabs.order ?? [];
-}
-
-function activeOf(snapshot: WorkspaceLayoutSnapshot, paneId: string): string | null {
-	return paneNodeById(snapshot.desktopRoot, paneId as PaneId)?.tabs.activeId ?? null;
-}
-
-function mutate(
-	base: WorkspaceLayoutSnapshot,
-	mutations: readonly WorkspaceLayoutMutation[],
+function snapshotWith(
+	desktopRoot: DesktopWorkspaceNode,
+	overrides: Partial<WorkspaceLayoutSnapshot> = {},
 ): WorkspaceLayoutSnapshot {
-	return reduceWorkspaceLayout(base, mutations);
+	const ids = collectWindowNodes(desktopRoot).flatMap((candidate) => candidate.tabs.order);
+	const surfaces = Object.fromEntries(
+		ids.map((surfaceId) => [surfaceId, descriptorFor(surfaceId)]),
+	);
+	return {
+		desktopRoot,
+		surfaces,
+		fullscreenWindowId: null,
+		dialogFileSurfaceId: null,
+		mobileActiveSurfaceId: collectWindowNodes(desktopRoot)[0].tabs.activeId,
+		mobileOnlySurfaceIds: [],
+		mobileReturnStack: [],
+		unplacedTerminalIds: [],
+		...overrides,
+	};
 }
 
-describe('workspace layout reducers', () => {
-	it('creates the canonical first-run layout', () => {
-		const snapshot = canonicalWorkspaceSnapshot();
+function tabs(snapshot: WorkspaceLayoutSnapshot, windowId: WorkspaceWindowId): readonly string[] {
+	const node = windowNodeById(snapshot.desktopRoot, windowId);
+	if (!node) throw new Error(`Missing test window: ${windowId}`);
+	return node.tabs.order;
+}
 
-		expect(snapshot.desktopRoot.type).toBe('pane');
-		expect(surfaceIds(snapshot, 'pane-main')).toEqual([
-			'singleton:chat',
-			'singleton:git',
-			'singleton:pull-requests',
-		]);
-		expect(activeOf(snapshot, 'pane-main')).toBe(CHAT_SURFACE_ID);
-		expect(snapshot.fullscreenPaneId).toBeNull();
-		expect(() => assertWorkspaceLayoutInvariants(snapshot)).not.toThrow();
-	});
-
-	it('registers surfaces into a pane and tracks mru', () => {
-		const next = mutate(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, paneId: 'pane-main' },
-			{ type: 'register-surface', surface: TERMINAL_B, paneId: 'pane-main', index: 0 },
-		]);
-		expect(surfaceIds(next, 'pane-main')).toEqual([
-			'terminal:b',
-			'singleton:chat',
-			'singleton:git',
-			'singleton:pull-requests',
-			'terminal:a',
-		]);
-		const tabs = paneNodeById(next.desktopRoot, 'pane-main' as PaneId)!.tabs;
-		expect(tabs.activeId).toBe(CHAT_SURFACE_ID);
-		expect([...tabs.mru].sort()).toEqual([...tabs.order].sort());
-	});
-
-	it('activates pane tabs', () => {
-		const next = mutate(canonicalWorkspaceSnapshot(), [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
-		]);
-		expect(activeOf(next, 'pane-main')).toBe('singleton:git');
-		expect(paneNodeById(next.desktopRoot, 'pane-main' as PaneId)!.tabs.mru[0]).toBe(
-			'singleton:git',
-		);
-	});
-
-	it('rejects activation of a surface that is not in the pane', () => {
-		expect(() =>
-			mutate(canonicalWorkspaceSnapshot(), [
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:files' },
-			]),
-		).toThrow();
-	});
-
-	it('moves tabs between panes and activates them', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
-				pane('pane-2', ['singleton:files']),
-			]),
-			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
-		);
-		const moved = mutate(base, [
-			{ type: 'move-tab', surfaceId: 'singleton:git', destinationPaneId: 'pane-2' },
-		]);
-		expect(surfaceIds(moved, 'pane-2')).toEqual(['singleton:files', 'singleton:git']);
-		expect(activeOf(moved, 'pane-2')).toBe('singleton:git');
-		expect(surfaceIds(moved, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
-	});
-
-	it('collapses a pane when its last tab moves out', () => {
-		const valid = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
-				pane('pane-2', ['singleton:pull-requests']),
-			]),
-		);
-		const next = mutate(valid, [
-			{ type: 'move-tab', surfaceId: 'singleton:pull-requests', destinationPaneId: 'pane-main' },
-		]);
-		expect(next.desktopRoot.type).toBe('pane');
-		expect(surfaceIds(next, 'pane-main')).toEqual([
-			CHAT_SURFACE_ID,
-			'singleton:git',
-			'singleton:pull-requests',
-		]);
-	});
-
-	it('rejects moving the last tab out of the root pane', () => {
-		expect(() =>
-			mutate(canonicalWorkspaceSnapshot(), [
-				{ type: 'move-tab', surfaceId: 'singleton:git', destinationPaneId: 'pane-2' as PaneId },
-			]),
-		).toThrow('Pane does not exist');
-	});
-
-	it('splits a tab out to a new pane', () => {
-		const next = mutate(canonicalWorkspaceSnapshot(), [
+describe('workspace layout reducer', () => {
+	it('replaces the current window Chat in place and activates its stable tab', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'split-tab-to-edge',
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: CANONICAL_WINDOW_ID,
+				index: 0,
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: CANONICAL_WINDOW_ID,
 				surfaceId: 'singleton:git',
-				targetPaneId: 'pane-main',
-				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
 			},
 		]);
-		expect(next.desktopRoot.type).toBe('split');
-		expect(surfaceIds(next, 'pane-2')).toEqual(['singleton:git']);
-		expect(activeOf(next, 'pane-2')).toBe('singleton:git');
-		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
-		expect(paneIdOfSurface(next.desktopRoot, 'singleton:git')).toBe('pane-2');
-	});
+		const beforeOrder = [...tabs(base, CANONICAL_WINDOW_ID)];
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-b' },
+		]);
 
-	it('keeps the pane count flat when the sole tab of a pane splits into another pane', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
-				pane('pane-2', ['singleton:files']),
-			]),
-			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
+		expect(tabs(next, CANONICAL_WINDOW_ID)).toEqual(beforeOrder);
+		expect(windowNodeById(next.desktopRoot, CANONICAL_WINDOW_ID)?.tabs.activeId).toBe(
+			CANONICAL_CHAT_SURFACE_ID,
 		);
-		const next = mutate(base, [
-			{
-				type: 'split-tab-to-edge',
-				surfaceId: 'singleton:files',
-				targetPaneId: 'pane-main',
-				edge: 'bottom',
-				newPaneId: 'pane-3',
-				splitId: 'split-2',
-			},
-		]);
-		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(2);
-		expect(paneIdOfSurface(next.desktopRoot, 'singleton:files')).toBe('pane-3');
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toEqual({
+			id: CANONICAL_CHAT_SURFACE_ID,
+			type: 'chat',
+			chatId: 'chat-b',
+		});
 	});
 
-	it('treats splitting the sole tab of a pane onto its own edge as a no-op', () => {
-		const single = snapshotWith(pane('pane-main', [CHAT_SURFACE_ID]));
-		const next = mutate(single, [
+	it('inserts a missing Chat view at index zero in the exact window', () => {
+		const root = partition(
+			'partition-root',
+			workspaceWindow('window-left', ['singleton:git']),
+			workspaceWindow('window-right', ['singleton:files']),
+		);
+		const next = reduceWorkspaceLayout(snapshotWith(root), [
+			{ type: 'set-window-chat', windowId: 'window-right', chatId: 'chat-r' },
+		]);
+
+		expect(tabs(next, 'window-left')).toEqual(['singleton:git']);
+		expect(tabs(next, 'window-right')).toEqual(['chat-view:window-right', 'singleton:files']);
+		expect(windowNodeById(next.desktopRoot, 'window-right')?.tabs.activeId).toBe(
+			'chat-view:window-right',
+		);
+	});
+
+	it('allows the same chat record in different window-owned Chat views', () => {
+		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'same-chat' },
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: CHAT_SURFACE_ID,
-				targetPaneId: 'pane-main',
+				type: 'open-chat-in-new-window',
+				chatId: 'same-chat',
+				targetWindowId: CANONICAL_WINDOW_ID,
 				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				newWindowId: 'window-two',
+				partitionId: 'partition-root',
 			},
 		]);
-		expect(next).toBe(single);
+
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'same-chat' });
+		expect(next.surfaces[chatViewSurfaceId('window-two')]).toMatchObject({ chatId: 'same-chat' });
 	});
 
-	it('enforces the pane cap on splits from multi-tab panes', () => {
-		let root: DesktopLayoutNode = pane('pane-main', [CHAT_SURFACE_ID, 'terminal:t5']);
-		const extraSurfaces: Record<string, SurfaceDescriptor> = {
-			'terminal:t5': { id: 'terminal:t5', type: 'terminal', terminalId: 't5' },
-		};
-		for (let index = 2; index <= MAX_WORKSPACE_PANES; index += 1) {
-			const surfaceId = `terminal:t${index}`;
-			extraSurfaces[surfaceId] = { id: surfaceId, type: 'terminal', terminalId: `t${index}` };
-			root = split(`split-${index}`, 'horizontal', [root, pane(`pane-${index}`, [surfaceId])]);
-		}
-		const base: WorkspaceLayoutSnapshot = {
-			...canonicalWorkspaceSnapshot(),
-			desktopRoot: root,
-			surfaces: {
-				[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-				...extraSurfaces,
+	it('registers, activates, reorders, and moves ordinary tabs window-locally', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: CANONICAL_WINDOW_ID,
 			},
-		};
+			{
+				type: 'register-surface-in-new-window',
+				surface: portableSingletonDescriptor('files'),
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-files',
+				partitionId: 'partition-root',
+			},
+		]);
+		const reordered = reduceWorkspaceLayout(base, [
+			{
+				type: 'move-tab',
+				surfaceId: 'singleton:git',
+				destinationWindowId: CANONICAL_WINDOW_ID,
+				index: 0,
+			},
+		]);
+		const moved = reduceWorkspaceLayout(reordered, [
+			{
+				type: 'move-tab',
+				surfaceId: 'singleton:git',
+				destinationWindowId: 'window-files',
+				index: 0,
+			},
+		]);
+
+		expect(tabs(reordered, CANONICAL_WINDOW_ID)).toEqual([
+			'singleton:git',
+			CANONICAL_CHAT_SURFACE_ID,
+		]);
+		expect(tabs(moved, CANONICAL_WINDOW_ID)).toEqual([CANONICAL_CHAT_SURFACE_ID]);
+		expect(tabs(moved, 'window-files')).toEqual(['singleton:git', 'singleton:files']);
+		expect(windowNodeById(moved.desktopRoot, 'window-files')?.tabs.activeId).toBe('singleton:git');
+	});
+
+	it('keeps a nonactivating assignment nonactivating in the destination', () => {
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-left', [chatViewSurfaceId('window-left'), 'singleton:git']),
+				workspaceWindow('window-right', ['singleton:files']),
+			),
+		);
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'assign-to-window',
+				surfaceId: 'singleton:git',
+				destinationWindowId: 'window-right',
+				index: 0,
+			},
+		]);
+
+		expect(tabs(next, 'window-right')).toEqual(['singleton:git', 'singleton:files']);
+		expect(windowNodeById(next.desktopRoot, 'window-right')?.tabs.activeId).toBe('singleton:files');
+	});
+
+	it('opens a tab in a new window and atomically collapses a sole-tab source', () => {
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-chat', [chatViewSurfaceId('window-chat')]),
+				workspaceWindow('window-git', ['singleton:git']),
+			),
+		);
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'open-tab-in-new-window',
+				surfaceId: 'singleton:git',
+				targetWindowId: 'window-chat',
+				edge: 'bottom',
+				newWindowId: 'window-new',
+				partitionId: 'partition-new',
+			},
+		]);
+
+		expect(collectWindowNodes(next.desktopRoot).map((item) => item.id)).toEqual([
+			'window-chat',
+			'window-new',
+		]);
+		expect(tabs(next, 'window-new')).toEqual(['singleton:git']);
+	});
+
+	it('rejects generic movement and removal of anchored Chat views', () => {
 		expect(() =>
-			mutate(base, [
+			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 				{
-					type: 'split-tab-to-edge',
-					surfaceId: CHAT_SURFACE_ID,
-					targetPaneId: 'pane-2' as PaneId,
-					edge: 'right',
-					newPaneId: 'pane-99' as PaneId,
-					splitId: 'split-99' as SplitId,
+					type: 'move-tab',
+					surfaceId: CANONICAL_CHAT_SURFACE_ID,
+					destinationWindowId: CANONICAL_WINDOW_ID,
 				},
 			]),
-		).toThrow('Pane count limit reached');
+		).toThrow('cannot move');
+		expect(() =>
+			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+				{ type: 'remove-surface', surfaceId: CANONICAL_CHAT_SURFACE_ID },
+			]),
+		).toThrow('cannot close as a tab');
 	});
 
-	it('allows a net-zero split of a sole-tab pane at the pane cap', () => {
-		let root: DesktopLayoutNode = pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']);
-		const extraSurfaces: Record<string, SurfaceDescriptor> = {};
-		for (let index = 2; index <= MAX_WORKSPACE_PANES; index += 1) {
-			const surfaceId = `terminal:t${index}`;
-			extraSurfaces[surfaceId] = { id: surfaceId, type: 'terminal', terminalId: `t${index}` };
-			root = split(`split-${index}`, 'horizontal', [root, pane(`pane-${index}`, [surfaceId])]);
+	it('enforces the four-window cap while allowing a net-zero edge move', () => {
+		let root: DesktopWorkspaceNode = workspaceWindow('window-1', [chatViewSurfaceId('window-1')]);
+		for (let index = 2; index <= MAX_WORKSPACE_WINDOWS; index += 1) {
+			root = partition(
+				`partition-${index}`,
+				root,
+				workspaceWindow(`window-${index}`, [`terminal:${index}`]),
+			);
 		}
-		const base: WorkspaceLayoutSnapshot = {
-			...canonicalWorkspaceSnapshot(),
-			desktopRoot: root,
-			surfaces: {
-				[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-				'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
-				...extraSurfaces,
-			},
-		};
-		const next = mutate(base, [
+		const full = snapshotWith(root);
+		const netZero = reduceWorkspaceLayout(full, [
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: 'terminal:t4',
-				targetPaneId: 'pane-main',
+				type: 'open-tab-in-new-window',
+				surfaceId: 'terminal:4',
+				targetWindowId: 'window-1',
+				edge: 'left',
+				newWindowId: 'window-replaced',
+				partitionId: 'partition-replaced',
+			},
+		]);
+		expect(collectWindowNodes(netZero.desktopRoot)).toHaveLength(MAX_WORKSPACE_WINDOWS);
+
+		const withExtraTab = reduceWorkspaceLayout(full, [
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: 'window-4',
+			},
+		]);
+		expect(() =>
+			reduceWorkspaceLayout(withExtraTab, [
+				{
+					type: 'open-tab-in-new-window',
+					surfaceId: 'singleton:git',
+					targetWindowId: 'window-1',
+					edge: 'right',
+					newWindowId: 'window-overflow',
+					partitionId: 'partition-overflow',
+				},
+			]),
+		).toThrow('count limit');
+	});
+
+	it('closes a whole window without merging its tabs and unplaces terminals', () => {
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-chat', [chatViewSurfaceId('window-chat')]),
+				workspaceWindow('window-tools', ['singleton:git', 'terminal:t1']),
+			),
+		);
+		const next = reduceWorkspaceLayout(base, [{ type: 'close-window', windowId: 'window-tools' }]);
+
+		expect(next.desktopRoot).toEqual(
+			workspaceWindow('window-chat', [chatViewSurfaceId('window-chat')]),
+		);
+		expect(next.surfaces['singleton:git']).toBeUndefined();
+		expect(next.surfaces['terminal:t1']).toBeUndefined();
+		expect(next.unplacedTerminalIds).toEqual(['t1']);
+		expect(() =>
+			reduceWorkspaceLayout(next, [{ type: 'close-window', windowId: 'window-chat' }]),
+		).toThrow('At least one');
+	});
+
+	it('retains only the fullscreen target and permanently removes every other window', () => {
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-chat', [chatViewSurfaceId('window-chat'), 'singleton:git']),
+				workspaceWindow('window-terminal', ['terminal:t2']),
+			),
+		);
+		const entered = reduceWorkspaceLayout(base, [
+			{ type: 'retain-only-window', windowId: 'window-chat' },
+		]);
+
+		expect(collectWindowNodes(entered.desktopRoot).map((item) => item.id)).toEqual(['window-chat']);
+		expect(entered.fullscreenWindowId).toBe('window-chat');
+		expect(entered.surfaces['terminal:t2']).toBeUndefined();
+		expect(entered.unplacedTerminalIds).toEqual(['t2']);
+		const exited = reduceWorkspaceLayout(entered, [
+			{ type: 'set-fullscreen-window', windowId: null },
+		]);
+		expect(exited.fullscreenWindowId).toBeNull();
+		expect(collectWindowNodes(exited.desktopRoot)).toHaveLength(1);
+	});
+
+	it('clears fullscreen when a new window is opened', () => {
+		const fullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'retain-only-window', windowId: CANONICAL_WINDOW_ID },
+		]);
+		const next = reduceWorkspaceLayout(fullscreen, [
+			{
+				type: 'register-surface-in-new-window',
+				surface: portableSingletonDescriptor('git'),
+				targetWindowId: CANONICAL_WINDOW_ID,
 				edge: 'right',
-				newPaneId: 'pane-99' as PaneId,
-				splitId: 'split-99' as SplitId,
+				newWindowId: 'window-git',
+				partitionId: 'partition-root',
 			},
 		]);
-		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(MAX_WORKSPACE_PANES);
-		expect(paneIdOfSurface(next.desktopRoot, 'terminal:t4')).toBe('pane-99');
+		expect(next.fullscreenWindowId).toBeNull();
 	});
 
-	it('keeps assign-to-pane stable when the surface already owns the destination', () => {
-		const base = snapshotWith(pane('pane-main', [CHAT_SURFACE_ID]));
-		const next = mutate(base, [
+	it('clamps partition ratios and preserves complete MRU state', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'assign-to-pane',
-				surfaceId: CHAT_SURFACE_ID,
-				destinationPaneId: 'pane-main',
+				type: 'register-surface-in-new-window',
+				surface: portableSingletonDescriptor('git'),
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-git',
+				partitionId: 'partition-root',
 			},
 		]);
-		expect(collectPaneNodes(next.desktopRoot)).toHaveLength(1);
-		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID]);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'set-partition-ratio', partitionId: 'partition-root', ratio: 5 },
+		]);
+		expect(next.desktopRoot.type).toBe('partition');
+		if (next.desktopRoot.type !== 'partition') throw new Error('Expected partition root');
+		expect(next.desktopRoot.ratio).toBe(0.85);
+		for (const item of collectWindowNodes(next.desktopRoot)) {
+			expect(new Set(item.tabs.mru)).toEqual(new Set(item.tabs.order));
+		}
 	});
 
-	it('registers a new surface directly into a new split pane', () => {
-		const next = mutate(canonicalWorkspaceSnapshot(), [
+	it('moves file surfaces through dialog and back into an exact window', () => {
+		const fileId = fileSurfaceId('f1');
+		const registered = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'register-surface-in-split',
-				surface: TERMINAL_A,
-				targetPaneId: 'pane-main',
-				edge: 'bottom',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				type: 'register-surface',
+				surface: { id: fileId, type: 'file', fileSessionId: 'f1' },
+				windowId: CANONICAL_WINDOW_ID,
 			},
 		]);
-		expect(next.desktopRoot.type).toBe('split');
-		const splitNode = next.desktopRoot;
-		if (splitNode.type !== 'split') throw new Error('expected split');
-		expect(splitNode.direction).toBe('vertical');
-		expect(surfaceIds(next, 'pane-2')).toEqual(['terminal:a']);
-		expect(activeOf(next, 'pane-2')).toBe('terminal:a');
-	});
-
-	it('merges a pane into another pane', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
-				pane('pane-2', ['singleton:files']),
-			]),
-			{ 'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' } },
-		);
-		const next = mutate(base, [
-			{ type: 'merge-pane', sourcePaneId: 'pane-2', destinationPaneId: 'pane-main' },
+		const dialog = reduceWorkspaceLayout(registered, [
+			{ type: 'place-in-dialog', surfaceId: fileId },
 		]);
-		expect(next.desktopRoot.type).toBe('pane');
-		expect(surfaceIds(next, 'pane-main')).toEqual([
-			CHAT_SURFACE_ID,
-			'singleton:git',
-			'singleton:pull-requests',
-			'singleton:files',
-		]);
-		expect(activeOf(next, 'pane-main')).toBe(CHAT_SURFACE_ID);
-	});
+		expect(dialog.dialogFileSurfaceId).toBe(fileId);
+		expect(tabs(dialog, CANONICAL_WINDOW_ID)).toEqual([CANONICAL_CHAT_SURFACE_ID]);
 
-	it('sets and clamps split ratios', () => {
-		const valid = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
-				pane('pane-2', ['singleton:pull-requests']),
-			]),
-		);
-		const resized = mutate(valid, [{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.7 }]);
-		expect(resized.desktopRoot.type === 'split' && resized.desktopRoot.ratio).toBe(0.7);
-		const clamped = mutate(valid, [{ type: 'set-split-ratio', splitId: 'split-1', ratio: 0.95 }]);
-		expect(clamped.desktopRoot.type === 'split' && clamped.desktopRoot.ratio).toBe(0.85);
-	});
-
-	it('toggles pane fullscreen and clears it when the pane disappears', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git']),
-				pane('pane-2', ['singleton:pull-requests']),
-			]),
-		);
-		const fullscreen = mutate(base, [{ type: 'set-fullscreen-pane', paneId: 'pane-2' }]);
-		expect(fullscreen.fullscreenPaneId).toBe('pane-2');
-		const cleared = mutate(fullscreen, [
-			{ type: 'merge-pane', sourcePaneId: 'pane-2', destinationPaneId: 'pane-main' },
-		]);
-		expect(cleared.fullscreenPaneId).toBeNull();
-		expect(() =>
-			mutate(base, [{ type: 'set-fullscreen-pane', paneId: 'pane-missing' as PaneId }]),
-		).toThrow('Pane does not exist');
-	});
-
-	it('moves a dialog file into a pane', () => {
-		const withDialog = mutate(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: FILE_A },
-			{ type: 'place-in-dialog', surfaceId: 'file:a' },
-		]);
-		expect(withDialog.dialogFileSurfaceId).toBe('file:a');
-		expect(withDialog.mobileOnlySurfaceIds).not.toContain('file:a');
-		const docked = mutate(withDialog, [
-			{ type: 'move-dialog-to-pane', surfaceId: 'file:a', destinationPaneId: 'pane-main' },
-		]);
-		expect(docked.dialogFileSurfaceId).toBeNull();
-		expect(surfaceIds(docked, 'pane-main')).toContain('file:a');
-		expect(activeOf(docked, 'pane-main')).toBe('file:a');
-	});
-
-	it('rejects placing non-file surfaces in the dialog', () => {
-		expect(() =>
-			mutate(canonicalWorkspaceSnapshot(), [
-				{ type: 'place-in-dialog', surfaceId: 'singleton:git' },
-			]),
-		).toThrow('Only file surfaces can enter dialog');
-	});
-
-	it('unplaces and forgets terminals, collapsing emptied panes', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
-				pane('pane-2', ['terminal:a']),
-			]),
-			{ 'terminal:a': TERMINAL_A },
-		);
-		const unplaced = mutate(base, [{ type: 'unplace-terminal', terminalId: 'a' }]);
-		expect(unplaced.desktopRoot.type).toBe('pane');
-		expect(unplaced.unplacedTerminalIds).toEqual(['a']);
-		expect(unplaced.surfaces['terminal:a']).toBeUndefined();
-
-		const forgotten = mutate(unplaced, [{ type: 'forget-terminal', terminalId: 'a' }]);
-		expect(forgotten.unplacedTerminalIds).toEqual([]);
-	});
-
-	it('swaps terminal placements across panes', () => {
-		const base = snapshotWith(
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'terminal:a']),
-				pane('pane-2', ['terminal:b']),
-			]),
-			{ 'terminal:a': TERMINAL_A, 'terminal:b': TERMINAL_B },
-		);
-		const swapped = mutate(base, [
+		const restored = reduceWorkspaceLayout(dialog, [
 			{
-				type: 'swap-terminal-placements',
-				firstSurfaceId: 'terminal:a',
-				secondSurfaceId: 'terminal:b',
+				type: 'move-dialog-to-window',
+				surfaceId: fileId,
+				destinationWindowId: CANONICAL_WINDOW_ID,
 			},
 		]);
-		expect(surfaceIds(swapped, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'terminal:b']);
-		expect(surfaceIds(swapped, 'pane-2')).toEqual(['terminal:a']);
+		expect(restored.dialogFileSurfaceId).toBeNull();
+		expect(windowNodeById(restored.desktopRoot, CANONICAL_WINDOW_ID)?.tabs.activeId).toBe(fileId);
 	});
 
-	it('replaces surfaces in place', () => {
-		const withTerminal = mutate(canonicalWorkspaceSnapshot(), [
-			{ type: 'register-surface', surface: TERMINAL_A, paneId: 'pane-main' },
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'terminal:a' },
-		]);
-		const replaced = mutate(withTerminal, [
+	it('tracks unplaced and replaced terminal identities', () => {
+		const firstId = terminalSurfaceId('a');
+		const secondId = terminalSurfaceId('b');
+		const placed = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: { id: firstId, type: 'terminal', terminalId: 'a' },
+				windowId: CANONICAL_WINDOW_ID,
+			},
 			{
 				type: 'replace-surface',
-				previousId: 'terminal:a',
-				surface: TERMINAL_B,
+				previousId: firstId,
+				surface: { id: secondId, type: 'terminal', terminalId: 'b' },
 			},
 		]);
-		expect(surfaceIds(replaced, 'pane-main')).toContain('terminal:b');
-		expect(activeOf(replaced, 'pane-main')).toBe('terminal:b');
-		expect(replaced.unplacedTerminalIds).toEqual(['a']);
+		expect(placed.unplacedTerminalIds).toEqual(['a']);
+		const unplaced = reduceWorkspaceLayout(placed, [{ type: 'unplace-terminal', terminalId: 'b' }]);
+		expect(unplaced.surfaces[secondId]).toBeUndefined();
+		expect(unplaced.unplacedTerminalIds).toEqual(['a', 'b']);
 	});
+});
 
-	it('removes surfaces and keeps chat', () => {
-		expect(() =>
-			mutate(canonicalWorkspaceSnapshot(), [{ type: 'remove-surface', surfaceId: CHAT_SURFACE_ID }]),
-		).toThrow('Chat cannot close');
-		const next = mutate(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:git' },
-		]);
-		expect(surfaceIds(next, 'pane-main')).toEqual([CHAT_SURFACE_ID, 'singleton:pull-requests']);
-	});
+describe('workspace layout invariants', () => {
+	it('rejects a Chat descriptor in the wrong window or two Chat views in one window', () => {
+		const wrong = snapshotWith(workspaceWindow('window-wrong', [CANONICAL_CHAT_SURFACE_ID]));
+		expect(() => assertWorkspaceLayoutInvariants(wrong)).toThrow('does not match');
 
-	it('rejects duplicate surfaces and duplicate pane ids', () => {
-		expect(() =>
-			mutate(canonicalWorkspaceSnapshot(), [
-				{
-					type: 'register-surface',
-					surface: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-					paneId: 'pane-main',
-				},
-			]),
-		).toThrow('Surface already exists');
-		const duplicated = withRoot(
-			canonicalWorkspaceSnapshot(),
-			split('split-1', 'horizontal', [
-				pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']),
-				pane('pane-main', ['singleton:git']),
-			]),
+		const secondChat = chatViewSurfaceId('window-second');
+		const duplicate = snapshotWith(
+			workspaceWindow('window-main', [CANONICAL_CHAT_SURFACE_ID, secondChat]),
 		);
-		expect(() => assertWorkspaceLayoutInvariants(duplicated)).toThrow('Pane ID is duplicated');
+		expect(() => assertWorkspaceLayoutInvariants(duplicate)).toThrow('more than one Chat');
 	});
 
-	it('requires surfaces to have exactly one ownership bucket', () => {
-		const dangling = withRoot(
-			canonicalWorkspaceSnapshot(),
-			pane('pane-main', [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests', 'file:x']),
-		);
-		expect(() => assertWorkspaceLayoutInvariants(dangling)).toThrow(
-			'Placement references missing surface',
-		);
-	});
+	it('rejects invalid prefixes, duplicate IDs, stale MRU, and hidden fullscreen topology', () => {
+		const badPrefix = {
+			...canonicalWorkspaceSnapshot(),
+			desktopRoot: { ...canonicalWorkspaceSnapshot().desktopRoot, id: 'main' },
+		} as unknown as WorkspaceLayoutSnapshot;
+		expect(() => assertWorkspaceLayoutInvariants(badPrefix)).toThrow('invalid prefix');
 
-	it('tracks store revisions on publish', () => {
+		const duplicate = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-dup', [CANONICAL_CHAT_SURFACE_ID]),
+				workspaceWindow('window-dup', ['singleton:git']),
+			),
+		);
+		expect(() => assertWorkspaceLayoutInvariants(duplicate)).toThrow('duplicated');
+
+		const staleMru = canonicalWorkspaceSnapshot();
+		if (staleMru.desktopRoot.type !== 'window') throw new Error('Expected window root');
+		const invalidMru = {
+			...staleMru,
+			desktopRoot: {
+				...staleMru.desktopRoot,
+				tabs: { ...staleMru.desktopRoot.tabs, mru: ['missing'] },
+			},
+		};
+		expect(() => assertWorkspaceLayoutInvariants(invalidMru)).toThrow('MRU');
+
+		const twoWindows = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-main', [CANONICAL_CHAT_SURFACE_ID]),
+				workspaceWindow('window-git', ['singleton:git']),
+			),
+			{ fullscreenWindowId: 'window-main' },
+		);
+		expect(() => assertWorkspaceLayoutInvariants(twoWindows)).toThrow('Fullscreen');
+	});
+});
+
+describe('WorkspaceLayoutStore', () => {
+	it('publishes only the expected revision and exposes the first window defaults', () => {
 		const store = new WorkspaceLayoutStore();
-		expect(store.revision).toBe(0);
-		const next = mutate(store.snapshot, [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+		expect(store.defaultWindowId).toBe(CANONICAL_WINDOW_ID);
+		expect(store.defaultActiveId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		const next = reduceWorkspaceLayout(store.snapshot, [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-a' },
 		]);
-		expect(store.publish(store.revision, next)).toBe(true);
+		expect(store.publish(1, next)).toBe(false);
+		expect(store.publish(0, next)).toBe(true);
 		expect(store.revision).toBe(1);
-		expect(store.chatPaneId).toBe('pane-main');
-		expect(store.defaultActiveId).toBe('singleton:git');
-	});
-
-	it('rejects stale revisions on publish', () => {
-		const store = new WorkspaceLayoutStore();
-		const next = mutate(store.snapshot, [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
-		]);
-		expect(store.publish(5, next)).toBe(false);
-		expect(store.revision).toBe(0);
+		expect(store.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'chat-a' });
 	});
 });

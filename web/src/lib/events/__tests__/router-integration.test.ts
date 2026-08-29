@@ -12,7 +12,7 @@ import { getChatSnapshot } from '$lib/api/chats.js';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
 
 vi.mock('$lib/api/chats.js', async (importOriginal) => ({
-	...await importOriginal<typeof import('$lib/api/chats.js')>(),
+	...(await importOriginal<typeof import('$lib/api/chats.js')>()),
 	getChatSnapshot: vi.fn(),
 }));
 
@@ -168,11 +168,14 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			startupCoordinator: new StartupCoordinator(),
 			onExternalChatCreated: vi.fn(),
 		},
-		readState: {
-			enqueueReadReceipt: vi.fn(),
-		},
-		...overrides,
-	};
+			readState: {
+				enqueueReadReceipt: vi.fn(),
+			},
+			chatPresentations: {
+				clearDeletedChat: vi.fn(),
+			},
+			...overrides,
+		};
 }
 
 function renderRouterWithRawMessages(
@@ -206,6 +209,16 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.sessions.quietRefreshChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears workspace Chat presentations when a chat is deleted remotely', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[{ type: 'chat-session-deleted', chatId: 'chat-a' }],
+			stores,
+		);
+
+		expect(stores.chatPresentations.clearDeletedChat).toHaveBeenCalledWith('chat-a');
 	});
 
 	it('routes ws-fault through normalize + global filter + handler without a chat ID', () => {
@@ -328,9 +341,7 @@ describe('event router integration', () => {
 	it('leaves processing events to the synchronous WebSocket reconciler', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[
-				{ type: 'chat-processing-updated', chatId: 'chat-a', phase: null },
-			],
+			[{ type: 'chat-processing-updated', chatId: 'chat-a', phase: null }],
 			stores,
 		);
 
@@ -444,7 +455,7 @@ describe('event router integration', () => {
 		warn.mockRestore();
 	});
 
-	it('warms visible split-pane previews before background chat filtering skips them', () => {
+	it('warms visible Chat-window previews before background chat filtering skips them', () => {
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -492,7 +503,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
 	});
 
-	it('reloads visible split-pane previews when live warming detects a gap', () => {
+	it('reloads visible Chat-window previews when live warming detects a gap', () => {
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -596,7 +607,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
 	});
 
-	it('reloads visible split-pane previews on transcript replacement', () => {
+	it('reloads visible Chat-window previews on transcript replacement', () => {
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -632,9 +643,9 @@ describe('event router integration', () => {
 		});
 		vi.mocked(getChatSnapshot).mockReturnValue(pendingSnapshot);
 		const stores = createStores();
-		expect(stores.conversationUi.setTransientFeedFromSnapshot(
-			transientFeed('generation-old'),
-		)).toMatchObject({ kind: 'applied' });
+		expect(
+			stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-old')),
+		).toMatchObject({ kind: 'applied' });
 
 		renderRouterWithRawMessages(
 			[
@@ -674,10 +685,12 @@ describe('event router integration', () => {
 		vi.mocked(getChatSnapshot).mockReturnValue(pendingSnapshot);
 		const stores = createStores();
 		const applySnapshot = vi.spyOn(stores.conversationUi, 'setTransientFeedFromSnapshot');
-		expect(stores.conversationUi.setTransientFeedFromSnapshot({
-			...transientFeed('generation-current'),
-			serverInstanceId: 'server-old',
-		})).toMatchObject({ kind: 'applied' });
+		expect(
+			stores.conversationUi.setTransientFeedFromSnapshot({
+				...transientFeed('generation-current'),
+				serverInstanceId: 'server-old',
+			}),
+		).toMatchObject({ kind: 'applied' });
 
 		renderRouterWithRawMessages(
 			[
@@ -692,10 +705,12 @@ describe('event router integration', () => {
 		);
 
 		await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledWith('chat-a', 1));
-		expect(stores.conversationUi.setTransientFeedFromSnapshot({
-			...transientFeed('generation-current'),
-			serverInstanceId: 'server-new',
-		})).toMatchObject({ kind: 'applied' });
+		expect(
+			stores.conversationUi.setTransientFeedFromSnapshot({
+				...transientFeed('generation-current'),
+				serverInstanceId: 'server-new',
+			}),
+		).toMatchObject({ kind: 'applied' });
 
 		resolveSnapshot({
 			...chatSnapshot('generation-current'),

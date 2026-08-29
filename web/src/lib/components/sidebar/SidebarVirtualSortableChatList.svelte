@@ -3,7 +3,7 @@
 	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
-	import { getAppShell, getSplitLayout } from '$lib/context';
+	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
@@ -34,7 +34,9 @@
 	} from './sidebar-pragmatic-dnd';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.svelte.js';
+	import { SidebarWorkspaceChatDragBridge } from './sidebar-workspace-chat-drag-bridge.js';
 
 	interface SidebarVirtualSortableChatListProps {
 		rows: SidebarVirtualRow[];
@@ -60,6 +62,8 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
@@ -90,6 +94,8 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
@@ -97,7 +103,7 @@
 	}: SidebarVirtualSortableChatListProps = $props();
 
 	const appShell = getAppShell();
-	const splitLayout = getSplitLayout();
+	const workspaceChatDrag = new SidebarWorkspaceChatDragBridge(getWorkspaceWindowDnd());
 	const instanceId = Symbol('sidebar-chat-list');
 	const desktopBottomPadding = 16;
 	const mobileBottomPadding = 112;
@@ -132,7 +138,7 @@
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
 	// Reorder and quick-move only apply to the manual sort order; the
 	// recent-activity sort is derived, so reordering is disabled there.
-	// Dragging a chat onto a workspace panel stays available in every sort mode.
+	// Dragging a chat onto a workspace window stays available in every sort mode.
 	let dragEnabled = $derived(!isMultiSelectMode);
 	let reorderEnabled = $derived(dragEnabled && displayOptions.sortMode === 'manual');
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
@@ -246,7 +252,7 @@
 		if (reorderEnabled) {
 			reorder.begin(row.list, row.chat.id, { ids: row.reorderScopeIds });
 		}
-		splitLayout.startDrag(row.chat.id);
+		workspaceChatDrag.begin(row.chat.id);
 	}
 
 	function cancelUnmountedDragSource(chatId: string): void {
@@ -254,7 +260,7 @@
 		const ownsNativeDrag = draggingChatId === chatId && !(ownsTouchDrag && touchDrag?.activated);
 		if (ownsTouchDrag) cancelTouchDrag();
 		if (!ownsNativeDrag) return;
-		// Split-only drags (derived sort modes) survive a source row unmount: a
+		// Window-only drags (derived sort modes) survive a source row unmount: a
 		// real drop still reaches the list-level monitor and ends the drag there,
 		// and a cancelled drag is recovered by pragmatic's broken-drag detection.
 		// Reorder drags need eager cleanup because their preview state is tied to
@@ -262,7 +268,7 @@
 		if (!reorderEnabled) return;
 		if (reorder.activeList) reorder.cancel(reorder.activeList);
 		clearDragPresentation();
-		if (splitLayout.draggedChatId === chatId) splitLayout.endDrag();
+		workspaceChatDrag.endIfOwned(chatId);
 	}
 
 	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
@@ -450,7 +456,7 @@
 
 		clearDragPresentation();
 		setTimeout(() => {
-			if (splitLayout.draggedChatId === sourceData.chatId) splitLayout.endDrag();
+			workspaceChatDrag.endIfOwned(sourceData.chatId);
 		}, 0);
 	}
 
@@ -649,7 +655,7 @@
 		const current = touchDrag;
 		if (current?.activated) {
 			reorder.cancel(current.sourceList);
-			if (splitLayout.draggedChatId === current.sourceChatId) splitLayout.endDrag();
+			workspaceChatDrag.endIfOwned(current.sourceChatId);
 			clearDragPresentation();
 		}
 		clearTouchDrag();
@@ -665,7 +671,7 @@
 		reorder.begin(current.sourceList, current.sourceChatId, {
 			ids: chatRowForId(current.sourceChatId)?.reorderScopeIds ?? [current.sourceChatId],
 		});
-		splitLayout.startDrag(current.sourceChatId);
+		workspaceChatDrag.begin(current.sourceChatId);
 		previewTouchDrop(current.currentX, current.currentY);
 		scheduleTouchAutoScroll();
 	}
@@ -750,7 +756,7 @@
 			reorder.cancel(current.sourceList);
 		}
 
-		if (splitLayout.draggedChatId === current.sourceChatId) splitLayout.endDrag();
+		workspaceChatDrag.endIfOwned(current.sourceChatId);
 		clearDragPresentation();
 		clearTouchDrag();
 	}
@@ -897,9 +903,7 @@
 	onDestroy(() => {
 		// The drag monitor is torn down with the list, so a drag the list still
 		// owns (its source row may already be unmounted) would leak otherwise.
-		if (draggingChatId && splitLayout.draggedChatId === draggingChatId) {
-			splitLayout.endDrag();
-		}
+		workspaceChatDrag.endIfOwned(draggingChatId);
 		virtual.destroy();
 	});
 </script>
@@ -978,6 +982,8 @@
 							{onShareChat}
 							{onTagClick}
 							{onManageTags}
+							{onOpenInNewWindow}
+							{newWindowBlocked}
 							{onEnterMultiSelect}
 							{onMultiSelectToggle}
 							onMoveToTop={getMoveToTop(row)}

@@ -31,10 +31,11 @@
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
+	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface QuickMoveWrite {
 		list: PersistedChatOrderGroup;
@@ -64,9 +65,10 @@
 		onForkChat: (sourceChatId: string) => Promise<void> | void;
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onManageTags: (chat: ChatSessionRecord) => void;
+		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
-		newPaneActions: WorkspaceNewPaneActions;
+		newWindowActions: WorkspaceNewWindowActions;
 	}
 
 	let {
@@ -86,9 +88,10 @@
 		onForkChat,
 		onShareChat,
 		onManageTags,
+		onOpenChatInNewWindow,
 		onShowScheduledPrompts,
 		onShowSettings,
-		newPaneActions,
+		newWindowActions,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
@@ -463,7 +466,7 @@
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
 			{onShowSettings}
-			{newPaneActions}
+			{newWindowActions}
 		/>
 	</div>
 
@@ -499,6 +502,8 @@
 			{onShareChat}
 			onTagClick={handleTagClick}
 			{onManageTags}
+			onOpenInNewWindow={onOpenChatInNewWindow}
+			newWindowBlocked={newWindowActions.windowLimitReached}
 			onQuickMove={handleQuickMove}
 		/>
 	</div>

@@ -13,7 +13,6 @@ export type ConversationFeedSpacing = 'responsive-feed' | 'scaled-transcript' | 
 
 export type ConversationVirtualFeedItem =
 	| { kind: 'viewport-start-spacer'; key: string; spacingAfter: 'none' }
-	| { kind: 'top-toolbar-spacer'; key: string; spacingAfter: 'none' }
 	| { kind: 'refresh-error'; key: string; spacingAfter: 'none' }
 	| { kind: 'earlier-boundary'; key: string; spacingAfter: 'none' }
 	| {
@@ -52,7 +51,6 @@ export interface ConversationVirtualFeedModel {
 }
 
 export interface ConversationVirtualFeedInput {
-	showTopToolbarSpacer: boolean;
 	showRefreshError: boolean;
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
@@ -104,13 +102,6 @@ export function buildConversationVirtualFeedModel(
 		spacingAfter: 'none',
 	});
 
-	if (input.showTopToolbarSpacer) {
-		items.push({
-			kind: 'top-toolbar-spacer',
-			key: key('prefix:top-toolbar-spacer'),
-			spacingAfter: 'none',
-		});
-	}
 	if (input.showRefreshError) {
 		items.push({
 			kind: 'refresh-error',
@@ -154,12 +145,9 @@ export function buildConversationVirtualFeedModel(
 		});
 		for (const [permissionIndex, request] of anchored.entries()) {
 			const isLastAnchored = permissionIndex === anchored.length - 1;
-			items.push(permissionItem(
-				key,
-				request,
-				permissionIndex === 0,
-				!(isLastAnchored && isLastItem),
-			));
+			items.push(
+				permissionItem(key, request, permissionIndex === 0, !(isLastAnchored && isLastItem)),
+			);
 		}
 	}
 	for (const permissions of permissionsByAnchor.values()) detachedPermissions.push(...permissions);
@@ -173,12 +161,14 @@ export function buildConversationVirtualFeedModel(
 		});
 	}
 	for (const [permissionIndex, request] of detachedPermissions.entries()) {
-		items.push(permissionItem(
-			key,
-			request,
-			permissionIndex === 0,
-			permissionIndex < detachedPermissions.length - 1,
-		));
+		items.push(
+			permissionItem(
+				key,
+				request,
+				permissionIndex === 0,
+				permissionIndex < detachedPermissions.length - 1,
+			),
+		);
 	}
 	items.push({
 		kind: 'viewport-end-spacer',
@@ -271,7 +261,6 @@ export function estimateConversationFeedItemSize(
 	if (!item) return 120;
 	if (item.kind === 'viewport-start-spacer') return 16;
 	if (item.kind === 'viewport-end-spacer') return item.reserveComposerTraySpace ? 56 : 16;
-	if (item.kind === 'top-toolbar-spacer') return 48;
 	if (
 		item.kind === 'refresh-error' ||
 		item.kind === 'earlier-boundary' ||

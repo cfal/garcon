@@ -179,24 +179,24 @@ describe('Settings', () => {
 			const markdownViewerPlacement = screen.getByRole('combobox', {
 				name: 'Markdown viewers',
 			});
-			expect(screen.getAllByRole('option', { name: 'Same pane' })).toHaveLength(3);
-			expect(screen.getAllByRole('option', { name: 'New pane' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Same window' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'New window' })).toHaveLength(3);
 			expect(screen.getAllByRole('option', { name: 'Dialog' })).toHaveLength(3);
-			expect((textEditorPlacement as HTMLSelectElement).value).toBe('source');
-			expect((imageViewerPlacement as HTMLSelectElement).value).toBe('source');
-			expect((markdownViewerPlacement as HTMLSelectElement).value).toBe('source');
-			await fireEvent.change(textEditorPlacement, { target: { value: 'new-pane' } });
-			await fireEvent.change(imageViewerPlacement, { target: { value: 'new-pane' } });
+			expect((textEditorPlacement as HTMLSelectElement).value).toBe('same-window');
+			expect((imageViewerPlacement as HTMLSelectElement).value).toBe('same-window');
+			expect((markdownViewerPlacement as HTMLSelectElement).value).toBe('same-window');
+			await fireEvent.change(textEditorPlacement, { target: { value: 'new-window' } });
+			await fireEvent.change(imageViewerPlacement, { target: { value: 'new-window' } });
 			await fireEvent.change(markdownViewerPlacement, { target: { value: 'dialog' } });
-			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'new-pane');
-			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'new-pane');
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'new-window');
+			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'new-window');
 			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'dialog');
-			await fireEvent.change(textEditorPlacement, { target: { value: 'source' } });
-			await fireEvent.change(imageViewerPlacement, { target: { value: 'source' } });
-			await fireEvent.change(markdownViewerPlacement, { target: { value: 'source' } });
-			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'source');
-			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'source');
-			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'source');
+			await fireEvent.change(textEditorPlacement, { target: { value: 'same-window' } });
+			await fireEvent.change(imageViewerPlacement, { target: { value: 'same-window' } });
+			await fireEvent.change(markdownViewerPlacement, { target: { value: 'same-window' } });
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'same-window');
+			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'same-window');
+			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'same-window');
 			expect(screen.queryByText('Group chats by project')).toBeNull();
 			expect(screen.queryByText('Group nested project paths')).toBeNull();
 			expect(

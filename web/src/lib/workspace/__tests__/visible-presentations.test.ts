@@ -7,35 +7,35 @@ import {
 	visiblePresentationMap,
 	visiblePortablePresentations,
 } from '../visible-presentations';
-import type { PaneId, WorkspaceLayoutSnapshot } from '../surface-types';
+import type { WorkspaceWindowId, WorkspaceLayoutSnapshot } from '../surface-types';
 
-function twoPaneLayout(): WorkspaceLayoutSnapshot {
+function twoWindowLayout(): WorkspaceLayoutSnapshot {
 	return reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 		{
-			type: 'split-tab-to-edge',
-			surfaceId: 'singleton:git',
-			targetPaneId: 'pane-main',
+			type: 'register-surface-in-new-window',
+			surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+			targetWindowId: 'window-main',
 			edge: 'right',
-			newPaneId: 'pane-2',
-			splitId: 'split-1',
+			newWindowId: 'window-2',
+			partitionId: 'partition-1',
 		},
 	]);
 }
 
 describe('visiblePortablePresentations', () => {
-	it('returns the active surface of every presented pane on desktop', () => {
-		const snapshot = twoPaneLayout();
+	it('returns the active surface of every presented window on desktop', () => {
+		const snapshot = twoWindowLayout();
 
 		expect(visiblePortablePresentations(snapshot, false)).toEqual([
-			{ surfaceId: 'singleton:git', presentation: 'pane-2' },
+			{ surfaceId: 'singleton:git', presentation: 'window-2' },
 		]);
 	});
 
 	it('omits the chat surface and projects one mobile surface', () => {
-		const snapshot = twoPaneLayout();
+		const snapshot = twoWindowLayout();
 		expect(
 			visiblePortablePresentations(snapshot, false).some(
-				({ surfaceId }) => surfaceId === 'singleton:chat',
+				({ surfaceId }) => surfaceId === 'chat-view:window-main',
 			),
 		).toBe(false);
 
@@ -51,28 +51,40 @@ describe('visiblePortablePresentations', () => {
 		]);
 	});
 
-	it('projects only the fullscreen pane on desktop and keeps mobile projection', () => {
-		const snapshot = reduceWorkspaceLayout(twoPaneLayout(), [
-			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
+	it('projects only the fullscreen window on desktop and keeps mobile projection', () => {
+		const snapshot = reduceWorkspaceLayout(twoWindowLayout(), [
+			{ type: 'retain-only-window', windowId: 'window-2' },
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		expect([...visiblePresentationMap(snapshot, 'desktop')]).toEqual([
-			['pane-2', 'singleton:git'],
+			['window-2', 'singleton:git'],
 		]);
-		expect([...visiblePresentationMap(snapshot, 'mobile')]).toEqual([
-			['mobile', 'singleton:chat'],
-		]);
+		expect([...visiblePresentationMap(snapshot, 'mobile')]).toEqual([['mobile', 'singleton:git']]);
 	});
 
-	it('retains activated singleton renderers per pane without retaining session surfaces', () => {
+	it('retains activated singleton renderers per window without retaining session surfaces', () => {
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:git' },
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-main',
+				surfaceId: 'singleton:git',
+			},
 		]);
 		const gitVisible = visiblePortablePresentations(gitActive, false);
 		const retained = nextRetainedSingletonPresentationKeys(gitActive, false, gitVisible, new Set());
-		expect([...retained]).toEqual(['pane-main:singleton:git']);
+		expect([...retained]).toEqual(['window-main:singleton:git']);
 
 		const chatActive = reduceWorkspaceLayout(gitActive, [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: 'singleton:chat' },
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-main',
+				surfaceId: 'chat-view:window-main',
+			},
 		]);
 		const chatVisible = visiblePortablePresentations(chatActive, false);
 		const nextRetained = nextRetainedSingletonPresentationKeys(
@@ -85,26 +97,27 @@ describe('visiblePortablePresentations', () => {
 		expect(renderedPortablePresentations(chatActive, false, chatVisible, nextRetained)).toEqual([
 			{
 				surfaceId: 'singleton:git',
-				presentation: 'pane-main' as PaneId,
-				paneId: 'pane-main' as PaneId,
+				presentation: 'window-main' as WorkspaceWindowId,
+				windowId: 'window-main' as WorkspaceWindowId,
 				visible: false,
 			},
 		]);
 	});
 
-	it('drops retained renderers for panes hidden by fullscreen and never retains on mobile', () => {
-		const snapshot = twoPaneLayout();
+	it('drops retained renderers for destroyed windows and never retains on mobile', () => {
+		const snapshot = twoWindowLayout();
 		const visible = visiblePortablePresentations(snapshot, false);
 		const retained = nextRetainedSingletonPresentationKeys(snapshot, false, visible, new Set());
-		expect([...retained].sort()).toEqual(['pane-2:singleton:git']);
+		expect([...retained].sort()).toEqual(['window-2:singleton:git']);
 
 		const fullscreen = reduceWorkspaceLayout(snapshot, [
-			{ type: 'set-fullscreen-pane', paneId: 'pane-2' },
+			{ type: 'retain-only-window', windowId: 'window-2' },
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		const fullscreenVisible = visiblePortablePresentations(fullscreen, false);
 		expect(
 			nextRetainedSingletonPresentationKeys(fullscreen, false, fullscreenVisible, retained),
-		).toEqual(new Set(['pane-2:singleton:git']));
+		).toEqual(new Set(['window-2:singleton:git']));
 		expect(nextRetainedSingletonPresentationKeys(snapshot, true, visible, retained).size).toBe(0);
 	});
 });

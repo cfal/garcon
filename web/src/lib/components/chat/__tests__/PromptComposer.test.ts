@@ -918,23 +918,6 @@ describe('PromptComposer focus', () => {
 		expect(screen.queryByText('/in')).toBeNull();
 	});
 
-	it('flushes the latest textarea value to its chat draft on pagehide', async () => {
-		localStorage.removeItem(chatDraftStorageKey('chat-draft-persist'));
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-draft-persist',
-			selectedStatus: 'running',
-			isSubmitting: false,
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-
-		await fireEvent.input(textarea, { target: { value: 'survives refresh' } });
-		window.dispatchEvent(new Event('pagehide'));
-
-		expect(localStorage.getItem(chatDraftStorageKey('chat-draft-persist'))).toBe(
-			'survives refresh',
-		);
-	});
-
 	it('expands /s for review and sends only on a second explicit submit', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,

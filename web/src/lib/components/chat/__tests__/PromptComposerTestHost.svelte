@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PromptComposer from '../PromptComposer.svelte';
+	import { onDestroy } from 'svelte';
 	import {
 		setAgentState,
 		setActiveTranscriptState,
@@ -14,10 +15,12 @@
 		setSnippets,
 		setTransientLayers,
 		setWorkspaceShortcuts,
+		setChatDrafts,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
@@ -25,7 +28,7 @@
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -39,6 +42,8 @@
 		WorkspaceShortcutDispatcher,
 		type WorkspaceShortcutDeps,
 	} from '$lib/workspace/workspace-shortcuts.js';
+	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		selectedChatId?: string;
@@ -98,7 +103,12 @@
 		onQuickCommit = () => {},
 	}: Props = $props();
 
-	const composer = new ComposerState();
+	const chatDrafts = new ChatDraftStore();
+	const composer = new ComposerState(chatDrafts, {
+		get activeChatId() {
+			return selectedChatId;
+		},
+	});
 	const transcript = new ActiveTranscriptState();
 
 	export function getComposerContentRevision(): number {
@@ -223,6 +233,7 @@
 	});
 
 	setComposerState(composer);
+	setChatDrafts(chatDrafts);
 	setActiveTranscriptState(transcript);
 	setAgentState(agent);
 	setConversationLifecycle(lifecycle);
@@ -348,16 +359,22 @@
 			},
 		}),
 	);
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
+	setCanonicalWorkspaceLayout();
+	onDestroy(() => chatDrafts.destroy());
 	const shortcutWorkspace = {
-		focusOwner: { kind: 'surface' as const, surfaceId: 'singleton:chat' },
+		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
 		isSurfacePresented: () => true,
-		focusPreviousTabInFocusedPane: () => false,
-		focusNextTabInFocusedPane: () => false,
-		cyclePaneFocus: () => undefined,
+		focusPreviousTabInFocusedWindow: () => false,
+		focusNextTabInFocusedWindow: () => false,
+		cycleWindowFocus: () => undefined,
 		layout: {
-			surface: () => ({ id: 'singleton:chat', type: 'singleton' as const, kind: 'chat' as const }),
+			surface: () => ({
+				id: CANONICAL_CHAT_SURFACE_ID,
+				type: 'chat' as const,
+				chatId: 'chat-1',
+			}),
 		},
 	} satisfies WorkspaceShortcutDeps['workspace'];
 	setWorkspaceShortcuts(

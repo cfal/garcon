@@ -4,7 +4,7 @@
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
-	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
+	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 
 	interface SidebarSearchDockProps {
 		isLoading: boolean;
@@ -29,7 +29,7 @@
 		onClearActiveQuery: () => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
-		newPaneActions: WorkspaceNewPaneActions;
+		newWindowActions: WorkspaceNewWindowActions;
 	}
 
 	let {
@@ -55,7 +55,7 @@
 		onClearActiveQuery,
 		onShowScheduledPrompts,
 		onShowSettings,
-		newPaneActions,
+		newWindowActions,
 	}: SidebarSearchDockProps = $props();
 
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
@@ -85,7 +85,7 @@
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
 		{onShowSettings}
-		{newPaneActions}
+		{newWindowActions}
 	/>
 	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />
 	<SidebarSearchContext

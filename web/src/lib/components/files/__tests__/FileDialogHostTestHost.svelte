@@ -88,10 +88,10 @@
 		},
 		attachmentErrors: {},
 		closeSurface: async () => true,
-		moveDialogFileToPane: async () => {
+		moveDialogFileToWindow: async () => {
 			if (moveError) throw moveError;
 		},
-		lastFocusedPaneId: 'pane-main',
+		lastFocusedWindowId: 'window-main',
 		isSurfaceCloseBlocked: () => false,
 		frameVersion: () => 0,
 		retryPresentation: async () => undefined,

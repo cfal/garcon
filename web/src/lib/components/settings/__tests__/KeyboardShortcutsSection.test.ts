@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
-import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 import KeyboardShortcutsSectionTestHost from './KeyboardShortcutsSectionTestHost.svelte';
 
@@ -95,7 +95,7 @@ describe('KeyboardShortcutsSection', () => {
 	});
 
 	it('cancels recording on Escape without letting the dialog underneath close', async () => {
-		const transients = new TransientLayerRegistry(new ChatInteractionGate());
+		const transients = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		render(KeyboardShortcutsSectionTestHost, { transients });
 		const newChat = screen.getByRole('group', { name: 'New chat' });
 		const changeNewChat = within(newChat).getByRole('button', {

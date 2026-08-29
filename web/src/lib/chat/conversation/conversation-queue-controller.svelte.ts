@@ -24,10 +24,7 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 import { errorDetail } from './conversation-submission-helpers.js';
 import { steerFailureNotice } from './steer-failure-notice.js';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	CommandOutcomeUnknownError,
-	submitIdempotentCommand,
-} from './idempotent-command.js';
+import { CommandOutcomeUnknownError, submitIdempotentCommand } from './idempotent-command.js';
 
 interface FailedQueueSubmission {
 	sequence: number;
@@ -43,7 +40,7 @@ export interface ConversationQueueControllerOptions {
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
-		'inputText' | 'images' | 'saveDraft'
+		'draftRevision' | 'isDraftEmpty' | 'restoreDraftIfRevision'
 	>;
 	get lifecycle(): Pick<SessionControllerDeps['lifecycle'], 'currentChatId'>;
 	get conversationUi(): Pick<
@@ -60,6 +57,7 @@ export class ConversationQueueController {
 	#submissionSequence = 0;
 	#pendingSubmissionsByChatId = new Map<string, number>();
 	#failedSubmissionsByChatId = new Map<string, FailedQueueSubmission[]>();
+	#latestClearRevisionByChatId = new Map<string, number>();
 
 	constructor(private readonly options: ConversationQueueControllerOptions) {}
 
@@ -79,6 +77,10 @@ export class ConversationQueueController {
 		this.#failedSubmissionsByChatId.set(chatId, [...failures, failure]);
 	}
 
+	recordComposerClear(chatId: string, revision: number): void {
+		this.#latestClearRevisionByChatId.set(chatId, revision);
+	}
+
 	finishSubmission(chatId: string): void {
 		const remaining = (this.#pendingSubmissionsByChatId.get(chatId) ?? 1) - 1;
 		if (remaining > 0) {
@@ -89,18 +91,25 @@ export class ConversationQueueController {
 		this.#pendingSubmissionsByChatId.delete(chatId);
 		const failures = this.#failedSubmissionsByChatId.get(chatId) ?? [];
 		this.#failedSubmissionsByChatId.delete(chatId);
-		if (failures.length === 0 || this.options.sessions.selectedChatId !== chatId) return;
-
-		const composerUntouched =
-			this.options.composerState.inputText.length === 0 && this.options.composerState.images.length === 0;
-		if (!composerUntouched) return;
+		const clearedRevision = this.#latestClearRevisionByChatId.get(chatId);
+		this.#latestClearRevisionByChatId.delete(chatId);
+		if (
+			failures.length === 0 ||
+			clearedRevision === undefined ||
+			!this.options.composerState.isDraftEmpty(chatId) ||
+			this.options.composerState.draftRevision(chatId) !== clearedRevision
+		)
+			return;
 
 		const earliestFailure = failures.reduce((earliest, failure) =>
 			failure.sequence < earliest.sequence ? failure : earliest,
 		);
-		this.options.composerState.inputText = earliestFailure.text;
-		this.options.composerState.images = earliestFailure.images;
-		this.options.composerState.saveDraft(chatId);
+		this.options.composerState.restoreDraftIfRevision(
+			chatId,
+			clearedRevision,
+			earliestFailure.text,
+			earliestFailure.images,
+		);
 	}
 
 	startControlRefresh(chatId: string): Promise<void> {
@@ -262,8 +271,10 @@ export class ConversationQueueController {
 			if (result.control) {
 				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 			}
-			const instanceConfirmed = this.options.conversationUi
-				.isExecutionControlSocketInstanceConfirmed(result.serverInstanceId);
+			const instanceConfirmed =
+				this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
+					result.serverInstanceId,
+				);
 			if (!instanceConfirmed) {
 				await this.#reconcileSelectedSteerTranscript(chatId);
 				this.#appendUnconfirmedSteerNotice(chatId);
@@ -275,8 +286,9 @@ export class ConversationQueueController {
 			} else {
 				await this.settleControlRefresh(this.startControlRefresh(chatId));
 			}
-			const instanceConfirmed = failure.serverInstanceId !== null
-				&& this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
+			const instanceConfirmed =
+				failure.serverInstanceId !== null &&
+				this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
 					failure.serverInstanceId,
 				);
 			if (!instanceConfirmed) await this.#reconcileSelectedSteerTranscript(chatId);
@@ -330,7 +342,6 @@ export class ConversationQueueController {
 		const control = controlFromMutationError(error);
 		if (control) this.options.conversationUi.setExecutionControlFromRefresh(chatId, control);
 	}
-
 }
 
 interface QueueEntrySteerFailure {
@@ -382,7 +393,8 @@ function parseQueueEntrySteerErrorResponse(
 		deliveryOutcome !== 'not-sent' &&
 		deliveryOutcome !== 'unknown' &&
 		deliveryOutcome !== 'accepted'
-	) return null;
+	)
+		return null;
 	const serverInstanceId = parseExecutionControlServerInstanceId(
 		Reflect.get(value, 'serverInstanceId'),
 	);

@@ -3,7 +3,7 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitComparisonController } from '$lib/git/review/git-comparison.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import GitComparisonHeader from './GitComparisonHeader.svelte';
 	import GitDiffDocumentScreen from './GitDiffDocumentScreen.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -11,7 +11,7 @@
 	interface GitComparisonScreenProps {
 		comparison: GitComparisonController;
 		isLoading: boolean;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		active?: boolean;
 		fontSize: number;
 		onBack?: () => void;
@@ -36,7 +36,6 @@
 		onOpenChat,
 	}: GitComparisonScreenProps = $props();
 	const isMobile = $derived(presentation === 'mobile');
-	const fullscreenPaneId = $derived<PaneId | null>(presentation === 'mobile' ? null : presentation);
 </script>
 
 {#snippet header(
@@ -52,7 +51,6 @@
 			{onToggleFileTree}
 			{onBack}
 			{onEdit}
-			{fullscreenPaneId}
 		/>
 		{#if comparison.staleMessage}
 			<div

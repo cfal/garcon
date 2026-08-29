@@ -37,15 +37,8 @@
 		onRetry?: () => void;
 		onLoadEarlier: () => void;
 		onLoadLater: () => void;
-		onPermissionDecision?: (
-			permissionOccurrenceId: string,
-			decision: PermissionDecision,
-		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
@@ -94,12 +87,6 @@
 		class={item.reserveComposerTraySpace ? 'h-14' : 'h-3 sm:h-4'}
 		data-chat-feed-viewport-end-spacer
 	></div>
-{:else if item.kind === 'top-toolbar-spacer'}
-	<div
-		aria-hidden="true"
-		class="h-[var(--workspace-floating-taskbar-inset)] shrink-0"
-		data-chat-feed-top-floating-toolbar-spacer
-	></div>
 {:else if item.kind === 'refresh-error'}
 	<div
 		class="border-b border-border bg-destructive/5 py-2 text-center text-sm text-muted-foreground"
@@ -132,15 +119,10 @@
 			<PermissionRequestRow
 				request={permissionRequestMessage(item.request)}
 				onDecision={onPermissionDecision}
-				draft={itemState.permissionDraft(
-					item.request.permissionOccurrenceId,
-				)}
+				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}
 				{acquireTransientActivity}
 				onDraftChange={(draft) =>
-					itemState.setPermissionDraft(
-						item.request.permissionOccurrenceId,
-						draft,
-					)}
+					itemState.setPermissionDraft(item.request.permissionOccurrenceId, draft)}
 			/>
 		{/if}
 		{#if item.spacingAfter === 'responsive-feed'}

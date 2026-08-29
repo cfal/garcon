@@ -6,19 +6,19 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 
 	let {
-		reserveTopFloatingToolbar,
 		subagentToolbar,
 		isVisible,
 		isInteractive,
 		onRegisterUserMessageNavigator,
 		onRegisterAppendToDraft,
+		textScale,
 	}: {
-		reserveTopFloatingToolbar: boolean;
 		subagentToolbar: SubagentToolbarState;
 		isVisible: boolean;
 		isInteractive: boolean;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
+		textScale: number;
 	} = $props();
 	let navigatorOpenCount = $state(0);
 	let draft = $state('');
@@ -73,10 +73,10 @@
 
 <div
 	data-testid="chat-surface-stub"
-	data-reserve-top-floating-toolbar={reserveTopFloatingToolbar}
 	data-navigator-open-count={navigatorOpenCount}
 	data-visible={isVisible}
 	data-interactive={isInteractive}
+	data-text-scale={textScale}
 >
 	Chat surface
 	<textarea aria-label="Chat focus target" bind:value={draft}></textarea>

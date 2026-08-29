@@ -37,7 +37,7 @@ describe('GitSurfaceToolbar', () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: target(),
-				presentation: 'pane-sidebar',
+				presentation: 'window-sidebar',
 			},
 		});
 		const folder = screen.getByRole('button', {
@@ -56,7 +56,7 @@ describe('GitSurfaceToolbar', () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: controller,
-				presentation: 'pane-main',
+				presentation: 'window-main',
 			},
 		});
 
@@ -88,7 +88,7 @@ describe('GitSurfaceToolbar', () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: controller,
-				presentation: 'pane-main',
+				presentation: 'window-main',
 			},
 		});
 
@@ -108,7 +108,7 @@ describe('GitSurfaceToolbar', () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: target(),
-				presentation: 'pane-main',
+				presentation: 'window-main',
 			},
 		});
 
@@ -153,7 +153,7 @@ describe('GitSurfaceToolbar', () => {
 
 		await rendered.rerender({
 			target: target(),
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 			onClose,
 			closeDisabled: false,
 		});
@@ -164,7 +164,7 @@ describe('GitSurfaceToolbar', () => {
 		render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: target(),
-				presentation: 'pane-main',
+				presentation: 'window-main',
 				showMenuLeadingContent: true,
 			},
 		});

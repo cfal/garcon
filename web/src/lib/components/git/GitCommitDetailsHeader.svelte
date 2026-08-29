@@ -5,8 +5,6 @@
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitCommitSnapshotReady } from '$lib/api/git.js';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
-	import WorkspaceFullscreenButton from '$lib/components/workspace/WorkspaceFullscreenButton.svelte';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -25,7 +23,6 @@
 		showFileTreeToggle: boolean;
 		fileTreeVisible: boolean;
 		onToggleFileTree: () => void;
-		fullscreenPaneId: PaneId | null;
 	}
 
 	let {
@@ -42,7 +39,6 @@
 		showFileTreeToggle,
 		fileTreeVisible,
 		onToggleFileTree,
-		fullscreenPaneId,
 	}: GitCommitDetailsHeaderProps = $props();
 
 	let copied = $state(false);
@@ -133,9 +129,6 @@
 		{#if showFileTreeToggle}
 			<div class="flex shrink-0 items-center gap-1">
 				<GitFileTreeToggleButton visible={fileTreeVisible} onToggle={onToggleFileTree} />
-				{#if fullscreenPaneId}
-					<WorkspaceFullscreenButton host={fullscreenPaneId} />
-				{/if}
 			</div>
 		{/if}
 	</div>

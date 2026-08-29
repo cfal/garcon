@@ -3,10 +3,10 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { Button } from '$lib/components/ui/button';
 	import { getWorkspaceCoordinator } from '$lib/context';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { host }: { host: PaneId } = $props();
+	let { host }: { host: WorkspaceWindowId } = $props();
 	const workspace = getWorkspaceCoordinator();
 	let creating = $state(false);
 	let error = $state<string | null>(null);

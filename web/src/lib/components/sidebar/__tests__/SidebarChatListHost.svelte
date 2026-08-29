@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SidebarChatList from '../SidebarChatList.svelte';
-	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import { setAppShell, setModelCatalog } from '$lib/context';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type {
 		PersistedChatOrderGroup,
@@ -82,11 +83,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext();
 </script>
 
 <div

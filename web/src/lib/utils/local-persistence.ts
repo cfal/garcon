@@ -25,7 +25,6 @@ export const LOCAL_STORAGE_KEYS = {
 	modelCatalogLegacy: 'pref_model_catalog_v3',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
 	workspaceLayout: 'workspace_layout_v2',
-	workspaceLayoutV1: 'workspace_layout_v1',
 } as const;
 
 export const LOCAL_STORAGE_PREFIXES = {
@@ -43,9 +42,7 @@ export type ChatDraftStorageKey = `${typeof LOCAL_STORAGE_PREFIXES.chatDraft}${s
 export type ChatExecutionDraftStorageKey =
 	`${typeof LOCAL_STORAGE_PREFIXES.chatExecutionDraft}${string}`;
 export type LocalStorageKey =
-	| ValueOf<typeof LOCAL_STORAGE_KEYS>
-	| ChatDraftStorageKey
-	| ChatExecutionDraftStorageKey;
+	ValueOf<typeof LOCAL_STORAGE_KEYS> | ChatDraftStorageKey | ChatExecutionDraftStorageKey;
 export type SessionStorageKey = ValueOf<typeof SESSION_STORAGE_KEYS>;
 
 type BrowserStorageKind = 'local' | 'session';

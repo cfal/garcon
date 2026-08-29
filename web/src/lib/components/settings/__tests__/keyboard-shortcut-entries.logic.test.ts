@@ -3,7 +3,7 @@ import { COMPOSER_SHORTCUTS, GLOBAL_SHORTCUTS, SLASH_COMMANDS } from '../keyboar
 import { formatGlobalShortcut, getEffectiveGlobalShortcut } from '$lib/workspace/global-shortcuts';
 
 describe('keyboard shortcut entries', () => {
-	it('documents pane-tab and chat-list navigation without changing New Chat', () => {
+	it('documents window-tab and chat-list navigation without changing New Chat', () => {
 		const shortcutKeys = new Map(
 			GLOBAL_SHORTCUTS.map((entry) => {
 				const binding = getEffectiveGlobalShortcut(entry.id, {});
@@ -15,11 +15,7 @@ describe('keyboard shortcut entries', () => {
 		expect(shortcutKeys.get('Go to tab on the right')).toEqual(['Ctrl', 'Shift', 'L']);
 		expect(shortcutKeys.get('Go to chat above')).toEqual(['Ctrl', 'Shift', 'P']);
 		expect(shortcutKeys.get('Go to chat below')).toEqual(['Ctrl', 'Shift', 'N']);
-		expect(shortcutKeys.get('Cycle pane focus')).toEqual([
-			'Ctrl',
-			'Shift',
-			'O',
-		]);
+		expect(shortcutKeys.get('Cycle window focus')).toEqual(['Ctrl', 'Shift', 'O']);
 		expect(shortcutKeys.get('New chat')).toEqual(['Ctrl', 'N']);
 		expect(shortcutKeys.get('Delete selected chat')).toEqual(['Ctrl', 'Shift', 'D']);
 		expect(shortcutKeys.get('Scroll up half a page')).toEqual(['Ctrl', 'U']);

@@ -2,12 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
 	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
-	import {
-		setAppShell,
-		setChatSessions,
-		setFileSessions,
-		setLocalSettings,
-	} from '$lib/context';
+	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -18,11 +13,7 @@
 
 	interface Props {
 		pendingPermissionRequests: PendingPermissionRequest[];
-		onExitPlanMode: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onExitPlanMode: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 	}
 
 	let { pendingPermissionRequests, onExitPlanMode }: Props = $props();
@@ -53,17 +44,19 @@
 	});
 	setChatSessions(chatSessions);
 
-	setFileSessions(new FileSessionRegistry({
-		getIsMobile: () => false,
-		getDefaultPlacement: () => ({ type: 'pane', paneId: 'pane-main' }),
-		getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
-		getPlacement: () => ({
-			async placeFileSession() {
-				return 'cancelled';
-			},
-			async focusFileSession() {},
+	setFileSessions(
+		new FileSessionRegistry({
+			getIsMobile: () => false,
+			getDefaultPlacement: () => ({ type: 'window', windowId: 'window-main' }),
+			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+			getPlacement: () => ({
+				async placeFileSession() {
+					return 'cancelled';
+				},
+				async focusFileSession() {},
+			}),
 		}),
-	}));
+	);
 
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';

@@ -16,15 +16,22 @@
 		setGitQuickSummary,
 		setGitBranchActions,
 		setChatProcessingReconciler,
+		setChatDrafts,
 	} from '$lib/context';
+	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
 	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
-	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
+	import {
+		WorkspaceShortcutDispatcher,
+		type WorkspaceShortcutDeps,
+	} from '$lib/workspace/workspace-shortcuts';
+	import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
+	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 
@@ -53,6 +60,7 @@
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 	});
+	setChatDrafts(new ChatDraftStore());
 
 	const sessions = {
 		get selectedChatId() {
@@ -70,11 +78,11 @@
 		get order() {
 			return [selectedChat.id];
 		},
-			startupByChatId: {},
-			hasChat: (chatId: string) => chatId === selectedChat.id,
-			isDraft: () => false,
-			processingPhase: () => selectedChat.processingPhase,
-			patchDraftStartup: () => {},
+		startupByChatId: {},
+		hasChat: (chatId: string) => chatId === selectedChat.id,
+		isDraft: () => false,
+		processingPhase: () => selectedChat.processingPhase,
+		patchDraftStartup: () => {},
 		patchPreview: () => {},
 		patchChat: () => {},
 		patchLastReadAt: () => {},
@@ -131,27 +139,45 @@
 		}),
 		getPermissionModes: () => ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'],
 		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
-			supportsFork: () => true,
-			supportsForkWhileRunning: () => true,
-			supportsSteering: (agentId: string) => agentId === 'claude' || agentId === 'codex',
-			supportsGoals: (agentId: string) => agentId === 'codex',
-		} as never);
+		supportsFork: () => true,
+		supportsForkWhileRunning: () => true,
+		supportsSteering: (agentId: string) => agentId === 'claude' || agentId === 'codex',
+		supportsGoals: (agentId: string) => agentId === 'codex',
+	} as never);
 
-	const chatInteractionGate = new ChatInteractionGate();
-	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
-	const workspace = {
-		focusOwner: { kind: 'surface', surfaceId: 'singleton:chat' },
-		isSurfacePresented: () => true,
+	const workspaceInteractionGate = new WorkspaceInteractionGate();
+	const transientLayers = new TransientLayerRegistry(workspaceInteractionGate);
+	type WorkspaceTestPort = WorkspaceShortcutDeps['workspace'] &
+		Pick<
+			WorkspaceCoordinator,
+			| 'currentWindowId'
+			| 'currentChatSurfaceId'
+			| 'focusChat'
+			| 'focusMobileSingleton'
+			| 'openSingletonAsTab'
+		>;
+	const workspace: WorkspaceTestPort = {
+		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
+		isSurfacePresented: (surfaceId: string) => surfaceId === CANONICAL_CHAT_SURFACE_ID,
+		focusPreviousTabInFocusedWindow: () => false,
+		focusNextTabInFocusedWindow: () => false,
+		cycleWindowFocus: () => undefined,
 		layout: {
 			surface: (surfaceId: string) =>
-				surfaceId === 'singleton:chat'
-					? { id: 'singleton:chat', type: 'singleton', kind: 'chat' }
+				surfaceId === CANONICAL_CHAT_SURFACE_ID
+					? { id: CANONICAL_CHAT_SURFACE_ID, type: 'chat' as const, chatId: 'chat-1' }
 					: null,
+		},
+		get currentWindowId() {
+			return 'window-main' as const;
+		},
+		get currentChatSurfaceId() {
+			return CANONICAL_CHAT_SURFACE_ID;
 		},
 		focusChat: () => Promise.resolve(),
 		focusMobileSingleton: () => Promise.resolve(),
-		openSingleton: () => Promise.resolve(),
-	} as never;
+		openSingletonAsTab: () => Promise.resolve(),
+	};
 	const workspaceShortcuts = new WorkspaceShortcutDispatcher({
 		workspace,
 		transients: transientLayers,
@@ -160,7 +186,7 @@
 		files: {} as never,
 		localSettings: { globalShortcuts: {} } as never,
 	});
-	setWorkspaceCoordinator(workspace);
+	setWorkspaceCoordinator(workspace as WorkspaceCoordinator);
 	setWorkspaceShortcuts(workspaceShortcuts);
 	setTransientLayers(transientLayers);
 	setGitQuickSummary(new GitQuickSummaryStore());
@@ -203,21 +229,23 @@
 >
 <button type="button" onclick={() => (selectedChat.agentId = 'claude')}>Use Claude</button>
 <button type="button" onclick={() => (selectedChat.agentId = 'codex')}>Use Codex</button>
-<button type="button" onclick={() => (selectedChat.agentId = 'opencode')}>Use unsupported agent</button>
+<button type="button" onclick={() => (selectedChat.agentId = 'opencode')}
+	>Use unsupported agent</button
+>
 <button
 	type="button"
 	onclick={() => {
 		selectedChat.isProcessing = !selectedChat.isProcessing;
 		selectedChat.processingPhase = selectedChat.isProcessing ? 'running' : null;
-	}}
->Toggle processing</button>
+	}}>Toggle processing</button
+>
 {#if showTestLayer}
 	<div
 		bind:this={testLayerElement}
 		role="dialog"
 		tabindex="-1"
 		aria-label="Test dialog"
-		data-workspace-surface-id={testLayerIsComposerEditor ? 'singleton:chat' : undefined}
+		data-workspace-surface-id={testLayerIsComposerEditor ? CANONICAL_CHAT_SURFACE_ID : undefined}
 		data-prompt-editor-dialog={testLayerIsComposerEditor ? '' : undefined}
 	>
 		{#if testLayerIsComposerEditor}

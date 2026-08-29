@@ -39,7 +39,7 @@ function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession
 				type: 'file',
 				fileSessionId: dialogSession.id,
 			},
-			paneId: 'pane-main',
+			windowId: 'window-main',
 		},
 		{ type: 'place-in-dialog', surfaceId: fileSurfaceId(dialogSession.id) },
 	];
@@ -52,11 +52,11 @@ function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession
 					type: 'file',
 					fileSessionId: backgroundSession.id,
 				},
-				paneId: 'pane-main',
+				windowId: 'window-main',
 			},
 			{
-				type: 'activate-pane-tab',
-				paneId: 'pane-main',
+				type: 'activate-window-tab',
+				windowId: 'window-main',
 				surfaceId: fileSurfaceId(backgroundSession.id),
 			},
 		);
@@ -69,7 +69,7 @@ describe('MarkdownViewer', () => {
 		const session = markdownSession('# Read me');
 		const main = render(MarkdownViewerTestHost, {
 			session,
-			presentation: 'pane-main',
+			presentation: 'window-main',
 			onOpen: vi.fn(),
 		});
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -82,7 +82,7 @@ describe('MarkdownViewer', () => {
 
 		const sidebar = render(MarkdownViewerTestHost, {
 			session,
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 			onOpen: vi.fn(),
 		});
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -140,7 +140,7 @@ describe('MarkdownViewer', () => {
 		expect(document.activeElement).toBe(content);
 	});
 
-	it.each(['pane-main', 'pane-sidebar', 'dialog', 'mobile'] as const)(
+	it.each(['window-main', 'window-sidebar', 'dialog', 'mobile'] as const)(
 		'opens a relative link from the %s presentation',
 		async (presentation) => {
 			const onOpen = vi.fn<(request: FileOpenRequest) => void>();

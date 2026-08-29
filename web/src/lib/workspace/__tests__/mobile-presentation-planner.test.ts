@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalWorkspaceSnapshot } from '../canonical-layout.js';
+import { CANONICAL_CHAT_SURFACE_ID, canonicalWorkspaceSnapshot } from '../canonical-layout.js';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
 import { MobilePresentationPlanner } from '../mobile-presentation-planner.js';
 
@@ -13,7 +13,13 @@ describe('MobilePresentationPlanner', () => {
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'register-surface',
 				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
 			},
 			{
 				type: 'set-mobile-presentation',
@@ -55,11 +61,18 @@ describe('MobilePresentationPlanner', () => {
 		const gitActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
+				surface: { id: 'singleton:git', type: 'singleton', kind: 'git' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'register-surface',
 				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
 			},
 			{
 				type: 'register-surface',
 				surface: { id: 'singleton:files', type: 'singleton', kind: 'files' },
+				windowId: 'window-main',
 			},
 			{
 				type: 'set-mobile-presentation',
@@ -94,7 +107,7 @@ describe('MobilePresentationPlanner', () => {
 		expect(planner.returnStackForTransient('singleton:commit', snapshot, false)).toBe(
 			snapshot.mobileReturnStack,
 		);
-		expect(planner.returnStackForTransient('singleton:chat', snapshot, true)).toBe(
+		expect(planner.returnStackForTransient(CANONICAL_CHAT_SURFACE_ID, snapshot, true)).toBe(
 			snapshot.mobileReturnStack,
 		);
 	});

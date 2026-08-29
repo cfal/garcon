@@ -1,5 +1,6 @@
 <script lang="ts">
 	import NewChatForm from '../NewChatForm.svelte';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 	import {
 		setAppShell,
 		setModelCatalog,
@@ -16,7 +17,7 @@
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
@@ -61,6 +62,7 @@
 	} as never);
 
 	setNotifications(notifications);
+	setCanonicalWorkspaceLayout();
 
 	let seedListener = () => {};
 	const appShell = {
@@ -73,7 +75,7 @@
 		},
 	} as never;
 	setAppShell(appShell);
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 
 	const selectableAgentIds = [

@@ -1,5 +1,5 @@
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-import type { SplitId } from '$lib/workspace/surface-types.js';
+import type { WorkspacePartitionId } from '$lib/workspace/surface-types.js';
 import type { WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types.js';
 import {
 	nextRetainedSingletonPresentationKeys,
@@ -14,7 +14,7 @@ interface WorkspaceRootStateOptions {
 
 export class WorkspaceRootState {
 	retainedSingletonPresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
-	splitRatioPreviews = $state<Readonly<Record<string, number>>>({});
+	partitionRatioPreviews = $state<Readonly<Record<string, number>>>({});
 	readonly #frameBridges = new Map<string, SurfaceFrameBridge>();
 
 	constructor(private readonly options: WorkspaceRootStateOptions) {}
@@ -47,23 +47,23 @@ export class WorkspaceRootState {
 		this.retainedSingletonPresentationKeys = next;
 	}
 
-	setSplitRatioPreview(splitId: SplitId, ratio: number | null): void {
+	setPartitionRatioPreview(partitionId: WorkspacePartitionId, ratio: number | null): void {
 		if (ratio === null) {
-			if (!(splitId in this.splitRatioPreviews)) return;
-			const { [splitId]: _removed, ...remaining } = this.splitRatioPreviews;
-			this.splitRatioPreviews = remaining;
+			if (!(partitionId in this.partitionRatioPreviews)) return;
+			const { [partitionId]: _removed, ...remaining } = this.partitionRatioPreviews;
+			this.partitionRatioPreviews = remaining;
 			return;
 		}
-		this.splitRatioPreviews = { ...this.splitRatioPreviews, [splitId]: ratio };
+		this.partitionRatioPreviews = { ...this.partitionRatioPreviews, [partitionId]: ratio };
 	}
 
-	splitRatio(splitId: SplitId, fallback: number): number {
-		return this.splitRatioPreviews[splitId] ?? fallback;
+	partitionRatio(partitionId: WorkspacePartitionId, fallback: number): number {
+		return this.partitionRatioPreviews[partitionId] ?? fallback;
 	}
 
 	surfaceStyle(presentation: string): string {
 		if (presentation === 'mobile') return 'inset: 0;';
-		return 'inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline: 0;';
+		return 'inset: 0;';
 	}
 
 	destroy(): void {

@@ -12,8 +12,17 @@
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
-	import { DropdownMenuItem, DropdownMenuSeparator } from '$lib/components/ui/dropdown-menu';
+	import PanelRight from '@lucide/svelte/icons/panel-right';
+	import PanelTop from '@lucide/svelte/icons/panel-top';
+	import {
+		DropdownMenuItem,
+		DropdownMenuSeparator,
+		DropdownMenuSub,
+		DropdownMenuSubContent,
+		DropdownMenuSubTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface SidebarChatMenuProps {
 		session: ChatSessionRecord;
@@ -24,6 +33,8 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onRename: () => void;
@@ -43,6 +54,8 @@
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		onTogglePinned,
 		onToggleArchive,
 		onRename,
@@ -75,6 +88,45 @@
 			{m.sidebar_chats_move_to_bottom()}
 		</DropdownMenuItem>
 	{/if}
+	<DropdownMenuSeparator />
+{/if}
+
+{#if onOpenInNewWindow}
+	<DropdownMenuItem
+		disabled={newWindowBlocked}
+		title={newWindowBlocked ? m.workspace_drop_zone_max_windows() : undefined}
+		onclick={() => onOpenInNewWindow?.(session.id)}
+	>
+		<PanelRight />
+		{m.sidebar_chat_open_new_window()}
+	</DropdownMenuItem>
+	<DropdownMenuSub>
+		<DropdownMenuSubTrigger
+			disabled={newWindowBlocked}
+			title={newWindowBlocked ? m.workspace_drop_zone_max_windows() : undefined}
+		>
+			<PanelRight />
+			{m.sidebar_chat_open_new_window_direction()}
+		</DropdownMenuSubTrigger>
+		<DropdownMenuSubContent class="w-56">
+			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'left')}>
+				<PanelRight class="rotate-180" />
+				{m.workspace_open_new_window_left()}
+			</DropdownMenuItem>
+			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'right')}>
+				<PanelRight />
+				{m.workspace_open_new_window_right()}
+			</DropdownMenuItem>
+			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'top')}>
+				<PanelTop />
+				{m.workspace_open_new_window_above()}
+			</DropdownMenuItem>
+			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'bottom')}>
+				<PanelTop class="rotate-180" />
+				{m.workspace_open_new_window_below()}
+			</DropdownMenuItem>
+		</DropdownMenuSubContent>
+	</DropdownMenuSub>
 	<DropdownMenuSeparator />
 {/if}
 

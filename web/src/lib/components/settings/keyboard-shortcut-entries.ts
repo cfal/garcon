@@ -30,8 +30,8 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ id: 'navigate-chat-above', label: m.settings_shortcut_navigate_chat_above },
 	{ id: 'navigate-chat-below', label: m.settings_shortcut_navigate_chat_below },
 	{
-		id: 'toggle-main-sidebar-focus',
-		label: m.settings_shortcut_toggle_main_sidebar_focus,
+		id: 'cycle-window-focus',
+		label: m.settings_shortcut_cycle_window_focus,
 	},
 	{ id: 'open-settings', label: m.settings_shortcut_open_settings },
 	{ id: 'scroll-half-page-up', label: m.settings_shortcut_scroll_half_page_up },

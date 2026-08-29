@@ -75,9 +75,13 @@ interface SlashCommandChatState {
 interface SlashCommandComposerState {
 	inputText: string;
 	images: File[];
-	readonly contentRevision: number;
-	clearAfterSubmit(chatId: string): void;
-	saveDraft(chatId: string): void;
+	clearAfterSubmit(chatId: string): number;
+	restoreDraftIfRevision(
+		chatId: string,
+		expectedRevision: number,
+		text: string,
+		images: readonly File[],
+	): boolean;
 }
 
 interface SlashCommandAgentState {
@@ -122,7 +126,10 @@ export interface ConversationSlashCommandDeps {
 }
 
 export type SlashCommandSubmissionResolution =
-	| { kind: 'handled'; outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome> }
+	| {
+			kind: 'handled';
+			outcome: ConversationSubmissionOutcome | Promise<ConversationSubmissionOutcome>;
+	  }
 	| { kind: 'steer'; content: string }
 	| { kind: 'goal-control'; content: string }
 	| { kind: 'continue'; content: string };
@@ -158,13 +165,7 @@ export class ConversationSlashCommandService {
 		if (move.kind !== 'not-command') {
 			return {
 				kind: 'handled',
-				outcome: this.submitMoveChatBoundaryCommand(
-					chatId,
-					chat,
-					move,
-					images,
-					ownsComposer,
-				),
+				outcome: this.submitMoveChatBoundaryCommand(chatId, chat, move, images, ownsComposer),
 			};
 		}
 
@@ -195,23 +196,23 @@ export class ConversationSlashCommandService {
 				handoffPending,
 			});
 			if (rejection) {
-				this.deps.chatState.appendLocalNotice(
-					'error',
-					steerSubmissionRejectionNotice(rejection),
-				);
+				this.deps.chatState.appendLocalNotice('error', steerSubmissionRejectionNotice(rejection));
 				return { kind: 'handled', outcome: 'rejected' };
 			}
 			return { kind: 'steer', content: prompt };
 		}
 
 		if (
-			isGoalCommand(text)
-			&& chat.status === 'running'
-			&& chat.isProcessing
-			&& this.deps.modelCatalog.supportsGoals(agentId)
+			isGoalCommand(text) &&
+			chat.status === 'running' &&
+			chat.isProcessing &&
+			this.deps.modelCatalog.supportsGoals(agentId)
 		) {
 			if (images.length > 0) {
-				this.deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				this.deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_queue_attachments_unavailable(),
+				);
 				return { kind: 'handled', outcome: 'rejected' };
 			}
 			return { kind: 'goal-control', content: text };
@@ -221,22 +222,16 @@ export class ConversationSlashCommandService {
 			const fork = parseForkCommand(text);
 			if (fork) {
 				if (
-					chat.status === 'running'
-					&& chat.isProcessing
-					&& !this.deps.modelCatalog.supportsForkWhileRunning(agentId)
+					chat.status === 'running' &&
+					chat.isProcessing &&
+					!this.deps.modelCatalog.supportsForkWhileRunning(agentId)
 				) {
 					this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return { kind: 'handled', outcome: 'rejected' };
 				}
 				return {
 					kind: 'handled',
-					outcome: this.submitForkCommand(
-						chatId,
-						chat,
-						fork.message,
-						images,
-						ownsComposer,
-					),
+					outcome: this.submitForkCommand(chatId, chat, fork.message, images, ownsComposer),
 				};
 			}
 		}
@@ -288,7 +283,7 @@ export class ConversationSlashCommandService {
 
 		this.#scheduleInFlight.add(chatId);
 		const previousText = deps.composerState.inputText;
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
+		const clearedRevision = ownsComposer ? deps.composerState.clearAfterSubmit(chatId) : null;
 		try {
 			const result = await scheduleChatPrompt({
 				chatId,
@@ -307,9 +302,8 @@ export class ConversationSlashCommandService {
 			}
 			return 'accepted';
 		} catch (error) {
-			if (ownsComposer && deps.sessions.selectedChatId === chatId) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
+			if (clearedRevision !== null) {
+				deps.composerState.restoreDraftIfRevision(chatId, clearedRevision, previousText, []);
 			}
 			if (deps.chatState.activeChatId === chatId) {
 				deps.chatState.appendLocalNotice(
@@ -346,8 +340,9 @@ export class ConversationSlashCommandService {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
-		const clearedContentRevision = deps.composerState.contentRevision;
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
 		const renamed = await deps.sessions.renameChat(chatId, title);
 		if (!renamed) {
 			this.#restoreComposerIfUntouched({
@@ -385,8 +380,9 @@ export class ConversationSlashCommandService {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
-		const clearedContentRevision = deps.composerState.contentRevision;
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
 		const result = await deps.sessions.moveChatToBoundary(chatId, command.boundary);
 		if (!result) {
 			this.#restoreComposerIfUntouched({
@@ -400,10 +396,7 @@ export class ConversationSlashCommandService {
 		}
 
 		if (deps.chatState.activeChatId === chatId) {
-			deps.chatState.appendLocalNotice(
-				'info',
-				moveChatNotice(command.boundary, result.changed),
-			);
+			deps.chatState.appendLocalNotice('info', moveChatNotice(command.boundary, result.changed));
 			deps.chatState.isUserScrolledUp = false;
 			deps.scrollToBottom();
 		}
@@ -430,8 +423,9 @@ export class ConversationSlashCommandService {
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
-		const clearedContentRevision = deps.composerState.contentRevision;
+		const clearedContentRevision = ownsComposer
+			? deps.composerState.clearAfterSubmit(chatId)
+			: null;
 
 		return this.#enqueueTagMutation(chatId, async () => {
 			const currentTags = normalizeTags(deps.sessions.byId[chatId]?.tags ?? chat.tags);
@@ -494,15 +488,16 @@ export class ConversationSlashCommandService {
 		ownsComposer: boolean;
 		text: string;
 		images: File[];
-		clearedContentRevision: number;
+		clearedContentRevision: number | null;
 	}): void {
 		const { deps } = this;
-		if (!input.ownsComposer || deps.sessions.selectedChatId !== input.chatId) return;
-		if (deps.composerState.contentRevision !== input.clearedContentRevision) return;
-		if (deps.composerState.inputText !== '' || deps.composerState.images.length !== 0) return;
-		deps.composerState.inputText = input.text;
-		deps.composerState.images = [...input.images];
-		deps.composerState.saveDraft(input.chatId);
+		if (!input.ownsComposer || input.clearedContentRevision === null) return;
+		deps.composerState.restoreDraftIfRevision(
+			input.chatId,
+			input.clearedContentRevision,
+			input.text,
+			input.images,
+		);
 	}
 
 	async submitCompactCommand(
@@ -518,7 +513,8 @@ export class ConversationSlashCommandService {
 		}
 
 		const previousText = deps.composerState.inputText;
-		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
+		const previousImages = [...deps.composerState.images];
+		const clearedRevision = clearComposer ? deps.composerState.clearAfterSubmit(chatId) : null;
 
 		try {
 			await compactChat({
@@ -528,9 +524,13 @@ export class ConversationSlashCommandService {
 			});
 			return 'accepted';
 		} catch (error) {
-			if (clearComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
+			if (clearedRevision !== null) {
+				deps.composerState.restoreDraftIfRevision(
+					chatId,
+					clearedRevision,
+					previousText,
+					previousImages,
+				);
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -563,14 +563,16 @@ export class ConversationSlashCommandService {
 		const previousImages = [...deps.composerState.images];
 		deps.chatState.appendLocalNotice('progress', m.chat_notice_handing_off_chat());
 		deps.chatState.isUserScrolledUp = false;
-		if (clearComposer) deps.composerState.clearAfterSubmit(sourceChatId);
+		const clearedRevision = clearComposer
+			? deps.composerState.clearAfterSubmit(sourceChatId)
+			: null;
 
 		let imagePayload: ChatImage[] = [];
 		if (images.length > 0) {
 			try {
 				imagePayload = await prepareChatImages(images);
 			} catch (error) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 				deps.chatState.appendLocalNotice(
 					'error',
 					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
@@ -600,7 +602,7 @@ export class ConversationSlashCommandService {
 			// invites a resubmission that would produce a second continuation.
 			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -641,10 +643,17 @@ export class ConversationSlashCommandService {
 		const previousImages = [...deps.composerState.images];
 		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
 		deps.chatState.isUserScrolledUp = false;
-		if (clearComposer) deps.composerState.clearAfterSubmit(sourceChatId);
+		const clearedRevision = clearComposer
+			? deps.composerState.clearAfterSubmit(sourceChatId)
+			: null;
 
 		if (!message.trim()) {
-			return this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
+			return this.#submitForkOnlyCommand(
+				sourceChatId,
+				previousText,
+				previousImages,
+				clearedRevision,
+			);
 		}
 
 		let imagePayload: ChatImage[] = [];
@@ -652,7 +661,7 @@ export class ConversationSlashCommandService {
 			try {
 				imagePayload = await prepareChatImages(images);
 			} catch (error) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 				deps.chatState.appendLocalNotice(
 					'error',
 					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
@@ -684,7 +693,7 @@ export class ConversationSlashCommandService {
 		try {
 			const response = await this.#submitForkRunWithConfirmation(submission);
 			if (!response) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 				return 'rejected';
 			}
 			deps.sessions.upsertServerChat(response.chat);
@@ -697,7 +706,7 @@ export class ConversationSlashCommandService {
 		} catch (error) {
 			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
 			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -718,24 +727,25 @@ export class ConversationSlashCommandService {
 		try {
 			await this.#performForkOnly(sourceChatId, upToOrdinal);
 		} catch (error) {
-			this.deps.chatState.appendLocalNotice(
-				'error',
-				forkFailureNotice(error),
-			);
+			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
 		}
 	}
 
 	// Resolves null when the user declines a handoff fork, so callers stay silent instead of
 	// reporting a failure.
-	async #performForkOnly(sourceChatId: string, upToOrdinal?: number): Promise<ChatListEntry | null> {
+	async #performForkOnly(
+		sourceChatId: string,
+		upToOrdinal?: number,
+	): Promise<ChatListEntry | null> {
 		const chatId = createClientChatId();
-		const selection = upToOrdinal === undefined
-			? null
-			: selectForkAtMessage(
-				this.deps.chatState.entries,
-				this.deps.chatState.getCursor().transcriptViewId,
-				upToOrdinal,
-			);
+		const selection =
+			upToOrdinal === undefined
+				? null
+				: selectForkAtMessage(
+						this.deps.chatState.entries,
+						this.deps.chatState.getCursor().transcriptViewId,
+						upToOrdinal,
+					);
 		if (upToOrdinal !== undefined && !selection) {
 			throw new Error(m.chat_notice_fork_message_no_longer_available());
 		}
@@ -792,20 +802,17 @@ export class ConversationSlashCommandService {
 		sourceChatId: string,
 		previousText: string,
 		previousImages: File[],
-		restoreComposer: boolean,
+		clearedRevision: number | null,
 	): Promise<ConversationSubmissionOutcome> {
 		try {
 			if (!(await this.#performForkOnly(sourceChatId))) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
 				return 'rejected';
 			}
 			return 'accepted';
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, restoreComposer);
-			this.deps.chatState.appendLocalNotice(
-				'error',
-				forkFailureNotice(error),
-			);
+			this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
 			return 'rejected';
 		}
 	}
@@ -814,12 +821,15 @@ export class ConversationSlashCommandService {
 		chatId: string,
 		previousText: string,
 		previousImages: File[],
-		restore: boolean,
+		clearedRevision: number | null,
 	): void {
-		if (!restore) return;
-		this.deps.composerState.inputText = previousText;
-		this.deps.composerState.images = previousImages;
-		this.deps.composerState.saveDraft(chatId);
+		if (clearedRevision === null) return;
+		this.deps.composerState.restoreDraftIfRevision(
+			chatId,
+			clearedRevision,
+			previousText,
+			previousImages,
+		);
 	}
 }
 
@@ -834,13 +844,11 @@ function forkPointParams(selection: ForkAtMessageSelection): {
 }
 
 function isStaleForkPointError(error: unknown): error is ApiError {
-	return error instanceof ApiError
-		&& error.errorCode === 'STALE_TRANSCRIPT_VIEW';
+	return error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW';
 }
 
 function isHandoffForkConfirmationError(error: unknown): error is ApiError {
-	return error instanceof ApiError
-		&& error.errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
+	return error instanceof ApiError && error.errorCode === 'TRANSCRIPT_NOT_YET_PERSISTED';
 }
 
 function forkFailureNotice(error: unknown): string {
@@ -849,13 +857,9 @@ function forkFailureNotice(error: unknown): string {
 
 function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {
 	if (boundary === 'top') {
-		return changed
-			? m.chat_notice_move_top_success()
-			: m.chat_notice_move_top_unchanged();
+		return changed ? m.chat_notice_move_top_success() : m.chat_notice_move_top_unchanged();
 	}
-	return changed
-		? m.chat_notice_move_bottom_success()
-		: m.chat_notice_move_bottom_unchanged();
+	return changed ? m.chat_notice_move_bottom_success() : m.chat_notice_move_bottom_unchanged();
 }
 
 function scheduleInErrorMessage(error: ScheduleInCommandError): string {

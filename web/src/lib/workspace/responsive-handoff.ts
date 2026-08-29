@@ -1,35 +1,28 @@
 import {
-	CHAT_SURFACE_ID,
 	isTransientMobileSingletonKind,
-	type PaneId,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
-import { collectPaneNodes, paneIdOfSurface, paneNodeById } from './pane-tree.js';
-
-function chatPaneId(snapshot: WorkspaceLayoutSnapshot): PaneId | null {
-	return paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
-}
-
-function chatPaneActiveId(snapshot: WorkspaceLayoutSnapshot): string {
-	const paneId = chatPaneId(snapshot);
-	const pane = paneId ? paneNodeById(snapshot.desktopRoot, paneId) : null;
-	return pane?.tabs.activeId ?? CHAT_SURFACE_ID;
-}
+import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
 
 export function selectMobileEntrySurface(
 	layout: WorkspaceLayoutSnapshot,
 	lastFocusedSurfaceId: string,
 ): string {
 	if (layout.dialogFileSurfaceId) return layout.dialogFileSurfaceId;
-	if (layout.fullscreenPaneId) {
-		const pane = paneNodeById(layout.desktopRoot, layout.fullscreenPaneId);
-		if (pane?.tabs.activeId) return pane.tabs.activeId;
+	if (layout.fullscreenWindowId) {
+		const workspaceWindow = windowNodeById(layout.desktopRoot, layout.fullscreenWindowId);
+		if (workspaceWindow) return workspaceWindow.tabs.activeId;
 	}
-	for (const pane of collectPaneNodes(layout.desktopRoot)) {
-		if (pane.tabs.activeId === lastFocusedSurfaceId) return lastFocusedSurfaceId;
+	const focusedWindowId = windowIdOfSurface(layout.desktopRoot, lastFocusedSurfaceId);
+	if (focusedWindowId) {
+		const workspaceWindow = windowNodeById(layout.desktopRoot, focusedWindowId);
+		if (workspaceWindow?.tabs.activeId === lastFocusedSurfaceId) return lastFocusedSurfaceId;
+		if (workspaceWindow) return workspaceWindow.tabs.activeId;
 	}
-	return chatPaneActiveId(layout);
+	const first = collectWindowNodes(layout.desktopRoot)[0];
+	if (!first) throw new Error('Workspace has no windows');
+	return first.tabs.activeId;
 }
 
 export function planDesktopReturnMutations(
@@ -38,8 +31,10 @@ export function planDesktopReturnMutations(
 ): WorkspaceLayoutMutation[] {
 	const mobileOnly = new Set(layout.mobileOnlySurfaceIds);
 	if (mobileOnly.size === 0) return [];
-	const destinationPaneId = chatPaneId(layout);
-	if (!destinationPaneId) return [];
+	const destinationWindowId =
+		windowIdOfSurface(layout.desktopRoot, layout.mobileActiveSurfaceId) ??
+		collectWindowNodes(layout.desktopRoot)[0]?.id;
+	if (!destinationWindowId) return [];
 	const ordered = mobileMruSurfaceIds.filter((surfaceId) => mobileOnly.has(surfaceId));
 	for (const surfaceId of layout.mobileOnlySurfaceIds) {
 		if (!ordered.includes(surfaceId)) ordered.push(surfaceId);
@@ -57,17 +52,16 @@ export function planDesktopReturnMutations(
 				mutations.push({ type: 'place-in-dialog', surfaceId });
 				dialogAvailable = false;
 			} else {
-				mutations.push({ type: 'assign-to-pane', surfaceId, destinationPaneId });
+				mutations.push({ type: 'assign-to-window', surfaceId, destinationWindowId });
 			}
 			continue;
 		}
-		if (surface.type === 'singleton' && surface.kind !== 'chat') {
-			if (isTransientMobileSingletonKind(surface.kind)) {
-				mutations.push({ type: 'remove-surface', surfaceId });
-				continue;
-			}
-			mutations.push({ type: 'assign-to-pane', surfaceId, destinationPaneId });
+		if (surface.type !== 'singleton') continue;
+		if (isTransientMobileSingletonKind(surface.kind)) {
+			mutations.push({ type: 'remove-surface', surfaceId });
+			continue;
 		}
+		mutations.push({ type: 'assign-to-window', surfaceId, destinationWindowId });
 	}
 	return mutations;
 }

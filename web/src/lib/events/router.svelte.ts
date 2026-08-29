@@ -151,6 +151,10 @@ export interface EventRouterReadStateStore {
 	enqueueReadReceipt: (chatId: string, readAt: string) => void;
 }
 
+export interface EventRouterChatPresentations {
+	clearDeletedChat: (chatId: string) => void;
+}
+
 // Store references required by the router to build handler contexts.
 export interface EventRouterStores {
 	agentSettings: EventRouterAgentSettings;
@@ -161,6 +165,7 @@ export interface EventRouterStores {
 	conversationUi: ConversationUiPort;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
+	chatPresentations: EventRouterChatPresentations;
 }
 
 function extractFirstLine(text: string): string {
@@ -329,6 +334,7 @@ function buildDispatch(
 		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
 		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
 		removeChatTranscript: stores.chatState.removeChatTranscript,
+		clearChatPresentations: stores.chatPresentations.clearDeletedChat,
 	};
 	const transientTranscriptViews = new Map<string, string>();
 

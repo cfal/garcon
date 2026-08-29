@@ -7,7 +7,7 @@ import {
 
 function harness(options: {
 	existing?: readonly string[];
-	open?: (kind: 'git-history' | 'git-compare', paneId: 'pane-main') => Promise<void>;
+	open?: (kind: 'git-history' | 'git-compare', windowId: 'window-main') => Promise<void>;
 	mobile?: (kind: 'git-history' | 'git-compare') => Promise<void>;
 }) {
 	const existing = new Set(options.existing ?? []);
@@ -15,8 +15,8 @@ function harness(options: {
 		layout: {
 			surface: (surfaceId: string) => (existing.has(surfaceId) ? { id: surfaceId } : null),
 		},
-		openSingletonAsTab: vi.fn(async (kind, paneId) => {
-			await options.open?.(kind as 'git-history' | 'git-compare', paneId as 'pane-main');
+		openSingletonAsTab: vi.fn(async (kind, windowId) => {
+			await options.open?.(kind as 'git-history' | 'git-compare', windowId as 'window-main');
 		}),
 		focusMobileSingleton: vi.fn(async (kind) => {
 			await options.mobile?.(kind as 'git-history' | 'git-compare');
@@ -33,10 +33,10 @@ function harness(options: {
 }
 
 describe('GitViewLauncher', () => {
-	it('opens desktop History as a tab in the origin pane', async () => {
+	it('opens desktop History as a tab in the origin window', async () => {
 		const { launcher, workspace } = harness({});
-		await launcher.openHistory({ presentation: 'pane-main' });
-		expect(workspace.openSingletonAsTab).toHaveBeenCalledWith('git-history', 'pane-main');
+		await launcher.openHistory({ presentation: 'window-main' });
+		expect(workspace.openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
 	it('opens mobile Compare without constructing contextual launch state', async () => {
@@ -52,7 +52,7 @@ describe('GitViewLauncher', () => {
 			},
 		});
 
-		await expect(launcher.openCompare({ presentation: 'pane-main' })).rejects.toThrow(
+		await expect(launcher.openCompare({ presentation: 'window-main' })).rejects.toThrow(
 			'registration failed',
 		);
 		expect(surfaces.disposeSurface).toHaveBeenCalledWith('git-compare');
@@ -75,7 +75,9 @@ describe('GitViewLauncher', () => {
 		} satisfies GitViewSurfacePort;
 		const launcher = new GitViewLauncher(workspace, surfaces);
 
-		await expect(launcher.openCompare({ presentation: 'pane-main' })).rejects.toThrow('frame failed');
+		await expect(launcher.openCompare({ presentation: 'window-main' })).rejects.toThrow(
+			'frame failed',
+		);
 		expect(surfaces.disposeSurface).not.toHaveBeenCalled();
 	});
 
@@ -87,7 +89,9 @@ describe('GitViewLauncher', () => {
 			},
 		});
 
-		await expect(launcher.openCompare({ presentation: 'pane-main' })).rejects.toThrow('focus failed');
+		await expect(launcher.openCompare({ presentation: 'window-main' })).rejects.toThrow(
+			'focus failed',
+		);
 		expect(surfaces.disposeSurface).not.toHaveBeenCalled();
 	});
 });

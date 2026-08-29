@@ -10,7 +10,7 @@
 		getTransientLayers,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import { singletonSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
+	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import GitCompareToolbar from './GitCompareToolbar.svelte';
 	import GitComparisonDialog from './GitComparisonDialog.svelte';
@@ -23,7 +23,7 @@
 		onAppendToChatDraft,
 	}: {
 		controller: GitCompareSurfaceController;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		visible?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
 	} = $props();

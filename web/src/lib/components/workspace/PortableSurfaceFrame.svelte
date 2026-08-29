@@ -6,7 +6,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-	import type { PaneId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
 	import SurfaceErrorState from './SurfaceErrorState.svelte';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -21,7 +21,7 @@
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		visible: boolean;
 		style: string;
 		onSendToChat: (message: string) => Promise<boolean>;
@@ -93,10 +93,24 @@
 				</button>
 			</div>
 			<div class="min-h-0 flex-1 overflow-hidden">
-				<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {onAppendToChatDraft} {frameBridge} />
+				<PortableSurfaceContent
+					{surface}
+					{presentation}
+					{visible}
+					{onSendToChat}
+					{onAppendToChatDraft}
+					{frameBridge}
+				/>
 			</div>
 		</div>
 	{:else}
-		<PortableSurfaceContent {surface} {presentation} {visible} {onSendToChat} {onAppendToChatDraft} {frameBridge} />
+		<PortableSurfaceContent
+			{surface}
+			{presentation}
+			{visible}
+			{onSendToChat}
+			{onAppendToChatDraft}
+			{frameBridge}
+		/>
 	{/if}
 </div>

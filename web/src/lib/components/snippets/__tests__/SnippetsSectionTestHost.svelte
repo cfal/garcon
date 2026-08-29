@@ -3,7 +3,7 @@
 	import { setNotifications, setSnippets, setTransientLayers } from '$lib/context';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { sortSnippetsByShortName, type Snippet, type SnippetsSnapshot } from '$shared/snippets';
 
@@ -90,7 +90,7 @@
 		},
 	});
 	setSnippets(store);
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 	const notifications = createNotificationsStore();
 	setNotifications(notifications);

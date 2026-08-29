@@ -28,7 +28,12 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
-	import { getAppShell, getChatSessions, getFileSessions, getWorkspaceLayout } from '$lib/context';
+	import {
+		getAppShell,
+		getChatSessions,
+		getFileSessions,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
@@ -41,11 +46,7 @@
 			permissionOccurrenceId: string,
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: PlanExitChoice,
-			plan: string,
-		) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: PlanExitChoice, plan: string) => void;
 		chatContext?: ConversationMessageChatContext | null;
 		draft?: PermissionQuestionDraft;
 		onDraftChange?: (draft: PermissionQuestionDraft) => void;
@@ -67,7 +68,7 @@
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
-	const workspaceLayout = getWorkspaceLayout();
+	const workspace = getWorkspaceCoordinator();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -115,7 +116,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : workspaceLayout.chatPaneId,
+			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
@@ -415,11 +416,7 @@
 				<div class="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(
-							request.permissionOccurrenceId,
-							'bypass-new',
-							plan,
-						)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'bypass-new', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90"
 						title={m.chat_permission_tooltip_new_session_bypass()}
 					>
@@ -427,11 +424,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(
-							request.permissionOccurrenceId,
-							'bypass',
-							plan,
-						)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'bypass', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border text-status-warning hover:bg-status-warning/15"
 						title={m.chat_permission_tooltip_bypass()}
 					>
@@ -439,11 +432,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(
-							request.permissionOccurrenceId,
-							'approve-edits',
-							plan,
-						)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'approve-edits', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-info-border text-status-info hover:bg-status-info/15"
 						title={m.chat_permission_tooltip_approve_edits()}
 					>
@@ -463,11 +452,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => onExitPlanMode?.(
-							request.permissionOccurrenceId,
-							'deny',
-							plan,
-						)}
+						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'deny', plan)}
 						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-neutral-border text-status-neutral-foreground hover:bg-status-neutral/50"
 					>
 						<X class="w-3.5 h-3.5" />
@@ -816,10 +801,7 @@
 				<div class="flex flex-wrap gap-2">
 					<button
 						type="button"
-						onclick={() => onDecision(
-							request.permissionOccurrenceId,
-							{ allow: true },
-						)}
+						onclick={() => onDecision(request.permissionOccurrenceId, { allow: true })}
 						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors"
 					>
 						<Check class="w-3.5 h-3.5" />

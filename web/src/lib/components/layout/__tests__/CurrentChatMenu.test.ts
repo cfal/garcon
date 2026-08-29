@@ -118,7 +118,6 @@ describe('CurrentChatMenu', () => {
 
 		expect(items.indexOf(history)).toBeLessThan(items.indexOf(compare));
 		expect(items.indexOf(compare)).toBeLessThan(items.indexOf(share));
-		expect(screen.queryByRole('menuitem', { name: m.workspace_split_view() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_fullscreen() })).toBeNull();
 		await fireEvent.click(history);
 		expect(openHistory).toHaveBeenCalledOnce();

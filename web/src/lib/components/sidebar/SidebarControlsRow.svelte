@@ -32,7 +32,7 @@
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
-	import type { WorkspaceNewPaneActions } from '$lib/workspace/workspace-new-pane-actions.js';
+	import type { WorkspaceNewWindowActions } from '$lib/workspace/workspace-new-window-actions.js';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
@@ -54,7 +54,7 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
-		newPaneActions: WorkspaceNewPaneActions;
+		newWindowActions: WorkspaceNewWindowActions;
 	}
 
 	let {
@@ -77,7 +77,7 @@
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
 		onShowSettings,
-		newPaneActions,
+		newWindowActions,
 	}: SidebarControlsRowProps = $props();
 
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
@@ -89,7 +89,7 @@
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
 
-	const newPaneSingletonLabels: Record<PortableSingletonKind, () => string> = {
+	const newWindowSingletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
 		'git-history': m.workspace_surface_git_history,
 		'git-compare': m.workspace_surface_git_compare,
@@ -152,32 +152,42 @@
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-				aria-label={m.workspace_new_pane()}
-				title={m.workspace_new_pane()}
-				data-workspace-new-pane-menu
+				aria-label={m.workspace_new_window()}
+				title={newWindowActions.windowLimitReached
+					? m.workspace_drop_zone_max_windows()
+					: m.workspace_new_window()}
+				data-workspace-new-window-menu
+				disabled={newWindowActions.windowLimitReached}
 			>
 				<PanelsTopLeft class="h-4 w-4" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" class="w-56">
 				<DropdownMenuItem
-					disabled={newPaneActions.terminalLimitReached}
-					title={newPaneActions.terminalLimitReached ? m.terminal_limit_reached() : undefined}
-					onclick={newPaneActions.createTerminal}
+					disabled={newWindowActions.windowLimitReached || newWindowActions.terminalLimitReached}
+					title={newWindowActions.windowLimitReached
+						? m.workspace_drop_zone_max_windows()
+						: newWindowActions.terminalLimitReached
+							? m.terminal_limit_reached()
+							: undefined}
+					onclick={newWindowActions.createTerminal}
 				>
 					<SquareTerminal class="h-3.5 w-3.5" />
-					{newPaneActions.terminalLimitReached
+					{newWindowActions.terminalLimitReached
 						? m.terminal_limit_reached()
 						: m.workspace_new_terminal()}
 				</DropdownMenuItem>
-				{#each newPaneActions.singletonKinds as kind (kind)}
-					<DropdownMenuItem onclick={() => newPaneActions.openSingleton(kind)}>
+				{#each newWindowActions.singletonKinds as kind (kind)}
+					<DropdownMenuItem
+						disabled={newWindowActions.windowLimitReached}
+						onclick={() => newWindowActions.openSingleton(kind)}
+					>
 						{#if kind === 'git'}<GitBranch class="h-3.5 w-3.5" />
 						{:else if kind === 'git-history'}<History class="h-3.5 w-3.5" />
 						{:else if kind === 'git-compare'}<GitCompareArrows class="h-3.5 w-3.5" />
 						{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5" />
 						{:else if kind === 'files'}<Files class="h-3.5 w-3.5" />
 						{:else}<GitCommitHorizontal class="h-3.5 w-3.5" />{/if}
-						{m.workspace_open_surface({ surface: newPaneSingletonLabels[kind]() })}
+						{m.workspace_open_surface({ surface: newWindowSingletonLabels[kind]() })}
 					</DropdownMenuItem>
 				{/each}
 			</DropdownMenuContent>

@@ -5,31 +5,31 @@ import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
-	it('offers a single dock-to-pane control for the dialog file', async () => {
+	it('offers one move-to-window control for the dialog file', async () => {
 		render(FileDialogHostTestHost, { request: 'file' });
 		const moveButtons = await screen.findAllByRole('button', {
-			name: m.file_session_move_to_pane(),
+			name: m.file_session_move_to_window(),
 		});
 		expect(moveButtons).toHaveLength(1);
 		expect(moveButtons[0].querySelector('.lucide-panel-left')).toBeTruthy();
 	});
 
-	it('reports a failed move to the destination pane', async () => {
+	it('reports a failed move to the destination window', async () => {
 		const notifications = createNotificationsStore();
 		render(FileDialogHostTestHost, {
 			request: 'file',
-			moveError: new Error('Destination pane is no longer available'),
+			moveError: new Error('Destination window is no longer available'),
 			notifications,
 		});
 
 		await fireEvent.click(
-			await screen.findByRole('button', { name: m.file_session_move_to_pane() }),
+			await screen.findByRole('button', { name: m.file_session_move_to_window() }),
 		);
 
 		await waitFor(() => expect(notifications.items).toHaveLength(1));
 		expect(notifications.items[0]).toMatchObject({
 			tone: 'error',
-			message: 'Destination pane is no longer available',
+			message: 'Destination window is no longer available',
 		});
 	});
 

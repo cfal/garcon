@@ -2,14 +2,19 @@
 	import { untrack } from 'svelte';
 	import KeyboardShortcuts from '../KeyboardShortcuts.svelte';
 	import { setAppShell, setNavigation, setWorkspaceShortcuts } from '$lib/context';
-	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import {
+		WorkspaceShortcutDispatcher,
+		type WorkspaceShortcutDeps,
+	} from '$lib/workspace/workspace-shortcuts';
+	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import {
 		TransientLayerRegistry,
 		type TransientLayerKind,
 	} from '$lib/workspace/transient-layers.svelte';
 	import type { GlobalShortcutOverrides } from '$lib/workspace/global-shortcuts.js';
 	import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import type { FocusOwner } from '$lib/workspace/surface-types.js';
 	import type { Attachment } from 'svelte/attachments';
 	import {
 		managedWorkspaceScrollRegion,
@@ -36,7 +41,7 @@
 		onFileSave?: () => void;
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
-		onCyclePaneFocus?: () => void;
+		onCycleWindowFocus?: () => void;
 		onTransientEscape?: () => void;
 		onSurfaceEscape?: () => void;
 		onPrimaryScroll?: (direction: WorkspaceHalfPageDirection) => void;
@@ -58,7 +63,7 @@
 		onFileSave = () => undefined,
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
-		onCyclePaneFocus = () => undefined,
+		onCycleWindowFocus = () => undefined,
 		onTransientEscape = () => undefined,
 		onSurfaceEscape = () => undefined,
 		onPrimaryScroll,
@@ -72,9 +77,8 @@
 	const primaryScrollRegion = managedWorkspaceScrollRegion('primary', (_element, direction) =>
 		onPrimaryScroll?.(direction),
 	);
-	const contextualScrollRegion = managedWorkspaceScrollRegion(
-		'contextual',
-		(_element, direction) => onContextualScroll?.(direction),
+	const contextualScrollRegion = managedWorkspaceScrollRegion('contextual', (_element, direction) =>
+		onContextualScroll?.(direction),
 	);
 	const transientScrollRegion = managedWorkspaceScrollRegion('primary', (_element, direction) =>
 		onTransientScroll?.(direction),
@@ -111,11 +115,11 @@
 
 	const workspace = {
 		isSurfacePresented: () => true,
-		focusPreviousTabInFocusedPane: (owner: { kind: string }) =>
-			owner.kind === 'chat-list' ? false : onFocusPreviousTab(),
-		focusNextTabInFocusedPane: (owner: { kind: string }) =>
-			owner.kind === 'chat-list' ? false : onFocusNextTab(),
-		cyclePaneFocus: () => onCyclePaneFocus(),
+		focusPreviousTabInFocusedWindow: (owner?: FocusOwner) =>
+			owner?.kind === 'chat-list' ? false : onFocusPreviousTab(),
+		focusNextTabInFocusedWindow: (owner?: FocusOwner) =>
+			owner?.kind === 'chat-list' ? false : onFocusNextTab(),
+		cycleWindowFocus: () => onCycleWindowFocus(),
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }
@@ -126,7 +130,7 @@
 								? 'file:file-session'
 								: focusOwner === 'terminal'
 									? 'terminal:one'
-									: 'singleton:chat',
+									: CANONICAL_CHAT_SURFACE_ID,
 					};
 		},
 		layout: {
@@ -135,10 +139,14 @@
 					? { id: surfaceId, type: 'file', fileSessionId: 'file-session' }
 					: surfaceId === 'terminal:one'
 						? { id: surfaceId, type: 'terminal', terminalId: 'one' }
-						: { id: 'singleton:chat', type: 'singleton', kind: 'chat' },
+						: {
+								id: CANONICAL_CHAT_SURFACE_ID,
+								type: 'chat' as const,
+								chatId: 'chat-1',
+							},
 		},
-	} as never;
-	const transients = new TransientLayerRegistry(new ChatInteractionGate());
+	} satisfies WorkspaceShortcutDeps['workspace'];
+	const transients = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	const initialTransientKind = untrack(() => transientKind);
 	if (initialTransientKind) {
 		transients.register({
@@ -172,7 +180,7 @@
 		localShortcutOwner
 			? shortcuts.registerLocalShortcutOwner(element, (event) => localShortcutOwner(event))
 			: undefined;
-	shortcuts.registerSurface('singleton:chat', (event) => {
+	shortcuts.registerSurface(CANONICAL_CHAT_SURFACE_ID, (event) => {
 		if (event.key !== 'Escape') return false;
 		onSurfaceEscape();
 		return true;
@@ -183,7 +191,7 @@
 <KeyboardShortcuts {onToggleCommandMenu} />
 
 {#if localShortcutOwner && !transientKind}
-	<div data-workspace-surface-id="singleton:chat" {@attach localShortcutBoundary}>
+	<div data-workspace-surface-id={CANONICAL_CHAT_SURFACE_ID} {@attach localShortcutBoundary}>
 		<button type="button" aria-label="Local shortcut target" onkeydown={onLocalKeydown}
 			>Local</button
 		>
@@ -194,7 +202,7 @@
 	<div
 		data-workspace-chat-list={focusOwner === 'chat-list' ? '' : undefined}
 		data-workspace-surface-id={focusOwner === 'chat'
-			? 'singleton:chat'
+			? CANONICAL_CHAT_SURFACE_ID
 			: focusOwner === 'file'
 				? 'file:file-session'
 				: undefined}

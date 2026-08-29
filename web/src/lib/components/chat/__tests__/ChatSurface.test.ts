@@ -6,29 +6,11 @@ import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-mana
 import * as m from '$lib/paraglide/messages.js';
 import ChatSurface from '../ChatSurface.svelte';
 
-const { sessions, splitLayout } = vi.hoisted(() => ({
+const { sessions } = vi.hoisted(() => ({
 	sessions: {
 		selectedChat: null as ChatSessionRecord | null,
 		isLoadingChats: false,
 		setSelectedChatId: vi.fn(),
-	},
-	splitLayout: {
-		isEnabled: false,
-		root: null,
-		panes: [],
-		paneCount: 0,
-		focusedPaneId: null,
-		focusedChatId: null,
-		draggedChatId: null,
-		draggedPaneId: null,
-		focusPane: vi.fn(),
-		closePane: vi.fn(),
-		disable: vi.fn(),
-		setRatioByPath: vi.fn(),
-		swapPanes: vi.fn(),
-		endDrag: vi.fn(),
-		addChatToZone: vi.fn(),
-		replacePaneChat: vi.fn(),
 	},
 }));
 
@@ -38,11 +20,6 @@ vi.mock('$lib/context', () => ({
 	getModelCatalog: () => ({
 		supportsFork: () => true,
 		supportsUpdateProjectPath: () => true,
-	}),
-	getSplitLayout: () => splitLayout,
-	getChatInteractionGate: () => ({
-		isChatDropEligible: false,
-		register: () => () => {},
 	}),
 	getOptionalTransientLayers: () => null,
 	getGitViewLauncher: () => ({
@@ -118,7 +95,6 @@ function subagentModel(): SubagentManagementModel {
 function props(subagentToolbar: SubagentToolbarState, isMobile = true, isVisible = true) {
 	return {
 		isMobile,
-		reserveTopFloatingToolbar: false,
 		isVisible,
 		isInteractive: true,
 		subagentToolbar,
@@ -151,9 +127,7 @@ describe('ChatSurface mobile toolbar', () => {
 		expect(toolbar?.firstElementChild?.contains(agents)).toBe(true);
 		expect(menuRegion?.contains(menu)).toBe(true);
 		expect(
-			screen
-				.getByTestId('conversation-workspace-stub')
-				.getAttribute('data-reserve-top-floating-toolbar'),
+			screen.getByTestId('conversation-workspace-stub').getAttribute('data-reserve-mobile-toolbar'),
 		).toBe('true');
 
 		await rendered.rerender(props(subagentToolbar, false));

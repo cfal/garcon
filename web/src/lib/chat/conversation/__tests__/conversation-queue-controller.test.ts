@@ -39,10 +39,40 @@ function createHarness() {
 		getCursor: vi.fn(() => ({ transcriptViewId: 'view-1', lastOrdinal: 0 })),
 		upsertPendingUserInput: vi.fn(),
 	};
+	let inputText = '';
+	let images: File[] = [];
+	let draftRevision = 1;
 	const composerState = {
-		inputText: '',
-		images: [] as File[],
-		saveDraft: vi.fn(),
+		get inputText() {
+			return inputText;
+		},
+		set inputText(value: string) {
+			inputText = value;
+			draftRevision += 1;
+		},
+		get images() {
+			return images;
+		},
+		set images(value: File[]) {
+			images = value;
+			draftRevision += 1;
+		},
+		draftRevision: vi.fn((_chatId: string) => draftRevision),
+		isDraftEmpty: vi.fn((_chatId: string) => inputText.length === 0 && images.length === 0),
+		restoreDraftIfRevision: vi.fn(
+			(
+				_chatId: string,
+				expectedRevision: number,
+				text: string,
+				restoredImages: readonly File[],
+			) => {
+				if (draftRevision !== expectedRevision) return false;
+				inputText = text;
+				images = [...restoredImages];
+				draftRevision += 1;
+				return true;
+			},
+		),
 	};
 	const lifecycle = { currentChatId: 'chat-1' as string | null };
 	const conversationUi = {
@@ -129,8 +159,9 @@ function controllerWithConversationUi(
 function queueSteerError(
 	errorCode: string,
 	deliveryOutcome: 'not-sent' | 'unknown' | 'accepted',
-	control: ReturnType<typeof emptyChatExecutionControlState> | null =
-		emptyChatExecutionControlState('server-instance-test'),
+	control: ReturnType<
+		typeof emptyChatExecutionControlState
+	> | null = emptyChatExecutionControlState('server-instance-test'),
 	serverInstanceId = control?.serverInstanceId ?? 'server-instance-test',
 ): ApiError {
 	return new ApiError(500, 'queued steer failed', errorCode, undefined, false, {
@@ -153,6 +184,7 @@ describe('ConversationQueueController', () => {
 		const { controller, composerState, chatState } = createHarness();
 		const first = controller.beginSubmission('chat-1');
 		const second = controller.beginSubmission('chat-1');
+		controller.recordComposerClear('chat-1', composerState.draftRevision('chat-1'));
 		controller.recordSubmissionFailure('chat-1', {
 			sequence: second,
 			text: 'second',
@@ -169,20 +201,21 @@ describe('ConversationQueueController', () => {
 		controller.finishSubmission('chat-1');
 
 		expect(composerState.inputText).toBe('first');
-		expect(composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(composerState.restoreDraftIfRevision).toHaveBeenCalledWith('chat-1', 1, 'first', []);
 		expect(chatState.clearLocalNotices).toHaveBeenCalledOnce();
 	});
 
 	it('does not overwrite composer text entered while a failed request was pending', () => {
 		const { controller, composerState } = createHarness();
 		const sequence = controller.beginSubmission('chat-1');
+		controller.recordComposerClear('chat-1', composerState.draftRevision('chat-1'));
 		controller.recordSubmissionFailure('chat-1', { sequence, text: 'failed', images: [] });
 		composerState.inputText = 'new text';
 
 		controller.finishSubmission('chat-1');
 
 		expect(composerState.inputText).toBe('new text');
-		expect(composerState.saveDraft).not.toHaveBeenCalled();
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 	});
 
 	it('applies refreshed execution control through the version-aware store method', async () => {
@@ -592,12 +625,7 @@ describe('ConversationQueueController', () => {
 	it('rejects a queued-steer error whose envelope and control instances differ', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');
-		const error = queueSteerError(
-			'STEER_OUTCOME_UNKNOWN',
-			'unknown',
-			control,
-			'server-other',
-		);
+		const error = queueSteerError('STEER_OUTCOME_UNKNOWN', 'unknown', control, 'server-other');
 		acceptedInputs.steerQueuedEntry.mockReturnValue({
 			clientRequestId: 'request-steer',
 			clientMessageId: 'message-steer',

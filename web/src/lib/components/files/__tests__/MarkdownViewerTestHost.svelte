@@ -22,7 +22,7 @@
 
 	let {
 		session,
-		presentation = 'pane-main',
+		presentation = 'window-main',
 		onOpen,
 		notifications = createNotificationsStore(),
 		workspaceLayout = createWorkspaceLayoutStore(),

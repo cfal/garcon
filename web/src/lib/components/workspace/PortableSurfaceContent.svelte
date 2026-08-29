@@ -32,7 +32,7 @@
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import type { PaneId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		setSurfaceFrameBridge,
@@ -52,7 +52,7 @@
 		frameBridge,
 	}: {
 		surface: SurfaceDescriptor;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		visible: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
@@ -79,7 +79,7 @@
 	{:else if surface.type === 'terminal-launcher'}
 		{#await terminalLauncherRenderer() then TerminalLauncherSurface}
 			<TerminalLauncherSurface
-				host={presentation === 'mobile' ? workspace.defaultPaneId : presentation}
+				host={presentation === 'mobile' ? workspace.defaultWindowId : presentation}
 			/>
 		{/await}
 	{:else if surface.type === 'file'}
@@ -116,7 +116,7 @@
 			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
 		>
 			{#await filesRenderer() then FilesPanel}
-				<FilesPanel presentation={presentation} />
+				<FilesPanel {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
@@ -127,12 +127,7 @@
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
 		>
 			{#await gitWorkbenchRenderer() then GitWorkbenchPanel}
-				<GitWorkbenchPanel
-					{controller}
-					{presentation}
-					{visible}
-					{onAppendToChatDraft}
-				/>
+				<GitWorkbenchPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git-history'}
@@ -143,12 +138,7 @@
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
 		>
 			{#await gitHistoryRenderer() then GitHistoryPanel}
-				<GitHistoryPanel
-					{controller}
-					{presentation}
-					{visible}
-					{onAppendToChatDraft}
-				/>
+				<GitHistoryPanel {controller} {presentation} {visible} {onAppendToChatDraft} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git-compare'}
@@ -159,12 +149,7 @@
 			retainedEffectiveProjectKey={controller.target.effectiveProjectKey}
 		>
 			{#await gitCompareRenderer() then GitComparePanel}
-				<GitComparePanel
-					{controller}
-					{presentation}
-					{visible}
-					{onAppendToChatDraft}
-				/>
+				<GitComparePanel {controller} {presentation} {visible} {onAppendToChatDraft} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}

@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
+	import { getAppShell, getModelCatalog, getWorkspaceWindowDnd } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -20,6 +20,7 @@
 	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
 	interface SidebarChatItemProps {
 		session: ChatSessionRecord;
@@ -49,6 +50,8 @@
 		hasPinnedChats?: boolean;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 	}
 
 	let {
@@ -78,6 +81,8 @@
 		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 	}: SidebarChatItemProps = $props();
 
 	let isProcessing = $derived(session.isProcessing);
@@ -149,7 +154,7 @@
 
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
-	const splitLayout = getSplitLayout();
+	const windowDnd = getWorkspaceWindowDnd();
 	const canFork = $derived(modelCatalog.supportsFork(agentId));
 	const canForkNow = $derived(
 		canUseForkAction({
@@ -162,12 +167,12 @@
 	function handleDragStart(e: DragEvent) {
 		if (!e.dataTransfer) return;
 		e.dataTransfer.effectAllowed = 'move';
-		e.dataTransfer.setData('text/plain', session.id);
-		splitLayout.startDrag(session.id);
+		e.dataTransfer.setData('application/x-garcon-workspace-drag', '1');
+		windowDnd.beginChatDrag(session.id);
 	}
 
 	function handleDragEnd() {
-		splitLayout.endDrag();
+		windowDnd.endDrag();
 	}
 
 	let itemEl: HTMLDivElement | undefined = $state();
@@ -387,6 +392,8 @@
 						{onEnterMultiSelect}
 						{onMoveToTop}
 						{onMoveToBottom}
+						{onOpenInNewWindow}
+						{newWindowBlocked}
 						{onTogglePinned}
 						{onToggleArchive}
 						onRename={requestRename}

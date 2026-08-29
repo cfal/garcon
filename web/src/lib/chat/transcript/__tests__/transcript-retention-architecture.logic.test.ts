@@ -16,15 +16,15 @@ describe('transcript retention architecture', () => {
 		expect(mutations).not.toContain("'history-pruned'");
 	});
 
-	it('[TLV5-PAGE.09-WEB-STATIC-01] shares visible-demand paging across active, background, and split loads', () => {
+	it('[TLV5-PAGE.09-WEB-STATIC-01] shares visible-demand paging across active, background, and window-preview loads', () => {
 		const activeTranscript = transcriptSource('active-transcript-state.svelte.ts');
 		const backgroundLoader = transcriptSource('background-transcript-loader.ts');
-		const splitPreview = readFileSync(
-			'src/lib/chat/split/split-pane-preview-store.svelte.ts',
+		const windowPreview = readFileSync(
+			'src/lib/chat/transcript/chat-window-preview-store.svelte.ts',
 			'utf8',
 		);
 
-		for (const source of [activeTranscript, backgroundLoader, splitPreview]) {
+		for (const source of [activeTranscript, backgroundLoader, windowPreview]) {
 			expect(source).toMatch(
 				/import[\s\S]*\bloadTranscriptPageDemand\b[\s\S]*from\s+['"][^'"]*transcript-page-demand\.js['"]/,
 			);

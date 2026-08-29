@@ -32,7 +32,6 @@ export interface ConversationFeedProjectionInput {
 	showThinking: boolean;
 	textScale: number;
 	isLiveWindow: boolean;
-	showTopToolbarSpacer: boolean;
 	showRefreshError: boolean;
 	showEarlierBoundary: boolean;
 	showLaterBoundary: boolean;
@@ -76,7 +75,6 @@ function sameInput(
 		left.showThinking === right.showThinking &&
 		left.textScale === right.textScale &&
 		left.isLiveWindow === right.isLiveWindow &&
-		left.showTopToolbarSpacer === right.showTopToolbarSpacer &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
@@ -96,7 +94,6 @@ function sameProjectionConfiguration(
 		left.showThinking === right.showThinking &&
 		left.textScale === right.textScale &&
 		left.isLiveWindow === right.isLiveWindow &&
-		left.showTopToolbarSpacer === right.showTopToolbarSpacer &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
 		left.showLaterBoundary === right.showLaterBoundary &&
@@ -129,7 +126,6 @@ export class ConversationFeedProjectionState {
 		const visibleTranscriptItems = this.#visibleTranscriptItems(renderModel.items, input);
 		const model = buildConversationVirtualFeedModel({
 			surfaceIdentity: input.surfaceIdentity,
-			showTopToolbarSpacer: input.showTopToolbarSpacer,
 			showRefreshError: input.showRefreshError,
 			showEarlierBoundary: input.showEarlierBoundary,
 			showLaterBoundary: input.showLaterBoundary,

@@ -6,7 +6,7 @@
 	import GitDiffSettingsMenuContent from './GitDiffSettingsMenuContent.svelte';
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 	let {
 		controller,
@@ -16,7 +16,7 @@
 		closeDisabled,
 	}: {
 		controller: GitCompareSurfaceController;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		onRefresh: () => void;
 		onClose: () => void;
 		closeDisabled: boolean;

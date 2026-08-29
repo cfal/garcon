@@ -6,8 +6,8 @@
 	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
-	import { terminalSurfaceId, type PaneId } from '$lib/workspace/surface-types';
-	import { collectPaneNodes, paneIdOfSurface } from '$lib/workspace/pane-tree.js';
+	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
+	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 	import * as m from '$lib/paraglide/messages.js';
@@ -30,7 +30,7 @@
 		workspace: providedWorkspace,
 	}: {
 		terminalId: string;
-		host: PaneId | 'mobile';
+		host: WorkspaceWindowId | 'mobile';
 		visible?: boolean;
 		terminals?: TerminalSurfaceRegistryPort;
 		workspace?: TerminalSurfaceWorkspacePort;
@@ -128,10 +128,12 @@
 	function placementLabel(itemTerminalId: string): string | null {
 		const surfaceId = terminalSurfaceId(itemTerminalId);
 		const snapshot = workspace.layout.snapshot;
-		const paneId = paneIdOfSurface(snapshot.desktopRoot, surfaceId);
-		if (!paneId) return null;
-		const index = collectPaneNodes(snapshot.desktopRoot).findIndex((pane) => pane.id === paneId);
-		return m.workspace_pane_number({ number: index + 1 });
+		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+		if (!windowId) return null;
+		const index = collectWindowNodes(snapshot.desktopRoot).findIndex(
+			(workspaceWindow) => workspaceWindow.id === windowId,
+		);
+		return m.workspace_window_number({ number: index + 1 });
 	}
 
 	$effect(() => {

@@ -109,38 +109,6 @@ describe('ConversationFeed', () => {
 		}
 	});
 
-	it('omits the top floating toolbar spacer by default', () => {
-		const { container } = render(ConversationFeedTestHost);
-
-		expect(container.querySelector('[data-chat-feed-top-floating-toolbar-spacer]')).toBeNull();
-	});
-
-	it('renders the floating toolbar reservation inside scrollable feed content', async () => {
-		const { container } = render(ConversationFeedTestHost, {
-			reserveTopFloatingToolbar: true,
-			transcriptScenario: 'row-ids',
-		});
-
-		const viewport = screen.getByRole('region', { name: 'Chat messages' });
-		await waitFor(() =>
-			expect(container.querySelector('[data-chat-feed-top-floating-toolbar-spacer]')).toBeTruthy(),
-		);
-		const spacer = container.querySelector<HTMLElement>(
-			'[data-chat-feed-top-floating-toolbar-spacer]',
-		);
-		const transcript = container.querySelector<HTMLElement>('[data-chat-row-id]');
-
-		expect(spacer).toBeTruthy();
-		expect(transcript).toBeTruthy();
-		expect(viewport.contains(spacer)).toBe(true);
-		expect(viewport.contains(transcript)).toBe(true);
-		expect(spacer?.classList.contains('h-[var(--workspace-floating-taskbar-inset)]')).toBe(true);
-		expect(spacer?.compareDocumentPosition(transcript as Node)).toBe(
-			Node.DOCUMENT_POSITION_FOLLOWING,
-		);
-		expect(container.querySelector('[data-chat-bottom-anchor]')).toBeNull();
-	});
-
 	it('represents viewport insets as measured virtual items', async () => {
 		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
 		const viewport = screen.getByRole('region', { name: 'Chat messages' });
@@ -151,15 +119,6 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-feed-viewport-end-spacer]')).toBeTruthy();
 		expect(viewport.classList.contains('pt-3')).toBe(false);
 		expect(viewport.classList.contains('pb-3')).toBe(false);
-	});
-
-	it('reserves toolbar space above empty feed states', () => {
-		const { container } = render(ConversationFeedTestHost, { reserveTopFloatingToolbar: true });
-		const viewport = screen.getByRole('region', { name: 'Chat messages' });
-		const spacer = container.querySelector('[data-chat-top-toolbar-spacer]');
-
-		expect(spacer).toBeTruthy();
-		expect(viewport.contains(spacer)).toBe(true);
 	});
 
 	it('keeps feed content and scrollbar invisible while preparing the initial position', async () => {
@@ -271,16 +230,13 @@ describe('ConversationFeed', () => {
 
 	it('shows automatic earlier loading outside virtual geometry', () => {
 		const { container } = render(ConversationFeedTestHost, {
-			reserveTopFloatingToolbar: true,
 			transcriptScenario: 'loading-earlier',
 		});
 		const viewport = screen.getByRole('region', { name: 'Chat messages' });
 		const indicator = container.querySelector<HTMLElement>('[data-chat-earlier-loading-indicator]');
 
 		expect(indicator?.textContent).toContain('Loading earlier messages...');
-		expect(
-			indicator?.classList.contains('top-[calc(var(--workspace-floating-taskbar-inset)+0.5rem)]'),
-		).toBe(true);
+		expect(indicator?.classList.contains('top-2')).toBe(true);
 		expect(indicator?.classList.contains('left-1/2')).toBe(true);
 		expect(indicator?.classList.contains('-translate-x-1/2')).toBe(true);
 		expect(indicator?.classList.contains('size-8')).toBe(true);

@@ -5,11 +5,12 @@
 		SidebarChatReorderState,
 		type SidebarChatOrderMap,
 	} from '../sidebar-chat-reorder-state.svelte';
-	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import { setAppShell, setModelCatalog, setWorkspaceWindowDnd } from '$lib/context';
 	import type { SidebarVirtualChatRow, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
-	import { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte';
+	import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
+	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
@@ -21,8 +22,8 @@
 		onRegisterRecenter?: (callback: () => void) => void;
 		onRegisterReorder?: (reorder: SidebarChatReorderState) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
-		onSplitDragEnd?: (chatId: string) => void;
-		onRegisterSplitLayout?: (splitLayout: SplitLayoutStore) => void;
+		onWorkspaceDragEnd?: (chatId: string) => void;
+		onRegisterWindowDnd?: (windowDnd: WorkspaceWindowDndController) => void;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 	}
 
@@ -41,8 +42,8 @@
 		onRegisterRecenter,
 		onRegisterReorder,
 		onPersistReorder = () => {},
-		onSplitDragEnd,
-		onRegisterSplitLayout,
+		onWorkspaceDragEnd,
+		onRegisterWindowDnd,
 		onToggleProjectCollapsed,
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
@@ -92,16 +93,16 @@
 		},
 	} as never);
 
-	class TestSplitLayoutStore extends SplitLayoutStore {
+	class TestWorkspaceWindowDndController extends WorkspaceWindowDndController {
 		override endDrag(): void {
-			const chatId = this.draggedChatId;
+			const chatId = this.payload?.kind === 'chat' ? this.payload.chatId : null;
 			super.endDrag();
-			if (chatId) onSplitDragEnd?.(chatId);
+			if (chatId) onWorkspaceDragEnd?.(chatId);
 		}
 	}
-	const splitLayout = new TestSplitLayoutStore();
-	setSplitLayout(splitLayout);
-	onMount(() => onRegisterSplitLayout?.(splitLayout));
+	const windowDnd = new TestWorkspaceWindowDndController(createWorkspaceLayoutStore());
+	setWorkspaceWindowDnd(windowDnd);
+	onMount(() => onRegisterWindowDnd?.(windowDnd));
 </script>
 
 <div

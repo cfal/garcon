@@ -3,12 +3,14 @@
 
 	let {
 		subagentToolbar,
-		reserveTopFloatingToolbar,
+		reserveMobileToolbar,
 		onRegisterPrepareHide,
+		textScale,
 	}: {
 		subagentToolbar: SubagentToolbarState;
-		reserveTopFloatingToolbar: boolean;
+		reserveMobileToolbar: boolean;
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
+		textScale: number;
 	} = $props();
 
 	let prepareHideCount = $state(0);
@@ -23,6 +25,7 @@
 <div
 	data-testid="conversation-workspace-stub"
 	data-has-subagent-toolbar={Boolean(subagentToolbar)}
-	data-reserve-top-floating-toolbar={reserveTopFloatingToolbar}
+	data-reserve-mobile-toolbar={reserveMobileToolbar}
 	data-prepare-hide-count={prepareHideCount}
+	data-text-scale={textScale}
 ></div>

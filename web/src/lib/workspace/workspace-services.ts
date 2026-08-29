@@ -25,7 +25,7 @@ import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelt
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
-import { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import { parsePersistedWorkspaceLayout } from './layout-schema.js';
 import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
@@ -36,10 +36,11 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
+import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
 import {
 	singletonSurfaceId,
 	type DesktopPlacement,
-	type PaneId,
+	type WorkspaceWindowId,
 	type PresentationHostId,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
@@ -48,7 +49,7 @@ export function resolveConfiguredFilePlacement(
 	settings: LocalSettingsStore,
 	mode: FileRendererMode,
 	origin: PresentationHostId,
-	defaultPaneId: PaneId,
+	defaultWindowId: WorkspaceWindowId,
 ): DesktopPlacement {
 	const preference: FileOpenPlacementPreference = (() => {
 		switch (mode) {
@@ -61,12 +62,13 @@ export function resolveConfiguredFilePlacement(
 		}
 	})();
 
-	const originPaneId: PaneId | null = origin.startsWith('pane-') ? (origin as PaneId) : null;
+	const originWindowId: WorkspaceWindowId | null =
+		origin === 'mobile' || origin === 'dialog' ? null : origin;
 	if (preference === 'dialog') return { type: 'dialog' };
-	if (preference === 'new-pane') {
-		return { type: 'new-pane', anchorPaneId: originPaneId ?? defaultPaneId };
+	if (preference === 'new-window') {
+		return { type: 'new-window', anchorWindowId: originWindowId ?? defaultWindowId };
 	}
-	return { type: 'pane', paneId: originPaneId ?? defaultPaneId };
+	return { type: 'window', windowId: originWindowId ?? defaultWindowId };
 }
 
 export interface WorkspaceRootDependencies {
@@ -83,7 +85,6 @@ export interface WorkspaceRootDependencies {
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
-	workspaceLayoutV1Raw?: string | null;
 }
 
 export interface WorkspaceServices {
@@ -91,7 +92,7 @@ export interface WorkspaceServices {
 	layout: WorkspaceLayoutReader;
 	context: ReturnType<typeof createWorkspaceContextStore>;
 	terminals: TerminalRegistry;
-	chatInteractionGate: ChatInteractionGate;
+	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	surfaceFrames: SurfaceFrameRegistry;
 	gitQuickSummary: GitQuickSummaryStore;
@@ -102,6 +103,7 @@ export interface WorkspaceServices {
 	singletonSurfaces: SingletonSurfaceRegistry;
 	files: FileSessionRegistry;
 	coordinator: WorkspaceCoordinator;
+	windowDnd: WorkspaceWindowDndController;
 	shortcuts: WorkspaceShortcutDispatcher;
 	destroy(): void;
 }
@@ -111,12 +113,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		deps.workspaceLayoutRaw === undefined
 			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout)
 			: deps.workspaceLayoutRaw;
-	const workspaceLayoutV1Raw =
-		deps.workspaceLayoutV1Raw === undefined
-			? getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayoutV1)
-			: deps.workspaceLayoutV1Raw;
-	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw, workspaceLayoutV1Raw);
+	const restore = parsePersistedWorkspaceLayout(workspaceLayoutRaw);
 	const layout = createWorkspaceLayoutStore(restore.snapshot);
+	const windowDnd = new WorkspaceWindowDndController(layout);
 	const persistence = new WorkspaceLayoutPersistence({
 		onError: (_error, retry) => {
 			deps.notifications.error(m.workspace_layout_persistence_failed(), {
@@ -146,8 +145,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
-	const chatInteractionGate = new ChatInteractionGate();
-	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	const workspaceInteractionGate = new WorkspaceInteractionGate();
+	const unregisterWorkspaceInteraction = workspaceInteractionGate.register({
+		cancelApplicationDrag: () => windowDnd.endDrag(),
+	});
+	const transientLayers = new TransientLayerRegistry(workspaceInteractionGate);
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
@@ -168,15 +170,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const createGitBranchSelector = () =>
 		new GitBranchSelectorState({
-		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
-			gitMutations.run({
-				surfaceId,
-				effectiveProjectKey,
-				projectPath,
-				execute,
-				didMutate: (result) => result.success,
-			}),
+			openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
+			runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
+				gitMutations.run({
+					surfaceId,
+					effectiveProjectKey,
+					projectPath,
+					execute,
+					didMutate: (result) => result.success,
+				}),
 		});
 	const gitBranchActions = createGitBranchSelector();
 	const gitReviewDisplay = new GitReviewDisplaySettingsStore();
@@ -223,7 +225,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				deps.localSettings,
 				mode,
 				origin,
-				placement?.defaultPaneId ?? 'pane-main',
+				placement?.defaultWindowId ?? 'window-main',
 			),
 		getEditorSettings: () => ({
 			get wordWrap() {
@@ -256,7 +258,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		terminals,
 		workspaceContext: context,
 		appShell: deps.appShell,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 		files,
 		singletons: singletonSurfaces,
@@ -293,7 +295,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		layout,
 		context,
 		terminals,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 		surfaceFrames,
 		gitQuickSummary,
@@ -304,8 +306,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		singletonSurfaces,
 		files,
 		coordinator,
+		windowDnd,
 		shortcuts,
 		destroy() {
+			windowDnd.endDrag();
+			unregisterWorkspaceInteraction();
 			domainBindings.destroy();
 			terminalLayoutBinding?.destroy();
 			terminals.destroy();

@@ -1,89 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import {
-	canOmitCanonicalPullRequests,
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 	isCanonicalFirstRunLayout,
 } from '../canonical-layout';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
-import { CHAT_SURFACE_ID, TERMINAL_LAUNCHER_ID, singletonSurfaceId } from '../surface-types';
+import { singletonSurfaceId } from '../surface-types';
 
 describe('canonical workspace layout', () => {
-	it('recognizes first-run layouts with or without Pull Requests', () => {
+	it('contains one window with one empty Chat view', () => {
 		const canonical = canonicalWorkspaceSnapshot();
+		expect(canonical.desktopRoot).toEqual({
+			type: 'window',
+			id: CANONICAL_WINDOW_ID,
+			tabs: {
+				order: [CANONICAL_CHAT_SURFACE_ID],
+				activeId: CANONICAL_CHAT_SURFACE_ID,
+				mru: [CANONICAL_CHAT_SURFACE_ID],
+			},
+		});
+		expect(canonical.surfaces).toEqual({
+			[CANONICAL_CHAT_SURFACE_ID]: {
+				id: CANONICAL_CHAT_SURFACE_ID,
+				type: 'chat',
+				chatId: null,
+			},
+		});
+		expect(canonical.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 		expect(isCanonicalFirstRunLayout(canonical)).toBe(true);
-
-		const withoutPullRequests = reduceWorkspaceLayout(canonical, [
-			{ type: 'remove-surface', surfaceId: singletonSurfaceId('pull-requests') },
-		]);
-		expect(isCanonicalFirstRunLayout(withoutPullRequests)).toBe(true);
 	});
 
-	it('rejects launcher-derived and user-focused layouts as first-run state', () => {
-		const canonical = canonicalWorkspaceSnapshot();
-		const withLauncher = reduceWorkspaceLayout(canonical, [
+	it('rejects a selected Chat, an added tab, or another window as first-run state', () => {
+		const selected = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-a' },
+		]);
+		const withTab = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
-				surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-				paneId: 'pane-main',
+				surface: { id: singletonSurfaceId('git'), type: 'singleton', kind: 'git' },
+				windowId: CANONICAL_WINDOW_ID,
 			},
 		]);
-		const focused = reduceWorkspaceLayout(canonical, [
-			{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: singletonSurfaceId('git') },
-		]);
-
-		expect(isCanonicalFirstRunLayout(withLauncher)).toBe(false);
-		expect(isCanonicalFirstRunLayout(focused)).toBe(false);
-	});
-
-	it('rejects split layouts as first-run state', () => {
-		const split = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+		const withWindow = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
-				type: 'split-tab-to-edge',
-				surfaceId: singletonSurfaceId('git'),
-				targetPaneId: 'pane-main',
+				type: 'open-chat-in-new-window',
+				chatId: 'chat-b',
+				targetWindowId: CANONICAL_WINDOW_ID,
 				edge: 'right',
-				newPaneId: 'pane-2',
-				splitId: 'split-1',
+				newWindowId: 'window-secondary',
+				partitionId: 'partition-root',
 			},
 		]);
-		expect(isCanonicalFirstRunLayout(split)).toBe(false);
-		expect(canOmitCanonicalPullRequests(split)).toBe(false);
-	});
 
-	it('allows canonical Pull Requests omission while tolerating the launcher', () => {
-		const withLauncher = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{
-				type: 'register-surface',
-				surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
-				paneId: 'pane-main',
-			},
-		]);
-		expect(canOmitCanonicalPullRequests(withLauncher)).toBe(true);
-
-		const pullRequestsActive = reduceWorkspaceLayout(withLauncher, [
-			{
-				type: 'activate-pane-tab',
-				paneId: 'pane-main',
-				surfaceId: singletonSurfaceId('pull-requests'),
-			},
-		]);
-		expect(canOmitCanonicalPullRequests(pullRequestsActive)).toBe(false);
-
-		const noncanonical = reduceWorkspaceLayout(withLauncher, [
-			{
-				type: 'register-surface',
-				surface: { id: singletonSurfaceId('files'), type: 'singleton', kind: 'files' },
-				paneId: 'pane-main',
-			},
-		]);
-		expect(canOmitCanonicalPullRequests(noncanonical)).toBe(false);
-	});
-
-	it('always places chat first in the canonical pane', () => {
-		const canonical = canonicalWorkspaceSnapshot();
-		expect(canonical.desktopRoot.type).toBe('pane');
-		if (canonical.desktopRoot.type !== 'pane') throw new Error('expected pane root');
-		expect(canonical.desktopRoot.tabs.order[0]).toBe(CHAT_SURFACE_ID);
-		expect(canonical.desktopRoot.tabs.activeId).toBe(CHAT_SURFACE_ID);
+		expect(isCanonicalFirstRunLayout(selected)).toBe(false);
+		expect(isCanonicalFirstRunLayout(withTab)).toBe(false);
+		expect(isCanonicalFirstRunLayout(withWindow)).toBe(false);
 	});
 });

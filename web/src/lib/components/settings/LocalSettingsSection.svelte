@@ -47,8 +47,8 @@
 	type FilePlacementSettingKey =
 		'textEditorOpenPlacement' | 'imageViewerOpenPlacement' | 'markdownViewerOpenPlacement';
 	const fileOpenPlacementLabels: Record<FileOpenPlacementPreference, () => string> = {
-		source: m.settings_file_open_placement_source,
-		'new-pane': m.settings_file_open_placement_new_pane,
+		'same-window': m.settings_file_open_placement_source,
+		'new-window': m.settings_file_open_placement_new_window,
 		dialog: m.settings_file_open_placement_dialog,
 	};
 	const chatListDockLabels: Record<ChatListDock, () => string> = {
@@ -193,8 +193,7 @@
 					id="local-chat-list-dock"
 					class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
 					value={ls.chatListDock}
-					onchange={(event) =>
-						setChatListDock((event.currentTarget as HTMLSelectElement).value)}
+					onchange={(event) => setChatListDock((event.currentTarget as HTMLSelectElement).value)}
 				>
 					{#each ['left', 'right'] as const as dock (dock)}
 						<option value={dock}>{chatListDockLabels[dock]()}</option>
@@ -225,8 +224,8 @@
 			)}
 			{@render settingRow(
 				m.settings_workspace_hide_chat_list_for_git(),
-				ls.hideChatListWhenGitInMain,
-				() => ls.toggle('hideChatListWhenGitInMain'),
+				ls.hideChatListWhenGitFocused,
+				() => ls.toggle('hideChatListWhenGitFocused'),
 			)}
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),
@@ -246,10 +245,8 @@
 				() => ls.toggle('allowDirectChats'),
 				{ description: m.settings_chat_allow_direct_chats_description() },
 			)}
-			{@render settingRow(
-				m.settings_chat_reduce_motion(),
-				ls.reduceMotion,
-				() => ls.toggle('reduceMotion'),
+			{@render settingRow(m.settings_chat_reduce_motion(), ls.reduceMotion, () =>
+				ls.toggle('reduceMotion'),
 			)}
 			<div class="py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_hidden_tools()}</div>

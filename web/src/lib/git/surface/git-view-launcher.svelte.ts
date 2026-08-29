@@ -1,7 +1,7 @@
-import { singletonSurfaceId, type PaneId } from '$lib/workspace/surface-types.js';
+import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 export interface GitViewLaunchOrigin {
-	presentation: PaneId | 'mobile';
+	presentation: WorkspaceWindowId | 'mobile';
 }
 
 export interface GitViewWorkspacePort {
@@ -9,7 +9,10 @@ export interface GitViewWorkspacePort {
 		surface(surfaceId: string): unknown;
 	};
 	focusMobileSingleton(kind: 'git-history' | 'git-compare'): Promise<void>;
-	openSingletonAsTab(kind: 'git-history' | 'git-compare', paneId: PaneId): Promise<void>;
+	openSingletonAsTab(
+		kind: 'git-history' | 'git-compare',
+		windowId: WorkspaceWindowId,
+	): Promise<void>;
 }
 
 export interface GitViewSurfacePort {

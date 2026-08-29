@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
-import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
+import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
-import { WorkspaceCoordinator, WorkspacePaneLimitError } from '../workspace-coordinator.svelte';
+import { WorkspaceCoordinator, WorkspaceWindowLimitError } from '../workspace-coordinator.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
-	CHAT_SURFACE_ID,
 	fileSurfaceId,
+	portableSingletonDescriptor,
 	terminalSurfaceId,
-	type PaneId,
+	type WorkspaceWindowId,
 } from '../surface-types';
-import { paneIdOfSurface, paneNodeById, collectPaneNodes } from '../pane-tree';
+import { CANONICAL_CHAT_SURFACE_ID } from '../canonical-layout';
+import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
 import type { TerminalMetadata } from '$shared/terminal';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
@@ -40,14 +41,14 @@ function terminalMetadata(terminalId: string): TerminalMetadata {
 	};
 }
 
-function paneTabs(snapshot: WorkspaceLayoutSnapshot, paneId: string) {
-	const pane = paneNodeById(snapshot.desktopRoot, paneId as PaneId);
-	if (!pane) throw new Error(`Pane missing in test: ${paneId}`);
-	return pane.tabs;
+function windowTabs(snapshot: WorkspaceLayoutSnapshot, windowId: string) {
+	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId as WorkspaceWindowId);
+	if (!workspaceWindow) throw new Error(`Window missing in test: ${windowId}`);
+	return workspaceWindow.tabs;
 }
 
-function paneCountOf(snapshot: WorkspaceLayoutSnapshot): number {
-	return collectPaneNodes(snapshot.desktopRoot).length;
+function windowCountOf(snapshot: WorkspaceLayoutSnapshot): number {
+	return collectWindowNodes(snapshot.desktopRoot).length;
 }
 
 function createHarness(
@@ -64,22 +65,45 @@ function createHarness(
 		onLayoutChanged?: () => void;
 		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
+		includePortableTabs?: boolean;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
+	if (options.includePortableTabs !== false) {
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor('git'),
+					windowId: 'window-main',
+				},
+				{
+					type: 'register-surface',
+					surface: portableSingletonDescriptor('pull-requests'),
+					windowId: 'window-main',
+				},
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId: CANONICAL_CHAT_SURFACE_ID,
+				},
+			]),
+		);
+	}
 	if (options.initialActiveSurfaceId) {
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
 				{
-					type: 'activate-pane-tab',
-					paneId: 'pane-main',
+					type: 'activate-window-tab',
+					windowId: 'window-main',
 					surfaceId: options.initialActiveSurfaceId,
 				},
 			]),
 		);
 	}
-	const chatInteractionGate = new ChatInteractionGate();
+	const workspaceInteractionGate = new WorkspaceInteractionGate();
 	const files = {
 		confirmDestructive: options.confirmDestructive ?? vi.fn(async () => true),
 		destroy: vi.fn(),
@@ -122,7 +146,7 @@ function createHarness(
 			if (kind === 'commit') commit.resetAfterClose();
 		}),
 	};
-	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	const transientLayers = new TransientLayerRegistry(workspaceInteractionGate);
 	let publishCount = 0;
 	const commitPort = options.failLayoutPublishAt
 		? {
@@ -140,7 +164,7 @@ function createHarness(
 		terminals: terminals as never,
 		workspaceContext: { current: null } as never,
 		appShell: appShell as never,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 		files: files as never,
 		singletons: singletons as never,
@@ -160,155 +184,202 @@ function createHarness(
 		terminals,
 		appShell,
 		singletons,
-		chatInteractionGate,
+		workspaceInteractionGate,
 		transientLayers,
 	};
 }
 
 describe('WorkspaceCoordinator', () => {
-	it('places a file as a tab in the target pane', async () => {
+	it('places a file as a tab in the target window', async () => {
 		const { coordinator, layout } = createHarness();
 
-		await coordinator.placeFileSession('pane-file', { type: 'pane', paneId: 'pane-main' });
+		await coordinator.placeFileSession('window-file', { type: 'window', windowId: 'window-main' });
 
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(fileSurfaceId('pane-file'));
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(fileSurfaceId('pane-file'));
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
+			fileSurfaceId('window-file'),
+		);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(fileSurfaceId('window-file'));
 	});
 
 	it('rolls back the publication when file placement fails to publish', async () => {
-		const { coordinator, layout, chatInteractionGate } = createHarness({
+		const { coordinator, layout } = createHarness({
 			failLayoutPublishAt: 1,
 		});
 		const publication = { publish: vi.fn(), rollback: vi.fn() };
 
 		await expect(
-			coordinator.placeFileSession('failed-file', { type: 'pane', paneId: 'pane-main' }, publication),
+			coordinator.placeFileSession(
+				'failed-file',
+				{ type: 'window', windowId: 'window-main' },
+				publication,
+			),
 		).rejects.toThrow('layout publication failed');
 
 		expect(publication.publish).toHaveBeenCalledOnce();
 		expect(publication.rollback).toHaveBeenCalledOnce();
-		expect(chatInteractionGate.isChatDropEligible).toBe(true);
 		expect(layout.surface(fileSurfaceId('failed-file'))).toBeNull();
 	});
 
-	it('places a file into a new pane split from the anchor', async () => {
+	it('places a file into a new window beside the anchor', async () => {
 		const { coordinator, layout } = createHarness();
 
-		await coordinator.placeFileSession('split-file', { type: 'new-pane', anchorPaneId: 'pane-main' });
+		await coordinator.placeFileSession('new-window-file', {
+			type: 'new-window',
+			anchorWindowId: 'window-main',
+		});
 
-		expect(paneCountOf(layout.snapshot)).toBe(2);
-		const paneId = paneIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('split-file'));
-		expect(paneId).not.toBe('pane-main');
-		expect(paneTabs(layout.snapshot, paneId!).activeId).toBe(fileSurfaceId('split-file'));
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		const windowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			fileSurfaceId('new-window-file'),
+		);
+		expect(windowId).not.toBe('window-main');
+		expect(windowTabs(layout.snapshot, windowId!).activeId).toBe(fileSurfaceId('new-window-file'));
 	});
 
-	it('falls back to a live pane when a file destination collapses before placement', async () => {
+	it('falls back to a live window when a file destination closes before placement', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
 			layout.snapshot.desktopRoot,
 			'singleton:git-history',
 		)!;
 
 		const closing = coordinator.closeSurface('singleton:git-history');
-		const placing = coordinator.placeFileSession('stale-pane', {
-			type: 'pane',
-			paneId: historyPaneId,
+		const placing = coordinator.placeFileSession('stale-window', {
+			type: 'window',
+			windowId: historyWindowId,
 		});
 		await Promise.all([closing, placing]);
 
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('stale-pane'))).toBe(
-			'pane-main',
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, fileSurfaceId('stale-window'))).toBe(
+			'window-main',
 		);
 	});
 
-	it('toggles fullscreen for a pane', async () => {
+	it('enters and exits fullscreen without restoring topology', async () => {
 		const { coordinator, layout } = createHarness();
 
-		await coordinator.toggleFullscreen('pane-main');
-		expect(layout.snapshot.fullscreenPaneId).toBe('pane-main');
-		await coordinator.toggleFullscreen('pane-main');
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
+		await coordinator.enterWindowFullscreen('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		await coordinator.exitWindowFullscreen('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(1);
 	});
 
-	it('exits fullscreen when focus moves to another pane', async () => {
+	it('exits fullscreen when a new window opens', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		await coordinator.toggleFullscreen('pane-main');
+		await coordinator.enterWindowFullscreen('window-main');
 
-		expect(layout.snapshot.fullscreenPaneId).toBe('pane-main');
-		await coordinator.focusSurface('singleton:git-history');
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
-		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe('singleton:git-history');
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		await coordinator.openSingletonInNewWindow('git-history');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
-	it('clears fullscreen when the fullscreen pane collapses', async () => {
+	it('destroys every other window when entering fullscreen', async () => {
+		const { coordinator, layout, singletons } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+
+		await coordinator.enterWindowFullscreen('window-main');
+
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(layout.surface('singleton:git-history')).toBeNull();
+		expect(singletons.disposeSurface).toHaveBeenCalledWith('git-history');
+	});
+
+	it('forgets a terminal that exits while fullscreen confirmation holds its reservation', async () => {
+		const confirmation = deferred<boolean>();
+		const confirmDestructive = vi.fn(() => confirmation.promise);
+		const { coordinator, layout, terminals } = createHarness({ confirmDestructive });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		const terminalId = 'terminal-fullscreen-race';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, historyWindowId);
+		await coordinator.placeFileSession('fullscreen-dirty', {
+			type: 'window',
+			windowId: historyWindowId,
+		});
+
+		const entering = coordinator.enterWindowFullscreen('window-main');
+		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
+		await coordinator.handleTerminalSessionTerminated(terminalId);
+		confirmation.resolve(true);
+		await expect(entering).resolves.toBe(true);
+
+		expect(layout.surface(terminalSurfaceId(terminalId))).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('falls back from a closed last-focused window', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		await coordinator.toggleFullscreen(historyPaneId);
-		expect(layout.snapshot.fullscreenPaneId).toBe(historyPaneId);
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		expect(coordinator.lastFocusedWindowId).toBe(historyWindowId);
 
 		await coordinator.closeSurface('singleton:git-history');
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
-		expect(paneCountOf(layout.snapshot)).toBe(1);
+
+		expect(coordinator.lastFocusedWindowId).toBe('window-main');
 	});
 
-	it('falls back from a collapsed last-focused pane', async () => {
-		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		expect(coordinator.lastFocusedPaneId).toBe(historyPaneId);
-
-		await coordinator.closeSurface('singleton:git-history');
-
-		expect(coordinator.lastFocusedPaneId).toBe('pane-main');
-	});
-
-	it('cancels Chat interaction before fullscreen and restores state on publish failure', async () => {
+	it('cancels workspace drag before fullscreen and retries required publication', async () => {
 		const successful = createHarness();
-		const cancel = vi.spyOn(successful.chatInteractionGate, 'cancelBeforeInertTransition');
-		await successful.coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(
+		const cancel = vi.spyOn(successful.workspaceInteractionGate, 'cancelBeforeInertTransition');
+		await successful.coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
 			successful.layout.snapshot.desktopRoot,
 			'singleton:git-history',
 		)!;
-		await successful.coordinator.toggleFullscreen(historyPaneId);
+		await successful.coordinator.enterWindowFullscreen(historyWindowId);
 		expect(cancel).toHaveBeenCalled();
 		expect(successful.coordinator.isChatPresented).toBe(false);
 
 		const failed = createHarness({ failLayoutPublishAt: 1 });
-		await expect(failed.coordinator.toggleFullscreen('pane-main')).rejects.toThrow(
-			'layout publication failed',
-		);
-		expect(failed.layout.snapshot.fullscreenPaneId).toBeNull();
+		await expect(failed.coordinator.enterWindowFullscreen('window-main')).resolves.toBe(true);
+		expect(failed.layout.snapshot.fullscreenWindowId).toBe('window-main');
 		expect(failed.coordinator.isChatPresented).toBe(true);
-		expect(failed.chatInteractionGate.isChatDropEligible).toBe(true);
 	});
 
-	it('computes rapid fullscreen toggles from the latest committed snapshot', async () => {
+	it('lets the first of two concurrent close requests own the topology', async () => {
 		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
 
-		await Promise.all([
-			coordinator.toggleFullscreen('pane-main'),
-			coordinator.toggleFullscreen('pane-main'),
+		const [first, second] = await Promise.all([
+			coordinator.closeWindow(historyWindowId),
+			coordinator.closeWindow('window-main'),
 		]);
 
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
+		expect([first, second].filter(Boolean)).toHaveLength(1);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
 	});
 
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.enterMobilePresentation();
 
-		await coordinator.placeFileSession('mobile-file', { type: 'pane', paneId: 'pane-main' });
+		await coordinator.placeFileSession('mobile-file', { type: 'window', windowId: 'window-main' });
 
 		const surfaceId = fileSurfaceId('mobile-file');
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 		expect(layout.snapshot.mobileOnlySurfaceIds).toContain(surfaceId);
 		expect(layout.snapshot.dialogFileSurfaceId).toBeNull();
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBeNull();
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBeNull();
 	});
 
 	it('destroys a mobile file session and returns to Chat when it is closed', async () => {
@@ -324,7 +395,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(files.destroy).toHaveBeenCalledWith('mobile-file');
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(layout.snapshot.mobileOnlySurfaceIds).not.toContain(surfaceId);
-		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
 	it('keeps a dirty mobile file visible when destructive Close is cancelled', async () => {
@@ -383,18 +454,21 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(fileSurfaceId('two'))).toBeNull();
 	});
 
-	it('rejects moving a dialog file into a pane that collapsed before publication', async () => {
+	it('rejects moving a dialog file into a window that closed before publication', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.placeFileSession('dialog-stale-pane', { type: 'dialog' });
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		await coordinator.placeFileSession('dialog-stale-window', { type: 'dialog' });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
 
 		const closing = coordinator.closeSurface('singleton:git-history');
-		const moving = coordinator.moveDialogFileToPane(historyPaneId);
+		const moving = coordinator.moveDialogFileToWindow(historyWindowId);
 		await closing;
 
-		await expect(moving).rejects.toThrow('destination pane is no longer available');
-		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('dialog-stale-pane'));
+		await expect(moving).rejects.toThrow('destination window is no longer available');
+		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('dialog-stale-window'));
 	});
 
 	it('closes a terminal tab without terminating its session and can reopen it', async () => {
@@ -404,7 +478,7 @@ describe('WorkspaceCoordinator', () => {
 			metadata: terminalMetadata(terminalId),
 			attachmentState: 'attached',
 		};
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
 		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
@@ -419,10 +493,13 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
 
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		await coordinator.openTerminalSession(terminalId, historyPaneId);
-		expect(paneTabs(layout.snapshot, historyPaneId).order).toContain(surfaceId);
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		await coordinator.openTerminalSession(terminalId, historyWindowId);
+		expect(windowTabs(layout.snapshot, historyWindowId).order).toContain(surfaceId);
 		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
 	});
 
@@ -435,18 +512,21 @@ describe('WorkspaceCoordinator', () => {
 			metadata: terminalMetadata(terminalId),
 			attachmentState: 'attached',
 		};
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
 		const terminationRequest = coordinator.terminateTerminalSession(terminalId);
 		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
 		coordinator.resolveCloseGuard(true);
 		await Promise.resolve();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		await coordinator.moveTabToPane(surfaceId, historyPaneId);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(surfaceId);
-		expect(paneTabs(layout.snapshot, historyPaneId).order).not.toContain(surfaceId);
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		await coordinator.moveTabToWindow(surfaceId, historyWindowId);
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(surfaceId);
+		expect(windowTabs(layout.snapshot, historyWindowId).order).not.toContain(surfaceId);
 
 		termination.resolve();
 		await expect(terminationRequest).resolves.toBe(true);
@@ -461,7 +541,7 @@ describe('WorkspaceCoordinator', () => {
 			metadata: terminalMetadata(terminalId),
 			attachmentState: 'attached',
 		};
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
 		const terminate = coordinator.terminateTerminalSession(terminalId);
@@ -481,7 +561,7 @@ describe('WorkspaceCoordinator', () => {
 			metadata: terminalMetadata(terminalId),
 			attachmentState: 'attached',
 		};
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
 		const terminate = coordinator.terminateTerminalSession(terminalId);
@@ -499,15 +579,15 @@ describe('WorkspaceCoordinator', () => {
 			filePendingMutationCount: 1,
 			commitCanClose: false,
 		});
-		await coordinator.placeFileSession('saving', { type: 'pane', paneId: 'pane-main' });
-		await coordinator.openSingletonAsTab('commit', 'pane-main');
+		await coordinator.placeFileSession('saving', { type: 'window', windowId: 'window-main' });
+		await coordinator.openSingletonAsTab('commit', 'window-main');
 
 		expect(coordinator.isSurfaceCloseBlocked(fileSurfaceId('saving'))).toBe(true);
 		expect(coordinator.isSurfaceCloseBlocked('singleton:commit')).toBe(true);
 		await expect(coordinator.closeSurface(fileSurfaceId('saving'))).resolves.toBe(false);
 		await expect(coordinator.closeSurface('singleton:commit')).resolves.toBe(false);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(fileSurfaceId('saving'));
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain('singleton:commit');
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(fileSurfaceId('saving'));
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain('singleton:commit');
 	});
 
 	it('blocks the invoking Git singleton while its branch mutation is pending', async () => {
@@ -517,31 +597,43 @@ describe('WorkspaceCoordinator', () => {
 		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(false);
 	});
 
-	it('exits a concurrently enabled fullscreen when a tab moves to another pane', async () => {
-		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+	it('reserves existing topology while fullscreen confirmation is pending', async () => {
+		const confirmation = deferred<boolean>();
+		const confirmDestructive = vi.fn(() => confirmation.promise);
+		const { coordinator, layout } = createHarness({ confirmDestructive });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		await coordinator.placeFileSession('fullscreen-reserved', {
+			type: 'window',
+			windowId: historyWindowId,
+		});
 
-		const enableFullscreen = coordinator.toggleFullscreen('pane-main');
-		const move = coordinator.moveTabToPane('singleton:git', historyPaneId);
-		await Promise.all([enableFullscreen, move]);
+		const entering = coordinator.enterWindowFullscreen('window-main');
+		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
+		await coordinator.openSingletonInNewWindow('git-compare', 'window-main');
 
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
-		expect(paneTabs(layout.snapshot, historyPaneId).order).toContain('singleton:git');
-		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe('singleton:git');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.surface('singleton:git-compare')).toBeNull();
+		confirmation.resolve(true);
+		await expect(entering).resolves.toBe(true);
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(windowCountOf(layout.snapshot)).toBe(1);
 	});
 
 	it('publishes placement before awaiting the exact destination frame', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
-		const opening = coordinator.openSingletonAsTab('files', 'pane-main');
+		const opening = coordinator.openSingletonAsTab('files', 'window-main');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:files'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:files'),
 		);
 		expect(coordinator.frameVersion('singleton:files')).toBe(1);
 
 		const attachRetainedRenderer = vi.fn();
-		frames.register('singleton:files', 'pane-main', {
+		frames.register('singleton:files', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer,
 			focusPrimary: vi.fn(),
@@ -555,13 +647,13 @@ describe('WorkspaceCoordinator', () => {
 	it('reveals a retained renderer before retrying an attachment error', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
-		const opening = coordinator.openSingletonAsTab('files', 'pane-main');
+		const opening = coordinator.openSingletonAsTab('files', 'window-main');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:files'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:files'),
 		);
 		const failedBridge = new SurfaceFrameBridge();
 		const failedActivation = vi.fn(() => failedBridge.activate());
-		frames.register('singleton:files', 'pane-main', {
+		frames.register('singleton:files', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: failedActivation,
 			focusPrimary: vi.fn(),
@@ -578,12 +670,12 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.attachmentErrors['singleton:files']).toBe('renderer failed');
 
 		failedBridge.deactivate();
-		const retry = coordinator.retryPresentation('singleton:files', 'pane-main');
+		const retry = coordinator.retryPresentation('singleton:files', 'window-main');
 		expect(coordinator.attachmentErrors['singleton:files']).toBeUndefined();
 		await vi.waitFor(() => expect(coordinator.frameVersion('singleton:files')).toBe(2));
 		const retryBridge = new SurfaceFrameBridge();
 		const attachRetainedRenderer = vi.fn(() => retryBridge.activate());
-		frames.register('singleton:files', 'pane-main', {
+		frames.register('singleton:files', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer,
 			focusPrimary: vi.fn(),
@@ -608,9 +700,9 @@ describe('WorkspaceCoordinator', () => {
 		const gitAttachment = deferred<void>();
 		const attachGit = vi.fn(() => gitAttachment.promise);
 		const focusGit = vi.fn();
-		const retry = coordinator.retryPresentation('singleton:git', 'pane-main');
+		const retry = coordinator.retryPresentation('singleton:git', 'window-main');
 		await vi.waitFor(() => expect(coordinator.frameVersion('singleton:git')).toBe(1));
-		frames.register('singleton:git', 'pane-main', {
+		frames.register('singleton:git', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: attachGit,
 			focusPrimary: focusGit,
@@ -620,9 +712,9 @@ describe('WorkspaceCoordinator', () => {
 		const focusPullRequests = vi.fn();
 		const focusNext = coordinator.focusSurface('singleton:pull-requests');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:pull-requests'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:pull-requests'),
 		);
-		frames.register('singleton:pull-requests', 'pane-main', {
+		frames.register('singleton:pull-requests', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: vi.fn(),
 			focusPrimary: focusPullRequests,
@@ -637,28 +729,20 @@ describe('WorkspaceCoordinator', () => {
 		expect(focusGit).not.toHaveBeenCalled();
 	});
 
-	it('updates Chat drop eligibility in the same transition that hides Chat', async () => {
-		const { coordinator, chatInteractionGate } = createHarness();
-		expect(chatInteractionGate.isChatDropEligible).toBe(true);
-
-		await coordinator.focusSurface('singleton:git');
-
-		expect(chatInteractionGate.isChatDropEligible).toBe(false);
-		await coordinator.focusChat();
-		expect(chatInteractionGate.isChatDropEligible).toBe(true);
-	});
-
 	it('publishes responsive mode with the layout and replaces a hidden focus owner', async () => {
 		const { coordinator, appShell, layout } = createHarness();
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:git' };
-		coordinator.lastFocusedSurfaceId = CHAT_SURFACE_ID;
+		coordinator.lastFocusedSurfaceId = CANONICAL_CHAT_SURFACE_ID;
 
 		await coordinator.enterMobilePresentation();
 
 		expect(coordinator.isMobile).toBe(true);
 		expect(appShell.isMobile).toBe(true);
-		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
-		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusOwner).toEqual({
+			kind: 'surface',
+			surfaceId: CANONICAL_CHAT_SURFACE_ID,
+		});
 	});
 
 	it('honors the newest responsive request when breakpoint changes overlap', async () => {
@@ -686,7 +770,7 @@ describe('WorkspaceCoordinator', () => {
 			await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
 
 			expect(layout.surface(surfaceId)).toBeNull();
-			expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+			expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 			expect(singletons.disposeSurface).toHaveBeenCalledWith(kind);
 		},
 	);
@@ -736,13 +820,13 @@ describe('WorkspaceCoordinator', () => {
 
 	it('preserves a desktop-owned Git view across a mobile presentation', async () => {
 		const { coordinator, layout, singletons } = createHarness();
-		await coordinator.openSingletonAsTab('git-history', 'pane-main');
+		await coordinator.openSingletonAsTab('git-history', 'window-main');
 		await coordinator.enterMobilePresentation();
 		await coordinator.focusMobileSingleton('git-history');
 
 		await coordinator.exitMobilePresentation();
 
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain('singleton:git-history');
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain('singleton:git-history');
 		expect(layout.surface('singleton:git-history')).not.toBeNull();
 		expect(singletons.disposeSurface).not.toHaveBeenCalledWith('git-history');
 	});
@@ -794,28 +878,20 @@ describe('WorkspaceCoordinator', () => {
 		expect(handler).not.toHaveBeenCalled();
 	});
 
-	it('initializes Chat drop eligibility from the restored presentation', () => {
-		const { chatInteractionGate } = createHarness({
-			initialActiveSurfaceId: 'singleton:git',
-		});
-
-		expect(chatInteractionGate.isChatDropEligible).toBe(false);
-	});
-
 	it('does not restore focus or recency after a presentation is superseded', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
 		const focusGit = coordinator.focusSurface('singleton:git');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:git'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:git'),
 		);
 
 		const focusPullRequests = coordinator.focusSurface('singleton:pull-requests');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:pull-requests'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:pull-requests'),
 		);
 		const focusPrimary = vi.fn();
-		frames.register('singleton:pull-requests', 'pane-main', {
+		frames.register('singleton:pull-requests', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: vi.fn(),
 			focusPrimary,
@@ -831,18 +907,18 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
 		const surfaceId = fileSurfaceId('superseded');
 		const placement = coordinator.placeFileSession('superseded', {
-			type: 'pane',
-			paneId: 'pane-main',
+			type: 'window',
+			windowId: 'window-main',
 		});
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(surfaceId),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(surfaceId),
 		);
 
 		const focusGit = coordinator.focusSurface('singleton:git');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:git'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:git'),
 		);
-		frames.register('singleton:git', 'pane-main', {
+		frames.register('singleton:git', 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: vi.fn(),
 			focusPrimary: vi.fn(),
@@ -853,15 +929,15 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(surfaceId)).not.toBeNull();
 	});
 
-	it('focuses an existing surface by activating its pane tab', async () => {
+	it('focuses an existing surface by activating its window-local tab', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonAsTab('files', 'pane-main');
+		await coordinator.openSingletonAsTab('files', 'window-main');
 		await coordinator.focusChat();
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(CHAT_SURFACE_ID);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
 
 		await coordinator.focusSurface('singleton:files');
 
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:files');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:files');
 	});
 
 	it('requests composer focus when Chat becomes the focused surface', async () => {
@@ -872,52 +948,52 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
 	});
 
-	it('moves between tabs in the focused pane without wrapping at either boundary', async () => {
+	it('moves between tabs in the focused window without wrapping at either boundary', async () => {
 		const { coordinator, layout } = createHarness();
-		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
 
-		expect(coordinator.focusPreviousTabInFocusedPane()).toBe(true);
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(CHAT_SURFACE_ID);
-		expect(coordinator.focusNextTabInFocusedPane()).toBe(true);
+		expect(coordinator.focusPreviousTabInFocusedWindow()).toBe(true);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.focusNextTabInFocusedWindow()).toBe(true);
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:git'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:git'),
 		);
 
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:git' };
-		expect(coordinator.focusNextTabInFocusedPane()).toBe(true);
+		expect(coordinator.focusNextTabInFocusedWindow()).toBe(true);
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:pull-requests'),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:pull-requests'),
 		);
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:pull-requests' };
-		expect(coordinator.focusNextTabInFocusedPane()).toBe(true);
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:pull-requests');
+		expect(coordinator.focusNextTabInFocusedWindow()).toBe(true);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:pull-requests');
 	});
 
-	it('cycles focus across panes with the pane focus shortcut', async () => {
+	it('cycles focus across windows with the window focus shortcut', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
+		await coordinator.openSingletonInNewWindow('git-history');
 		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
-		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
 
-		coordinator.cyclePaneFocus();
+		coordinator.cycleWindowFocus();
 		expect(focusSurface).toHaveBeenLastCalledWith('singleton:git-history');
 
-		coordinator.cyclePaneFocus({ kind: 'surface', surfaceId: 'singleton:git-history' });
-		expect(focusSurface).toHaveBeenLastCalledWith(CHAT_SURFACE_ID);
-		expect(layout.snapshot.fullscreenPaneId).toBeNull();
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: 'singleton:git-history' });
+		expect(focusSurface).toHaveBeenLastCalledWith(CANONICAL_CHAT_SURFACE_ID);
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
 
-	it('does not navigate pane tabs from the chat list or mobile presentation', async () => {
+	it('does not navigate window tabs from the chat list or mobile presentation', async () => {
 		const { coordinator, appShell, layout } = createHarness();
 		coordinator.focusOwner = { kind: 'chat-list' };
-		expect(coordinator.focusNextTabInFocusedPane()).toBe(false);
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(CHAT_SURFACE_ID);
+		expect(coordinator.focusNextTabInFocusedWindow()).toBe(false);
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
 
 		appShell.isMobile = true;
 		await coordinator.enterMobilePresentation();
-		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
-		expect(coordinator.focusNextTabInFocusedPane()).toBe(false);
-		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
+		expect(coordinator.focusNextTabInFocusedWindow()).toBe(false);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
 	it('switches a terminal tab in place and swaps an already placed target', async () => {
@@ -932,36 +1008,40 @@ describe('WorkspaceCoordinator', () => {
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
 				{
-					type: 'split-tab-to-edge',
+					type: 'open-tab-in-new-window',
 					surfaceId: 'singleton:git',
-					targetPaneId: 'pane-main',
+					targetWindowId: 'window-main',
 					edge: 'right',
-					newPaneId: 'pane-2',
-					splitId: 'split-1',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
 				},
 				{
 					type: 'register-surface',
 					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
-					paneId: 'pane-main',
+					windowId: 'window-main',
 				},
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: terminalSurfaceId('one') },
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId: terminalSurfaceId('one'),
+				},
 				{
 					type: 'register-surface',
 					surface: { id: terminalSurfaceId('two'), type: 'terminal', terminalId: 'two' },
-					paneId: 'pane-2',
+					windowId: 'window-2',
 				},
 			]),
 		);
 
 		await coordinator.switchTerminalSurface('one', 'two');
 
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(terminalSurfaceId('two'));
-		expect(paneTabs(layout.snapshot, 'pane-2').order).toContain(terminalSurfaceId('one'));
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(terminalSurfaceId('two'));
+		expect(windowTabs(layout.snapshot, 'window-2').order).toContain(terminalSurfaceId('one'));
 		expect(
-			paneTabs(layout.snapshot, 'pane-main').order.filter((id) => id.startsWith('terminal:')),
+			windowTabs(layout.snapshot, 'window-main').order.filter((id) => id.startsWith('terminal:')),
 		).toHaveLength(1);
 		expect(
-			paneTabs(layout.snapshot, 'pane-2').order.filter((id) => id.startsWith('terminal:')),
+			windowTabs(layout.snapshot, 'window-2').order.filter((id) => id.startsWith('terminal:')),
 		).toHaveLength(1);
 	});
 
@@ -979,15 +1059,19 @@ describe('WorkspaceCoordinator', () => {
 				{
 					type: 'register-surface',
 					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
-					paneId: 'pane-main',
+					windowId: 'window-main',
 				},
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: terminalSurfaceId('one') },
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId: terminalSurfaceId('one'),
+				},
 			]),
 		);
 
 		await coordinator.switchTerminalSurface('one', 'two');
 
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(terminalSurfaceId('two'));
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(terminalSurfaceId('two'));
 		expect(layout.snapshot.surfaces[terminalSurfaceId('one')]).toBeUndefined();
 		expect(layout.snapshot.unplacedTerminalIds).toContain('one');
 		expect(layout.snapshot.unplacedTerminalIds).not.toContain('two');
@@ -1007,69 +1091,74 @@ describe('WorkspaceCoordinator', () => {
 				{
 					type: 'register-surface',
 					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
-					paneId: 'pane-main',
+					windowId: 'window-main',
 				},
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId: terminalSurfaceId('one') },
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId: terminalSurfaceId('one'),
+				},
 			]),
 		);
 
-		await coordinator.createTerminalReplacing('one', 'terminal-surface:one:pane-main');
+		await coordinator.createTerminalReplacing('one', 'terminal-surface:one:window-main');
 
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(terminalSurfaceId('two'));
-		expect(paneTabs(layout.snapshot, 'pane-main').order).not.toContain(terminalSurfaceId('one'));
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(terminalSurfaceId('two'));
+		expect(windowTabs(layout.snapshot, 'window-main').order).not.toContain(
+			terminalSurfaceId('one'),
+		);
 		expect(
-			paneTabs(layout.snapshot, 'pane-main').order.filter((id) => id.startsWith('terminal:')),
+			windowTabs(layout.snapshot, 'window-main').order.filter((id) => id.startsWith('terminal:')),
 		).toHaveLength(1);
 		expect(layout.snapshot.unplacedTerminalIds).toContain('one');
 		expect(terminals.sessions.one).toBeDefined();
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
 
-	it('opens a singleton in a new pane and focuses it', async () => {
+	it('opens a singleton in a new window and focuses it', async () => {
 		const { coordinator, layout } = createHarness();
 
-		await coordinator.openSingletonInNewPane('git-compare');
+		await coordinator.openSingletonInNewWindow('git-compare');
 
-		expect(paneCountOf(layout.snapshot)).toBe(2);
-		const paneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare');
-		expect(paneId).not.toBe('pane-main');
-		expect(paneTabs(layout.snapshot, paneId!).activeId).toBe('singleton:git-compare');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		const windowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare');
+		expect(windowId).not.toBe('window-main');
+		expect(windowTabs(layout.snapshot, windowId!).activeId).toBe('singleton:git-compare');
 		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:git-compare');
 	});
 
-	it('focuses an existing singleton that already owns a pane instead of splitting again', async () => {
+	it('focuses an existing singleton that already owns a window instead of opening another', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-compare');
-		const paneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare')!;
+		await coordinator.openSingletonInNewWindow('git-compare');
+		const windowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare')!;
 		await coordinator.focusChat();
 
-		await coordinator.openSingletonInNewPane('git-compare');
+		await coordinator.openSingletonInNewWindow('git-compare');
 
-		expect(paneCountOf(layout.snapshot)).toBe(2);
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare')).toBe(paneId);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-compare')).toBe(windowId);
 		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:git-compare');
 	});
 
-	it('detaches an existing background singleton into a new pane', async () => {
+	it('focuses an existing background singleton without creating a new window', async () => {
 		const { coordinator, layout } = createHarness();
 
-		await coordinator.openSingletonInNewPane('git');
+		await coordinator.openSingletonInNewWindow('git');
 
-		expect(paneCountOf(layout.snapshot)).toBe(2);
-		const paneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git');
-		expect(paneId).not.toBe('pane-main');
-		expect(paneTabs(layout.snapshot, 'pane-main').order).not.toContain('singleton:git');
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git')).toBe('window-main');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:git');
 	});
 
-	it('rejects new panes beyond the pane limit', async () => {
+	it('rejects new windows beyond the window limit', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		await coordinator.openSingletonInNewPane('git-compare');
-		await coordinator.openSingletonInNewPane('files');
-		expect(paneCountOf(layout.snapshot)).toBe(4);
+		await coordinator.openSingletonInNewWindow('git-history');
+		await coordinator.openSingletonInNewWindow('git-compare');
+		await coordinator.openSingletonInNewWindow('files');
+		expect(windowCountOf(layout.snapshot)).toBe(4);
 
-		await expect(coordinator.openSingletonInNewPane('commit')).rejects.toBeInstanceOf(
-			WorkspacePaneLimitError,
+		await expect(coordinator.openSingletonInNewWindow('commit')).rejects.toBeInstanceOf(
+			WorkspaceWindowLimitError,
 		);
 		expect(layout.surface('singleton:commit')).toBeNull();
 	});
@@ -1078,22 +1167,22 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, layout } = createHarness();
 
 		await Promise.all([
-			coordinator.openSingletonAsTab('commit', 'pane-main'),
-			coordinator.openSingletonAsTab('commit', 'pane-main'),
+			coordinator.openSingletonAsTab('commit', 'window-main'),
+			coordinator.openSingletonAsTab('commit', 'window-main'),
 		]);
 
 		expect(
-			paneTabs(layout.snapshot, 'pane-main').order.filter((id) => id === 'singleton:commit'),
+			windowTabs(layout.snapshot, 'window-main').order.filter((id) => id === 'singleton:commit'),
 		).toHaveLength(1);
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe('singleton:commit');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe('singleton:commit');
 	});
 
-	it('lets an in-flight close win over a pane-local singleton reopen', async () => {
+	it('lets an in-flight close win over a window-local singleton reopen', async () => {
 		const { coordinator, layout, singletons } = createHarness();
-		await coordinator.openSingletonAsTab('commit', 'pane-main');
+		await coordinator.openSingletonAsTab('commit', 'window-main');
 
 		const closing = coordinator.closeSurface('singleton:commit');
-		const reopening = coordinator.openSingletonAsTab('commit', 'pane-main');
+		const reopening = coordinator.openSingletonAsTab('commit', 'window-main');
 		await Promise.all([closing, reopening]);
 
 		expect(layout.surface('singleton:commit')).toBeNull();
@@ -1102,52 +1191,50 @@ describe('WorkspaceCoordinator', () => {
 
 	it('applies concurrent singleton destinations against the latest layout', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
 
 		await Promise.all([
-			coordinator.openSingletonAsTab('commit', 'pane-main'),
-			coordinator.openSingletonAsTab('commit', historyPaneId),
+			coordinator.openSingletonAsTab('commit', 'window-main'),
+			coordinator.openSingletonAsTab('commit', historyWindowId),
 		]);
 
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:commit')).toBe(historyPaneId);
-		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe('singleton:commit');
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:commit')).toBe(
+			historyWindowId,
+		);
+		expect(windowTabs(layout.snapshot, historyWindowId).activeId).toBe('singleton:commit');
 	});
 
-	it('allows a net-zero edge move at the pane limit', async () => {
+	it('allows a net-zero edge move at the window limit', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		await coordinator.openSingletonInNewPane('git-compare');
-		await coordinator.openSingletonInNewPane('files');
-		const sourcePaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
-		expect(paneCountOf(layout.snapshot)).toBe(4);
+		await coordinator.openSingletonInNewWindow('git-history');
+		await coordinator.openSingletonInNewWindow('git-compare');
+		await coordinator.openSingletonInNewWindow('files');
+		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
+		expect(windowCountOf(layout.snapshot)).toBe(4);
 
-		await coordinator.splitTabToEdge('singleton:files', 'pane-main', 'left');
+		await coordinator.openTabInNewWindow('singleton:files', 'window-main', 'left');
 
-		expect(paneCountOf(layout.snapshot)).toBe(4);
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(sourcePaneId);
-	});
-
-	it('merges a pane into another pane and keeps its tabs', async () => {
-		const { coordinator, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-
-		await coordinator.mergePaneInto(historyPaneId, 'pane-main');
-
-		expect(paneCountOf(layout.snapshot)).toBe(1);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain('singleton:git-history');
+		expect(windowCountOf(layout.snapshot)).toBe(4);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(
+			sourceWindowId,
+		);
 	});
 
 	it('derives the Terminal launcher only while first-run layout is still canonical', async () => {
-		const canonical = createHarness();
+		const canonical = createHarness({ includePortableTabs: false });
 		await canonical.coordinator.reconcileTerminals([], { deriveLauncher: true });
-		expect(paneTabs(canonical.layout.snapshot, 'pane-main').order).toContain('terminal-launcher');
+		expect(windowTabs(canonical.layout.snapshot, 'window-main').order).toContain(
+			'terminal-launcher',
+		);
 
 		const changed = createHarness();
 		await changed.coordinator.focusSurface('singleton:git');
 		await changed.coordinator.reconcileTerminals([], { deriveLauncher: true });
-		expect(paneTabs(changed.layout.snapshot, 'pane-main').order).not.toContain(
+		expect(windowTabs(changed.layout.snapshot, 'window-main').order).not.toContain(
 			'terminal-launcher',
 		);
 	});
@@ -1157,13 +1244,13 @@ describe('WorkspaceCoordinator', () => {
 
 		await coordinator.reconcileTerminals(['one', 'two'], { deriveLauncher: false });
 
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(terminalSurfaceId('one'));
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(terminalSurfaceId('two'));
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(CHAT_SURFACE_ID);
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('one'));
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('two'));
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
 	it('reuses the launcher Create request ID after an indeterminate response', async () => {
-		const { coordinator, terminals, layout } = createHarness();
+		const { coordinator, terminals, layout } = createHarness({ includePortableTabs: false });
 		await coordinator.reconcileTerminals([], { deriveLauncher: true });
 		const requestIds: string[] = [];
 		terminals.create
@@ -1178,11 +1265,13 @@ describe('WorkspaceCoordinator', () => {
 				return 'terminal-recovered';
 			});
 
-		await expect(coordinator.activateTerminalLauncher('pane-main')).rejects.toThrow('network lost');
-		await expect(coordinator.activateTerminalLauncher('pane-main')).resolves.toBeUndefined();
+		await expect(coordinator.activateTerminalLauncher('window-main')).rejects.toThrow(
+			'network lost',
+		);
+		await expect(coordinator.activateTerminalLauncher('window-main')).resolves.toBeUndefined();
 
 		expect(requestIds[1]).toBe(requestIds[0]);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-recovered'),
 		);
 	});
@@ -1196,54 +1285,66 @@ describe('WorkspaceCoordinator', () => {
 		});
 
 		await Promise.all([
-			coordinator.createTerminal('pane-main'),
-			coordinator.createTerminal('pane-main'),
+			coordinator.createTerminal('window-main'),
+			coordinator.createTerminal('window-main'),
 		]);
 
 		expect(new Set(requestIds).size).toBe(2);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-1'),
 		);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-2'),
 		);
 	});
 
 	it('removes the launcher when New Terminal is invoked elsewhere without recording dismissal', async () => {
 		const onTerminalLauncherDismissed = vi.fn();
-		const { coordinator, terminals, layout } = createHarness({ onTerminalLauncherDismissed });
+		const { coordinator, terminals, layout } = createHarness({
+			onTerminalLauncherDismissed,
+			includePortableTabs: false,
+		});
 		await coordinator.reconcileTerminals([], { deriveLauncher: true });
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		terminals.create.mockResolvedValue('terminal-other-pane');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		terminals.create.mockResolvedValue('terminal-other-window');
 
-		await coordinator.createTerminal(historyPaneId);
+		await coordinator.createTerminal(historyWindowId);
 
 		expect(layout.surface('terminal-launcher')).toBeNull();
-		expect(paneTabs(layout.snapshot, historyPaneId).order).toContain(
-			terminalSurfaceId('terminal-other-pane'),
+		expect(windowTabs(layout.snapshot, historyWindowId).order).toContain(
+			terminalSurfaceId('terminal-other-window'),
 		);
 		expect(onTerminalLauncherDismissed).not.toHaveBeenCalled();
 	});
 
-	it('honors the requested pane when reconciliation places a terminal during creation', async () => {
+	it('honors the requested window when reconciliation places a terminal during creation', async () => {
 		const creation = deferred<string>();
 		const { coordinator, terminals, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
 		terminals.create.mockReturnValue(creation.promise);
 
-		const opening = coordinator.createTerminal(historyPaneId, `workspace-taskbar:${historyPaneId}`);
+		const opening = coordinator.createTerminal(
+			historyWindowId,
+			`workspace-window-titlebar:${historyWindowId}`,
+		);
 		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
 		// Simulate a restored live terminal racing the creation.
 		await coordinator.handleTerminalSessionTerminated('terminal-race').catch(() => undefined);
 		creation.resolve('terminal-race');
 		await opening;
 
-		expect(paneTabs(layout.snapshot, historyPaneId).order).toContain(
+		expect(windowTabs(layout.snapshot, historyWindowId).order).toContain(
 			terminalSurfaceId('terminal-race'),
 		);
-		expect(paneTabs(layout.snapshot, historyPaneId).activeId).toBe(
+		expect(windowTabs(layout.snapshot, historyWindowId).activeId).toBe(
 			terminalSurfaceId('terminal-race'),
 		);
 	});
@@ -1251,35 +1352,38 @@ describe('WorkspaceCoordinator', () => {
 	it('falls back when a terminal destination collapses during creation', async () => {
 		const creation = deferred<string>();
 		const { coordinator, terminals, layout } = createHarness();
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
 		terminals.create.mockReturnValue(creation.promise);
 
-		const opening = coordinator.createTerminal(historyPaneId);
+		const opening = coordinator.createTerminal(historyWindowId);
 		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
 		await coordinator.closeSurface('singleton:git-history');
-		creation.resolve('terminal-stale-pane');
+		creation.resolve('terminal-stale-window');
 		await opening;
 
 		expect(
-			paneIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId('terminal-stale-pane')),
-		).toBe('pane-main');
+			windowIdOfSurface(layout.snapshot.desktopRoot, terminalSurfaceId('terminal-stale-window')),
+		).toBe('window-main');
 	});
 
-	it('does not create desktop pane topology when a New Terminal crosses into mobile', async () => {
+	it('does not create desktop window topology when a New Terminal crosses into mobile', async () => {
 		const creation = deferred<string>();
 		const { coordinator, terminals, layout } = createHarness();
 		terminals.create.mockReturnValue(creation.promise);
 
-		const opening = coordinator.createTerminalInNewPane('pane-main');
+		const opening = coordinator.createTerminalInNewWindow('window-main');
 		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
 		await coordinator.enterMobilePresentation();
 		creation.resolve('terminal-mobile-transition');
 		await opening;
 
 		const surfaceId = terminalSurfaceId('terminal-mobile-transition');
-		expect(paneCountOf(layout.snapshot)).toBe(1);
-		expect(paneIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('pane-main');
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId)).toBe('window-main');
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
 	});
 
@@ -1287,7 +1391,7 @@ describe('WorkspaceCoordinator', () => {
 		const { coordinator, terminals, layout } = createHarness({ failLayoutPublishAt: 1 });
 		terminals.create.mockResolvedValue('terminal-unplaced');
 
-		await expect(coordinator.createTerminal('pane-main')).rejects.toThrow(
+		await expect(coordinator.createTerminal('window-main')).rejects.toThrow(
 			'layout publication failed',
 		);
 
@@ -1300,15 +1404,18 @@ describe('WorkspaceCoordinator', () => {
 	});
 
 	it('keeps the launcher and terminates its terminal when replacement cannot publish', async () => {
-		const { coordinator, terminals, layout } = createHarness({ failLayoutPublishAt: 2 });
+		const { coordinator, terminals, layout } = createHarness({
+			failLayoutPublishAt: 2,
+			includePortableTabs: false,
+		});
 		await coordinator.reconcileTerminals([], { deriveLauncher: true });
 		terminals.create.mockResolvedValue('terminal-unplaced');
 
-		await expect(coordinator.activateTerminalLauncher('pane-main')).rejects.toThrow(
+		await expect(coordinator.activateTerminalLauncher('window-main')).rejects.toThrow(
 			'layout publication failed',
 		);
 
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain('terminal-launcher');
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain('terminal-launcher');
 		expect(layout.surface(terminalSurfaceId('terminal-unplaced'))).toBeNull();
 		expect(terminals.requestTermination).toHaveBeenCalledWith(
 			'terminal-unplaced',
@@ -1319,26 +1426,26 @@ describe('WorkspaceCoordinator', () => {
 
 	it('keeps the launcher reserved until a created terminal replaces it', async () => {
 		const creation = deferred<string>();
-		const { coordinator, terminals, layout } = createHarness();
+		const { coordinator, terminals, layout } = createHarness({ includePortableTabs: false });
 		await coordinator.reconcileTerminals([], { deriveLauncher: true });
 		terminals.create.mockImplementation(() => creation.promise);
 
-		const activation = coordinator.activateTerminalLauncher('pane-main');
+		const activation = coordinator.activateTerminalLauncher('window-main');
 		await Promise.resolve();
-		await coordinator.activateTerminalLauncher('pane-main');
+		await coordinator.activateTerminalLauncher('window-main');
 		await coordinator.reconcileTerminals(['terminal-race'], { deriveLauncher: true });
 
 		expect(terminals.create).toHaveBeenCalledOnce();
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain('terminal-launcher');
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain('terminal-launcher');
 
 		creation.resolve('terminal-race');
 		await activation;
 
-		expect(paneTabs(layout.snapshot, 'pane-main').order).not.toContain('terminal-launcher');
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(
+		expect(windowTabs(layout.snapshot, 'window-main').order).not.toContain('terminal-launcher');
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(
 			terminalSurfaceId('terminal-race'),
 		);
-		expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(
 			terminalSurfaceId('terminal-race'),
 		);
 	});
@@ -1360,7 +1467,7 @@ describe('WorkspaceCoordinator', () => {
 			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
 			attachmentState: 'detached',
 		} as never;
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
 		await expect(coordinator.terminateTerminalSession(terminalId)).rejects.toThrow('network lost');
@@ -1379,9 +1486,12 @@ describe('WorkspaceCoordinator', () => {
 			attachmentState: 'attached',
 		} as never;
 		const surfaceId = terminalSurfaceId(terminalId);
-		await coordinator.openSingletonInNewPane('git-history');
-		const historyPaneId = paneIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
-		await coordinator.openTerminalSession(terminalId, historyPaneId);
+		await coordinator.openSingletonInNewWindow('git-history');
+		const historyWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		await coordinator.openTerminalSession(terminalId, historyWindowId);
 
 		await coordinator.handleTerminalSessionTerminated(terminalId);
 
@@ -1404,11 +1514,11 @@ describe('WorkspaceCoordinator', () => {
 			attachmentState: 'detached',
 		} as never;
 		const surfaceId = terminalSurfaceId(terminalId);
-		const opening = coordinator.openTerminalSession(terminalId, 'pane-main');
+		const opening = coordinator.openTerminalSession(terminalId, 'window-main');
 		await vi.waitFor(() =>
-			expect(paneTabs(layout.snapshot, 'pane-main').activeId).toBe(surfaceId),
+			expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(surfaceId),
 		);
-		frames.register(surfaceId, 'pane-main', {
+		frames.register(surfaceId, 'window-main', {
 			element: document.createElement('div'),
 			attachRetainedRenderer: vi.fn(),
 			focusPrimary: vi.fn(),
@@ -1431,7 +1541,7 @@ describe('WorkspaceCoordinator', () => {
 			attachmentState: 'detached',
 		} as never;
 		const surfaceId = terminalSurfaceId(terminalId);
-		await coordinator.openTerminalSession(terminalId, 'pane-main');
+		await coordinator.openTerminalSession(terminalId, 'window-main');
 		onLayoutChanged.mockImplementation(() => {
 			throw new Error('storage unavailable');
 		});
@@ -1447,12 +1557,12 @@ describe('WorkspaceCoordinator', () => {
 		const confirmDestructive = vi.fn(() => confirmation.promise);
 		const { coordinator, layout } = createHarness({ confirmDestructive });
 		await coordinator.placeFileSession('dialog', { type: 'dialog' });
-		await coordinator.placeFileSession('source', { type: 'pane', paneId: 'pane-main' });
+		await coordinator.placeFileSession('source', { type: 'window', windowId: 'window-main' });
 
 		const popOut = coordinator.popOutFile(fileSurfaceId('source'));
 		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
 		await expect(coordinator.closeSurface(fileSurfaceId('source'))).resolves.toBe(false);
-		expect(paneTabs(layout.snapshot, 'pane-main').order).toContain(fileSurfaceId('source'));
+		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(fileSurfaceId('source'));
 
 		confirmation.resolve(false);
 		await expect(popOut).resolves.toBe(false);

@@ -53,7 +53,6 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		showThinking: true,
 		textScale: 1,
 		isLiveWindow: true,
-		showTopToolbarSpacer: false,
 		showRefreshError: false,
 		showEarlierBoundary: false,
 		showLaterBoundary: false,
@@ -112,12 +111,18 @@ describe('ConversationFeedProjectionState', () => {
 		);
 		const oldEndKey = first.model.items.at(-1)?.key;
 
-		transcript.applyMessages('chat-1', 'generation-1', [
-			{
-				ordinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
-				message: new AssistantMessage(TS, 'new response'),
-			},
-		], ACTIVE_TRANSCRIPT_RETENTION_LIMIT, ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
+		transcript.applyMessages(
+			'chat-1',
+			'generation-1',
+			[
+				{
+					ordinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+					message: new AssistantMessage(TS, 'new response'),
+				},
+			],
+			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
+		);
 		const appendedRows = transcript.visibleRows;
 		const appendedTail = appendedRows.at(-1);
 		if (appendedTail?.kind !== 'message') throw new Error('Expected an appended transcript row');

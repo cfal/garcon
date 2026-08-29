@@ -57,7 +57,8 @@ export async function submitQueueRoute(
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
 	// Clears before awaiting the network so typing during the request survives.
-	clearOwnedComposer(deps, context);
+	const clearedRevision = clearOwnedComposer(deps, context);
+	if (clearedRevision !== null) queue.recordComposerClear(context.chatId, clearedRevision);
 	const submission = acceptedInputs.enqueue({
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
@@ -72,15 +73,17 @@ export async function submitQueueRoute(
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
-			rejectedNotice: (failure) => m.chat_notice_failed_queue_message({
-				detail: errorDetail(failure),
-				content: context.ownsComposer ? context.previousText : context.text,
-			}),
-			restoreRejected: () => queue.recordSubmissionFailure(context.chatId, {
-				sequence,
-				text: context.previousText,
-				images: context.previousImages,
-			}),
+			rejectedNotice: (failure) =>
+				m.chat_notice_failed_queue_message({
+					detail: errorDetail(failure),
+					content: context.ownsComposer ? context.previousText : context.text,
+				}),
+			restoreRejected: () =>
+				queue.recordSubmissionFailure(context.chatId, {
+					sequence,
+					text: context.previousText,
+					images: context.previousImages,
+				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
 		});
 	} finally {
@@ -95,7 +98,8 @@ export async function submitGoalControlRoute(
 	context: SubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const sequence = queue.beginSubmission(context.chatId);
-	clearOwnedComposer(deps, context);
+	const clearedRevision = clearOwnedComposer(deps, context);
+	if (clearedRevision !== null) queue.recordComposerClear(context.chatId, clearedRevision);
 	const submission = acceptedInputs.goalControl({
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
@@ -108,15 +112,17 @@ export async function submitGoalControlRoute(
 	} catch (error) {
 		return settleSubmissionFailure(deps, context, error, {
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
-			rejectedNotice: (failure) => m.chat_notice_failed_queue_message({
-				detail: errorDetail(failure),
-				content: context.ownsComposer ? context.previousText : context.text,
-			}),
-			restoreRejected: () => queue.recordSubmissionFailure(context.chatId, {
-				sequence,
-				text: context.previousText,
-				images: context.previousImages,
-			}),
+			rejectedNotice: (failure) =>
+				m.chat_notice_failed_queue_message({
+					detail: errorDetail(failure),
+					content: context.ownsComposer ? context.previousText : context.text,
+				}),
+			restoreRejected: () =>
+				queue.recordSubmissionFailure(context.chatId, {
+					sequence,
+					text: context.previousText,
+					images: context.previousImages,
+				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
 		});
 	} finally {
@@ -135,12 +141,7 @@ export async function submitSteerRoute(
 		content: context.content,
 	});
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(
-			context.chatId,
-			context.content,
-			[],
-			submission.clientMessageId,
-		),
+		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
@@ -157,9 +158,7 @@ export async function submitSteerRoute(
 		if (deps.sessions.selectedChatId === context.chatId) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				outcomeUnknown
-					? m.chat_notice_steer_outcome_unconfirmed()
-					: steerFailureNotice(error),
+				outcomeUnknown ? m.chat_notice_steer_outcome_unconfirmed() : steerFailureNotice(error),
 			);
 		}
 		return outcomeUnknown ? 'unknown' : 'rejected';
@@ -214,7 +213,8 @@ export async function submitDraftRoute(
 		projectPath: chat.projectPath!,
 		model: startup?.model ?? chat.model ?? deps.agentState.model,
 		apiProviderId: startup?.apiProviderId ?? chat.apiProviderId ?? deps.agentState.apiProviderId,
-		modelEndpointId: startup?.modelEndpointId ?? chat.modelEndpointId ?? deps.agentState.modelEndpointId,
+		modelEndpointId:
+			startup?.modelEndpointId ?? chat.modelEndpointId ?? deps.agentState.modelEndpointId,
 		modelProtocol: startup?.modelProtocol ?? chat.modelProtocol ?? deps.agentState.modelProtocol,
 		permissionMode: startup?.permissionMode ?? deps.agentState.permissionMode,
 		thinkingMode: startup?.thinkingMode ?? deps.agentState.thinkingMode,
@@ -243,7 +243,8 @@ export async function submitDraftRoute(
 			clientMessageId: submission.clientMessageId,
 			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
-			rejectedNotice: (failure) => m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
+			rejectedNotice: (failure) =>
+				m.chat_notice_failed_start_chat({ detail: errorDetail(failure) }),
 			onRejected: () => {
 				deps.lifecycle.clearTurnStatus(chatId);
 				deps.sessions.applyProcessingEvent(chatId, null);
@@ -272,11 +273,11 @@ export async function submitRunRoute(
 		...(handoff
 			? { handoff }
 			: {
-				permissionMode: deps.agentState.permissionMode,
-				thinkingMode: deps.agentState.thinkingMode,
-				agentSettings: deps.agentState.agentSettings,
-				...selection,
-			}),
+					permissionMode: deps.agentState.permissionMode,
+					thinkingMode: deps.agentState.thinkingMode,
+					agentSettings: deps.agentState.agentSettings,
+					...selection,
+				}),
 	});
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
@@ -299,7 +300,8 @@ export async function submitRunRoute(
 			clientMessageId: submission.clientMessageId,
 			composerRevisionAfterClear,
 			unknownNotice: m.chat_notice_delivery_outcome_unconfirmed(),
-			rejectedNotice: (failure) => m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
+			rejectedNotice: (failure) =>
+				m.chat_notice_failed_send_message({ detail: errorDetail(failure) }),
 			refreshOnAdmissionConflict: true,
 			refreshControl: () => queue.settleControlRefresh(queue.startControlRefresh(context.chatId)),
 		});
@@ -331,8 +333,7 @@ function beginOptimisticInput(
 function clearOwnedComposer(deps: RouteDeps, context: SubmissionContext): number | null {
 	if (!context.ownsComposer) return null;
 	if (context.composerRevisionAfterClear !== null) return context.composerRevisionAfterClear;
-	deps.composerState.clearAfterSubmit(context.chatId);
-	return deps.composerState.contentRevision;
+	return deps.composerState.clearAfterSubmit(context.chatId);
 }
 
 function restoreSteerComposer(
@@ -340,14 +341,11 @@ function restoreSteerComposer(
 	context: SubmissionContext,
 	clearedComposerRevision: number | null,
 ): void {
-	if (
-		!context.ownsComposer
-		|| deps.sessions.selectedChatId !== context.chatId
-		|| deps.composerState.contentRevision !== clearedComposerRevision
-		|| deps.composerState.inputText !== ''
-		|| deps.composerState.images.length > 0
-	) return;
-	deps.composerState.inputText = context.previousText;
-	deps.composerState.images = context.previousImages;
-	deps.composerState.saveDraft(context.chatId);
+	if (!context.ownsComposer || clearedComposerRevision === null) return;
+	deps.composerState.restoreDraftIfRevision(
+		context.chatId,
+		clearedComposerRevision,
+		context.previousText,
+		context.previousImages,
+	);
 }

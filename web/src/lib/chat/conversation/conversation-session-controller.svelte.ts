@@ -2,11 +2,7 @@
 // Delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
-import {
-	isStopSatisfied,
-	type ChatImage,
-	type ChatStopOutcome,
-} from '$shared/chat-types';
+import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
 	INITIAL_VISIBLE_MESSAGES,
@@ -91,6 +87,10 @@ type SessionComposerState = Pick<
 	| 'isSubmitting'
 	| 'clearAfterSubmit'
 	| 'clearImages'
+	| 'draftSnapshot'
+	| 'draftRevision'
+	| 'isDraftEmpty'
+	| 'restoreDraftIfRevision'
 	| 'restoreDraft'
 	| 'saveDraft'
 >;
@@ -208,10 +208,9 @@ export interface SessionControllerDeps {
 		supportsSteering: (agentId: SessionAgentId) => boolean;
 		supportsGoals: (agentId: SessionAgentId) => boolean;
 	};
-	getExecutionDefaults(agentId: SessionAgentId): Pick<
-		ConversationExecutionSelection,
-		'permissionMode' | 'thinkingMode' | 'agentSettings'
-	>;
+	getExecutionDefaults(
+		agentId: SessionAgentId,
+	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
@@ -237,17 +236,22 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {
 		this.#executionDraft = new ConversationExecutionDraftState({
-			get activeChatId() { return deps.sessions.selectedChatId; },
+			get activeChatId() {
+				return deps.sessions.selectedChatId;
+			},
 			get durableSelection() {
 				return executionSelectionFromProjection(deps.sessions.selectedChat);
 			},
 		});
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
-		this.#slashCommands = new ConversationSlashCommandService({
-			...deps,
-			refetchTranscript: (chatId) => this.#loadChat(chatId),
-			confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
-		}, this.#acceptedInputs);
+		this.#slashCommands = new ConversationSlashCommandService(
+			{
+				...deps,
+				refetchTranscript: (chatId) => this.#loadChat(chatId),
+				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
+			},
+			this.#acceptedInputs,
+		);
 		this.#agentSwitch = new ConversationAgentSwitchService({
 			sessions: deps.sessions,
 			agentState: deps.agentState,
@@ -259,27 +263,53 @@ export class ConversationSessionController {
 		const agentSwitch = this.#agentSwitch;
 		const executionDraft = this.#executionDraft;
 		this.#queue = new ConversationQueueController({
-			get sessions() { return deps.sessions; },
-			get chatState() { return deps.chatState; },
-			get composerState() { return deps.composerState; },
-			get lifecycle() { return deps.lifecycle; },
-			get conversationUi() { return deps.conversationUi; },
-			get acceptedInputs() { return acceptedInputs; },
+			get sessions() {
+				return deps.sessions;
+			},
+			get chatState() {
+				return deps.chatState;
+			},
+			get composerState() {
+				return deps.composerState;
+			},
+			get lifecycle() {
+				return deps.lifecycle;
+			},
+			get conversationUi() {
+				return deps.conversationUi;
+			},
+			get acceptedInputs() {
+				return acceptedInputs;
+			},
 		});
 		const queue = this.#queue;
 		this.#permissions = new ConversationPermissionService({
 			deps,
 			acceptedInputs,
-			get queue() { return queue; },
+			get queue() {
+				return queue;
+			},
 			executionModelSelection: () => this.#executionModelSelection(),
 		});
 		this.#settings = new ConversationSettingsController({
-			get sessions() { return deps.sessions; },
-			get agentState() { return deps.agentState; },
-			get modelCatalog() { return deps.modelCatalog; },
-			get chatState() { return deps.chatState; },
-			get agentSwitch() { return agentSwitch; },
-			get executionDraft() { return executionDraft; },
+			get sessions() {
+				return deps.sessions;
+			},
+			get agentState() {
+				return deps.agentState;
+			},
+			get modelCatalog() {
+				return deps.modelCatalog;
+			},
+			get chatState() {
+				return deps.chatState;
+			},
+			get agentSwitch() {
+				return agentSwitch;
+			},
+			get executionDraft() {
+				return executionDraft;
+			},
 		});
 	}
 
@@ -332,8 +362,6 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const currentChatId = deps.lifecycle.currentChatId;
 		deps.chatState.activateChat(null);
-		deps.composerState.inputText = '';
-		deps.composerState.clearImages();
 		if (currentChatId) deps.lifecycle.clearTurnStatus(currentChatId);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.activateTransientFeed(null);
@@ -376,8 +404,6 @@ export class ConversationSessionController {
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
-		deps.composerState.inputText = '';
-		deps.composerState.clearImages();
 		const previousChatId = deps.lifecycle.currentChatId;
 		if (previousChatId) deps.lifecycle.clearTurnStatus(previousChatId);
 		deps.conversationUi.activateTransientFeed(chatId);
@@ -451,10 +477,7 @@ export class ConversationSessionController {
 		}
 	}
 
-	async #loadChat(
-		chatId: string,
-		options: { minimumMessageLimit?: number } = {},
-	): Promise<void> {
+	async #loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
@@ -536,16 +559,13 @@ export class ConversationSessionController {
 		images: File[],
 		composerRevisionAfterClear: number | null,
 	): void {
-		const { composerState, sessions } = this.deps;
-		if (
-			composerRevisionAfterClear === null ||
-			sessions.selectedChatId !== chatId ||
-			composerState.contentRevision !== composerRevisionAfterClear
-		)
-			return;
-		composerState.inputText = text;
-		composerState.images = images;
-		composerState.saveDraft(chatId);
+		if (composerRevisionAfterClear === null) return;
+		this.deps.composerState.restoreDraftIfRevision(
+			chatId,
+			composerRevisionAfterClear,
+			text,
+			images,
+		);
 	}
 
 	// Accepts an explicit chat ID so draft startup cannot race selection changes.
@@ -563,12 +583,13 @@ export class ConversationSessionController {
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
-		const text = messageOverride ?? deps.composerState.inputText.trim();
-		const submissionImages = imageOverride ?? deps.composerState.images;
+		const draft = deps.composerState.draftSnapshot(chatId);
+		const text = messageOverride ?? draft.text.trim();
+		const submissionImages = imageOverride ?? draft.attachments;
 		if (!text && submissionImages.length === 0) return 'no-op';
 
-		const previousText = deps.composerState.inputText;
-		const previousImages = [...deps.composerState.images];
+		const previousText = draft.text;
+		const previousImages = [...draft.attachments];
 		const handoffPending = selected.status !== 'draft' && this.#executionDraft.isHandoffPending;
 		const slash = this.#slashCommands.dispatchSubmission({
 			chatId,
@@ -613,8 +634,7 @@ export class ConversationSessionController {
 
 		let composerRevisionAfterClear: number | null = null;
 		if (ownsComposer) {
-			deps.composerState.clearAfterSubmit(chatId);
-			composerRevisionAfterClear = deps.composerState.contentRevision;
+			composerRevisionAfterClear = deps.composerState.clearAfterSubmit(chatId);
 		}
 
 		try {
@@ -693,9 +713,7 @@ export class ConversationSessionController {
 			}
 			if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
 			const currentChat = deps.sessions.byId[chatId];
-			const handoff = this.#executionDraft.handoffRequest(
-				currentChat?.agentOwnershipEpoch ?? '',
-			);
+			const handoff = this.#executionDraft.handoffRequest(currentChat?.agentOwnershipEpoch ?? '');
 			const outcome = await submitRunRoute(
 				deps,
 				this.#acceptedInputs,
@@ -781,10 +799,7 @@ export class ConversationSessionController {
 		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
 		const appendFailure = (detail: string) => {
 			if (deps.chatState.activeChatId !== chatId) return;
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_stop_chat({ detail }),
-			);
+			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_stop_chat({ detail }));
 		};
 		return request({
 			clientRequestId,
@@ -811,11 +826,7 @@ export class ConversationSessionController {
 		this.#permissions.handlePermissionDecision(permissionOccurrenceId, decision);
 	}
 
-	handleExitPlanMode(
-		permissionOccurrenceId: string,
-		choice: string,
-		plan: string,
-	): void {
+	handleExitPlanMode(permissionOccurrenceId: string, choice: string, plan: string): void {
 		this.#permissions.handleExitPlanMode(permissionOccurrenceId, choice, plan);
 	}
 

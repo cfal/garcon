@@ -7,19 +7,26 @@ import {
 } from '../submission-settlement.js';
 
 function createDeps() {
+	let currentRevision = 1;
+	const restoreDraftIfRevision = vi.fn(
+		(_chatId: string, expectedRevision: number, _text: string, _images: readonly File[]) =>
+			expectedRevision === currentRevision,
+	);
 	const deps = {
 		chatState: {
 			appendLocalNotice: vi.fn(),
 			clearOptimisticUserInput: vi.fn(),
 		},
 		composerState: {
-			inputText: 'current',
-			images: [] as File[],
-			contentRevision: 1,
-			saveDraft: vi.fn(),
+			restoreDraftIfRevision,
 		},
 	} satisfies SubmissionSettlementDeps;
-	return deps;
+	return {
+		...deps,
+		setCurrentRevision(revision: number) {
+			currentRevision = revision;
+		},
+	};
 }
 
 const failures = [
@@ -64,6 +71,7 @@ describe('settleSubmissionFailure', () => {
 					failure.error(),
 					{
 						clientMessageId: 'message-1',
+						composerRevisionAfterClear: 1,
 						unknownNotice: 'unknown notice',
 						rejectedNotice: () => 'rejected notice',
 						refreshOnAdmissionConflict: true,
@@ -78,8 +86,7 @@ describe('settleSubmissionFailure', () => {
 				);
 				expect(refreshControl).toHaveBeenCalledTimes(failure.refreshes ? 1 : 0);
 				const restores = ownsComposer && failure.outcome === 'rejected';
-				expect(deps.composerState.inputText).toBe(restores ? 'previous' : 'current');
-				expect(deps.composerState.saveDraft).toHaveBeenCalledTimes(restores ? 1 : 0);
+				expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledTimes(restores ? 1 : 0);
 				expect(onRejected).toHaveBeenCalledTimes(failure.outcome === 'rejected' ? 1 : 0);
 				expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 					'error',
@@ -110,14 +117,12 @@ describe('settleSubmissionFailure', () => {
 		);
 
 		expect(restoreRejected).toHaveBeenCalledOnce();
-		expect(deps.composerState.inputText).toBe('current');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
 	});
 
 	it('preserves a newer draft when a cleared submission is rejected', async () => {
 		const deps = createDeps();
-		deps.composerState.inputText = 'new draft';
-		deps.composerState.contentRevision = 2;
+		deps.setCurrentRevision(2);
 
 		await settleSubmissionFailure(
 			deps,
@@ -135,7 +140,12 @@ describe('settleSubmissionFailure', () => {
 			},
 		);
 
-		expect(deps.composerState.inputText).toBe('new draft');
-		expect(deps.composerState.saveDraft).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledWith(
+			'chat-1',
+			1,
+			'submitted text',
+			[],
+		);
+		expect(deps.composerState.restoreDraftIfRevision).toHaveReturnedWith(false);
 	});
 });

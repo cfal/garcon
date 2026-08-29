@@ -22,7 +22,6 @@
 
 	interface Props {
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
-		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
 		showAnnouncementTrigger?: boolean;
 		transcriptScenario?:
@@ -39,7 +38,6 @@
 
 	const {
 		onUserScrollIntent,
-		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
 		showAnnouncementTrigger = false,
 		transcriptScenario = 'empty',
@@ -160,7 +158,7 @@
 	setFileSessions(
 		new FileSessionRegistry({
 			getIsMobile: () => false,
-			getDefaultPlacement: () => ({ type: 'pane', paneId: 'pane-main' }),
+			getDefaultPlacement: () => ({ type: 'window', windowId: 'window-main' }),
 			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
 			getPlacement: () => ({
 				async placeFileSession() {
@@ -175,7 +173,6 @@
 
 <ConversationFeed
 	{onUserScrollIntent}
-	{reserveTopFloatingToolbar}
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
 	isVisible={true}

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
+import { CANONICAL_CHAT_SURFACE_ID as CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 import KeyboardShortcutsHost from './KeyboardShortcutsHost.svelte';
 
 function createMockAppShell() {
@@ -70,9 +70,7 @@ describe('KeyboardShortcuts', () => {
 			onToggleCommandMenu: vi.fn(),
 		});
 
-		window.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }),
-		);
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }));
 
 		expect(appShell.requestDeleteSelectedChat).toHaveBeenCalledTimes(1);
 	});
@@ -357,9 +355,7 @@ describe('KeyboardShortcuts', () => {
 			globalShortcuts: { 'delete-chat': null },
 		});
 
-		window.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }),
-		);
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'D', ctrlKey: true, shiftKey: true }));
 
 		expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
 	});
@@ -380,9 +376,7 @@ describe('KeyboardShortcuts', () => {
 		input.focus();
 
 		try {
-			input.dispatchEvent(
-				new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }),
-			);
+			input.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }));
 			expect(appShell.requestDeleteSelectedChat).not.toHaveBeenCalled();
 		} finally {
 			input.remove();
@@ -419,7 +413,7 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
-	it('moves left between tabs on Ctrl-Shift-J while a workspace pane owns focus', () => {
+	it('moves left between tabs on Ctrl-Shift-J while a workspace window owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 		const onFocusPreviousTab = vi.fn(() => true);
@@ -445,7 +439,7 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
 	});
 
-	it('moves right between tabs on Ctrl-Shift-L while a workspace pane owns focus', () => {
+	it('moves right between tabs on Ctrl-Shift-L while a workspace window owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 		const onFocusNextTab = vi.fn(() => true);
@@ -464,8 +458,8 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
-	it('cycles workspace pane focus on Ctrl-Shift-O', () => {
-		const onCyclePaneFocus = vi.fn();
+	it('cycles workspace window focus on Ctrl-Shift-O', () => {
+		const onCycleWindowFocus = vi.fn();
 		const event = new KeyboardEvent('keydown', {
 			key: 'o',
 			ctrlKey: true,
@@ -476,12 +470,12 @@ describe('KeyboardShortcuts', () => {
 		render(KeyboardShortcutsHost, {
 			appShell: createMockAppShell(),
 			navigation: createMockNavigation(),
-			onCyclePaneFocus,
+			onCycleWindowFocus,
 		});
 
 		window.dispatchEvent(event);
 
-		expect(onCyclePaneFocus).toHaveBeenCalledOnce();
+		expect(onCycleWindowFocus).toHaveBeenCalledOnce();
 		expect(event.defaultPrevented).toBe(true);
 	});
 

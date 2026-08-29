@@ -9,7 +9,7 @@ export const GLOBAL_SHORTCUT_IDS = [
 	'navigate-tab-right',
 	'navigate-chat-above',
 	'navigate-chat-below',
-	'toggle-main-sidebar-focus',
+	'cycle-window-focus',
 	'open-settings',
 	'scroll-half-page-up',
 	'scroll-half-page-down',
@@ -50,7 +50,7 @@ export const GLOBAL_SHORTCUT_DEFINITIONS: readonly GlobalShortcutDefinition[] = 
 	{ id: 'navigate-chat-above', defaultBinding: { key: 'p', ctrl: true, shift: true } },
 	{ id: 'navigate-chat-below', defaultBinding: { key: 'n', ctrl: true, shift: true } },
 	{
-		id: 'toggle-main-sidebar-focus',
+		id: 'cycle-window-focus',
 		defaultBinding: { key: 'o', ctrl: true, shift: true },
 	},
 	{ id: 'open-settings', defaultBinding: { key: ',', ctrl: true } },
@@ -101,9 +101,7 @@ export function sanitizeGlobalShortcutOverrides(value: unknown): GlobalShortcutO
 		if (Object.hasOwn(overrides, definition.id)) continue;
 		const conflictsWithOverride = GLOBAL_SHORTCUT_IDS.some((id) => {
 			const binding = overrides[id];
-			return binding
-				? globalShortcutBindingsConflict(definition.defaultBinding, binding)
-				: false;
+			return binding ? globalShortcutBindingsConflict(definition.defaultBinding, binding) : false;
 		});
 		if (conflictsWithOverride) overrides[definition.id] = null;
 	}

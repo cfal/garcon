@@ -37,7 +37,7 @@ describe('CommitSurface', () => {
 	it('renders as an in-flow surface without dialog semantics', () => {
 		render(CommitSurfaceTestHost, {
 			controller: makeController(),
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 		});
 
 		expect(screen.queryByRole('dialog')).toBeNull();
@@ -48,7 +48,7 @@ describe('CommitSurface', () => {
 	it('marks the commit message as the primary focus target', () => {
 		render(CommitSurfaceTestHost, {
 			controller: makeController(),
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 		});
 
 		expect(screen.getByRole('textbox').hasAttribute('data-surface-primary')).toBe(true);
@@ -66,7 +66,7 @@ describe('CommitSurface', () => {
 	it('uses the shared folder and branch target controls', () => {
 		const { container } = render(CommitSurfaceTestHost, {
 			controller: makeController(),
-			presentation: 'pane-main',
+			presentation: 'window-main',
 		});
 
 		const folder = screen.getByRole('button', { name: '/project' });
@@ -78,7 +78,7 @@ describe('CommitSurface', () => {
 	it('places the selected-file summary between the file tree and commit message', () => {
 		const { container } = render(CommitSurfaceTestHost, {
 			controller: makeController(),
-			presentation: 'pane-main',
+			presentation: 'window-main',
 		});
 
 		const toolbar = container.querySelector('[data-git-surface-toolbar]');
@@ -126,7 +126,7 @@ describe('CommitSurface', () => {
 
 		const { container } = render(CommitSurfaceTestHost, {
 			controller,
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 		});
 		const viewport = container.querySelector<HTMLElement>('[data-commit-file-scroll]');
 		expect(viewport).toBeTruthy();
@@ -169,7 +169,7 @@ describe('CommitSurface', () => {
 		const togglePath = vi.spyOn(controller, 'togglePath');
 		const { container } = render(CommitSurfaceTestHost, {
 			controller,
-			presentation: 'pane-sidebar',
+			presentation: 'window-sidebar',
 		});
 		const checkboxes = container.querySelectorAll<HTMLInputElement>(
 			'[data-commit-file-scroll] input[type="checkbox"]',

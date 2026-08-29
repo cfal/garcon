@@ -12,12 +12,12 @@ function navigationPort() {
 }
 
 describe('Git workbench navigation', () => {
-	it('opens Commit as a tab in the invoking pane', async () => {
+	it('opens Commit as a tab in the invoking window', async () => {
 		const workspace = navigationPort();
 
-		await openCommitFromGitWorkbench(workspace, 'pane-invoking');
+		await openCommitFromGitWorkbench(workspace, 'window-invoking');
 
-		expect(workspace.openSingletonAsTab).toHaveBeenCalledWith('commit', 'pane-invoking');
+		expect(workspace.openSingletonAsTab).toHaveBeenCalledWith('commit', 'window-invoking');
 		expect(workspace.focusMobileSingleton).not.toHaveBeenCalled();
 	});
 

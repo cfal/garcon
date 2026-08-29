@@ -43,12 +43,12 @@
 		rendererRetryKey += 1;
 	}
 
-	async function moveDialogFileToPane(): Promise<void> {
+	async function moveDialogFileToWindow(): Promise<void> {
 		try {
-			await workspace.moveDialogFileToPane(workspace.lastFocusedPaneId);
+			await workspace.moveDialogFileToWindow(workspace.lastFocusedWindowId);
 		} catch (error) {
 			notifications.error(
-				error instanceof Error ? error.message : m.file_session_move_to_pane_failed(),
+				error instanceof Error ? error.message : m.file_session_move_to_window_failed(),
 			);
 		}
 	}
@@ -73,9 +73,9 @@
 				<Button
 					variant="ghost"
 					size="icon-sm"
-					onclick={() => void moveDialogFileToPane()}
-					aria-label={m.file_session_move_to_pane()}
-					title={m.file_session_move_to_pane()}
+					onclick={() => void moveDialogFileToWindow()}
+					aria-label={m.file_session_move_to_window()}
+					title={m.file_session_move_to_window()}
 				>
 					<PanelLeft class="h-4 w-4 rtl:-scale-x-100" />
 				</Button>

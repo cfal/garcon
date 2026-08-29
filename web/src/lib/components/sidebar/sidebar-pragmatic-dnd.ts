@@ -4,13 +4,11 @@ import { extractClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/clo
 import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 
 const sidebarChatDragKind = 'sidebar-chat';
-const splitPaneChatDragKind = 'split-pane-chat';
 const sidebarChatDropTargetKind = 'sidebar-chat-row-target';
 const chatOrderLists: PersistedChatOrderGroup[] = ['pinned', 'normal', 'archived'];
 
 export interface SidebarChatDragData extends Record<string | symbol, unknown> {
 	kind: typeof sidebarChatDragKind;
-	splitPaneDragKind: typeof splitPaneChatDragKind;
 	chatId: string;
 	list: PersistedChatOrderGroup;
 	index: number;
@@ -45,7 +43,6 @@ export function getSidebarChatDragData(input: {
 }): SidebarChatDragData {
 	return {
 		kind: sidebarChatDragKind,
-		splitPaneDragKind: splitPaneChatDragKind,
 		chatId: input.chatId,
 		list: input.list,
 		index: input.index,
@@ -84,7 +81,6 @@ export function isSidebarChatDragData(data: unknown): data is SidebarChatDragDat
 	const record = asDataRecord(data);
 	return (
 		record?.kind === sidebarChatDragKind &&
-		record.splitPaneDragKind === splitPaneChatDragKind &&
 		typeof record.chatId === 'string' &&
 		isChatOrderList(record.list) &&
 		typeof record.index === 'number' &&

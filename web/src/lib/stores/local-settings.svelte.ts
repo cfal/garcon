@@ -29,10 +29,10 @@ export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 
 export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
 export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
-export type FileOpenPlacementPreference = 'source' | 'new-pane' | 'dialog';
+export type FileOpenPlacementPreference = 'same-window' | 'new-window' | 'dialog';
 export const FILE_OPEN_PLACEMENT_VALUES = [
-	'source',
-	'new-pane',
+	'same-window',
+	'new-window',
 	'dialog',
 ] as const satisfies readonly FileOpenPlacementPreference[];
 export const HIDEABLE_TOOL_GROUPS = [
@@ -106,7 +106,7 @@ export interface LocalSettingsSnapshot {
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
-	hideChatListWhenGitInMain: boolean;
+	hideChatListWhenGitFocused: boolean;
 	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
@@ -140,7 +140,7 @@ type BooleanLocalSettingKey =
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
 	| 'steerWithCtrlEnter'
-	| 'hideChatListWhenGitInMain'
+	| 'hideChatListWhenGitFocused'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
@@ -162,7 +162,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	hideChatListWhenGitInMain: false,
+	hideChatListWhenGitFocused: false,
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
@@ -176,9 +176,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	terminalFontSize: '13',
-	textEditorOpenPlacement: 'source',
-	imageViewerOpenPlacement: 'source',
-	markdownViewerOpenPlacement: 'source',
+	textEditorOpenPlacement: 'same-window',
+	imageViewerOpenPlacement: 'same-window',
+	markdownViewerOpenPlacement: 'same-window',
 	language: 'en',
 	hiddenToolTypes: [],
 	globalShortcuts: {},
@@ -232,15 +232,11 @@ export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementP
 	);
 }
 
-// Maps retired host-based placements onto pane semantics: main becomes the
-// origin pane, and sidebar/other become a new pane split from the origin.
 function parseFileOpenPlacement(
 	value: unknown,
 	fallback: FileOpenPlacementPreference,
 ): FileOpenPlacementPreference {
 	if (isFileOpenPlacement(value)) return value;
-	if (value === 'main') return 'source';
-	if (value === 'sidebar' || value === 'other') return 'new-pane';
 	return fallback;
 }
 
@@ -274,11 +270,11 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		hideChatListWhenGitInMain: parseBoolean(
-			parsed.hideChatListWhenGitInMain,
-			DEFAULTS.hideChatListWhenGitInMain,
+		hideChatListWhenGitFocused: parseBoolean(
+			parsed.hideChatListWhenGitFocused,
+			DEFAULTS.hideChatListWhenGitFocused,
 		),
-		chatListDock: normalizeChatListDock(parsed.chatListDock ?? parsed.desktopLayoutOrder),
+		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGroupByProject: parseBoolean(
@@ -356,7 +352,7 @@ export class LocalSettingsStore {
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
-	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
+	hideChatListWhenGitFocused = $state(DEFAULTS.hideChatListWhenGitFocused);
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
@@ -444,7 +440,7 @@ export class LocalSettingsStore {
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
-			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
+			hideChatListWhenGitFocused: this.hideChatListWhenGitFocused,
 			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
@@ -482,7 +478,7 @@ export class LocalSettingsStore {
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
-		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
+		this.hideChatListWhenGitFocused = snap.hideChatListWhenGitFocused;
 		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;

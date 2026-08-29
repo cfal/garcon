@@ -1,4 +1,4 @@
-import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import { untrack } from 'svelte';
 
 export type TransientLayerKind =
@@ -48,9 +48,7 @@ export class TransientLayerRegistry {
 	#pendingMainInertLayers: PendingMainInertLayer[] = [];
 	#sequence = 0;
 
-	constructor(private readonly chatInteractionGate: ChatInteractionGate) {
-		this.#syncChatInertness();
-	}
+	constructor(private readonly workspaceInteractionGate: WorkspaceInteractionGate) {}
 
 	get makesMainInert(): boolean {
 		return (
@@ -64,11 +62,10 @@ export class TransientLayerRegistry {
 
 	open<T>(modality: TransientLayerModality, commitOpen: () => T): T {
 		if (modality !== 'main-inert') return commitOpen();
-		this.chatInteractionGate.cancelBeforeInertTransition();
+		this.workspaceInteractionGate.cancelBeforeInertTransition();
 		const pending: PendingMainInertLayer = { id: Symbol('main-inert'), timer: null };
 		this.#pendingMainInertLayers.push(pending);
 		this.#pendingMainInert = this.#pendingMainInertLayers.length;
-		this.#syncChatInertness();
 		let result: T;
 		try {
 			result = commitOpen();
@@ -93,13 +90,11 @@ export class TransientLayerRegistry {
 	}
 
 	register(registration: TransientLayerRegistration): () => void {
-		if (registration.modality === 'main-inert') this.#consumePending(false);
+		if (registration.modality === 'main-inert') this.#consumePending();
 		const layer: RegisteredLayer = { ...registration, sequence: ++this.#sequence };
 		this.#layers = [...untrack(() => this.#layers), layer];
-		this.#syncChatInertness();
 		return () => {
 			this.#layers = untrack(() => this.#layers).filter((candidate) => candidate !== layer);
-			this.#syncChatInertness();
 		};
 	}
 
@@ -137,9 +132,9 @@ export class TransientLayerRegistry {
 		);
 	}
 
-	#consumePending(sync = true): void {
+	#consumePending(): void {
 		const pending = this.#pendingMainInertLayers[0];
-		if (pending) this.#releasePending(pending, sync);
+		if (pending) this.#releasePending(pending);
 	}
 
 	#schedulePendingFallback(pending: PendingMainInertLayer): void {
@@ -147,16 +142,11 @@ export class TransientLayerRegistry {
 		pending.timer = setTimeout(() => this.#releasePending(pending), 0);
 	}
 
-	#releasePending(pending: PendingMainInertLayer, sync = true): void {
+	#releasePending(pending: PendingMainInertLayer): void {
 		if (pending.timer) clearTimeout(pending.timer);
 		this.#pendingMainInertLayers = this.#pendingMainInertLayers.filter(
 			(candidate) => candidate !== pending,
 		);
 		this.#pendingMainInert = this.#pendingMainInertLayers.length;
-		if (sync) this.#syncChatInertness();
-	}
-
-	#syncChatInertness(): void {
-		this.chatInteractionGate.setMainInert(untrack(() => this.makesMainInert));
 	}
 }

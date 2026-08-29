@@ -11,12 +11,13 @@
 		setTransientLayers,
 		setWorkspaceCoordinator,
 	} from '$lib/context';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
 		snippetTemplate?: string | null;
@@ -26,6 +27,7 @@
 	let { snippetTemplate = null, onCreateDraft = () => {} }: Props = $props();
 
 	const appShell = createAppShellStore();
+	setCanonicalWorkspaceLayout();
 	appShell.projectBasePath = '/workspace';
 	appShell.openNewChatDialog();
 
@@ -36,7 +38,7 @@
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(createNotificationsStore());
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 	setSnippets(
 		createSnippetsStore({

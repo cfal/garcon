@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
-import { resolveAdjacentChatId } from '../app-shell-chat-navigation';
+import {
+	resolveAdjacentChatId,
+	shouldSynchronizeFocusedChat,
+} from '../app-shell-chat-navigation';
 
 function chat(
 	id: string,
@@ -73,5 +76,40 @@ describe('resolveAdjacentChatId', () => {
 				offset: 1,
 			}),
 		).toBeNull();
+	});
+});
+
+describe('shouldSynchronizeFocusedChat', () => {
+	it('does not let stale focus replace an explicit Chat navigation in flight', () => {
+		expect(
+			shouldSynchronizeFocusedChat({
+				focusedChatId: 'chat-old',
+				focusedChatExists: true,
+				selectedChatId: null,
+				pendingChatTarget: 'chat-route',
+			}),
+		).toBe(false);
+	});
+
+	it('synchronizes a changed focused Chat after explicit navigation settles', () => {
+		expect(
+			shouldSynchronizeFocusedChat({
+				focusedChatId: 'chat-focused',
+				focusedChatExists: true,
+				selectedChatId: 'chat-selected',
+				pendingChatTarget: null,
+			}),
+		).toBe(true);
+	});
+
+	it('does not reselect a focused Chat after its session is deleted', () => {
+		expect(
+			shouldSynchronizeFocusedChat({
+				focusedChatId: 'chat-deleted',
+				focusedChatExists: false,
+				selectedChatId: null,
+				pendingChatTarget: null,
+			}),
+		).toBe(false);
 	});
 });

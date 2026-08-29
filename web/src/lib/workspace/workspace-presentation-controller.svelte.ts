@@ -3,30 +3,29 @@ import type { FileSessionRegistry } from '$lib/files/sessions/file-session-regis
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
-import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
+import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
 import { MobilePresentationPlanner } from './mobile-presentation-planner.js';
 import { selectMobileEntrySurface } from './responsive-handoff.js';
 import {
-	CHAT_SURFACE_ID,
 	PORTABLE_SINGLETON_KINDS,
 	isTransientMobileSingletonKind,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type FocusOwner,
-	type PaneId,
 	type PortableSingletonKind,
 	type PresentationHostId,
 	type TransientMobileSingletonKind,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
+	type WorkspaceWindowId,
 } from './surface-types.js';
-import { collectPaneNodes, paneIdOfSurface, paneNodeById } from './pane-tree.js';
+import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
-import { isDesktopPanePresented, visiblePresentationMap } from './visible-presentations.js';
+import { isDesktopWindowPresented, visiblePresentationMap } from './visible-presentations.js';
 import { WorkspacePresentationFrames } from './workspace-presentation-frames.svelte.js';
 
 type PresentationMode = 'desktop' | 'mobile';
@@ -36,7 +35,7 @@ interface WorkspacePresentationControllerDeps {
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
 	appShell: AppShellStore;
-	chatInteractionGate: ChatInteractionGate;
+	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	files: FileSessionRegistry;
 	singletons: SingletonSurfaceRegistry;
@@ -59,9 +58,7 @@ function transientMobileGitViewKinds(
 ): TransientMobileSingletonKind[] {
 	return snapshot.mobileOnlySurfaceIds.flatMap((surfaceId) => {
 		const surface = snapshot.surfaces[surfaceId];
-		return surface?.type === 'singleton' &&
-			surface.kind !== 'chat' &&
-			isTransientMobileSingletonKind(surface.kind)
+		return surface?.type === 'singleton' && isTransientMobileSingletonKind(surface.kind)
 			? [surface.kind]
 			: [];
 	});
@@ -77,9 +74,9 @@ function removeTransientMobileGitViews(
 }
 
 export class WorkspacePresentationController {
-	lastFocusedSurfaceId = $state(CHAT_SURFACE_ID as string);
-	lastFocusedPaneId = $state<PaneId | null>(null);
-	focusOwner = $state<FocusOwner>({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
+	lastFocusedSurfaceId = $state('');
+	lastFocusedWindowId = $state<WorkspaceWindowId | null>(null);
+	focusOwner = $state<FocusOwner>({ kind: 'chat-list' });
 	#inFlightCommitCount = 0;
 	#presentationMode = $state<PresentationMode>('desktop');
 	#requestedPresentationMode: PresentationMode = 'desktop';
@@ -99,9 +96,9 @@ export class WorkspacePresentationController {
 		});
 		this.#presentationMode = deps.appShell.isMobile ? 'mobile' : 'desktop';
 		this.#requestedPresentationMode = this.#presentationMode;
-		deps.chatInteractionGate.setPresented(
-			this.#isChatPresentedInSnapshot(this.layout.snapshot, this.#presentationMode),
-		);
+		this.lastFocusedSurfaceId = this.layout.defaultActiveId;
+		this.lastFocusedWindowId = this.layout.defaultWindowId;
+		this.focusOwner = { kind: 'surface', surfaceId: this.lastFocusedSurfaceId };
 		this.#syncSingletonVisibility(this.layout.snapshot, this.#presentationMode);
 	}
 
@@ -115,6 +112,18 @@ export class WorkspacePresentationController {
 
 	get defaultActiveId(): string {
 		return this.layout.defaultActiveId;
+	}
+
+	get defaultWindowId(): WorkspaceWindowId {
+		return this.layout.defaultWindowId;
+	}
+
+	get currentWindowId(): WorkspaceWindowId {
+		return this.resolveCurrentWindow(this.layout.snapshot);
+	}
+
+	get currentChatSurfaceId(): string | null {
+		return this.#chatSurfaceInWindow(this.layout.snapshot, this.currentWindowId);
 	}
 
 	get isChatPresented(): boolean {
@@ -145,20 +154,32 @@ export class WorkspacePresentationController {
 		return [...this.#visiblePresentations(this.layout.snapshot).values()].includes(surfaceId);
 	}
 
-	paneOf(surfaceId: string): PaneId | null {
-		return this.paneOfSnapshot(this.layout.snapshot, surfaceId);
+	windowOf(surfaceId: string): WorkspaceWindowId | null {
+		return this.windowOfSnapshot(this.layout.snapshot, surfaceId);
 	}
 
-	paneOfSnapshot(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): PaneId | null {
-		return paneIdOfSurface(snapshot.desktopRoot, surfaceId);
+	windowOfSnapshot(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): WorkspaceWindowId | null {
+		return windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+	}
+
+	resolveCurrentWindow(snapshot: WorkspaceLayoutSnapshot): WorkspaceWindowId {
+		if (
+			this.lastFocusedWindowId &&
+			windowNodeById(snapshot.desktopRoot, this.lastFocusedWindowId)
+		) {
+			return this.lastFocusedWindowId;
+		}
+		const surfaceWindow = windowIdOfSurface(snapshot.desktopRoot, this.lastFocusedSurfaceId);
+		if (surfaceWindow) return surfaceWindow;
+		const first = collectWindowNodes(snapshot.desktopRoot)[0];
+		if (!first) throw new Error('Workspace has no windows');
+		return first.id;
 	}
 
 	eligibleDesktopReturn(surfaceId: string | null): string | null {
 		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
-		const snapshot = this.layout.snapshot;
-		const paneId = paneIdOfSurface(snapshot.desktopRoot, surfaceId);
-		if (paneId && isDesktopPanePresented(snapshot, paneId)) return surfaceId;
-		return null;
+		const windowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
+		return windowId && isDesktopWindowPresented(this.layout.snapshot, windowId) ? surfaceId : null;
 	}
 
 	returnStackForTransient(
@@ -182,65 +203,59 @@ export class WorkspacePresentationController {
 		if (!this.isSurfacePresented(surfaceId)) return;
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedSurfaceId = surfaceId;
-		const paneId = this.paneOf(surfaceId);
-		if (paneId) this.lastFocusedPaneId = paneId;
+		const windowId = this.windowOf(surfaceId);
+		if (windowId) this.lastFocusedWindowId = windowId;
 	}
 
 	noteChatListFocus(): void {
 		this.focusOwner = { kind: 'chat-list' };
 	}
 
-	notePaneChromeFocus(paneId: PaneId, surfaceId: string): void {
-		if (!this.isSurfacePresented(surfaceId)) return;
-		this.focusOwner = { kind: 'pane-chrome', paneId, surfaceId };
-		this.lastFocusedPaneId = paneId;
+	noteWindowChromeFocus(windowId: WorkspaceWindowId, surfaceId: string): void {
+		if (!windowNodeById(this.layout.snapshot.desktopRoot, windowId)) return;
+		this.focusOwner = { kind: 'window-chrome', windowId, surfaceId };
+		this.lastFocusedWindowId = windowId;
+		this.lastFocusedSurfaceId = surfaceId;
 	}
 
 	async focusChat(): Promise<void> {
-		this.deps.chatInteractionGate.cancelBeforeInertTransition();
-		const current = this.isMobile
-			? await this.commit([
-					{ type: 'set-mobile-presentation', activeId: CHAT_SURFACE_ID, returnStack: [] },
-				])
-			: await this.commit((latest) => {
-					const paneId = paneIdOfSurface(latest.desktopRoot, CHAT_SURFACE_ID);
-					if (!paneId) return [];
-					return [
-						...(latest.fullscreenPaneId && latest.fullscreenPaneId !== paneId
-							? [{ type: 'set-fullscreen-pane', paneId: null } as const]
-							: []),
-						{ type: 'activate-pane-tab', paneId, surfaceId: CHAT_SURFACE_ID },
-					];
-				});
-		if (current) this.presentSurface(CHAT_SURFACE_ID);
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		let surfaceId: string | null = null;
+		const current = await this.commit((latest) => {
+			const preferredWindowId = this.resolveCurrentWindow(latest);
+			surfaceId =
+				this.#chatSurfaceInWindow(latest, preferredWindowId) ??
+				collectWindowNodes(latest.desktopRoot)
+					.map((workspaceWindow) => this.#chatSurfaceInWindow(latest, workspaceWindow.id))
+					.find((candidate): candidate is string => Boolean(candidate)) ??
+				null;
+			if (!surfaceId) return [];
+			if (this.isMobile) {
+				return [{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] }];
+			}
+			const windowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+			return windowId ? [{ type: 'activate-window-tab', windowId, surfaceId }] : [];
+		});
+		if (current && surfaceId) this.presentSurface(surfaceId);
 	}
 
 	async focusSurface(surfaceId: string, reserved: ReadonlySet<string>): Promise<void> {
 		if (reserved.has(surfaceId)) return;
-		const paneId = this.paneOf(surfaceId);
-		if (!paneId) return;
-		if (surfaceId !== CHAT_SURFACE_ID && this.isChatPresented) {
-			this.deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		let current: boolean;
-		if (this.isMobile) {
-			current = await this.commit((latest) =>
-				latest.surfaces[surfaceId]
-					? [{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] }]
-					: [],
-			);
-		} else {
-			current = await this.commit((latest) => {
-				const latestPaneId = paneIdOfSurface(latest.desktopRoot, surfaceId);
-				if (!latestPaneId) return [];
-				return [
-					...(latest.fullscreenPaneId && latest.fullscreenPaneId !== latestPaneId
-						? [{ type: 'set-fullscreen-pane', paneId: null } as const]
-						: []),
-					{ type: 'activate-pane-tab', paneId: latestPaneId, surfaceId },
-				];
-			});
-		}
+		const windowId = this.windowOf(surfaceId);
+		if (!windowId && !this.isMobile) return;
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const current = this.isMobile
+			? await this.commit((latest) =>
+					latest.surfaces[surfaceId]
+						? [{ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] }]
+						: [],
+				)
+			: await this.commit((latest) => {
+					const latestWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+					return latestWindowId
+						? [{ type: 'activate-window-tab', windowId: latestWindowId, surfaceId }]
+						: [];
+				});
 		if (current) this.presentSurface(surfaceId);
 	}
 
@@ -252,32 +267,30 @@ export class WorkspacePresentationController {
 		return this.#focusAdjacentTab(owner, 1, focusSurface);
 	}
 
-	// Cycles focus to the next pane's active tab. Replaces the old
-	// main/sidebar focus toggle now that panes are arbitrary.
-	cyclePaneFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
+	cycleWindowFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
 		if (this.isMobile) return;
-		const snapshot = this.layout.snapshot;
-		if (snapshot.fullscreenPaneId !== null) return;
-		const panes = collectPaneNodes(snapshot.desktopRoot);
-		if (panes.length < 2) return;
-		const ownerPaneId =
-			owner.kind === 'pane-chrome'
-				? owner.paneId
+		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
+		if (windows.length < 2) return;
+		const ownerWindowId =
+			owner.kind === 'window-chrome'
+				? owner.windowId
 				: owner.kind === 'surface'
-					? this.paneOf(owner.surfaceId)
+					? this.windowOf(owner.surfaceId)
 					: null;
-		const currentIndex = panes.findIndex((pane) => pane.id === ownerPaneId);
-		const nextPane = panes[(currentIndex + 1 + panes.length) % panes.length];
-		if (nextPane.tabs.activeId) focusSurface(nextPane.tabs.activeId);
+		const currentIndex = windows.findIndex(
+			(workspaceWindow) => workspaceWindow.id === ownerWindowId,
+		);
+		const nextWindow = windows[(currentIndex + 1 + windows.length) % windows.length];
+		focusSurface(nextWindow.tabs.activeId);
 	}
 
 	async enterMobilePresentation(): Promise<void> {
 		if (this.#requestedPresentationMode === 'mobile') return;
 		this.#requestedPresentationMode = 'mobile';
-		this.deps.chatInteractionGate.cancelBeforeInertTransition();
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		const from = this.#presentationMode;
-		let activeId = CHAT_SURFACE_ID as string;
+		let activeId = this.layout.defaultActiveId;
 		let current: boolean;
 		try {
 			current = await this.commit(
@@ -310,7 +323,7 @@ export class WorkspacePresentationController {
 	async exitMobilePresentation(): Promise<void> {
 		if (this.#requestedPresentationMode === 'desktop') return;
 		this.#requestedPresentationMode = 'desktop';
-		this.deps.chatInteractionGate.cancelBeforeInertTransition();
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		let plannedTransientKinds: TransientMobileSingletonKind[] = [];
 		let current: boolean;
@@ -343,7 +356,7 @@ export class WorkspacePresentationController {
 	}
 
 	async focusMobileSingleton(kind: PortableSingletonKind): Promise<void> {
-		this.deps.chatInteractionGate.cancelBeforeInertTransition();
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const surfaceId = singletonSurfaceId(kind);
 		if (!this.layout.surface(surfaceId)) {
 			await this.commit([{ type: 'register-surface', surface: portableSingletonDescriptor(kind) }]);
@@ -389,14 +402,14 @@ export class WorkspacePresentationController {
 
 	presentSurface(surfaceId: string): void {
 		this.lastFocusedSurfaceId = surfaceId;
-		const paneId = this.paneOf(surfaceId);
-		if (paneId) this.lastFocusedPaneId = paneId;
+		const windowId = this.windowOf(surfaceId);
+		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.focusPresentedSurface(surfaceId);
 	}
 
 	focusPresentedSurface(surfaceId: string): void {
-		if (surfaceId === CHAT_SURFACE_ID) {
+		if (this.layout.surface(surfaceId)?.type === 'chat') {
 			this.deps.appShell.requestComposerFocus();
 			return;
 		}
@@ -416,19 +429,12 @@ export class WorkspacePresentationController {
 			return await this.commit(mutations, { requiredPublication: true });
 		} catch (error) {
 			const remaining = surfaceIds.filter((surfaceId) => this.layout.surface(surfaceId));
-			if (remaining.length === 0) {
+			if (surfaceIds.length > 0 && remaining.length === 0) {
 				console.error('Required workspace removal completed with degraded follow-up work', error);
 				return true;
 			}
 			console.error('Retrying required workspace removal after a publication failure', error);
-			const removed = await this.deps.arbiter.commit(
-				(latest) =>
-					remaining.flatMap((surfaceId) =>
-						latest.surfaces[surfaceId] ? [{ type: 'remove-surface' as const, surfaceId }] : [],
-					),
-				{},
-				{ retryPublishFailure: true },
-			);
+			const removed = await this.deps.arbiter.commit(mutations, {}, { retryPublishFailure: true });
 			const survivors = remaining.filter((surfaceId) => this.layout.surface(surfaceId));
 			if (!removed || survivors.length > 0) {
 				throw new Error(`Required workspace removal failed for ${survivors.join(', ')}`, {
@@ -463,9 +469,7 @@ export class WorkspacePresentationController {
 
 	#disposeAbsentTransientMobileGitViews(kinds: readonly TransientMobileSingletonKind[]): void {
 		for (const kind of new Set(kinds)) {
-			if (!this.layout.surface(singletonSurfaceId(kind))) {
-				this.deps.singletons.disposeSurface(kind);
-			}
+			if (!this.layout.surface(singletonSurfaceId(kind))) this.deps.singletons.disposeSurface(kind);
 		}
 	}
 
@@ -489,16 +493,15 @@ export class WorkspacePresentationController {
 		if (this.isMobile || owner.kind === 'chat-list') return false;
 		if (!this.isSurfacePresented(owner.surfaceId)) return false;
 		const snapshot = this.layout.snapshot;
-		const paneId =
-			owner.kind === 'pane-chrome' ? owner.paneId : this.paneOfSnapshot(snapshot, owner.surfaceId);
-		if (!paneId || !isDesktopPanePresented(snapshot, paneId)) {
-			return false;
-		}
-		const pane = paneNodeById(snapshot.desktopRoot, paneId);
-		if (!pane || pane.tabs.activeId !== owner.surfaceId) return false;
-		const activeIndex = pane.tabs.activeId ? pane.tabs.order.indexOf(pane.tabs.activeId) : -1;
-		if (activeIndex < 0) return false;
-		const nextSurfaceId = pane.tabs.order[activeIndex + offset];
+		const windowId =
+			owner.kind === 'window-chrome'
+				? owner.windowId
+				: this.windowOfSnapshot(snapshot, owner.surfaceId);
+		if (!windowId || !isDesktopWindowPresented(snapshot, windowId)) return false;
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		if (!workspaceWindow || workspaceWindow.tabs.activeId !== owner.surfaceId) return false;
+		const activeIndex = workspaceWindow.tabs.order.indexOf(workspaceWindow.tabs.activeId);
+		const nextSurfaceId = workspaceWindow.tabs.order[activeIndex + offset];
 		if (nextSurfaceId) focusSurface(nextSurfaceId);
 		return true;
 	}
@@ -509,13 +512,9 @@ export class WorkspacePresentationController {
 			return snapshot.mobileActiveSurfaceId === surfaceId ? 'mobile' : null;
 		}
 		if (snapshot.dialogFileSurfaceId === surfaceId) return 'dialog';
-		const paneId = paneIdOfSurface(snapshot.desktopRoot, surfaceId);
-		if (
-			paneId &&
-			isDesktopPanePresented(snapshot, paneId) &&
-			paneNodeById(snapshot.desktopRoot, paneId)?.tabs.activeId === surfaceId
-		) {
-			return paneId;
+		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+		if (windowId && windowNodeById(snapshot.desktopRoot, windowId)?.tabs.activeId === surfaceId) {
+			return windowId;
 		}
 		return null;
 	}
@@ -543,9 +542,6 @@ export class WorkspacePresentationController {
 							presentationFrom = this.#presentationMode;
 							this.#setPresentationMode(options.presentationMode);
 						}
-						this.deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(next, presentationTo),
-						);
 						this.#hideLeavingSingletons(
 							base,
 							next,
@@ -574,9 +570,6 @@ export class WorkspacePresentationController {
 				publishFailed: () => {
 					try {
 						if (presentationFrom) this.#setPresentationMode(presentationFrom);
-						this.deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(this.layout.snapshot, presentationFrom ?? undefined),
-						);
 						this.#syncSingletonVisibility(this.layout.snapshot, presentationFrom ?? undefined);
 						options.publication?.rollback();
 						this.#frames.cancel(expectations);
@@ -608,11 +601,13 @@ export class WorkspacePresentationController {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): void {
-		if (!this.lastFocusedPaneId || !paneNodeById(snapshot.desktopRoot, this.lastFocusedPaneId)) {
-			this.lastFocusedPaneId =
-				paneIdOfSurface(snapshot.desktopRoot, this.lastFocusedSurfaceId) ??
-				paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID) ??
-				collectPaneNodes(snapshot.desktopRoot)[0]?.id ??
+		if (
+			!this.lastFocusedWindowId ||
+			!windowNodeById(snapshot.desktopRoot, this.lastFocusedWindowId)
+		) {
+			this.lastFocusedWindowId =
+				windowIdOfSurface(snapshot.desktopRoot, this.lastFocusedSurfaceId) ??
+				collectWindowNodes(snapshot.desktopRoot)[0]?.id ??
 				null;
 		}
 		if (this.focusOwner.kind === 'chat-list') return;
@@ -621,21 +616,30 @@ export class WorkspacePresentationController {
 		const fallback =
 			(visible.has(this.lastFocusedSurfaceId) ? this.lastFocusedSurfaceId : null) ??
 			visible.values().next().value ??
-			CHAT_SURFACE_ID;
+			this.layout.defaultActiveId;
 		this.focusOwner = { kind: 'surface', surfaceId: fallback };
 		this.lastFocusedSurfaceId = fallback;
+	}
+
+	#chatSurfaceInWindow(
+		snapshot: WorkspaceLayoutSnapshot,
+		windowId: WorkspaceWindowId,
+	): string | null {
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		return (
+			workspaceWindow?.tabs.order.find(
+				(surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat',
+			) ?? null
+		);
 	}
 
 	#isChatPresentedInSnapshot(
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: PresentationMode = this.#presentationMode,
 	): boolean {
-		if (mode === 'mobile') {
-			return visiblePresentationMap(snapshot, mode).get('mobile') === CHAT_SURFACE_ID;
-		}
-		const chatPaneId = paneIdOfSurface(snapshot.desktopRoot, CHAT_SURFACE_ID);
-		if (!chatPaneId || !isDesktopPanePresented(snapshot, chatPaneId)) return false;
-		return paneNodeById(snapshot.desktopRoot, chatPaneId)?.tabs.activeId === CHAT_SURFACE_ID;
+		return [...visiblePresentationMap(snapshot, mode).values()].some(
+			(surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat',
+		);
 	}
 
 	#syncSingletonVisibility(

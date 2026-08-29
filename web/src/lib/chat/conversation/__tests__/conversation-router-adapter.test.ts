@@ -57,8 +57,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			patchLastReadAt: vi.fn(),
 			removeChat: vi.fn(),
 			setSelectedChatId: vi.fn(),
-			isChatProcessing: (chatId) =>
-				chatId === selectedChat?.id && selectedChat.isProcessing,
+			isChatProcessing: (chatId) => chatId === selectedChat?.id && selectedChat.isProcessing,
 			applyProcessingEvent: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			quietRefreshChats: vi.fn(),
@@ -67,9 +66,10 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		agentState: new AgentState(),
 		lifecycle: new ConversationLifecycleState(),
 		conversationUi: new ConversationUiState(),
-		startupCoordinator: new StartupCoordinator(),
-		readReceiptOutbox: { enqueue: vi.fn() },
-	};
+			startupCoordinator: new StartupCoordinator(),
+			readReceiptOutbox: { enqueue: vi.fn() },
+			clearDeletedChat: vi.fn(),
+		};
 }
 
 function entry(ordinal: number, content: string): TranscriptMessage {
@@ -96,14 +96,18 @@ describe('buildRouterStores', () => {
 		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
-			entry(2, 'two'),
-		], 2, 2);
+		const applied = stores.chatState.warmBackgroundTranscript(
+			'chat-2',
+			'generation-2',
+			[entry(2, 'two')],
+			2,
+			2,
+		);
 
 		expect(applied).toBe(true);
-		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal)).toEqual([
-			1, 2,
-		]);
+		expect(
+			deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal),
+		).toEqual([1, 2]);
 	});
 
 	it('does not create tail-only background transcripts and queues recovery', () => {
@@ -112,9 +116,13 @@ describe('buildRouterStores', () => {
 		deps.backgroundTranscriptLoader = { queueLoad };
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
-			entry(4, 'tail'),
-		], 4, 4);
+		const applied = stores.chatState.warmBackgroundTranscript(
+			'chat-2',
+			'generation-2',
+			[entry(4, 'tail')],
+			4,
+			4,
+		);
 
 		expect(applied).toBe(false);
 		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
@@ -138,13 +146,7 @@ describe('buildRouterStores', () => {
 
 		expect(stores.chatState.isVisiblePreviewChat('chat-2')).toBe(true);
 		expect(
-			stores.chatState.warmVisibleChatPreview(
-				'chat-2',
-				'generation-2',
-				[entry(2, 'two')],
-				2,
-				2,
-			),
+			stores.chatState.warmVisibleChatPreview('chat-2', 'generation-2', [entry(2, 'two')], 2, 2),
 		).toBe(true);
 		stores.chatState.markVisibleChatPreviewStale('chat-2');
 		void stores.chatState.loadVisibleChatPreview('chat-2');
@@ -171,5 +173,25 @@ describe('buildRouterStores', () => {
 			'Preview',
 			'2026-02-25T12:00:00.000Z',
 		);
+	});
+
+	it('discards the shared draft when the server deletes a chat', () => {
+		const deps = depsFor(chatRecord());
+		const discardChat = vi.fn();
+		deps.chatDrafts = { discardChat };
+		const stores = buildRouterStores(deps);
+
+		stores.chatState.removeChatTranscript('chat-1');
+
+		expect(discardChat).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('maps remote chat deletion to workspace presentation cleanup', () => {
+		const deps = depsFor(chatRecord());
+		const stores = buildRouterStores(deps);
+
+		stores.chatPresentations.clearDeletedChat('chat-1');
+
+		expect(deps.clearDeletedChat).toHaveBeenCalledWith('chat-1');
 	});
 });

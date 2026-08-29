@@ -548,8 +548,8 @@ describe('ChatReconnectCoordinator', () => {
 
 		await flushUntil(
 			() =>
-				deps.conversationUi.setExecutionControlFromRefresh.mock.calls.length === 1
-				&& deps.sessions.quietRefreshChats.mock.calls.length === 1,
+				deps.conversationUi.setExecutionControlFromRefresh.mock.calls.length === 1 &&
+				deps.sessions.quietRefreshChats.mock.calls.length === 1,
 		);
 		expect(deps.sessions.quietRefreshChats).toHaveBeenCalledOnce();
 		expect(deps.getExecutionControl).not.toHaveBeenCalled();
@@ -984,11 +984,13 @@ describe('ChatReconnectCoordinator', () => {
 		expect(subscribeRequests[0]).not.toHaveProperty('throughOrdinal');
 		expect(subscribeRequests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 7 });
 		expect(subscribeRequests[2]).toMatchObject({ afterOrdinal: 6, throughOrdinal: 7 });
-		expect(deps.chatState.applyMessages.mock.calls.map((call) => ({
-			messages: call[2].map((entry) => entry.ordinal),
-			firstOrdinal: call[3],
-			lastOrdinal: call[4],
-		}))).toEqual([
+		expect(
+			deps.chatState.applyMessages.mock.calls.map((call) => ({
+				messages: call[2].map((entry) => entry.ordinal),
+				firstOrdinal: call[3],
+				lastOrdinal: call[4],
+			})),
+		).toEqual([
 			{ messages: [3], firstOrdinal: 3, lastOrdinal: 4 },
 			{ messages: [], firstOrdinal: 5, lastOrdinal: 6 },
 			{ messages: [7], firstOrdinal: 7, lastOrdinal: 7 },
@@ -1106,31 +1108,37 @@ describe('ChatReconnectCoordinator', () => {
 		const reconnect = coordinator.handleConnectionState(true);
 		await flushUntil(() => subscribeCount === 2);
 
-		liveMessages.enqueue(new ChatMessagesMessage(
-			'chat-1',
-			'generation-selected',
-			[{ ordinal: 7, message: new AssistantMessage(TS, 'live-seven') }],
-			7,
-			7,
-			[],
-		));
+		liveMessages.enqueue(
+			new ChatMessagesMessage(
+				'chat-1',
+				'generation-selected',
+				[{ ordinal: 7, message: new AssistantMessage(TS, 'live-seven') }],
+				7,
+				7,
+				[],
+			),
+		);
 		liveMessages.flush();
-		heldContinuation.resolve(boundedReplayResponse({
-			afterOrdinal: 4,
-			nextAfterOrdinal: 6,
-			throughOrdinal: 6,
-			hasMore: false,
-			messages: [messageJson(5, 'replay-five'), messageJson(6, 'equal-content')],
-		}));
+		heldContinuation.resolve(
+			boundedReplayResponse({
+				afterOrdinal: 4,
+				nextAfterOrdinal: 6,
+				throughOrdinal: 6,
+				hasMore: false,
+				messages: [messageJson(5, 'replay-five'), messageJson(6, 'equal-content')],
+			}),
+		);
 		await reconnect;
 
 		expect(reloadChatTranscript).not.toHaveBeenCalled();
 		expect(loadMessages).not.toHaveBeenCalled();
 		expect(markValidated).toHaveBeenCalledOnce();
-		expect(activeTranscript.entries.map((entry) => ({
-			ordinal: entry.ordinal,
-			content: 'content' in entry.message ? entry.message.content : entry.message.type,
-		}))).toEqual([
+		expect(
+			activeTranscript.entries.map((entry) => ({
+				ordinal: entry.ordinal,
+				content: 'content' in entry.message ? entry.message.content : entry.message.type,
+			})),
+		).toEqual([
 			{ ordinal: 1, content: 'initial-one' },
 			{ ordinal: 2, content: 'initial-two' },
 			{ ordinal: 3, content: 'replay-three' },
@@ -1211,25 +1219,35 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			'generation-reloaded',
 			[{ ordinal: 1, message: new AssistantMessage(TS, 'reloaded-one') }],
-			{ lastOrdinal: 1, pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+			{
+				lastOrdinal: 1,
+				pageOldestOrdinal: 1,
+				pageNewestOrdinal: 1,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			},
 		);
-		liveMessages.enqueue(new ChatMessagesMessage(
-			'chat-1',
-			'generation-reloaded',
-			[{ ordinal: 2, message: new AssistantMessage(TS, 'reloaded-live-two') }],
-			2,
-			2,
-			[],
-		));
+		liveMessages.enqueue(
+			new ChatMessagesMessage(
+				'chat-1',
+				'generation-reloaded',
+				[{ ordinal: 2, message: new AssistantMessage(TS, 'reloaded-live-two') }],
+				2,
+				2,
+				[],
+			),
+		);
 		liveMessages.flush();
 		baseDeps.conversationUi.setTransientFeedFromSnapshot.mockClear();
-		heldContinuation.resolve(boundedReplayResponse({
-			afterOrdinal: 4,
-			nextAfterOrdinal: 6,
-			throughOrdinal: 6,
-			hasMore: false,
-			messages: [messageJson(5, 'old-five'), messageJson(6, 'old-six')],
-		}));
+		heldContinuation.resolve(
+			boundedReplayResponse({
+				afterOrdinal: 4,
+				nextAfterOrdinal: 6,
+				throughOrdinal: 6,
+				hasMore: false,
+				messages: [messageJson(5, 'old-five'), messageJson(6, 'old-six')],
+			}),
+		);
 		await reconnect;
 
 		expect(reloadChatTranscript).not.toHaveBeenCalled();
@@ -1237,10 +1255,12 @@ describe('ChatReconnectCoordinator', () => {
 		expect(loadMessages).toHaveBeenCalledWith('chat-1');
 		expect(markValidated).toHaveBeenCalledOnce();
 		expect(baseDeps.conversationUi.setTransientFeedFromSnapshot).not.toHaveBeenCalled();
-		expect(activeTranscript.entries.map((entry) => ({
-			ordinal: entry.ordinal,
-			content: 'content' in entry.message ? entry.message.content : entry.message.type,
-		}))).toEqual([
+		expect(
+			activeTranscript.entries.map((entry) => ({
+				ordinal: entry.ordinal,
+				content: 'content' in entry.message ? entry.message.content : entry.message.type,
+			})),
+		).toEqual([
 			{ ordinal: 1, content: 'reloaded-one' },
 			{ ordinal: 2, content: 'reloaded-live-two' },
 		]);
@@ -1307,11 +1327,13 @@ describe('ChatReconnectCoordinator', () => {
 		expect(requests[0]).toMatchObject({ afterOrdinal: 2 });
 		expect(requests[0]).not.toHaveProperty('throughOrdinal');
 		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 6 });
-		expect(deps.onVisibleChatMessages.mock.calls.map((call) => ({
-			ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
-			firstOrdinal: call[3],
-			lastOrdinal: call[4],
-		}))).toEqual([
+		expect(
+			deps.onVisibleChatMessages.mock.calls.map((call) => ({
+				ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
+				firstOrdinal: call[3],
+				lastOrdinal: call[4],
+			})),
+		).toEqual([
 			{ ordinals: [3], firstOrdinal: 3, lastOrdinal: 4 },
 			{ ordinals: [6], firstOrdinal: 5, lastOrdinal: 6 },
 		]);
@@ -1321,11 +1343,13 @@ describe('ChatReconnectCoordinator', () => {
 	it('applies every bounded replay page to a cached background transcript', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: '',
-			backgroundCursors: [{
-				chatId: 'chat-background',
-				transcriptViewId: 'generation-background',
-				lastOrdinal: 2,
-			}],
+			backgroundCursors: [
+				{
+					chatId: 'chat-background',
+					transcriptViewId: 'generation-background',
+					lastOrdinal: 2,
+				},
+			],
 		});
 		let backgroundPage = 0;
 		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
@@ -1364,18 +1388,20 @@ describe('ChatReconnectCoordinator', () => {
 
 		const requests = deps.ws.sendRequest.mock.calls
 			.map(([request]) => request as Record<string, unknown>)
-			.filter((request) => (
-				request.type === 'chat-subscribe' && request.chatId === 'chat-background'
-			));
+			.filter(
+				(request) => request.type === 'chat-subscribe' && request.chatId === 'chat-background',
+			);
 		expect(requests).toHaveLength(2);
 		expect(requests[0]).toMatchObject({ afterOrdinal: 2 });
 		expect(requests[0]).not.toHaveProperty('throughOrdinal');
 		expect(requests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 5 });
-		expect(deps.onBackgroundMessages.mock.calls.map((call) => ({
-			ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
-			firstOrdinal: call[3],
-			lastOrdinal: call[4],
-		}))).toEqual([
+		expect(
+			deps.onBackgroundMessages.mock.calls.map((call) => ({
+				ordinals: call[2].map((entry: TranscriptMessage) => entry.ordinal),
+				firstOrdinal: call[3],
+				lastOrdinal: call[4],
+			})),
+		).toEqual([
 			{ ordinals: [], firstOrdinal: 3, lastOrdinal: 4 },
 			{ ordinals: [5], firstOrdinal: 5, lastOrdinal: 5 },
 		]);
@@ -1431,13 +1457,15 @@ describe('ChatReconnectCoordinator', () => {
 		await flushUntil(() => subscribeCount === 3);
 		await restartedReplay;
 
-		heldContinuation.resolve(boundedReplayResponse({
-			afterOrdinal: 4,
-			nextAfterOrdinal: 6,
-			throughOrdinal: 6,
-			hasMore: false,
-			messages: [messageJson(6, 'stale-page')],
-		}));
+		heldContinuation.resolve(
+			boundedReplayResponse({
+				afterOrdinal: 4,
+				nextAfterOrdinal: 6,
+				throughOrdinal: 6,
+				hasMore: false,
+				messages: [messageJson(6, 'stale-page')],
+			}),
+		);
 		await interruptedReplay;
 
 		const subscribeRequests = deps.ws.sendRequest.mock.calls
@@ -1447,13 +1475,13 @@ describe('ChatReconnectCoordinator', () => {
 		expect(subscribeRequests[1]).toMatchObject({ afterOrdinal: 4, throughOrdinal: 6 });
 		expect(subscribeRequests[2]).toMatchObject({ afterOrdinal: 4 });
 		expect(subscribeRequests[2]).not.toHaveProperty('throughOrdinal');
-		expect(deps.chatState.applyMessages.mock.calls.flatMap((call) => (
-			call[2].map((entry) => (
-				entry.message.type === 'assistant-message'
-					? entry.message.content
-					: entry.message.type
-			))
-		))).toEqual(['old-page-one', 'fresh-page', 'fresh-live-tail']);
+		expect(
+			deps.chatState.applyMessages.mock.calls.flatMap((call) =>
+				call[2].map((entry) =>
+					entry.message.type === 'assistant-message' ? entry.message.content : entry.message.type,
+				),
+			),
+		).toEqual(['old-page-one', 'fresh-page', 'fresh-live-tail']);
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
 	});
 
@@ -1517,7 +1545,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.onBackgroundMessages).toHaveBeenCalledTimes(20);
 	});
 
-	it('resumes visible split-pane chats before bounded background cursors', async () => {
+	it('resumes visible Chat windows before bounded background cursors', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			visibleChatIds: ['chat-2'],
@@ -1560,7 +1588,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(subscribeOrder).toEqual(['chat-1', 'chat-2', 'chat-3']);
 	});
 
-	it('loads visible split-pane snapshots when no visible cursor exists', async () => {
+	it('loads visible Chat-window snapshots when no visible cursor exists', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			visibleChatIds: ['chat-2'],
@@ -1581,7 +1609,7 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
-	it('loads visible split-pane snapshots when visible apply reports a gap', async () => {
+	it('loads visible Chat-window snapshots when visible apply reports a gap', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			visibleChatIds: ['chat-2'],

@@ -19,7 +19,6 @@
 	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
-	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
@@ -37,7 +36,6 @@
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
-		setSplitLayout,
 		setNotifications,
 		setSidebarSearch,
 		setSidebarProjectCollapse,
@@ -49,7 +47,7 @@
 		setWorkspaceContext,
 		setTerminalRegistry,
 		setWorkspaceCoordinator,
-		setChatInteractionGate,
+		setWorkspaceWindowDnd,
 		setTransientLayers,
 		setSurfaceFrames,
 		setWorkspaceShortcuts,
@@ -132,7 +130,6 @@
 	const workspaceLayout = workspaceServices.layout;
 	const workspaceContext = workspaceServices.context;
 	const terminals = workspaceServices.terminals;
-	const chatInteractionGate = workspaceServices.chatInteractionGate;
 	const transientLayers = workspaceServices.transientLayers;
 	const surfaceFrames = workspaceServices.surfaceFrames;
 	const gitQuickSummary = workspaceServices.gitQuickSummary;
@@ -144,7 +141,6 @@
 	const fileSessions = workspaceServices.files;
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
-	const splitLayout = createSplitLayoutStore();
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
@@ -170,7 +166,7 @@
 	setWorkspaceContext(workspaceContext);
 	setTerminalRegistry(terminals);
 	setWorkspaceCoordinator(workspace);
-	setChatInteractionGate(chatInteractionGate);
+	setWorkspaceWindowDnd(workspaceServices.windowDnd);
 	setTransientLayers(transientLayers);
 	setSurfaceFrames(surfaceFrames);
 	setWorkspaceShortcuts(workspaceShortcuts);
@@ -185,7 +181,6 @@
 	setFileSessions(fileSessions);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
-	setSplitLayout(splitLayout);
 	setGhCapability(ghCapability);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
@@ -233,13 +228,6 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
-	$effect(() => {
-		if (!ghCapability.hasChecked || ghCapability.available) return;
-		if (workspaceLayoutRestore.source !== 'absent' && workspaceLayoutRestore.source !== 'fallback')
-			return;
-		untrack(() => void workspace.omitCanonicalPullRequests());
-	});
-
 	// Toggles colorblind-friendly color overrides on the root element.
 	$effect(() => {
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
@@ -285,9 +273,8 @@
 
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
-	const transcriptSearchStatusRouter = new TranscriptSearchStatusRouter(
-		ws,
-		(status) => sidebarSearch.applyTranscriptSearchStatus(status),
+	const transcriptSearchStatusRouter = new TranscriptSearchStatusRouter(ws, (status) =>
+		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);

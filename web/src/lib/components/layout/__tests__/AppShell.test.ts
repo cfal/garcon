@@ -11,6 +11,9 @@ const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown>
 const chatNavigation = vi.hoisted(() => ({
 	gotoChat: vi.fn<(_chatId: string) => Promise<void>>(() => Promise.resolve()),
 }));
+const chatDraftContext = vi.hoisted(() => ({
+	set: vi.fn<(_drafts: unknown) => void>(),
+}));
 
 vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
 	gotoChat: chatNavigation.gotoChat,
@@ -28,6 +31,7 @@ vi.mock('$lib/context', () => ({
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
 	getWs: () => testContext.current?.ws,
+	setChatDrafts: chatDraftContext.set,
 }));
 
 vi.mock('$lib/components/workspace/WorkspaceRoot.svelte', async () => ({
@@ -205,6 +209,19 @@ describe('AppShell responsive workspace binding', () => {
 		vi.restoreAllMocks();
 		chatNavigation.gotoChat.mockReset();
 		chatNavigation.gotoChat.mockResolvedValue(undefined);
+		chatDraftContext.set.mockReset();
+	});
+
+	it('provides one shared draft store for the shell lifetime', () => {
+		installContext();
+		const view = render(AppShell);
+
+		expect(chatDraftContext.set).toHaveBeenCalledOnce();
+		const drafts = chatDraftContext.set.mock.calls[0]?.[0] as { destroy(): void };
+		const destroy = vi.spyOn(drafts, 'destroy');
+
+		view.unmount();
+		expect(destroy).toHaveBeenCalledOnce();
 	});
 
 	it('hands desktop and mobile breakpoint changes to the workspace coordinator', async () => {
@@ -221,6 +238,20 @@ describe('AppShell responsive workspace binding', () => {
 		mediaQuery.setMatches(false);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
+	});
+
+	it('reconciles breakpoint changes from resize when the media query omits change events', async () => {
+		const workspace = installContext();
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		mediaQuery.matches = true;
+		window.dispatchEvent(new Event('resize'));
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+
+		mediaQuery.matches = false;
+		window.dispatchEvent(new Event('resize'));
+		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 	});
 
 	it('loads the initial chat list independently of WebSocket connection state', async () => {
@@ -276,7 +307,7 @@ describe('AppShell responsive workspace binding', () => {
 
 		expect(sessions.setSelectedChatId).toHaveBeenCalledWith('chat-test');
 		expect(chatNavigation.gotoChat).toHaveBeenCalledWith('chat-test');
-		expect(workspace.focusChatCalls).toBe(1);
+		expect(workspace.showChatCalls).toBe(1);
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 	});
 
@@ -285,21 +316,21 @@ describe('AppShell responsive workspace binding', () => {
 		async (kind) => {
 			const workspace = installContext();
 			(
-				testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean }
-			).hideChatListWhenGitInMain = true;
+				testContext.current?.localSettings as { hideChatListWhenGitFocused: boolean }
+			).hideChatListWhenGitFocused = true;
 			const surfaceId = `singleton:${kind}`;
 			if (!workspace.layout.surface(surfaceId)) {
 				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
 					{
 						type: 'register-surface',
 						surface: portableSingletonDescriptor(kind),
-						paneId: 'pane-main',
+						windowId: 'window-main',
 					},
 				]);
 				workspace.layout.publish(workspace.layout.revision, registered);
 			}
 			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId },
+				{ type: 'activate-window-tab', windowId: 'window-main', surfaceId },
 			]);
 			workspace.layout.publish(workspace.layout.revision, focused);
 
@@ -327,9 +358,9 @@ describe('AppShell responsive workspace binding', () => {
 		expect(screen.getByRole('button', { name: 'Select test chat' })).toBe(sidebarButton);
 	});
 
-	it('hides and restores the desktop chat list for pane fullscreen', async () => {
+	it('hides and restores the desktop chat list for window fullscreen', async () => {
 		const workspace = installContext();
-		await workspace.toggleFullscreen('pane-main');
+		await workspace.enterWindowFullscreen('window-main');
 		render(AppShell);
 
 		await waitFor(() =>
@@ -338,7 +369,7 @@ describe('AppShell responsive workspace binding', () => {
 			).toBe('true'),
 		);
 
-		await workspace.toggleFullscreen('pane-main');
+		await workspace.exitWindowFullscreen('window-main');
 		await waitFor(() =>
 			expect(
 				document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
@@ -351,21 +382,21 @@ describe('AppShell responsive workspace binding', () => {
 		async (kind) => {
 			const workspace = installContext();
 			(
-				testContext.current?.localSettings as { hideChatListWhenGitInMain: boolean }
-			).hideChatListWhenGitInMain = true;
+				testContext.current?.localSettings as { hideChatListWhenGitFocused: boolean }
+			).hideChatListWhenGitFocused = true;
 			const surfaceId = `singleton:${kind}`;
 			if (!workspace.layout.surface(surfaceId)) {
 				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
 					{
 						type: 'register-surface',
 						surface: portableSingletonDescriptor(kind),
-						paneId: 'pane-main',
+						windowId: 'window-main',
 					},
 				]);
 				workspace.layout.publish(workspace.layout.revision, registered);
 			}
 			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'activate-pane-tab', paneId: 'pane-main', surfaceId },
+				{ type: 'activate-window-tab', windowId: 'window-main', surfaceId },
 			]);
 			workspace.layout.publish(workspace.layout.revision, focused);
 

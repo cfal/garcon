@@ -11,8 +11,8 @@ import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
-import type { PaneId } from '$lib/workspace/surface-types.js';
-import { paneIdOfSurface, paneNodeById } from '../pane-tree.js';
+import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
+import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
 import {
 	createWorkspaceServices,
 	resolveConfiguredFilePlacement,
@@ -46,8 +46,8 @@ vi.mock('$lib/api/files.js', async (importOriginal) => {
 	};
 });
 
-const DEFAULT_PANE: PaneId = 'pane-main';
-const OTHER_PANE: PaneId = 'pane-2';
+const DEFAULT_WINDOW: WorkspaceWindowId = 'window-main';
+const OTHER_WINDOW: WorkspaceWindowId = 'window-2';
 
 function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 	services: WorkspaceServices;
@@ -77,7 +77,6 @@ function assembleWorkspaceServices(localSettings: LocalSettingsStore): {
 			onTerminalLauncherDismissed: () => {},
 			isTerminalLauncherDismissed: () => false,
 			workspaceLayoutRaw: null,
-			workspaceLayoutV1Raw: null,
 		}),
 		ghCapability,
 	};
@@ -95,16 +94,21 @@ describe('createWorkspaceServices', () => {
 	});
 
 	it.each([
-		['code', 'pane-main'],
-		['image', 'pane-main'],
-		['markdown', 'pane-2'],
+		['code', 'window-main'],
+		['image', 'window-main'],
+		['markdown', 'window-2'],
 	] as const)('resolves source placement for %s from origin %s', (mode, origin) => {
 		localStorage.clear();
 		const localSettings = createLocalSettingsStore();
 
 		expect(
-			resolveConfiguredFilePlacement(localSettings, mode, origin as PaneId, DEFAULT_PANE),
-		).toEqual({ type: 'pane', paneId: origin });
+			resolveConfiguredFilePlacement(
+				localSettings,
+				mode,
+				origin as WorkspaceWindowId,
+				DEFAULT_WINDOW,
+			),
+		).toEqual({ type: 'window', windowId: origin });
 
 		localSettings.destroy();
 	});
@@ -113,81 +117,62 @@ describe('createWorkspaceServices', () => {
 		localStorage.clear();
 		const localSettings = createLocalSettingsStore();
 
-		localSettings.set('textEditorOpenPlacement', 'new-pane');
-		localSettings.set('imageViewerOpenPlacement', 'source');
+		localSettings.set('textEditorOpenPlacement', 'new-window');
+		localSettings.set('imageViewerOpenPlacement', 'same-window');
 		localSettings.set('markdownViewerOpenPlacement', 'dialog');
 
+		expect(resolveConfiguredFilePlacement(localSettings, 'code', 'dialog', DEFAULT_WINDOW)).toEqual(
+			{ type: 'new-window', anchorWindowId: DEFAULT_WINDOW },
+		);
 		expect(
-			resolveConfiguredFilePlacement(localSettings, 'code', 'dialog', DEFAULT_PANE),
-		).toEqual({ type: 'new-pane', anchorPaneId: DEFAULT_PANE });
+			resolveConfiguredFilePlacement(localSettings, 'image', OTHER_WINDOW, DEFAULT_WINDOW),
+		).toEqual({ type: 'window', windowId: OTHER_WINDOW });
 		expect(
-			resolveConfiguredFilePlacement(localSettings, 'image', OTHER_PANE, DEFAULT_PANE),
-		).toEqual({ type: 'pane', paneId: OTHER_PANE });
-		expect(
-			resolveConfiguredFilePlacement(localSettings, 'markdown', OTHER_PANE, DEFAULT_PANE),
+			resolveConfiguredFilePlacement(localSettings, 'markdown', OTHER_WINDOW, DEFAULT_WINDOW),
 		).toEqual({ type: 'dialog' });
 
 		localSettings.destroy();
 	});
 
-	it('falls back to the default pane when the origin is not a pane', () => {
+	it('falls back to the default window when the origin is not a window', () => {
 		localStorage.clear();
 		const localSettings = createLocalSettingsStore();
 
 		expect(
-			resolveConfiguredFilePlacement(localSettings, 'markdown', 'mobile', DEFAULT_PANE),
-		).toEqual({ type: 'pane', paneId: DEFAULT_PANE });
+			resolveConfiguredFilePlacement(localSettings, 'markdown', 'mobile', DEFAULT_WINDOW),
+		).toEqual({ type: 'window', windowId: DEFAULT_WINDOW });
 		expect(
-			resolveConfiguredFilePlacement(localSettings, 'markdown', 'dialog', DEFAULT_PANE),
-		).toEqual({ type: 'pane', paneId: DEFAULT_PANE });
+			resolveConfiguredFilePlacement(localSettings, 'markdown', 'dialog', DEFAULT_WINDOW),
+		).toEqual({ type: 'window', windowId: DEFAULT_WINDOW });
 
 		localSettings.destroy();
 	});
 
-	it('migrates legacy host placements to pane semantics', () => {
-		localStorage.clear();
-		localStorage.setItem(
-			'pref_local_settings',
-			JSON.stringify({
-				textEditorOpenPlacement: 'main',
-				imageViewerOpenPlacement: 'sidebar',
-				markdownViewerOpenPlacement: 'other',
-			}),
-		);
-		const localSettings = createLocalSettingsStore();
-
-		expect(localSettings.textEditorOpenPlacement).toBe('source');
-		expect(localSettings.imageViewerOpenPlacement).toBe('new-pane');
-		expect(localSettings.markdownViewerOpenPlacement).toBe('new-pane');
-
-		localSettings.destroy();
-	});
-
-	it('routes new-pane file opens through the assembled registry and coordinator', async () => {
+	it('routes new-window file opens through the assembled registry and coordinator', async () => {
 		localStorage.clear();
 		rootLocalSettings = createLocalSettingsStore();
-		rootLocalSettings.set('textEditorOpenPlacement', 'new-pane');
+		rootLocalSettings.set('textEditorOpenPlacement', 'new-window');
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 
 		const opening = services.files.open({
 			fileRootPath: '/workspace',
 			relativePath: 'from-main.ts',
 			mode: 'code',
-			origin: 'pane-main',
+			origin: 'window-main',
 			reason: 'user-open',
 		});
 		await vi.waitFor(() => {
 			const snapshot = services!.layout.snapshot;
 			const fileSurface = Object.keys(snapshot.surfaces).find((id) => id.startsWith('file:'));
 			expect(fileSurface).toBeDefined();
-			const paneId = paneIdOfSurface(snapshot.desktopRoot, fileSurface!);
-			expect(paneId).not.toBeNull();
-			expect(paneId).not.toBe('pane-main');
+			const windowId = windowIdOfSurface(snapshot.desktopRoot, fileSurface!);
+			expect(windowId).not.toBeNull();
+			expect(windowId).not.toBe('window-main');
 		});
 		const snapshot = services.layout.snapshot;
 		const placedSurfaceId = Object.keys(snapshot.surfaces).find((id) => id.startsWith('file:'))!;
-		const paneId = paneIdOfSurface(snapshot.desktopRoot, placedSurfaceId)!;
-		services.surfaceFrames.register(placedSurfaceId, paneId, {
+		const windowId = windowIdOfSurface(snapshot.desktopRoot, placedSurfaceId)!;
+		services.surfaceFrames.register(placedSurfaceId, windowId, {
 			element: document.createElement('div'),
 			attachRetainedRenderer: () => {},
 			focusPrimary: () => {},
@@ -195,7 +180,7 @@ describe('createWorkspaceServices', () => {
 		const opened = await opening;
 		if (!opened) throw new Error('Expected file to open');
 		await vi.waitFor(() => {
-			expect(paneNodeById(services!.layout.snapshot.desktopRoot, paneId)?.tabs.activeId).toBe(
+			expect(windowNodeById(services!.layout.snapshot.desktopRoot, windowId)?.tabs.activeId).toBe(
 				placedSurfaceId,
 			);
 		});
@@ -212,9 +197,9 @@ describe('createWorkspaceServices', () => {
 		expect(services.restore.source).toBe('absent');
 		expect(services.coordinator.layout).toBe(services.layout);
 		expect(
-			paneNodeById(services.layout.snapshot.desktopRoot, DEFAULT_PANE)?.tabs.order[0],
-		).toBe('singleton:chat');
-		expect(services.chatInteractionGate).toBeDefined();
+			windowNodeById(services.layout.snapshot.desktopRoot, DEFAULT_WINDOW)?.tabs.order[0],
+		).toBe('chat-view:window-main');
+		expect(services.workspaceInteractionGate).toBeDefined();
 		expect(services.surfaceFrames).toBeDefined();
 		expect(services.shortcuts).toBeDefined();
 		expect(services.gitQuickSummary.isEnabled).toBe(false);
@@ -226,5 +211,30 @@ describe('createWorkspaceServices', () => {
 
 		expect(services.gitQuickSummary.isEnabled).toBe(true);
 		expect(services.singletonSurfaces.pullRequests().capabilityState).toBe('unavailable');
+	});
+
+	it('cancels root-owned window drag before a main-inert transition', () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		services.windowDnd.beginChatDrag('chat-dragged');
+		expect(services.windowDnd.isDragging).toBe(true);
+
+		const element = document.createElement('div');
+		document.body.append(element);
+		let unregister = () => undefined;
+		services.transientLayers.open('main-inert', () => {
+			unregister = services!.transientLayers.register({
+				id: 'test-dialog',
+				kind: 'application-dialog',
+				modality: 'main-inert',
+				element: () => element,
+				onEscape: () => true,
+				restoreFocus: () => undefined,
+			});
+		});
+
+		expect(services.windowDnd.isDragging).toBe(false);
+		unregister();
+		element.remove();
 	});
 });

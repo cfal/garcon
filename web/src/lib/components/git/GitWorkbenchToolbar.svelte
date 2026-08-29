@@ -8,7 +8,7 @@
 	import GitDiffSettingsMenuContent from './GitDiffSettingsMenuContent.svelte';
 	import GitSurfaceToolbar from './GitSurfaceToolbar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { PaneId } from '$lib/workspace/surface-types.js';
+	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 	let {
 		controller,
@@ -18,7 +18,7 @@
 		onRefresh,
 	}: {
 		controller: GitWorkbenchSurfaceController;
-		presentation: PaneId | 'mobile';
+		presentation: WorkspaceWindowId | 'mobile';
 		onCommit: () => void;
 		onPush: () => void;
 		onRefresh: () => void;

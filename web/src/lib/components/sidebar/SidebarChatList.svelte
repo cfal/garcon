@@ -17,6 +17,7 @@
 	} from './sidebar-display-options';
 	import { sortChatsByRecencyDesc } from './chat-recency-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
@@ -48,6 +49,8 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
+		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		newWindowBlocked?: boolean;
 		onQuickMove: (
 			list: PersistedChatOrderGroup,
 			chatId: string,
@@ -83,6 +86,8 @@
 		onShareChat,
 		onTagClick,
 		onManageTags,
+		onOpenInNewWindow,
+		newWindowBlocked = false,
 		onQuickMove,
 	}: SidebarChatListProps = $props();
 
@@ -195,6 +200,8 @@
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}
+		{onOpenInNewWindow}
+		{newWindowBlocked}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
 		{hasPinnedChats}

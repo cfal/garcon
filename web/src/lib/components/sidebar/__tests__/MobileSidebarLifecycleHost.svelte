@@ -11,7 +11,6 @@
 		setSidebarProjectCollapse,
 		setChatSessions,
 		setSidebarSearch,
-		setSplitLayout,
 	} from '$lib/context';
 	import {
 		createSidebarSearchStore,
@@ -19,7 +18,8 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
-	import { workspaceNewPaneActionsTestFixture } from './workspace-new-pane-actions-test-fixture.js';
+	import { workspaceNewWindowActionsTestFixture } from './workspace-new-window-actions-test-fixture.js';
+	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 
 	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
@@ -157,11 +157,7 @@
 		},
 	} as never);
 
-	setSplitLayout({
-		isEnabled: false,
-		startDrag() {},
-		endDrag() {},
-	} as never);
+	setWorkspaceWindowDndTestContext();
 
 	setChatSessions({
 		get selectedChat() {
@@ -199,6 +195,6 @@
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
 		onShowSettings={() => {}}
-		newPaneActions={workspaceNewPaneActionsTestFixture}
+		newWindowActions={workspaceNewWindowActionsTestFixture}
 	/>
 {/if}

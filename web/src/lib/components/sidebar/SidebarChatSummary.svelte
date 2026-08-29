@@ -76,7 +76,7 @@
 			{/if}
 			{@render titleBadge?.()}
 			{#if isProcessing}
-				<span class="sr-only">{m.chat_pane_processing()}</span>
+				<span class="sr-only">{m.chat_window_processing()}</span>
 				<span
 					class={cn('flex items-center justify-end pr-0.5', singleLineStatusClass)}
 					aria-hidden="true"
@@ -119,7 +119,7 @@
 					</span>
 				{/if}
 				{#if isProcessing}
-					<span class="sr-only">{m.chat_pane_processing()}</span>
+					<span class="sr-only">{m.chat_window_processing()}</span>
 				{/if}
 				{#if isProcessing}
 					<span
