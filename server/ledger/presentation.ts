@@ -13,7 +13,6 @@ import { parseTranscriptNoticeDetail } from '../../common/transcript-notice-deta
 import type { TranscriptMessage } from '../../common/chat-view.js';
 import {
   isLedgerCliRowNoticeDetail,
-  type LedgerNoticeRow,
   type LedgerRow,
 } from './contracts.js';
 
@@ -62,7 +61,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
       return new TranscriptNoticeMessage(
         row.at,
         row.message,
-        noticeDetail(row.detail),
+        parseTranscriptNoticeDetail(row.detail) ?? undefined,
         typeof row.detail.title === 'string' && row.detail.title ? row.detail.title : undefined,
       );
     }
@@ -102,8 +101,4 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'run-ended':
       return null;
   }
-}
-
-function noticeDetail(detail: LedgerNoticeRow['detail']) {
-  return parseTranscriptNoticeDetail(detail) ?? undefined;
 }

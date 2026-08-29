@@ -283,6 +283,8 @@ describe("Lightpanda transcript scrolling", () => {
       const thirdEra = eraMarkers("a-return");
       const expectedUsers = [...firstEra, ...secondEra, ...thirdEra];
       const handoffCount = 2;
+      // Each handoff contributes an agent-switch row and a carryover notice.
+      const handoffRows = handoffCount * 2;
 
       const started = await fixture.integration.client.startDirectChat({
         chatId,
@@ -336,15 +338,12 @@ describe("Lightpanda transcript scrolling", () => {
       await waitForTranscriptIdle(fixture.page);
       await requestEarlierPageByScroll(fixture.page);
       const expectedCompleteModelCount =
-        initial.modelCount - 50 + expectedUsers.length * 2 + handoffCount * 2;
+        initial.modelCount - 50 + expectedUsers.length * 2 + handoffRows;
       await waitForModelCount(fixture.page, expectedCompleteModelCount);
       await waitForTranscriptIdle(fixture.page);
 
       const loaded = await virtualTranscriptSnapshot(fixture.page);
       expect(loaded.modelCount).toBe(expectedCompleteModelCount);
-      expect(loaded.modelCount - (initial.modelCount - 50)).toBe(
-        expectedUsers.length * 2 + handoffCount * 2,
-      );
       expect(loaded.mountedCount).toBeLessThan(loaded.modelCount);
       expect(await pageRequestCount(fixture.page)).toBeGreaterThan(1);
 

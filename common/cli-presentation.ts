@@ -72,9 +72,7 @@ export function coerceDurableCliBodyDisclosure(value: unknown): CliBodyDisclosur
   return isCliBodyDisclosure(value) ? value : 'expanded';
 }
 
-export function coerceDurableCliPresentation(
-  value: unknown,
-): CliPresentation {
+export function coerceDurableCliPresentation(value: unknown): CliPresentation {
   if (isCliPresentation(value)) return value;
   if (isCliPresentationStyle(value)) {
     return value === 'custom' ? { style: 'notice' } : { style: value };

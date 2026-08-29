@@ -55,14 +55,7 @@ function spineOf(commands) {
 }
 
 function historyAtExactUncompactedLimit() {
-  const messages = [];
-  for (let turn = 0; turn < 161; turn += 1) {
-    const marker = String(messages.length);
-    messages.push(
-      new UserMessage(TIME, `${'word '.repeat(300)}${marker}`),
-      new AssistantMessage(TIME, `${'word '.repeat(300)}${marker}`),
-    );
-  }
+  const messages = turns(161, (turn) => `${'word '.repeat(300)}${turn * 2}`);
   messages.push(new UserMessage(TIME, 'word '.repeat(447)));
   return messages;
 }

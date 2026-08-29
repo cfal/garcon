@@ -1174,18 +1174,15 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
     case 'error':
       return new ErrorMessage(str(data.timestamp), str(data.content));
-    case 'transcript-notice':
-      {
-        const detail = data.detail === undefined
-          ? undefined
-          : parseTranscriptNoticeDetail(data.detail) ?? undefined;
-        return new TranscriptNoticeMessage(
-          str(data.timestamp),
-          str(data.content),
-          detail,
-          typeof data.title === 'string' && data.title ? data.title : undefined,
-        );
-      }
+    case 'transcript-notice': {
+      const detail = parseTranscriptNoticeDetail(data.detail) ?? undefined;
+      return new TranscriptNoticeMessage(
+        str(data.timestamp),
+        str(data.content),
+        detail,
+        typeof data.title === 'string' && data.title ? data.title : undefined,
+      );
+    }
     case 'cli-row':
       return parseDurableCliRow(data);
     case 'permission-request': {
