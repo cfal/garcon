@@ -18,13 +18,16 @@ import {
 } from './sse-events.js';
 import {
   acceptUniqueOpenCodeTurnEvent,
+  activateOpenCodeSessionTurn,
   createOpenCodeTurnContext,
   openCodeEventBelongsToTurn,
+  openCodeTurnRequiresProviderQuiescence,
   relocateOpenCodeSession,
+  shouldWarnForUnroutedOpenCodeEvent,
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
-import { CompactionMessage, ErrorMessage } from '@garcon/common/chat-types';
+import { CompactionMessage } from '@garcon/common/chat-types';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   runtimeRows,
@@ -87,6 +90,10 @@ import {
 } from './model-catalog.js';
 import { adoptOpenCodeCompactionPartRoute, manualCompactionBoundaryRow } from './compaction-routing.js';
 import { OpenCodeIdleLifecycle } from './idle-lifecycle.js';
+import {
+  OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+  openCodeProviderFailureRow,
+} from './turn-failure.js';
 
 const SILENT_LOGGER: AgentLogger = Object.freeze({
   debug() {},
@@ -397,6 +404,10 @@ export class OpenCodeRuntime {
     this.#instanceGeneration += 1;
     this.#globalEventListener.close();
     this.#operationRoutes.clear();
+    // Closing the provider process definitively quiesces every settled session.
+    for (const session of this.#sessions.values()) {
+      if (session.status !== 'running') session.providerWorkRequiresQuiescence = false;
+    }
     if (instance) {
       // Killing a still-live process must preserve the availability cooldown
       // that prompted the close; an already-exited process keeps death
@@ -657,24 +668,17 @@ export class OpenCodeRuntime {
     }
   }
 
-  #failTurnForProviderError(agentSessionId: string, session: OpenCodeSession, message: string): void {
+  #failTurnForProviderError(
+    agentSessionId: string, session: OpenCodeSession, message: string, entryId?: string,
+  ): void {
     this.steering.stagePendingCleanup(session);
-    session.providerWorkRequiresQuiescence = true;
+    session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(session.turn);
     session.status = 'completed';
     session.lastActivityAt = Date.now();
     this.#decisions.cancelForSession(agentSessionId, 'cancelled');
     this.#rejectTurnWaiter(agentSessionId, new Error(message));
-    // OpenCode stores a failed turn's provider error on its in-flight assistant
-    // message, whose id the native loader uses as the error occurrence's
-    // identity. Carrying that same id on the live error keeps one canonical
-    // occurrence across live and restart rather than a duplicate.
-    const failedMessageId = lastValue(session.turn.assistantMessageIds);
-    const errorRow = new ErrorMessage(new Date().toISOString(), message);
-    this.#publishRows(
-      agentSessionId,
-      session.turn.operation,
-      [failedMessageId ? attachNativeMessageSource(errorRow, { entryId: failedMessageId }) : errorRow],
-    );
+    const row = openCodeProviderFailureRow(message, entryId, session.turn.assistantMessageIds);
+    this.#publishRows(agentSessionId, session.turn.operation, [row]);
     this.#publishFailed(agentSessionId, session.turn.operation, message);
   }
 
@@ -689,24 +693,34 @@ export class OpenCodeRuntime {
       if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
       return;
     }
-    const providerTerminal = lastValue(route.turn.assistantTerminals.values());
+    const providerTerminal = Array.from(route.turn.assistantTerminals.values()).at(-1);
     if (providerTerminal?.outcome === 'failed') {
-      this.#failTurnForProviderError(route.sessionId, session, providerTerminal.error);
-      if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
-      return;
+      this.#failTurnForProviderError(
+        route.sessionId, session, providerTerminal.error, providerTerminal.messageId,
+      );
+    } else if (providerTerminal?.outcome === 'aborted') {
+      this.#logger.debug('OpenCode prompt failed after an aborted terminal', { error: errorMessage(error) });
+      this.#settleTurnTerminal(route.sessionId, session, providerTerminal);
+    } else {
+      const message = errorMessage(error);
+      this.#logger.error('OpenCode prompt failed', {
+        agentSessionId: route.sessionId,
+        error: message,
+      });
+      this.steering.stagePendingCleanup(session);
+      session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(route.turn);
+      session.status = 'completed';
+      session.lastActivityAt = Date.now();
+      this.#decisions.cancelForSession(route.sessionId, 'cancelled');
+      this.#rejectTurnWaiter(route.sessionId, error);
+      this.#publishFailed(route.sessionId, route.turn.operation, message);
     }
-    const message = errorMessage(error);
-    this.#logger.error('OpenCode prompt failed', {
-      agentSessionId: route.sessionId,
-      error: message,
-    });
-    this.steering.stagePendingCleanup(session);
-    session.providerWorkRequiresQuiescence = true;
-    session.status = 'completed';
-    session.lastActivityAt = Date.now();
-    this.#decisions.cancelForSession(route.sessionId, 'cancelled');
-    this.#rejectTurnWaiter(route.sessionId, error);
-    this.#publishFailed(route.sessionId, route.turn.operation, message);
+    const active = this.#sessions.get(route.sessionId);
+    if (active?.turn !== route.turn || active.status !== 'running') {
+      // Settled routes either observed a terminal or require quiescence before provider reuse;
+      // retaining either route blocks idle retirement indefinitely.
+      this.#operationRoutes.unregister(route);
+    }
     if (this.isTemporarilyUnavailable()) this.#idleLifecycle.closeInstanceIfIdle();
   }
 
@@ -721,23 +735,31 @@ export class OpenCodeRuntime {
       return;
     }
     session.deferredTerminal = null;
-    if (terminal.outcome === 'aborted') {
-      this.#logger.debug('Ignoring OpenCode abort unwind for a Garcon-retired turn', {
-        agentSessionId,
-        messageId: terminal.messageId,
-      });
-      return;
-    }
     if (session.turn.pendingSteeringMessageIds.size > 0) {
       this.#failTurnForProviderError(
         agentSessionId,
         session,
         'OpenCode stopped before processing accepted steering input',
+        terminal.messageId,
+      );
+      return;
+    }
+    if (terminal.outcome === 'aborted') {
+      this.#logger.warn('OpenCode interrupted the current turn', {
+        agentSessionId, messageId: terminal.messageId,
+      });
+      this.#failTurnForProviderError(
+        agentSessionId,
+        session,
+        OPEN_CODE_ABORTED_TURN_FAILURE_MESSAGE,
+        terminal.messageId,
       );
       return;
     }
     if (terminal.outcome === 'failed') {
-      this.#failTurnForProviderError(agentSessionId, session, terminal.error);
+      this.#failTurnForProviderError(
+        agentSessionId, session, terminal.error, terminal.messageId,
+      );
       return;
     }
     this.#decisions.cancelForSession(agentSessionId, 'session-complete');
@@ -753,6 +775,7 @@ export class OpenCodeRuntime {
     if (!terminal) return;
     session.deferredTerminal = null;
     this.#settleTurnTerminal(agentSessionId, session, terminal);
+    if (session.status !== 'running') this.#operationRoutes.retireTurn(session.turn);
   }
 
   #clearTurnWaiter(agentSessionId: string): void {
@@ -838,7 +861,7 @@ export class OpenCodeRuntime {
     const sess = this.#sessions.get(agentSessionId);
     if (request.executionAdmission?.signal.aborted) {
       if (sess?.turn === turn) {
-        sess.providerWorkRequiresQuiescence = true;
+        sess.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
         sess.status = 'completed';
         sess.lastActivityAt = Date.now();
       }
@@ -848,7 +871,7 @@ export class OpenCodeRuntime {
     this.#logger.error(options.logLabel, { agentSessionId, error: error.message });
     if (!sess || sess.status !== 'running' || sess.turn !== turn) return error;
     if (options.stageSteeringCleanup) this.steering.stagePendingCleanup(sess);
-    sess.providerWorkRequiresQuiescence = true;
+    sess.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
     sess.status = 'completed';
     sess.lastActivityAt = Date.now();
     this.#clearTurnWaiter(agentSessionId);
@@ -871,17 +894,7 @@ export class OpenCodeRuntime {
     },
   ): void {
     if (session) {
-      session.status = 'running';
-      session.aborting = false;
-      session.activeSteeringDeliveries = 0;
-      session.deferredTerminal = null;
-      session.chatId = input.chatId;
-      session.model = input.model;
-      session.thinkingVariant = input.thinkingVariant;
-      session.permissionMode = input.permissionMode;
-      session.directory = input.directory;
-      session.lastActivityAt = Date.now();
-      session.turn = input.turn;
+      activateOpenCodeSessionTurn(session, input);
       return;
     }
     this.#sessions.set(agentSessionId, {
@@ -996,7 +1009,10 @@ export class OpenCodeRuntime {
     } finally {
       if (sourceRetired) {
         const session = this.#sessions.get(route.sessionId);
-        if (session?.turn === route.turn) session.providerWorkRequiresQuiescence = false;
+        if (session?.turn === route.turn) {
+          route.turn.providerPromptRequestCompleted = true;
+          session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(route.turn);
+        }
         this.#operationRoutes.unregister(route);
       }
     }
@@ -1729,6 +1745,7 @@ export class OpenCodeRuntime {
     }
 
     session.providerWorkRequiresQuiescence = false;
+    session.aborting = false;
     if (
       this.#sessions.get(agentSessionId) !== session
       || session.status !== 'running'
@@ -1830,21 +1847,4 @@ export class OpenCodeRuntime {
   startPurgeTimer(): void {
     this.#idleLifecycle.start();
   }
-}
-
-// The failing assistant message is the last one the turn observed; the native
-// error occurrence is stored on it, so its id is the canonical error identity.
-function lastValue<T>(values: Iterable<T>): T | null {
-  let last: T | null = null;
-  for (const value of values) last = value;
-  return last;
-}
-
-function shouldWarnForUnroutedOpenCodeEvent(eventType: string): boolean {
-  return eventType === 'message.updated'
-    || eventType === 'message.part.updated'
-    || eventType === 'message.part.delta'
-    || eventType === 'permission.asked'
-    || eventType === 'question.asked'
-    || eventType === 'session.error';
 }

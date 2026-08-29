@@ -654,6 +654,11 @@ describe('OpenCodeRuntime permissions', () => {
       outcome: 'failed',
       error: { code: 'PROVIDER_FAILURE', message: 'permission endpoint failed' },
     });
+    expect(manual.events.flatMap((event) => event.type === 'rows' ? event.rows : []))
+      .toContainEqual(expect.objectContaining({
+        message: expect.objectContaining({ type: 'error', content: 'permission endpoint failed' }),
+        providerMeta: { entryId: 'assistant-manual' },
+      }));
     expect(client.global.event).toHaveBeenCalledTimes(1);
 
     eventStream.close();

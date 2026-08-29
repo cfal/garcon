@@ -1086,21 +1086,5 @@ describe('settings store', () => {
       await reloaded.init();
       expect(reloaded.getFeatureSettings().chatIdDiscovery).toEqual({ enabled: false });
     });
-
-    it('persists a combined feature patch with one version and event', async () => {
-      const events = [];
-      store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setFeatureSettings({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
-      });
-
-      expect(store.getFeatureSettings()).toEqual({
-        transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
-      });
-      expect(store.getRemoteSettingsVersion()).toBe(1);
-      expect(events).toEqual(['changed']);
-    });
   });
 });

@@ -1415,7 +1415,7 @@
 	"settings_providers_description": "Provider configuration for Claude Code, Codex, and Direct Chat.",
 	"settings_scope_local_description": "These settings are stored in your browser.",
 	"settings_scope_remote_description": "These settings are stored on the garcon server.",
-	"settings_disable_chat_id_discovery": "Disable chat ID auto-discovery",
+	"settings_enable_chat_id_discovery": "Enable chat ID auto-discovery",
 	"settings_chat_id_discovery_description": "Allows an agent to automatically discover their own chat ID for use with garcon-cli and inter-agent communication.",
 	"settings_chat_id_discovery_docs_link": "See Garcon Skills",
 	"settings_transcript_search": "Transcript search",

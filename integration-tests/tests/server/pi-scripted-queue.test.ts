@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
-import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
+import {
+  chatCompletionsText,
+  chatCompletionsToolUse,
+} from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
@@ -101,61 +107,80 @@ describe('scripted Pi queue lifecycle', () => {
     }, withScriptedPi());
   }, 120_000);
 
-  test('delivers a requested chat ID to the next queued turn exactly once', async () => {
+  test('[TLV5-CHAT-ID-DISCOVERY.05-PI-SCRIPTED-01] immediately steers a requested chat ID without creating user input', async () => {
     const testEnvironment = requireEnvironment();
     const firstPrompt = marker('CHAT_ID_FIRST_PROMPT');
-    const queuedPrompt = marker('CHAT_ID_QUEUED_PROMPT');
-    const queuedReply = marker('CHAT_ID_QUEUED_REPLY');
-    const firstHeld = testEnvironment.model.scriptHeldTurn([
+    const receivedReply = marker('CHAT_ID_RECEIVED');
+    let releasePath = '';
+    testEnvironment.model.scriptTurn(() => [
       chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      chatCompletionsToolUse('call_pi_chat_id', 'bash', {
+        command: `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
+      }),
     ]);
-    const queuedHeld = testEnvironment.model.scriptHeldTurn([
-      chatCompletionsText(queuedReply),
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([
+      chatCompletionsText(receivedReply),
     ]);
 
     try {
       await withIntegrationFixture('pi-scripted-chat-id-discovery', async (fixture) => {
         const chatId = fixture.newChatId();
-        await fixture.client.startChat(scriptedPiStartRequest({
+        releasePath = path.join(fixture.dirs.project, 'release-chat-id-tool');
+        const cursor = fixture.client.markEvents();
+        const active = await fixture.client.startChat(scriptedPiStartRequest({
           chatId,
           projectPath: fixture.dirs.project,
           command: firstPrompt,
         }));
-        await firstHeld.requested;
-        await fixture.client.enqueueNew(chatId, queuedPrompt);
-        firstHeld.release();
 
-        const queuedRequest = await queuedHeld.requested;
-        const disclosed = queuedRequest.userTexts.find((text) => text.includes(queuedPrompt));
-        if (!disclosed) throw new Error('Pi omitted the queued user prompt.');
-        expect(disclosed.endsWith(
-          `\n\n<garcon-chat-id>${chatId}</garcon-chat-id>`,
-        )).toBe(true);
-        expect(disclosed.split('<garcon-chat-id>').length - 1).toBe(1);
-        queuedHeld.release();
-        await fixture.client.waitForProcessing(chatId, false, {
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some((entry) => (
+              entry.message.type === 'transcript-notice'
+              && entry.message.detail?.type === 'chat-id-disclosure'
+            )),
+          `Pi chat ID disclosure for ${chatId}`,
+          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        await writeFile(releasePath, 'release', 'utf8');
+
+        const steeredRequest = await steeredHeld.requested;
+        expect(steeredRequest.userTexts.join('\n')).toContain(
+          `<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        );
+        steeredHeld.release();
+        expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+          afterIndex: cursor,
           timeoutMs: LIVE_TURN_TIMEOUT_MS,
-        });
+        })).type);
 
         const page = await fixture.client.getMessages(chatId);
-        expect(userContents(page.messages)).toEqual([firstPrompt, queuedPrompt]);
+        expect(userContents(page.messages)).toEqual([firstPrompt]);
+        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
-          .filter((message) => message.detail?.type === 'chat-id-request')).toHaveLength(1);
-        expect(messagesOfType(page.messages, 'transcript-notice')
-          .filter((message) => message.detail?.type === 'chat-id-disclosure'))
-          .toEqual([expect.objectContaining({
-            content: `Sent chat ID ${chatId} to agent`,
-            detail: { type: 'chat-id-disclosure', delivery: 'input' },
-          })]);
+          .filter((message) => message.detail?.type.startsWith('chat-id-')))
+          .toEqual([
+            expect.objectContaining({
+              content: 'Agent requested chat ID',
+              detail: { type: 'chat-id-request' },
+            }),
+            expect.objectContaining({
+              content: `Sent chat ID ${chatId} to agent`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+          ]);
 
-        await reloadUntilNativeContains(fixture, chatId, queuedReply);
+        await reloadUntilNativeContains(fixture, chatId, receivedReply);
         const reloaded = await fixture.client.getMessages(chatId);
+        expect(userContents(reloaded.messages)).toEqual([firstPrompt]);
         expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
         testEnvironment.model.assertSettled();
       }, withScriptedPi());
     } finally {
-      firstHeld.release();
-      queuedHeld.release();
+      if (releasePath) await writeFile(releasePath, 'release', 'utf8').catch(() => undefined);
+      steeredHeld.release();
     }
   }, 120_000);
 

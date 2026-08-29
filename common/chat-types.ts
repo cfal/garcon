@@ -34,7 +34,7 @@ import {
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isChatIdDisclosureNoticeDetail,
-  isChatIdDiscoveryDisabledNoticeDetail,
+  isChatIdDiscoveryFailureNoticeDetail,
   isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
   type TranscriptNoticeDetail,
@@ -44,14 +44,15 @@ export type { UserMessagePresentation } from './user-message-presentation.js';
 export {
   isCarryoverMigrationQuarantineNoticeDetail,
   isChatIdDisclosureNoticeDetail,
-  isChatIdDiscoveryDisabledNoticeDetail,
+  isChatIdDiscoveryFailureNoticeDetail,
   isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
 } from './transcript-notice-details.js';
 export type {
   CarryoverMigrationQuarantineNoticeDetail,
   ChatIdDisclosureNoticeDetail,
-  ChatIdDiscoveryDisabledNoticeDetail,
+  ChatIdDiscoveryFailureNoticeDetail,
+  ChatIdDiscoveryFailureReason,
   ChatIdRequestNoticeDetail,
   HandoffSummaryNoticeDetail,
   TranscriptNoticeDetail,
@@ -1183,9 +1184,9 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
   }
   if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
   if (isChatIdRequestNoticeDetail(value)) return { type: value.type };
-  if (isChatIdDiscoveryDisabledNoticeDetail(value)) return { type: value.type };
-  if (isChatIdDisclosureNoticeDetail(value)) {
-    return { type: value.type, delivery: value.delivery };
+  if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDiscoveryFailureNoticeDetail(value)) {
+    return { type: value.type, reason: value.reason };
   }
   return null;
 }

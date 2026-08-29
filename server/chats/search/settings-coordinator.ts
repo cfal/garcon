@@ -27,19 +27,19 @@ export class TranscriptSearchSettingsCoordinator {
 
   async setEnabled(
     enabled: boolean,
-    patch: Partial<FeatureSettings> = {},
+    additionalPatch: Partial<FeatureSettings> = {},
   ): Promise<void> {
     await this.#lock.runExclusive(SETTINGS_LOCK_KEY, async () => {
       const current = this.#settings.getFeatureSettings().transcriptSearch.enabled;
       const featurePatch = {
-        ...patch,
+        ...additionalPatch,
         transcriptSearch: { enabled },
       };
-      const hasAdditionalPatch = Object.keys(patch).length > 0;
+      const hasAdditionalPatch = Object.keys(additionalPatch).length > 0;
       if (current === enabled) {
         if (!enabled) {
-          await this.#disableAndDelete();
           if (hasAdditionalPatch) await this.#settings.setFeatureSettings(featurePatch);
+          await this.#disableAndDelete();
         } else {
           try {
             await this.#controller.start();
@@ -67,9 +67,8 @@ export class TranscriptSearchSettingsCoordinator {
         return;
       }
 
-      await this.#settings.setFeatureSettings({ transcriptSearch: { enabled: false } });
+      await this.#settings.setFeatureSettings(featurePatch);
       await this.#disableAndDelete();
-      if (hasAdditionalPatch) await this.#settings.setFeatureSettings(patch);
     });
   }
 

@@ -1,17 +1,15 @@
 import type { Database } from 'bun:sqlite';
-import type { TranscriptViewId } from './contracts.js';
-
-export interface ProviderActivityWatermark {
-  readonly ordinal: number;
-  readonly at: string;
-}
+import type {
+  NativeActivityProviderWatermark,
+  TranscriptViewId,
+} from './contracts.js';
 
 export function readProviderActivityWatermark(
   database: Database,
   viewId: TranscriptViewId,
   contentStartOrdinal: number,
-): ProviderActivityWatermark | null {
-  return database.query<ProviderActivityWatermark, [string, number]>(`
+): NativeActivityProviderWatermark | null {
+  return database.query<NativeActivityProviderWatermark, [string, number]>(`
     SELECT ordinal, at
     FROM transcript_rows
     WHERE view_id = ? AND ordinal >= ? AND (
@@ -32,9 +30,15 @@ export function readProviderActivityWatermark(
       )
       OR (
         kind = 'notice'
-        AND json_extract(payload_json, '$.value.detail.type') IN (
-          'chat-id-request',
-          'chat-id-discovery-disabled'
+        AND (
+          json_extract(payload_json, '$.value.detail.type') IN (
+            'chat-id-request',
+            'chat-id-disclosure'
+          )
+          OR (
+            json_extract(payload_json, '$.value.detail.type') = 'chat-id-discovery-failure'
+            AND json_extract(payload_json, '$.value.detail.reason') = 'disabled'
+          )
         )
       )
     )

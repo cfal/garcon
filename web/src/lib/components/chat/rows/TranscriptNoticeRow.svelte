@@ -3,7 +3,7 @@
 	// behind the shared clamp so very long summaries stay bounded, while the
 	// server-supplied title remains visible for orientation.
 	import {
-		isChatIdDiscoveryDisabledNoticeDetail,
+		isChatIdDiscoveryFailureNoticeDetail,
 		isHandoffSummaryNoticeDetail,
 		TranscriptNoticeMessage,
 	} from '$shared/chat-types';
@@ -30,12 +30,10 @@
 	}: Props = $props();
 
 	const isHandoffSummary = $derived(isHandoffSummaryNoticeDetail(message.detail));
-	const isDiscoveryDisabled = $derived(
-		isChatIdDiscoveryDisabledNoticeDetail(message.detail),
-	);
+	const isChatIdDiscoveryFailure = $derived(isChatIdDiscoveryFailureNoticeDetail(message.detail));
 </script>
 
-<ChatEventCard variant={isDiscoveryDisabled ? 'error' : 'info'}>
+<ChatEventCard variant={isChatIdDiscoveryFailure ? 'error' : 'info'}>
 	{#snippet body()}
 		{#if message.title}
 			<div class="min-w-0 truncate text-xs font-medium">{message.title}</div>

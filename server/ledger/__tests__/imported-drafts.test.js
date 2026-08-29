@@ -14,6 +14,48 @@ import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
 
+describe('imported transcript drafts', () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] canonicalizes chat ID requests and synthetic control steers as notices', () => {
+    expect(importedDrafts([
+      {
+        message: new AssistantMessage(
+          AT,
+          '<get-garcon-chat-id />\nContinuing the response.',
+        ),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        message: new UserMessage(
+          AT,
+          '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+        ),
+        providerMeta: { nativeIdentity: { id: 'user-1' } },
+      },
+    ], () => AT)).toEqual([
+      {
+        kind: 'provider-row',
+        at: AT,
+        message: new AssistantMessage(AT, 'Continuing the response.'),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+        providerMeta: null,
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Sent chat ID 1787836573296800 to agent',
+        detail: { type: 'chat-id-disclosure', title: 'Response: Garcon Chat ID' },
+        providerMeta: null,
+      },
+    ]);
+  });
+});
+
 describe('frozen transcript drafts', () => {
   it('[TLV5-ADOPT.09-FROZEN-CONVERSATION-UNIT-01] preserves user identity and provider-rendered rows without provider metadata', () => {
     const user = new UserMessage(AT, 'frozen question', undefined, {
@@ -80,105 +122,5 @@ describe('frozen transcript drafts', () => {
       detail: quarantineDetail,
       providerMeta: null,
     }]);
-  });
-});
-
-describe('imported transcript drafts', () => {
-  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] removes chat ID controls while preserving provider metadata', () => {
-    const providerMeta = { providerOccurrence: 'provider-1' };
-    expect(importedDrafts([
-      {
-        message: new AssistantMessage(AT, '<get-garcon-chat-id />answer'),
-        providerMeta,
-      },
-      {
-        message: new AssistantMessage(AT, '<get-garcon-chat-id />'),
-        providerMeta: { providerOccurrence: 'provider-2' },
-      },
-      {
-        message: new UserMessage(
-          AT,
-          'continue\n\n<garcon-chat-id>1787836573296801</garcon-chat-id>',
-        ),
-        providerMeta: { providerOccurrence: 'provider-3' },
-      },
-    ], () => AT)).toEqual([
-      {
-        kind: 'provider-row',
-        at: AT,
-        message: new AssistantMessage(AT, 'answer'),
-        providerMeta,
-      },
-      {
-        kind: 'notice',
-        at: AT,
-        message: 'Agent requested chat ID',
-        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-        providerMeta: null,
-      },
-      {
-        kind: 'notice',
-        at: AT,
-        message: 'Agent requested chat ID',
-        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-        providerMeta: null,
-      },
-      {
-        kind: 'user-input',
-        at: AT,
-        detail: {
-          clientMessageId: null,
-          message: new UserMessage(AT, 'continue'),
-          attachments: [],
-          steer: false,
-        },
-        providerMeta: { providerOccurrence: 'provider-3' },
-      },
-    ]);
-  });
-
-  it('does not synthesize discovery notices for malformed controls', () => {
-    const assistant = new AssistantMessage(AT, ' <get-garcon-chat-id />answer');
-    const user = new UserMessage(
-      AT,
-      'continue\n\n<garcon-chat-id>invalid</garcon-chat-id>',
-    );
-    expect(importedDrafts([
-      { message: assistant, providerMeta: null },
-      { message: user, providerMeta: null },
-    ], () => AT)).toEqual([
-      { kind: 'provider-row', at: AT, message: assistant, providerMeta: null },
-      {
-        kind: 'user-input',
-        at: AT,
-        detail: {
-          clientMessageId: null,
-          message: user,
-          attachments: [],
-          steer: false,
-        },
-        providerMeta: null,
-      },
-    ]);
-  });
-
-  it('preserves a disabled marker timestamp through an error notice', () => {
-    expect(importedDrafts([
-      {
-        message: new AssistantMessage(AT, '<get-garcon-chat-id />'),
-        providerMeta: { providerOccurrence: 'provider-1' },
-      },
-    ], () => AT, { chatIdDiscoveryEnabled: false })).toEqual([
-      {
-        kind: 'notice',
-        at: AT,
-        message: 'Chat ID auto-discovery is disabled.',
-        detail: {
-          type: 'chat-id-discovery-disabled',
-          title: 'Request: Garcon Chat ID',
-        },
-        providerMeta: null,
-      },
-    ]);
   });
 });

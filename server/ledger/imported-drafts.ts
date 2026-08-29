@@ -3,14 +3,15 @@ import {
   isToolUseMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
-import type { JsonObject } from '../../common/json.js';
 import {
-  CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
+  chatIdDisclosureNoticeContent,
+  CHAT_ID_DISCLOSURE_NOTICE_TITLE,
   CHAT_ID_REQUEST_NOTICE_CONTENT,
   CHAT_ID_REQUEST_NOTICE_TITLE,
-  sanitizeImportedChatIdDisclosure,
+  parseChatIdDisclosure,
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
+import type { JsonObject } from '../../common/json.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {
@@ -18,23 +19,13 @@ export interface ImportedRow {
   readonly providerMeta: JsonObject | null;
 }
 
-interface ImportedDraftOptions {
-  readonly chatIdDiscoveryEnabled?: boolean;
-}
-
 // Turns provider-supplied history into ledger drafts. Adoption, reload, and native fork all
 // read a provider's own record and must agree on what it becomes, so they share this mapping.
 export function importedDrafts(
   rows: readonly ImportedRow[],
   now: () => string,
-  options: ImportedDraftOptions = {},
 ): LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(
-    message,
-    providerMeta,
-    now,
-    options.chatIdDiscoveryEnabled ?? true,
-  ));
+  return rows.flatMap(({ message, providerMeta }) => importedDraftFor(message, providerMeta, now));
 }
 
 // Turns conversation carried over from an earlier agent into frozen drafts. No provider ever
@@ -52,7 +43,6 @@ function importedDraftFor(
   original: ChatMessage,
   providerMeta: JsonObject | null,
   now: () => string,
-  chatIdDiscoveryEnabled: boolean,
 ): LedgerRowDraft[] {
   const request = transformChatIdRequest(original);
   if (request) {
@@ -64,30 +54,37 @@ function importedDraftFor(
       {
         kind: 'notice',
         at,
-        message: chatIdDiscoveryEnabled
-          ? CHAT_ID_REQUEST_NOTICE_CONTENT
-          : CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
-        detail: chatIdDiscoveryEnabled
-          ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-          : { type: 'chat-id-discovery-disabled', title: CHAT_ID_REQUEST_NOTICE_TITLE },
+        message: CHAT_ID_REQUEST_NOTICE_CONTENT,
+        detail: { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE },
         providerMeta: null,
       },
     ];
   }
-  const message = sanitizeImportedChatIdDisclosure(original);
-  if (message.type === 'permission-request'
-      || message.type === 'permission-resolved'
-      || message.type === 'permission-cancelled'
-      || message.type === 'permission-expired') return [];
-  const at = message.timestamp || now();
-  if (message.type === 'user-message') {
+  if (original.type === 'user-message') {
+    const disclosedChatId = parseChatIdDisclosure(original.content);
+    if (disclosedChatId) {
+      return [{
+        kind: 'notice',
+        at: original.timestamp || now(),
+        message: chatIdDisclosureNoticeContent(disclosedChatId),
+        detail: { type: 'chat-id-disclosure', title: CHAT_ID_DISCLOSURE_NOTICE_TITLE },
+        providerMeta: null,
+      }];
+    }
+  }
+  if (original.type === 'permission-request'
+      || original.type === 'permission-resolved'
+      || original.type === 'permission-cancelled'
+      || original.type === 'permission-expired') return [];
+  const at = original.timestamp || now();
+  if (original.type === 'user-message') {
     return [{
       kind: 'user-input',
       at,
       detail: {
         clientMessageId: null,
-        message,
-        attachments: (message.images ?? []).map((image) => ({
+        message: original,
+        attachments: (original.images ?? []).map((image) => ({
           kind: 'image',
           data: image.data,
           name: image.name || null,
@@ -98,7 +95,7 @@ function importedDraftFor(
       providerMeta,
     }];
   }
-  return [{ kind: 'provider-row', at, message, providerMeta }];
+  return [{ kind: 'provider-row', at, message: original, providerMeta }];
 }
 
 function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft[] {

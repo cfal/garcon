@@ -1,11 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
   codexExecCommandCall,
 } from '../../support/fake-codex-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
+import {
+  expectFinished,
+  LIVE_TURN_TIMEOUT_MS,
+  reloadUntilNativeContains,
+} from '../../support/live-agent.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import {
   startScriptedCodexTestEnvironment,
@@ -116,6 +123,86 @@ describe('scripted Codex strict steering', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
       prepareWorkspace: testEnvironment.prepareWorkspace,
     });
+  }, 120_000);
+
+  test('[TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01] immediately steers a requested chat ID without creating user input', async () => {
+    if (!environment) throw new Error('Scripted Codex environment was not initialized.');
+    const testEnvironment = environment;
+    let releasePath = '';
+    const receivedReply = marker('CHAT_ID_RECEIVED');
+    testEnvironment.model.scriptTurn(() => [
+      codexAssistantMessage(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      codexExecCommandCall(
+        'call_chat_id_gate',
+        `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
+      ),
+    ]);
+    const steeredHeld = testEnvironment.model.scriptHeldTurn([
+      codexAssistantMessage(receivedReply),
+    ]);
+
+    try {
+      await withIntegrationFixture('codex-scripted-chat-id-discovery', async (fixture) => {
+        const chatId = fixture.newChatId();
+        releasePath = path.join(fixture.dirs.project, 'release-chat-id-tool');
+        const cursor = fixture.client.markEvents();
+        const active = await fixture.client.startChat(liveCodexStartRequest({
+          chatId,
+          projectPath: fixture.dirs.project,
+          command: marker('CHAT_ID_FIRST_PROMPT'),
+          permissionMode: 'bypassPermissions',
+        }));
+
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some((entry) => (
+              entry.message.type === 'transcript-notice'
+              && entry.message.detail?.type === 'chat-id-disclosure'
+            )),
+          `Codex chat ID disclosure for ${chatId}`,
+          { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        await writeFile(releasePath, 'release', 'utf8');
+
+        const steeredRequest = await steeredHeld.requested;
+        expect(steeredRequest.userTexts.join('\n')).toContain(
+          `<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        );
+        steeredHeld.release();
+        expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+          afterIndex: cursor,
+          timeoutMs: LIVE_TURN_TIMEOUT_MS,
+        })).type);
+
+        const page = await fixture.client.getMessages(chatId);
+        expect(userContents(page.messages)).toHaveLength(1);
+        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
+        expect(messagesOfType(page.messages, 'transcript-notice')
+          .filter((message) => message.detail?.type.startsWith('chat-id-')))
+          .toEqual([
+            expect.objectContaining({ detail: { type: 'chat-id-request' } }),
+            expect.objectContaining({
+              content: `Sent chat ID ${chatId} to agent`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+          ]);
+
+        await reloadUntilNativeContains(fixture, chatId, receivedReply);
+        const reloaded = await fixture.client.getMessages(chatId);
+        expect(userContents(reloaded.messages)).toHaveLength(1);
+        expect(JSON.stringify(reloaded.messages)).not.toContain('<garcon-chat-id>');
+        testEnvironment.model.assertSettled();
+      }, {
+        serverEnvironment: testEnvironment.serverEnvironment,
+        prepareWorkspace: testEnvironment.prepareWorkspace,
+      });
+    } finally {
+      if (releasePath) await writeFile(releasePath, 'release', 'utf8').catch(() => undefined);
+      steeredHeld.release();
+      testEnvironment.model.reset();
+    }
   }, 120_000);
 
   test('delivers concurrent steers in committed ledger order', async () => {

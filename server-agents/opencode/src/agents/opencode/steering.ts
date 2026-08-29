@@ -16,6 +16,7 @@ import {
 import {
   createOpenCodePromptPartId,
   observeOpenCodeSteeringPart,
+  openCodeTurnRequiresProviderQuiescence,
   type OpenCodeSession,
   type OpenCodeTurnContext,
 } from './turn-events.js';
@@ -130,7 +131,8 @@ export class OpenCodeSteeringController {
         );
       } catch {
         preserveCorrelation = true;
-        session.providerWorkRequiresQuiescence = true;
+        turn.providerSteeringDeliveryUnconfirmed = true;
+        session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
         return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
       }
 
@@ -143,14 +145,16 @@ export class OpenCodeSteeringController {
           'OpenCode steering acknowledgement',
         );
       } catch {
-        session.providerWorkRequiresQuiescence = true;
+        turn.providerSteeringDeliveryUnconfirmed = true;
+        session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
         return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
       }
       return { kind: 'accepted' };
     } catch (error) {
       if (!attempted) throw error;
       preserveCorrelation = true;
-      session.providerWorkRequiresQuiescence = true;
+      turn.providerSteeringDeliveryUnconfirmed = true;
+      session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
       return failedSteer('unknown', 'OpenCode steering delivery could not be confirmed');
     } finally {
       if (this.#acknowledgements.get(partId) === pending) {
@@ -210,6 +214,8 @@ export class OpenCodeSteeringController {
     session.activeSteeringDeliveries = Math.max(0, session.activeSteeringDeliveries - 1);
     if (session.activeSteeringDeliveries > 0 || session.turn !== turn) return;
     this.options.releaseDeferredTerminal(agentSessionId, session);
+    if (session.status !== 'running') return;
+    session.providerWorkRequiresQuiescence = openCodeTurnRequiresProviderQuiescence(turn);
   }
 }
 

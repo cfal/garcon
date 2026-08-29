@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   CliRowMessage,
   ErrorMessage,
+  isChatIdDiscoveryFailureNoticeDetail,
   isHandoffSummaryNoticeDetail,
   parseChatMessage,
 } from '../chat-types.ts';
@@ -49,44 +50,28 @@ describe('transcript notice contracts', () => {
   });
 
   it('round-trips typed chat ID discovery notices', () => {
-    for (const message of [
-      {
-        type: 'transcript-notice',
-        timestamp: AT,
-        content: 'Agent requested chat ID',
-        detail: { type: 'chat-id-request' },
-        title: 'Request: Garcon Chat ID',
-      },
-      {
-        type: 'transcript-notice',
-        timestamp: AT,
-        content: 'Sent chat ID 1787836573296800 to agent',
-        detail: { type: 'chat-id-disclosure', delivery: 'input' },
-        title: 'Response: Garcon Chat ID',
-      },
-      {
-        type: 'transcript-notice',
-        timestamp: AT,
-        content: 'Sent chat ID 1787836573296800 to agent (steer)',
-        detail: { type: 'chat-id-disclosure', delivery: 'steer' },
-        title: 'Response: Garcon Chat ID',
-      },
-      {
-        type: 'transcript-notice',
-        timestamp: AT,
-        content: 'Chat ID auto-discovery is disabled.',
-        detail: { type: 'chat-id-discovery-disabled' },
-        title: 'Request: Garcon Chat ID',
-      },
+    for (const detail of [
+      { type: 'chat-id-request' },
+      { type: 'chat-id-disclosure' },
+      { type: 'chat-id-discovery-failure', reason: 'unsupported' },
     ]) {
+      const message = {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Synthetic discovery notice.',
+        detail,
+        title: 'Garcon Chat ID',
+      };
       expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
     }
-    expect(parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Malformed disclosure.',
-      detail: { type: 'chat-id-disclosure', delivery: 'queued' },
-    })).toBeNull();
+    expect(isChatIdDiscoveryFailureNoticeDetail({
+      type: 'chat-id-discovery-failure',
+      reason: 'unsupported',
+    })).toBe(true);
+    expect(isChatIdDiscoveryFailureNoticeDetail({
+      type: 'chat-id-discovery-failure',
+      reason: 'invalid',
+    })).toBe(false);
   });
 
   it('upgrades legacy CLI provenance into explicit row messages', () => {

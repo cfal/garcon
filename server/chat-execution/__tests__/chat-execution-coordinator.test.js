@@ -210,6 +210,44 @@ describe('ChatExecutionCoordinator', () => {
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
+  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-CONTROL-UNIT-01] delivers control steering without admitting or cleaning up user input', async () => {
+    const providerTarget = { providerTurnId: 'provider-turn-1' };
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => providerTarget),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
+          await prepare();
+          return { kind: 'accepted' };
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const target = coordinator.captureSteerTarget('chat-1');
+
+    await coordinator.deliverControlSteer(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      target,
+    );
+
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    const steerCall = fixture.turnRunner.steerInput.mock.calls[0];
+    expect(steerCall[0]).toBe('chat-1');
+    expect(steerCall[1]).toBe('<garcon-chat-id>1787836573296800</garcon-chat-id>');
+    expect(steerCall[2]).toEqual({
+      clientRequestId: expect.any(String),
+      clientMessageId: steerCall[2].clientRequestId,
+      transcriptViewId: 'view-1',
+    });
+    expect(steerCall[3]).toBe(providerTarget);
+    expect(steerCall[4]).toEqual(expect.any(Function));
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(fixture.projection.discardPreparedInput).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
   it('retires an interrupted run immediately and starts its queued successor', async () => {
     const first = deferred();
     const second = deferred();

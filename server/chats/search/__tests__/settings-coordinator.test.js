@@ -6,22 +6,15 @@ import {
 
 function createHarness(enabled = false) {
   let current = enabled;
-  let chatIdDiscoveryEnabled = true;
   const events = [];
   const settings = {
     getFeatureSettings: () => ({
       transcriptSearch: { enabled: current },
-      chatIdDiscovery: { enabled: chatIdDiscoveryEnabled },
+      chatIdDiscovery: { enabled: true },
     }),
     setFeatureSettings: mock(async (patch) => {
-      if (patch.transcriptSearch) {
-        events.push(`persist:${patch.transcriptSearch.enabled}`);
-        current = patch.transcriptSearch.enabled;
-      }
-      if (patch.chatIdDiscovery) {
-        events.push(`persist:chat-id:${patch.chatIdDiscovery.enabled}`);
-        chatIdDiscoveryEnabled = patch.chatIdDiscovery.enabled;
-      }
+      events.push(`persist:${patch.transcriptSearch.enabled}`);
+      current = patch.transcriptSearch.enabled;
     }),
   };
   const controller = {
@@ -76,61 +69,6 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
-  it('does not persist an additional feature when disabled cleanup fails', async () => {
-    const harness = createHarness(false);
-    harness.controller.disableAndDelete.mockImplementationOnce(async () => {
-      harness.events.push('delete');
-      throw new Error('busy');
-    });
-
-    await expect(harness.coordinator.setEnabled(false, {
-      chatIdDiscovery: { enabled: false },
-    })).rejects.toMatchObject({ code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED' });
-
-    expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
-    expect(harness.settings.getFeatureSettings().chatIdDiscovery.enabled).toBe(true);
-  });
-
-  it('defers an additional feature until transition cleanup succeeds', async () => {
-    const harness = createHarness(true);
-    harness.controller.disableAndDelete.mockImplementationOnce(async () => {
-      harness.events.push('delete');
-      throw new Error('busy');
-    });
-
-    await expect(harness.coordinator.setEnabled(false, {
-      chatIdDiscovery: { enabled: false },
-    })).rejects.toMatchObject({ code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED' });
-
-    expect(harness.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
-    expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
-      transcriptSearch: { enabled: false },
-    });
-    expect(harness.settings.getFeatureSettings().chatIdDiscovery.enabled).toBe(true);
-  });
-
-  it('persists a combined disable in its required two-phase order', async () => {
-    const harness = createHarness(true);
-
-    await harness.coordinator.setEnabled(false, {
-      chatIdDiscovery: { enabled: false },
-    });
-
-    expect(harness.events).toEqual([
-      'persist:false',
-      'delete',
-      'persist:chat-id:false',
-    ]);
-    expect(harness.settings.setFeatureSettings.mock.calls).toEqual([
-      [{ transcriptSearch: { enabled: false } }],
-      [{ chatIdDiscovery: { enabled: false } }],
-    ]);
-    expect(harness.settings.getFeatureSettings()).toEqual({
-      transcriptSearch: { enabled: false },
-      chatIdDiscovery: { enabled: false },
-    });
-  });
-
   it('retries admission while the durable setting is already enabled', async () => {
     const harness = createHarness(true);
     harness.controller.start.mockImplementationOnce(async () => {
@@ -147,16 +85,35 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     expect(harness.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
-  it('persists an additional feature in the same mutation', async () => {
+  it('persists a combined feature patch once', async () => {
     const harness = createHarness(false);
+
     await harness.coordinator.setEnabled(true, {
       chatIdDiscovery: { enabled: false },
     });
 
+    expect(harness.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: true },
       chatIdDiscovery: { enabled: false },
     });
-    expect(harness.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an additional feature patch when disabled cleanup fails', async () => {
+    const harness = createHarness(false);
+    harness.controller.disableAndDelete.mockImplementationOnce(async () => {
+      harness.events.push('delete');
+      throw new Error('busy');
+    });
+
+    await expect(harness.coordinator.setEnabled(false, {
+      chatIdDiscovery: { enabled: false },
+    })).rejects.toMatchObject({ code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED' });
+
+    expect(harness.events).toEqual(['persist:false', 'delete']);
+    expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
+      transcriptSearch: { enabled: false },
+      chatIdDiscovery: { enabled: false },
+    });
   });
 });

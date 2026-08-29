@@ -30,6 +30,8 @@ export interface OpenCodeProcessState {
   parentStartTimeTicks: string;
   mode: 'direct' | 'proxy';
   status: 'running' | 'stopping' | 'stopped';
+  // Proxy-only test access to the backend; shutdown clears it before persisting stopped state.
+  backendUrl?: string;
   reason?: 'signal' | 'parent-exited' | 'provider-exited' | 'startup-failed';
   version?: string;
 }
@@ -473,6 +475,7 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
     if (parentWatcher) clearInterval(parentWatcher);
     if (providerProcessWatcher) clearInterval(providerProcessWatcher);
     refreshProviderProcesses();
+    state.backendUrl = undefined;
     state.status = 'stopping';
     state.reason = reason;
     shutdownPromise = (async () => {
@@ -611,6 +614,12 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
         return exitCode;
       }
       const backendUrl = await waitForBackendReady(backend, backendPort);
+      if (stopping) {
+        await shutdownPromise;
+        return exitCode;
+      }
+      state.backendUrl = backendUrl;
+      await writeState();
       if (stopping) {
         await shutdownPromise;
         return exitCode;

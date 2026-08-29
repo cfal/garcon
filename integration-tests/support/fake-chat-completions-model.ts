@@ -54,6 +54,7 @@ export interface RecordedChatCompletionsRequest {
   readonly lastUserText: string;
   readonly toolResults: ReadonlyArray<{ toolCallId: string; content: string }>;
   readonly receivedAt: number;
+  abortedAt: number | null;
 }
 
 export function chatCompletionsText(
@@ -398,7 +399,13 @@ export class FakeChatCompletionsModel {
       lastUserText: recordedUserTexts.at(-1) ?? '',
       toolResults: toolResults(record),
       receivedAt: Date.now(),
+      abortedAt: null,
     };
+    const observeAbort = () => {
+      if (recorded.abortedAt === null) recorded.abortedAt = Date.now();
+    };
+    if (request.signal.aborted) observeAbort();
+    else request.signal.addEventListener('abort', observeAbort, { once: true });
     this.#requests.push(recorded);
     const turn = this.#turns.shift();
     if (!turn) {

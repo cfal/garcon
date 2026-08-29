@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 24 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 26 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -12,10 +12,10 @@ revision 24 makes its rendered artifacts transcript-first and succinct.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 24, SHA-256
-  `1b3bb0c862441da3aab17da39f4e138e34e935b0874dbaa8af3a729213f3d17c`
+- `docs/transcript-ledger-v5-design.md`, revision 26, SHA-256
+  `160c6487f6678c9e8653a5b047789809f84dd2f93321d32a12c406e309068f03`
 
-Current inventory: 377 discovered stable IDs, validated by
+Current inventory: 397 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -367,6 +367,18 @@ routine local testing.
 | TLV5-L12.02 | Provider translation, import, probe, and fork logic remains behind the integration interface. | Static architecture test   |
 | TLV5-L12.03 | Capabilities are nullable facets rather than optional methods or provider booleans.           | Interface conformance test |
 | TLV5-L12.04 | Each provider runs the strongest tier required by repository policy.                          | Catalog validator          |
+
+### Chat ID Discovery
+
+| ID                            | Obligation                                                                                                                               | Required evidence                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| TLV5-CHAT-ID-DISCOVERY.01     | An exact leading assistant marker is removed and its cleaned row plus typed request or disabled notice commit before dispatch begins.    | Core unit                          |
+| TLV5-CHAT-ID-DISCOVERY.02     | Discovery notices render and export as diagnostics but enter no conversational, search, or frozen fold.                               | Read-fold matrix                   |
+| TLV5-CHAT-ID-DISCOVERY.03     | Native import maps request markers and exact synthetic disclosure inputs to notices without exposing or redispatching server control.    | Import unit                        |
+| TLV5-CHAT-ID-DISCOVERY.04     | Control steering captures the active target and reaches the ordinary provider steering transport without creating user-input, prepared-input, or queue work. | Core control unit                  |
+| TLV5-CHAT-ID-DISCOVERY.05     | Every reference provider immediately receives one disclosure steer during the requesting run and no synthetic user row becomes durable. | Claude, Codex, OpenCode, Pi scripted |
+| TLV5-CHAT-ID-DISCOVERY.06     | Disabled discovery strips the marker, emits a typed error, and sends no disclosure to the provider.                                      | Core unit, Claude scripted         |
+| TLV5-CHAT-ID-DISCOVERY.07     | Typed discovery failures render with error semantics.                                                                                    | Web component                      |
 
 ### Presentation-Only Chat Rows
 
@@ -819,9 +831,17 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.05-SERVER-01          | `integration-tests/tests/server/native-transcript-reload.test.ts`: external rows remain absent through transient warning delivery and enter the transcript only through explicit Reload | L09.05, L08.04 |
 | TLV5-L01.02-CORE-EXPORT-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: the canonical all-kind fixture projects exact user-export membership, categories, durable ordinals, session exclusion, terminal inclusion, and provider-metadata privacy | L01.02 |
 | TLV5-L01.02-CORE-MATRIX-01     | `server/ledger/__tests__/read-fold-matrix.test.js`: one all-kind fixture projects ordinary and quarantine notices, late/repeated content, switch, permission, session, and terminal rows exactly across rendering, context, carryover, snapshot, search, preview, and broadcast | L01.02 |
-| TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01 | `server/ledger/__tests__/service.test.js`: exact assistant request markers produce cleaned provider rows and adjacent typed notices in one committed event | L02.01, L03.01 |
-| TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: request and disclosure notices render and export as diagnostics while remaining absent from conversation, search, preview, and frozen folds | L01.02 |
-| TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: native import strips request and disclosure controls, reconstructs request-state notices, and preserves retained provider metadata | L01.02, L10 |
+| TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01 | `server/ledger/__tests__/service.test.js`: exact leading markers commit cleaned provider output and a typed request notice before synchronous control dispatch starts | CHAT-ID-DISCOVERY.01 |
+| TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: request, disclosure, and failure notices render and export while remaining outside conversational, search, and frozen folds | CHAT-ID-DISCOVERY.02 |
+| TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01 | `server/ledger/__tests__/imported-drafts.test.js`: native request markers and exact synthetic disclosure inputs become typed notices rather than provider or user conversation | CHAT-ID-DISCOVERY.03 |
+| TLV5-CHAT-ID-DISCOVERY.04-CORE-CONTROL-UNIT-01 | `server/chat-execution/__tests__/chat-execution-coordinator.test.js`: provider-only control delivery uses ordinary steering without user-input admission or prepared-input creation | CHAT-ID-DISCOVERY.04 |
+| TLV5-CHAT-ID-DISCOVERY.05-CLAUDE-SCRIPTED-01 | `integration-tests/tests/server/claude-scripted-chat-id-discovery.test.ts`: the real Claude CLI receives the immediate disclosure steer with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
+| TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-scripted-steer.test.ts`: the real Codex binary receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
+| TLV5-CHAT-ID-DISCOVERY.05-OPENCODE-SCRIPTED-01 | `integration-tests/tests/server/opencode-scripted-steer.test.ts`: the real OpenCode binary receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
+| TLV5-CHAT-ID-DISCOVERY.05-PI-SCRIPTED-01 | `integration-tests/tests/server/pi-scripted-queue.test.ts`: the real Pi CLI receives the immediate disclosure at an active tool boundary with no synthetic ledger input | CHAT-ID-DISCOVERY.05 |
+| TLV5-CHAT-ID-DISCOVERY.06-CLAUDE-SCRIPTED-01 | `integration-tests/tests/server/claude-scripted-chat-id-discovery.test.ts`: disabled discovery strips the marker, records the error, and sends no provider disclosure | CHAT-ID-DISCOVERY.06 |
+| TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01 | `server/ledger/__tests__/service.test.js`: disabled discovery commits a typed failure and does not invoke the request sink | CHAT-ID-DISCOVERY.06 |
+| TLV5-CHAT-ID-DISCOVERY.07-WEB-UNIT-01 | `web/src/lib/components/chat/__tests__/TranscriptNoticeRow.test.ts`: typed discovery failures render with the error event-card variant | CHAT-ID-DISCOVERY.07 |
 | TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |
 | TLV5-L01.02-SEARCH-LAZY-ADOPTION-SERVER-01 | `integration-tests/tests/server/transcript-search-lazy-adoption.test.ts`: first successful lazy adoption converges into an already-enabled index without a later commit, restart, toggle, or native request | L01.02, ADOPT.01 |
 | TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01 | `server/chats/search/__tests__/controller-service.test.js`: a chat adopted while a resync replacement is held remains searchable after exclusive pruning refreshes the catalog | L01.02, ADOPT.01 |

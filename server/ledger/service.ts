@@ -10,7 +10,7 @@ import type { AgentAttachment } from '../../common/agent-execution.js';
 import {
   CHAT_ID_REQUEST_NOTICE_CONTENT,
   CHAT_ID_REQUEST_NOTICE_TITLE,
-  CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
+  chatIdDiscoveryFailureContent,
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
 import {
@@ -103,7 +103,12 @@ export interface TranscriptLedgerServiceOptions {
 
 export interface ChatIdRequestSink {
   enabled(): boolean;
-  request(chatId: string, viewId: TranscriptViewId): void;
+  request(input: {
+    readonly chatId: string;
+    readonly viewId: TranscriptViewId;
+    readonly runId: string | null;
+    readonly at: string;
+  }): void;
 }
 
 const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
@@ -431,12 +436,14 @@ export class TranscriptLedgerService {
       readonly title: string;
       readonly content: string;
       readonly detail?: TranscriptNoticeDetail;
+      readonly at?: string;
     },
   ): LedgerNoticeRow {
     return this.#appendInternalNotice(chatId, viewId, {
       title: input.title,
       content: input.content,
       detail: input.detail ? { ...input.detail } : {},
+      at: input.at,
     });
   }
 
@@ -459,13 +466,20 @@ export class TranscriptLedgerService {
       readonly title: string;
       readonly content: string;
       readonly detail: JsonObject;
+      readonly at?: string;
     },
   ): LedgerNoticeRow {
     const title = parseChatRowTitle(input.title);
     if (!title) throw new TypeError('Notice title is required');
+    const at = input.at === undefined
+      ? this.#now()
+      : timestampAtOrAfter(
+          input.at,
+          this.#store.nativeActivityState(chatId).providerWatermark?.at ?? null,
+        );
     const [row] = this.#store.append(chatId, viewId, [{
       kind: 'notice',
-      at: this.#now(),
+      at,
       message: parseChatRowContent(input.content),
       detail: { ...input.detail, title },
       providerMeta: null,
@@ -656,8 +670,8 @@ export class TranscriptLedgerService {
     switch (event.type) {
       case 'rows': {
         const drafts: LedgerRowDraft[] = [];
-        let chatIdRequested = false;
-        const discoveryEnabled = this.#chatIdRequests.enabled();
+        let discoveryEnabled: boolean | undefined;
+        let discoveryRequestAt: string | undefined;
         for (const row of event.rows) {
           const request = transformChatIdRequest(row.message);
           const message = request ? request.message : row.message;
@@ -670,24 +684,35 @@ export class TranscriptLedgerService {
             });
           }
           if (!request) continue;
-
-          if (discoveryEnabled) chatIdRequested = true;
+          discoveryEnabled ??= this.#chatIdRequests.enabled();
+          discoveryRequestAt ??= row.message.timestamp;
           drafts.push({
             kind: 'notice',
             at: row.message.timestamp,
             message: discoveryEnabled
               ? CHAT_ID_REQUEST_NOTICE_CONTENT
-              : CHAT_ID_DISCOVERY_DISABLED_NOTICE_CONTENT,
+              : chatIdDiscoveryFailureContent('disabled'),
             detail: discoveryEnabled
               ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-              : { type: 'chat-id-discovery-disabled', title: CHAT_ID_REQUEST_NOTICE_TITLE },
+              : {
+                  type: 'chat-id-discovery-failure',
+                  reason: 'disabled',
+                  title: CHAT_ID_REQUEST_NOTICE_TITLE,
+                },
             providerMeta: null,
           });
         }
         if (drafts.length === 0) return;
         const rows = this.#store.append(chatId, viewId, drafts);
-        if (chatIdRequested) this.#chatIdRequests.request(chatId, viewId);
         this.#notify({ type: 'rows', chatId, viewId, rows });
+        if (discoveryEnabled === true) {
+          this.#chatIdRequests.request({
+            chatId,
+            viewId,
+            runId: this.#activeRuns.get(chatId) ?? null,
+            at: discoveryRequestAt!,
+          });
+        }
         return;
       }
       case 'notice': {
@@ -873,6 +898,15 @@ export class TranscriptLedgerService {
 
 function inputKey(chatId: string, clientMessageId: string): string {
   return `${chatId}\u0000${clientMessageId}`;
+}
+
+function timestampAtOrAfter(candidate: string, floor: string | null): string {
+  if (!floor) return candidate;
+  const candidateTime = Date.parse(candidate);
+  const floorTime = Date.parse(floor);
+  if (!Number.isFinite(candidateTime)) return floor;
+  if (!Number.isFinite(floorTime)) return candidate;
+  return candidateTime < floorTime ? floor : candidate;
 }
 
 function validatePermissionDecision(

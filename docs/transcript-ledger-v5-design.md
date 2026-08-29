@@ -7,20 +7,18 @@ which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
 Revision 26 adds provider-neutral chat-ID auto-discovery as a core
-canonicalization rule. While enabled, an exact assistant-message prefix requests
-the current chat ID: core removes the marker before storage, atomically appends
-a typed presentation-only request notice, and arms one view-scoped ephemeral
-disclosure. The next provider-bound user input receives the ID as server-only
-prompt context and a successful provider admission appends a typed disclosure
-notice. While disclosure is disabled, core still removes the control marker and
-appends a typed error notice, but arms no reservation. Native import always
-removes recognized request and disclosure controls,
-including while live discovery is disabled, so server context never becomes
-user-authored history after Reload or native fork. Import reconstructs a typed
-request or disabled-error notice at the provider timestamp so a marker-only
-native tail remains represented in the activity watermark; disclosure notices
-have no native source and are not reconstructed. Discovery notices use the
-ordinary diagnostic notice folds and are not retained by frozen projection.
+canonicalization and control-steering rule. An assistant message beginning
+exactly with `<get-garcon-chat-id />` has that prefix removed before storage;
+the cleaned provider row and a typed request notice commit together. When the
+default-enabled remote setting is enabled, core synchronously captures the
+emitting run's active steering target and starts one provider-only steer carrying
+`<garcon-chat-id>{chatId}</garcon-chat-id>`. This control creates no
+`user-input`, queue entry, next-turn latch, or prompt decoration. Delivery
+completion appends a typed success or failure notice, and repeated requests in
+one run dispatch only once. Disabled requests still remove the marker and append
+a typed error notice but dispatch nothing. Native import canonicalizes request
+markers and exact synthetic disclosure inputs back into notices so Reload and
+native forks never expose server control as user-authored conversation.
 
 Revision 25 makes enabled transcript search a second explicit genesis-adoption
 occasion alongside first open. Search maintenance probes current-view
@@ -550,11 +548,11 @@ Kind semantics:
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload. Chat-ID discovery uses `{type: 'chat-id-request'}` for each recognized
-  request, `{type: 'chat-id-discovery-disabled'}` when the request is denied, and
-  `{type: 'chat-id-disclosure', delivery: 'input' | 'steer'}` after successful
-  provider admission. They are presentation-only diagnostic notices: they
-  render, replay, share, and export, but do not enter search,
+  Reload. Chat-ID discovery uses `{type: 'chat-id-request'}` for a recognized
+  request, `{type: 'chat-id-disclosure'}` after accepted control steering, and
+  `{type: 'chat-id-discovery-failure', reason}` for disabled, unsupported,
+  unavailable-turn, or failed delivery outcomes. They are presentation-only
+  diagnostics: they render, replay, share, and export, but do not enter search,
   preview, model context, resend, carryover, or fork seeds. Rendered
   `TranscriptNoticeMessage` and `ErrorMessage` instances own
   their optional top-level `title`; a rendered CLI row's detail is only the
@@ -575,14 +573,11 @@ Kind semantics:
   `ErrorMessage` is presentation-only even though its integration provenance
   keeps it in this row kind; every other provider row is conversational.
   Streaming deltas are overlay, never rows. Core recognizes only an assistant
-  message beginning exactly with
-  `<get-garcon-chat-id />`, removes that prefix and leading remainder whitespace
-  before append, and omits the provider row when no non-whitespace remainder
-  exists. The original `providerMeta` remains attached when a cleaned row is
-  stored. The adjacent typed request or disabled-error notice is part of the
-  same append batch; only an enabled live request arms disclosure state. Native
-  import applies the same text transform and reconstructs the request or
-  disabled-error notice without arming runtime state.
+  message beginning exactly with `<get-garcon-chat-id />`, removes that prefix
+  and leading remainder whitespace before append, and omits the provider row
+  when no non-whitespace remainder exists. The original `providerMeta` remains
+  attached to a cleaned row. The adjacent request or disabled-error notice is
+  part of the same append batch.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -997,8 +992,7 @@ durability:
   logged and not retried.
 - Acceptance snapshots: core canonicalizes the event into a core-owned
   immutable envelope; later mutation of the caller's object has no
-  effect. Chat-ID request recognition is part of this canonicalization, so the
-  cleaned provider row and request notice either commit together or not at all.
+  effect.
 - The commit executes inside `publish()` before it returns; observed
   order is the order synchronous mutation calls begin on the event loop,
   and no ledger transaction spans an `await`, so no lock or race
@@ -1115,6 +1109,16 @@ The guarantee is durable before provider dispatch, not durable at send:
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
   fold.
+- A **chat-ID discovery control steer** is server-originated rather than a user
+  submission. Its typed request notice commits before delivery starts, but the
+  control itself creates no `user-input` row and does not participate in resend,
+  queueing, or command idempotency. Core captures the active run target
+  synchronously, sends only the disclosure envelope, and appends a typed outcome
+  notice asynchronously. Provider correlation uses an ephemeral generated
+  `clientMessageId`; no prepared transcript input exists to consume or discard.
+  Provider delivery reuses the same steering transport as
+  `garcon-cli send --allow-steer`, whose prepared-input lookup is therefore an
+  inert miss for this generated identity.
 - A **future-turn queued input** remains only in the process-ephemeral
   queue, indexed by `clientMessageId`. It is not a transcript row.
   Dequeue is one synchronous block: commit the `user-input` row (the
@@ -1125,16 +1129,6 @@ The guarantee is durable before provider dispatch, not durable at send:
   a still-queued entry only removes it from the queue. Restart
   intentionally loses queued entries and does not reconstruct them or
   mark them.
-
-Chat-ID disclosure is provider-only prompt decoration. One process-ephemeral,
-view-scoped request reservation may append
-`<garcon-chat-id>{chatId}</garcon-chat-id>` to the next direct, queued, steering,
-or goal-control input after its durable user row is admitted. The durable user
-row retains exactly the user's content. A successful provider admission appends
-one typed disclosure notice; rejected or unknown delivery releases the
-reservation for a later input. Restart intentionally loses an unanswered
-reservation. View replacement, chat deletion, in-place handoff, and disabling
-the feature clear it.
 
 Submission is idempotent by `(chatId, transcriptViewId,
 clientMessageId)`. The client generates `clientMessageId` once per
@@ -1646,6 +1640,21 @@ notice, while dropping other lifecycle rows. The replaced view is deleted,
 and there is no undo. That lossiness is expected and is part of why reload is
 manual and confirmed; shares published earlier are unaffected because they
 are self-contained snapshots.
+
+Native import treats an exact synthetic chat-ID disclosure input as server
+control rather than user conversation and reconstructs a typed disclosure
+notice at its provider timestamp. It applies the same assistant request-marker
+canonicalization without dispatching control. Request, disabled-request, and
+disclosure notices may therefore serve as native-activity watermarks; the live
+disclosure starts from the requesting provider row's timestamp for the same reason.
+Core clamps it forward to the current provider watermark so an asynchronously
+accepted disclosure cannot regress that watermark. An asynchronous failed-delivery
+notice cannot serve as a watermark because it proves no provider-native entry.
+
+The native marker does not encode whether discovery was disabled at the time it
+was emitted. A manual Reload therefore reconstructs the request notice but not
+the live core-only disabled failure; this is ordinary native-import lossiness,
+not a claim that the request was delivered.
 
 The product rule for history: external or crash-missed native activity
 is adoptable only while its session is the current binding. Once

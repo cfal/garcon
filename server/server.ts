@@ -55,7 +55,6 @@ import {
   CarryOverCompactionService,
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
-import { ChatIdDiscoveryState } from './chats/chat-id-discovery-state.js';
 import { ChatIdDiscoveryController } from './chats/chat-id-discovery-controller.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
@@ -281,16 +280,11 @@ export async function startServer(): Promise<void> {
     });
     await chatRegistry.init();
     await settings.init();
-    let chatIdDiscoveryEnabled = settings.getFeatureSettings().chatIdDiscovery.enabled;
-    const chatIdDiscoveryState = new ChatIdDiscoveryState(
-      () => chatIdDiscoveryEnabled,
-      (error, chatId) => {
-        logger.warn('Ignored chat ID discovery request for noncanonical chat', {
-          chatId,
-          reason: errorMessage(error),
-        });
-      },
-    );
+    let queue: ChatExecutionCoordinator | null = null;
+    const requireExecutionQueue = (): ChatExecutionCoordinator => {
+      if (!queue) throw new Error('Chat execution coordinator is not initialized');
+      return queue;
+    };
     const transcriptStore = new TranscriptLedgerStore(
       path.join(workspaceDir, 'transcript-ledgers'),
     );
@@ -303,15 +297,20 @@ export async function startServer(): Promise<void> {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
       chatIdRequests: {
-        enabled: () => chatIdDiscoveryState.enabled(),
-        request: (chatId, viewId) => chatIdDiscoveryState.request(chatId, viewId),
+        enabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
+        request: (input) => chatIdDiscovery.request(input),
       },
     });
     const chatIdDiscovery = new ChatIdDiscoveryController({
-      state: chatIdDiscoveryState,
+      execution: {
+        captureSteerTarget: (chatId) => requireExecutionQueue().captureSteerTarget(chatId),
+        deliverControlSteer: (chatId, content, viewId, target) => (
+          requireExecutionQueue().deliverControlSteer(chatId, content, viewId, target)
+        ),
+      },
       notices: transcriptLedger,
-      onRecordError(error, chatId) {
-        logger.warn('Failed to record chat ID disclosure', {
+      onError(error, chatId) {
+        logger.warn('Chat ID auto-discovery steering failed', {
           chatId,
           reason: errorMessage(error),
         });
@@ -321,15 +320,11 @@ export async function startServer(): Promise<void> {
     transcriptLedger.subscribe((event) => {
       if (event.type !== 'view-replaced') return;
       preparedCarryover.discard(event.chatId);
-      chatIdDiscoveryState.discard(event.chatId);
+      chatIdDiscovery.discard(event.chatId);
     });
     chatRegistry.onChatRemoved((chatId) => {
       preparedCarryover.discard(chatId);
-      chatIdDiscoveryState.discard(chatId);
-    });
-    settings.onRemoteSettingsChanged(() => {
-      chatIdDiscoveryEnabled = settings.getFeatureSettings().chatIdDiscovery.enabled;
-      if (!chatIdDiscoveryEnabled) chatIdDiscoveryState.clear();
+      chatIdDiscovery.discard(chatId);
     });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
@@ -389,7 +384,6 @@ export async function startServer(): Promise<void> {
       onAdopted(chatId) {
         chatSearch?.catalogMayHaveChanged(chatId);
       },
-      chatIdDiscoveryEnabled: () => chatIdDiscoveryEnabled,
     });
     const nativeTranscriptActivity = new NativeTranscriptActivityService({
       ledger: transcriptLedger,
@@ -442,7 +436,6 @@ export async function startServer(): Promise<void> {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
       hasPendingOwnershipTransfer: (chatId) => agentOwnership.hasPending(chatId),
-      chatIdDiscovery,
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
@@ -519,7 +512,6 @@ export async function startServer(): Promise<void> {
       preparedCarryover,
       reopenProducer: (chatId) => agentRegistry.reopenTranscriptProducer(chatId),
       onCommitted(chatId) {
-        chatIdDiscoveryState.discard(chatId);
         eventWiring?.notifyAgentHandoff(chatId);
       },
     });
@@ -531,7 +523,7 @@ export async function startServer(): Promise<void> {
     await shareStore.init();
 
     const commandLedger = new CommandLedger(workspaceDir);
-    const queue = new ChatExecutionCoordinator(
+    queue = new ChatExecutionCoordinator(
       workspaceDir,
       agentRegistry,
       agentRegistry,
@@ -552,7 +544,6 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine,
       ),
-      chatIdDiscoveryEnabled: () => chatIdDiscoveryEnabled,
       chatMutationLock,
     });
     const chatRows = new ChatRowService({
@@ -612,7 +603,6 @@ export async function startServer(): Promise<void> {
           carryOverRevision: carryOver.revision([]),
           signal: new AbortController().signal,
           now: () => new Date().toISOString(),
-          chatIdDiscoveryEnabled,
         });
       },
       transcripts: transcriptLedger,

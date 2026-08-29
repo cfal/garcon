@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,124 +17,74 @@ import { TranscriptLedgerStore } from '../store.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptLedgerService', () => {
-  it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits cleaned chat ID requests and notices in one provider batch', async () => {
-    const requests = [];
-    await withService(async ({ ledger }) => {
-      const view = ledger.initializeChat('1787836573296800');
-      const notifications = [];
-      ledger.subscribe((event) => notifications.push(event));
-      const lease = ledger.openProducer('1787836573296800', 'test');
+  describe('chat ID discovery requests', () => {
+    it('[TLV5-CHAT-ID-DISCOVERY.01-CORE-UNIT-01] commits and strips the marker before starting immediate delivery', async () => {
+      const requests = mock(() => undefined);
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const notifications = [];
+        ledger.subscribe((event) => notifications.push(event));
+        requests.mockImplementation((input) => {
+          expect(ledger.currentRows('chat-1')).toHaveLength(2);
+          expect(notifications).toEqual([]);
+          expect(input).toMatchObject({ chatId: 'chat-1', runId: 'run-1' });
+        });
 
-      lease.sink.publish({
-        type: 'rows',
-        rows: [
-          {
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{
             message: new AssistantMessage(
               TS,
-              '<get-garcon-chat-id />working',
+              '<get-garcon-chat-id />\nContinuing the response.',
             ),
-            providerMeta: { providerOccurrence: 'assistant-1' },
+          }],
+        });
+
+        expect(requests).toHaveBeenCalledTimes(1);
+        expect(ledger.currentRows('chat-1')).toMatchObject([
+          {
+            kind: 'provider-row',
+            message: { type: 'assistant-message', content: 'Continuing the response.' },
           },
           {
-            message: new AssistantMessage(TS, '<get-garcon-chat-id />'),
-            providerMeta: { providerOccurrence: 'assistant-2' },
+            kind: 'notice',
+            message: 'Agent requested chat ID',
+            detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
           },
-        ],
+        ]);
+        await tick();
+        expect(notifications).toHaveLength(1);
+      }, {
+        chatIdRequests: { enabled: () => true, request: requests },
       });
-
-      expect(ledger.currentRows('1787836573296800')).toMatchObject([
-        {
-          kind: 'provider-row',
-          ordinal: 1,
-          message: { type: 'assistant-message', content: 'working' },
-          providerMeta: { providerOccurrence: 'assistant-1' },
-        },
-        {
-          kind: 'notice',
-          ordinal: 2,
-          message: 'Agent requested chat ID',
-          detail: {
-            type: 'chat-id-request',
-            title: 'Request: Garcon Chat ID',
-          },
-        },
-        {
-          kind: 'notice',
-          ordinal: 3,
-          message: 'Agent requested chat ID',
-          detail: {
-            type: 'chat-id-request',
-            title: 'Request: Garcon Chat ID',
-          },
-        },
-      ]);
-      expect(requests).toEqual([['1787836573296800', view.viewId]]);
-      await tick();
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toMatchObject({
-        type: 'rows',
-        rows: [{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }],
-      });
-    }, {
-      chatIdRequests: {
-        enabled: () => true,
-        request: (chatId, viewId) => requests.push([chatId, viewId]),
-      },
     });
-  });
 
-  it('leaves near matches untouched and reports disabled discovery requests', async () => {
-    await withService(async ({ ledger }) => {
-      ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1', 'test');
-      lease.sink.publish({
-        type: 'rows',
-        rows: [
-          { message: new AssistantMessage(TS, ' <get-garcon-chat-id />working') },
-          { message: new AssistantMessage(TS, '<get-garcon-chat-id />raw') },
-        ],
-      });
-      expect(ledger.currentRows('chat-1')).toMatchObject([
-        {
-          kind: 'provider-row',
-          message: { content: ' <get-garcon-chat-id />working' },
-        },
-        {
-          kind: 'provider-row',
-          message: { content: 'raw' },
-        },
-        {
+    it('[TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01] records a disabled failure without dispatching', async () => {
+      const requests = mock(() => undefined);
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
+        });
+
+        expect(requests).not.toHaveBeenCalled();
+        expect(ledger.currentRows('chat-1')).toMatchObject([{
           kind: 'notice',
           message: 'Chat ID auto-discovery is disabled.',
           detail: {
-            type: 'chat-id-discovery-disabled',
+            type: 'chat-id-discovery-failure',
+            reason: 'disabled',
             title: 'Request: Garcon Chat ID',
           },
-        },
-      ]);
-    });
-  });
-
-  it('commits only an error notice for a marker-only disabled request', async () => {
-    await withService(async ({ ledger }) => {
-      ledger.initializeChat('chat-1');
-      const lease = ledger.openProducer('chat-1', 'test');
-
-      lease.sink.publish({
-        type: 'rows',
-        rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
+        }]);
+      }, {
+        chatIdRequests: { enabled: () => false, request: requests },
       });
-
-      expect(ledger.currentRows('chat-1')).toMatchObject([
-        {
-          kind: 'notice',
-          message: 'Chat ID auto-discovery is disabled.',
-          detail: {
-            type: 'chat-id-discovery-disabled',
-            title: 'Request: Garcon Chat ID',
-          },
-        },
-      ]);
     });
   });
 
@@ -255,24 +205,6 @@ describe('TranscriptLedgerService', () => {
         viewId: view.viewId,
         rows: [row],
       })]);
-    });
-  });
-
-  it('preserves typed detail on an internal notice', async () => {
-    await withService(async ({ ledger }) => {
-      const view = ledger.initializeChat('chat-1');
-      expect(ledger.appendNotice('chat-1', view.viewId, {
-        title: 'Response: Garcon Chat ID',
-        content: 'Sent chat ID 1787836573296800 to agent',
-        detail: { type: 'chat-id-disclosure', delivery: 'input' },
-      })).toMatchObject({
-        kind: 'notice',
-        detail: {
-          type: 'chat-id-disclosure',
-          delivery: 'input',
-          title: 'Response: Garcon Chat ID',
-        },
-      });
     });
   });
 

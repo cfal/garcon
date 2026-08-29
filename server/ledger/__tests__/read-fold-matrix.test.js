@@ -21,6 +21,7 @@ import { transcriptViewId } from '../contracts.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
+const DISCOVERY_PROVIDER_AT = '2026-08-16T00:00:01.000Z';
 const CHAT_ROW_AT = '2026-08-16T00:01:00.000Z';
 const CHAT_ID = 'fold-matrix-chat';
 const VIEW_ID = transcriptViewId('fold-matrix-view');
@@ -203,8 +204,8 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
-  it('[TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01] keeps chat ID discovery notices visible but presentation-only across folds', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-id-notice-fold-'));
+  it('[TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01] keeps discovery notices out of conversational folds', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-id-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {
       createViewId: () => VIEW_ID,
       now: () => AT,
@@ -212,86 +213,106 @@ describe('transcript ledger read-fold matrix', () => {
     const ledger = new TranscriptLedgerService(store, { now: () => AT });
     try {
       ledger.initializeChat(CHAT_ID);
-      const rows = store.append(CHAT_ID, VIEW_ID, [
+      const rows = [...store.append(CHAT_ID, VIEW_ID, [
+        {
+          kind: 'user-input',
+          at: AT,
+          providerMeta: null,
+          detail: {
+            clientMessageId: 'chat-id-input',
+            message: new UserMessage(AT, 'discover the chat ID'),
+            attachments: [],
+            steer: false,
+          },
+        },
         {
           kind: 'notice',
           at: AT,
+          providerMeta: null,
           message: 'Agent requested chat ID',
           detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+        },
+        {
+          kind: 'provider-row',
+          at: DISCOVERY_PROVIDER_AT,
           providerMeta: null,
+          message: new AssistantMessage(DISCOVERY_PROVIDER_AT, 'waiting for the ID'),
         },
-        {
-          kind: 'notice',
-          at: AT,
-          message: 'Chat ID auto-discovery is disabled.',
-          detail: {
-            type: 'chat-id-discovery-disabled',
-            title: 'Request: Garcon Chat ID',
-          },
-          providerMeta: null,
-        },
-        {
-          kind: 'notice',
-          at: AT,
-          message: 'Sent chat ID 1787836573296800 to agent (steer)',
-          detail: {
-            type: 'chat-id-disclosure',
-            delivery: 'steer',
-            title: 'Response: Garcon Chat ID',
-          },
-          providerMeta: null,
-        },
-      ]);
-
-      expect(ledgerRowsToTranscriptMessages(rows)).toEqual([
-        {
-          ordinal: 1,
-          message: new TranscriptNoticeMessage(
-            AT,
-            'Agent requested chat ID',
-            { type: 'chat-id-request' },
-            'Request: Garcon Chat ID',
-          ),
-        },
-        {
-          ordinal: 2,
-          message: new TranscriptNoticeMessage(
-            AT,
-            'Chat ID auto-discovery is disabled.',
-            { type: 'chat-id-discovery-disabled' },
-            'Request: Garcon Chat ID',
-          ),
-        },
-        {
-          ordinal: 3,
-          message: new TranscriptNoticeMessage(
-            AT,
-            'Sent chat ID 1787836573296800 to agent (steer)',
-            { type: 'chat-id-disclosure', delivery: 'steer' },
-            'Response: Garcon Chat ID',
-          ),
-        },
-      ]);
-      expect(ledger.conversationMessages(CHAT_ID)).toEqual([]);
-      expect(frozenConversationDrafts(rows)).toEqual([]);
-      expect((await initializeSearchFold(ledger, rows))).toEqual([]);
-      expect(foldRowsForExport(rows).map((entry) => entry.category)).toEqual([
-        'diagnostics',
-        'diagnostics',
-        'diagnostics',
-      ]);
-
-      const metadataUpdates = [];
-      const fanout = createTranscriptEventFanout({
-        chatExists: () => true,
-        schedule: (_chatId, task) => task(),
-        broadcast: () => undefined,
-        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
-        replaceMetadata: () => undefined,
-        resendCandidates: () => [],
+      ])];
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 3,
+        at: DISCOVERY_PROVIDER_AT,
       });
-      fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
-      expect(metadataUpdates).toEqual([]);
+      rows.push(...store.append(CHAT_ID, VIEW_ID, [{
+        kind: 'user-input',
+        at: AT,
+        providerMeta: null,
+        detail: {
+          clientMessageId: 'client-clock-input',
+          message: new UserMessage(AT, 'client-clock input'),
+          attachments: [],
+          steer: true,
+        },
+      }]));
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 3,
+        at: DISCOVERY_PROVIDER_AT,
+      });
+      const disclosure = ledger.appendNotice(CHAT_ID, VIEW_ID, {
+        title: 'Response: Garcon Chat ID',
+        content: 'Sent chat ID 1787836573296800 to agent',
+        detail: { type: 'chat-id-disclosure' },
+        at: AT,
+      });
+      expect(disclosure.at).toBe(DISCOVERY_PROVIDER_AT);
+      rows.push(disclosure);
+      rows.push(...store.append(CHAT_ID, VIEW_ID, [{
+        kind: 'notice',
+        at: DISCOVERY_PROVIDER_AT,
+        providerMeta: null,
+        message: 'Garcon could not send the chat ID to the agent.',
+        detail: {
+          type: 'chat-id-discovery-failure',
+          reason: 'delivery-failed',
+          title: 'Response: Garcon Chat ID',
+        },
+      }]));
+
+      expect(ledgerRowsToTranscriptMessages(rows).map((entry) => entry.message.type)).toEqual([
+        'user-message',
+        'transcript-notice',
+        'assistant-message',
+        'user-message',
+        'transcript-notice',
+        'transcript-notice',
+      ]);
+      expect(ledger.conversationMessages(CHAT_ID).map(conversationalText)).toEqual([
+        'discover the chat ID',
+        'waiting for the ID',
+        'client-clock input',
+      ]);
+      expect(frozenConversationDrafts(rows).map((row) => frozenDraftText(row))).toEqual([
+        'discover the chat ID',
+        'waiting for the ID',
+        'client-clock input',
+      ]);
+      expect((await initializeSearchFold(ledger, rows)).map((row) => row.body)).toEqual([
+        'discover the chat ID',
+        'waiting for the ID',
+        'client-clock input',
+      ]);
+      expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
+        [1, 'conversation'],
+        [2, 'diagnostics'],
+        [3, 'conversation'],
+        [4, 'conversation'],
+        [5, 'diagnostics'],
+        [6, 'diagnostics'],
+      ]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 5,
+        at: DISCOVERY_PROVIDER_AT,
+      });
     } finally {
       ledger.close();
       await rm(root, { recursive: true, force: true });

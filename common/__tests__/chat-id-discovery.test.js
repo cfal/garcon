@@ -1,96 +1,54 @@
 import { describe, expect, it } from 'bun:test';
+import { AssistantMessage, ThinkingMessage, UserMessage } from '../chat-types.ts';
 import {
-  appendChatIdDisclosure,
-  CHAT_ID_DISCLOSURE_CLOSE,
-  CHAT_ID_DISCLOSURE_OPEN,
-  sanitizeImportedChatIdDisclosure,
-  stripImportedChatIdDisclosure,
+  CHAT_ID_DISCOVERY_REQUEST_MARKER,
+  chatIdDisclosureContent,
+  parseChatIdDisclosure,
   transformChatIdRequest,
 } from '../chat-id-discovery.ts';
 import { parseChatId } from '../chat-id.ts';
-import {
-  AssistantMessage,
-  ThinkingMessage,
-  UserMessage,
-} from '../chat-types.ts';
 
-const AT = '2026-08-27T00:00:00.000Z';
+const AT = '2026-08-28T00:00:00.000Z';
 const CHAT_ID = parseChatId('1787836573296800');
-const OTHER_CHAT_ID = parseChatId('1787836573296801');
 
 describe('chat ID discovery protocol', () => {
-  it('transforms only the exact leading assistant marker', () => {
-    expect(transformChatIdRequest(
-      new AssistantMessage(AT, '<get-garcon-chat-id />working'),
-    )).toEqual({ message: new AssistantMessage(AT, 'working') });
-    expect(transformChatIdRequest(
-      new AssistantMessage(AT, '<get-garcon-chat-id />'),
-    )).toEqual({ message: null });
-    expect(transformChatIdRequest(
-      new AssistantMessage(AT, '<get-garcon-chat-id /> '),
-    )).toEqual({ message: null });
-    expect(transformChatIdRequest(
-      new AssistantMessage(AT, '<get-garcon-chat-id />\n'),
-    )).toEqual({ message: null });
-    expect(transformChatIdRequest(
-      new AssistantMessage(AT, '<get-garcon-chat-id />\n\nworking'),
-    )).toEqual({ message: new AssistantMessage(AT, 'working') });
+  it('removes a leading request marker while preserving following assistant content', () => {
+    expect(transformChatIdRequest(new AssistantMessage(
+      AT,
+      `${CHAT_ID_DISCOVERY_REQUEST_MARKER}\nContinuing the response.`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, 'Continuing the response.'),
+    });
+    expect(transformChatIdRequest(new AssistantMessage(
+      AT,
+      CHAT_ID_DISCOVERY_REQUEST_MARKER,
+    ))).toEqual({ message: null });
+  });
 
+  it('ignores near-miss markers and non-assistant messages', () => {
     for (const content of [
-      ' <get-garcon-chat-id />',
+      `Explanation ${CHAT_ID_DISCOVERY_REQUEST_MARKER}`,
+      ` ${CHAT_ID_DISCOVERY_REQUEST_MARKER}`,
       '<get-garcon-chat-id/>',
       '<GET-GARCON-CHAT-ID />',
-      'quote <get-garcon-chat-id />',
     ]) {
       expect(transformChatIdRequest(new AssistantMessage(AT, content))).toBeNull();
     }
-    expect(transformChatIdRequest(
-      new ThinkingMessage(AT, '<get-garcon-chat-id />'),
-    )).toBeNull();
-    expect(transformChatIdRequest(
-      new UserMessage(AT, '<get-garcon-chat-id />'),
-    )).toBeNull();
+    expect(transformChatIdRequest(new ThinkingMessage(
+      AT,
+      CHAT_ID_DISCOVERY_REQUEST_MARKER,
+    ))).toBeNull();
+    expect(transformChatIdRequest(new UserMessage(
+      AT,
+      CHAT_ID_DISCOVERY_REQUEST_MARKER,
+    ))).toBeNull();
   });
 
-  it('appends and strips only a valid trailing disclosure envelope', () => {
-    const disclosed = appendChatIdDisclosure('continue', CHAT_ID);
-    expect(disclosed).toBe(
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE}`,
-    );
-    expect(stripImportedChatIdDisclosure(disclosed)).toBe('continue');
-    expect(stripImportedChatIdDisclosure(
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${OTHER_CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE}`,
-    )).toBe('continue');
-
-    for (const content of [
-      `continue${CHAT_ID_DISCLOSURE_OPEN}invalid${CHAT_ID_DISCLOSURE_CLOSE}`,
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}`,
-      `<garcon-chat-id>${CHAT_ID}</garcon-chat-id>`,
-    ]) {
-      expect(stripImportedChatIdDisclosure(content)).toBe(content);
-    }
-    expect(stripImportedChatIdDisclosure(
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE} later`,
-    )).toBe('continue later');
-    expect(stripImportedChatIdDisclosure(
-      `continue${CHAT_ID_DISCLOSURE_OPEN}${CHAT_ID}${CHAT_ID_DISCLOSURE_CLOSE}\n\n<attached-file>body</attached-file>`,
-    )).toBe('continue\n\n<attached-file>body</attached-file>');
-  });
-
-  it('sanitizes imported disclosures without losing user fields', () => {
-    const user = new UserMessage(
-      AT,
-      appendChatIdDisclosure('continue', CHAT_ID),
-      [{ data: 'image', name: 'image.png', mimeType: 'image/png' }],
-      { clientMessageId: 'message-1' },
-      { style: 'info' },
-    );
-    expect(sanitizeImportedChatIdDisclosure(user)).toEqual(new UserMessage(
-      AT,
-      'continue',
-      user.images,
-      user.metadata,
-      user.presentation,
-    ));
+  it('round-trips only a standalone canonical disclosure envelope', () => {
+    const content = chatIdDisclosureContent(CHAT_ID);
+    expect(content).toBe('<garcon-chat-id>1787836573296800</garcon-chat-id>');
+    expect(parseChatIdDisclosure(content)).toBe(CHAT_ID);
+    expect(parseChatIdDisclosure(`prompt\n${content}`)).toBeNull();
+    expect(parseChatIdDisclosure('<garcon-chat-id>invalid</garcon-chat-id>')).toBeNull();
   });
 });

@@ -9,7 +9,7 @@ import {
   UserMessage,
   isCarryoverMigrationQuarantineNoticeDetail,
   isChatIdDisclosureNoticeDetail,
-  isChatIdDiscoveryDisabledNoticeDetail,
+  isChatIdDiscoveryFailureNoticeDetail,
   isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
   type ChatMessage,
@@ -118,9 +118,9 @@ function noticeDetail(detail: LedgerNoticeRow['detail']) {
   }
   if (isHandoffSummaryNoticeDetail(detail)) return { type: detail.type };
   if (isChatIdRequestNoticeDetail(detail)) return { type: detail.type };
-  if (isChatIdDiscoveryDisabledNoticeDetail(detail)) return { type: detail.type };
-  if (isChatIdDisclosureNoticeDetail(detail)) {
-    return { type: detail.type, delivery: detail.delivery };
+  if (isChatIdDisclosureNoticeDetail(detail)) return { type: detail.type };
+  if (isChatIdDiscoveryFailureNoticeDetail(detail)) {
+    return { type: detail.type, reason: detail.reason };
   }
   return undefined;
 }

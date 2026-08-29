@@ -717,8 +717,7 @@ describe('PUT /api/app/settings', () => {
     });
   });
 
-  it('persists combined feature settings in one mutation', async () => {
-    ctx.settings.setFeatureSettings.mockClear();
+  it('persists both feature toggles in one mutation', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },
@@ -729,17 +728,15 @@ describe('PUT /api/app/settings', () => {
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
 
     expect(response.status).toBe(200);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
     expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: true },
       chatIdDiscovery: { enabled: false },
     });
-    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('forwards the additional feature patch through the transcript coordinator', async () => {
-    const transcriptSearchSettings = {
-      setEnabled: mock(() => Promise.resolve()),
-    };
+  it('forwards the chat ID patch through the transcript search coordinator', async () => {
+    const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
     const routes = createWorkspaceRoutes(
       ctx.settings,
       ctx.agents,
@@ -748,7 +745,6 @@ describe('PUT /api/app/settings', () => {
       undefined,
       transcriptSearchSettings,
     );
-    ctx.settings.setFeatureSettings.mockClear();
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },

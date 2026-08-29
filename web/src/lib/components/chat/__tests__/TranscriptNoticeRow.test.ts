@@ -6,18 +6,18 @@ import TranscriptNoticeRow from '../rows/TranscriptNoticeRow.svelte';
 const AT = '2026-08-28T00:00:00.000Z';
 
 describe('TranscriptNoticeRow', () => {
-	it('renders disabled chat ID discovery as an error event card', () => {
+	it('[TLV5-CHAT-ID-DISCOVERY.07-WEB-UNIT-01] renders chat ID discovery failures as error event cards', () => {
 		const { container } = render(TranscriptNoticeRow, {
 			message: new TranscriptNoticeMessage(
 				AT,
-				'Chat ID auto-discovery is disabled.',
-				{ type: 'chat-id-discovery-disabled' },
-				'Request: Garcon Chat ID',
+				'This agent does not support chat ID auto-discovery steering.',
+				{ type: 'chat-id-discovery-failure', reason: 'unsupported' },
+				'Response: Garcon Chat ID',
 			),
 		});
 
-		expect(screen.getByText('Request: Garcon Chat ID')).toBeTruthy();
-		expect(screen.getByText('Chat ID auto-discovery is disabled.')).toBeTruthy();
+		expect(screen.getByText('Response: Garcon Chat ID')).toBeTruthy();
+		expect(screen.getByText(/does not support chat ID auto-discovery steering/)).toBeTruthy();
 		expect(container.querySelector('article')?.className).toContain('border-status-error-border');
 	});
 });

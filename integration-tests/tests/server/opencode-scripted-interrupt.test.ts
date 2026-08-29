@@ -15,6 +15,7 @@ import {
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
+  type RecordedChatCompletionsRequest,
 } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -75,7 +76,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         command: marker('HELD_PROMPT'),
       }));
       if (!active.turnId) throw new Error('OpenCode start response omitted its turn id.');
-      await held.requested;
+      const heldRequest = await held.requested;
 
       const stopCursor = fixture.client.markEvents();
       const stopped = await fixture.client.stopChat({
@@ -103,8 +104,10 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         active.turnId,
       );
 
-      // The recovery begins immediately after Garcon confirms the stop. The abort endpoint
-      // does not return until OpenCode has interrupted its session runner.
+      // Stop confirms the request, not provider quiescence. The held response must stay
+      // unavailable until OpenCode has both persisted the abort and closed the model request.
+      await waitForAbortedAssistant(fixture, chatId);
+      await waitForModelRequestAbort(heldRequest);
       held.release();
 
       testEnvironment.model.reset();
@@ -126,7 +129,6 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       expect(fixture.client.eventsSince(stopCursor).some((event) =>
         event.type === 'chat-messages'
         && event.chatId === chatId
-        && event.turnId === active.turnId
         && event.messages.some((entry) =>
           entry.message.type === 'assistant-message'
           && entry.message.content.includes(stoppedReply))
@@ -336,6 +338,105 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
   }, 120_000);
 });
 
+describeOnLinux('scripted OpenCode unrequested native abort', () => {
+  beforeEach(() => {
+    environment = startScriptedOpenCodeTestEnvironment({ proxy: true });
+  });
+
+  afterEach(() => {
+    environment?.dispose();
+    environment = undefined;
+  });
+
+  test('surfaces the failure and recovers on the next turn', async () => {
+    const testEnvironment = requireEnvironment();
+    const initialReply = marker('INTERRUPT_INITIAL_REPLY');
+    const interruptedPrompt = marker('INTERRUPTED_PROMPT');
+    const interruptedReply = marker('INTERRUPTED_REPLY');
+    const recoveryReply = marker('INTERRUPT_RECOVERY_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(initialReply)]);
+
+    await withIntegrationFixture('opencode-unrequested-native-abort', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialCursor = fixture.client.markEvents();
+      const initial = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('INTERRUPT_INITIAL_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: initial.turnId,
+        marker: initialReply,
+        afterIndex: initialCursor,
+      });
+
+      const held = testEnvironment.model.scriptHeldTurn([chatCompletionsText(interruptedReply)]);
+      const active = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: interruptedPrompt,
+      }));
+      await held.requested;
+
+      const native = await openCodeNativeSession(fixture, chatId);
+      const interruptedCursor = fixture.client.markEvents();
+      // An out-of-band native abort reproduces the provider result, not the unknown upstream
+      // trigger. Unlike Garcon Stop, this endpoint returns after OpenCode finalizes cancellation.
+      try {
+        await abortOpenCodeSessionOutOfBand(fixture, native.agentSessionId);
+      } finally {
+        held.release();
+      }
+
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
+        afterIndex: interruptedCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal).toMatchObject({
+        type: 'agent-run-failed',
+        error: 'OpenCode interrupted the turn',
+      });
+      await fixture.client.waitForProcessing(chatId, false, {
+        afterIndex: interruptedCursor,
+        timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(fixture.client.eventsSince(interruptedCursor).filter((event) =>
+        (event.type === 'agent-run-failed' || event.type === 'agent-run-finished')
+        && event.chatId === chatId
+        && event.turnId === active.turnId
+      )).toHaveLength(1);
+      expect(messagesOfType((await fixture.client.getMessages(chatId)).messages, 'error'))
+        .toHaveLength(1);
+
+      // Native history cannot distinguish this failure from an acknowledged Stop, so a native
+      // reload intentionally omits the live error while retaining the interrupted user message.
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = (await fixture.client.getMessages(chatId)).messages;
+      expect(userContents(reloaded)).toContain(interruptedPrompt);
+      expect(messagesOfType(reloaded, 'error')).toEqual([]);
+
+      testEnvironment.model.reset();
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryReply)]);
+      const recoveryCursor = fixture.client.markEvents();
+      const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
+        chatId,
+        command: marker('INTERRUPT_RECOVERY_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: recovery.turnId,
+        marker: recoveryReply,
+        afterIndex: recoveryCursor,
+      });
+      expect(assistantContents((await fixture.client.getMessages(chatId)).messages).join('\n'))
+        .not.toContain(interruptedReply);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+});
+
 function expectAbortedToolRows(
   messages: readonly TranscriptMessage[],
   command: string,
@@ -369,6 +470,32 @@ function withScriptedOpenCode(): IntegrationFixtureOptions {
 
 function marker(label: string): string {
   return `SCRIPTED_OPENCODE_INTERRUPT_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+async function abortOpenCodeSessionOutOfBand(
+  fixture: IntegrationFixture,
+  agentSessionId: string,
+): Promise<void> {
+  const supervisors = (await readSupervisorStates(fixture.dirs))
+    .filter((state) => state.status === 'running');
+  if (supervisors.length !== 1 || !supervisors[0].backendUrl) {
+    throw new Error('Expected one running proxied OpenCode supervisor with a backend URL.');
+  }
+  const endpoint = new URL(
+    `/session/${encodeURIComponent(agentSessionId)}/abort`,
+    supervisors[0].backendUrl,
+  );
+  endpoint.searchParams.set('directory', fixture.dirs.project);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    signal: AbortSignal.timeout(LIVE_TURN_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenCode native abort failed with HTTP ${response.status}.`);
+  }
+  if (await response.json() !== true) {
+    throw new Error('OpenCode native abort was not acknowledged.');
+  }
 }
 
 function expectOpenCodeStoppedTurnEventOrder(
@@ -416,18 +543,23 @@ async function waitForAbortedAssistant(
   while (Date.now() < deadline) {
     const rows = readOpenCodeSessionRows(native);
     const assistant = rows.messages.find((row) => row.data.role === 'assistant');
-    const time = assistant?.data.time;
-    if (
-      assistant
-      && (assistant.data.error !== undefined
-        || (time !== null && typeof time === 'object'
-          && (time as Record<string, unknown>).completed !== undefined))
-    ) {
+    const error = assistant?.data.error;
+    if (error !== null && typeof error === 'object'
+      && (error as Record<string, unknown>).name === 'MessageAbortedError') {
       return;
     }
     await Bun.sleep(25);
   }
   throw new Error('OpenCode never settled the aborted assistant message.');
+}
+
+async function waitForModelRequestAbort(request: RecordedChatCompletionsRequest): Promise<void> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (request.abortedAt !== null) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('OpenCode never closed the aborted turn model request.');
 }
 
 async function waitForFile(path: string): Promise<void> {

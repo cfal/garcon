@@ -1,5 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { OpenCodeRuntime } from '../opencode.js';
+import { OpenCodeSteeringController } from '../steering.js';
+import { createOpenCodeTurnContext } from '../turn-events.js';
 
 function deferred() {
   let resolve;
@@ -99,13 +101,21 @@ function createEventStream() {
       closed = true;
       for (const resolve of waiters.splice(0)) resolve();
     },
-    async *stream() {
-      while (!closed || events.length > 0) {
-        if (events.length > 0) {
-          yield events.shift();
-          continue;
+    async *stream(signal) {
+      const abort = () => {
+        for (const resolve of waiters.splice(0)) resolve();
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        while (!signal?.aborted && (!closed || events.length > 0)) {
+          if (events.length > 0) {
+            yield events.shift();
+            continue;
+          }
+          await new Promise((resolve) => waiters.push(resolve));
         }
-        await new Promise((resolve) => waiters.push(resolve));
+      } finally {
+        signal?.removeEventListener('abort', abort);
       }
     },
   };
@@ -117,6 +127,29 @@ async function waitFor(predicate) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error('Timed out waiting for condition');
+}
+
+function captureIntervals() {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const intervals = new Map();
+  globalThis.setInterval = mock((callback, intervalMs) => {
+    const timer = { unref: mock(() => {}) };
+    intervals.set(intervalMs, { callback, timer });
+    return timer;
+  });
+  globalThis.clearInterval = mock(() => {});
+  return {
+    callback(intervalMs) {
+      const entry = intervals.get(intervalMs);
+      if (!entry) throw new Error(`Missing ${intervalMs}ms interval`);
+      return entry.callback;
+    },
+    restore() {
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    },
+  };
 }
 
 function createRuntime(overrides = {}) {
@@ -133,12 +166,16 @@ function createRuntime(overrides = {}) {
   };
   const abort = overrides.abort ?? mock(() => Promise.resolve({ data: true }));
   const revert = overrides.revert ?? mock(() => Promise.resolve({ data: {} }));
+  const close = mock(() => undefined);
   const runtime = new OpenCodeRuntime({
     requestTimeoutMs: overrides.requestTimeoutMs,
+    idleRetirementDelayMs: overrides.idleRetirementDelayMs,
+    idleRetirementCheckIntervalMs: overrides.idleRetirementCheckIntervalMs,
+    now: overrides.now,
     createInstance: mock(() => Promise.resolve({
       client: {
         permission: { reply: mock(() => Promise.resolve({})) },
-        global: { event: mock(() => Promise.resolve({ stream: eventStream.stream() })) },
+        global: { event: mock(({ signal }) => Promise.resolve({ stream: eventStream.stream(signal) })) },
         session: {
           create: mock(() => Promise.resolve({ data: { id: 'session-1' } })),
           prompt,
@@ -147,10 +184,10 @@ function createRuntime(overrides = {}) {
           revert,
         },
       },
-      server: { close: mock(() => undefined) },
+      server: { close },
     })),
   });
-  return { runtime, eventStream, promptAsync, abort, revert };
+  return { runtime, eventStream, promptAsync, abort, revert, close };
 }
 
 async function start(runtime, overrides = {}) {
@@ -247,6 +284,24 @@ function pushAssistant(eventStream, {
       },
     }));
   }
+}
+
+function pushAbortedAssistant(eventStream, { messageId, parentId, eventNumber }) {
+  eventStream.push(envelope({
+    id: `evt_${String(eventNumber).padStart(4, '0')}`,
+    type: 'message.updated',
+    properties: {
+      sessionID: 'session-1',
+      info: {
+        id: messageId,
+        role: 'assistant',
+        parentID: parentId,
+        finish: 'error',
+        time: { completed: Date.now() },
+        error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+      },
+    },
+  }));
 }
 
 describe('OpenCodeRuntime steering', () => {
@@ -370,6 +425,301 @@ describe('OpenCodeRuntime steering', () => {
     expect(promptAsync).toHaveBeenCalledTimes(1);
     eventStream.close();
     await runtime.shutdown();
+  });
+
+  it('keeps accepted-steering specificity and quiesces before recovery', async () => {
+    const steeringSubmission = deferred();
+    let submissionCount = 0;
+    const promptAsync = mock(() => {
+      submissionCount += 1;
+      return submissionCount === 2 ? steeringSubmission.promise : Promise.resolve({});
+    });
+    const abort = mock(() => Promise.resolve({ data: true }));
+    const { runtime, eventStream, revert } = createRuntime({ promptAsync, abort });
+    const published = await start(runtime);
+    await bindPrompt(eventStream, promptAsync, 0, 'hello');
+    const target = await waitForTarget(runtime);
+    const steering = runtime.steering.steer(steerRequest(target));
+    await waitFor(() => promptAsync.mock.calls.length === 2);
+
+    const steerPartId = promptAsync.mock.calls[1][0].parts[0].id;
+    eventStream.push(envelope({
+      id: 'evt_0003',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: steerPartId,
+          messageID: 'user-steer',
+          type: 'text',
+          text: '/review the current approach',
+        },
+      },
+    }));
+    pushAbortedAssistant(eventStream, {
+      messageId: 'assistant-aborted',
+      parentId: 'user-1',
+      eventNumber: 4,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminalEvents(published.events)).toEqual([]);
+
+    steeringSubmission.resolve({});
+    await expect(steering).resolves.toEqual({ kind: 'accepted' });
+    await waitFor(() => terminalEvents(published.events).length === 1);
+    const failureMessage = 'OpenCode stopped before processing accepted steering input';
+    expect(terminalEvents(published.events)).toEqual([{
+      type: 'run-ended',
+      runId: 'run-default',
+      outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: failureMessage },
+    }]);
+    expect(publishedMessages(published.events)).toContainEqual(expect.objectContaining({
+      type: 'error',
+      content: failureMessage,
+    }));
+
+    const recoveryOperation = collectOperation('run-recovery');
+    const recovery = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      model: 'provider/model',
+      permissionMode: 'default',
+      operation: recoveryOperation.operation,
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 3);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(revert).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-1',
+      messageID: 'user-steer',
+      directory: '/repo',
+    }), expect.any(Object));
+    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
+      revert.mock.invocationCallOrder[0],
+    );
+
+    const recoveryMessageId = await bindPrompt(eventStream, promptAsync, 2, 'recover');
+    pushAssistant(eventStream, {
+      messageId: 'assistant-recovery',
+      parentId: recoveryMessageId,
+      text: 'recovered',
+      eventNumber: 7,
+      finish: 'stop',
+    });
+    await expect(recovery).resolves.toBeUndefined();
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('quiesces an unconfirmed steering delivery before the next turn', async () => {
+    let submissionCount = 0;
+    const promptAsync = mock(() => {
+      submissionCount += 1;
+      return submissionCount === 2
+        ? Promise.reject(new Error('steering transport failed'))
+        : Promise.resolve({});
+    });
+    const abort = mock(() => Promise.resolve({ data: true }));
+    const { runtime, eventStream } = createRuntime({ promptAsync, abort });
+    const published = await start(runtime);
+    await bindPrompt(eventStream, promptAsync, 0, 'hello');
+    const target = await waitForTarget(runtime);
+
+    await expect(runtime.steering.steer(steerRequest(target))).resolves.toEqual({
+      kind: 'failed',
+      outcome: 'unknown',
+      message: 'OpenCode steering delivery could not be confirmed',
+    });
+    pushAssistant(eventStream, {
+      messageId: 'assistant-initial',
+      parentId: 'user-1',
+      text: 'initial reply',
+      eventNumber: 3,
+      finish: 'stop',
+    });
+    await waitFor(() => terminalEvents(published.events).length === 1);
+
+    const recoveryOperation = collectOperation('run-recovery');
+    const recovery = runtime.runTurn({
+      command: 'recover',
+      agentSessionId: 'session-1',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      model: 'provider/model',
+      permissionMode: 'default',
+      operation: recoveryOperation.operation,
+    });
+    await waitFor(() => promptAsync.mock.calls.length === 3);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abort.mock.invocationCallOrder[0]).toBeLessThan(
+      promptAsync.mock.invocationCallOrder[2],
+    );
+
+    const recoveryMessageId = await bindPrompt(eventStream, promptAsync, 2, 'recover');
+    pushAssistant(eventStream, {
+      messageId: 'assistant-recovery',
+      parentId: recoveryMessageId,
+      text: 'recovered',
+      eventNumber: 7,
+      finish: 'stop',
+    });
+    await expect(recovery).resolves.toBeUndefined();
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
+  it('retires the provider process after an unconfirmed steer on a finished turn', async () => {
+    const timers = captureIntervals();
+    let now = 0;
+    let submissionCount = 0;
+    const promptAsync = mock(() => {
+      submissionCount += 1;
+      return submissionCount === 2
+        ? Promise.reject(new Error('steering transport failed'))
+        : Promise.resolve({});
+    });
+    const fixture = createRuntime({
+      promptAsync,
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      fixture.runtime.startPurgeTimer();
+      const published = await start(fixture.runtime);
+      await bindPrompt(fixture.eventStream, promptAsync, 0, 'hello');
+      const target = await waitForTarget(fixture.runtime);
+      await expect(fixture.runtime.steering.steer(steerRequest(target))).resolves.toMatchObject({
+        kind: 'failed',
+        outcome: 'unknown',
+      });
+      pushAssistant(fixture.eventStream, {
+        messageId: 'assistant-initial',
+        parentId: 'user-1',
+        text: 'initial reply',
+        eventNumber: 3,
+        finish: 'stop',
+      });
+      await waitFor(() => terminalEvents(published.events).length === 1);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(fixture.close).toHaveBeenCalledTimes(1);
+
+      const recoveryOperation = collectOperation('run-recovery');
+      const recovery = fixture.runtime.runTurn({
+        command: 'recover',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        model: 'provider/model',
+        permissionMode: 'default',
+        operation: recoveryOperation.operation,
+      });
+      fixture.eventStream.push(connectedEnvelope());
+      await waitFor(() => promptAsync.mock.calls.length === 3);
+      expect(fixture.abort).not.toHaveBeenCalled();
+      const recoveryMessageId = await bindPrompt(fixture.eventStream, promptAsync, 2, 'recover');
+      pushAssistant(fixture.eventStream, {
+        messageId: 'assistant-recovery',
+        parentId: recoveryMessageId,
+        text: 'recovered',
+        eventNumber: 7,
+        finish: 'stop',
+      });
+      await expect(recovery).resolves.toBeUndefined();
+    } finally {
+      fixture.eventStream.close();
+      await fixture.runtime.shutdown();
+      timers.restore();
+    }
+  });
+
+  it('preserves an accepted steering revert across provider process retirement', async () => {
+    const timers = captureIntervals();
+    let now = 0;
+    const fixture = createRuntime({
+      idleRetirementDelayMs: 100,
+      idleRetirementCheckIntervalMs: 10,
+      now: () => now,
+    });
+
+    try {
+      fixture.runtime.startPurgeTimer();
+      const published = await start(fixture.runtime);
+      await bindPrompt(fixture.eventStream, fixture.promptAsync, 0, 'hello');
+      const target = await waitForTarget(fixture.runtime);
+      const steering = fixture.runtime.steering.steer(steerRequest(target));
+      await waitFor(() => fixture.promptAsync.mock.calls.length === 2);
+      fixture.eventStream.push(envelope({
+        id: 'evt_0003',
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'session-1',
+          part: {
+            id: fixture.promptAsync.mock.calls[1][0].parts[0].id,
+            messageID: 'user-steer',
+            type: 'text',
+            text: '/review the current approach',
+          },
+        },
+      }));
+      await expect(steering).resolves.toEqual({ kind: 'accepted' });
+      pushAbortedAssistant(fixture.eventStream, {
+        messageId: 'assistant-aborted',
+        parentId: 'user-1',
+        eventNumber: 4,
+      });
+      await waitFor(() => terminalEvents(published.events).length === 1);
+
+      now = 100;
+      await timers.callback(10)();
+      expect(fixture.close).toHaveBeenCalledTimes(1);
+
+      const recoveryOperation = collectOperation('run-recovery');
+      const recovery = fixture.runtime.runTurn({
+        command: 'recover',
+        agentSessionId: 'session-1',
+        chatId: 'chat-1',
+        projectPath: '/repo',
+        model: 'provider/model',
+        permissionMode: 'default',
+        operation: recoveryOperation.operation,
+      });
+      fixture.eventStream.push(connectedEnvelope());
+      await waitFor(() => fixture.promptAsync.mock.calls.length === 3);
+      expect(fixture.abort).not.toHaveBeenCalled();
+      expect(fixture.revert).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'session-1',
+        messageID: 'user-steer',
+        directory: '/repo',
+      }), expect.any(Object));
+      expect(fixture.revert.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.promptAsync.mock.invocationCallOrder[2],
+      );
+
+      const recoveryMessageId = await bindPrompt(
+        fixture.eventStream,
+        fixture.promptAsync,
+        2,
+        'recover',
+      );
+      pushAssistant(fixture.eventStream, {
+        messageId: 'assistant-recovery',
+        parentId: recoveryMessageId,
+        text: 'recovered',
+        eventNumber: 7,
+        finish: 'stop',
+      });
+      await expect(recovery).resolves.toBeUndefined();
+    } finally {
+      fixture.eventStream.close();
+      await fixture.runtime.shutdown();
+      timers.restore();
+    }
   });
 
   it('reports a provider rejection after delivery preparation without accepting it', async () => {
@@ -587,3 +937,85 @@ async function waitForTarget(runtime) {
   });
   return target;
 }
+
+function createControllerFixture(options = {}) {
+  const turn = createOpenCodeTurnContext(collectOperation('run-a').operation);
+  turn.providerMessageId = 'user-a';
+  turn.providerPromptRequestCompleted = options.providerPromptRequestCompleted ?? false;
+  const session = {
+    status: 'running',
+    chatId: 'chat-1',
+    model: 'provider/model',
+    permissionMode: 'default',
+    directory: '/repo',
+    startedAt: new Date(0).toISOString(),
+    lastActivityAt: 0,
+    providerWorkRequiresQuiescence: false,
+    activeSteeringDeliveries: 0,
+    deferredTerminal: null,
+    pendingSteeringRevertMessageId: null,
+    turn,
+  };
+  const promptAsync = options.promptAsync ?? mock(() => Promise.resolve({}));
+  const controller = new OpenCodeSteeringController({
+    requestTimeoutMs: 100,
+    getSession: () => session,
+    getClient: () => Promise.resolve({ session: { promptAsync } }),
+    runScopedRequest: (_label, scope, operation) => (
+      operation(new AbortController().signal, scope)
+    ),
+    releaseDeferredTerminal() {},
+    bindOperationPart: () => true,
+    unbindOperationPart() {},
+  });
+  return { controller, promptAsync, session, turn };
+}
+
+describe('OpenCodeSteeringController', () => {
+  it('re-arms quiescence when a late steering acknowledgement remains unconsumed', async () => {
+    const fixture = createControllerFixture({ providerPromptRequestCompleted: true });
+    const target = fixture.controller.captureTarget('session-1');
+    const steering = fixture.controller.steer(steerRequest(target));
+    await waitFor(() => fixture.promptAsync.mock.calls.length === 1);
+
+    fixture.controller.observeAcknowledgement(fixture.session, envelope({
+      id: 'evt_steer',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: fixture.promptAsync.mock.calls[0][0].parts[0].id,
+          messageID: 'user-steer',
+          type: 'text',
+          text: '/review the current approach',
+        },
+      },
+    }).payload);
+
+    await expect(steering).resolves.toEqual({ kind: 'accepted' });
+    expect(fixture.turn.pendingSteeringMessageIds).toEqual(new Set(['user-steer']));
+    expect(fixture.session.providerWorkRequiresQuiescence).toBe(true);
+  });
+
+  it('does not re-arm quiescence after an acknowledged Stop', async () => {
+    const preparation = deferred();
+    const preparationStarted = deferred();
+    const fixture = createControllerFixture();
+    const target = fixture.controller.captureTarget('session-1');
+    const steering = fixture.controller.steer(steerRequest(target, {
+      prepareDelivery: () => {
+        preparationStarted.resolve();
+        return preparation.promise;
+      },
+    }));
+    await preparationStarted.promise;
+
+    fixture.session.status = 'aborted';
+    fixture.session.providerWorkRequiresQuiescence = false;
+    preparation.reject(new Error('delivery preparation stopped'));
+
+    await expect(steering).rejects.toThrow('delivery preparation stopped');
+    expect(fixture.promptAsync).not.toHaveBeenCalled();
+    expect(fixture.session.providerWorkRequiresQuiescence).toBe(false);
+  });
+});
