@@ -102,6 +102,11 @@ const gitSurface = {
 	type: 'singleton',
 	kind: 'git',
 } as const satisfies SurfaceDescriptor;
+const otherChatSurface = {
+	id: 'chat-view:window-two',
+	type: 'chat',
+	chatId: 'chat-b',
+} as const satisfies SurfaceDescriptor;
 
 function workspaceWindow(
 	order: readonly string[],
@@ -238,6 +243,39 @@ describe('WorkspaceWindowTitleBar', () => {
 		});
 
 		expect(close.title).toBe(m.workspace_close_window_final_chat_disabled());
+	});
+
+	it('describes a transient close block when another Chat view remains', () => {
+		runtime.windowCount = 2;
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[gitSurface.id]: gitSurface,
+			[otherChatSurface.id]: otherChatSurface,
+		};
+		runtime.desktopRoot = {
+			type: 'partition',
+			id: 'partition-root',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				workspaceWindow([chatSurface.id]),
+				{
+					type: 'window',
+					id: 'window-two',
+					tabs: {
+						order: [otherChatSurface.id],
+						activeId: otherChatSurface.id,
+						mru: [otherChatSurface.id],
+					},
+				},
+			],
+		};
+
+		const close = renderTitleBar(workspaceWindow([chatSurface.id])).getByRole('button', {
+			name: m.workspace_close_window(),
+		});
+
+		expect(close.title).toBe(m.workspace_close_window_unavailable());
 	});
 
 	it('targets reversible fullscreen and close at the exact window', async () => {

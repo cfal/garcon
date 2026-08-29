@@ -43,6 +43,10 @@ describe('Lightpanda workspace-window fullscreen', () => {
         },
       );
 
+      expect(await app.currentWorkspaceWindowId()).toBe(terminalWindow.windowId);
+      await dispatchCycleWindowFocusShortcut(fixture.page);
+      await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
+
       await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
       await app.waitForWorkspaceWindowCount(2);
       await waitForFullscreenState(fixture.page, chatWindowId, true);
@@ -69,14 +73,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       await fixture.page.$eval(`[data-workspace-window-titlebar="${chatWindowId}"]`, (element) =>
         (element as HTMLElement).focus(),
       );
-      await fixture.page.keyboard.down('Control');
-      await fixture.page.keyboard.down('Shift');
-      try {
-        await fixture.page.keyboard.press('O');
-      } finally {
-        await fixture.page.keyboard.up('Shift');
-        await fixture.page.keyboard.up('Control');
-      }
+      await dispatchCycleWindowFocusShortcut(fixture.page);
       expect(await app.currentWorkspaceWindowId()).toBe(chatWindowId);
       expect(
         await fixture.page.$eval(
@@ -91,6 +88,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
 
       await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
       await waitForFullscreenState(fixture.page, chatWindowId, false);
+      await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
       expect(
         await fixture.page.$eval(
           `[data-workspace-window-id="${terminalWindow.windowId}"]`,
@@ -211,6 +209,31 @@ async function clickWindowControl(
       button.click();
     },
     { expectedControl: control, expectedWindowId: windowId },
+  );
+}
+
+async function dispatchCycleWindowFocusShortcut(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'o',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+}
+
+async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Promise<void> {
+  await page.waitForFunction(
+    (expectedWindowId) =>
+      document
+        .querySelector('[data-workspace-window-current="true"]')
+        ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+    { timeout: 20_000 },
+    windowId,
   );
 }
 
