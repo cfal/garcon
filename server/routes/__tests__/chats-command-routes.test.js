@@ -1785,18 +1785,9 @@ describe('REST chat command routes', () => {
     const agent = createRouteAgent();
     const nextPath = path.join(testBasePath, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-    agent.queue.readChatExecutionControl.mockResolvedValueOnce({
-      entries: [
-        {
-          id: 'entry-1',
-          content: 'queued',
-          status: 'queued',
-          createdAt: '2026-05-14T00:00:00.000Z',
-        },
-      ],
-      pause: null,
-      version: 1,
-    });
+    agent.queue.readChatExecutionControl.mockResolvedValueOnce(
+      storedQueue([queueEntry('entry-1')], { version: 1 }),
+    );
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
