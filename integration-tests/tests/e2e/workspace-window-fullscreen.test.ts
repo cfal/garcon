@@ -1,137 +1,171 @@
-import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { Page } from 'puppeteer-core';
-import { withE2eFixture } from '../../support/e2e-fixture.js';
-import { SpaDriver } from '../../support/spa-driver.js';
+import { describe, expect, test } from "bun:test";
+import type { Page } from "puppeteer-core";
+import { withE2eFixture } from "../../support/e2e-fixture.js";
+import { SpaDriver } from "../../support/spa-driver.js";
 
-describe('Lightpanda workspace-window fullscreen', () => {
-  test('destroys other windows, unplaces terminals, and never restores removed topology', async () => {
-    await withE2eFixture('workspace-window-fullscreen', async (fixture) => {
+describe("Lightpanda workspace-window fullscreen", () => {
+  test("hides keyed windows and restores the exact persisted topology on exit and reload", async () => {
+    await withE2eFixture("workspace-window-fullscreen", async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat('workspace-window-fullscreen-seed');
+      await app.startOpenAiDirectChat("workspace-window-fullscreen-seed");
       const chatWindowId = await app.currentWorkspaceWindowId();
 
-      await app.openNewWorkspaceWindow('New Terminal');
+      await app.openNewWorkspaceWindow("New Terminal");
       await app.waitForWorkspaceWindowCount(2);
-      const terminalWindow = await waitForActiveSurface(fixture.page, 'terminal:');
-      const terminalId = terminalWindow.surfaceId.slice('terminal:'.length);
-      expect(terminalId).not.toBe('');
+      const terminalWindow = await waitForActiveSurface(
+        fixture.page,
+        "terminal:",
+      );
+      const terminalId = terminalWindow.surfaceId.slice("terminal:".length);
+      expect(terminalId).not.toBe("");
+      await waitForPersistedTerminalWindow(fixture.page, terminalId);
+      const persistedBefore = await fixture.page.evaluate(() =>
+        localStorage.getItem("workspace_layout_v2"),
+      );
+      if (!persistedBefore)
+        throw new Error("Missing persisted workspace layout.");
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await app.waitForWorkspaceWindowCount(1);
-      await waitForFullscreenState(fixture.page, chatWindowId, true);
-      await fixture.page.waitForFunction(
-        (expectedTerminalId) => {
-          const raw = localStorage.getItem('workspace_layout_v2');
-          if (!raw) return false;
-          const layout = JSON.parse(raw) as {
-            root?: { type?: unknown; id?: unknown };
-            unplacedTerminalIds?: unknown;
-          };
-          return (
-            layout.root?.type === 'window' &&
-            layout.root.id === 'window-main' &&
-            Array.isArray(layout.unplacedTerminalIds) &&
-            layout.unplacedTerminalIds.includes(expectedTerminalId)
-          );
+      await fixture.page.evaluate(
+        ({ firstWindowId, secondWindowId }) => {
+          for (const [windowId, marker] of [
+            [firstWindowId, "chat-instance"],
+            [secondWindowId, "terminal-instance"],
+          ] as const) {
+            const workspaceWindow = document.querySelector<HTMLElement>(
+              `[data-workspace-window-id="${windowId}"]`,
+            );
+            if (!workspaceWindow)
+              throw new Error(`Missing workspace window: ${windowId}`);
+            workspaceWindow.dataset.fullscreenInstance = marker;
+          }
         },
-        { timeout: 20_000 },
-        terminalId,
+        {
+          firstWindowId: chatWindowId,
+          secondWindowId: terminalWindow.windowId,
+        },
       );
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await waitForFullscreenState(fixture.page, chatWindowId, false);
-      await app.openWorkspaceWindowActions(chatWindowId);
-      await app.waitForMenuItemEnabled('Terminal 1');
-      await app.clickMenuItem('Terminal 1');
-      const reopened = await waitForActiveSurface(fixture.page, 'terminal:');
-      expect(reopened.windowId).toBe(chatWindowId);
-      expect(reopened.surfaceId).toBe(terminalWindow.surfaceId);
-      expect(await app.workspaceWindowIds()).toEqual([chatWindowId]);
-      fixture.assertNoBrowserErrors();
-    });
-  });
-
-  test('cancels destructive fullscreen atomically for a retained Commit draft', async () => {
-    await withE2eFixture('workspace-window-fullscreen-commit-guard', async (fixture) => {
-      const app = new SpaDriver(fixture.page, fixture.integration);
-      await app.setViewport(1_440, 900);
-      await app.open();
-      await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat('workspace-window-commit-guard', {
-        projectPath: fixture.integration.dirs.project,
+      await clickWindowControl(fixture.page, "fullscreen", chatWindowId);
+      await app.waitForWorkspaceWindowCount(2);
+      await waitForFullscreenState(fixture.page, chatWindowId, true);
+      expect(
+        await fullscreenProjectionState(
+          fixture.page,
+          chatWindowId,
+          terminalWindow.windowId,
+          terminalWindow.surfaceId,
+        ),
+      ).toEqual({
+        targetMarker: "chat-instance",
+        targetIsFullSize: true,
+        hiddenMarker: "terminal-instance",
+        hidden: true,
+        inert: true,
+        ariaHidden: "true",
+        hiddenActiveSurface: terminalWindow.surfaceId,
       });
-      const chatWindowId = await app.currentWorkspaceWindowId();
-      await app.openNewWorkspaceWindow('Open Commit');
-      await app.waitForWorkspaceWindowCount(2);
-      await waitForActiveSurface(fixture.page, 'singleton:commit');
-      await app.fill('[data-commit-message-pane] textarea', 'Retained commit draft');
+      expect(
+        await fixture.page.evaluate(() =>
+          localStorage.getItem("workspace_layout_v2"),
+        ),
+      ).toBe(persistedBefore);
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await fixture.page.waitForSelector('[role="dialog"]');
-      await app.clickDialogButton('Cancel');
-      await app.waitForWorkspaceWindowCount(2);
+      await clickWindowControl(fixture.page, "fullscreen", chatWindowId);
       await waitForFullscreenState(fixture.page, chatWindowId, false);
       expect(
         await fixture.page.$eval(
-          '[data-commit-message-pane] textarea',
-          (element) => (element as HTMLTextAreaElement).value,
+          `[data-workspace-window-id="${terminalWindow.windowId}"]`,
+          (element) => ({
+            marker: (element as HTMLElement).dataset.fullscreenInstance,
+            hidden: element.classList.contains("hidden"),
+            inert: (element as HTMLElement).inert,
+            activeSurface: (element as HTMLElement).dataset
+              .workspaceWindowActiveSurface,
+          }),
         ),
-      ).toBe('Retained commit draft');
+      ).toEqual({
+        marker: "terminal-instance",
+        hidden: false,
+        inert: false,
+        activeSurface: terminalWindow.surfaceId,
+      });
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await fixture.page.waitForSelector('[role="dialog"]');
-      await app.clickDialogButton('Discard and close');
-      await app.waitForWorkspaceWindowCount(1);
+      await clickWindowControl(fixture.page, "fullscreen", chatWindowId);
       await waitForFullscreenState(fixture.page, chatWindowId, true);
+      const beforeReloadConnections =
+        await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
+      await fixture.waitForSpaWebSocket({
+        afterConnectionCount: beforeReloadConnections,
+      });
+      await app.waitForWorkspaceWindowCount(2);
+      await waitForFullscreenState(fixture.page, chatWindowId, false);
+      const restoredTerminal = await waitForActiveSurface(
+        fixture.page,
+        "terminal:",
+      );
+      expect(restoredTerminal).toEqual(terminalWindow);
+      expect(
+        await fixture.page.evaluate(() =>
+          localStorage.getItem("workspace_layout_v2"),
+        ),
+      ).toBe(persistedBefore);
       fixture.assertNoBrowserErrors();
     });
   });
 
-  test('cancels destructive fullscreen atomically for a dirty file', async () => {
-    await withE2eFixture('workspace-window-fullscreen-file-guard', async (fixture) => {
-      const project = fixture.integration.dirs.project;
-      const filePath = join(project, 'dirty-fullscreen.txt');
-      await writeFile(filePath, 'original\n', 'utf8');
+  test("preserves a hidden Commit draft without a destructive prompt", async () => {
+    await withE2eFixture(
+      "workspace-window-fullscreen-commit",
+      async (fixture) => {
+        const app = new SpaDriver(fixture.page, fixture.integration);
+        await app.setViewport(1_440, 900);
+        await app.open();
+        await fixture.waitForSpaWebSocket();
+        await app.startOpenAiDirectChat("workspace-window-commit-fullscreen", {
+          projectPath: fixture.integration.dirs.project,
+        });
+        const chatWindowId = await app.currentWorkspaceWindowId();
+        await app.openNewWorkspaceWindow("Open Commit");
+        await app.waitForWorkspaceWindowCount(2);
+        const commitWindow = await waitForActiveSurface(
+          fixture.page,
+          "singleton:commit",
+        );
+        await app.fill(
+          "[data-commit-message-pane] textarea",
+          "Retained commit draft",
+        );
 
-      const app = new SpaDriver(fixture.page, fixture.integration);
-      await app.setViewport(1_440, 900);
-      await app.open();
-      await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat('workspace-window-file-guard', { projectPath: project });
-      const chatWindowId = await app.currentWorkspaceWindowId();
-      await app.openNewWorkspaceWindow('Open Files');
-      await app.waitForWorkspaceWindowCount(2);
-      await waitForActiveSurface(fixture.page, 'singleton:files');
-      await openFile(fixture.page, filePath);
-      await waitForActiveSurface(fixture.page, 'file:');
-      await fixture.page.waitForSelector('.cm-content[contenteditable="true"]');
-      await fixture.page.$eval('.cm-content[contenteditable="true"]', (element) => {
-        const line = element.querySelector<HTMLElement>('.cm-line');
-        if (!line) throw new Error('Missing CodeMirror line.');
-        line.textContent = 'dirty edit';
-        element.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      });
-      await fixture.page.waitForSelector('[aria-label="Unsaved"]');
+        await clickWindowControl(fixture.page, "fullscreen", chatWindowId);
+        await waitForFullscreenState(fixture.page, chatWindowId, true);
+        expect(await fixture.page.$('[role="dialog"]')).toBeNull();
+        expect(
+          await fixture.page.$eval(
+            `[data-workspace-window-id="${commitWindow.windowId}"]`,
+            (element) => ({
+              hidden: element.classList.contains("hidden"),
+              draft: element.querySelector<HTMLTextAreaElement>(
+                "[data-commit-message-pane] textarea",
+              )?.value,
+            }),
+          ),
+        ).toEqual({ hidden: true, draft: "Retained commit draft" });
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await fixture.page.waitForSelector('[role="dialog"]');
-      await app.clickDialogButton('Cancel');
-      await app.waitForWorkspaceWindowCount(2);
-      await waitForFullscreenState(fixture.page, chatWindowId, false);
-      expect(await fixture.page.$('[aria-label="Unsaved"]')).not.toBeNull();
-
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
-      await fixture.page.waitForSelector('[role="dialog"]');
-      await app.clickDialogButton('Discard');
-      await app.waitForWorkspaceWindowCount(1);
-      await waitForFullscreenState(fixture.page, chatWindowId, true);
-      fixture.assertNoBrowserErrors();
-    });
+        await clickWindowControl(fixture.page, "fullscreen", chatWindowId);
+        await waitForFullscreenState(fixture.page, chatWindowId, false);
+        expect(
+          await fixture.page.$eval(
+            "[data-commit-message-pane] textarea",
+            (element) => (element as HTMLTextAreaElement).value,
+          ),
+        ).toBe("Retained commit draft");
+        fixture.assertNoBrowserErrors();
+      },
+    );
   });
 });
 
@@ -141,40 +175,56 @@ async function waitForActiveSurface(
 ): Promise<{ windowId: string; surfaceId: string }> {
   await page.waitForFunction(
     (expectedPrefix) =>
-      [...document.querySelectorAll<HTMLElement>('[data-workspace-window-active-surface]')].some(
-        (element) => element.dataset.workspaceWindowActiveSurface?.startsWith(expectedPrefix),
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-workspace-window-active-surface]",
+        ),
+      ].some((element) =>
+        element.dataset.workspaceWindowActiveSurface?.startsWith(
+          expectedPrefix,
+        ),
       ),
     { timeout: 20_000 },
     prefix,
   );
   return page.evaluate((expectedPrefix) => {
     const workspaceWindow = [
-      ...document.querySelectorAll<HTMLElement>('[data-workspace-window-active-surface]'),
-    ].find((element) => element.dataset.workspaceWindowActiveSurface?.startsWith(expectedPrefix));
+      ...document.querySelectorAll<HTMLElement>(
+        "[data-workspace-window-active-surface]",
+      ),
+    ].find((element) =>
+      element.dataset.workspaceWindowActiveSurface?.startsWith(expectedPrefix),
+    );
     const windowId = workspaceWindow?.dataset.workspaceWindowId;
     const surfaceId = workspaceWindow?.dataset.workspaceWindowActiveSurface;
-    if (!windowId || !surfaceId) throw new Error(`Missing active surface: ${expectedPrefix}`);
+    if (!windowId || !surfaceId)
+      throw new Error(`Missing active surface: ${expectedPrefix}`);
     return { windowId, surfaceId };
   }, prefix);
 }
 
 async function clickWindowControl(
   page: Page,
-  control: 'fullscreen' | 'close',
+  control: "fullscreen" | "close",
   windowId: string,
 ): Promise<void> {
   await page.evaluate(
     ({ expectedControl, expectedWindowId }) => {
       const attribute =
-        expectedControl === 'fullscreen'
-          ? 'data-workspace-window-fullscreen'
-          : 'data-workspace-window-close';
-      const button = [...document.querySelectorAll<HTMLButtonElement>(`[${attribute}]`)].find(
-        (element) => element.getAttribute(attribute) === expectedWindowId,
-      );
-      if (!button) throw new Error(`Missing ${expectedControl} control: ${expectedWindowId}`);
+        expectedControl === "fullscreen"
+          ? "data-workspace-window-fullscreen"
+          : "data-workspace-window-close";
+      const button = [
+        ...document.querySelectorAll<HTMLButtonElement>(`[${attribute}]`),
+      ].find((element) => element.getAttribute(attribute) === expectedWindowId);
+      if (!button)
+        throw new Error(
+          `Missing ${expectedControl} control: ${expectedWindowId}`,
+        );
       if (button.disabled)
-        throw new Error(`Disabled ${expectedControl} control: ${expectedWindowId}`);
+        throw new Error(
+          `Disabled ${expectedControl} control: ${expectedWindowId}`,
+        );
       button.click();
     },
     { expectedControl: control, expectedWindowId: windowId },
@@ -189,13 +239,21 @@ async function waitForFullscreenState(
   await page.waitForFunction(
     ({ expectedWindowId, expectedFullscreen }) => {
       const button = [
-        ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-fullscreen]'),
-      ].find((element) => element.dataset.workspaceWindowFullscreen === expectedWindowId);
-      const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+        ...document.querySelectorAll<HTMLButtonElement>(
+          "[data-workspace-window-fullscreen]",
+        ),
+      ].find(
+        (element) =>
+          element.dataset.workspaceWindowFullscreen === expectedWindowId,
+      );
+      const chatList = document.querySelector<HTMLElement>(
+        "[data-workspace-chat-list]",
+      );
       if (!button || !chatList) return false;
       return (
-        (button.getAttribute('aria-label') === 'Exit fullscreen') === expectedFullscreen &&
-        (chatList.getAttribute('aria-hidden') === 'true') === expectedFullscreen
+        (button.getAttribute("aria-label") === "Exit fullscreen") ===
+          expectedFullscreen &&
+        (chatList.getAttribute("aria-hidden") === "true") === expectedFullscreen
       );
     },
     { timeout: 20_000 },
@@ -203,21 +261,100 @@ async function waitForFullscreenState(
   );
 }
 
-async function openFile(page: Page, absolutePath: string): Promise<void> {
+async function waitForPersistedTerminalWindow(
+  page: Page,
+  terminalId: string,
+): Promise<void> {
   await page.waitForFunction(
-    (path) =>
-      [...document.querySelectorAll<HTMLElement>('[data-file-tree-row] [role="rowheader"]')].some(
-        (element) => element.getAttribute('title') === path,
-      ),
+    (expectedTerminalId) => {
+      const raw = localStorage.getItem("workspace_layout_v2");
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as {
+        root?: unknown;
+        unplacedTerminalIds?: unknown;
+      };
+      let windowCount = 0;
+      let terminalPlaced = false;
+      const visit = (node: unknown): void => {
+        if (!node || typeof node !== "object") return;
+        const candidate = node as {
+          type?: string;
+          order?: Array<{ type?: string; terminalId?: string }>;
+          children?: unknown[];
+        };
+        if (candidate.type === "window") {
+          windowCount += 1;
+          terminalPlaced ||=
+            candidate.order?.some(
+              (ref) =>
+                ref.type === "terminal" &&
+                ref.terminalId === expectedTerminalId,
+            ) ?? false;
+        } else if (candidate.type === "partition") {
+          candidate.children?.forEach(visit);
+        }
+      };
+      visit(parsed.root);
+      return (
+        windowCount === 2 &&
+        terminalPlaced &&
+        Array.isArray(parsed.unplacedTerminalIds) &&
+        !parsed.unplacedTerminalIds.includes(expectedTerminalId)
+      );
+    },
     { timeout: 20_000 },
-    absolutePath,
+    terminalId,
   );
-  await page.evaluate((path) => {
-    const header = [
-      ...document.querySelectorAll<HTMLElement>('[data-file-tree-row] [role="rowheader"]'),
-    ].find((element) => element.getAttribute('title') === path);
-    const row = header?.closest<HTMLElement>('[data-file-tree-row]');
-    if (!row) throw new Error(`Missing file tree row: ${path}`);
-    row.click();
-  }, absolutePath);
+}
+
+async function fullscreenProjectionState(
+  page: Page,
+  targetWindowId: string,
+  hiddenWindowId: string,
+  hiddenSurfaceId: string,
+): Promise<{
+  targetMarker: string | undefined;
+  targetIsFullSize: boolean;
+  hiddenMarker: string | undefined;
+  hidden: boolean;
+  inert: boolean;
+  ariaHidden: string | null;
+  hiddenActiveSurface: string | undefined;
+}> {
+  return page.evaluate(
+    ({ targetId, hiddenId, expectedHiddenSurfaceId }) => {
+      const target = document.querySelector<HTMLElement>(
+        `[data-workspace-window-id="${targetId}"]`,
+      );
+      const hiddenWindow = document.querySelector<HTMLElement>(
+        `[data-workspace-window-id="${hiddenId}"]`,
+      );
+      if (!target || !hiddenWindow)
+        throw new Error("Missing fullscreen window projection.");
+      if (
+        hiddenWindow.dataset.workspaceWindowActiveSurface !==
+        expectedHiddenSurfaceId
+      ) {
+        throw new Error("Fullscreen changed the hidden window active surface.");
+      }
+      return {
+        targetMarker: target.dataset.fullscreenInstance,
+        targetIsFullSize:
+          target.style.left === "0%" &&
+          target.style.top === "0%" &&
+          target.style.width === "100%" &&
+          target.style.height === "100%",
+        hiddenMarker: hiddenWindow.dataset.fullscreenInstance,
+        hidden: hiddenWindow.classList.contains("hidden"),
+        inert: hiddenWindow.inert,
+        ariaHidden: hiddenWindow.getAttribute("aria-hidden"),
+        hiddenActiveSurface: hiddenWindow.dataset.workspaceWindowActiveSurface,
+      };
+    },
+    {
+      targetId: targetWindowId,
+      hiddenId: hiddenWindowId,
+      expectedHiddenSurfaceId: hiddenSurfaceId,
+    },
+  );
 }
