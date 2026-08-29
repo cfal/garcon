@@ -1,3 +1,5 @@
+import { parseChatId } from './chat-id.js';
+
 export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly type: 'carryover-migration-quarantine';
   readonly artifactId: string;
@@ -182,4 +184,3 @@ function isInterAgentMessageFailureReason(value: unknown): value is InterAgentMe
     || value === 'server-shutting-down'
     || value === 'delivery-failed';
 }
-import { parseChatId } from './chat-id.js';
