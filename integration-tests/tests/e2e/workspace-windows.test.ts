@@ -103,9 +103,9 @@ describe('Lightpanda workspace windows', () => {
         requiredSingletons: ['git', 'git-compare'],
       });
 
-      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
-      await fixture.page.reload({ waitUntil: [] });
-      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+		const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+		await fixture.page.reload({ waitUntil: [] });
+		await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
       await app.waitForWorkspaceWindowCount(2);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       expect(
@@ -138,6 +138,11 @@ describe('Lightpanda workspace windows', () => {
       await app.waitForSelectedChat(chatA.id);
       const secondWindowId = await app.currentWorkspaceWindowId();
       expect(secondWindowId).not.toBe(originalWindowId);
+      expect(
+        await fixture.page.$(
+          `[data-workspace-window-id="${originalWindowId}"] [data-chat-window-preview] textarea`,
+        ),
+      ).toBeNull();
 
       const chatCId = fixture.integration.newChatId();
       const startedChatC = await fixture.integration.client.startDirectChat({
@@ -158,6 +163,11 @@ describe('Lightpanda workspace windows', () => {
 
       await app.focusWorkspaceWindow(originalWindowId);
       await app.waitForSelectedChat(chatB.id);
+      expect(
+        await fixture.page.$(
+          `[data-workspace-window-id="${secondWindowId}"] [data-chat-window-preview] textarea`,
+        ),
+      ).toBeNull();
       await app.clickSidebarChatContaining('workspace-chat-a');
       await app.waitForSelectedChat(chatA.id);
       await waitForPersistedChatWindows(fixture.page, {
@@ -247,8 +257,8 @@ async function waitForPersistedWindowState(
       const raw = localStorage.getItem('workspace_layout_v2');
       if (!raw) return false;
       const parsed = JSON.parse(raw) as { root?: unknown };
-      const windows: Array<{ order?: Array<{ type?: string; kind?: string; chatId?: string }> }> =
-        [];
+		const windows: Array<{ order?: Array<{ type?: string; kind?: string; chatId?: string }> }> =
+			[];
       const visit = (node: unknown): void => {
         if (!node || typeof node !== 'object') return;
         const candidate = node as {

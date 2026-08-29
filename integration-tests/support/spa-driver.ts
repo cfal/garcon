@@ -553,7 +553,7 @@ export class SpaDriver {
       await this.selectWorkspaceWindowSurfaceById(surfaceId, targetWindowId);
       return;
     }
-    await this.openWorkspaceWindowActions(targetWindowId);
+    await this.openWorkspaceWindowAddMenu(targetWindowId);
     await this.waitForMenuItemEnabled(name);
     await this.clickMenuItem(name);
   }
@@ -672,6 +672,17 @@ export class SpaDriver {
         ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-menu-trigger]'),
       ].find((element) => element.dataset.workspaceWindowMenuTrigger === expectedWindowId);
       if (!trigger) throw new Error(`Missing workspace window menu: ${expectedWindowId}`);
+      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+    }, targetWindowId);
+  }
+
+  async openWorkspaceWindowAddMenu(windowId?: string): Promise<void> {
+    const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
+    await this.#page.evaluate((expectedWindowId) => {
+      const trigger = [
+        ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-add-trigger]'),
+      ].find((element) => element.dataset.workspaceWindowAddTrigger === expectedWindowId);
+      if (!trigger) throw new Error(`Missing workspace window add menu: ${expectedWindowId}`);
       if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
     }, targetWindowId);
   }

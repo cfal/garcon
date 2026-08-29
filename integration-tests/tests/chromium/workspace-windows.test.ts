@@ -90,7 +90,7 @@ async function openWindowTab(
   label: string,
 ): Promise<void> {
   await page
-    .locator(`[data-workspace-window-menu-trigger="${windowId}"]`)
+    .locator(`[data-workspace-window-add-trigger="${windowId}"]`)
     .click();
   await page.getByRole("menuitem", { name: label, exact: true }).click();
 }
@@ -430,6 +430,21 @@ describe("Chromium workspace windows", () => {
           .locator('[data-workspace-window-current="true"]')
           .getAttribute("data-workspace-window-id");
         if (!chatWindowId) throw new Error("Missing initial Chat window.");
+        expect(
+          await fixture.page
+            .locator("[data-workspace-window-focus-ring]")
+            .count(),
+        ).toBe(0);
+        expect(
+          await fixture.page
+            .locator(`[data-workspace-window-add-trigger="${chatWindowId}"]`)
+            .count(),
+        ).toBe(1);
+        expect(
+          await fixture.page
+            .locator(`[data-workspace-window-menu-trigger="${chatWindowId}"]`)
+            .count(),
+        ).toBe(1);
 
         markPhase("verifying adaptive labels and Chat tab actions");
         await openWindowTab(fixture.page, chatWindowId, "Open Git Compare");
@@ -441,6 +456,32 @@ describe("Chromium workspace windows", () => {
             "singleton:git-compare",
           chatWindowId,
         );
+        await fixture.page
+          .locator(`[data-workspace-window-menu-trigger="${chatWindowId}"]`)
+          .click();
+        expect(
+          await fixture.page
+            .getByRole("menuitem", { name: "New Terminal", exact: true })
+            .count(),
+        ).toBe(0);
+        for (const label of [
+          "Move tab left",
+          "Move tab right",
+          "Open in new window left",
+          "Open in new window right",
+          "Open in new window above",
+          "Open in new window below",
+        ]) {
+          await fixture.page
+            .getByRole("menuitem", { name: label, exact: true })
+            .waitFor();
+        }
+        expect(
+          await fixture.page
+            .locator("[data-workspace-window-tab-actions-separator]")
+            .count(),
+        ).toBe(1);
+        await fixture.page.keyboard.press("Escape");
         await verifyAdaptiveTabLabels(fixture.page, chatWindowId);
         await openChatTabBelow(fixture.page, chatWindowId);
         expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
