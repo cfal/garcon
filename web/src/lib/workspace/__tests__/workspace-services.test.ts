@@ -221,7 +221,7 @@ describe('createWorkspaceServices', () => {
 
 		const element = document.createElement('div');
 		document.body.append(element);
-		let unregister = () => undefined;
+		let unregister: () => void = () => undefined;
 		services.transientLayers.open('main-inert', () => {
 			unregister = services!.transientLayers.register({
 				id: 'test-dialog',
