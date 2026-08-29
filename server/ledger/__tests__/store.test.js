@@ -14,7 +14,10 @@ import {
   TranscriptLedgerStore,
   transcriptViewId,
 } from '../index.ts';
-import { chatIdRequestNoticeDraft } from '../garcon-command-request.ts';
+import {
+  chatIdRequestNoticeDraft,
+  interAgentSendRequestNoticeDraft,
+} from '../garcon-command-request.ts';
 import { decodeLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 
@@ -116,6 +119,34 @@ describe('TranscriptLedgerStore', () => {
       at,
       message: 'Agent requested chat ID',
       detail: { type: 'chat-id-request' },
+      providerMeta: null,
+    }]);
+  });
+
+  it('preserves hidden inter-agent command evidence when reopening a ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    store.append('chat-one', view.viewId, [interAgentSendRequestNoticeDraft(at, {
+      recipients: ['1787974832309199'],
+      hideSender: true,
+      body: 'message body',
+    })]);
+    store.close();
+    store = new TranscriptLedgerStore(root);
+
+    expect(store.currentRows('chat-one')).toMatchObject([{
+      ordinal: 1,
+      kind: 'notice',
+      at,
+      message: 'Agent requested inter-agent message delivery',
+      detail: {
+        type: 'inter-agent-send-request',
+        recipients: ['1787974832309199'],
+        hideSender: true,
+        body: 'message body',
+      },
       providerMeta: null,
     }]);
   });

@@ -67,6 +67,89 @@ describe('imported transcript drafts', () => {
     }]);
   });
 
+  it('canonicalizes outgoing commands and incoming inter-agent envelopes without dispatch', () => {
+    expect(importedDrafts([
+      {
+        message: new AssistantMessage(
+          AT,
+          'Retained answer.\n'
+            + '<garcon-send-message to="1787974832309199, 1787973671383699" hide_sender="false">\n'
+            + 'message body\n'
+            + '</garcon-send-message>',
+        ),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        message: new UserMessage(
+          AT,
+          '<garcon-message from="1787974832309199">\nmessage body\n</garcon-message>',
+        ),
+        providerMeta: { nativeIdentity: { id: 'user-1' } },
+      },
+      {
+        message: new UserMessage(
+          AT,
+          '<garcon-message>\nhidden body\n</garcon-message>',
+        ),
+        providerMeta: { nativeIdentity: { id: 'user-2' } },
+      },
+    ], () => AT)).toEqual([
+      {
+        kind: 'provider-row',
+        at: AT,
+        message: new AssistantMessage(AT, 'Retained answer.'),
+        providerMeta: { nativeIdentity: { id: 'assistant-1' } },
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'Agent requested inter-agent message delivery',
+        detail: {
+          type: 'inter-agent-send-request',
+          recipients: ['1787974832309199', '1787973671383699'],
+          hideSender: false,
+          body: 'message body',
+        },
+        providerMeta: null,
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'message body',
+        detail: {
+          type: 'inter-agent-message-received',
+          fromChatId: '1787974832309199',
+          title: 'Message from chat 1787974832309199',
+        },
+        providerMeta: null,
+      },
+      {
+        kind: 'notice',
+        at: AT,
+        message: 'hidden body',
+        detail: {
+          type: 'inter-agent-message-received',
+          fromChatId: null,
+          title: 'Inter-agent message',
+        },
+        providerMeta: null,
+      },
+    ]);
+  });
+
+  it('preserves malformed outgoing commands without synthesizing a diagnostic', () => {
+    const message = new AssistantMessage(
+      AT,
+      '<garcon-send-message to="invalid" hide_sender="false">body</garcon-send-message>',
+    );
+    expect(importedDrafts([{ message, providerMeta: null }], () => AT)).toEqual([{
+      kind: 'provider-row',
+      at: AT,
+      message,
+      providerMeta: null,
+    }]);
+  });
+
   it('preserves non-standalone disclosure content', () => {
     const user = new UserMessage(
       AT,

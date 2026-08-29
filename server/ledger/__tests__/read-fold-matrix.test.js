@@ -11,7 +11,10 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
-import { chatIdRequestNoticeDraft } from '../garcon-command-request.ts';
+import {
+  chatIdRequestNoticeDraft,
+  interAgentSendRequestNoticeDraft,
+} from '../garcon-command-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
@@ -317,6 +320,64 @@ describe('transcript ledger read-fold matrix', () => {
         ordinal: 5,
         at: DISCOVERY_PROVIDER_AT,
       });
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps inter-agent evidence private and both audit notices presentation-only', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-message-fold-matrix-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => AT });
+    try {
+      ledger.initializeChat(CHAT_ID);
+      const rows = store.append(CHAT_ID, VIEW_ID, [
+        interAgentSendRequestNoticeDraft(AT, {
+          recipients: ['1787974832309199'],
+          hideSender: false,
+          body: 'message body',
+        }),
+        {
+          kind: 'notice',
+          at: AT,
+          message: 'Delivered: 1787974832309199\n\nmessage body',
+          detail: {
+            type: 'inter-agent-message-outcome',
+            results: [{ chatId: '1787974832309199', status: 'delivered' }],
+          },
+          providerMeta: null,
+        },
+        {
+          kind: 'notice',
+          at: AT,
+          message: 'message body',
+          detail: {
+            type: 'inter-agent-message-received',
+            fromChatId: '1787974832309199',
+          },
+          providerMeta: null,
+        },
+      ]);
+
+      expect(ledgerRowsToTranscriptMessages(rows).map(({ ordinal, message }) => ({
+        ordinal,
+        type: message.type,
+      }))).toEqual([
+        { ordinal: 2, type: 'transcript-notice' },
+        { ordinal: 3, type: 'transcript-notice' },
+      ]);
+      expect(ledger.conversationMessages(CHAT_ID)).toEqual([]);
+      expect(ledger.resendCandidates(CHAT_ID)).toEqual([]);
+      expect(frozenConversationDrafts(rows)).toEqual([]);
+      expect((await initializeSearchFold(ledger, rows))).toEqual([]);
+      expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
+        [2, 'diagnostics'],
+        [3, 'diagnostics'],
+      ]);
     } finally {
       ledger.close();
       await rm(root, { recursive: true, force: true });

@@ -33,7 +33,9 @@ export function readProviderActivityWatermark(
         AND (
           json_extract(payload_json, '$.value.detail.type') IN (
             'chat-id-request',
-            'chat-id-disclosure'
+            'chat-id-disclosure',
+            'inter-agent-send-request',
+            'inter-agent-message-received'
           )
           OR (
             json_extract(payload_json, '$.value.detail.type') = 'chat-id-discovery-failure'

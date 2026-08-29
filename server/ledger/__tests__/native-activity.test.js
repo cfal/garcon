@@ -169,6 +169,50 @@ describe('NativeTranscriptActivityService', () => {
         ordinal: 12,
         at: IMPORTED_AT,
       });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Agent requested inter-agent message delivery',
+        detail: {
+          type: 'inter-agent-send-request',
+          recipients: ['1787974832309199'],
+          hideSender: false,
+          body: 'message',
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 13,
+        at: IMPORTED_AT,
+      });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'message',
+        detail: {
+          type: 'inter-agent-message-received',
+          fromChatId: '1787974832309199',
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 14,
+        at: IMPORTED_AT,
+      });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Queued message',
+        detail: {
+          type: 'inter-agent-message-outcome',
+          results: [{ chatId: '1787974832309199', status: 'queued' }],
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(14);
     });
   });
 

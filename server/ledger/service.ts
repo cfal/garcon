@@ -8,7 +8,13 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
-import { transformChatIdRequest } from '../../common/chat-id-discovery.js';
+import type { ChatId } from '../../common/chat-id.js';
+import {
+  extractGarconCommands,
+  INTER_AGENT_MESSAGE_NOTICE_TITLE,
+  MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
+  type GarconEdgeCommand,
+} from '../../common/garcon-commands.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
@@ -37,7 +43,10 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
-import { chatIdRequestNoticeDraft } from './garcon-command-request.js';
+import {
+  chatIdRequestNoticeDraft,
+  interAgentSendRequestNoticeDraft,
+} from './garcon-command-request.js';
 import { PermissionNotActionableError } from './errors.js';
 import { TranscriptLedgerStore } from './store.js';
 
@@ -96,6 +105,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly serverInstanceId?: string;
   readonly onListenerError?: (error: unknown) => void;
   readonly chatIdRequests?: ChatIdRequestSink;
+  readonly interAgentMessages?: InterAgentMessageRequestSink;
 }
 
 export interface ChatIdRequestSink {
@@ -107,7 +117,22 @@ export interface ChatIdRequestSink {
   }): void;
 }
 
+export interface InterAgentMessageRequestSink {
+  request(input: {
+    readonly sourceChatId: string;
+    readonly sourceViewId: TranscriptViewId;
+    readonly requestAt: string;
+    readonly recipients: readonly ChatId[];
+    readonly hideSender: boolean;
+    readonly body: string;
+  }): void;
+}
+
 const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
+  request: () => undefined,
+});
+
+const DISABLED_INTER_AGENT_MESSAGE_SINK: InterAgentMessageRequestSink = Object.freeze({
   request: () => undefined,
 });
 
@@ -147,6 +172,7 @@ export class TranscriptLedgerService {
   readonly #serverInstanceId: string;
   readonly #onListenerError: (error: unknown) => void;
   readonly #chatIdRequests: ChatIdRequestSink;
+  readonly #interAgentMessages: InterAgentMessageRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -162,6 +188,7 @@ export class TranscriptLedgerService {
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
     this.#chatIdRequests = options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK;
+    this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -671,10 +698,13 @@ export class TranscriptLedgerService {
     switch (event.type) {
       case 'rows': {
         const drafts: LedgerRowDraft[] = [];
-        let discoveryRequestAt: string | undefined;
+        const commands: Array<{
+          readonly command: GarconEdgeCommand;
+          readonly at: string;
+        }> = [];
         for (const row of event.rows) {
-          const request = transformChatIdRequest(row.message);
-          const message = request ? request.message : row.message;
+          const transformed = extractGarconCommands(row.message);
+          const message = transformed ? transformed.message : row.message;
           if (message) {
             drafts.push({
               kind: 'provider-row',
@@ -683,21 +713,52 @@ export class TranscriptLedgerService {
               providerMeta: row.providerMeta ?? null,
             });
           }
-          if (!request) continue;
-          discoveryRequestAt ??= row.message.timestamp;
-          drafts.push(chatIdRequestNoticeDraft(row.message.timestamp));
+          if (!transformed) continue;
+          for (const command of transformed.commands) {
+            commands.push({ command, at: row.message.timestamp });
+            drafts.push(command.type === 'get-chat-id'
+              ? chatIdRequestNoticeDraft(row.message.timestamp)
+              : interAgentSendRequestNoticeDraft(row.message.timestamp, {
+                  recipients: command.recipients,
+                  hideSender: command.hideSender,
+                  body: command.body,
+                }));
+          }
+          for (const _issue of transformed.issues) {
+            drafts.push({
+              kind: 'notice',
+              at: row.message.timestamp,
+              message: MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
+              detail: { title: INTER_AGENT_MESSAGE_NOTICE_TITLE },
+              providerMeta: null,
+            });
+          }
         }
+        let committed: readonly LedgerRow[] = [];
         if (drafts.length > 0) {
-          const rows = this.#store.append(chatId, viewId, drafts);
-          this.#notify({ type: 'rows', chatId, viewId, rows });
+          committed = this.#store.append(chatId, viewId, drafts);
         }
-        if (discoveryRequestAt !== undefined) {
-          this.#chatIdRequests.request({
-            chatId,
-            viewId,
-            runId: this.#activeRuns.get(chatId) ?? null,
-            at: discoveryRequestAt,
-          });
+        for (const { command, at } of commands) {
+          if (command.type === 'get-chat-id') {
+            this.#chatIdRequests.request({
+              chatId,
+              viewId,
+              runId: this.#activeRuns.get(chatId) ?? null,
+              at,
+            });
+          } else {
+            this.#interAgentMessages.request({
+              sourceChatId: chatId,
+              sourceViewId: viewId,
+              requestAt: at,
+              recipients: command.recipients,
+              hideSender: command.hideSender,
+              body: command.body,
+            });
+          }
+        }
+        if (committed.length > 0) {
+          this.#notify({ type: 'rows', chatId, viewId, rows: committed });
         }
         return;
       }

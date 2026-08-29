@@ -6,6 +6,9 @@ export const GARCON_SEND_MESSAGE_PREFIX = '<garcon-send-message';
 export const GARCON_SEND_MESSAGE_CLOSE = '</garcon-send-message>';
 export const GARCON_MESSAGE_OPEN = '<garcon-message>';
 export const GARCON_MESSAGE_CLOSE = '</garcon-message>';
+export const INTER_AGENT_MESSAGE_NOTICE_TITLE = 'Inter-agent message';
+export const MALFORMED_INTER_AGENT_MESSAGE_CONTENT =
+  'Garcon could not parse an inter-agent message command.';
 export const MAX_GARCON_MESSAGE_RECIPIENTS = 16;
 export const GARCON_MESSAGE_BODY_MAX_BYTES = 60 * 1024;
 

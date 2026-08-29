@@ -1,36 +1,9 @@
 import { parseChatId, type ChatId } from './chat-id.js';
-import {
-  AssistantMessage,
-  type ChatMessage,
-} from './chat-types.js';
 import type { ChatIdDiscoveryFailureReason } from './transcript-notice-details.js';
 
-export const CHAT_ID_DISCOVERY_REQUEST_MARKER = '<garcon-get-chat-id />';
 export const CHAT_ID_DISCLOSURE_OPEN = '<garcon-chat-id>';
 export const CHAT_ID_DISCLOSURE_CLOSE = '</garcon-chat-id>';
 export const CHAT_ID_DISCOVERY_NOTICE_TITLE = 'Chat ID auto-discovery';
-
-export interface ChatIdRequestTransform {
-  readonly message: AssistantMessage | null;
-}
-
-export function transformChatIdRequest(
-  message: ChatMessage,
-): ChatIdRequestTransform | null {
-  if (
-    message.type !== 'assistant-message'
-    || !message.content.startsWith(CHAT_ID_DISCOVERY_REQUEST_MARKER)
-  ) {
-    return null;
-  }
-
-  const content = message.content
-    .slice(CHAT_ID_DISCOVERY_REQUEST_MARKER.length)
-    .trimStart();
-  return {
-    message: content ? new AssistantMessage(message.timestamp, content) : null,
-  };
-}
 
 export function chatIdDisclosureContent(chatId: ChatId): string {
   return `${CHAT_ID_DISCLOSURE_OPEN}${chatId}${CHAT_ID_DISCLOSURE_CLOSE}`;

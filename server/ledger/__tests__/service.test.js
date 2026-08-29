@@ -94,6 +94,116 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  describe('Garcon command publication', () => {
+    it('commits cleaned output and private command evidence before ordered dispatch', async () => {
+      const dispatches = [];
+      const chatIdRequests = mock((input) => dispatches.push({ type: 'get-chat-id', input }));
+      const interAgentMessages = mock((input) => {
+        dispatches.push({ type: 'send-message', input });
+      });
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        ledger.beginRun('chat-1', 'run-1');
+        const notifications = [];
+        ledger.subscribe((event) => notifications.push(event));
+        interAgentMessages.mockImplementation((input) => {
+          expect(ledger.currentRows('chat-1')).toHaveLength(3);
+          expect(notifications).toEqual([]);
+          dispatches.push({ type: 'send-message', input });
+        });
+
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{
+            message: new AssistantMessage(
+              TS,
+              '<garcon-get-chat-id />\n'
+                + '<garcon-send-message to="1787974832309199, 1787973671383699" hide_sender="true">\n'
+                + 'message body\n'
+                + '</garcon-send-message>\n'
+                + 'Continuing the response.',
+            ),
+          }],
+        });
+
+        expect(dispatches).toEqual([
+          {
+            type: 'get-chat-id',
+            input: {
+              chatId: 'chat-1',
+              viewId: expect.any(String),
+              runId: 'run-1',
+              at: TS,
+            },
+          },
+          {
+            type: 'send-message',
+            input: {
+              sourceChatId: 'chat-1',
+              sourceViewId: expect.any(String),
+              requestAt: TS,
+              recipients: ['1787974832309199', '1787973671383699'],
+              hideSender: true,
+              body: 'message body',
+            },
+          },
+        ]);
+        expect(ledger.currentRows('chat-1')).toMatchObject([
+          {
+            ordinal: 1,
+            kind: 'provider-row',
+            message: { type: 'assistant-message', content: 'Continuing the response.' },
+          },
+          { ordinal: 2, kind: 'notice', detail: { type: 'chat-id-request' } },
+          {
+            ordinal: 3,
+            kind: 'notice',
+            detail: {
+              type: 'inter-agent-send-request',
+              recipients: ['1787974832309199', '1787973671383699'],
+              hideSender: true,
+              body: 'message body',
+            },
+          },
+        ]);
+        await tick();
+        expect(notifications).toHaveLength(1);
+      }, {
+        chatIdRequests: { request: chatIdRequests },
+        interAgentMessages: { request: interAgentMessages },
+      });
+    });
+
+    it('keeps malformed commands as provider output and appends a visible diagnostic', async () => {
+      const requests = mock(() => undefined);
+      await withService(async ({ ledger }) => {
+        ledger.initializeChat('chat-1');
+        const lease = ledger.openProducer('chat-1', 'test');
+        const content = '<garcon-send-message to="invalid" hide_sender="false">body</garcon-send-message>';
+
+        lease.sink.publish({
+          type: 'rows',
+          rows: [{ message: new AssistantMessage(TS, content) }],
+        });
+
+        expect(requests).not.toHaveBeenCalled();
+        expect(ledger.currentRows('chat-1')).toMatchObject([
+          {
+            kind: 'provider-row',
+            message: { type: 'assistant-message', content },
+          },
+          {
+            kind: 'notice',
+            at: TS,
+            message: 'Garcon could not parse an inter-agent message command.',
+            detail: { title: 'Inter-agent message' },
+          },
+        ]);
+      }, { interAgentMessages: { request: requests } });
+    });
+  });
+
   it('[TLV5-L03.01-CORE-UNIT-01] commits producer events synchronously and notifies after publish returns', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('chat-1');
