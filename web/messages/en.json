@@ -1779,5 +1779,7 @@
 	"file_session_placement_window": "Window",
 	"workspace_window_number": "Window {number}",
 	"workspace_close_window": "Close window",
-	"workspace_close_window_disabled": "At least one window must remain"
+	"workspace_close_window_disabled": "At least one window must remain",
+	"workspace_close_window_final_chat_disabled": "At least one Chat view must remain",
+	"workspace_close_window_unavailable": "This window cannot be closed right now"
 }

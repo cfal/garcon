@@ -184,6 +184,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		const toolbar = screen.getByRole('toolbar');
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
+		expect(toolbar.classList.contains('bg-accent/50')).toBe(false);
 		expect(screen.getByText('Chat A')).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
@@ -203,7 +204,8 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
 	});
 
-	it('uses a stronger title-bar background only for the current window', () => {
+	it('uses a stronger title-bar background only for the current window in a multi-window layout', () => {
+		runtime.windowCount = 2;
 		const current = renderTitleBar(workspaceWindow([chatSurface.id])).container.querySelector(
 			'[data-workspace-window-titlebar]',
 		)!;
@@ -216,6 +218,26 @@ describe('WorkspaceWindowTitleBar', () => {
 		).container.querySelector('[data-workspace-window-titlebar]')!;
 		expect(inactive.classList.contains('bg-muted/30')).toBe(true);
 		expect(inactive.classList.contains('bg-accent/50')).toBe(false);
+	});
+
+	it('keeps the fullscreen title bar muted', () => {
+		runtime.windowCount = 2;
+		runtime.fullscreenWindowId = 'window-main';
+		const toolbar = renderTitleBar(workspaceWindow([chatSurface.id])).container.querySelector(
+			'[data-workspace-window-titlebar]',
+		)!;
+
+		expect(toolbar.classList.contains('bg-muted/30')).toBe(true);
+		expect(toolbar.classList.contains('bg-accent/50')).toBe(false);
+	});
+
+	it('describes the final Chat view close block', () => {
+		runtime.windowCount = 2;
+		const close = renderTitleBar(workspaceWindow([chatSurface.id])).getByRole('button', {
+			name: m.workspace_close_window(),
+		});
+
+		expect(close.title).toBe(m.workspace_close_window_final_chat_disabled());
 	});
 
 	it('targets reversible fullscreen and close at the exact window', async () => {

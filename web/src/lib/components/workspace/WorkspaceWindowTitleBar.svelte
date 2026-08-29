@@ -4,7 +4,11 @@
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import X from '@lucide/svelte/icons/x';
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
-	import type { ActiveSurfaceKind, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
+	import {
+		workspaceChatViewCount,
+		type ActiveSurfaceKind,
+		type WorkspaceWindowNode,
+	} from '$lib/workspace/surface-types.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
@@ -33,8 +37,9 @@
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	let visibleSurfaceIds = $state.raw<readonly string[]>([]);
+	const snapshot = $derived(workspace.layout.snapshot);
 	const hasTabBar = $derived(workspaceWindow.tabs.order.length > 1);
-	const activeSurface = $derived(workspace.layout.surface(workspaceWindow.tabs.activeId));
+	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
 	const activeKind = $derived.by((): ActiveSurfaceKind => {
 		if (!activeSurface) return 'file';
 		return activeSurface.type === 'singleton' ? activeSurface.kind : activeSurface.type;
@@ -44,13 +49,24 @@
 			? (sessions.byId[activeSurface.chatId] ?? null)
 			: null,
 	);
-	const fullscreen = $derived(workspace.layout.snapshot.fullscreenWindowId === workspaceWindow.id);
+	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
+	const showActiveTreatment = $derived(isCurrent && workspace.windowCount > 1 && !fullscreen);
 	const hiddenSurfaceIds = $derived(
 		hasTabBar
 			? workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId))
 			: [],
 	);
 	const closeDisabled = $derived(workspace.isWindowCloseBlocked(workspaceWindow.id));
+	const ownsFinalChatView = $derived(
+		workspaceChatViewCount(snapshot) === 1 &&
+			workspaceWindow.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat'),
+	);
+	const closeTitle = $derived.by(() => {
+		if (!closeDisabled) return m.workspace_close_window();
+		if (workspace.windowCount === 1) return m.workspace_close_window_disabled();
+		if (ownsFinalChatView) return m.workspace_close_window_final_chat_disabled();
+		return m.workspace_close_window_unavailable();
+	});
 
 	function noteFocus(): void {
 		workspace.noteWindowChromeFocus(workspaceWindow.id, workspaceWindow.tabs.activeId);
@@ -78,7 +94,7 @@
 	data-workspace-window-titlebar={workspaceWindow.id}
 	class={cn(
 		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-muted/30 px-1.5 transition-colors',
-		isCurrent && 'bg-accent/50',
+		showActiveTreatment && 'bg-accent/50',
 	)}
 	class:h-8={!hasTabBar}
 	class:h-10={hasTabBar}
@@ -143,7 +159,7 @@
 			type="button"
 			class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
 			aria-label={m.workspace_close_window()}
-			title={closeDisabled ? m.workspace_close_window_disabled() : m.workspace_close_window()}
+			title={closeTitle}
 			disabled={closeDisabled}
 			data-workspace-window-close={workspaceWindow.id}
 			onclick={closeWindow}
