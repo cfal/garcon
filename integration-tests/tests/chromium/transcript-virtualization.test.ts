@@ -1620,10 +1620,33 @@ async function workspaceWindowIds(page: Page): Promise<string[]> {
 }
 
 async function openNewWorkspaceWindow(page: Page, name: string): Promise<string> {
-  const workspaceWindows = page.locator('[data-workspace-window-id]');
   const existingWindowIds = new Set(await workspaceWindowIds(page));
-  await page.locator('[data-workspace-new-window-menu]').click();
+  const sourceWindow = page.locator('[data-workspace-window-current="true"]');
+  const sourceWindowId = await sourceWindow.getAttribute('data-workspace-window-id');
+  const previousActiveSurfaceId = await sourceWindow.getAttribute(
+    'data-workspace-window-active-surface',
+  );
+  if (!sourceWindowId) throw new Error('Current workspace window has no ID.');
+  await openCurrentWorkspaceAddMenu(page);
   await clickMenuItem(page, name);
+  await page.waitForFunction(
+    ({ expectedWindowId, previousSurfaceId }) => {
+      const workspaceWindow = document.querySelector<HTMLElement>(
+        `[data-workspace-window-id="${expectedWindowId}"]`,
+      );
+      return (
+        workspaceWindow?.dataset.workspaceWindowCurrent === 'true' &&
+        workspaceWindow.dataset.workspaceWindowActiveSurface !== previousSurfaceId
+      );
+    },
+    { expectedWindowId: sourceWindowId, previousSurfaceId: previousActiveSurfaceId },
+  );
+  await openCurrentWorkspaceTabActionsMenu(page);
+  await page
+    .locator(
+      `[data-workspace-window-menu="${sourceWindowId}"] [data-workspace-window-tab-action="move-new-right"]`,
+    )
+    .click();
   await page.waitForFunction(
     (expectedCount) =>
       document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
@@ -4750,10 +4773,10 @@ async function verifyPermissionDraftPersistence(
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-	await waitForTranscriptReady(fixture.page);
+  await waitForTranscriptReady(fixture.page);
 
-	const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
-	await postgres.waitFor({ state: 'visible' });
+  const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
+  await postgres.waitFor({ state: 'visible' });
   await postgres.check();
   expect(await postgres.isChecked()).toBe(true);
   const permissionItem = fixture.page.locator(ITEM_SELECTOR).filter({ has: postgres });

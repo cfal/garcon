@@ -510,15 +510,106 @@ export class SpaDriver {
     }, surfaceId);
   }
 
-  async openNewWorkspaceWindow(name: string): Promise<void> {
-    await this.#page.evaluate(() => {
-      const trigger = document.querySelector<HTMLButtonElement>('[data-workspace-new-window-menu]');
-      if (!trigger) throw new Error('Missing new workspace window menu.');
-      if (trigger.disabled) throw new Error('New workspace window menu is disabled.');
-      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-    });
+  async openNewWorkspaceWindow(name: string): Promise<string> {
+    const sourceWindowId = await this.currentWorkspaceWindowId();
+    const existingWindowIds = new Set(await this.workspaceWindowIds());
+    const previousActiveSurfaceId = await this.#page.$eval(
+      `[data-workspace-window-id="${sourceWindowId}"]`,
+      (element) => (element as HTMLElement).dataset.workspaceWindowActiveSurface ?? null,
+    );
+    await this.openWorkspaceWindowAddMenu(sourceWindowId);
     await this.waitForMenuItemEnabled(name);
     await this.clickMenuItem(name);
+    await this.#page.waitForFunction(
+      ({ expectedWindowId, previousSurfaceId }) => {
+        const workspaceWindow = [
+          ...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]'),
+        ].find((element) => element.dataset.workspaceWindowId === expectedWindowId);
+        return (
+          workspaceWindow?.dataset.workspaceWindowCurrent === 'true' &&
+          workspaceWindow.dataset.workspaceWindowActiveSurface !== previousSurfaceId
+        );
+      },
+      { timeout: 20_000 },
+      { expectedWindowId: sourceWindowId, previousSurfaceId: previousActiveSurfaceId },
+    );
+    await this.openWorkspaceWindowActions(sourceWindowId);
+    await this.#page.waitForFunction(
+      (expectedWindowId) => {
+        const menu = document.querySelector<HTMLElement>(
+          `[data-workspace-window-menu="${expectedWindowId}"]`,
+        );
+        const item = menu?.querySelector<HTMLElement>(
+          '[data-workspace-window-tab-action="move-new-right"]',
+        );
+        return item?.getAttribute('aria-disabled') !== 'true';
+      },
+      { timeout: 20_000 },
+      sourceWindowId,
+    );
+    await this.#page.evaluate((expectedWindowId) => {
+      const menu = document.querySelector<HTMLElement>(
+        `[data-workspace-window-menu="${expectedWindowId}"]`,
+      );
+      const item = menu?.querySelector<HTMLElement>(
+        '[data-workspace-window-tab-action="move-new-right"]',
+      );
+      if (!item) throw new Error(`Missing move-to-new-window action: ${expectedWindowId}`);
+      item.click();
+    }, sourceWindowId);
+    await this.waitForWorkspaceWindowCount(existingWindowIds.size + 1);
+    const openedWindowId = (await this.workspaceWindowIds()).find(
+      (windowId) => !existingWindowIds.has(windowId),
+    );
+    if (!openedWindowId) throw new Error(`New workspace window did not open for ${name}.`);
+    await this.#page.waitForFunction(
+      (expectedWindowId) =>
+        document
+          .querySelector('[data-workspace-window-current="true"]')
+          ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+      { timeout: 20_000 },
+      openedWindowId,
+    );
+    return openedWindowId;
+  }
+
+  async moveActiveWorkspaceTabToWindow(
+    sourceWindowId: string,
+    destinationWindowId: string,
+  ): Promise<void> {
+    const destinationIndex = (await this.workspaceWindowIds())
+      .filter((windowId) => windowId !== sourceWindowId)
+      .indexOf(destinationWindowId);
+    if (destinationIndex < 0) {
+      throw new Error(`Missing workspace move destination: ${destinationWindowId}`);
+    }
+    await this.openWorkspaceWindowActions(sourceWindowId);
+    await this.#page.waitForFunction(
+      ({ expectedWindowId, expectedIndex }) => {
+        const menu = document.querySelector<HTMLElement>(
+          `[data-workspace-window-menu="${expectedWindowId}"]`,
+        );
+        const item = menu?.querySelectorAll<HTMLElement>(
+          '[data-workspace-window-tab-action="move-to-window"]',
+        )[expectedIndex];
+        return item != null && item.getAttribute('aria-disabled') !== 'true';
+      },
+      { timeout: 20_000 },
+      { expectedWindowId: sourceWindowId, expectedIndex: destinationIndex },
+    );
+    await this.#page.evaluate(
+      ({ expectedWindowId, expectedIndex }) => {
+        const menu = document.querySelector<HTMLElement>(
+          `[data-workspace-window-menu="${expectedWindowId}"]`,
+        );
+        const item = menu?.querySelectorAll<HTMLElement>(
+          '[data-workspace-window-tab-action="move-to-window"]',
+        )[expectedIndex];
+        if (!item) throw new Error(`Missing workspace move destination: ${expectedWindowId}`);
+        item.click();
+      },
+      { expectedWindowId: sourceWindowId, expectedIndex: destinationIndex },
+    );
   }
 
   async selectWorkspaceWindowSurface(name: string, windowId?: string): Promise<void> {
