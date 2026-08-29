@@ -56,6 +56,7 @@ import {
 } from './chats/carryover-compaction.js';
 import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
 import { ChatIdDiscoveryController } from './chats/chat-id-discovery-controller.js';
+import { InterAgentMessageController } from './chats/inter-agent-message-controller.js';
 import { defaultAgentIntegrations } from './agents/default-agent-integrations.js';
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
@@ -112,6 +113,7 @@ import {
   TranscriptLedgerStore,
   TranscriptReloadService,
   TranscriptViewReader,
+  transcriptViewId,
 } from './ledger/index.js';
 
 // Route factory
@@ -175,6 +177,14 @@ type ServeOptionsWithConnectionLimit = Parameters<
 >[0] & {
   maxConnections?: number;
 };
+
+function structuredErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { readonly code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return error instanceof Error ? error.name : 'UNKNOWN';
+}
 
 export async function startServer(): Promise<void> {
   process.on('unhandledRejection', (err: unknown) => {
@@ -281,9 +291,16 @@ export async function startServer(): Promise<void> {
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
+    let interAgentMessages: InterAgentMessageController | null = null;
     const requireExecutionQueue = (): ChatExecutionCoordinator => {
       if (!queue) throw new Error('Chat execution coordinator is not initialized');
       return queue;
+    };
+    const requireInterAgentMessages = (): InterAgentMessageController => {
+      if (!interAgentMessages) {
+        throw new Error('Inter-agent message controller is not initialized');
+      }
+      return interAgentMessages;
     };
     const transcriptStore = new TranscriptLedgerStore(
       path.join(workspaceDir, 'transcript-ledgers'),
@@ -298,6 +315,9 @@ export async function startServer(): Promise<void> {
       },
       chatIdRequests: {
         request: (input) => chatIdDiscovery.request(input),
+      },
+      interAgentMessages: {
+        request: (input) => requireInterAgentMessages().request(input),
       },
     });
     const chatIdDiscovery = new ChatIdDiscoveryController({
@@ -327,10 +347,12 @@ export async function startServer(): Promise<void> {
       if (event.type !== 'view-replaced') return;
       preparedCarryover.discard(event.chatId);
       chatIdDiscovery.discard(event.chatId);
+      interAgentMessages?.discardSource(event.chatId);
     });
     chatRegistry.onChatRemoved((chatId) => {
       preparedCarryover.discard(chatId);
       chatIdDiscovery.discard(chatId);
+      interAgentMessages?.discardSource(chatId);
     });
     const agentOwnership = new AgentOwnershipJournal({
       workspaceDir,
@@ -536,7 +558,29 @@ export async function startServer(): Promise<void> {
       (chatId) => Boolean(chatRegistry.getChat(chatId)),
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
+      (chatId, entry) => {
+        transcriptLedger.appendNotice(chatId, transcriptViewId(entry.transcriptViewId), {
+          ...entry.receipt,
+          at: entry.createdAt,
+        });
+      },
     );
+    interAgentMessages = new InterAgentMessageController({
+      registry: chatRegistry,
+      adoption: transcriptAdoption,
+      execution: queue,
+      notices: transcriptLedger,
+      chatMutationLock,
+      onDisposition(event) {
+        logger.debug('Inter-agent message recipient disposition', event);
+      },
+      onError(error, context) {
+        logger.warn('Inter-agent message routing failed', {
+          ...context,
+          errorCode: structuredErrorCode(error),
+        });
+      },
+    });
     executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({
       ledger: transcriptLedger,
