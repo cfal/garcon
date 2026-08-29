@@ -68,7 +68,12 @@ function createRoutesFixture({
     runReservedTurn: mock(async () => undefined),
     abortForChatDeletion: mock(async () => true),
     triggerDrain: mock(async () => undefined),
-    readChatExecutionControl: mock(async () => ({ entries: [], pause: null, version: 0 })),
+    readChatExecutionControl: mock(async () => ({
+      entries: [],
+      controlEntries: [],
+      pause: null,
+      version: 0,
+    })),
     enqueueChat: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], pause: null, version: 1 } })),
     dequeueChat: mock(async () => ({ entries: [], pause: null, version: 2 })),
     clearChatQueue: mock(async () => ({ entries: [], pause: null, version: 2 })),

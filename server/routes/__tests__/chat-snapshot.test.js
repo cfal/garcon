@@ -63,6 +63,7 @@ function fixture(overrides = {}) {
             transcriptViewId: 'generation-1',
           },
         }],
+        controlEntries: [],
         recentlyDispatched: [],
         appliedCommands: [{
           key: 'private-command',

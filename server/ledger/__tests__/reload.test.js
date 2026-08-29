@@ -382,7 +382,7 @@ async function withReload(run, options = {}) {
     reserveTranscriptSnapshot: (chatId) => ({ chatId, reservationId: 'reservation-1' }),
     releaseTranscriptSnapshot: async () => undefined,
     async readChatExecutionControl() {
-      return { entries: this.queueEntries };
+      return { entries: this.queueEntries, controlEntries: [] };
     },
   };
   const registry = {

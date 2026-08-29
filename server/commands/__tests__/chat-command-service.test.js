@@ -94,6 +94,7 @@ function storedQueue(entries = [], overrides = {}) {
   return {
     serverInstanceId: 'server-instance-test',
     entries,
+    controlEntries: [],
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,

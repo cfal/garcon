@@ -50,7 +50,19 @@ function chatHandlerDeps() {
       pageNewestOrdinal: 0,
       hasMore: false,
     }),
-    queue: { readChatExecutionControl: async () => ({}) },
+    queue: {
+      readChatExecutionControl: async () => ({
+        serverInstanceId: 'server-instance-test',
+        entries: [],
+        controlEntries: [],
+        recentlyDispatched: [],
+        appliedCommands: [],
+        pause: null,
+        reorderRevision: 0,
+        version: 0,
+        updatedAt: null,
+      }),
+    },
     transientFeeds: {
       snapshot: (chatId, transcriptViewId) => ({
         serverInstanceId: 'server-instance-test',

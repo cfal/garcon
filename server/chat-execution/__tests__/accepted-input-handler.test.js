@@ -23,6 +23,7 @@ function control(overrides = {}) {
   return {
     version: 0,
     entries: [],
+    controlEntries: [],
     pause: null,
     appliedCommands: [],
     recentlyDispatched: [],
