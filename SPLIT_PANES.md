@@ -12,9 +12,9 @@ Garcon will use one desktop windowing model for Chat, Git, Commit, Pull Requests
 
 The binary layout tree remains as an internal geometry representation because it is the simplest way to express mixed horizontal and vertical arrangements. Its branch nodes are **partitions**, not user-visible split panes. Product actions never say “split pane.” They say “open in new window” when the source presentation remains and “move to new window” when a tab relocates.
 
-Chat becomes a window-local view instead of the single global `singleton:chat` surface. Selecting a chat in the chat list replaces the chat shown by the current window without changing chat views in other windows. Dragging a chat onto any window creates a new adjacent window. One interactive `ConversationWorkspace` remains mounted and moves between focused chat windows; other visible chat windows use the existing transcript-preview model.
+Chat becomes a window-local view instead of the single global `singleton:chat` surface. Selecting a chat in the chat list replaces the chat shown by the current window without changing chat views in other windows. Center-dropping a chat-list item adds or replaces the Chat view in that exact window, while edge-dropping it creates a new adjacent Chat window. One interactive `ConversationWorkspace` remains mounted and moves between focused chat windows; other visible chat windows use the existing transcript-preview model.
 
-Every desktop window has one in-flow title bar with the same adaptive tab strip, including one-tab windows. This gives every view the same direct tab affordance and drag source. A Chat tab whose session is processing replaces its normal Chat icon with the existing pulsing semantic-blue indicator, including when the tab or window is inactive. The right side always shows a `+` add menu, an active-tab actions menu, and fullscreen; Close Window appears only when at least two windows exist. Adjacent windows have one-pixel separators. Dedicated semantic tokens make title/tab bars clearly distinct: dark themes use an almost-black active bar and a lighter inactive bar, while light themes use a dark grey active bar and a lighter inactive bar. The selected tab in an inactive window uses a separate muted background from the selected tab in the current window. There is no active-window border. Fullscreen is an ephemeral projection: it hides the other windows without mutating their topology, and exiting restores the exact prior layout.
+Every desktop window has one in-flow title bar with the same adaptive tab strip, including one-tab windows. This gives every view the same direct tab affordance and drag source. A Chat tab whose session is processing replaces its normal Chat icon with the existing pulsing semantic-blue indicator, including when the tab or window is inactive. The right side always shows a `+` add menu, an active-tab actions menu, and fullscreen; Close Window appears only when at least two windows exist. Adjacent windows have one-pixel separators. Dedicated semantic tokens make title/tab bars clearly distinct: dark themes use an almost-black active bar and a lighter inactive bar, while light themes use a dark grey active bar and a lighter inactive bar. Multi-tab windows give the selected tab in an inactive window a separate muted background from the selected tab in the current window; a one-tab window leaves its sole selected trigger transparent so the bar is not visually boxed twice. There is no active-window border. Fullscreen is an ephemeral projection: it hides the other windows without mutating their topology, and exiting restores the exact prior layout.
 
 ## Terminology
 
@@ -25,7 +25,7 @@ Every desktop window has one in-flow title bar with the same adaptive tab strip,
 | Tab | A view placement owned by exactly one workspace window. There is no global tab collection. |
 | Active tab | The one rendered, interactive view within a window. |
 | Partition | An internal binary-tree branch that positions two child subtrees and owns a resize ratio. It has no direct product affordance. |
-| Open in new window | Creates an additional presentation in a new workspace-window leaf while retaining the source. Sidebar Chat drag/context actions use this language. |
+| Open in new window | Creates an additional presentation in a new workspace-window leaf while retaining the source. Sidebar Chat edge-drag and context actions use this language. |
 | Move to new window | Relocates an existing tab into a new workspace-window leaf. Tab actions use this language. |
 | Chat view | A stable, window-owned tab whose `chatId` can be replaced without remounting the live Chat workspace. |
 | Live Chat workspace | The single mounted `ConversationWorkspace` used by the focused visible Chat view. |
@@ -55,7 +55,7 @@ Keeping both layout systems would preserve conflicting ownership rules and make 
 - Remove “main view,” “pane,” and “split pane” as workspace product concepts.
 - Make global open commands create a new window and window-local open commands create a tab in that window.
 - Make chat-list selection replace the Chat view in the current window while leaving other windows unchanged.
-- Make a chat-list drag onto any workspace window create a new adjacent Chat window.
+- Make a chat-list center drop add or replace Chat in the exact target window and an edge drop create a new adjacent Chat window.
 - Give every desktop window the same always-present tab strip, add menu, actions menu, and fullscreen control, plus Close Window whenever several windows exist.
 - Preserve adaptive tab labels and a menu path to tabs that overflow even in icon-only mode.
 - Make Chat tabs follow the same existing-window and directional move semantics as other tabs while preserving window-derived Chat surface identity.
@@ -87,7 +87,7 @@ Keeping both layout systems would preserve conflicting ownership rules and make 
 - Focusing a one-tab Chat window keeps the title/tab bar at 40 px; the live Chat layer always begins at the universal `top-10` body inset and never overlaps the bar.
 - Every adjacent horizontal or vertical window boundary has one one-pixel `border-border` separator.
 - Title/tab bars use dedicated semantic backgrounds: approximately 93% lightness inactive and 84% active in light themes, and 7% inactive and 1% active in dark themes. Colorblind variants inherit their corresponding base-theme values.
-- Selected tabs use approximately 96% lightness in the current light-theme window and 88% in inactive windows, or 18% in the current dark-theme window and 12% in inactive windows. No active-window border renders in any theme or window-count state.
+- Selected tabs in multi-tab windows use approximately 96% lightness in the current light-theme window and 88% in inactive windows, or 18% in the current dark-theme window and 12% in inactive windows. A one-tab window applies no selected-tab background to its sole trigger. No active-window border renders in any theme or window-count state.
 - The title bar always exposes a `+` add menu, an active-tab actions menu, and fullscreen. Close Window is absent for the sole remaining window; with several windows it is visible and disabled whenever closure would remove the final Chat view or violate a transient destruction guard.
 - The command palette opens Terminal, Git, Git History, Git Compare, Pull Requests, Files, and Commit in a new window. The sidebar has no separate New Window button beside Search.
 - The same commands in a window’s `+` menu open as tabs in that exact window, including new and unplaced terminals. Every eligible portable-view command is grouped under the localized “Open views” label in canonical `Git Workbench → Git History → Git Compare → Pull Requests → Files → Commit` order, before the “Open terminals” section, even when a singleton currently lives in another window.
@@ -95,14 +95,15 @@ Keeping both layout systems would preserve conflicting ownership rules and make 
 - Selecting chat B while window 1 currently owns chat A changes only window 1’s Chat view to B and activates it.
 - Selecting a chat while the current window has no Chat tab inserts a stable Chat tab at index zero and activates it.
 - Focusing the chat list does not change which workspace window receives a selected chat.
-- Dragging any chat-list row onto any window creates a new adjacent Chat window, regardless of the target window’s active view.
+- Center-dropping any chat-list row onto a Chat-less window adds and activates its stable Chat tab; center-dropping onto a window that already has Chat replaces and activates that presentation. The result label is localized “Add as tab” or “Replace existing chat,” respectively.
+- Edge-dropping any chat-list row onto any window creates a new adjacent Chat window, regardless of the target window’s active view.
 - Edge-dropping a workspace tab creates a new window. Center-dropping it adds it as a tab to the target window.
 - A Chat tab with a non-null `chatId` exposes Move to every other window. A Chat-less destination receives and activates it; a destination with a Chat view replaces that presentation and activates/focuses it. The source Chat view is removed, and an empty source window collapses.
 - A non-empty Chat tab is draggable through the same tab-strip, center-window, and edge-window targets as ordinary tabs. A center or tab-strip drop into a Chat-less window receives the Chat; a destination that already has Chat replaces that presentation and shows the localized “Replace existing chat” result instead of “Add as tab.” Moving the last tab out collapses the emptied source window atomically.
 - A tab move publishes the destination as current before layout/route observers run. Collapsing the focused source window never exposes an intermediate surviving window as current or lets route synchronization replace the moved Chat.
 - Every tab-menu and drag-result label, including “Add as tab” and “Replace existing chat,” comes from the Paraglide message catalog; components contain no user-visible fallback literals.
 - Chat directional actions move the Chat view instead of copying it. They are disabled when Chat is the source window’s sole tab because creating and collapsing an adjacent window has no visible geometric result; the reducer also treats that case as an identity no-op.
-- Empty Chat views do not expose cross-window or directional movement. The final Chat view cannot close. Sidebar Chat drag/context “Open in New Window” actions continue to create an additional presentation.
+- Empty Chat views do not expose cross-window or directional movement. The final Chat view cannot close. Sidebar Chat edge-drag and context “Open in New Window” actions continue to create an additional presentation.
 - Every processing Chat tab replaces its normal Chat icon with the pulsing semantic-blue processing indicator, including inactive tabs and background windows; idle, stopping, or missing-session tabs use the normal icon.
 - Entering fullscreen for window 2 leaves every window, tab, MRU entry, partition, ratio, and surface owner unchanged while presenting only window 2. Exiting fullscreen restores the same layout and keyed window instances.
 - The cycle-window-focus shortcut is inert during fullscreen and never activates a hidden window or exits fullscreen.
@@ -279,7 +280,8 @@ Direct browser navigation to `/chat/:id` replaces the current window’s Chat vi
 
 | Origin | Command result |
 | --- | --- |
-| Sidebar Chat context action or drag | Open an additional Chat presentation in a new window; retain the source presentation. |
+| Sidebar Chat context action or edge drop | Open an additional Chat presentation in a new window; retain the source presentation. |
+| Sidebar Chat center drop | Add or replace the Chat presentation in that exact window and activate it. |
 | Command palette global “Open …” | Open in a new window. |
 | Window title-bar `+` menu | Open as a tab in that exact window. |
 | Existing singleton already owns a window/tab | Focus it for a global open; move and activate it for an explicit window-local open, matching current singleton uniqueness. |
@@ -287,22 +289,23 @@ Direct browser navigation to `/chat/:id` replaces the current window’s Chat vi
 | File preference “New window” | Open in a new window adjacent to the origin/current window. |
 | File preference “Dialog” | Preserve the existing file dialog projection. |
 
-The command palette calls coordinator methods such as `openSingletonInNewWindow`, `createTerminalInNewWindow`, and `openFileInNewWindow` directly. The default placement edge is right. Direction-specific tab and context-menu actions are “Move to New Window Left/Right/Above/Below.” Sidebar Chat copy actions retain “Open in New Window.”
+The command palette calls coordinator methods such as `openSingletonInNewWindow`, `createTerminalInNewWindow`, and `openFileInNewWindow` directly. The default placement edge is right. Direction-specific tab and context-menu actions are “Move to New Window Left/Right/Above/Below.” Sidebar Chat context and edge-copy actions retain “Open in New Window”; center drops use localized “Add as tab” or “Replace existing chat.”
 
 At four windows, new-window commands are disabled with “4 windows max.” They never silently degrade to opening a tab.
 
 ### Chat drag onto any window
 
-Click and drag intentionally have different semantics:
+Chat-list click and drop position intentionally have distinct semantics:
 
 - Click a chat-list row: replace the current window’s Chat view.
-- Drag a chat-list row onto any workspace window: create a new Chat window.
+- Center-drop a chat-list row: add or replace the Chat view in that exact target window and activate it.
+- Edge-drop a chat-list row: create a new adjacent Chat window.
 
 The complete target window, including title bar and content, participates in the chat drop. The active tab can be Chat, Git, Files, a file, Commit, Pull Requests, or Terminal. A Chat drop never depends on a conversation-feed element.
 
-For a Chat payload, the target is divided into four directional new-window regions. The dominant pointer vector from the target center chooses left, right, top, or bottom; an exact-center tie chooses right. There is no center “replace” outcome for Chat drag because click already owns replacement. The preview always shows the half occupied by the new window.
+For a Chat payload, the target uses the same five regions as a surface tab. The center region resolves against the exact destination: a Chat-less window shows localized “Add as tab,” while a window that already owns Chat shows localized “Replace existing chat.” Dropping commits `set-window-chat` for that window and publishes its derived Chat surface as the current presentation before layout/route observers run. The four edge regions show the half occupied by a new adjacent Chat window and retain copy semantics.
 
-At the window cap, the whole target is blocked with an explicit label. A failed or cancelled drop leaves selection and topology unchanged.
+At the window cap, the four edge regions are blocked with an explicit label while the center remains available because it does not add a window. A failed or cancelled drop leaves selection and topology unchanged.
 
 For a surface-tab payload, the existing five outcomes remain with new language: four edges move the tab into a new window, and center moves it into the target window. Tab-strip drops remain indexed tab moves. Chat tabs use this same payload. A Chat-less center destination receives the Chat at the requested position; a destination that already owns Chat replaces its existing presentation and activates the transferred Chat. The center result label is localized “Replace existing chat” for the occupied case and localized “Add as tab” otherwise. If the moved tab was the source window’s last tab, that source window collapses in the same reduction.
 
@@ -333,7 +336,7 @@ All tab counts use one state:
 
 The title bar participates in normal flex layout, so the body starts below it. This removes `--workspace-floating-taskbar-inset`, `reserveTopFloatingToolbar`, `lowerToolbarForChatSplit`, and the special toolbar-overlap offset. It also eliminates the duplicate ChatPane header.
 
-Every partition boundary renders one centered one-pixel `border-border` separator inside the existing resize hit target. Title/tab bars use dedicated `workspace-window-titlebar` and `workspace-window-titlebar-active` semantic tokens instead of borrowing generic muted/accent backgrounds. The light base theme uses approximately 93% lightness for inactive bars and 84% for the active bar; the dark base theme uses approximately 7% and 1%, respectively. Selected tabs use dedicated `workspace-window-tab-selected` and `workspace-window-tab-selected-inactive` tokens: approximately 96%/88% in light themes and 18%/12% in dark themes. Colorblind variants inherit their corresponding light/dark base values. The active-window focus-ring overlay and token are removed; title and selected-tab contrast communicate focus without drawing a border over content. These affordances do not change geometry or pointer hit areas.
+Every partition boundary renders one centered one-pixel `border-border` separator inside the existing resize hit target. Title/tab bars use dedicated `workspace-window-titlebar` and `workspace-window-titlebar-active` semantic tokens instead of borrowing generic muted/accent backgrounds. The light base theme uses approximately 93% lightness for inactive bars and 84% for the active bar; the dark base theme uses approximately 7% and 1%, respectively. Selected tabs in multi-tab windows use dedicated `workspace-window-tab-selected` and `workspace-window-tab-selected-inactive` tokens: approximately 96%/88% in light themes and 18%/12% in dark themes. A sole tab keeps a transparent trigger with foreground text, leaving the title-bar token as its only background. Colorblind variants inherit their corresponding light/dark base values. The active-window focus-ring overlay and token are removed; title and selected-tab contrast communicate focus without drawing a border over content. These affordances do not change geometry or pointer hit areas.
 
 The `+` menu owns additive window-local commands: create a terminal, reopen an unplaced terminal, and open an available portable view as a tab in that exact window. It derives available portable views from the canonical `PORTABLE_SINGLETON_KINDS` order, groups every eligible command under the localized “Open views” label, and renders that complete group before “Open terminals.” A singleton in another window remains eligible because selecting it performs the existing explicit move into this window; its position in the group does not change. The three-dots menu owns the active tab. It begins with local reorder, eligible cross-window movement, the four directional move-to-new-window commands, and neutral-colored Close Tab; a separator then precedes hidden-tab access and current-surface actions. The tab’s right-click menu retains the same ordered movement section.
 
@@ -577,6 +580,7 @@ Fullscreen remains omitted from serialization. Because entry never changes the o
 
 ```ts
 showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId>;
+showChatInWindow(chatId: string, windowId: WorkspaceWindowId): Promise<ChatViewSurfaceId>;
 openChatInNewWindow(
 	chatId: string,
 	targetWindowId?: WorkspaceWindowId,
@@ -597,22 +601,45 @@ setPartitionRatio(partitionId: WorkspacePartitionId, ratio: number): Promise<voi
 cycleWindowFocus(owner?: FocusOwner): void;
 ```
 
-There is no `split*` or `mergePaneInto` API. `moveTabToWindow` branches on the latest descriptor: ordinary surfaces use generic movement, while Chat uses `move-chat-to-window` and presents the destination-derived Chat surface ID. `moveTabToNewWindow` likewise presents `chat-view:<newWindowId>` after a Chat transfer. `openChatInNewWindow` remains separate for sidebar copy actions. `enterWindowFullscreen` and `exitWindowFullscreen` change only the ephemeral projection flag.
+There is no `split*` or `mergePaneInto` API. `showChatInWindow` validates the exact destination in the latest snapshot, applies `set-window-chat`, and publishes `chat-view:<windowId>` as the presentation target; `showChatInCurrentWindow` shares that path after resolving its destination in the arbiter turn. `moveTabToWindow` branches on the latest descriptor: ordinary surfaces use generic movement, while Chat uses `move-chat-to-window` and presents the destination-derived Chat surface ID. `moveTabToNewWindow` likewise presents `chat-view:<newWindowId>` after a Chat transfer. `openChatInNewWindow` remains separate for sidebar edge/context copy actions. `enterWindowFullscreen` and `exitWindowFullscreen` change only the ephemeral projection flag.
 
 Tab moves publish through `WorkspacePresentationController.commitWithPresentationTarget`. The mutation-plan closure resolves the destination surface from the latest snapshot and exposes it only when it emits an actual move. After layout publication, the controller adopts that visible surface as `focusOwner`, `lastFocusedSurfaceId`, and `lastFocusedWindowId` before focus normalization and `onLayoutChanged` observers run. Stale or identity-no-op plans expose no target and therefore do not focus an unrelated destination. The existing post-settlement `presentSurface` call remains responsible for DOM/frame or composer focus.
 
-`showChatInCurrentWindow` resolves its destination inside the arbiter plan and returns the stable Chat surface ID only after publication:
+Both Chat placement intents resolve or validate their destination inside the arbiter plan and return the stable Chat surface ID only after publication:
 
 ```ts
 async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {
-	let destination: WorkspaceWindowId | null = null;
-	await this.#presentation.commit((latest) => {
-		destination = this.#resolveCurrentWindow(latest);
-		return [{ type: 'set-window-chat', windowId: destination, chatId }];
-	});
-	if (!destination) throw new Error('Workspace has no current window');
-	const surfaceId = chatViewSurfaceId(destination);
-	this.#presentation.presentSurface(surfaceId);
+	return this.#showChat(chatId, (latest) => this.#resolveCurrentWindow(latest));
+}
+
+async showChatInWindow(
+	chatId: string,
+	windowId: WorkspaceWindowId,
+): Promise<ChatViewSurfaceId> {
+	return this.#showChat(chatId, (latest) =>
+		windowNodeById(latest.desktopRoot, windowId) ? windowId : null,
+	);
+}
+
+async #showChat(
+	chatId: string,
+	resolveWindow: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceWindowId | null,
+): Promise<ChatViewSurfaceId> {
+	let surfaceId: ChatViewSurfaceId | null = null;
+	let applied = false;
+	const current = await this.#presentation.commitWithPresentationTarget(
+		(latest) => {
+			const windowId = resolveWindow(latest);
+			if (!windowId || this.#reservedWindowIds.has(windowId)) return [];
+			surfaceId = chatViewSurfaceId(windowId);
+			if (this.#reservedSurfaceIds.has(surfaceId)) return [];
+			applied = true;
+			return [{ type: 'set-window-chat', windowId, chatId }];
+		},
+		() => (applied ? surfaceId : null),
+	);
+	if (!surfaceId || !applied) throw new Error(m.workspace_open_failed());
+	if (current) this.#presentation.presentSurface(surfaceId);
 	return surfaceId;
 }
 ```
@@ -775,7 +802,7 @@ Drop resolution matrix:
 | Payload | Tab strip | Window body/center | Window edge |
 | --- | --- | --- | --- |
 | Surface tab, including Chat | Indexed reorder/move; occupied Chat destinations replace their Chat | Move and activate as a tab; occupied Chat destinations replace their Chat | Move into a new adjacent window |
-| Sidebar chat | New-window overlay owns the event | Open a new adjacent window using dominant direction | Open a new adjacent window at that edge |
+| Sidebar chat | Root window overlay owns the event | Add or replace Chat in that exact window and activate it | Open a new adjacent Chat window at that edge |
 
 The in-memory typed payload is authoritative. Native `DataTransfer` contains only an opaque application MIME marker, never chat IDs, project paths, titles, or surface IDs. Sidebar reorder data remains in Pragmatic DnD; its workspace bridge calls `beginChatDrag(chatId)` and does not reuse the Chat split store.
 
@@ -845,7 +872,8 @@ Chat deletion reconciliation:
 | --- | --- |
 | Destination window closes before a sidebar selection commits | Re-resolve to the latest current window inside the arbiter turn. |
 | DnD target closes before drop | Reject/no-op, clear the overlay, and show a notification only if a committed user action fails. |
-| Four-window cap reached | Disable new-window menu actions and show a blocked drop preview; never open a tab instead. |
+| Four-window cap reached | Disable new-window menu actions and block edge-drop previews; keep non-window-creating center drops available and never silently reinterpret an edge as center. |
+| Exact sidebar Chat center-drop destination closes before commit | Revalidate the requested window in the arbiter turn, no-op without changing another window, clear the overlay, and report the failed committed action. |
 | Dirty file or Commit drafts in a window being closed | Confirm before any publication; cancel atomically. Fullscreen is unaffected because it preserves every owner. |
 | Pending mutation owns a surface | Disable/reject Close Window; fullscreen remains presentation-only. |
 | Close races with reopen | Window/surface reservation wins; the later open no-ops or reports the existing blocked state. |
@@ -1027,7 +1055,7 @@ Change:
 - `workspace-taskbar-layout.ts` → `workspace-window-tab-layout.ts`
 - `PortableSurfaceFrame.svelte` and surface style/inset helpers
 
-Render one in-flow title bar and tab strip per keyed window, including one-tab windows. Use natural label widths while they fit, then truncate, then use icon-only tabs, and only then overflow tabs into the actions menu. Replace each processing Chat icon from the per-chat session registry, including inactive/background tabs. Keep direct `+` add-menu, active-tab actions-menu, and fullscreen fixed right; show Close Window there only when several windows exist. Draw one-pixel partition separators. Use dedicated sharp title-bar and selected-tab tokens with a visibly muted inactive-window treatment; remove the focused-window border overlay and token entirely. Move active portable content into the body with no floating top inset. Keep geometry and resizers absolute and stable.
+Render one in-flow title bar and tab strip per keyed window, including one-tab windows. Use natural label widths while they fit, then truncate, then use icon-only tabs, and only then overflow tabs into the actions menu. Replace each processing Chat icon from the per-chat session registry, including inactive/background tabs. Keep the sole selected trigger transparent in a one-tab window; apply current/inactive selected-tab tokens only when several tabs need selection contrast. Keep direct `+` add-menu, active-tab actions-menu, and fullscreen fixed right; show Close Window there only when several windows exist. Draw one-pixel partition separators. Use dedicated sharp title-bar and selected-tab tokens with a visibly muted inactive-window treatment; remove the focused-window border overlay and token entirely. Move active portable content into the body with no floating top inset. Keep geometry and resizers absolute and stable.
 
 Tests:
 
@@ -1042,11 +1070,11 @@ Tests:
 - Tab context actions use window language and preserve movement/new-window parity with the actions menu; Chat tabs expose all eligible existing-window destinations and directional true-move actions.
 - Chat tabs are native drag sources. Center and indexed drops receive or replace Chat as required, occupied-center previews use the localized replacement label, edge drops move into new windows, and moving the final source tab collapses its window.
 - Processing Chat tabs replace the ordinary icon in full-label, truncated, icon-only, and background-window states; the inert measurement rail keeps stable dimensions without duplicating animation or status semantics.
-- Light, dark, and inherited colorblind themes expose the specified computed active/inactive title-bar and selected-tab contrast values, with no focused-window overlay or token.
+- Light, dark, and inherited colorblind themes expose the specified computed active/inactive title-bar and multi-tab selected-tab contrast values; a sole selected tab has no selected background, and no focused-window overlay or token exists.
 - Root keeps surviving windows mounted across close/repartition.
 - Fullscreen keeps every keyed window mounted and inertly hidden, then reveals the same instances on exit.
 - Resizer pointer/keyboard behavior and one-pixel horizontal/vertical separators remain.
-- Pointer/focus changes update title-bar and selected-tab treatment without moving layout or rendering a focused-window border.
+- Pointer/focus changes update title-bar and multi-tab selected-tab treatment without moving layout or rendering a focused-window border; one-tab triggers remain background-transparent.
 
 Validation: `cd web && bunx vitest run src/lib/components/workspace/__tests__`.
 
@@ -1089,10 +1117,11 @@ Construct one controller in `createWorkspaceServices`, register it through typed
 
 Tests:
 
-- Chat payload maps every pointer position to a new-window edge.
+- Chat payload maps the central region to exact-window add/replace and the four edge regions to new adjacent windows.
 - The same drag targets Chat, Git, Files, file, Commit, Pull Requests, and Terminal windows.
-- Chat center/tie creates a right-hand window, not a replacement tab.
-- Four-window cap blocks the whole Chat target.
+- Chat center over a Chat-less destination says localized “Add as tab”; an occupied destination says localized “Replace existing chat.”
+- Four-window cap blocks Chat edge targets but leaves its center target available.
+- Exact-window Chat center drops publish the destination as current before layout/route observers and no-op if that destination disappears before commit.
 - Surface tab strip, center, edge, same-window, and net-zero cap cases remain.
 - Chat surface-tab payloads cover indexed receive/replace, center receive/replace, edge movement, last-tab source collapse, and derived surface-ID repair.
 - Cancel, drag end outside app, virtualization unmount, inert transition, and responsive transition clear all state.
@@ -1138,7 +1167,7 @@ Replace stale host-era E2E coverage rather than adapting its old expectations:
 
 - Replace `integration-tests/tests/e2e/workspace-host-fullscreen.test.ts` with `workspace-window-fullscreen.test.ts` proving other windows become hidden/inert without resource disposal, chat list hides, exit restores exact topology and keyed instances, and reload during fullscreen restores the ordinary persisted topology with fullscreen off.
 - Replace `desktop-layout-order.test.ts` with `chat-list-dock.test.ts` proving left/right docking and reload persistence.
-- Add `workspace-windows.test.ts` covering command-palette new-window opens, window-local tabs, Chat moves into empty/occupied destinations, directional Chat moves, sidebar Chat copy behavior, absence of the sidebar New Window control, chat drag onto a non-Chat window, tab overflow, close, resize, reload, route/focus, and draft preservation.
+- Add `workspace-windows.test.ts` covering command-palette new-window opens, window-local tabs, Chat moves into empty/occupied destinations, directional Chat moves, sidebar Chat center add/replace and edge-copy behavior, absence of the sidebar New Window control, chat drag onto a non-Chat window, tab overflow, close, resize, reload, route/focus, and draft preservation.
 - Update `git-view-surfaces.test.ts`, `file-viewer-scrolling.test.ts`, `multi-chat.test.ts`, and driver helpers for window selectors and local menus.
 
 Lightpanda covers state and DOM contracts. Run the native DnD and pointer-resize workflow in the configured Chromium integration tier because synthetic DOM events do not prove browser drag behavior.
@@ -1189,6 +1218,7 @@ Use a new isolated server and verify at 1440×900 and a narrow desktop width:
 - Open Git from the command palette and confirm a new window; open Git Compare from that window and confirm a local tab. Confirm the sidebar has no New Window control beside Search.
 - Confirm each title bar always has a draggable tab strip plus a `+` menu for adding tabs/terminals and a separate three-dots menu for active-tab actions; neither menu contains the other’s commands. Confirm a sole window has no Close Window `X`.
 - Focus an inactive one-tab Chat window and confirm its 40 px bar does not shrink or become covered when the live Chat workspace moves into it.
+- Confirm a one-tab window never paints a selected-tab background behind its sole title in either current or inactive state; after adding a second tab, confirm selected current/inactive backgrounds return.
 - In a window whose portable views are both absent and placed in other windows, confirm the `+` menu keeps all eligible Open views entries together in `Git Workbench → Git History → Git Compare → Pull Requests → Files → Commit` order before Open terminals.
 - Confirm the three-dots menu starts with Move Tab Left/Right, eligible Move to Window entries, Move to New Window Left/Right/Above/Below, and neutral Close Tab, then a separator and current-tab actions; right-click the tab and confirm exact parity.
 - Open tabs with long and short labels; confirm natural widths are used while they fit, then labels truncate, then tabs become icon-only, and finally overflowed tabs remain in the menu.
@@ -1196,11 +1226,12 @@ Use a new isolated server and verify at 1440×900 and a narrow desktop width:
 - Focus window B and repeat; A remains unchanged.
 - Move a Chat tab to a window without Chat and confirm the source presentation disappears, the destination receives/focuses it, and an emptied source window collapses. Repeat onto a window with Chat and confirm the destination presentation is replaced without deleting either chat record.
 - Drag a Chat tab onto a Chat-less center and tab position, then onto a Chat-occupied center. Confirm the occupied preview says localized “Replace existing chat,” the source Chat disappears, the destination replaces/focuses it, and dragging the last source tab collapses that window.
+- Drag a sidebar chat onto the center of a Chat-less window and confirm localized “Add as tab,” exact-window activation, and no new window. Repeat over a Chat-occupied window and confirm localized “Replace existing chat.” Repeat both at the four-window cap, then confirm edge drops remain blocked with “4 windows max.”
 - Confirm a sole-tab Chat has no directional movement, an empty Chat has no cross-window movement, and sidebar Chat “Open in New Window” still copies.
 - Hold one foreground and one background Chat in processing states; confirm each visible tab replaces its Chat icon with the semantic-blue pulse, then restores the icon when processing ends. Verify reduced motion and a missing-session fallback.
-- Confirm no active-window border appears with one window, several windows, or fullscreen. Verify that inactive title bars and their selected tabs use the distinct muted light, dark, and inherited colorblind token values while the current window retains the stronger active treatment.
+- Confirm no active-window border appears with one window, several windows, or fullscreen. Verify that inactive title bars and selected tabs in multi-tab windows use the distinct muted light, dark, and inherited colorblind token values while the current window retains the stronger active treatment; verify one-tab triggers stay transparent.
 - Drag a chat onto Chat, Git, Files, Terminal, and file windows at all four edges.
-- At four windows, confirm blocked overlays and disabled menu commands.
+- At four windows, confirm blocked new-window overlays and disabled menu commands while center add/replace drops remain available.
 - Move/reorder tabs by pointer and keyboard-equivalent menu actions.
 - Resize nested horizontal and vertical partitions by pointer and keyboard.
 - Type a Chat draft, switch rapidly among Chat windows and non-Chat tabs, and verify no focus, draft, or scroll jump.
@@ -1226,20 +1257,20 @@ No feature flag or server data change is required. Implement in the ordered stag
 - Four visible desktop windows remain the limit.
 - Chat selection replaces or adds the stable Chat view in the current window.
 - The same chat may be presented in several windows; each presentation has a window-owned surface ID.
-- Chat click replaces; Chat drag opens a new window.
-- A Chat drag has four new-window outcomes and no center replacement outcome.
+- Chat click replaces in the current window. A sidebar Chat center drop adds or replaces Chat in the exact target window, while an edge drop opens a new adjacent window.
+- A sidebar Chat drag has one center add/replace outcome and four new-window edge outcomes. At the cap, only the edges are blocked.
 - Generic surface center drop adds a tab; generic edge drop opens a new window.
 - One live Chat workspace remains mounted; other active Chat windows are transcript-only previews with no composer.
 - Every desktop window always has one in-flow title bar.
 - Every title bar uses the same draggable tab strip, including one-tab windows, with natural-width, truncated, icon-only, then overflow tiers.
-- Adjacent windows share one-pixel separators. Dedicated title-bar tokens use a lighter inactive and darker active value in both light and dark themes, while selected tabs use separate current-window and muted inactive-window tokens with inherited colorblind parity. No active-window border or focus-ring overlay renders.
+- Adjacent windows share one-pixel separators. Dedicated title-bar tokens use a lighter inactive and darker active value in both light and dark themes, while selected tabs in multi-tab windows use separate current-window and muted inactive-window tokens with inherited colorblind parity. A sole tab has no selected background. No active-window border or focus-ring overlay renders.
 - A `+` add menu, active-tab actions menu, and fullscreen are direct controls for every window. Close Window appears only when at least two windows exist.
 - The `+` menu owns window-local additions and keeps every eligible portable view in canonical order under a localized Open views group before Open terminals, including views placed in other windows. The actions menu begins with Move Tab Left/Right, eligible Move to Window entries, Move to New Window Left/Right/Above/Below, and neutral Close Tab, then a separator and current-tab actions. The tab context menu matches this ordering.
 - Close Window destroys local tabs and never merges them.
 - The sole window and the window owning the final Chat view cannot close.
 - Non-empty Chat tabs expose every other window as a move destination. Moving into a Chat-less window installs and focuses the source Chat; moving into a window with Chat replaces and focuses its presentation. The source presentation is removed in both cases.
 - Non-empty Chat tabs use the same native drag affordances as other movable tabs. Center and indexed drops receive or replace the destination Chat, occupied centers say localized “Replace existing chat,” edge drops move into a new window, and an emptied source window collapses atomically.
-- Chat directional tab actions are true moves. Empty Chat views and sole-tab directional cases do not expose them; the reducer preserves identity for stale sole-tab attempts. Sidebar Chat drag/context actions remain explicit copy operations.
+- Chat directional tab actions are true moves. Empty Chat views and sole-tab directional cases do not expose them; the reducer preserves identity for stale sole-tab attempts. Sidebar Chat edge-drag/context actions remain explicit copy operations, while center drops add or replace the exact destination presentation.
 - Processing Chat tabs replace their ordinary icon with the existing pulsing semantic-blue status indicator regardless of active tab/window; session activity comes from the root registry and respects reduced motion.
 - The sidebar has no Search-adjacent New Window button. Global open commands remain in the command palette, and every workspace window retains its local `+` menu.
 - Fullscreen hides other windows without changing topology or resource ownership; exit restores the same keyed layout.
