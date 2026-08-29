@@ -6,26 +6,38 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
+		id: string;
 		ref?: HTMLTextAreaElement | null;
 		value?: string;
-		placeholder: string;
+		placeholder?: string;
 		invalid: boolean;
 		readOnly: boolean;
+		disabled?: boolean;
+		rows?: number;
+		textareaClass?: string;
+		describedBy?: string;
 		canExpand: boolean;
+		expandLabel: string;
 		canRefinePrompt: boolean;
 		isPromptRefinementPending: boolean;
-		onkeydown: (event: KeyboardEvent) => void;
+		onkeydown?: (event: KeyboardEvent) => void;
 		onExpand: () => void;
 		onRefinePrompt: () => void;
 	}
 
 	let {
+		id,
 		ref = $bindable(null),
 		value = $bindable(''),
-		placeholder,
+		placeholder = '',
 		invalid,
 		readOnly,
+		disabled = false,
+		rows = 4,
+		textareaClass = '',
+		describedBy = '',
 		canExpand,
+		expandLabel,
 		canRefinePrompt,
 		isPromptRefinementPending,
 		onkeydown,
@@ -45,14 +57,15 @@
 	<textarea
 		bind:this={ref}
 		bind:value
-		id="snippet-template"
+		{id}
 		{onkeydown}
-		rows="12"
+		{rows}
 		{placeholder}
 		readonly={readOnly}
+		{disabled}
 		aria-invalid={invalid}
-		aria-describedby="snippet-template-help snippet-template-error"
-		class="block min-h-48 w-full resize-y border-0 bg-transparent px-3 py-2 font-mono text-base leading-5 outline-none sm:pointer-fine:text-sm"
+		aria-describedby={describedBy || undefined}
+		class="block w-full resize-y border-0 bg-transparent px-3 py-2 text-base leading-5 outline-none disabled:cursor-wait disabled:opacity-70 read-only:cursor-wait read-only:opacity-70 sm:pointer-fine:text-sm {textareaClass}"
 	></textarea>
 	<div class="flex min-h-11 items-center justify-end gap-1 px-1.5 pb-1.5 sm:pointer-fine:min-h-9">
 		<Button
@@ -62,8 +75,8 @@
 			class="size-11 sm:pointer-fine:size-8"
 			disabled={!canExpand || isPromptRefinementPending}
 			onclick={onExpand}
-			aria-label={m.snippets_template_expand()}
-			title={m.snippets_template_expand()}
+			aria-label={expandLabel}
+			title={expandLabel}
 		>
 			<Maximize2 class="size-4" aria-hidden="true" />
 		</Button>

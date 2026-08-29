@@ -1,6 +1,8 @@
-import type { PromptEditorSelection } from '$lib/prompt-editor/prompt-editor-selection.js';
+import type { PromptEditorSelection } from './prompt-editor-selection.js';
 
-export class SnippetTemplateEditorState {
+// Open, focus-request, and selection state for a compact prompt field that
+// expands into PromptEditorDialog. Shared by every dialog-hosted prompt field.
+export class PromptEditorDialogState {
 	open = $state(false);
 	focusRequestId = $state(0);
 	selection = $state<PromptEditorSelection>({ anchor: 0, head: 0 });

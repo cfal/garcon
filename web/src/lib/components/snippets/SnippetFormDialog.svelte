@@ -3,6 +3,8 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
+	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { getNotifications, getSnippets, getTransientLayers } from '$lib/context';
 	import {
@@ -19,8 +21,6 @@
 		type SnippetDefinitionInput,
 	} from '$shared/snippets';
 	import { SnippetFormState } from './snippet-form-state.svelte.js';
-	import SnippetTemplateField from './SnippetTemplateField.svelte';
-	import { SnippetTemplateEditorState } from './snippet-template-editor-state.svelte.js';
 	import { SnippetTemplateRefinementController } from './snippet-template-refinement-controller.js';
 
 	interface Props {
@@ -36,14 +36,14 @@
 	const transientLayers = getTransientLayers();
 	let form = $state(new SnippetFormState(() => snippets.snippets));
 	let templateTextarea = $state<HTMLTextAreaElement | null>(null);
-	let templateEditor = $state(new SnippetTemplateEditorState());
+	let templateEditor = $state(new PromptEditorDialogState());
 	let refinement = $state<SnippetTemplateRefinementController | null>(null);
 	const refinementPending = $derived(refinement?.pending ?? false);
 
 	$effect(() => {
 		if (!open) return;
 		const nextForm = new SnippetFormState(() => snippets.snippets);
-		const nextEditor = new SnippetTemplateEditorState();
+		const nextEditor = new PromptEditorDialogState();
 		nextForm.reset(snippet);
 		form = nextForm;
 		templateEditor = nextEditor;
@@ -169,10 +169,12 @@
 				<label for="snippet-template" class="text-sm font-medium text-foreground">
 					{m.snippets_template_label()}
 				</label>
-				<SnippetTemplateField
+				<PromptTextField
+					id="snippet-template"
 					bind:ref={templateTextarea}
 					bind:value={form.template}
 					onkeydown={handleFormKeyDown}
+					rows={12}
 					placeholder={m.snippets_template_placeholder({
 						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
 						projectPathToken: SNIPPET_PROJECT_PATH_TOKEN,
@@ -180,7 +182,10 @@
 					})}
 					invalid={Boolean(form.templateError)}
 					readOnly={refinementPending}
+					describedBy="snippet-template-help snippet-template-error"
+					textareaClass="min-h-48 font-mono"
 					canExpand={!form.saving}
+					expandLabel={m.snippets_template_expand()}
 					canRefinePrompt={refinement?.canStart ?? false}
 					isPromptRefinementPending={refinementPending}
 					onExpand={openExpandedEditor}
