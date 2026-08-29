@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { assistantContents, userContents } from '../../support/chat-assertions.js';
+import {
+  assistantContents,
+  messagesOfType,
+  userContents,
+} from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -64,6 +68,13 @@ describe('cross-provider fork lifecycle', () => {
         'echo:openai-source-turn',
         expect.stringContaining('anthropic-handoff-turn'),
         expect.stringContaining('anthropic-target-turn'),
+      ]);
+      expect(messagesOfType(target.messages, 'transcript-notice')).toEqual([
+        expect.objectContaining({
+          title: 'History carried without compaction',
+          content: 'Earlier chat history was small enough to carry over as context.',
+          detail: undefined,
+        }),
       ]);
     });
   });
