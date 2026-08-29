@@ -279,9 +279,9 @@ async function openChatWorkspace(
   });
 }
 
-async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
+async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {
   await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]')
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
     .click();
   await page.getByRole('menuitem', { name: label }).click();
 }
@@ -291,7 +291,7 @@ async function verifyHistoryBreakpoints(
   markPhase: MarkPhase,
 ): Promise<void> {
   markPhase('opening Git History');
-  await openWorkspaceSurface(fixture.page, 'Open Git History');
+  await openWorkspaceAddMenuItem(fixture.page, 'Open Git History');
   await fixture.page.locator(PANEL_SELECTOR).waitFor({ state: 'visible' });
   await fixture.page.waitForFunction(
     (selector) =>
@@ -367,7 +367,7 @@ async function verifyCompareResponsiveActions(
   markPhase: MarkPhase,
 ): Promise<void> {
   markPhase('opening Git Compare');
-  await openWorkspaceSurface(fixture.page, 'Open Git Compare');
+  await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
   await fixture.page.locator(COMPARE_PANEL_SELECTOR).waitFor({ state: 'visible' });
   await fixture.page.locator(`${COMPARE_PANEL_SELECTOR} [data-git-diff-document]`).waitFor({
     state: 'visible',

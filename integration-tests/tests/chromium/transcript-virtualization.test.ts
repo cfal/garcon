@@ -1586,12 +1586,22 @@ async function currentWorkspaceIdentity(
   });
 }
 
-async function openCurrentWorkspaceActions(page: Page): Promise<void> {
+async function openCurrentWorkspaceTabActionsMenu(page: Page): Promise<void> {
   await page.evaluate(() => {
     const trigger = document.querySelector<HTMLButtonElement>(
       '[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]',
     );
-    if (!trigger) throw new Error('Current workspace window menu is missing.');
+    if (!trigger) throw new Error('Current workspace window tab actions menu is missing.');
+    if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+  });
+}
+
+async function openCurrentWorkspaceAddMenu(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const trigger = document.querySelector<HTMLButtonElement>(
+      '[data-workspace-window-current="true"] [data-workspace-window-add-trigger]',
+    );
+    if (!trigger) throw new Error('Current workspace window add menu is missing.');
     if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
   });
 }
@@ -1722,7 +1732,7 @@ async function selectAndVerifyEdgeNavigatorTarget(
   marker: string,
   edge: 'start' | 'end',
 ): Promise<void> {
-  await openCurrentWorkspaceActions(page);
+  await openCurrentWorkspaceTabActionsMenu(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1820,7 +1830,7 @@ async function selectNavigatorTargetDuringAppend(
   chatId: string,
   marker: string,
 ): Promise<void> {
-  await openCurrentWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceTabActionsMenu(fixture.page);
   await clickMenuItem(fixture.page, 'Jump to user message');
   await fixture.page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(fixture.page, marker);
@@ -1914,7 +1924,7 @@ async function installDelayedTargetCompletion(page: Page, rowId: string): Promis
 }
 
 async function selectAndVerifyNavigatorTarget(page: Page, marker: string): Promise<void> {
-  await openCurrentWorkspaceActions(page);
+  await openCurrentWorkspaceTabActionsMenu(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1924,7 +1934,7 @@ async function selectAndVerifyNavigatorTarget(page: Page, marker: string): Promi
 }
 
 async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string): Promise<void> {
-  await openCurrentWorkspaceActions(page);
+  await openCurrentWorkspaceTabActionsMenu(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1935,7 +1945,7 @@ async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string)
 }
 
 async function interruptNavigatorJump(page: Page, marker: string): Promise<void> {
-  await openCurrentWorkspaceActions(page);
+  await openCurrentWorkspaceTabActionsMenu(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -3360,7 +3370,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     userScrolledUp: true,
   });
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceAddMenu(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-hidden-append');
@@ -3385,7 +3395,7 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
   await waitForStablePinnedTranscriptLayout(fixture.page, 'pinned-append');
 
   const pinnedIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceAddMenu(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-pinned-hidden-append');
@@ -4082,7 +4092,7 @@ async function verifyDirectChatExposesNativeReload(fixture: ChromiumFixture): Pr
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
   await waitForStablePinnedTranscriptLayout(fixture.page, 'direct-native-reload-baseline');
-  await openCurrentWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceTabActionsMenu(fixture.page);
   expect(
     await fixture.page.getByRole('menuitem', { name: 'Reload from native history' }).count(),
   ).toBe(1);
@@ -4094,7 +4104,7 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
   await prepareTranscript(fixture, chatId);
   await scrollToPosition(fixture.page, 'middle');
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
-  await openCurrentWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceAddMenu(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   const terminalIdentity = await currentWorkspaceIdentity(fixture.page);

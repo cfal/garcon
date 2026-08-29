@@ -49,7 +49,7 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
 
 async function openCompare(page: Page): Promise<void> {
   await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]')
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
     .click();
   await page.getByRole('menuitem', { name: 'Open Git Compare' }).click();
   await page.locator(`${COMPARE_PANEL} [data-git-comparison-header-row]`).waitFor();

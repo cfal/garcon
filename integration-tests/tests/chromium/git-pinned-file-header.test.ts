@@ -72,13 +72,13 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {
-  await openWorkspaceSurface(page, 'Open Git Workbench');
+  await openWorkspaceAddMenuItem(page, 'Open Git Workbench');
   await page.locator(WORKBENCH_PANEL).waitFor({ state: 'visible' });
 }
 
-async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
+async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {
   await page
-    .locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]')
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-add-trigger]')
     .click();
   await page.getByRole('menuitem', { name: label, exact: true }).click();
 }
@@ -320,7 +320,7 @@ describe('Chromium pinned Git file headers', () => {
       markPhase('checking the Compare header variant');
       await fixture.page.setViewportSize({ width: 1_440, height: 900 });
       await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
-      await openWorkspaceSurface(fixture.page, 'Open Git Compare');
+      await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);
       await scrollDiffTo(fixture.page, COMPARE_PANEL, 60);
@@ -336,7 +336,7 @@ describe('Chromium pinned Git file headers', () => {
       ).toBe(1);
 
       markPhase('checking the History header variant');
-      await openWorkspaceSurface(fixture.page, 'Open Git History');
+      await openWorkspaceAddMenuItem(fixture.page, 'Open Git History');
       await fixture.page.locator(HISTORY_PANEL).waitFor();
       await fixture.page
         .locator(
