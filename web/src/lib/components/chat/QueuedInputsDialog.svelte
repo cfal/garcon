@@ -1,14 +1,22 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
+	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
+	import {
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
+	import { getNotifications, getTransientLayers } from '$lib/context';
 	import { ApiError } from '$lib/api/client.js';
 	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';
+	import { QueuedInputRefinementController } from './queued-input-refinement-controller.js';
 	import { isQueuedInputDragData } from './queued-input-dnd.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -45,6 +53,26 @@
 		onPause,
 		onResume,
 	}: Props = $props();
+	const notifications = getNotifications();
+	const transientLayers = getTransientLayers();
+	const expandedEditor = new PromptEditorDialogState();
+	// Lives at dialog lifetime so a pending refinement survives the draft card
+	// relocating from its inline row to the departed-draft recovery slot.
+	const refinement = new QueuedInputRefinementController({
+		get editor() {
+			return editor;
+		},
+		expandedEditor,
+		notifications,
+		transientLayers,
+		get textarea() {
+			return editorTextarea;
+		},
+		get startBlocked() {
+			return !open;
+		},
+	});
+	let editorTextarea = $state<HTMLTextAreaElement | null>(null);
 	let listContainer: HTMLDivElement | null = $state(null);
 	let listHeading: HTMLHeadingElement | null = $state(null);
 	let deletingIds = $state<Set<string>>(new Set());
@@ -60,6 +88,10 @@
 	const entries = $derived(queue?.entries ?? []);
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
+	const refinementPending = $derived(refinement.pending);
+	// A live entry edits in place inside the list; a departed draft (sent or
+	// removed) is recovered above the list without a stale queue position.
+	const editorInline = $derived(editorOpen && editor.liveEntry !== null);
 	const pause = $derived(queue?.pause ?? null);
 	const queueSteering = $derived(queue?.steeringEntryId != null);
 	const pauseDetail = $derived(pause ? queuePauseDetail(pause) : null);
@@ -86,6 +118,8 @@
 
 	onDestroy(() => {
 		if (moveFocusFrame !== null) cancelAnimationFrame(moveFocusFrame);
+		refinement.destroy();
+		expandedEditor.close();
 	});
 
 	$effect(() => {
@@ -157,6 +191,8 @@
 	}
 
 	function closeEditor(restoreEntryId: string | null = editor.entryId): void {
+		refinement.abort();
+		expandedEditor.close();
 		editor.close();
 		if (!restoreEntryId) return;
 		void tick().then(() => {
@@ -169,6 +205,27 @@
 			}
 			listHeading?.focus();
 		});
+	}
+
+	function openExpandedEditor(): void {
+		if (editor.mutation !== 'idle' || refinement.pending || !editorTextarea) return;
+		const selection = promptEditorSelectionFromTextarea(editorTextarea);
+		editorTextarea.focus({ preventScroll: true });
+		expandedEditor.show(selection);
+	}
+
+	async function closeExpandedEditor(): Promise<void> {
+		const selection = expandedEditor.selection;
+		expandedEditor.close();
+		await tick();
+		if (!open || !editorTextarea) return;
+		restorePromptEditorSelection(editorTextarea, selection);
+		editorTextarea.focus({ preventScroll: true });
+	}
+
+	function handleExpandedTextChange(text: string): void {
+		if (!open || refinement.pending || editor.mutationBlocked || editor.draft === text) return;
+		editor.draft = text;
 	}
 
 	async function mutateQueueControl(
@@ -312,6 +369,20 @@
 	</div>
 {/snippet}
 
+{#snippet editorPanel()}
+	<QueuedInputEditorPanel
+		{editor}
+		bind:textarea={editorTextarea}
+		canRefinePrompt={refinement.canStart}
+		isPromptRefinementPending={refinementPending}
+		{onCreate}
+		{onReplace}
+		onExpand={openExpandedEditor}
+		onRefinePrompt={() => refinement.handleAction()}
+		onClose={closeEditor}
+	/>
+{/snippet}
+
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		class="flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[80dvh] sm:max-h-[44rem] sm:max-w-2xl sm:rounded-lg sm:border"
@@ -380,14 +451,19 @@
 			<p class="sr-only" aria-live="polite" aria-atomic="true">{moveAnnouncement}</p>
 		</Dialog.Header>
 
-		{#if editorOpen}
-			<QueuedInputEditorPanel {editor} {onCreate} {onReplace} onClose={closeEditor} />
-		{/if}
-
-		<div bind:this={listContainer} class="min-h-0 flex-1 overflow-y-auto">
+		<div
+			bind:this={listContainer}
+			class="min-h-0 flex-1 overflow-y-auto"
+			{@attach refinementPending && !expandedEditor.open && refinement.layerAttachment}
+		>
 			<h3 bind:this={listHeading} tabindex="-1" class="sr-only" data-queue-list-heading>
 				{m.chat_queue_dialog_title()}
 			</h3>
+			{#if editorOpen && !editorInline}
+				<div class="border-b border-border bg-muted/30 px-5 py-4 sm:px-6">
+					{@render editorPanel()}
+				</div>
+			{/if}
 			{#if entries.length === 0}
 				<div
 					class="flex min-h-40 items-center justify-center px-5 py-10 text-center text-sm text-muted-foreground"
@@ -398,31 +474,42 @@
 				<ol class="divide-y divide-border">
 					{#each entries as entry, index (entry.id)}
 						<svelte:boundary {failed}>
-							<QueuedInputRow
-								{entry}
-								position={index + 1}
-								error={rowErrors[entry.id]}
-								steering={queue?.steeringEntryId === entry.id}
-								deleting={deletingIds.has(entry.id)}
-								editDisabled={editorOpen ||
-									queueSteering ||
-									deletingIds.has(entry.id) ||
-									movingEntryId === entry.id}
-								deleteDisabled={deletingIds.has(entry.id) ||
-									queueSteering ||
-									(editor.entryId === entry.id && editor.mutation !== 'idle') ||
-									movingEntryId === entry.id}
-								movePending={movingEntryId === entry.id}
-								moveBlocked={movesBlocked}
-								canMoveUp={index > 0}
-								canMoveDown={index < entries.length - 1}
-								dragEnabled={dragEnabled && !queueSteering}
-								onEdit={beginEdit}
-								onDelete={(entryId) => void deleteEntry(entryId)}
-								onMove={moveEntry}
-								onMoveSettled={scheduleMoveFocus}
-								onDrop={dropEntry}
-							/>
+							{#if editorInline && editor.entryId === entry.id}
+								<li class="flex items-start gap-3 px-5 py-4 sm:px-6">
+									<span class="mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+										{index + 1}
+									</span>
+									<div class="min-w-0 flex-1">
+										{@render editorPanel()}
+									</div>
+								</li>
+							{:else}
+								<QueuedInputRow
+									{entry}
+									position={index + 1}
+									error={rowErrors[entry.id]}
+									steering={queue?.steeringEntryId === entry.id}
+									deleting={deletingIds.has(entry.id)}
+									editDisabled={editorOpen ||
+										queueSteering ||
+										deletingIds.has(entry.id) ||
+										movingEntryId === entry.id}
+									deleteDisabled={deletingIds.has(entry.id) ||
+										queueSteering ||
+										(editor.entryId === entry.id && editor.mutation !== 'idle') ||
+										movingEntryId === entry.id}
+									movePending={movingEntryId === entry.id}
+									moveBlocked={movesBlocked}
+									canMoveUp={index > 0}
+									canMoveDown={index < entries.length - 1}
+									dragEnabled={dragEnabled && !queueSteering}
+									onEdit={beginEdit}
+									onDelete={(entryId) => void deleteEntry(entryId)}
+									onMove={moveEntry}
+									onMoveSettled={scheduleMoveFocus}
+									onDrop={dropEntry}
+								/>
+							{/if}
 						</svelte:boundary>
 					{/each}
 				</ol>
@@ -430,3 +517,20 @@
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+{#if open && expandedEditor.open}
+	<PromptEditorDialog
+		title={m.chat_queue_expanded_editor_title()}
+		editorLabel={m.chat_queue_expanded_editor_label()}
+		text={editor.draft}
+		selection={expandedEditor.selection}
+		focusRequestId={expandedEditor.focusRequestId}
+		readOnly={refinementPending || editor.mutationBlocked || editor.mutation !== 'idle'}
+		canRefinePrompt={refinement.canStart}
+		isPromptRefinementPending={refinementPending}
+		onTextChange={handleExpandedTextChange}
+		onSelectionChange={(selection) => expandedEditor.updateSelection(selection)}
+		onRefinePrompt={() => refinement.handleAction()}
+		onClose={() => void closeExpandedEditor()}
+	/>
+{/if}

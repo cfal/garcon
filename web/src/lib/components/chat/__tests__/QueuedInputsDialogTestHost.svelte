@@ -2,6 +2,10 @@
 	import { untrack } from 'svelte';
 	import QueuedInputsDialog from '../QueuedInputsDialog.svelte';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte';
+	import { setNotifications, setTransientLayers } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 
@@ -36,6 +40,10 @@
 			return queue;
 		},
 	});
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const notifications = createNotificationsStore();
+	setTransientLayers(transientLayers);
+	setNotifications(notifications);
 
 	export function setQueue(nextQueue: ChatQueueState): void {
 		queue = nextQueue;
@@ -55,6 +63,8 @@
 	}
 </script>
 
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
+
 {#if open}
 	<QueuedInputsDialog
 		open={true}
@@ -69,3 +79,7 @@
 		onClose={closeDialog}
 	/>
 {/if}
+
+<div data-testid="queue-notifications">
+	{notifications.items.map((notification) => notification.message).join('\n')}
+</div>
