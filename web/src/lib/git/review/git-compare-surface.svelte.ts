@@ -25,10 +25,6 @@ interface GitComparisonSessionIdentity {
 	readonly projectPath: string;
 }
 
-interface ActiveGitComparisonSession {
-	identity: GitComparisonSessionIdentity;
-}
-
 export class GitCompareSurfaceController implements PortableSingletonController {
 	readonly comparison = new GitComparisonController();
 	readonly target: GitTargetSessionController;
@@ -116,14 +112,13 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 	}
 
 	async compareCurrentSpecification(): Promise<boolean> {
-		const active = this.#activeSession();
-		if (!active) return false;
+		const identity = this.#activeSessionIdentity();
+		if (!identity) return false;
 
-		const requestIdentity = active.identity;
-		this.#loadedSessionIdentity = requestIdentity;
-		const loaded = await this.comparison.compare(requestIdentity.projectPath);
-		if (this.#loadedSessionIdentity !== requestIdentity) return false;
-		if (loaded) this.#rememberConfirmedUserSelection(requestIdentity);
+		this.#loadedSessionIdentity = identity;
+		const loaded = await this.comparison.compare(identity.projectPath);
+		if (this.#loadedSessionIdentity !== identity) return false;
+		if (loaded) this.#rememberConfirmedUserSelection(identity);
 		return loaded;
 	}
 
@@ -144,14 +139,14 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 
 	async #activateComparison(): Promise<void> {
 		if (!this.presentationVisible) return;
-		const active = this.#activeSession();
-		if (!active) return;
-		if (sameSession(this.#loadedSessionIdentity, active.identity)) return;
+		const identity = this.#activeSessionIdentity();
+		if (!identity) return;
+		if (sameSession(this.#loadedSessionIdentity, identity)) return;
 
 		const specification =
 			this.deps.comparisonPreferences.recall({
-				chatId: active.identity.chatId,
-				projectPath: active.identity.projectPath,
+				chatId: identity.chatId,
+				projectPath: identity.projectPath,
 			}) ?? DEFAULT_GIT_COMPARISON;
 		this.comparison.setSpecification(specification, {
 			diffMode: this.deps.reviewDisplay.diffMode,
@@ -159,20 +154,19 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		});
 		// Marked before the await so a concurrent activation for the same
 		// session does not start a second load.
-		const activationIdentity = active.identity;
-		this.#loadedSessionIdentity = activationIdentity;
-		const loaded = await this.comparison.compare(activationIdentity.projectPath);
-		if (this.#loadedSessionIdentity !== activationIdentity) return;
+		this.#loadedSessionIdentity = identity;
+		const loaded = await this.comparison.compare(identity.projectPath);
+		if (this.#loadedSessionIdentity !== identity) return;
 		// A failed default load must stay retryable on the next visibility or
 		// activation pass; a superseded session keeps the newer marker.
 		if (!loaded) {
 			this.#loadedSessionIdentity = null;
 			return;
 		}
-		this.#rememberConfirmedChatComparison(activationIdentity);
+		this.#rememberConfirmedChatComparison(identity);
 	}
 
-	#activeSession(): ActiveGitComparisonSession | null {
+	#activeSessionIdentity(): GitComparisonSessionIdentity | null {
 		const chatId = this.#chatId;
 		const projectPath = this.target.activeProjectPath;
 		const targetIdentity = this.target.appliedIdentity;
@@ -185,9 +179,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		) {
 			return null;
 		}
-		return {
-			identity: { chatId, targetIdentity, projectPath },
-		};
+		return { chatId, targetIdentity, projectPath };
 	}
 
 	#rememberConfirmedChatComparison(identity = this.#loadedSessionIdentity): void {

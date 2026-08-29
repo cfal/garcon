@@ -88,12 +88,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 	rememberChat(chatId: string, specification: GitComparisonSpecification): void {
 		if (!isNonEmptyString(chatId)) return;
 		const record = this.#readRecord();
-		record.entries = rememberEntry(
-			record.entries,
-			(entry) => entry.chatId === chatId,
-			{ chatId, specification: cloneSpecification(specification) },
-			GIT_COMPARISON_CHAT_PREFERENCE_LIMIT,
-		);
+		this.#rememberChatEntry(record, chatId, specification);
 		this.#writeRecord(record);
 	}
 
@@ -103,12 +98,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 	): void {
 		if (!isNonEmptyString(context.chatId)) return;
 		const record = this.#readRecord();
-		record.entries = rememberEntry(
-			record.entries,
-			(entry) => entry.chatId === context.chatId,
-			{ chatId: context.chatId, specification: cloneSpecification(specification) },
-			GIT_COMPARISON_CHAT_PREFERENCE_LIMIT,
-		);
+		this.#rememberChatEntry(record, context.chatId, specification);
 		const [projectPath] = projectPathAndAncestors(context.projectPath);
 		if (projectPath) {
 			record.projectEntries = rememberEntry(
@@ -119,6 +109,19 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 			);
 		}
 		this.#writeRecord(record);
+	}
+
+	#rememberChatEntry(
+		record: GitComparisonPreferenceRecord,
+		chatId: string,
+		specification: GitComparisonSpecification,
+	): void {
+		record.entries = rememberEntry(
+			record.entries,
+			(entry) => entry.chatId === chatId,
+			{ chatId, specification: cloneSpecification(specification) },
+			GIT_COMPARISON_CHAT_PREFERENCE_LIMIT,
+		);
 	}
 
 	#readRecord(): GitComparisonPreferenceRecord {
