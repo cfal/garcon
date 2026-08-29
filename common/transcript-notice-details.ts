@@ -74,6 +74,10 @@ export interface SubAgentStartOutcomeNoticeDetail {
   readonly results: readonly GarconCreateChatResult[];
 }
 
+export type ServerControlReceiptDetail =
+  | InterAgentMessageReceivedNoticeDetail
+  | SubAgentStartOutcomeNoticeDetail;
+
 export type TranscriptNoticeDetail =
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail

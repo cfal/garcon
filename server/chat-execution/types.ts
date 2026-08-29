@@ -206,9 +206,9 @@ export interface CapturedSteerTarget {
   readonly providerTarget: AgentSteerTarget | null;
 }
 
-export type InterAgentControlInput = Omit<StoredControlInputEntry, 'id'>;
+export type ServerControlInput = Omit<StoredControlInputEntry, 'id'>;
 
-export type InterAgentControlDisposition = 'delivered' | 'queued';
+export type ServerControlDisposition = 'delivered' | 'queued';
 
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;

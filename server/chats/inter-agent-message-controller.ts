@@ -8,7 +8,7 @@ import type {
   InterAgentMessageReceivedNoticeDetail,
   InterAgentMessageResult,
 } from '../../common/transcript-notice-details.js';
-import type { InterAgentControlDisposition, InterAgentControlInput } from '../chat-execution/types.js';
+import type { ServerControlDisposition, ServerControlInput } from '../chat-execution/types.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
@@ -32,9 +32,9 @@ interface InterAgentMessageAttempt {
 export interface InterAgentMessageExecution {
   deliverInterAgentControlInput(
     chatId: string,
-    input: InterAgentControlInput,
+    input: ServerControlInput,
     signal: AbortSignal,
-  ): Promise<InterAgentControlDisposition>;
+  ): Promise<ServerControlDisposition>;
 }
 
 export interface InterAgentMessageDispositionEvent {
@@ -183,14 +183,14 @@ export class InterAgentMessageController {
 
       const fromChatId = input.hideSender ? null : sourceChatId;
       const receipt = receivedMessageNotice(fromChatId, input.body);
-      const controlInput: InterAgentControlInput = {
+      const controlInput: ServerControlInput = {
         content: garconMessageContent(fromChatId, input.body),
         transcriptViewId: view.viewId,
         createdAt: input.requestAt,
         receipt,
       };
 
-      let disposition: InterAgentControlDisposition;
+      let disposition: ServerControlDisposition;
       try {
         disposition = await this.options.execution.deliverInterAgentControlInput(
           targetChatId,
@@ -228,7 +228,7 @@ export class InterAgentMessageController {
   #result(
     sourceChatId: string,
     targetChatId: ChatId,
-    disposition: InterAgentControlDisposition | InterAgentMessageFailureReason,
+    disposition: ServerControlDisposition | InterAgentMessageFailureReason,
   ): InterAgentMessageResult {
     const result: InterAgentMessageResult = disposition === 'delivered' || disposition === 'queued'
       ? { chatId: targetChatId, status: disposition }
@@ -297,7 +297,7 @@ export class InterAgentMessageController {
 function receivedMessageNotice(
   fromChatId: ChatId | null,
   body: string,
-): InterAgentControlInput['receipt'] {
+): ServerControlInput['receipt'] {
   const detail: InterAgentMessageReceivedNoticeDetail = {
     type: 'inter-agent-message-received',
     fromChatId,

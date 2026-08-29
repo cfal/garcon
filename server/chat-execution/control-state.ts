@@ -5,7 +5,7 @@ import type {
   RecentlyDispatchedQueueEntry,
 } from '../../common/queue-state.ts';
 import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../common/queue-state.ts';
-import type { InterAgentMessageReceivedNoticeDetail } from '../../common/transcript-notice-details.ts';
+import type { ServerControlReceiptDetail } from '../../common/transcript-notice-details.ts';
 
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../common/queue-state.ts';
 
@@ -30,7 +30,7 @@ export interface StoredControlInputEntry {
   readonly receipt: {
     readonly title: string;
     readonly content: string;
-    readonly detail: InterAgentMessageReceivedNoticeDetail;
+    readonly detail: ServerControlReceiptDetail;
   };
 }
 

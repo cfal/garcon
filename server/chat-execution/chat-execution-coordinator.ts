@@ -51,8 +51,8 @@ import {
   type DirectTurnReservation,
   type DrainSuppressionReason,
   type ExecutionControlUpdatedCallback,
-  type InterAgentControlDisposition,
-  type InterAgentControlInput,
+  type ServerControlDisposition,
+  type ServerControlInput,
   type UserInputAdmissionOptions,
   type ProcessingInvalidatedCallback,
   type QueueCommandMutationResult,
@@ -417,20 +417,33 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     onControlRun: (turnId: string) => void,
   ): Promise<void> {
     return this.#controlInputDelivery.deliver(
-      chatId,
-      content,
-      transcriptViewId,
-      emittingRunId,
-      signal,
-      onControlRun,
+      chatId, content, transcriptViewId, emittingRunId, signal, onControlRun,
     );
   }
 
   async deliverInterAgentControlInput(
     chatId: string,
-    input: InterAgentControlInput,
+    input: ServerControlInput,
     signal: AbortSignal,
-  ): Promise<InterAgentControlDisposition> {
+  ): Promise<ServerControlDisposition> {
+    return this.#deliverServerControlInput(chatId, input, signal);
+  }
+
+  async deliverAgentCommandResult(
+    chatId: string,
+    input: ServerControlInput,
+    requestRunId: string | null,
+    signal: AbortSignal,
+  ): Promise<ServerControlDisposition> {
+    return this.#deliverServerControlInput(chatId, input, signal, requestRunId);
+  }
+
+  async #deliverServerControlInput(
+    chatId: string,
+    input: ServerControlInput,
+    signal: AbortSignal,
+    expectedRunId?: string | null,
+  ): Promise<ServerControlDisposition> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
@@ -438,10 +451,11 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const control = await this.#controlOperations.read(chatId);
     signal.throwIfAborted();
     if (control.pause || control.controlEntries.length > 0) {
-      return this.#enqueueInterAgentControlInput(chatId, input, signal);
+      return this.#enqueueServerControlInput(chatId, input, signal);
     }
 
-    const target = this.#steerInputDelivery.captureTarget(chatId);
+    let target = this.#steerInputDelivery.captureTarget(chatId);
+    if (expectedRunId !== undefined && target?.identity.turnId !== expectedRunId) target = null;
     if (target) {
       const outcome = await this.#controlSteerDelivery.toCapturedTarget(
         chatId,
@@ -453,7 +467,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (outcome === 'delivered') return 'delivered';
     }
 
-    return this.#enqueueInterAgentControlInput(chatId, input, signal);
+    return this.#enqueueServerControlInput(chatId, input, signal);
   }
 
   async deliverGoalControlInput(
@@ -795,16 +809,16 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#trackDispatch(task);
   }
 
-  async #enqueueInterAgentControlInput(
+  async #enqueueServerControlInput(
     chatId: string,
-    input: InterAgentControlInput,
+    input: ServerControlInput,
     signal: AbortSignal,
   ): Promise<'queued'> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
     await this.#controlOperations.enqueueControl(chatId, input);
-    this.#requestDrain(chatId, 'inter-agent control input');
+    this.#requestDrain(chatId, 'server control input');
     return 'queued';
   }
 
