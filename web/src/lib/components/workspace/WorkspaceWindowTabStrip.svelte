@@ -33,6 +33,7 @@
 		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
+	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -42,6 +43,7 @@
 		onSelect,
 		onFocus,
 		dnd,
+		isChatProcessing = () => false,
 		onVisibleChange,
 	}: {
 		windowId: WorkspaceWindowId;
@@ -50,6 +52,7 @@
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
 		dnd: WorkspaceWindowDndController;
+		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
 	} = $props();
 
@@ -215,6 +218,8 @@
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
 	{@const dropPosition = measurement ? null : tabDropPosition(surfaceId)}
 	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
+	{@const chatIsProcessing = !measurement && isChatProcessing(surfaceId)}
+	{@const processingStatusId = `${windowId}-tab-${surfaceId}-processing`}
 	<button
 		{...triggerProps}
 		type="button"
@@ -222,6 +227,8 @@
 		id={measurement ? undefined : `${windowId}-tab-${surfaceId}`}
 		aria-controls={measurement ? undefined : `${windowId}-panel-${surfaceId}`}
 		aria-selected={measurement ? undefined : tabs.activeId === surfaceId}
+		aria-label={measurement ? undefined : labelFor(surfaceId)}
+		aria-describedby={chatIsProcessing ? processingStatusId : undefined}
 		tabindex={measurement ? -1 : tabs.activeId === surfaceId ? 0 : -1}
 		data-window-tab-measure-id={measurement ? surfaceId : undefined}
 		data-workspace-tab-label-mode={measurement ? undefined : renderedLabelMode}
@@ -256,7 +263,11 @@
 				class:right-0={dropPosition === 'after'}
 			></span>
 		{/if}
-		<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} />
+		{#if chatIsProcessing}
+			<WorkspaceChatProcessingIndicator statusId={processingStatusId} />
+		{:else}
+			<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} />
+		{/if}
 		<span
 			class={cn(
 				'min-w-0',

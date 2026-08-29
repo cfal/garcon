@@ -40,6 +40,7 @@ const {
 		windowCount: 1,
 		closeBlocked: true,
 		surfaceCloseBlocked: false,
+		processingChatIds: new Set<string>(),
 		surfaces: {} as Record<string, SurfaceDescriptor>,
 	},
 }));
@@ -81,7 +82,10 @@ vi.mock('$lib/context', () => ({
 		exitWindowFullscreen,
 		closeWindow,
 	}),
-	getChatSessions: () => ({ byId: {} }),
+	getChatSessions: () => ({
+		byId: {},
+		isChatProcessing: (chatId: string) => runtime.processingChatIds.has(chatId),
+	}),
 	getNotifications: () => ({ error: vi.fn() }),
 	getFileSessions: () => ({ showOpenFiles: vi.fn() }),
 	getTerminalRegistry: () => ({ orderedSessions: [] }),
@@ -200,6 +204,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.windowCount = 1;
 		runtime.closeBlocked = true;
 		runtime.surfaceCloseBlocked = false;
+		runtime.processingChatIds.clear();
 		runtime.surfaces = { [chatSurface.id]: chatSurface, [gitSurface.id]: gitSurface };
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
@@ -216,7 +221,8 @@ describe('WorkspaceWindowTitleBar', () => {
 		const toolbar = screen.getByRole('toolbar');
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
-		expect(toolbar.classList.contains('bg-accent/50')).toBe(false);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(true);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
 		expect(screen.getByText('Chat A')).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
@@ -236,20 +242,65 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
 	});
 
-	it('uses a stronger title-bar background only for the current window in a multi-window layout', () => {
+	it('replaces an inactive background Chat tab icon while that Chat is processing', () => {
+		runtime.processingChatIds.add('chat-a');
+		const { container } = renderTitleBar(
+			workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id),
+			false,
+		);
+		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+		const indicator = chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]');
+		const descriptionId = chatTab.getAttribute('aria-describedby');
+
+		expect(indicator).toBeTruthy();
+		expect(chatTab.querySelector('.lucide-message-square')).toBeNull();
+		expect(descriptionId).toBeTruthy();
+		if (!descriptionId) throw new Error('Processing tab has no accessible description');
+		expect(document.getElementById(descriptionId)?.textContent).toBe(m.chat_window_processing());
+		const measurementTab = container.querySelector(
+			`[data-window-tab-measure-id="${chatSurface.id}"]`,
+		);
+		expect(
+			measurementTab?.querySelector('[data-slot="workspace-chat-processing-indicator"]'),
+		).toBeNull();
+		expect(measurementTab?.querySelector('.lucide-message-square')).toBeTruthy();
+	});
+
+	it('uses the normal Chat icon when no processing session is known', () => {
+		const { container } = renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+
+		expect(chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]')).toBeNull();
+		expect(chatTab.querySelector('.lucide-message-square')).toBeTruthy();
+		expect(
+			container.querySelectorAll('[data-slot="workspace-chat-processing-indicator"]'),
+		).toHaveLength(0);
+	});
+
+	it('replaces the single-tab Chat title icon while processing', () => {
+		runtime.processingChatIds.add('chat-a');
+		const { container } = renderTitleBar(workspaceWindow([chatSurface.id]));
+
+		expect(
+			container.querySelector('[data-slot="workspace-chat-processing-indicator"]'),
+		).toBeTruthy();
+		expect(container.querySelector('.lucide-message-square')).toBeNull();
+	});
+
+	it('uses the active title-bar token only for the current window in a multi-window layout', () => {
 		runtime.windowCount = 2;
 		const current = renderTitleBar(workspaceWindow([chatSurface.id])).container.querySelector(
 			'[data-workspace-window-titlebar]',
 		)!;
-		expect(current.classList.contains('bg-accent/50')).toBe(true);
+		expect(current.classList.contains('bg-workspace-window-titlebar-active')).toBe(true);
 		cleanup();
 
 		const inactive = renderTitleBar(
 			workspaceWindow([chatSurface.id]),
 			false,
 		).container.querySelector('[data-workspace-window-titlebar]')!;
-		expect(inactive.classList.contains('bg-muted/30')).toBe(true);
-		expect(inactive.classList.contains('bg-accent/50')).toBe(false);
+		expect(inactive.classList.contains('bg-workspace-window-titlebar')).toBe(true);
+		expect(inactive.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
 	});
 
 	it('keeps the fullscreen title bar muted', () => {
@@ -259,8 +310,8 @@ describe('WorkspaceWindowTitleBar', () => {
 			'[data-workspace-window-titlebar]',
 		)!;
 
-		expect(toolbar.classList.contains('bg-muted/30')).toBe(true);
-		expect(toolbar.classList.contains('bg-accent/50')).toBe(false);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(true);
+		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
 	});
 
 	it('describes the final Chat view close block', () => {

@@ -198,6 +198,7 @@ function installContext() {
 			selectedChatId: 'chat-a',
 			selectedChat: chat('chat-a', 'Chat A'),
 			byId: { 'chat-a': chat('chat-a', 'Chat A'), 'chat-b': chat('chat-b', 'Chat B') },
+			isChatProcessing: () => false,
 		},
 		modelCatalog: {
 			supportsFork: () => false,

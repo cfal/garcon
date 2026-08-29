@@ -11,6 +11,7 @@
 	} from '$lib/workspace/surface-types.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
+	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
@@ -49,6 +50,7 @@
 			? (sessions.byId[activeSurface.chatId] ?? null)
 			: null,
 	);
+	const activeChatIsProcessing = $derived(isSurfaceChatProcessing(workspaceWindow.tabs.activeId));
 	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
 	const showActiveTreatment = $derived(isCurrent && workspace.windowCount > 1 && !fullscreen);
 	const hiddenSurfaceIds = $derived(
@@ -72,6 +74,12 @@
 		workspace.noteWindowChromeFocus(workspaceWindow.id, workspaceWindow.tabs.activeId);
 	}
 
+	function isSurfaceChatProcessing(surfaceId: string): boolean {
+		const surface = snapshot.surfaces[surfaceId];
+		if (surface?.type !== 'chat' || !surface.chatId) return false;
+		return sessions.isChatProcessing(surface.chatId);
+	}
+
 	function notifyFailure(error: unknown): void {
 		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 	}
@@ -93,8 +101,8 @@
 	tabindex="-1"
 	data-workspace-window-titlebar={workspaceWindow.id}
 	class={cn(
-		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-muted/30 px-1.5 transition-colors',
-		showActiveTreatment && 'bg-accent/50',
+		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
+		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
 	class:h-8={!hasTabBar}
 	class:h-10={hasTabBar}
@@ -110,6 +118,7 @@
 				onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 				onFocus={(surfaceId) => workspace.noteWindowChromeFocus(workspaceWindow.id, surfaceId)}
 				{dnd}
+				isChatProcessing={isSurfaceChatProcessing}
 				onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
 			/>
 		{:else}
@@ -117,15 +126,15 @@
 				id={`${workspaceWindow.id}-tab-${workspaceWindow.tabs.activeId}`}
 				class="flex min-w-0 items-center gap-1.5 px-1.5 text-xs font-medium"
 			>
-				<WorkspaceSurfaceIcon kind={activeKind} />
+				{#if activeChatIsProcessing}
+					<WorkspaceChatProcessingIndicator
+						statusId={`${workspaceWindow.id}-title-chat-processing`}
+					/>
+				{:else}
+					<WorkspaceSurfaceIcon kind={activeKind} />
+				{/if}
 				<span class="min-w-0 truncate">{labelFor(workspaceWindow.tabs.activeId)}</span>
-				{#if activeChat?.isProcessing}
-					<span class="relative flex h-1.5 w-1.5 shrink-0" aria-label={m.chat_window_processing()}>
-						<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50"
-						></span>
-						<span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary"></span>
-					</span>
-				{:else if !isCurrent && activeChat?.isUnread}
+				{#if !activeChatIsProcessing && !isCurrent && activeChat?.isUnread}
 					<span
 						class="h-2 w-2 shrink-0 rounded-full bg-indicator-attention"
 						aria-label={m.chat_window_activity()}

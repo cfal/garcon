@@ -20,6 +20,8 @@
 	--color-destructive-foreground: hsl(var(--destructive-foreground));
 	--color-border: hsl(var(--border));
 	--color-workspace-window-focus: hsl(var(--workspace-window-focus));
+	--color-workspace-window-titlebar: hsl(var(--workspace-window-titlebar));
+	--color-workspace-window-titlebar-active: hsl(var(--workspace-window-titlebar-active));
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
 	--color-chat-header: hsl(var(--chat-header-bg));
@@ -205,7 +207,9 @@
 	--destructive: 0 84.2% 60.2%;
 	--destructive-foreground: 0 0% 98%;
 	--border: 0 0% 90%;
-	--workspace-window-focus: 0 0% 70%;
+	--workspace-window-focus: 0 0% 82%;
+	--workspace-window-titlebar: 0 0% 91%;
+	--workspace-window-titlebar-active: 0 0% 84%;
 	--composer-thinking-static-start: 0 0% 85%;
 	--composer-thinking-pulse-emphasis: 0 0% 80%;
 	--input: 0 0% 90%;
@@ -433,7 +437,9 @@
 	--destructive: 0 62.8% 30.6%;
 	--destructive-foreground: 0 0% 95%;
 	--border: 0 0% 20%;
-	--workspace-window-focus: 0 0% 38%;
+	--workspace-window-focus: 0 0% 28%;
+	--workspace-window-titlebar: 0 0% 4%;
+	--workspace-window-titlebar-active: 0 0% 1%;
 	--composer-thinking-static-start: 0 0% 25%;
 	--composer-thinking-pulse-emphasis: 0 0% 30%;
 	--input: 0 0% 40%;
@@ -1022,7 +1028,8 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-	.sidebar-processing-indicator {
+	.sidebar-processing-indicator,
+	.workspace-chat-processing-indicator {
 		animation: sidebar-processing-pulse 1.6s ease-in-out infinite;
 	}
 
