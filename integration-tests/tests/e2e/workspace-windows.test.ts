@@ -103,9 +103,9 @@ describe('Lightpanda workspace windows', () => {
         requiredSingletons: ['git', 'git-compare'],
       });
 
-		const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
-		await fixture.page.reload({ waitUntil: [] });
-		await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
+      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
       await app.waitForWorkspaceWindowCount(2);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       expect(
@@ -257,8 +257,8 @@ async function waitForPersistedWindowState(
       const raw = localStorage.getItem('workspace_layout_v2');
       if (!raw) return false;
       const parsed = JSON.parse(raw) as { root?: unknown };
-		const windows: Array<{ order?: Array<{ type?: string; kind?: string; chatId?: string }> }> =
-			[];
+      const windows: Array<{ order?: Array<{ type?: string; kind?: string; chatId?: string }> }> =
+        [];
       const visit = (node: unknown): void => {
         if (!node || typeof node !== 'object') return;
         const candidate = node as {
