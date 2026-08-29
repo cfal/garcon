@@ -76,6 +76,11 @@
 					?.resultInsetClass ?? null)
 			: null,
 	);
+	const dropLayerInsetClass = $derived.by(() => {
+		if (dnd.payload?.kind === 'chat') return 'inset-0';
+		if (workspaceWindow.tabs.order.length > 1) return 'inset-x-0 bottom-0 top-10';
+		return 'inset-x-0 bottom-0 top-8';
+	});
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
 		switch (zone.zone) {
@@ -221,11 +226,7 @@
 		<div
 			class={cn(
 				'pointer-events-auto absolute z-50',
-				dnd.payload?.kind === 'chat'
-					? 'inset-0'
-					: workspaceWindow.tabs.order.length > 1
-						? 'inset-x-0 bottom-0 top-10'
-						: 'inset-x-0 bottom-0 top-8',
+				dropLayerInsetClass,
 			)}
 			data-workspace-window-drop-layer={workspaceWindow.id}
 			role="status"

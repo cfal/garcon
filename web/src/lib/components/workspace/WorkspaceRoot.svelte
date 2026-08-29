@@ -216,6 +216,15 @@
 		return fullscreenWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
 	}
 
+	function chatContentModeForWindow(
+		windowId: WorkspaceWindowId,
+	): 'live' | 'preview' | 'none' {
+		if (isMobile) return 'none';
+		if (fullscreenWindowId && fullscreenWindowId !== windowId) return 'none';
+		if (liveChat?.windowId === windowId) return 'live';
+		return 'preview';
+	}
+
 	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
 		const ratio = rootState.partitionRatio(partition.id, partition.ratio);
 		if (partition.direction === 'horizontal') {
@@ -302,12 +311,7 @@
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id}
-				chatContentMode={isMobile ||
-				(fullscreenWindowId !== null && fullscreenWindowId !== workspaceWindow.id)
-					? 'none'
-					: liveChat?.windowId === workspaceWindow.id
-						? 'live'
-						: 'preview'}
+				chatContentMode={chatContentModeForWindow(workspaceWindow.id)}
 				presentations={renderedPresentations}
 				style={rectStyle(displayRect(workspaceWindow.id, rect))}
 				labelFor={label}
