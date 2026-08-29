@@ -131,7 +131,7 @@ describe('chat lifecycle', () => {
     });
   });
 
-  test('[TLV5-CHAT-ID-DISCOVERY.04-DIRECT-SERVER-01] falls back to one hidden direct turn', async () => {
+  test('[TLV5-CHAT-ID-DISCOVERY.04-DIRECT-SERVER-01] falls back to one direct control turn', async () => {
     await withIntegrationFixture('direct-chat-id-discovery-fallback', async (fixture) => {
       const chatId = fixture.newChatId();
       const initialPrompt = 'Discover this chat ID.';

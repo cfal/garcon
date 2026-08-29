@@ -302,13 +302,14 @@ export async function startServer(): Promise<void> {
     });
     const chatIdDiscovery = new ChatIdDiscoveryController({
       execution: {
-        deliverControlInput: (chatId, content, viewId, signal, onHiddenRun) => (
+        deliverControlInput: (chatId, content, viewId, runId, signal, onControlRun) => (
           requireExecutionQueue().deliverControlInput(
             chatId,
             content,
             viewId,
+            runId,
             signal,
-            onHiddenRun,
+            onControlRun,
           )
         ),
       },

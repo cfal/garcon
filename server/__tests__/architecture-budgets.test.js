@@ -9,8 +9,8 @@ import { join } from 'node:path';
 const MAX_LINES = 1000;
 // Keeps command and execution orchestration from regrowing persistence or
 // provider concerns now owned by the ledger and integration boundary. The
-// provider-neutral hidden control route adds bounded run-or-steer delivery.
-const EXECUTION_FOOTPRINT_BUDGET = 8100;
+// provider-neutral control route adds one-shot steer-or-control-turn delivery.
+const EXECUTION_FOOTPRINT_BUDGET = 7960;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

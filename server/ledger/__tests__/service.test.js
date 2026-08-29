@@ -27,7 +27,7 @@ describe('TranscriptLedgerService', () => {
         const notifications = [];
         ledger.subscribe((event) => notifications.push(event));
         requests.mockImplementation((input) => {
-          expect(ledger.currentRows('chat-1')).toHaveLength(1);
+          expect(ledger.currentRows('chat-1')).toHaveLength(2);
           expect(notifications).toEqual([]);
           expect(input).toMatchObject({ chatId: 'chat-1', runId: 'run-1' });
         });
@@ -48,6 +48,12 @@ describe('TranscriptLedgerService', () => {
             kind: 'provider-row',
             message: { type: 'assistant-message', content: 'Continuing the response.' },
           },
+          {
+            kind: 'notice',
+            at: TS,
+            message: 'Agent requested chat ID',
+            detail: { type: 'chat-id-request' },
+          },
         ]);
         await tick();
         expect(notifications).toHaveLength(1);
@@ -56,7 +62,7 @@ describe('TranscriptLedgerService', () => {
       });
     });
 
-    it('dispatches a marker-only request without committing a row', async () => {
+    it('commits a hidden row before dispatching a marker-only request', async () => {
       const requests = mock(() => undefined);
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
@@ -73,7 +79,15 @@ describe('TranscriptLedgerService', () => {
           runId: null,
           at: TS,
         });
-        expect(ledger.currentRows('chat-1')).toEqual([]);
+        expect(ledger.currentRows('chat-1')).toMatchObject([{
+          ordinal: 1,
+          kind: 'notice',
+          at: TS,
+          message: 'Agent requested chat ID',
+          detail: { type: 'chat-id-request' },
+          providerMeta: null,
+        }]);
+        expect(ledger.conversationMessages('chat-1')).toEqual([]);
       }, {
         chatIdRequests: { request: requests },
       });

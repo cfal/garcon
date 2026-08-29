@@ -14,7 +14,6 @@ export interface ChatIdDisclosureNoticeDetail {
 
 export type ChatIdDiscoveryFailureReason =
   | 'disabled'
-  | 'unsupported'
   | 'delivery-failed';
 
 export interface ChatIdDiscoveryFailureNoticeDetail {
@@ -58,7 +57,6 @@ export function isChatIdDiscoveryFailureNoticeDetail(
   if (!hasType(value, 'chat-id-discovery-failure')) return false;
   const reason = (value as Record<string, unknown>).reason;
   return reason === 'disabled'
-    || reason === 'unsupported'
     || reason === 'delivery-failed';
 }
 

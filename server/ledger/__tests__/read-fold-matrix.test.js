@@ -11,6 +11,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
+import { chatIdRequestNoticeDraft } from '../chat-id-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
@@ -238,6 +239,13 @@ describe('transcript ledger read-fold matrix', () => {
         ordinal: 2,
         at: DISCOVERY_PROVIDER_AT,
       });
+      rows.push(...store.append(CHAT_ID, VIEW_ID, [
+        chatIdRequestNoticeDraft(DISCOVERY_PROVIDER_AT),
+      ]));
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 3,
+        at: DISCOVERY_PROVIDER_AT,
+      });
       rows.push(...store.append(CHAT_ID, VIEW_ID, [{
         kind: 'user-input',
         at: AT,
@@ -250,7 +258,7 @@ describe('transcript ledger read-fold matrix', () => {
         },
       }]));
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 2,
+        ordinal: 3,
         at: DISCOVERY_PROVIDER_AT,
       });
       const disclosure = ledger.appendNotice(CHAT_ID, VIEW_ID, {
@@ -285,6 +293,9 @@ describe('transcript ledger read-fold matrix', () => {
         'waiting for the ID',
         'client-clock input',
       ]);
+      expect(ledger.resendCandidates(CHAT_ID).map(({ content }) => content)).toEqual([
+        'client-clock input',
+      ]);
       expect(frozenConversationDrafts(rows).map((row) => frozenDraftText(row))).toEqual([
         'discover the chat ID',
         'waiting for the ID',
@@ -298,9 +309,9 @@ describe('transcript ledger read-fold matrix', () => {
       expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
         [1, 'conversation'],
         [2, 'conversation'],
-        [3, 'conversation'],
-        [4, 'diagnostics'],
+        [4, 'conversation'],
         [5, 'diagnostics'],
+        [6, 'diagnostics'],
       ]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
         ordinal: 5,

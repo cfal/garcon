@@ -157,21 +157,4 @@ describe('AgentEventBus', () => {
 
     expect(created).toHaveBeenCalledWith('chat-1');
   });
-
-  it('clears turn correlation without suppressing the run-activity signal', async () => {
-    const bus = new AgentEventBus();
-    const finished = mock(() => undefined);
-    const activityCleared = mock(() => undefined);
-    bus.onFinished(finished);
-    bus.onRunActivityCleared(activityCleared);
-    bus.trackTurn('chat-1', operation('turn-1'));
-    bus.settleTurn('chat-1', operation('turn-1'));
-    bus.clearTurn('chat-1');
-
-    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('finished'));
-
-    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
-    expect(finished).not.toHaveBeenCalled();
-    expect(activityCleared).toHaveBeenCalledWith('chat-1');
-  });
 });

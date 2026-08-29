@@ -47,6 +47,7 @@ describe('ChatIdDiscoveryController', () => {
       CHAT_ID,
       '<garcon-chat-id>1787836573296800</garcon-chat-id>',
       VIEW_ID,
+      'run-1',
       expect.anything(),
       expect.any(Function),
     );
@@ -112,15 +113,22 @@ describe('ChatIdDiscoveryController', () => {
     expect(deliverControlInput).toHaveBeenCalledTimes(2);
   });
 
-  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-RECURSION-UNIT-01] suppresses uncorrelated markers after its hidden turn', async () => {
-    const deliverControlInput = mock(async (_chatId, _content, _viewId, _signal, onHiddenRun) => {
-      onHiddenRun('hidden-turn');
+  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-RECURSION-UNIT-01] suppresses uncorrelated markers after its control turn', async () => {
+    const deliverControlInput = mock(async (
+      _chatId,
+      _content,
+      _viewId,
+      _runId,
+      _signal,
+      onControlRun,
+    ) => {
+      onControlRun('control-turn');
     });
     const { controller } = createController({ execution: { deliverControlInput } });
 
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
     await Promise.resolve();
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'hidden-turn', at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'control-turn', at: AT });
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
     await Promise.resolve();
@@ -128,28 +136,7 @@ describe('ChatIdDiscoveryController', () => {
     expect(deliverControlInput).toHaveBeenCalledTimes(2);
   });
 
-  it('contains synchronous delivery setup failures', () => {
-    const { appendNotice, controller } = createController({
-      execution: {
-        deliverControlInput: mock(() => { throw new Error('execution unavailable'); }),
-      },
-    });
-
-    expect(() => controller.request({
-      chatId: CHAT_ID,
-      viewId: VIEW_ID,
-      runId: 'run-1',
-      at: AT,
-    })).not.toThrow();
-    expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
-      title: 'Chat ID auto-discovery',
-      content: 'Garcon could not send the chat ID to the agent.',
-      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
-      at: AT,
-    });
-  });
-
-  it('records unsupported delivery as one typed failure', async () => {
+  it('maps an unexpected unsupported rejection to the generic failure', async () => {
     const error = new DomainError(
       'OPERATION_UNSUPPORTED',
       'This agent does not support steering',
@@ -166,8 +153,8 @@ describe('ChatIdDiscoveryController', () => {
 
     expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
       title: 'Chat ID auto-discovery',
-      content: 'This agent does not support chat ID auto-discovery.',
-      detail: { type: 'chat-id-discovery-failure', reason: 'unsupported' },
+      content: 'Garcon could not send the chat ID to the agent.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
       at: AT,
     });
   });
@@ -184,6 +171,27 @@ describe('ChatIdDiscoveryController', () => {
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
     await Promise.resolve();
 
+    expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
+      title: 'Chat ID auto-discovery',
+      content: 'Garcon could not send the chat ID to the agent.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
+      at: AT,
+    });
+  });
+
+  it('records a generic failure when delivery throws synchronously', () => {
+    const error = new Error('Execution queue is not initialized');
+    const onError = mock(() => undefined);
+    const { appendNotice, controller } = createController({
+      execution: {
+        deliverControlInput: mock(() => { throw error; }),
+      },
+      onError,
+    });
+
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+
+    expect(onError).toHaveBeenCalledWith(error, CHAT_ID);
     expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
       title: 'Chat ID auto-discovery',
       content: 'Garcon could not send the chat ID to the agent.',
@@ -221,7 +229,7 @@ describe('ChatIdDiscoveryController', () => {
     let signal;
     const { appendNotice, controller } = createController({
       execution: {
-        deliverControlInput: mock((_chatId, _content, _viewId, inputSignal) => {
+        deliverControlInput: mock((_chatId, _content, _viewId, _runId, inputSignal) => {
           signal = inputSignal;
           return delivery.promise;
         }),

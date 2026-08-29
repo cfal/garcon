@@ -98,7 +98,6 @@ export class QueueDrainer {
           ...options,
           executionAdmission: ownership.installAttempt(chatId, attempt),
         };
-        ownership.notifyOwnersChanged(chatId);
         ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
         ownership.setActiveDrainEntry(chatId, result.entry.id);
 

@@ -59,8 +59,6 @@ export function chatIdDiscoveryFailureContent(reason: ChatIdDiscoveryFailureReas
   switch (reason) {
     case 'disabled':
       return 'Chat ID auto-discovery is disabled.';
-    case 'unsupported':
-      return 'This agent does not support chat ID auto-discovery.';
     case 'delivery-failed':
       return 'Garcon could not send the chat ID to the agent.';
   }

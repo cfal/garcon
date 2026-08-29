@@ -10,7 +10,6 @@ import type {
 } from '../../common/transcript-notice-details.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { TranscriptViewId } from '../ledger/contracts.js';
-import { DomainError } from '../lib/domain-error.js';
 
 interface ChatIdDiscoveryRequest {
   readonly chatId: string;
@@ -20,7 +19,6 @@ interface ChatIdDiscoveryRequest {
 }
 
 interface ChatIdDiscoveryAttempt {
-  readonly hasRun: boolean;
   readonly runId: string | null;
   readonly abortController: AbortController;
   pending: boolean;
@@ -31,8 +29,9 @@ interface ChatIdDiscoveryExecution {
     chatId: string,
     content: string,
     transcriptViewId: string,
+    emittingRunId: string | null,
     signal: AbortSignal,
-    onHiddenRun: (turnId: string) => void,
+    onControlRun: (turnId: string) => void,
   ): Promise<void>;
 }
 
@@ -55,9 +54,8 @@ export class ChatIdDiscoveryController {
     if (controlRunId && (!hasRun || controlRunId === input.runId)) return;
     const current = this.#attempts.get(input.chatId);
     if (current?.pending) return;
-    if (hasRun && current?.hasRun && current.runId === input.runId) return;
+    if (hasRun && current?.runId === input.runId) return;
     const attempt = {
-      hasRun,
       runId: input.runId,
       abortController: new AbortController(),
       pending: true,
@@ -83,12 +81,13 @@ export class ChatIdDiscoveryController {
         input.chatId,
         chatIdDisclosureContent(chatId),
         input.viewId,
+        input.runId,
         attempt.abortController.signal,
         (turnId) => this.#controlRunIds.set(input.chatId, turnId),
       );
     } catch (error) {
       this.options.onError?.(error, input.chatId);
-      this.#recordFailure(input, attempt, failureReason(error));
+      this.#recordFailure(input, attempt, 'delivery-failed');
       return;
     }
     void delivery.then(
@@ -96,7 +95,7 @@ export class ChatIdDiscoveryController {
       (error) => {
         if (attempt.abortController.signal.aborted) return;
         this.options.onError?.(error, input.chatId);
-        this.#recordFailure(input, attempt, failureReason(error));
+        this.#recordFailure(input, attempt, 'delivery-failed');
       },
     );
   }
@@ -146,10 +145,4 @@ export class ChatIdDiscoveryController {
       this.options.onError?.(error, input.chatId);
     }
   }
-}
-
-function failureReason(error: unknown): ChatIdDiscoveryFailureReason {
-  if (!(error instanceof DomainError)) return 'delivery-failed';
-  if (error.code === 'OPERATION_UNSUPPORTED') return 'unsupported';
-  return 'delivery-failed';
 }

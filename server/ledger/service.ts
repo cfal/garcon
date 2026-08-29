@@ -37,6 +37,7 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
+import { chatIdRequestNoticeDraft } from './chat-id-request.js';
 import { PermissionNotActionableError } from './errors.js';
 import { TranscriptLedgerStore } from './store.js';
 
@@ -684,6 +685,7 @@ export class TranscriptLedgerService {
           }
           if (!request) continue;
           discoveryRequestAt ??= row.message.timestamp;
+          drafts.push(chatIdRequestNoticeDraft(row.message.timestamp));
         }
         if (drafts.length > 0) {
           const rows = this.#store.append(chatId, viewId, drafts);

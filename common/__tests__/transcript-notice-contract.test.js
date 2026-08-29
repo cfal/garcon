@@ -57,7 +57,6 @@ describe('transcript notice contracts', () => {
     for (const detail of [
       { type: 'chat-id-disclosure' },
       { type: 'chat-id-discovery-failure', reason: 'disabled' },
-      { type: 'chat-id-discovery-failure', reason: 'unsupported' },
       { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
     ]) {
       const message = {
@@ -72,7 +71,7 @@ describe('transcript notice contracts', () => {
     expect(isChatIdDiscoveryFailureNoticeDetail({
       type: 'chat-id-discovery-failure',
       reason: 'unsupported',
-    })).toBe(true);
+    })).toBe(false);
     expect(isChatIdDiscoveryFailureNoticeDetail({
       type: 'chat-id-discovery-failure',
       reason: 'invalid',

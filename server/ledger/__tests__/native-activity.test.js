@@ -112,8 +112,8 @@ describe('NativeTranscriptActivityService', () => {
       store.append(CHAT_ID, view.viewId, [{
         kind: 'notice',
         at: IMPORTED_AT,
-        message: 'Chat ID auto-discovery is disabled.',
-        detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
+        message: 'Agent requested chat ID',
+        detail: { type: 'chat-id-request' },
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
@@ -124,11 +124,35 @@ describe('NativeTranscriptActivityService', () => {
       store.append(CHAT_ID, view.viewId, [{
         kind: 'notice',
         at: IMPORTED_AT,
+        message: 'Sent chat ID 1787836573296800 to agent.',
+        detail: { type: 'chat-id-disclosure' },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 9,
+        at: IMPORTED_AT,
+      });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Chat ID auto-discovery is disabled.',
+        detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 10,
+        at: IMPORTED_AT,
+      });
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
         message: 'Garcon could not send the chat ID to the agent.',
         detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
         providerMeta: null,
       }]);
-      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(9);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(10);
 
       store.append(CHAT_ID, view.viewId, [{
         kind: 'user-input',
@@ -142,7 +166,7 @@ describe('NativeTranscriptActivityService', () => {
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 10,
+        ordinal: 12,
         at: IMPORTED_AT,
       });
     });

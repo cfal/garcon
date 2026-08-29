@@ -433,9 +433,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
   onFinished(cb: Parameters<AgentEventBus['onFinished']>[0]): void { this.#events.onFinished(cb); }
-  onRunActivityCleared(cb: Parameters<AgentEventBus['onRunActivityCleared']>[0]): void {
-    this.#events.onRunActivityCleared(cb);
-  }
   onFailed(cb: (
     chatId: string,
     error: string,

@@ -10,6 +10,7 @@ import {
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
 import type { JsonObject } from '../../common/json.js';
+import { chatIdRequestNoticeDraft } from './chat-id-request.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {
@@ -45,9 +46,12 @@ function importedDraftFor(
   const request = transformChatIdRequest(original);
   if (request) {
     const at = original.timestamp || now();
-    return request.message
-      ? [{ kind: 'provider-row', at, message: request.message, providerMeta }]
-      : [];
+    return [
+      ...(request.message
+        ? [{ kind: 'provider-row' as const, at, message: request.message, providerMeta }]
+        : []),
+      chatIdRequestNoticeDraft(at),
+    ];
   }
   if (original.type === 'user-message') {
     const disclosedChatId = parseChatIdDisclosure(original.content);

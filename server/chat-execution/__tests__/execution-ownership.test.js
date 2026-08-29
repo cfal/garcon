@@ -61,37 +61,3 @@ describe('ExecutionOwnership direct-turn exclusivity', () => {
     );
   });
 });
-
-describe('ExecutionOwnership owner-change watches', () => {
-  it('keeps cancelled watches pending and resolves active watches', async () => {
-    const ownership = new ExecutionOwnership();
-    const cancelled = ownership.watchOwnerChange(CHAT_ID);
-    let cancelledResolved = false;
-    void cancelled.promise.then(() => { cancelledResolved = true; });
-
-    cancelled.cancel();
-    ownership.notifyOwnersChanged(CHAT_ID);
-    await Promise.resolve();
-    expect(cancelledResolved).toBe(false);
-
-    const active = ownership.watchOwnerChange(CHAT_ID);
-    let activeResolved = false;
-    void active.promise.then(() => { activeResolved = true; });
-    ownership.notifyOwnersChanged('other-chat');
-    await Promise.resolve();
-    expect(activeResolved).toBe(false);
-
-    ownership.notifyOwnersChanged(CHAT_ID);
-    await active.promise;
-    expect(activeResolved).toBe(true);
-  });
-
-  it('resolves a watch-only chat when shutdown begins', async () => {
-    const ownership = new ExecutionOwnership();
-    const watch = ownership.watchOwnerChange(CHAT_ID);
-
-    ownership.beginShutdown(new Error('shutdown'));
-
-    await watch.promise;
-  });
-});

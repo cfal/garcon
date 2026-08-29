@@ -14,6 +14,7 @@ import {
   TranscriptLedgerStore,
   transcriptViewId,
 } from '../index.ts';
+import { chatIdRequestNoticeDraft } from '../chat-id-request.ts';
 import { decodeLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 
@@ -98,6 +99,25 @@ describe('TranscriptLedgerStore', () => {
     expect(appended.map((row) => row.ordinal)).toEqual([3]);
     expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2, 3]);
     expect(store.highWatermark('chat-one')).toEqual({ viewId: view.viewId, ordinal: 3 });
+  });
+
+  it('[TLV5-CHAT-ID-DISCOVERY.01-STORE-RESTART-01] preserves a hidden chat ID request row when reopening a ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    store.append('chat-one', view.viewId, [chatIdRequestNoticeDraft(at)]);
+    store.close();
+    store = new TranscriptLedgerStore(root);
+
+    expect(store.currentRows('chat-one')).toMatchObject([{
+      ordinal: 1,
+      kind: 'notice',
+      at,
+      message: 'Agent requested chat ID',
+      detail: { type: 'chat-id-request' },
+      providerMeta: null,
+    }]);
   });
 
   it('rejects an invalid multi-row batch before committing without fencing the chat', () => {

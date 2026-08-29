@@ -3,7 +3,6 @@ import { AssistantMessage } from '../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { wireServerEvents } from '../server-event-wiring.js';
-import { AgentEventBus } from '../agents/event-bus.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
@@ -26,7 +25,6 @@ function createFixture(overrides = {}) {
     onTranscriptCommitted: mock((callback) => { agent.transcript = callback; }),
     onSessionCreated: mock((callback) => { agent.session = callback; }),
     onFinished: mock((callback) => { agent.finished = callback; }),
-    onRunActivityCleared: mock((callback) => { agent.activityCleared = callback; }),
     onFailed: mock((callback) => { agent.failed = callback; }),
     resendCandidates: mock(() => []),
     settleTurn: mock(() => undefined),
@@ -224,43 +222,6 @@ describe('server event wiring', () => {
       'finished',
       {},
     );
-  });
-
-  it('checks chat idle without awaiting queue drain when run activity clears', async () => {
-    const eventBus = new AgentEventBus();
-    let releaseIdleCheck;
-    const idleCheck = new Promise((resolve) => {
-      releaseIdleCheck = resolve;
-    });
-    const fixture = createFixture({
-      agentRegistry: {
-        onFinished: (callback) => eventBus.onFinished(callback),
-        onFailed: (callback) => eventBus.onFailed(callback),
-        onRunActivityCleared: (callback) => eventBus.onRunActivityCleared(callback),
-      },
-      queue: {
-        checkChatIdle: mock(() => idleCheck),
-      },
-    });
-    eventBus.trackTurn('chat-1', turn);
-    eventBus.clearTurn('chat-1');
-
-    const publication = eventBus.publishRunEnded('chat-1', 'turn-1', terminalCommit().row);
-    let publicationSettled = false;
-    void publication.then(() => {
-      publicationSettled = true;
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    try {
-      expect(publicationSettled).toBe(true);
-      expect(fixture.queueService.checkChatIdle).toHaveBeenCalledWith('chat-1');
-      expect(fixture.published).toEqual([]);
-    } finally {
-      releaseIdleCheck();
-      await publication;
-    }
   });
 
   it('captures committed assistant output for the command receipt before terminal settlement', async () => {

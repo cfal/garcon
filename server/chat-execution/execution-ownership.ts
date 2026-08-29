@@ -80,7 +80,6 @@ function isIdle(state: ChatExecutionState): boolean {
 export class ExecutionOwnership {
   readonly #chats = new Map<string, ChatExecutionState>();
   readonly #ownerWaiters = new Set<() => void>();
-  readonly #chatOwnerWaiters = new Map<string, Set<() => void>>();
   readonly #turnFinalizations = new QueuedTurnFinalizationTracker();
 
   #state(chatId: string): ChatExecutionState {
@@ -119,10 +118,6 @@ export class ExecutionOwnership {
     for (const [chatId, state] of this.#chats) {
       this.#abortAdmissions(state, reason);
       if (ownsExecution(state)) owners.push(chatId);
-      this.notifyOwnersChanged(chatId);
-    }
-    for (const chatId of [...this.#chatOwnerWaiters.keys()]) {
-      this.notifyOwnersChanged(chatId);
     }
     return owners;
   }
@@ -150,38 +145,9 @@ export class ExecutionOwnership {
     }
   }
 
-  // Watches the complete coordinator admission route. External busy inputs, including provider
-  // run state, notify this watch when they change.
-  watchOwnerChange(chatId: string): { readonly promise: Promise<void>; cancel(): void } {
-    let resolve!: () => void;
-    const promise = new Promise<void>((done) => { resolve = done; });
-    let waiters = this.#chatOwnerWaiters.get(chatId);
-    if (!waiters) {
-      waiters = new Set();
-      this.#chatOwnerWaiters.set(chatId, waiters);
-    }
-    const complete = () => {
-      this.#deleteChatOwnerWaiter(chatId, complete);
-      resolve();
-    };
-    waiters.add(complete);
-    return {
-      promise,
-      cancel: () => this.#deleteChatOwnerWaiter(chatId, complete),
-    };
-  }
-
-  notifyOwnersChanged(chatId: string): void {
+  notifyOwnersChanged(): void {
     for (const resolve of this.#ownerWaiters) resolve();
     this.#ownerWaiters.clear();
-    for (const resolve of [...(this.#chatOwnerWaiters.get(chatId) ?? [])]) resolve();
-  }
-
-  #deleteChatOwnerWaiter(chatId: string, waiter: () => void): void {
-    const waiters = this.#chatOwnerWaiters.get(chatId);
-    if (!waiters) return;
-    waiters.delete(waiter);
-    if (waiters.size === 0) this.#chatOwnerWaiters.delete(chatId);
   }
 
   hasOwner(chatId: string): boolean {
@@ -447,7 +413,7 @@ export class ExecutionOwnership {
     }
     this.#turnFinalizations.clearChat(chatId);
     this.#gc(chatId);
-    this.notifyOwnersChanged(chatId);
+    this.notifyOwnersChanged();
   }
 
   beginFinalization(chatId: string, turnId: string): QueuedTurnFinalizationHandle {
