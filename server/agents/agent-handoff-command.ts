@@ -4,6 +4,7 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { ChatListEntry } from '../../common/chat-list.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
+import { hasPendingTurnInput } from '../chat-execution/control-state.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { CommandExecutionControlError } from '../lib/command-execution-control-error.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
@@ -57,7 +58,7 @@ export async function prepareAgentHandoffCommand(input: {
   const control = await input.execution.readChatExecutionControl(input.chatId);
   if (
     input.execution.ownsExecution(input.chatId)
-    || control.entries.length > 0
+    || hasPendingTurnInput(control)
     || control.pause !== null
   ) {
     throw new CommandExecutionControlError(

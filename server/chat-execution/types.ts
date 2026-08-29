@@ -4,6 +4,7 @@ import type {
   SteerDeliveryOutcome,
 } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
+import type { InterAgentMessageReceivedNoticeDetail } from '../../common/transcript-notice-details.ts';
 import type {
   ChatStopIntent,
   ChatStopOutcome,
@@ -204,6 +205,19 @@ export interface CapturedSteerTarget {
   readonly identity: Readonly<TurnIdentity> & { readonly turnId: string };
   readonly providerTarget: AgentSteerTarget | null;
 }
+
+export interface InterAgentControlInput {
+  readonly content: string;
+  readonly transcriptViewId: string;
+  readonly createdAt: string;
+  readonly receipt: {
+    readonly title: string;
+    readonly content: string;
+    readonly detail: InterAgentMessageReceivedNoticeDetail;
+  };
+}
+
+export type InterAgentControlDisposition = 'delivered' | 'queued';
 
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;
@@ -472,5 +486,11 @@ export function transitionError(
       );
     case 'QUEUE_PAUSE_CHANGED':
       return new QueuePauseChangedError(control);
+    case 'CONTROL_INPUT_QUEUE_FULL':
+      return new DomainError(
+        'CONTROL_INPUT_QUEUE_FULL',
+        'The inter-agent control input lane is full',
+        409,
+      );
   }
 }

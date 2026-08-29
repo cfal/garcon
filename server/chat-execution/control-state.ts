@@ -5,6 +5,7 @@ import type {
   RecentlyDispatchedQueueEntry,
 } from '../../common/queue-state.ts';
 import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../common/queue-state.ts';
+import type { InterAgentMessageReceivedNoticeDetail } from '../../common/transcript-notice-details.ts';
 
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../common/queue-state.ts';
 
@@ -19,6 +20,20 @@ export interface StoredQueueEntry extends QueueEntry {
   submission?: StoredQueueSubmissionIdentity;
 }
 
+export const MAX_CONTROL_INPUT_ENTRIES = 64;
+
+export interface StoredControlInputEntry {
+  readonly id: string;
+  readonly content: string;
+  readonly transcriptViewId: string;
+  readonly createdAt: string;
+  readonly receipt: {
+    readonly title: string;
+    readonly content: string;
+    readonly detail: InterAgentMessageReceivedNoticeDetail;
+  };
+}
+
 export type StoredQueueCommandOperation = 'create' | 'replace' | 'delete' | 'move';
 
 export interface StoredAppliedQueueCommand {
@@ -31,6 +46,7 @@ export interface StoredAppliedQueueCommand {
 export interface StoredChatExecutionControlState {
   serverInstanceId: string;
   entries: StoredQueueEntry[];
+  controlEntries: StoredControlInputEntry[];
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
   pause: QueuePause | null;
@@ -48,6 +64,7 @@ export function emptyStoredChatExecutionControl(
   return {
     serverInstanceId,
     entries: [],
+    controlEntries: [],
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
@@ -73,6 +90,13 @@ export function cloneStoredChatExecutionControl(
         },
       } : {}),
     })),
+    controlEntries: control.controlEntries.map((entry) => ({
+      ...entry,
+      receipt: {
+        ...entry.receipt,
+        detail: { ...entry.receipt.detail },
+      },
+    })),
     recentlyDispatched: control.recentlyDispatched.map((entry) => ({ ...entry })),
     appliedCommands: control.appliedCommands.map((command) => ({ ...command })),
     pause: control.pause ? { ...control.pause } : null,
@@ -83,6 +107,10 @@ export function cloneStoredChatExecutionControl(
     delete clone.resumePauses;
   }
   return clone;
+}
+
+export function hasPendingTurnInput(control: StoredChatExecutionControlState): boolean {
+  return control.controlEntries.length > 0 || control.entries.length > 0;
 }
 
 export function toClientChatExecutionControlState(

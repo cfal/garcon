@@ -26,9 +26,9 @@ describe('QueueDrainer', () => {
         attempt: () => null,
       },
       controls: {
-        dequeue: mock(async (chatId, admit) => {
+        dequeueNextTurn: mock(async (chatId, admit) => {
           expect(chatId).toBe('chat-1');
-          expect(admit(entry)).toBe(true);
+          expect(admit({ kind: 'user', entry })).toBe(true);
           throw failure;
         }),
       },
@@ -39,6 +39,7 @@ describe('QueueDrainer', () => {
       callbacks: {
         isShuttingDown: () => false,
         registerQueued: mock(() => true),
+        appendControlReceipt: mock(() => undefined),
         discardPreparedInput,
         publishIdle: mock(() => undefined),
         publishTurnFailed: mock(() => undefined),

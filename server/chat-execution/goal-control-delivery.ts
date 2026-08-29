@@ -1,6 +1,9 @@
 import type { RunAgentTurnOptions } from '../agents/session-types.ts';
 import { DomainError, GoalControlDeliveryError } from '../lib/domain-error.ts';
-import type { StoredChatExecutionControlState } from './control-state.ts';
+import {
+  hasPendingTurnInput,
+  type StoredChatExecutionControlState,
+} from './control-state.ts';
 import type { ExecutionOwnership } from './execution-ownership.ts';
 import { executionTurnIdentity } from './types.ts';
 import type {
@@ -36,7 +39,12 @@ export class GoalControlDelivery {
     const supportsGoalControl = this.options.turnRunner.isChatRunning(chatId)
       && typeof this.options.turnRunner.submitGoalControl === 'function';
     const currentQueue = supportsGoalControl ? await this.options.readControl(chatId) : null;
-    if (!supportsGoalControl || currentQueue?.entries.length !== 0 || currentQueue.pause !== null) {
+    if (
+      !supportsGoalControl
+      || !currentQueue
+      || hasPendingTurnInput(currentQueue)
+      || currentQueue.pause !== null
+    ) {
       return false;
     }
 

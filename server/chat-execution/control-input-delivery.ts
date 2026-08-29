@@ -1,5 +1,5 @@
-import { DomainError } from '../lib/domain-error.ts';
 import type { CapturedSteerTarget } from './types.ts';
+import { ControlSteerDelivery } from './control-steer-delivery.ts';
 
 interface ControlInputDeliveryOptions {
   captureTarget(chatId: string): CapturedSteerTarget | null;
@@ -18,7 +18,11 @@ interface ControlInputDeliveryOptions {
 }
 
 export class ControlInputDelivery {
-  constructor(private readonly options: ControlInputDeliveryOptions) {}
+  readonly #steerDelivery: ControlSteerDelivery;
+
+  constructor(private readonly options: ControlInputDeliveryOptions) {
+    this.#steerDelivery = new ControlSteerDelivery(options.deliverSteer);
+  }
 
   async deliver(
     chatId: string,
@@ -33,46 +37,17 @@ export class ControlInputDelivery {
     const target = captured?.identity.turnId === emittingRunId ? captured : null;
 
     if (target) {
-      try {
-        await this.options.deliverSteer(chatId, content, transcriptViewId, target);
-        return;
-      } catch (error) {
-        signal.throwIfAborted();
-        if (!isDefinitiveNonDelivery(error)) throw error;
-        await waitAbortably(target.attempt.waitUntilSettled(), signal);
-      }
+      const outcome = await this.#steerDelivery.toCapturedTarget(
+        chatId,
+        content,
+        transcriptViewId,
+        target,
+        signal,
+      );
+      if (outcome === 'delivered') return;
     }
 
     signal.throwIfAborted();
     await this.options.scheduleRun(chatId, content, transcriptViewId, onControlRun);
   }
-}
-
-function isDefinitiveNonDelivery(error: unknown): boolean {
-  if (error instanceof DomainError) {
-    return error.code === 'STEER_TURN_UNAVAILABLE'
-      || error.code === 'STEER_TURN_CHANGED'
-      || error.code === 'STEER_TURN_NOT_STEERABLE'
-      || error.code === 'OPERATION_UNSUPPORTED'
-      || error.code === 'STEER_NOT_DELIVERED';
-  }
-  return false;
-}
-
-function waitAbortably(promise: Promise<void>, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    void promise.then(
-      () => {
-        signal.removeEventListener('abort', onAbort);
-        resolve();
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      },
-    );
-  });
 }

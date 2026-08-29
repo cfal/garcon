@@ -3,6 +3,7 @@ import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
+  type StoredControlInputEntry,
   type StoredQueueSubmissionIdentity,
   type StoredQueueEntry,
 } from './control-state.ts';
@@ -15,7 +16,8 @@ import {
   deleteQueueEntry,
   moveQueueEntry,
   pauseQueue,
-  dequeueNextQueueEntry,
+  dequeueNextTurn,
+  enqueueControlInput,
   consumeQueueSteer,
   releaseQueueSteer,
   replaceQueueEntry,
@@ -24,6 +26,7 @@ import {
   pauseAfterDispatchFailure,
   resumeQueue,
   type ControlTransition,
+  type DequeuedTurnInput,
   type QueueCommandIdentity,
 } from './chat-execution-control-transitions.ts';
 import {
@@ -192,6 +195,23 @@ export class ChatExecutionControlOperations {
     });
   }
 
+  async enqueueControl(
+    chatId: string,
+    input: Omit<StoredControlInputEntry, 'id'>,
+  ): Promise<{ entry: StoredControlInputEntry; control: StoredChatExecutionControlState }> {
+    return this.host.runExclusive(chatId, async () => {
+      this.#assertChatExists(chatId);
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        enqueueControlInput(current, input, transitionContext()),
+      );
+      this.#logControlMutation('enqueue', chatId, committed.value, committed.control);
+      return { entry: committed.value, control: committed.control };
+    });
+  }
+
   async pause(chatId: string): Promise<StoredChatExecutionControlState> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
@@ -221,27 +241,31 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async dequeue(
+  async dequeueNextTurn(
     chatId: string,
-    admit: (entry: StoredQueueEntry) => boolean,
+    admit: (input: DequeuedTurnInput) => boolean,
   ): Promise<{
-    entry: StoredQueueEntry;
+    input: DequeuedTurnInput;
     control: StoredChatExecutionControlState;
     inserted: boolean;
   } | null> {
     return this.host.runExclusive(chatId, () => {
       const current = this.#load(chatId);
-      const transition = dequeueNextQueueEntry(current, transitionContext());
+      const transition = dequeueNextTurn(current, transitionContext());
       if (transition.outcome.status === 'rejected') {
         throw transitionError(transition.outcome.rejection, current);
       }
       if (!transition.outcome.value) return Promise.resolve(null);
-      const inserted = admit(transition.outcome.value.entry);
-      const control = this.#commitNow(chatId, transition.next);
+      const inserted = admit(transition.outcome.value);
+      const control = this.#commitNow(chatId, transition.next, transition.publicChanged);
       const committed = { value: transition.outcome.value, control };
-      const entry = committed.value.entry;
-      this.#logMutation('pop', chatId, entry.id, committed.control, entry.revision);
-      return Promise.resolve({ entry, control: committed.control, inserted });
+      if (committed.value.kind === 'control') {
+        this.#logControlMutation('dequeue', chatId, committed.value.entry, committed.control);
+      } else {
+        const entry = committed.value.entry;
+        this.#logMutation('pop', chatId, entry.id, committed.control, entry.revision);
+      }
+      return Promise.resolve({ input: committed.value, control: committed.control, inserted });
     });
   }
 
@@ -350,25 +374,29 @@ export class ChatExecutionControlOperations {
   async #commit(
     chatId: string,
     control: StoredChatExecutionControlState,
+    publish = true,
   ): Promise<StoredChatExecutionControlState> {
     if (!this.host.chatExists(chatId)) {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
-    return this.#commitNow(chatId, control);
+    return this.#commitNow(chatId, control, publish);
   }
 
   #commitNow(
     chatId: string,
     control: StoredChatExecutionControlState,
+    publish = true,
   ): StoredChatExecutionControlState {
     if (!this.host.chatExists(chatId)) {
       throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
     }
     const result = this.repository.save(chatId, control);
-    try {
-      this.host.publish(chatId, result);
-    } catch (error) {
-      logger.warn(`execution-control publication failed after commit for ${chatId}:`, error);
+    if (publish) {
+      try {
+        this.host.publish(chatId, result);
+      } catch (error) {
+        logger.warn(`execution-control publication failed after commit for ${chatId}:`, error);
+      }
     }
     return result;
   }
@@ -396,7 +424,7 @@ export class ChatExecutionControlOperations {
     }
     return {
       value: transition.outcome.value,
-      control: await this.#commit(chatId, transition.next),
+      control: await this.#commit(chatId, transition.next, transition.publicChanged),
       changed: true,
     };
   }
@@ -468,6 +496,20 @@ export class ChatExecutionControlOperations {
       ...(control.pause ? { pauseId: control.pause.id, pauseKind: control.pause.kind } : {}),
       queueVersion: control.version,
       queuedCount: control.entries.filter(isPendingQueueEntry).length,
+    });
+  }
+
+  #logControlMutation(
+    operation: 'enqueue' | 'dequeue',
+    chatId: string,
+    entry: StoredControlInputEntry,
+    control: StoredChatExecutionControlState,
+  ): void {
+    logger.debug('control input lane mutation', {
+      chatId,
+      operation,
+      entryId: entry.id,
+      laneDepth: control.controlEntries.length,
     });
   }
 

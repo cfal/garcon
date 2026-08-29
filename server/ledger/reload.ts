@@ -1,7 +1,10 @@
 import type { IntegrationRegistry } from '../agents/integration-registry.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
-import type { StoredChatExecutionControlState } from '../chat-execution/control-state.js';
+import {
+  hasPendingTurnInput,
+  type StoredChatExecutionControlState,
+} from '../chat-execution/control-state.js';
 import type { TranscriptSnapshotReservation } from '../chat-execution/types.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
@@ -42,7 +45,7 @@ export class TranscriptReloadService {
       const reservation = this.#reserve(chatId);
       try {
         const queue = await this.options.execution.readChatExecutionControl(chatId);
-        if (queue.entries.length > 0) {
+        if (hasPendingTurnInput(queue)) {
           throw new DomainError(
             'CHAT_RUNNING',
             'Run or remove queued messages before reloading from native history.',

@@ -19,6 +19,7 @@ function control(entries, overrides = {}) {
   return {
     serverInstanceId: 'server-instance-test',
     entries,
+    controlEntries: [],
     recentlyDispatched: [],
     appliedCommands: [],
     pause: null,
@@ -87,5 +88,25 @@ describe('chat execution-control projection', () => {
     expect(result.queue.pause).toMatchObject({ id: 'automatic-pause' });
     expect(result).not.toHaveProperty('appliedCommands');
     expect(result).not.toHaveProperty('resumePauses');
+  });
+
+  it('does not project private control input or change the public snapshot', () => {
+    const baseline = control([entry('q1', 'queued')]);
+    const withControl = control([entry('q1', 'queued')], {
+      controlEntries: [{
+        id: 'control-1',
+        content: '<garcon-message>message</garcon-message>',
+        transcriptViewId: 'view-1',
+        createdAt: '2026-02-27T00:00:01.000Z',
+        receipt: {
+          title: 'Inter-agent message',
+          content: 'message',
+          detail: { type: 'inter-agent-message-received', fromChatId: null },
+        },
+      }],
+    });
+
+    expect(toClientChatExecutionControlState(withControl))
+      .toEqual(toClientChatExecutionControlState(baseline));
   });
 });

@@ -2,8 +2,11 @@ import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-sta
 import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
+  MAX_CONTROL_INPUT_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
   cloneStoredChatExecutionControl,
+  hasPendingTurnInput,
+  type StoredControlInputEntry,
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
   type StoredQueueSubmissionIdentity,
@@ -28,7 +31,8 @@ export type TransitionRejection =
   | { code: 'QUEUE_ENTRY_IN_FLIGHT'; entryId: string }
   | { code: 'QUEUE_ENTRY_REVISION_CONFLICT'; entryId: string; actualRevision: number }
   | { code: 'QUEUE_ENTRY_REORDER_CONFLICT' }
-  | { code: 'QUEUE_PAUSE_CHANGED' };
+  | { code: 'QUEUE_PAUSE_CHANGED' }
+  | { code: 'CONTROL_INPUT_QUEUE_FULL' };
 
 export type TransitionOutcome<T> =
   | { status: 'ok'; value: T }
@@ -38,6 +42,7 @@ export interface ControlTransition<T> {
   next: StoredChatExecutionControlState;
   outcome: TransitionOutcome<T>;
   changed: boolean;
+  publicChanged: boolean;
 }
 
 export interface QueueMutationValue {
@@ -50,9 +55,9 @@ export interface QueueMoveMutationValue extends QueueMutationValue {
   rebased: boolean | null;
 }
 
-export interface DequeuedQueueEntry {
-  entry: StoredQueueEntry;
-}
+export type DequeuedTurnInput =
+  | { readonly kind: 'control'; readonly entry: StoredControlInputEntry }
+  | { readonly kind: 'user'; readonly entry: StoredQueueEntry };
 
 export interface ReservedQueueSteer {
   entry: StoredQueueEntry;
@@ -67,7 +72,14 @@ function accepted<T>(
   value: T,
   changed: boolean,
 ): ControlTransition<T> {
-  return { next, outcome: { status: 'ok', value }, changed };
+  return { next, outcome: { status: 'ok', value }, changed, publicChanged: changed };
+}
+
+function acceptedInternal<T>(
+  next: StoredChatExecutionControlState,
+  value: T,
+): ControlTransition<T> {
+  return { next, outcome: { status: 'ok', value }, changed: true, publicChanged: false };
 }
 
 function rejected<T>(
@@ -78,6 +90,7 @@ function rejected<T>(
     next: cloneStoredChatExecutionControl(current),
     outcome: { status: 'rejected', rejection },
     changed: false,
+    publicChanged: false,
   };
 }
 
@@ -196,6 +209,27 @@ export function createQueueEntry(
   return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
 }
 
+export function enqueueControlInput(
+  current: StoredChatExecutionControlState,
+  input: Omit<StoredControlInputEntry, 'id'>,
+  context: TransitionContext,
+): ControlTransition<StoredControlInputEntry> {
+  const next = cloneStoredChatExecutionControl(current);
+  if (next.controlEntries.length >= MAX_CONTROL_INPUT_ENTRIES) {
+    return rejected(current, { code: 'CONTROL_INPUT_QUEUE_FULL' });
+  }
+  const entry: StoredControlInputEntry = {
+    id: context.newId(),
+    ...input,
+    receipt: {
+      ...input.receipt,
+      detail: { ...input.receipt.detail },
+    },
+  };
+  next.controlEntries.push(entry);
+  return acceptedInternal(next, cloneControlInputEntry(entry));
+}
+
 export function replaceQueueEntry(
   current: StoredChatExecutionControlState,
   input: {
@@ -272,7 +306,7 @@ export function deleteQueueEntry(
   }
 
   next.entries.splice(index, 1);
-  if (!next.entries.some(isPendingQueueEntry)) {
+  if (!hasPendingTurnInput(next)) {
     next.pause = null;
     delete next.resumePauses;
   }
@@ -404,7 +438,7 @@ export function pauseQueue(
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  if (!next.entries.some(isPendingQueueEntry) || next.pause) {
+  if (!hasPendingTurnInput(next) || next.pause) {
     return accepted(next, undefined, false);
   }
   next.pause = { id: context.newId(), kind: 'manual', pausedAt: context.now };
@@ -428,14 +462,21 @@ export function resumeQueue(
   return accepted(next, undefined, true);
 }
 
-export function dequeueNextQueueEntry(
+export function dequeueNextTurn(
   current: StoredChatExecutionControlState,
   context: TransitionContext,
-): ControlTransition<DequeuedQueueEntry | null> {
+): ControlTransition<DequeuedTurnInput | null> {
   const next = cloneStoredChatExecutionControl(current);
   if (next.pause) return accepted(next, null, false);
   if (next.entries.some((entry) => entry.status === 'steering')) {
     return accepted(next, null, false);
+  }
+  const controlEntry = next.controlEntries.shift();
+  if (controlEntry) {
+    return acceptedInternal(next, {
+      kind: 'control',
+      entry: cloneControlInputEntry(controlEntry),
+    });
   }
   const entry = next.entries.find((candidate) => candidate.status === 'queued');
   if (!entry) return accepted(next, null, false);
@@ -447,10 +488,8 @@ export function dequeueNextQueueEntry(
   ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
   bump(next, context.now);
   return accepted(next, {
-    entry: {
-      ...entry,
-      ...(entry.submission ? { submission: { ...entry.submission } } : {}),
-    },
+    kind: 'user',
+    entry: cloneQueueEntry(entry),
   }, true);
 }
 
@@ -527,7 +566,7 @@ export function consumeQueueSteer(
     ...next.recentlyDispatched.filter((candidate) => candidate.entryId !== entry.id),
     { entryId: entry.id, revision: entry.revision, dispatchedAt: context.now },
   ].slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES);
-  if (!next.entries.some(isPendingQueueEntry)) {
+  if (!hasPendingTurnInput(next)) {
     next.pause = null;
     delete next.resumePauses;
   }
@@ -550,7 +589,7 @@ export function requeueAndPause(
       (candidate) => candidate.entryId !== input.entryId,
     );
   }
-  next.pause = next.entries.some(isPendingQueueEntry)
+  next.pause = hasPendingTurnInput(next)
     ? {
         id: context.newId(),
         kind: input.kind,
@@ -568,7 +607,7 @@ export function pauseAfterDispatchFailure(
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  if (!next.entries.some(isPendingQueueEntry)) return accepted(next, undefined, false);
+  if (!hasPendingTurnInput(next)) return accepted(next, undefined, false);
   next.pause = {
     id: context.newId(),
     kind: 'queued-turn-failed',
@@ -577,4 +616,21 @@ export function pauseAfterDispatchFailure(
   };
   bump(next, context.now);
   return accepted(next, undefined, true);
+}
+
+function cloneQueueEntry(entry: StoredQueueEntry): StoredQueueEntry {
+  return {
+    ...entry,
+    ...(entry.submission ? { submission: { ...entry.submission } } : {}),
+  };
+}
+
+function cloneControlInputEntry(entry: StoredControlInputEntry): StoredControlInputEntry {
+  return {
+    ...entry,
+    receipt: {
+      ...entry.receipt,
+      detail: { ...entry.receipt.detail },
+    },
+  };
 }

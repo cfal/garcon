@@ -36,7 +36,10 @@ import type {
   UserInputAdmissionOptions,
   QueueCommandMutationResult,
 } from './types.ts';
-import type { StoredChatExecutionControlState } from './control-state.ts';
+import {
+  hasPendingTurnInput,
+  type StoredChatExecutionControlState,
+} from './control-state.ts';
 import { DuplicateGoalControlInputError } from './goal-control-delivery.ts';
 
 const logger = createLogger('accepted-input');
@@ -672,7 +675,7 @@ export class AcceptedInputHandler {
 }
 
 function assertDirectControlAvailable(control: StoredChatExecutionControlState): void {
-  if (control.entries.length === 0 && !control.pause) return;
+  if (!hasPendingTurnInput(control) && !control.pause) return;
   throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
 }
 

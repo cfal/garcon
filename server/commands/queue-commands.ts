@@ -11,7 +11,10 @@ import type {
   QueueMutationResponse,
 } from '../../common/chat-command-contracts.js';
 import { QueueEntryMutationError } from '../chat-execution/chat-execution-coordinator.js';
-import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
+import {
+  hasPendingTurnInput,
+  toClientChatExecutionControlState,
+} from '../chat-execution/control-state.ts';
 import type { CommandLedgerRecord } from './command-ledger.js';
 import {
   CommandSupport,
@@ -303,7 +306,7 @@ export class QueueCommands {
       await this.support.assertCurrentTranscriptView(chatId, transcriptViewId);
       const busy = this.deps.queue.ownsExecution(chatId);
       const control = await this.deps.queue.readChatExecutionControl(chatId);
-      const queueBlocksDirectRun = control.entries.length > 0
+      const queueBlocksDirectRun = hasPendingTurnInput(control)
         || control.pause !== null;
       if ((busy || queueBlocksDirectRun) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };

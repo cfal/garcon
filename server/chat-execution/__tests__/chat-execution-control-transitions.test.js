@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { emptyStoredChatExecutionControl } from '../control-state.ts';
+import {
+  MAX_CONTROL_INPUT_ENTRIES,
+  emptyStoredChatExecutionControl,
+} from '../control-state.ts';
 import {
   clearQueue,
   consumeQueueSteer,
   createQueueEntry,
-  dequeueNextQueueEntry,
+  dequeueNextTurn,
   deleteQueueEntry,
   moveQueueEntry,
   pauseAfterDispatchFailure,
@@ -13,6 +16,7 @@ import {
   replaceQueueEntry,
   reserveQueueSteer,
   resumeQueue,
+  enqueueControlInput,
 } from '../chat-execution-control-transitions.ts';
 
 function context(tick = 1, unsettled = []) {
@@ -39,6 +43,19 @@ function rejection(transition) {
 
 function add(control, content, tick, input = {}) {
   return createQueueEntry(control, { content, ...input }, context(tick));
+}
+
+function controlInput(content, createdAt = context(1).now) {
+  return {
+    content: `<garcon-message>${content}</garcon-message>`,
+    transcriptViewId: 'view-1',
+    createdAt,
+    receipt: {
+      title: 'Inter-agent message',
+      content,
+      detail: { type: 'inter-agent-message-received', fromChatId: null },
+    },
+  };
 }
 
 describe('chat execution control transitions', () => {
@@ -95,8 +112,11 @@ describe('chat execution control transitions', () => {
     const firstId = value(first).entryId;
     const second = add(first.next, 'second', 2);
 
-    const dequeued = dequeueNextQueueEntry(second.next, context(3));
-    expect(value(dequeued).entry).toMatchObject({ id: firstId, status: 'queued' });
+    const dequeued = dequeueNextTurn(second.next, context(3));
+    expect(value(dequeued)).toMatchObject({
+      kind: 'user',
+      entry: { id: firstId, status: 'queued' },
+    });
     expect(dequeued.next.entries.map((entry) => entry.content)).toEqual(['second']);
     expect(dequeued.next.recentlyDispatched).toEqual([
       { entryId: firstId, revision: 1, dispatchedAt: context(3).now },
@@ -112,13 +132,13 @@ describe('chat execution control transitions', () => {
     const created = add(initial(), 'first', 1);
     const paused = pauseQueue(created.next, context(2));
     expect(paused.next.pause).toMatchObject({ id: 'id-2', kind: 'manual' });
-    expect(value(dequeueNextQueueEntry(paused.next, context(3)))).toBeNull();
+    expect(value(dequeueNextTurn(paused.next, context(3)))).toBeNull();
     expect(rejection(resumeQueue(paused.next, 'stale', context(4))).code).toBe(
       'QUEUE_PAUSE_CHANGED',
     );
     const resumed = resumeQueue(paused.next, 'id-2', context(5));
     expect(resumed.next.pause).toBeNull();
-    expect(value(dequeueNextQueueEntry(resumed.next, context(6))).entry.content).toBe('first');
+    expect(value(dequeueNextTurn(resumed.next, context(6))).entry.content).toBe('first');
   });
 
   it('reserves only the queue head for steering and consumes it atomically', () => {
@@ -139,7 +159,7 @@ describe('chat execution control transitions', () => {
       expectedReorderRevision: 0,
     }, context(4));
     expect(value(reserved).entry.status).toBe('steering');
-    expect(value(dequeueNextQueueEntry(reserved.next, context(5)))).toBeNull();
+    expect(value(dequeueNextTurn(reserved.next, context(5)))).toBeNull();
 
     const released = releaseQueueSteer(reserved.next, firstId, context(6));
     expect(released.next.entries[0].status).toBe('queued');
@@ -156,13 +176,13 @@ describe('chat execution control transitions', () => {
   it('pauses only the remaining tail after a dequeued dispatch fails', () => {
     const only = add(initial(), 'only', 1);
     const onlyId = value(only).entryId;
-    const empty = dequeueNextQueueEntry(only.next, context(2));
+    const empty = dequeueNextTurn(only.next, context(2));
     const noTail = pauseAfterDispatchFailure(empty.next, onlyId, context(3));
     expect(noTail.changed).toBe(false);
     expect(noTail.next.pause).toBeNull();
 
     const withTail = add(only.next, 'tail', 2);
-    const dequeued = dequeueNextQueueEntry(withTail.next, context(3));
+    const dequeued = dequeueNextTurn(withTail.next, context(3));
     const failed = pauseAfterDispatchFailure(dequeued.next, onlyId, context(4));
     expect(failed.next.entries.map((entry) => entry.content)).toEqual(['tail']);
     expect(failed.next.pause).toMatchObject({
@@ -177,5 +197,63 @@ describe('chat execution control transitions', () => {
     const cleared = clearQueue(paused.next, context(3));
     expect(cleared.next.entries).toEqual([]);
     expect(cleared.next.pause).toBeNull();
+  });
+
+  it('enqueues a bounded private FIFO without changing public revisions', () => {
+    let control = initial();
+    for (let index = 0; index < MAX_CONTROL_INPUT_ENTRIES; index += 1) {
+      const transition = enqueueControlInput(
+        control,
+        controlInput(`message-${index}`),
+        {
+          ...context(index + 1),
+          newId: () => `control-${index}`,
+        },
+      );
+      expect(transition.publicChanged).toBe(false);
+      expect(transition.next.version).toBe(0);
+      control = transition.next;
+    }
+    expect(control.controlEntries.map((entry) => entry.id)).toEqual(
+      Array.from({ length: MAX_CONTROL_INPUT_ENTRIES }, (_, index) => `control-${index}`),
+    );
+    expect(rejection(enqueueControlInput(
+      control,
+      controlInput('overflow'),
+      context(1),
+    ))).toEqual({ code: 'CONTROL_INPUT_QUEUE_FULL' });
+  });
+
+  it('gates both lanes with one pause and dequeues control input first', () => {
+    const user = add(initial(), 'user input', 1);
+    const control = enqueueControlInput(user.next, controlInput('control input'), context(2));
+    const paused = pauseQueue(control.next, context(3));
+
+    expect(value(dequeueNextTurn(paused.next, context(4)))).toBeNull();
+    const resumed = resumeQueue(paused.next, 'id-3', context(5));
+    const first = dequeueNextTurn(resumed.next, context(6));
+    expect(value(first)).toMatchObject({
+      kind: 'control',
+      entry: { receipt: { content: 'control input' } },
+    });
+    expect(first.publicChanged).toBe(false);
+    expect(first.next.version).toBe(resumed.next.version);
+    expect(first.next.recentlyDispatched).toEqual([]);
+    expect(value(dequeueNextTurn(first.next, context(7)))).toMatchObject({
+      kind: 'user',
+      entry: { content: 'user input' },
+    });
+  });
+
+  it('preserves private control work when the public queue is cleared', () => {
+    const user = add(initial(), 'user input', 1);
+    const control = enqueueControlInput(user.next, controlInput('control input'), context(2));
+    const paused = pauseQueue(control.next, context(3));
+    const cleared = clearQueue(paused.next, context(4));
+
+    expect(cleared.next.entries).toEqual([]);
+    expect(cleared.next.controlEntries).toHaveLength(1);
+    expect(cleared.next.pause).toBeNull();
+    expect(value(dequeueNextTurn(cleared.next, context(5)))?.kind).toBe('control');
   });
 });
