@@ -20,6 +20,7 @@ const {
 	moveTabToWindow,
 	noteWindowChromeFocus,
 	openSingletonAsTab,
+	openChatInNewWindow,
 	openTabInNewWindow,
 	runtime,
 } = vi.hoisted(() => ({
@@ -32,11 +33,13 @@ const {
 	moveTabToWindow: vi.fn(async () => undefined),
 	noteWindowChromeFocus: vi.fn(),
 	openSingletonAsTab: vi.fn(async () => undefined),
+	openChatInNewWindow: vi.fn(async () => 'window-chat-copy'),
 	openTabInNewWindow: vi.fn(async () => undefined),
 	runtime: {
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		windowCount: 1,
 		closeBlocked: true,
+		surfaceCloseBlocked: false,
 		surfaces: {} as Record<string, SurfaceDescriptor>,
 	},
 }));
@@ -65,10 +68,11 @@ vi.mock('$lib/context', () => ({
 			return runtime.windowCount;
 		},
 		isWindowCloseBlocked: () => runtime.closeBlocked,
-		isSurfaceCloseBlocked: () => false,
+		isSurfaceCloseBlocked: () => runtime.surfaceCloseBlocked,
 		noteWindowChromeFocus,
 		focusSurface,
 		moveTabToWindow,
+		openChatInNewWindow,
 		openTabInNewWindow,
 		openSingletonAsTab,
 		createTerminal,
@@ -108,13 +112,13 @@ function workspaceWindow(
 	};
 }
 
-function renderTitleBar(node: WorkspaceWindowNode) {
+function renderTitleBar(node: WorkspaceWindowNode, isCurrent = true) {
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
 		labelFor: (surfaceId: string) =>
 			surfaceId === chatSurface.id ? 'Chat A' : surfaceId === gitSurface.id ? 'Git' : surfaceId,
 		dnd: new WorkspaceWindowDndController(createWorkspaceLayoutStore()),
-		isCurrent: true,
+		isCurrent,
 	});
 }
 
@@ -124,6 +128,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.fullscreenWindowId = null;
 		runtime.windowCount = 1;
 		runtime.closeBlocked = true;
+		runtime.surfaceCloseBlocked = false;
 		runtime.surfaces = { [chatSurface.id]: chatSurface, [gitSurface.id]: gitSurface };
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
@@ -158,21 +163,34 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
 	});
 
-	it('targets destructive fullscreen and close at the exact window', async () => {
+	it('uses a stronger title-bar background only for the current window', () => {
+		const current = renderTitleBar(workspaceWindow([chatSurface.id])).container.querySelector(
+			'[data-workspace-window-titlebar]',
+		)!;
+		expect(current.classList.contains('bg-accent/50')).toBe(true);
+		cleanup();
+
+		const inactive = renderTitleBar(
+			workspaceWindow([chatSurface.id]),
+			false,
+		).container.querySelector('[data-workspace-window-titlebar]')!;
+		expect(inactive.classList.contains('bg-muted/30')).toBe(true);
+		expect(inactive.classList.contains('bg-accent/50')).toBe(false);
+	});
+
+	it('targets reversible fullscreen and close at the exact window', async () => {
 		runtime.windowCount = 2;
 		runtime.closeBlocked = false;
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_fullscreen_close_others() }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_fullscreen() }));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_close_window() }));
 
 		expect(enterWindowFullscreen).toHaveBeenCalledWith('window-main');
 		expect(closeWindow).toHaveBeenCalledWith('window-main');
 	});
 
-	it('exits fullscreen without restoring other windows', async () => {
+	it('dispatches the exact window when exiting fullscreen', async () => {
 		runtime.fullscreenWindowId = 'window-main';
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 
@@ -218,5 +236,26 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(moveTabToWindow).toHaveBeenCalledWith('singleton:git', 'window-main', 0),
 		);
+	});
+
+	it('offers Chat tabs the directional new-window context actions', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		await fireEvent.click(
+			await screen.findByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+		);
+
+		await waitFor(() =>
+			expect(openChatInNewWindow).toHaveBeenCalledWith('chat-a', 'window-main', 'right'),
+		);
+	});
+
+	it('shows the final Chat close action as disabled', async () => {
+		runtime.surfaceCloseBlocked = true;
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+
+		const close = await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+		expect(close.getAttribute('data-disabled')).not.toBeNull();
 	});
 });

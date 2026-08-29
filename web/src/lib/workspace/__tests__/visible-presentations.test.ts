@@ -53,13 +53,14 @@ describe('visiblePortablePresentations', () => {
 
 	it('projects only the fullscreen window on desktop and keeps mobile projection', () => {
 		const snapshot = reduceWorkspaceLayout(twoWindowLayout(), [
-			{ type: 'retain-only-window', windowId: 'window-2' },
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		expect([...visiblePresentationMap(snapshot, 'desktop')]).toEqual([
 			['window-2', 'singleton:git'],
 		]);
-		expect([...visiblePresentationMap(snapshot, 'mobile')]).toEqual([['mobile', 'singleton:git']]);
+		expect([...visiblePresentationMap(snapshot, 'mobile')]).toEqual([
+			['mobile', 'chat-view:window-main'],
+		]);
 	});
 
 	it('retains activated singleton renderers per window without retaining session surfaces', () => {
@@ -111,7 +112,6 @@ describe('visiblePortablePresentations', () => {
 		expect([...retained].sort()).toEqual(['window-2:singleton:git']);
 
 		const fullscreen = reduceWorkspaceLayout(snapshot, [
-			{ type: 'retain-only-window', windowId: 'window-2' },
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		const fullscreenVisible = visiblePortablePresentations(fullscreen, false);

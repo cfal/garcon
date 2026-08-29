@@ -8,6 +8,7 @@ import {
 	fileSurfaceId,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
+	workspaceChatViewCount,
 	type ActiveSurfaceKind,
 	type DesktopPlacement,
 	type FocusOwner,
@@ -250,7 +251,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	isSurfaceCloseBlocked(surfaceId: string): boolean {
 		const surface = this.layout.surface(surfaceId);
-		if (!surface || surface.type === 'chat' || this.#reservedSurfaceIds.has(surfaceId)) return true;
+		if (!surface || this.#reservedSurfaceIds.has(surfaceId)) return true;
+		if (surface.type === 'chat' && workspaceChatViewCount(this.layout.snapshot) <= 1) {
+			return true;
+		}
 		const ownerWindowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
 		if (ownerWindowId && this.#reservedWindowIds.has(ownerWindowId)) return true;
 		if (ownerWindowId) {
@@ -563,8 +567,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const sourceWindowId = this.#presentation.windowOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			let mobileFallbackId: string | null = null;
+			let removalBlocked = false;
 			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
 				if (!latest.surfaces[surfaceId]) return [];
+				if (surface.type === 'chat' && workspaceChatViewCount(latest) <= 1) {
+					removalBlocked = true;
+					return [];
+				}
 				const mutations: WorkspaceLayoutMutation[] = [
 					surface.type === 'terminal'
 						? { type: 'unplace-terminal', terminalId: surface.terminalId }
@@ -585,6 +594,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				surface.type === 'terminal'
 					? await this.#presentation.commit(removalPlan)
 					: await this.#presentation.commitDestroyedRemovals([surfaceId], removalPlan);
+			if (removalBlocked) return false;
 			this.#presentation.clearAttachmentError(surfaceId);
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
@@ -623,7 +633,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (this.isMobile) return false;
 		if (this.layout.snapshot.fullscreenWindowId === windowId) return true;
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
-		return this.#windowDestruction.fullscreen(windowId);
+		let applied = false;
+		const current = await this.#presentation.commit((latest) => {
+			if (!windowNodeById(latest.desktopRoot, windowId)) return [];
+			applied = true;
+			return [{ type: 'set-fullscreen-window', windowId }];
+		});
+		if (!applied) return false;
+		if (current) {
+			const activeId = windowNodeById(this.layout.snapshot.desktopRoot, windowId)?.tabs.activeId;
+			if (activeId) this.#presentation.presentSurface(activeId);
+		}
+		return true;
 	}
 
 	async exitWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {

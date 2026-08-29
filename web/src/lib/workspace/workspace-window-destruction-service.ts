@@ -7,7 +7,9 @@ import type {
 	WorkspaceLayoutReader,
 	WorkspaceLayoutSnapshot,
 	WorkspaceWindowId,
+	WorkspaceWindowNode,
 } from './surface-types.js';
+import { workspaceChatViewCount } from './surface-types.js';
 import { collectWindowNodes, windowNodeById } from './window-tree.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 
@@ -42,8 +44,6 @@ interface WorkspaceWindowDestructionServiceDeps {
 	present(surfaceId: string): void;
 }
 
-export type WorkspaceWindowDestructionMode = 'close' | 'fullscreen';
-
 export class WorkspaceWindowDestructionService {
 	constructor(private readonly deps: WorkspaceWindowDestructionServiceDeps) {}
 
@@ -51,34 +51,23 @@ export class WorkspaceWindowDestructionService {
 		if (this.deps.windowReservations.has(windowId)) return true;
 		const workspaceWindow = windowNodeById(this.deps.layout.snapshot.desktopRoot, windowId);
 		if (!workspaceWindow) return true;
+		if (this.#removesFinalChat(this.deps.layout.snapshot, workspaceWindow)) return true;
 		return workspaceWindow.tabs.order.some((surfaceId) => this.#isSurfaceBlocked(surfaceId));
 	}
 
 	async close(windowId: WorkspaceWindowId): Promise<boolean> {
-		return this.#destroy('close', windowId);
+		return this.#destroy(windowId);
 	}
 
-	async fullscreen(windowId: WorkspaceWindowId): Promise<boolean> {
-		return this.#destroy('fullscreen', windowId);
-	}
-
-	async #destroy(
-		mode: WorkspaceWindowDestructionMode,
-		targetWindowId: WorkspaceWindowId,
-	): Promise<boolean> {
+	async #destroy(targetWindowId: WorkspaceWindowId): Promise<boolean> {
 		const initial = this.deps.layout.snapshot;
 		const target = windowNodeById(initial.desktopRoot, targetWindowId);
 		if (!target) return false;
 		const initialWindows = collectWindowNodes(initial.desktopRoot);
-		if (mode === 'close' && initialWindows.length === 1) return false;
-		const affectedWindows =
-			mode === 'close'
-				? [target]
-				: initialWindows.filter((workspaceWindow) => workspaceWindow.id !== targetWindowId);
+		if (initialWindows.length === 1) return false;
+		if (this.#removesFinalChat(initial, target)) return false;
 		const reservedWindowIds = initialWindows.map((workspaceWindow) => workspaceWindow.id);
-		const affectedSurfaceIds = affectedWindows.flatMap(
-			(workspaceWindow) => workspaceWindow.tabs.order,
-		);
+		const affectedSurfaceIds = target.tabs.order;
 		if (
 			reservedWindowIds.some((windowId) => this.deps.windowReservations.has(windowId)) ||
 			affectedSurfaceIds.some((surfaceId) => this.#isSurfaceBlocked(surfaceId))
@@ -105,29 +94,18 @@ export class WorkspaceWindowDestructionService {
 				) {
 					return [];
 				}
-				const latestAffected =
-					mode === 'close'
-						? [latestTarget]
-						: latestWindows.filter((workspaceWindow) => workspaceWindow.id !== targetWindowId);
-				const latestAffectedSurfaceIds = latestAffected.flatMap(
-					(workspaceWindow) => workspaceWindow.tabs.order,
-				);
+				const latestAffectedSurfaceIds = latestTarget.tabs.order;
+				if (this.#removesFinalChat(latest, latestTarget)) return [];
 				if (latestAffectedSurfaceIds.some((surfaceId) => !affectedSurfaceIds.includes(surfaceId))) {
 					return [];
 				}
-				removedDescriptors = latestAffected.flatMap((workspaceWindow) =>
-					workspaceWindow.tabs.order.flatMap((surfaceId) => {
-						const surface = latest.surfaces[surfaceId];
-						return surface ? [surface] : [];
-					}),
-				);
-				if (mode === 'close') {
-					if (latestWindows.length === 1) return [];
-					removalPlanned = true;
-					return [{ type: 'close-window', windowId: targetWindowId }];
-				}
+				removedDescriptors = latestTarget.tabs.order.flatMap((surfaceId) => {
+					const surface = latest.surfaces[surfaceId];
+					return surface ? [surface] : [];
+				});
+				if (latestWindows.length === 1) return [];
 				removalPlanned = true;
-				return [{ type: 'retain-only-window', windowId: targetWindowId }];
+				return [{ type: 'close-window', windowId: targetWindowId }];
 			};
 			const current = await this.deps.commitDestroyedRemovals(affectedSurfaceIds, plan);
 			if (!removalPlanned) return false;
@@ -137,10 +115,7 @@ export class WorkspaceWindowDestructionService {
 			await this.#disposeRemovedDescriptors(removedDescriptors);
 			if (current) {
 				const snapshot = this.deps.layout.snapshot;
-				const focusWindow =
-					mode === 'fullscreen'
-						? windowNodeById(snapshot.desktopRoot, targetWindowId)
-						: collectWindowNodes(snapshot.desktopRoot)[0];
+				const focusWindow = collectWindowNodes(snapshot.desktopRoot)[0];
 				if (focusWindow) this.deps.present(focusWindow.tabs.activeId);
 			}
 			return true;
@@ -151,6 +126,16 @@ export class WorkspaceWindowDestructionService {
 				await this.deps.afterTerminalReleased(terminalId);
 			}
 		}
+	}
+
+	#removesFinalChat(
+		snapshot: WorkspaceLayoutSnapshot,
+		workspaceWindow: WorkspaceWindowNode,
+	): boolean {
+		return (
+			workspaceChatViewCount(snapshot) <= 1 &&
+			workspaceWindow.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat')
+		);
 	}
 
 	#isSurfaceBlocked(surfaceId: string): boolean {
@@ -201,11 +186,11 @@ export class WorkspaceWindowDestructionService {
 	async #disposeRemovedDescriptors(descriptors: readonly SurfaceDescriptor[]): Promise<void> {
 		for (const surface of descriptors) {
 			this.deps.clearAttachmentError(surface.id);
-				if (surface.type === 'file') {
-					this.deps.files.destroy(surface.fileSessionId);
-					continue;
-				}
-				if (surface.type === 'terminal') continue;
+			if (surface.type === 'file') {
+				this.deps.files.destroy(surface.fileSessionId);
+				continue;
+			}
+			if (surface.type === 'terminal') continue;
 			if (surface.type === 'terminal-launcher') {
 				this.deps.onTerminalLauncherDismissed?.();
 				continue;

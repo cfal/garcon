@@ -26,7 +26,10 @@ export function isDesktopWindowPresented(
 	snapshot: WorkspaceLayoutSnapshot,
 	windowId: WorkspaceWindowId,
 ): boolean {
-	return windowNodeById(snapshot.desktopRoot, windowId) !== null;
+	return (
+		windowNodeById(snapshot.desktopRoot, windowId) !== null &&
+		(!snapshot.fullscreenWindowId || snapshot.fullscreenWindowId === windowId)
+	);
 }
 
 export function visiblePresentationMap(
@@ -39,7 +42,13 @@ export function visiblePresentationMap(
 		visible.set('mobile', snapshot.mobileActiveSurfaceId);
 		return visible;
 	}
-	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
+	const fullscreenWindow = snapshot.fullscreenWindowId
+		? windowNodeById(snapshot.desktopRoot, snapshot.fullscreenWindowId)
+		: null;
+	const desktopWindows = fullscreenWindow
+		? [fullscreenWindow]
+		: collectWindowNodes(snapshot.desktopRoot);
+	for (const workspaceWindow of desktopWindows) {
 		visible.set(workspaceWindow.id, workspaceWindow.tabs.activeId);
 	}
 	if (includeDialog && snapshot.dialogFileSurfaceId) {
@@ -111,7 +120,11 @@ export function renderedPortablePresentations(
 			if (snapshot.surfaces[surfaceId]?.type === 'chat') continue;
 			const key = portablePresentationKey(workspaceWindow.id, surfaceId);
 			const isVisible = visibleKeys.has(key);
-			if (!isVisible && !retainedSingletonKeys.has(key)) continue;
+			const isHiddenFullscreenActive =
+				Boolean(snapshot.fullscreenWindowId) &&
+				workspaceWindow.id !== snapshot.fullscreenWindowId &&
+				workspaceWindow.tabs.activeId === surfaceId;
+			if (!isVisible && !retainedSingletonKeys.has(key) && !isHiddenFullscreenActive) continue;
 			rendered.push({
 				surfaceId,
 				presentation: workspaceWindow.id,

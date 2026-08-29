@@ -39,6 +39,7 @@ describe('workspace layout V2 schema', () => {
 		]);
 		const persisted = serializeWorkspaceLayout({
 			...snapshot,
+			fullscreenWindowId: 'window-two',
 			unplacedTerminalIds: ['spare'],
 		});
 		const result = parsePersistedWorkspaceLayout(JSON.stringify(persisted));
@@ -48,6 +49,7 @@ describe('workspace layout V2 schema', () => {
 		expect(result.snapshot.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'chat-a' });
 		expect(result.snapshot.surfaces['chat-view:window-two']).toMatchObject({ chatId: 'chat-a' });
 		expect(result.snapshot.unplacedTerminalIds).toEqual(['spare']);
+		expect(result.snapshot.fullscreenWindowId).toBeNull();
 	});
 
 	it('restores a null Chat ID and keeps only the first Chat ref in a window', () => {

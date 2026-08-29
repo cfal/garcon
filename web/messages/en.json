@@ -1778,6 +1778,5 @@
 	"file_session_placement_window": "Window",
 	"workspace_window_number": "Window {number}",
 	"workspace_close_window": "Close window",
-	"workspace_close_window_disabled": "At least one window must remain",
-	"workspace_fullscreen_close_others": "Fullscreen and close other windows"
+	"workspace_close_window_disabled": "At least one window must remain"
 }

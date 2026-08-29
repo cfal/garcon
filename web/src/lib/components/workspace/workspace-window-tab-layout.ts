@@ -5,7 +5,19 @@ export interface WindowTabLayoutInput {
 	availableWidth: number;
 	widths: ReadonlyMap<string, number>;
 	gap: number;
+	minimumLabeledWidth?: number;
+	iconWidth?: number;
 }
+
+export type WindowTabLabelMode = 'full' | 'truncated' | 'icon-only';
+
+export interface WindowTabPresentation {
+	visibleIds: readonly string[];
+	labelMode: WindowTabLabelMode;
+}
+
+export const DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH = 64;
+export const DEFAULT_WINDOW_TAB_ICON_WIDTH = 28;
 
 export interface WindowTabCapacityInput {
 	containerWidth: number;
@@ -35,32 +47,49 @@ export function resolveWindowTabCapacity({
 	};
 }
 
-export function selectVisibleWindowTabIds(input: WindowTabLayoutInput): readonly string[] {
-	const { order, activeId, pinnedIds, availableWidth, widths, gap } = input;
-	if (order.some((surfaceId) => !widths.has(surfaceId))) return order;
+export function resolveWindowTabPresentation(input: WindowTabLayoutInput): WindowTabPresentation {
+	const {
+		order,
+		activeId,
+		pinnedIds,
+		availableWidth,
+		widths,
+		gap,
+		minimumLabeledWidth = DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH,
+		iconWidth = DEFAULT_WINDOW_TAB_ICON_WIDTH,
+	} = input;
+	if (order.some((surfaceId) => !widths.has(surfaceId))) {
+		return { visibleIds: order, labelMode: 'full' };
+	}
 	const total = order.reduce(
 		(sum, surfaceId, index) => sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? gap : 0),
 		0,
 	);
-	if (total <= availableWidth) return order;
-	if (availableWidth <= 0) return [];
+	if (total <= availableWidth) return { visibleIds: order, labelMode: 'full' };
+
+	const totalGaps = Math.max(0, order.length - 1) * gap;
+	if (order.length * minimumLabeledWidth + totalGaps <= availableWidth) {
+		return { visibleIds: order, labelMode: 'truncated' };
+	}
+	if (order.length * iconWidth + totalGaps <= availableWidth) {
+		return { visibleIds: order, labelMode: 'icon-only' };
+	}
+	if (availableWidth < iconWidth) return { visibleIds: [], labelMode: 'icon-only' };
+
+	const capacity = Math.floor((availableWidth + gap) / (iconWidth + gap));
 
 	const selected = new Set<string>();
-	let used = 0;
 
-	if (activeId && order.includes(activeId)) {
-		selected.add(activeId);
-		used = Math.min(widths.get(activeId) ?? 0, availableWidth);
-	}
+	if (activeId && order.includes(activeId)) selected.add(activeId);
 
 	for (const surfaceId of [...pinnedIds, ...order]) {
+		if (selected.size >= capacity) break;
 		if (selected.has(surfaceId)) continue;
 		if (!order.includes(surfaceId)) continue;
-		const width = widths.get(surfaceId) ?? 0;
-		const nextGap = selected.size > 0 ? gap : 0;
-		if (used + nextGap + width > availableWidth) continue;
 		selected.add(surfaceId);
-		used += nextGap + width;
 	}
-	return order.filter((surfaceId) => selected.has(surfaceId));
+	return {
+		visibleIds: order.filter((surfaceId) => selected.has(surfaceId)),
+		labelMode: 'icon-only',
+	};
 }

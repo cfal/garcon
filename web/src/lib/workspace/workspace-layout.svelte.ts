@@ -4,6 +4,7 @@ import {
 	chatViewSurfaceId,
 	isPortableSingleton,
 	terminalSurfaceId,
+	workspaceChatViewCount,
 	type DesktopWorkspaceNode,
 	type MobileReturnTarget,
 	type SurfaceDescriptor,
@@ -422,11 +423,15 @@ function moveTab(
 	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-tab' }>,
 	activate: boolean,
 ): WorkspaceLayoutSnapshot {
-	assertMovableSurface(snapshot, mutation.surfaceId);
 	if (!windowNodeById(snapshot.desktopRoot, mutation.destinationWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.destinationWindowId}`);
 	}
 	const sourceWindowId = windowIdOfSurface(snapshot.desktopRoot, mutation.surfaceId);
+	const surface = snapshot.surfaces[mutation.surfaceId];
+	if (!surface) throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
+	if (surface.type === 'chat' && sourceWindowId !== mutation.destinationWindowId) {
+		throw new Error('A window Chat view cannot move between windows');
+	}
 	if (sourceWindowId === mutation.destinationWindowId) {
 		return {
 			...snapshot,
@@ -539,27 +544,20 @@ function closeWindow(
 	}
 	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
 	if (!workspaceWindow) throw new Error(`Workspace window does not exist: ${windowId}`);
+	if (
+		workspaceWindow.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat') &&
+		workspaceChatViewCount(snapshot) <= 1
+	) {
+		throw new Error('At least one Chat view must remain');
+	}
 	const root = removeWindowAndCollapse(snapshot.desktopRoot, windowId);
 	if (!root) throw new Error('At least one workspace window must remain');
 	return removeOwnedSurfaceDescriptors(snapshot, workspaceWindow.tabs.order, root, null);
 }
 
-function retainOnlyWindow(
-	snapshot: WorkspaceLayoutSnapshot,
-	windowId: WorkspaceWindowId,
-): WorkspaceLayoutSnapshot {
-	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
-	if (!workspaceWindow) throw new Error(`Workspace window does not exist: ${windowId}`);
-	const removedSurfaceIds = collectWindowNodes(snapshot.desktopRoot)
-		.filter((candidate) => candidate.id !== windowId)
-		.flatMap((candidate) => candidate.tabs.order);
-	return removeOwnedSurfaceDescriptors(snapshot, removedSurfaceIds, workspaceWindow, windowId);
-}
-
 function normalizeFullscreenWindow(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
 	if (!snapshot.fullscreenWindowId) return snapshot;
-	const windows = collectWindowNodes(snapshot.desktopRoot);
-	if (windows.length !== 1 || windows[0]?.id !== snapshot.fullscreenWindowId) {
+	if (!windowNodeById(snapshot.desktopRoot, snapshot.fullscreenWindowId)) {
 		return { ...snapshot, fullscreenWindowId: null };
 	}
 	return snapshot;
@@ -632,8 +630,6 @@ function applyMutation(
 			return openTabInNewWindow(snapshot, mutation);
 		case 'close-window':
 			return closeWindow(snapshot, mutation.windowId);
-		case 'retain-only-window':
-			return retainOnlyWindow(snapshot, mutation.windowId);
 		case 'set-partition-ratio':
 			return {
 				...snapshot,
@@ -645,9 +641,8 @@ function applyMutation(
 			};
 		case 'set-fullscreen-window':
 			if (mutation.windowId) {
-				const windows = collectWindowNodes(snapshot.desktopRoot);
-				if (windows.length !== 1 || windows[0]?.id !== mutation.windowId) {
-					throw new Error('Fullscreen requires retaining exactly one workspace window');
+				if (!windowNodeById(snapshot.desktopRoot, mutation.windowId)) {
+					throw new Error(`Workspace window does not exist: ${mutation.windowId}`);
 				}
 			}
 			return { ...snapshot, fullscreenWindowId: mutation.windowId };
@@ -683,8 +678,10 @@ function applyMutation(
 			return updateTerminalPlacement(snapshot, mutation.terminalId, 'forgotten');
 		case 'remove-surface': {
 			const surface = snapshot.surfaces[mutation.surfaceId];
-			if (surface?.type === 'chat') throw new Error('A window Chat view cannot close as a tab');
 			if (!surface) return snapshot;
+			if (surface.type === 'chat' && workspaceChatViewCount(snapshot) <= 1) {
+				throw new Error('At least one Chat view must remain');
+			}
 			const next = removeEveryPlacement(snapshot, mutation.surfaceId);
 			const surfaces = { ...next.surfaces };
 			delete surfaces[mutation.surfaceId];
@@ -820,12 +817,8 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 		if (!snapshot.surfaces[id]) throw new Error(`Placement references missing surface: ${id}`);
 	}
 	if (snapshot.fullscreenWindowId) {
-		if (
-			windows.length !== 1 ||
-			windows[0]?.id !== snapshot.fullscreenWindowId ||
-			!windowIds.has(snapshot.fullscreenWindowId)
-		) {
-			throw new Error('Fullscreen must retain exactly its workspace window');
+		if (!windowIds.has(snapshot.fullscreenWindowId)) {
+			throw new Error('Fullscreen must reference an existing workspace window');
 		}
 	}
 	if (!snapshot.surfaces[snapshot.mobileActiveSurfaceId]) {

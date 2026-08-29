@@ -21,6 +21,7 @@
 	let {
 		workspaceWindow,
 		isCurrent,
+		isVisible,
 		chatContentMode,
 		presentations,
 		style,
@@ -36,6 +37,7 @@
 	}: {
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
+		isVisible: boolean;
 		chatContentMode: 'live' | 'preview' | 'none';
 		presentations: readonly RenderedPortablePresentation[];
 		style: string;
@@ -140,8 +142,15 @@
 	data-workspace-window-id={workspaceWindow.id}
 	data-workspace-window-current={isCurrent ? 'true' : undefined}
 	data-workspace-window-active-surface={workspaceWindow.tabs.activeId}
-	class="absolute flex min-h-0 min-w-0 flex-col overflow-hidden bg-background"
+	class={cn(
+		'absolute z-0 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background',
+		isCurrent && 'z-10',
+		dnd.isDragging && 'z-50',
+		!isVisible && 'hidden',
+	)}
 	{style}
+	inert={!isVisible}
+	aria-hidden={!isVisible}
 	aria-label={m.workspace_window_region({ title: labelFor(workspaceWindow.tabs.activeId) })}
 	onfocusin={() => workspace.noteSurfaceFocus(workspaceWindow.tabs.activeId)}
 	onpointerdown={() => workspace.noteSurfaceFocus(workspaceWindow.tabs.activeId)}

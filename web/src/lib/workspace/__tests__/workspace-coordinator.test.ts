@@ -5,6 +5,7 @@ import { TransientLayerRegistry } from '../transient-layers.svelte';
 import { WorkspaceCoordinator, WorkspaceWindowLimitError } from '../workspace-coordinator.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
+	chatViewSurfaceId,
 	fileSurfaceId,
 	portableSingletonDescriptor,
 	terminalSurfaceId,
@@ -257,14 +258,19 @@ describe('WorkspaceCoordinator', () => {
 		);
 	});
 
-	it('enters and exits fullscreen without restoring topology', async () => {
+	it('restores the exact topology after exiting fullscreen', async () => {
 		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		const before = layout.snapshot;
 
 		await coordinator.enterWindowFullscreen('window-main');
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.snapshot.surfaces).toBe(before.surfaces);
 		await coordinator.exitWindowFullscreen('window-main');
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.snapshot.surfaces).toBe(before.surfaces);
 	});
 
 	it('exits fullscreen when a new window opens', async () => {
@@ -277,7 +283,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
-	it('destroys every other window when entering fullscreen', async () => {
+	it('keeps hidden window surfaces and controllers alive while fullscreen', async () => {
 		const { coordinator, layout, singletons } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
 		expect(windowCountOf(layout.snapshot)).toBe(2);
@@ -285,15 +291,41 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.enterWindowFullscreen('window-main');
 
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		expect(windowCountOf(layout.snapshot)).toBe(1);
-		expect(layout.surface('singleton:git-history')).toBeNull();
-		expect(singletons.disposeSurface).toHaveBeenCalledWith('git-history');
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.surface('singleton:git-history')).not.toBeNull();
+		expect(singletons.disposeSurface).not.toHaveBeenCalled();
 	});
 
-	it('forgets a terminal that exits while fullscreen confirmation holds its reservation', async () => {
-		const confirmation = deferred<boolean>();
-		const confirmDestructive = vi.fn(() => confirmation.promise);
-		const { coordinator, layout, terminals } = createHarness({ confirmDestructive });
+	it('closes a Chat tab only when another Chat view remains', async () => {
+		const { coordinator, layout } = createHarness();
+		const mainChatSurfaceId = chatViewSurfaceId('window-main');
+
+		expect(coordinator.isSurfaceCloseBlocked(mainChatSurfaceId)).toBe(true);
+		await expect(coordinator.closeSurface(mainChatSurfaceId)).resolves.toBe(false);
+
+		await coordinator.openChatInNewWindow('chat-b', 'window-main', 'right');
+		expect(coordinator.isSurfaceCloseBlocked(mainChatSurfaceId)).toBe(false);
+		await expect(coordinator.closeSurface(mainChatSurfaceId)).resolves.toBe(true);
+
+		expect(layout.surface(mainChatSurfaceId)).toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(
+			Object.values(layout.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
+		).toHaveLength(1);
+	});
+
+	it('blocks closing the window that owns the final Chat view', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+
+		expect(coordinator.isWindowCloseBlocked('window-main')).toBe(true);
+		await expect(coordinator.closeWindow('window-main')).resolves.toBe(false);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).not.toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+	});
+
+	it('reconciles a hidden terminal that exits while another window is fullscreen', async () => {
+		const { coordinator, layout, terminals } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
 		const historyWindowId = windowIdOfSurface(
 			layout.snapshot.desktopRoot,
@@ -305,19 +337,12 @@ describe('WorkspaceCoordinator', () => {
 			attachmentState: 'attached',
 		};
 		await coordinator.openTerminalSession(terminalId, historyWindowId);
-		await coordinator.placeFileSession('fullscreen-dirty', {
-			type: 'window',
-			windowId: historyWindowId,
-		});
-
-		const entering = coordinator.enterWindowFullscreen('window-main');
-		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
+		await coordinator.enterWindowFullscreen('window-main');
 		await coordinator.handleTerminalSessionTerminated(terminalId);
-		confirmation.resolve(true);
-		await expect(entering).resolves.toBe(true);
 
 		expect(layout.surface(terminalSurfaceId(terminalId))).toBeNull();
 		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
 	});
 
 	it('falls back from a closed last-focused window', async () => {
@@ -334,7 +359,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.lastFocusedWindowId).toBe('window-main');
 	});
 
-	it('cancels workspace drag before fullscreen and retries required publication', async () => {
+	it('cancels workspace drag before fullscreen and preserves topology on publication failure', async () => {
 		const successful = createHarness();
 		const cancel = vi.spyOn(successful.workspaceInteractionGate, 'cancelBeforeInertTransition');
 		await successful.coordinator.openSingletonInNewWindow('git-history');
@@ -347,8 +372,10 @@ describe('WorkspaceCoordinator', () => {
 		expect(successful.coordinator.isChatPresented).toBe(false);
 
 		const failed = createHarness({ failLayoutPublishAt: 1 });
-		await expect(failed.coordinator.enterWindowFullscreen('window-main')).resolves.toBe(true);
-		expect(failed.layout.snapshot.fullscreenWindowId).toBe('window-main');
+		await expect(failed.coordinator.enterWindowFullscreen('window-main')).rejects.toThrow(
+			'layout publication failed',
+		);
+		expect(failed.layout.snapshot.fullscreenWindowId).toBeNull();
 		expect(failed.coordinator.isChatPresented).toBe(true);
 	});
 
@@ -597,9 +624,8 @@ describe('WorkspaceCoordinator', () => {
 		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(false);
 	});
 
-	it('reserves existing topology while fullscreen confirmation is pending', async () => {
-		const confirmation = deferred<boolean>();
-		const confirmDestructive = vi.fn(() => confirmation.promise);
+	it('enters fullscreen without destructive confirmation for hidden dirty surfaces', async () => {
+		const confirmDestructive = vi.fn(async () => true);
 		const { coordinator, layout } = createHarness({ confirmDestructive });
 		await coordinator.openSingletonInNewWindow('git-history');
 		const historyWindowId = windowIdOfSurface(
@@ -611,16 +637,12 @@ describe('WorkspaceCoordinator', () => {
 			windowId: historyWindowId,
 		});
 
-		const entering = coordinator.enterWindowFullscreen('window-main');
-		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledOnce());
-		await coordinator.openSingletonInNewWindow('git-compare', 'window-main');
+		await expect(coordinator.enterWindowFullscreen('window-main')).resolves.toBe(true);
 
-		expect(windowCountOf(layout.snapshot)).toBe(2);
-		expect(layout.surface('singleton:git-compare')).toBeNull();
-		confirmation.resolve(true);
-		await expect(entering).resolves.toBe(true);
+		expect(confirmDestructive).not.toHaveBeenCalled();
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
-		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(layout.surface(fileSurfaceId('fullscreen-reserved'))).not.toBeNull();
 	});
 
 	it('publishes placement before awaiting the exact destination frame', async () => {

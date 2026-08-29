@@ -56,7 +56,7 @@
 	let creatingTerminal = $state(false);
 	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
 	const activeSurface = $derived(workspace.layout.surface(tabs.activeId));
-	const canOfferCloseTab = $derived(activeSurface !== null && activeSurface.type !== 'chat');
+	const canOfferCloseTab = $derived(activeSurface !== null);
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
@@ -136,10 +136,10 @@
 		{#if hiddenSurfaceIds.length > 0}
 			<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
 			{#each hiddenSurfaceIds as surfaceId (surfaceId)}
-			<DropdownMenuItem
-				data-workspace-hidden-tab-id={surfaceId}
-				onSelect={() => onSelect(surfaceId)}
-			>
+				<DropdownMenuItem
+					data-workspace-hidden-tab-id={surfaceId}
+					onSelect={() => onSelect(surfaceId)}
+				>
 					<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} />
 					<span class="min-w-0 truncate">{labelFor(surfaceId)}</span>
 				</DropdownMenuItem>
@@ -164,8 +164,7 @@
 			<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
 			{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
 				<DropdownMenuItem
-					onSelect={() =>
-						void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
+					onSelect={() => void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
 				>
 					<SquareTerminal />
 					{m.workspace_surface_terminal_number({ number: session.metadata.displaySequence })}

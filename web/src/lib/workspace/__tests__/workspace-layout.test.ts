@@ -246,21 +246,65 @@ describe('workspace layout reducer', () => {
 		expect(tabs(next, 'window-new')).toEqual(['singleton:git']);
 	});
 
-	it('rejects generic movement and removal of anchored Chat views', () => {
+	it('reorders an anchored Chat view locally but rejects moving it to another window', () => {
+		const local = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: CANONICAL_WINDOW_ID,
+			},
+			{
+				type: 'move-tab',
+				surfaceId: CANONICAL_CHAT_SURFACE_ID,
+				destinationWindowId: CANONICAL_WINDOW_ID,
+				index: 1,
+			},
+		]);
+		expect(tabs(local, CANONICAL_WINDOW_ID)).toEqual(['singleton:git', CANONICAL_CHAT_SURFACE_ID]);
+
+		const withSecondWindow = reduceWorkspaceLayout(local, [
+			{
+				type: 'register-surface-in-new-window',
+				surface: portableSingletonDescriptor('files'),
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-files',
+				partitionId: 'partition-files',
+			},
+		]);
 		expect(() =>
-			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			reduceWorkspaceLayout(withSecondWindow, [
 				{
 					type: 'move-tab',
 					surfaceId: CANONICAL_CHAT_SURFACE_ID,
-					destinationWindowId: CANONICAL_WINDOW_ID,
+					destinationWindowId: 'window-files',
 				},
 			]),
 		).toThrow('cannot move');
+	});
+
+	it('allows closing a Chat view only while another Chat view remains', () => {
 		expect(() =>
 			reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 				{ type: 'remove-surface', surfaceId: CANONICAL_CHAT_SURFACE_ID },
 			]),
-		).toThrow('cannot close as a tab');
+		).toThrow('At least one Chat view');
+
+		const duplicateChat = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'open-chat-in-new-window',
+				chatId: 'chat-b',
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-chat-b',
+				partitionId: 'partition-chat-b',
+			},
+		]);
+		const next = reduceWorkspaceLayout(duplicateChat, [
+			{ type: 'remove-surface', surfaceId: CANONICAL_CHAT_SURFACE_ID },
+		]);
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toBeUndefined();
+		expect(collectWindowNodes(next.desktopRoot).map((item) => item.id)).toEqual(['window-chat-b']);
 	});
 
 	it('enforces the four-window cap while allowing a net-zero edge move', () => {
@@ -327,7 +371,24 @@ describe('workspace layout reducer', () => {
 		).toThrow('At least one');
 	});
 
-	it('retains only the fullscreen target and permanently removes every other window', () => {
+	it('rejects closing the window that owns the final Chat view', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{
+				type: 'register-surface-in-new-window',
+				surface: portableSingletonDescriptor('git'),
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-git',
+				partitionId: 'partition-git',
+			},
+		]);
+
+		expect(() =>
+			reduceWorkspaceLayout(base, [{ type: 'close-window', windowId: CANONICAL_WINDOW_ID }]),
+		).toThrow('At least one Chat view');
+	});
+
+	it('keeps the exact topology while fullscreen is entered and exited', () => {
 		const base = snapshotWith(
 			partition(
 				'partition-root',
@@ -336,23 +397,23 @@ describe('workspace layout reducer', () => {
 			),
 		);
 		const entered = reduceWorkspaceLayout(base, [
-			{ type: 'retain-only-window', windowId: 'window-chat' },
+			{ type: 'set-fullscreen-window', windowId: 'window-chat' },
 		]);
 
-		expect(collectWindowNodes(entered.desktopRoot).map((item) => item.id)).toEqual(['window-chat']);
+		expect(entered.desktopRoot).toBe(base.desktopRoot);
+		expect(entered.surfaces).toBe(base.surfaces);
 		expect(entered.fullscreenWindowId).toBe('window-chat');
-		expect(entered.surfaces['terminal:t2']).toBeUndefined();
-		expect(entered.unplacedTerminalIds).toEqual(['t2']);
 		const exited = reduceWorkspaceLayout(entered, [
 			{ type: 'set-fullscreen-window', windowId: null },
 		]);
 		expect(exited.fullscreenWindowId).toBeNull();
-		expect(collectWindowNodes(exited.desktopRoot)).toHaveLength(1);
+		expect(exited.desktopRoot).toBe(base.desktopRoot);
+		expect(exited.surfaces).toBe(base.surfaces);
 	});
 
 	it('clears fullscreen when a new window is opened', () => {
 		const fullscreen = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'retain-only-window', windowId: CANONICAL_WINDOW_ID },
+			{ type: 'set-fullscreen-window', windowId: CANONICAL_WINDOW_ID },
 		]);
 		const next = reduceWorkspaceLayout(fullscreen, [
 			{
@@ -449,7 +510,7 @@ describe('workspace layout invariants', () => {
 		expect(() => assertWorkspaceLayoutInvariants(duplicate)).toThrow('more than one Chat');
 	});
 
-	it('rejects invalid prefixes, duplicate IDs, stale MRU, and hidden fullscreen topology', () => {
+	it('rejects invalid prefixes, duplicate IDs, stale MRU, and missing fullscreen windows', () => {
 		const badPrefix = {
 			...canonicalWorkspaceSnapshot(),
 			desktopRoot: { ...canonicalWorkspaceSnapshot().desktopRoot, id: 'main' },
@@ -484,7 +545,13 @@ describe('workspace layout invariants', () => {
 			),
 			{ fullscreenWindowId: 'window-main' },
 		);
-		expect(() => assertWorkspaceLayoutInvariants(twoWindows)).toThrow('Fullscreen');
+		expect(() => assertWorkspaceLayoutInvariants(twoWindows)).not.toThrow();
+		expect(() =>
+			assertWorkspaceLayoutInvariants({
+				...twoWindows,
+				fullscreenWindowId: 'window-missing',
+			}),
+		).toThrow('Fullscreen');
 	});
 });
 

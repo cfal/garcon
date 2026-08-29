@@ -99,6 +99,12 @@ export interface WorkspaceLayoutSnapshot {
 	readonly unplacedTerminalIds: readonly string[];
 }
 
+export function workspaceChatViewCount(
+	snapshot: Pick<WorkspaceLayoutSnapshot, 'surfaces'>,
+): number {
+	return Object.values(snapshot.surfaces).filter((surface) => surface.type === 'chat').length;
+}
+
 export interface WorkspaceLayoutReader {
 	readonly revision: number;
 	readonly snapshot: WorkspaceLayoutSnapshot;
@@ -159,7 +165,6 @@ export type WorkspaceLayoutMutation =
 			partitionId: WorkspacePartitionId;
 	  }
 	| { type: 'close-window'; windowId: WorkspaceWindowId }
-	| { type: 'retain-only-window'; windowId: WorkspaceWindowId }
 	| { type: 'set-partition-ratio'; partitionId: WorkspacePartitionId; ratio: number }
 	| { type: 'set-fullscreen-window'; windowId: WorkspaceWindowId | null }
 	| { type: 'place-in-dialog'; surfaceId: string }

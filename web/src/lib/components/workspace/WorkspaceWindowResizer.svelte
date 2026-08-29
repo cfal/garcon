@@ -126,7 +126,7 @@
 <div
 	bind:this={trackElement}
 	class={cn(
-		'absolute flex-shrink-0 group select-none touch-none z-40 outline-none',
+		'pointer-events-none absolute z-40 flex-shrink-0 select-none touch-none outline-none group',
 		'focus-visible:ring-2 focus-visible:ring-ring rounded-full',
 		isHorizontal ? 'cursor-col-resize' : 'cursor-row-resize',
 	)}
@@ -142,9 +142,22 @@
 	aria-valuenow={Math.round((previewRatio ?? ratio) * 100)}
 	tabindex="0"
 >
-	<!-- Wide invisible hit area for easy grabbing -->
 	<div
-		class={cn('absolute z-10', isHorizontal ? 'inset-y-0 -left-5 w-11' : 'inset-x-0 -top-5 h-11')}
+		data-workspace-window-separator-line
+		class={cn(
+			'pointer-events-none absolute bg-border',
+			isHorizontal
+				? 'inset-y-0 left-1/2 w-px -translate-x-1/2'
+				: 'inset-x-0 top-1/2 h-px -translate-y-1/2',
+		)}
+	></div>
+	<!-- Keeps resize hit targets clear of adjacent title-bar controls. -->
+	<div
+		data-workspace-window-resize-hit-area
+		class={cn(
+			'pointer-events-auto absolute z-10',
+			isHorizontal ? '-left-5 bottom-0 top-10 w-11' : 'inset-x-0 bottom-0 h-6',
+		)}
 	></div>
 	<!-- Track background -->
 	<div

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
 	resolveWindowTabCapacity,
-	selectVisibleWindowTabIds,
+	resolveWindowTabPresentation,
 } from '../workspace-window-tab-layout';
 
 const order = ['chat-view:window-main', 'singleton:git', 'singleton:files', 'terminal:1'];
 const widths = new Map(order.map((surfaceId) => [surfaceId, 80]));
 
-describe('selectVisibleWindowTabIds', () => {
-	it('keeps every task visible while the rail has capacity', () => {
+describe('resolveWindowTabPresentation', () => {
+	it('uses full labels while their natural widths fit', () => {
 		expect(
-			selectVisibleWindowTabIds({
+			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
 				pinnedIds: ['chat-view:window-main'],
@@ -18,25 +18,54 @@ describe('selectVisibleWindowTabIds', () => {
 				widths,
 				gap: 2,
 			}),
-		).toEqual(order);
+		).toEqual({ visibleIds: order, labelMode: 'full' });
 	});
 
-	it('keeps pinned and active tasks visible before overflowing earlier inactive tasks', () => {
+	it('keeps every tab and truncates labels only after natural widths stop fitting', () => {
 		expect(
-			selectVisibleWindowTabIds({
+			resolveWindowTabPresentation({
 				order,
-				activeId: 'terminal:1',
+				activeId: 'singleton:files',
 				pinnedIds: ['chat-view:window-main'],
-				availableWidth: 244,
+				availableWidth: 280,
 				widths,
 				gap: 2,
 			}),
-		).toEqual(['chat-view:window-main', 'singleton:git', 'terminal:1']);
+		).toEqual({ visibleIds: order, labelMode: 'truncated' });
 	});
 
-	it('waits for every measured width before hiding tasks', () => {
+	it('switches every tab to icon-only before hiding any tab', () => {
 		expect(
-			selectVisibleWindowTabIds({
+			resolveWindowTabPresentation({
+				order,
+				activeId: 'terminal:1',
+				pinnedIds: ['chat-view:window-main'],
+				availableWidth: 120,
+				widths,
+				gap: 2,
+			}),
+		).toEqual({ visibleIds: order, labelMode: 'icon-only' });
+	});
+
+	it('keeps pinned and active tabs first when even icons overflow', () => {
+		expect(
+			resolveWindowTabPresentation({
+				order,
+				activeId: 'terminal:1',
+				pinnedIds: ['chat-view:window-main'],
+				availableWidth: 90,
+				widths,
+				gap: 2,
+			}),
+		).toEqual({
+			visibleIds: ['chat-view:window-main', 'singleton:git', 'terminal:1'],
+			labelMode: 'icon-only',
+		});
+	});
+
+	it('waits for every measured width before changing label presentation', () => {
+		expect(
+			resolveWindowTabPresentation({
 				order,
 				activeId: 'terminal:1',
 				pinnedIds: ['chat-view:window-main'],
@@ -44,46 +73,20 @@ describe('selectVisibleWindowTabIds', () => {
 				widths: new Map([['chat-view:window-main', 80]]),
 				gap: 2,
 			}),
-		).toEqual(order);
+		).toEqual({ visibleIds: order, labelMode: 'full' });
 	});
 
-	it('keeps the active task when the pinned task no longer fits', () => {
+	it('moves every tab into the menu when not even one icon fits', () => {
 		expect(
-			selectVisibleWindowTabIds({
-				order,
-				activeId: 'terminal:1',
-				pinnedIds: ['chat-view:window-main'],
-				availableWidth: 100,
-				widths,
-				gap: 2,
-			}),
-		).toEqual(['terminal:1']);
-	});
-
-	it('keeps an oversized active task so its rendered trigger can truncate', () => {
-		expect(
-			selectVisibleWindowTabIds({
+			resolveWindowTabPresentation({
 				order,
 				activeId: 'singleton:files',
 				pinnedIds: ['chat-view:window-main'],
-				availableWidth: 40,
+				availableWidth: 20,
 				widths,
 				gap: 2,
 			}),
-		).toEqual(['singleton:files']);
-	});
-
-	it('moves every task into the menu when the centered rail has no capacity', () => {
-		expect(
-			selectVisibleWindowTabIds({
-				order,
-				activeId: 'singleton:files',
-				pinnedIds: ['chat-view:window-main'],
-				availableWidth: 0,
-				widths,
-				gap: 2,
-			}),
-		).toEqual([]);
+		).toEqual({ visibleIds: [], labelMode: 'icon-only' });
 	});
 });
 

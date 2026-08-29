@@ -18,7 +18,6 @@ import {
 } from '$lib/workspace/surface-types.js';
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
@@ -131,10 +130,7 @@ function installContext() {
 			return true;
 		}),
 		enterWindowFullscreen: vi.fn(async (windowId: WorkspaceWindowId) => {
-			commit([
-				{ type: 'retain-only-window', windowId },
-				{ type: 'set-fullscreen-window', windowId },
-			]);
+			commit([{ type: 'set-fullscreen-window', windowId }]);
 			runtime.currentWindowId = windowId;
 			return true;
 		}),
@@ -348,7 +344,7 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-surface-stub').dataset.textScale).toBe('1');
 	});
 
-	it('destructive fullscreen removes every other window from state and DOM', async () => {
+	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {
 		const { layout } = installContext();
 		layout.publish(
 			layout.revision,
@@ -364,25 +360,40 @@ describe('WorkspaceRoot', () => {
 			]),
 		);
 		const { container } = renderRoot();
+		const beforeRoot = layout.snapshot.desktopRoot;
+		const mainWindow = container.querySelector('[data-workspace-window-id="window-main"]')!;
+		const gitWindow = container.querySelector('[data-workspace-window-id="window-2"]')!;
 		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2);
 
 		await fireEvent.click(
-			screen.getAllByRole('button', { name: m.workspace_fullscreen_close_others() })[1]!,
+			container.querySelector('[data-workspace-window-fullscreen="window-2"]') as HTMLButtonElement,
 		);
 
-		await waitFor(() =>
-			expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1),
-		);
-		expect(collectWindowNodes(layout.snapshot.desktopRoot).map((item) => item.id)).toEqual([
-			'window-2',
-		]);
+		await waitFor(() => expect(layout.snapshot.fullscreenWindowId).toBe('window-2'));
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2);
+		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
+		expect(container.querySelector('[data-workspace-window-id="window-2"]')).toBe(gitWindow);
+		expect(mainWindow.classList.contains('hidden')).toBe(true);
+		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
+		expect(layout.snapshot.desktopRoot).toBe(beforeRoot);
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-2');
+		expect(
+			container.querySelectorAll('[data-workspace-window-focus-ring="window-2"]'),
+		).toHaveLength(1);
 		const gitPanel = container.querySelector(
 			'[data-workspace-surface-id="singleton:git"]',
 		) as HTMLElement;
 		const labelledBy = gitPanel.getAttribute('aria-labelledby');
 		expect(labelledBy).toBe('window-2-tab-singleton:git');
 		expect(document.getElementById(labelledBy!)).not.toBeNull();
+
+		await fireEvent.click(
+			container.querySelector('[data-workspace-window-fullscreen="window-2"]') as HTMLButtonElement,
+		);
+		await waitFor(() => expect(layout.snapshot.fullscreenWindowId).toBeNull());
+		expect(layout.snapshot.desktopRoot).toBe(beforeRoot);
+		expect(mainWindow.classList.contains('hidden')).toBe(false);
+		expect(gitWindow.getAttribute('style')).not.toContain('width: 100%');
 	});
 
 	it('keeps surviving keyed window identity when another window closes', async () => {

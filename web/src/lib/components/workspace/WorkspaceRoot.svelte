@@ -103,8 +103,11 @@
 			rootState.partitionRatio(partitionId, ratio),
 		),
 	);
-	const chatWindowTextScale = $derived(getChatWindowTextScale(geometry.windows.length));
+	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
+	const visibleWindowCount = $derived(fullscreenWindowId ? 1 : geometry.windows.length);
+	const chatWindowTextScale = $derived(getChatWindowTextScale(visibleWindowCount));
 	const currentWindowId = $derived(workspace.currentWindowId);
+	const presentedCurrentWindowId = $derived(fullscreenWindowId ?? currentWindowId);
 	const liveChat = $derived.by(
 		(): {
 			surface: ChatViewSurfaceDescriptor;
@@ -118,7 +121,7 @@
 					? { surface, windowId: null, rect: null, titleBarHeight: 0 }
 					: null;
 			}
-			const workspaceWindow = windowNodeById(snapshot.desktopRoot, currentWindowId);
+			const workspaceWindow = windowNodeById(snapshot.desktopRoot, presentedCurrentWindowId);
 			if (!workspaceWindow) return null;
 			const surface = snapshot.surfaces[workspaceWindow.tabs.activeId];
 			if (surface?.type !== 'chat') return null;
@@ -129,7 +132,7 @@
 				? {
 						surface,
 						windowId: workspaceWindow.id,
-						rect,
+						rect: displayRect(workspaceWindow.id, rect),
 						titleBarHeight: workspaceWindow.tabs.order.length > 1 ? 40 : 32,
 					}
 				: null;
@@ -139,6 +142,7 @@
 		isMobile
 			? []
 			: geometry.windows.flatMap(({ workspaceWindow }) => {
+					if (fullscreenWindowId && workspaceWindow.id !== fullscreenWindowId) return [];
 					const surface = snapshot.surfaces[workspaceWindow.tabs.activeId];
 					return surface?.type === 'chat' && surface.chatId ? [surface.chatId] : [];
 				}),
@@ -203,6 +207,13 @@
 
 	function rectStyle(rect: WorkspaceWindowRect): string {
 		return `left: ${rect.left * 100}%; top: ${rect.top * 100}%; width: ${rect.width * 100}%; height: ${rect.height * 100}%;`;
+	}
+
+	function displayRect(
+		windowId: WorkspaceWindowId,
+		rect: WorkspaceWindowRect,
+	): WorkspaceWindowRect {
+		return fullscreenWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
 	}
 
 	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
@@ -289,14 +300,16 @@
 		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
 			<WorkspaceWindow
 				{workspaceWindow}
-				isCurrent={currentWindowId === workspaceWindow.id}
-				chatContentMode={isMobile
+				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
+				isVisible={!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id}
+				chatContentMode={isMobile ||
+				(fullscreenWindowId !== null && fullscreenWindowId !== workspaceWindow.id)
 					? 'none'
 					: liveChat?.windowId === workspaceWindow.id
 						? 'live'
 						: 'preview'}
 				presentations={renderedPresentations}
-				style={rectStyle(rect)}
+				style={rectStyle(displayRect(workspaceWindow.id, rect))}
 				labelFor={label}
 				previewStore={chatWindowPreviews}
 				previewTextScale={chatWindowTextScale}
@@ -308,17 +321,19 @@
 				onAppendToChatDraft={appendToChatDraft}
 			/>
 		{/each}
-		{#each geometry.partitions as { partition, bounds } (partition.id)}
-			<WorkspaceWindowResizer
-				direction={partition.direction}
-				ratio={rootState.partitionRatio(partition.id, partition.ratio)}
-				style={resizerStyle(partition, bounds)}
-				boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
-				onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
-				onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
-				onReset={() => void workspace.setPartitionRatio(partition.id, 0.5)}
-			/>
-		{/each}
+		{#if !fullscreenWindowId}
+			{#each geometry.partitions as { partition, bounds } (partition.id)}
+				<WorkspaceWindowResizer
+					direction={partition.direction}
+					ratio={rootState.partitionRatio(partition.id, partition.ratio)}
+					style={resizerStyle(partition, bounds)}
+					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
+					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
+					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
+					onReset={() => void workspace.setPartitionRatio(partition.id, 0.5)}
+				/>
+			{/each}
+		{/if}
 	</div>
 
 	<div
@@ -356,6 +371,18 @@
 			/>
 		</div>
 	</div>
+
+	{#if !isMobile}
+		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
+			{#if workspaceWindow.id === presentedCurrentWindowId && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
+				<div
+					data-workspace-window-focus-ring={workspaceWindow.id}
+					class="pointer-events-none absolute z-40 ring-1 ring-inset ring-ring/80"
+					style={rectStyle(displayRect(workspaceWindow.id, rect))}
+				></div>
+			{/if}
+		{/each}
+	{/if}
 
 	{#if isMobile}
 		{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}

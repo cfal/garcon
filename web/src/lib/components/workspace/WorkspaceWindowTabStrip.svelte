@@ -24,7 +24,9 @@
 	import { cn } from '$lib/utils/cn';
 	import {
 		resolveWindowTabCapacity,
-		selectVisibleWindowTabIds,
+		resolveWindowTabPresentation,
+		type WindowTabLabelMode,
+		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -51,8 +53,9 @@
 	const notifications = getNotifications();
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
-	let visibleSurfaceIds = $state.raw<readonly string[] | null>(null);
-	const displayedSurfaceIds = $derived(visibleSurfaceIds ?? tabs.order);
+	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
+	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
+	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 	const otherWindows = $derived(
 		collectWindowNodes(workspace.layout.snapshot.desktopRoot).filter(
 			(workspaceWindow) => workspaceWindow.id !== windowId,
@@ -90,9 +93,23 @@
 		return surface.type === 'singleton' ? surface.kind : surface.type;
 	}
 
-	function canMove(surfaceId: string): boolean {
+	function canDrag(surfaceId: string): boolean {
 		const surface = workspace.layout.surface(surfaceId);
 		return Boolean(surface && surface.type !== 'chat' && surface.type !== 'terminal-launcher');
+	}
+
+	function hasContextMenu(surfaceId: string): boolean {
+		const surface = workspace.layout.surface(surfaceId);
+		return Boolean(surface && surface.type !== 'terminal-launcher');
+	}
+
+	function canMoveBetweenWindows(surfaceId: string): boolean {
+		return canDrag(surfaceId);
+	}
+
+	function canOpenInNewWindow(surfaceId: string): boolean {
+		const surface = workspace.layout.surface(surfaceId);
+		return Boolean(surface && (surface.type !== 'chat' || surface.chatId));
 	}
 
 	function recomputeVisibleTabs(): void {
@@ -111,7 +128,7 @@
 			gap: 0,
 			railChromeWidth: 0,
 		});
-		visibleSurfaceIds = selectVisibleWindowTabIds({
+		tabPresentation = resolveWindowTabPresentation({
 			order: tabs.order,
 			activeId: tabs.activeId,
 			pinnedIds: [],
@@ -144,7 +161,14 @@
 	}
 
 	function openInNewWindow(surfaceId: string, edge: WorkspaceWindowEdge): void {
-		void workspace.openTabInNewWindow(surfaceId, windowId, edge).catch(notifyFailure);
+		const surface = workspace.layout.surface(surfaceId);
+		const action =
+			surface?.type === 'chat'
+				? surface.chatId
+					? workspace.openChatInNewWindow(surface.chatId, windowId, edge)
+					: Promise.resolve()
+				: workspace.openTabInNewWindow(surfaceId, windowId, edge);
+		void action.catch(notifyFailure);
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
@@ -195,6 +219,7 @@
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
 	{@const dropPosition = measurement ? null : tabDropPosition(surfaceId)}
+	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
 	<button
 		{...triggerProps}
 		type="button"
@@ -204,15 +229,19 @@
 		aria-selected={measurement ? undefined : tabs.activeId === surfaceId}
 		tabindex={measurement ? -1 : tabs.activeId === surfaceId ? 0 : -1}
 		data-window-tab-measure-id={measurement ? surfaceId : undefined}
+		data-workspace-tab-label-mode={measurement ? undefined : renderedLabelMode}
 		class={cn(
-			'relative flex h-7 min-w-0 max-w-40 items-center gap-1.5 rounded-md px-2 text-xs',
+			'relative flex h-7 min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs',
 			'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+			renderedLabelMode === 'full' && 'w-max shrink-0 px-2',
+			renderedLabelMode === 'truncated' && 'min-w-16 flex-1 px-2',
+			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
 			!measurement && tabs.activeId === surfaceId
 				? 'bg-accent text-accent-foreground'
 				: 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
 		)}
 		title={labelFor(surfaceId)}
-		draggable={!measurement && canMove(surfaceId) ? true : undefined}
+		draggable={!measurement && canDrag(surfaceId) ? true : undefined}
 		ondragstart={!measurement ? (event) => handleTabDragStart(event, surfaceId) : undefined}
 		ondragover={!measurement
 			? (event) => dnd.handleTabDragOver(windowId, surfaceId, event)
@@ -233,12 +262,18 @@
 			></span>
 		{/if}
 		<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} />
-		<span class="min-w-0 truncate">{labelFor(surfaceId)}</span>
+		<span
+			class={cn(
+				'min-w-0',
+				renderedLabelMode === 'truncated' && 'truncate',
+				renderedLabelMode === 'icon-only' && 'sr-only',
+			)}>{labelFor(surfaceId)}</span
+		>
 	</button>
 {/snippet}
 
 {#snippet tab(surfaceId: string, measurement = false)}
-	{#if measurement || !canMove(surfaceId)}
+	{#if measurement || !hasContextMenu(surfaceId)}
 		{@render tabButton(surfaceId, measurement, {})}
 	{:else}
 		<ContextMenu>
@@ -260,25 +295,39 @@
 					<ArrowRight />
 					{m.workspace_move_tab_right()}
 				</ContextMenuItem>
-				{#each otherWindows as destination (destination.id)}
-					<ContextMenuItem onclick={() => moveTab(surfaceId, destination.id)}>
-						<PanelRight />
-						{m.workspace_move_to_window({ window: labelFor(destination.tabs.activeId) })}
-					</ContextMenuItem>
-				{/each}
-				<ContextMenuItem onclick={() => openInNewWindow(surfaceId, 'left')}>
+				{#if canMoveBetweenWindows(surfaceId)}
+					{#each otherWindows as destination (destination.id)}
+						<ContextMenuItem onclick={() => moveTab(surfaceId, destination.id)}>
+							<PanelRight />
+							{m.workspace_move_to_window({ window: labelFor(destination.tabs.activeId) })}
+						</ContextMenuItem>
+					{/each}
+				{/if}
+				<ContextMenuItem
+					disabled={!canOpenInNewWindow(surfaceId)}
+					onclick={() => openInNewWindow(surfaceId, 'left')}
+				>
 					<PanelRight class="rotate-180" />
 					{m.workspace_open_tab_new_window_left()}
 				</ContextMenuItem>
-				<ContextMenuItem onclick={() => openInNewWindow(surfaceId, 'right')}>
+				<ContextMenuItem
+					disabled={!canOpenInNewWindow(surfaceId)}
+					onclick={() => openInNewWindow(surfaceId, 'right')}
+				>
 					<PanelRight />
 					{m.workspace_open_tab_new_window_right()}
 				</ContextMenuItem>
-				<ContextMenuItem onclick={() => openInNewWindow(surfaceId, 'top')}>
+				<ContextMenuItem
+					disabled={!canOpenInNewWindow(surfaceId)}
+					onclick={() => openInNewWindow(surfaceId, 'top')}
+				>
 					<PanelTop />
 					{m.workspace_open_tab_new_window_above()}
 				</ContextMenuItem>
-				<ContextMenuItem onclick={() => openInNewWindow(surfaceId, 'bottom')}>
+				<ContextMenuItem
+					disabled={!canOpenInNewWindow(surfaceId)}
+					onclick={() => openInNewWindow(surfaceId, 'bottom')}
+				>
 					<PanelTop class="rotate-180" />
 					{m.workspace_open_tab_new_window_below()}
 				</ContextMenuItem>
@@ -308,6 +357,7 @@
 	tabindex="-1"
 	aria-label={m.workspace_window_views()}
 	data-workspace-window-tabs={windowId}
+	data-workspace-tab-label-mode={labelMode}
 	ondragover={(event) => dnd.handleTabListDragOver(windowId, event)}
 	ondrop={(event) => void commitTabDrop(null, event)}
 >

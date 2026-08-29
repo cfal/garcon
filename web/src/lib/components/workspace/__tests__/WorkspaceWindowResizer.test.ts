@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowResizer from '../WorkspaceWindowResizer.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
-function renderResizer() {
+function renderResizer(direction: 'horizontal' | 'vertical' = 'horizontal') {
 	const onPreview = vi.fn();
 	const onCommit = vi.fn();
 	const result = render(WorkspaceWindowResizer, {
-		direction: 'horizontal',
+		direction,
 		ratio: 0.5,
 		style: '',
 		boundsFraction: 1,
@@ -35,6 +35,21 @@ describe('WorkspaceWindowResizer', () => {
 		expect(separator.getAttribute('aria-valuemin')).toBe('15');
 		expect(separator.getAttribute('aria-valuemax')).toBe('85');
 		expect(separator.getAttribute('aria-valuenow')).toBe('50');
+	});
+
+	it.each([
+		['horizontal', 'w-px', 'inset-y-0', 'top-10'],
+		['vertical', 'h-px', 'inset-x-0', 'bottom-0'],
+	] as const)('renders a one-pixel %s window separator', (direction, thickness, span, hitArea) => {
+		const { container } = renderResizer(direction);
+		const line = container.querySelector('[data-workspace-window-separator-line]')!;
+		const target = container.querySelector('[data-workspace-window-resize-hit-area]')!;
+
+		expect(line.classList.contains('bg-border')).toBe(true);
+		expect(line.classList.contains(thickness)).toBe(true);
+		expect(line.classList.contains(span)).toBe(true);
+		expect(target.classList.contains('pointer-events-auto')).toBe(true);
+		expect(target.classList.contains(hitArea)).toBe(true);
 	});
 
 	it('reverts a pointer preview on cancellation without committing it', async () => {

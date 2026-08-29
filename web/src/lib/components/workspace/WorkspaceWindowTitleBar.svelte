@@ -49,7 +49,6 @@
 			? workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId))
 			: [],
 	);
-	const windowCount = $derived(workspace.windowCount);
 	const closeDisabled = $derived(workspace.isWindowCloseBlocked(workspaceWindow.id));
 
 	function noteFocus(): void {
@@ -77,8 +76,8 @@
 	tabindex="-1"
 	data-workspace-window-titlebar={workspaceWindow.id}
 	class={cn(
-		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/40 bg-muted/20 px-1.5',
-		isCurrent && 'bg-accent/20',
+		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-muted/30 px-1.5 transition-colors',
+		isCurrent && 'bg-accent/50',
 	)}
 	class:h-8={!hasTabBar}
 	class:h-10={hasTabBar}
@@ -131,16 +130,8 @@
 		<button
 			type="button"
 			class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-			aria-label={fullscreen
-				? m.workspace_exit_fullscreen()
-				: windowCount > 1
-					? m.workspace_fullscreen_close_others()
-					: m.workspace_fullscreen()}
-			title={fullscreen
-				? m.workspace_exit_fullscreen()
-				: windowCount > 1
-					? m.workspace_fullscreen_close_others()
-					: m.workspace_fullscreen()}
+			aria-label={fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
+			title={fullscreen ? m.workspace_exit_fullscreen() : m.workspace_fullscreen()}
 			data-workspace-window-fullscreen={workspaceWindow.id}
 			onclick={toggleFullscreen}
 		>

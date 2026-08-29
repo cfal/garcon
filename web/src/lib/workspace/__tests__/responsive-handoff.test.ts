@@ -50,7 +50,6 @@ describe('selectMobileEntrySurface', () => {
 				newWindowId: 'window-2',
 				partitionId: 'partition-1',
 			},
-			{ type: 'retain-only-window', windowId: 'window-2' },
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 		]);
 		expect(selectMobileEntrySurface(fullscreen, 'chat-view:window-main')).toBe('singleton:git');
@@ -66,7 +65,6 @@ describe('selectMobileEntrySurface', () => {
 				newWindowId: 'window-2',
 				partitionId: 'partition-1',
 			},
-			{ type: 'retain-only-window', windowId: 'window-2' },
 			{ type: 'set-fullscreen-window', windowId: 'window-2' },
 			{
 				type: 'register-surface',
