@@ -160,7 +160,11 @@ async function verifyAdaptiveTabLabels(
   await waitForTabLabelMode(page, windowId, "full");
 }
 
-async function openChatTabBelow(page: Page, windowId: string): Promise<string> {
+async function openChatTabBelow(
+  page: Page,
+  windowId: string,
+  expectedTranscriptText: string,
+): Promise<string> {
   const previousCount = await page.locator(WINDOW_SELECTOR).count();
   await page
     .locator(`[id="${windowId}-tab-chat-view:${windowId}"]`)
@@ -187,6 +191,22 @@ async function openChatTabBelow(page: Page, windowId: string): Promise<string> {
       "Chat tab context action did not create a new current window.",
     );
   }
+  await page.waitForFunction(
+    ({ expectedWindowId, expectedSurfaceId }) =>
+      document
+        .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+        ?.getAttribute("data-workspace-window-active-surface") ===
+      expectedSurfaceId,
+    {
+      expectedWindowId: openedWindowId,
+      expectedSurfaceId: `chat-view:${openedWindowId}`,
+    },
+  );
+  await page
+    .locator("[data-conversation-workspace-layer]")
+    .getByLabel("Chat messages")
+    .getByText(expectedTranscriptText, { exact: true })
+    .waitFor();
   return openedWindowId;
 }
 
@@ -483,7 +503,11 @@ describe("Chromium workspace windows", () => {
         ).toBe(1);
         await fixture.page.keyboard.press("Escape");
         await verifyAdaptiveTabLabels(fixture.page, chatWindowId);
-        await openChatTabBelow(fixture.page, chatWindowId);
+        await openChatTabBelow(
+          fixture.page,
+          chatWindowId,
+          "echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement",
+        );
         expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
 
         markPhase("opening a non-Chat target window");
