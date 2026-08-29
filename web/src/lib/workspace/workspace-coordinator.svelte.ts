@@ -10,6 +10,7 @@ import {
 	singletonSurfaceId,
 	workspaceChatViewCount,
 	type ActiveSurfaceKind,
+	type ChatViewSurfaceId,
 	type DesktopPlacement,
 	type FocusOwner,
 	type PortableSingletonKind,
@@ -310,25 +311,50 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.cycleWindowFocus(owner, (surfaceId) => void this.focusSurface(surfaceId));
 	}
 
-	async showChatInCurrentWindow(chatId: string): Promise<`chat-view:${WorkspaceWindowId}`> {
-		let destinationWindowId: WorkspaceWindowId | null = null;
-		let surfaceId: `chat-view:${WorkspaceWindowId}` | null = null;
+	async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {
+		return this.#showChat(chatId, (latest) =>
+			this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId),
+		);
+	}
+
+	async showChatInWindow(
+		chatId: string,
+		windowId: WorkspaceWindowId,
+	): Promise<ChatViewSurfaceId> {
+		return this.#showChat(chatId, (latest) =>
+			windowNodeById(latest.desktopRoot, windowId) ? windowId : null,
+		);
+	}
+
+	async #showChat(
+		chatId: string,
+		resolveWindow: (snapshot: WorkspaceLayoutSnapshot) => WorkspaceWindowId | null,
+	): Promise<ChatViewSurfaceId> {
+		let surfaceId: ChatViewSurfaceId | null = null;
 		let applied = false;
-		const current = await this.#presentation.commit((latest) => {
-			destinationWindowId = this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId);
-			if (this.#reservedWindowIds.has(destinationWindowId)) return [];
-			surfaceId = chatViewSurfaceId(destinationWindowId);
-			applied = true;
-			const mutations: WorkspaceLayoutMutation[] = [
-				{ type: 'set-window-chat', windowId: destinationWindowId, chatId },
-			];
-			if (this.isMobile) {
-				mutations.push({ type: 'set-mobile-presentation', activeId: surfaceId, returnStack: [] });
-			}
-			return mutations;
-		});
-		if (!destinationWindowId || !surfaceId) throw new Error('Workspace has no current window');
-		if (!applied) throw new Error(m.workspace_open_failed());
+		const current = await this.#presentation.commitWithPresentationTarget(
+			(latest) => {
+				const destinationWindowId = resolveWindow(latest);
+				if (!destinationWindowId || this.#reservedWindowIds.has(destinationWindowId)) return [];
+				const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+				if (this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
+				surfaceId = destinationSurfaceId;
+				applied = true;
+				const mutations: WorkspaceLayoutMutation[] = [
+					{ type: 'set-window-chat', windowId: destinationWindowId, chatId },
+				];
+				if (this.isMobile) {
+					mutations.push({
+						type: 'set-mobile-presentation',
+						activeId: destinationSurfaceId,
+						returnStack: [],
+					});
+				}
+				return mutations;
+			},
+			() => (applied ? surfaceId : null),
+		);
+		if (!applied || !surfaceId) throw new Error(m.workspace_open_failed());
 		if (current) this.#presentation.presentSurface(surfaceId);
 		return surfaceId;
 	}

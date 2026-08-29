@@ -1,6 +1,5 @@
 import {
 	dragLeftWorkspaceWindow,
-	resolveDominantWorkspaceWindowEdge,
 	resolveWorkspaceWindowDropZone,
 	type WorkspaceWindowDropZone,
 } from './window-drop-geometry.js';
@@ -55,11 +54,12 @@ export function resolveWorkspaceWindowCenterDropResult(
 	payload: WorkspaceDragPayload | null,
 	destinationWindowId: WorkspaceWindowId,
 ): WorkspaceWindowCenterDropResult {
-	if (
-		payload?.kind !== 'surface-tab' ||
-		payload.sourceWindowId === destinationWindowId ||
-		snapshot.surfaces[payload.surfaceId]?.type !== 'chat'
-	) {
+	const isChat =
+		payload?.kind === 'chat' ||
+		(payload?.kind === 'surface-tab' &&
+			payload.sourceWindowId !== destinationWindowId &&
+			snapshot.surfaces[payload.surfaceId]?.type === 'chat');
+	if (!isChat) {
 		return 'add-tab';
 	}
 	const destination = windowNodeById(snapshot.desktopRoot, destinationWindowId);
@@ -108,10 +108,7 @@ export class WorkspaceWindowDndController {
 		);
 		if (!element) return;
 		const rect = element.getBoundingClientRect();
-		const zone =
-			this.payload.kind === 'chat'
-				? resolveDominantWorkspaceWindowEdge(rect, event.clientX, event.clientY)
-				: resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY);
+		const zone = resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY);
 		const target = this.#windowTarget(windowId, zone);
 		event.preventDefault();
 		event.stopPropagation();
@@ -136,9 +133,7 @@ export class WorkspaceWindowDndController {
 		);
 		const rect = element?.getBoundingClientRect();
 		const fallbackZone = rect
-			? payload.kind === 'chat'
-				? resolveDominantWorkspaceWindowEdge(rect, event.clientX, event.clientY)
-				: resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY)
+			? resolveWorkspaceWindowDropZone(rect, event.clientX, event.clientY)
 			: null;
 		const target =
 			this.activeTarget?.kind === 'window' && this.activeTarget.windowId === windowId
@@ -216,6 +211,7 @@ export class WorkspaceWindowDndController {
 		const payload = this.payload;
 		if (!payload) return undefined;
 		if (payload.kind === 'chat') {
+			if (zone === 'center') return undefined;
 			return collectWindowNodes(this.layout.snapshot.desktopRoot).length >= MAX_WORKSPACE_WINDOWS
 				? 'max-windows'
 				: undefined;

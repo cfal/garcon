@@ -52,17 +52,6 @@ export function resolveWorkspaceWindowDropZone(
 	return 'center';
 }
 
-export function resolveDominantWorkspaceWindowEdge(
-	rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
-	clientX: number,
-	clientY: number,
-): WorkspaceWindowEdge {
-	const normalizedX = (clientX - (rect.left + rect.width / 2)) / Math.max(rect.width, 1);
-	const normalizedY = (clientY - (rect.top + rect.height / 2)) / Math.max(rect.height, 1);
-	if (Math.abs(normalizedX) >= Math.abs(normalizedY)) return normalizedX < 0 ? 'left' : 'right';
-	return normalizedY < 0 ? 'top' : 'bottom';
-}
-
 export function dragLeftWorkspaceWindow(event: DragEvent): boolean {
 	const related = event.relatedTarget as HTMLElement | null;
 	return !related || !(event.currentTarget as HTMLElement).contains(related);

@@ -66,11 +66,6 @@
 		const target = dnd.activeTarget;
 		return target?.kind === 'window' && target.windowId === workspaceWindow.id ? target : null;
 	});
-	const visibleDropZones = $derived(
-		dnd.payload?.kind === 'chat'
-			? WORKSPACE_WINDOW_DROP_ZONES.filter((entry) => entry.zone !== 'center')
-			: WORKSPACE_WINDOW_DROP_ZONES,
-	);
 	const activeResultInset = $derived(
 		activeDropTarget
 			? (WORKSPACE_WINDOW_DROP_ZONES.find((entry) => entry.zone === activeDropTarget.zone)
@@ -125,12 +120,15 @@
 		if (!commit || commit.target.kind !== 'window') return;
 		try {
 			if (commit.payload.kind === 'chat') {
-				if (commit.target.zone === 'center') return;
-				await workspace.openChatInNewWindow(
-					commit.payload.chatId,
-					workspaceWindow.id,
-					commit.target.zone,
-				);
+				if (commit.target.zone === 'center') {
+					await workspace.showChatInWindow(commit.payload.chatId, workspaceWindow.id);
+				} else {
+					await workspace.openChatInNewWindow(
+						commit.payload.chatId,
+						workspaceWindow.id,
+						commit.target.zone,
+					);
+				}
 			} else if (commit.target.zone === 'center') {
 				await workspace.moveTabToWindow(commit.payload.surfaceId, workspaceWindow.id);
 			} else {
@@ -239,7 +237,7 @@
 			role="status"
 			aria-label={m.workspace_window_drop_target()}
 		>
-			{#each visibleDropZones as dropZone (dropZone.zone)}
+			{#each WORKSPACE_WINDOW_DROP_ZONES as dropZone (dropZone.zone)}
 				<div
 					data-workspace-window-drop-zone={dropZone.zone}
 					class={cn(

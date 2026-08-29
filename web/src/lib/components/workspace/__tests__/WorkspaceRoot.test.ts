@@ -158,6 +158,11 @@ function installContext() {
 				]);
 			},
 		),
+		showChatInWindow: vi.fn(async (chatId: string, windowId: WorkspaceWindowId) => {
+			commit([{ type: 'set-window-chat', windowId, chatId }]);
+			runtime.currentWindowId = windowId;
+			return chatViewSurfaceId(windowId);
+		}),
 		openChatInNewWindow: vi.fn(
 			async (chatId: string, targetWindowId: WorkspaceWindowId, edge: WorkspaceWindowEdge) => {
 				commit([
@@ -300,6 +305,81 @@ describe('WorkspaceRoot', () => {
 		expect(
 			container.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
 		).toBe(m.workspace_drop_zone_replace_chat());
+	});
+
+	it('adds a sidebar Chat to the exact Chat-less center destination', async () => {
+		const { layout, windowDnd, workspace } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('files'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-files',
+					partitionId: 'partition-files',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		const destination = container.querySelector(
+			'[data-workspace-window-id="window-files"]',
+		) as HTMLElement;
+		vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+		windowDnd.beginChatDrag('chat-b');
+		await tick();
+
+		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
+		expect(
+			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
+		).toBe(m.workspace_drop_zone_add_tab());
+		await fireEvent(destination, positionedDragEvent('drop', 50, 50));
+
+		await waitFor(() =>
+			expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-b', 'window-files'),
+		);
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({ chatId: 'chat-b' });
+		expect(windowIdOfSurface(layout.snapshot.desktopRoot, chatViewSurfaceId('window-files'))).toBe(
+			'window-files',
+		);
+		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(2);
+	});
+
+	it('replaces a sidebar Chat in the exact occupied center destination', async () => {
+		const { layout, windowDnd, workspace } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		const destination = container.querySelector(
+			'[data-workspace-window-id="window-2"]',
+		) as HTMLElement;
+		vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+		windowDnd.beginChatDrag('chat-a');
+		await tick();
+
+		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
+		expect(
+			destination.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
+		).toBe(m.workspace_drop_zone_replace_chat());
+		await fireEvent(destination, positionedDragEvent('drop', 50, 50));
+
+		await waitFor(() =>
+			expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-2'),
+		);
+		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({ chatId: 'chat-a' });
+		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(2);
 	});
 
 	it('keeps one live Chat surface mounted while its local tab becomes hidden', async () => {

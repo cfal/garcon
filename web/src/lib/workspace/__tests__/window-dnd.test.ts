@@ -101,14 +101,25 @@ describe('WorkspaceWindowDndController', () => {
 
 	it('classifies Chat center drops by destination ownership', () => {
 		const chatlessDestination = twoWindowLayout();
-		const payload = {
+		const surfacePayload = {
 			kind: 'surface-tab',
 			surfaceId: 'chat-view:window-main',
 			sourceWindowId: 'window-main',
 			sourceIndex: 0,
 		} as const;
 		expect(
-			resolveWorkspaceWindowCenterDropResult(chatlessDestination.snapshot, payload, 'window-files'),
+			resolveWorkspaceWindowCenterDropResult(
+				chatlessDestination.snapshot,
+				surfacePayload,
+				'window-files',
+			),
+		).toBe('add-tab');
+		expect(
+			resolveWorkspaceWindowCenterDropResult(
+				chatlessDestination.snapshot,
+				{ kind: 'chat', chatId: 'chat-c', source: 'chat-list' },
+				'window-files',
+			),
 		).toBe('add-tab');
 
 		const occupiedDestination = createWorkspaceLayoutStore();
@@ -127,7 +138,18 @@ describe('WorkspaceWindowDndController', () => {
 			]),
 		);
 		expect(
-			resolveWorkspaceWindowCenterDropResult(occupiedDestination.snapshot, payload, 'window-chat'),
+			resolveWorkspaceWindowCenterDropResult(
+				occupiedDestination.snapshot,
+				surfacePayload,
+				'window-chat',
+			),
+		).toBe('replace-chat');
+		expect(
+			resolveWorkspaceWindowCenterDropResult(
+				occupiedDestination.snapshot,
+				{ kind: 'chat', chatId: 'chat-c', source: 'chat-list' },
+				'window-chat',
+			),
 		).toBe('replace-chat');
 	});
 
@@ -153,7 +175,7 @@ describe('WorkspaceWindowDndController', () => {
 		});
 	});
 
-	it('maps a chat center tie to a new right-hand window', () => {
+	it('maps a sidebar Chat drag to the center target', () => {
 		const layout = createWorkspaceLayoutStore();
 		const dnd = new WorkspaceWindowDndController(layout);
 		const target = windowElement('window-main');
@@ -166,12 +188,21 @@ describe('WorkspaceWindowDndController', () => {
 		expect(dnd.activeTarget).toEqual({
 			kind: 'window',
 			windowId: 'window-main',
-			zone: 'right',
+			zone: 'center',
 			blockedReason: undefined,
+		});
+		expect(
+			dnd.handleWindowDrop(
+				'window-main',
+				dragEvent('drop', target, { clientX: 50, clientY: 50 }),
+			),
+		).toMatchObject({
+			payload: { kind: 'chat', chatId: 'chat-a' },
+			target: { kind: 'window', windowId: 'window-main', zone: 'center' },
 		});
 	});
 
-	it('blocks every chat drop target at the four-window cap', () => {
+	it('blocks Chat edges but keeps the center available at the four-window cap', () => {
 		const layout = createWorkspaceLayoutStore();
 		layout.publish(
 			layout.revision,
@@ -195,6 +226,16 @@ describe('WorkspaceWindowDndController', () => {
 		);
 
 		expect(dnd.activeTarget).toMatchObject({ blockedReason: 'max-windows' });
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 50, clientY: 50 }),
+		);
+		expect(dnd.activeTarget).toEqual({
+			kind: 'window',
+			windowId: 'window-main',
+			zone: 'center',
+			blockedReason: undefined,
+		});
 	});
 
 	it('resolves tab-strip drops to an exact destination index', () => {

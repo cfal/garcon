@@ -314,6 +314,80 @@ describe('WorkspaceCoordinator', () => {
 		).toHaveLength(1);
 	});
 
+	it('adds Chat to an exact window and publishes that destination as current', async () => {
+		let coordinator: WorkspaceCoordinator | null = null;
+		let observePlacement = false;
+		let observed:
+			| {
+					currentWindowId: WorkspaceWindowId;
+					lastFocusedSurfaceId: string;
+			  }
+			| undefined;
+		const harness = createHarness({
+			includePortableTabs: false,
+			onLayoutChanged: () => {
+				if (!observePlacement || !coordinator) return;
+				observed = {
+					currentWindowId: coordinator.currentWindowId,
+					lastFocusedSurfaceId: coordinator.lastFocusedSurfaceId,
+				};
+			},
+		});
+		coordinator = harness.coordinator;
+		const { layout } = harness;
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const destinationWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+		observePlacement = true;
+
+		await coordinator.showChatInWindow('chat-b', destinationWindowId);
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-b' });
+		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
+		expect(observed).toEqual({
+			currentWindowId: destinationWindowId,
+			lastFocusedSurfaceId: destinationSurfaceId,
+		});
+	});
+
+	it('replaces Chat in an exact occupied window without changing another presentation', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const destinationWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
+
+		await coordinator.showChatInWindow('chat-c', destinationWindowId);
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId(destinationWindowId))).toMatchObject({
+			chatId: 'chat-c',
+		});
+		expect(
+			Object.values(layout.snapshot.surfaces).filter((surface) => surface.type === 'chat'),
+		).toHaveLength(2);
+		expect(coordinator.currentWindowId).toBe(destinationWindowId);
+	});
+
+	it('does not redirect an exact Chat placement when its destination is missing', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		await expect(
+			coordinator.showChatInWindow('chat-b', 'window-missing' as WorkspaceWindowId),
+		).rejects.toThrow();
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+	});
+
 	it('moves Chat into a Chat-less window and presents its destination identity', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
