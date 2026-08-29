@@ -134,6 +134,7 @@ export class CarryOverTranscriptStore {
       fs.mkdir(this.#trashDir, { recursive: true, mode: 0o700 }),
       fs.mkdir(path.join(this.#rootDir, 'quarantine'), { recursive: true, mode: 0o700 }),
     ]);
+    await this.#cleanupTrash();
   }
 
   revision(
@@ -164,6 +165,15 @@ export class CarryOverTranscriptStore {
     }
     if (removed > 0) await syncDirectory(this.#tmpDir);
     return removed;
+  }
+
+  async #cleanupTrash(): Promise<void> {
+    const entries = await fs.readdir(this.#trashDir, { withFileTypes: true });
+    if (entries.length === 0) return;
+    await Promise.all(entries.map((entry) => (
+      fs.rm(path.join(this.#trashDir, entry.name), { recursive: true, force: true })
+    )));
+    await syncDirectory(this.#trashDir);
   }
 
   sweep(roots: () => ReadonlySet<string>): Promise<CarryOverSweepResult> {

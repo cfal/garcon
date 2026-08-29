@@ -96,7 +96,7 @@ describe('CarryOverGarbageCollector', () => {
   });
 
   it('defers and coalesces scheduled sweeps', async () => {
-    let runScheduledSweep;
+    const scheduledCallbacks = [];
     let sweepCount = 0;
     const scheduled = new CarryOverGarbageCollector({
       registry: { listAllChats: () => ({}) },
@@ -115,17 +115,60 @@ describe('CarryOverGarbageCollector', () => {
           };
         },
       },
-    }, { defer: (callback) => { runScheduledSweep = callback; } });
+    }, { defer: (callback) => { scheduledCallbacks.push(callback); } });
 
     scheduled.schedule();
     scheduled.schedule();
     expect(sweepCount).toBe(0);
-    expect(runScheduledSweep).toBeFunction();
+    expect(scheduledCallbacks).toHaveLength(1);
 
-    runScheduledSweep();
+    scheduledCallbacks[0]();
     await Promise.resolve();
     expect(sweepCount).toBe(1);
   });
+
+  it('cancels a pending sweep during shutdown', () => {
+    const scheduledCallbacks = [];
+    let cancelCount = 0;
+    const scheduled = new CarryOverGarbageCollector({
+      registry: { listAllChats: () => ({}) },
+      journal: { roots: () => new Set() },
+      store: {
+        cleanupTemporary: async () => 0,
+        sweep: async () => emptySweepResult(),
+      },
+    }, {
+      defer: (callback) => {
+        scheduledCallbacks.push(callback);
+        return () => { cancelCount += 1; };
+      },
+    });
+
+    scheduled.schedule();
+    scheduled.shutdown();
+
+    expect(scheduledCallbacks).toHaveLength(1);
+    expect(cancelCount).toBe(1);
+  });
+
+  it('uses an unref-ed delayed timer by default', async () => {
+    const fixture = path.join(import.meta.dir, 'fixtures', 'carryover-gc-scheduler.ts');
+    const child = Bun.spawn([process.execPath, fixture], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const timeout = setTimeout(() => child.kill(), 2_500);
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    clearTimeout(timeout);
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe('scheduled\n');
+    expect(stderr).toBe('');
+  }, 10_000);
 
   async function prepareSegment(id) {
     return store.prepareSegment({
@@ -144,6 +187,17 @@ describe('CarryOverGarbageCollector', () => {
 
   function segmentStat(id) {
     return fs.stat(path.join(workspaceDir, 'carryover-transcripts', 'segments', id));
+  }
+
+  function emptySweepResult() {
+    return {
+      reachableSegmentCount: 0,
+      unreachableSegmentCount: 0,
+      removedSegmentCount: 0,
+      compressedBytes: 0,
+      declaredUncompressedBytes: 0,
+      durationMs: 0,
+    };
   }
 });
 
