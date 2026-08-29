@@ -11,7 +11,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
-import { chatIdRequestNoticeDraft } from '../chat-id-request.ts';
+import { chatIdRequestNoticeDraft } from '../garcon-command-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';

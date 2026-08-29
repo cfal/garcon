@@ -11,7 +11,7 @@ import {
 } from '../../common/chat-types.js';
 import { parseTranscriptNoticeDetail } from '../../common/transcript-notice-details.js';
 import type { TranscriptMessage } from '../../common/chat-view.js';
-import { isChatIdRequestNoticeRow } from './chat-id-request.js';
+import { isLedgerPrivateGarconCommandRow } from './garcon-command-request.js';
 import {
   isLedgerCliRowNoticeDetail,
   type LedgerRow,
@@ -49,7 +49,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'provider-row':
       return row.message;
     case 'notice': {
-      if (isChatIdRequestNoticeRow(row)) return null;
+      if (isLedgerPrivateGarconCommandRow(row)) return null;
       if (isLedgerCliRowNoticeDetail(row.detail)) {
         return new CliRowMessage(
           row.at,

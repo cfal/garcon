@@ -10,7 +10,7 @@ import {
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
 import type { JsonObject } from '../../common/json.js';
-import { chatIdRequestNoticeDraft } from './chat-id-request.js';
+import { chatIdRequestNoticeDraft } from './garcon-command-request.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {

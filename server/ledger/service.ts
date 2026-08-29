@@ -37,7 +37,7 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
-import { chatIdRequestNoticeDraft } from './chat-id-request.js';
+import { chatIdRequestNoticeDraft } from './garcon-command-request.js';
 import { PermissionNotActionableError } from './errors.js';
 import { TranscriptLedgerStore } from './store.js';
 

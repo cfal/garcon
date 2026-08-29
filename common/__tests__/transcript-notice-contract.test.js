@@ -8,6 +8,8 @@ import {
 import {
   isChatIdDiscoveryFailureNoticeDetail,
   isHandoffSummaryNoticeDetail,
+  isInterAgentMessageOutcomeNoticeDetail,
+  isInterAgentMessageReceivedNoticeDetail,
   parseTranscriptNoticeDetail,
 } from '../transcript-notice-details.ts';
 
@@ -76,6 +78,65 @@ describe('transcript notice contracts', () => {
       type: 'chat-id-discovery-failure',
       reason: 'invalid',
     })).toBe(false);
+  });
+
+  it('round-trips typed inter-agent message notices', () => {
+    const outcome = {
+      type: 'inter-agent-message-outcome',
+      results: [
+        { chatId: '1787974832309199', status: 'delivered' },
+        { chatId: '1787973671383699', status: 'queued' },
+        { chatId: '1787971111111111', status: 'failed', reason: 'target-not-found' },
+      ],
+    };
+    const received = {
+      type: 'inter-agent-message-received',
+      fromChatId: '1787974832309199',
+    };
+    const hidden = {
+      type: 'inter-agent-message-received',
+      fromChatId: null,
+    };
+
+    for (const detail of [outcome, received, hidden]) {
+      const message = {
+        type: 'transcript-notice',
+        timestamp: AT,
+        content: 'Inter-agent message.',
+        detail,
+        title: 'Inter-agent message',
+      };
+      expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
+      expect(parseTranscriptNoticeDetail({ ...detail, ignored: true })).toEqual(detail);
+    }
+    expect(isInterAgentMessageOutcomeNoticeDetail(outcome)).toBe(true);
+    expect(isInterAgentMessageReceivedNoticeDetail(received)).toBe(true);
+    expect(isInterAgentMessageReceivedNoticeDetail(hidden)).toBe(true);
+  });
+
+  it('rejects malformed inter-agent message notice details', () => {
+    for (const detail of [
+      { type: 'inter-agent-message-outcome', results: [] },
+      {
+        type: 'inter-agent-message-outcome',
+        results: [{ chatId: 'invalid', status: 'delivered' }],
+      },
+      {
+        type: 'inter-agent-message-outcome',
+        results: [
+          { chatId: '1787974832309199', status: 'queued' },
+          { chatId: '1787974832309199', status: 'delivered' },
+        ],
+      },
+      {
+        type: 'inter-agent-message-outcome',
+        results: [{ chatId: '1787974832309199', status: 'failed', reason: 'invalid' }],
+      },
+      { type: 'inter-agent-message-received', fromChatId: 'invalid' },
+      { type: 'inter-agent-message-received' },
+    ]) {
+      expect(parseTranscriptNoticeDetail(detail)).toBeNull();
+    }
   });
 
   it('round-trips title-only notices without inventing semantic detail', () => {

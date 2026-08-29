@@ -14,7 +14,7 @@ import {
   TranscriptLedgerStore,
   transcriptViewId,
 } from '../index.ts';
-import { chatIdRequestNoticeDraft } from '../chat-id-request.ts';
+import { chatIdRequestNoticeDraft } from '../garcon-command-request.ts';
 import { decodeLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 
