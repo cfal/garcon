@@ -164,7 +164,9 @@ export class AgentRuntimeRouter {
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
     const persistedEntry = this.#registry.getChat(chatId);
     const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
-    const { integration, selection } = await this.#resolveExecutionTarget(persistedEntry, entry, opts);
+    const integration = this.#directory.require(entry.agentId);
+    const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
+    await this.#validateEndpoint(integration, selection);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
@@ -173,7 +175,7 @@ export class AgentRuntimeRouter {
     const runId = this.#ledger.beginRun(chatId, operation.turnId);
     try {
       assertExecutionAdmissionOpen(opts);
-      const carryoverOutcome = await this.#createCarriedContext({
+      const outcome = await this.#createCarriedContext({
         chatId,
         entry,
         messages: this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
@@ -183,7 +185,7 @@ export class AgentRuntimeRouter {
         signal: opts.executionAdmission?.signal,
       });
       assertExecutionAdmissionOpen(opts);
-      const carryover = resolveCarryOverOutcome(carryoverOutcome);
+      const carryover = resolveCarryOverOutcome(outcome);
       if (carryover.notice) {
         this.#ledger.appendNotice(chatId, prepared.viewId, carryover.notice);
       }
@@ -226,7 +228,9 @@ export class AgentRuntimeRouter {
       });
       return;
     }
-    const { integration, selection } = await this.#resolveExecutionTarget(persistedEntry, entry, opts);
+    const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
+    const integration = this.#directory.require(entry.agentId);
+    await this.#validateEndpoint(integration, selection);
     const prepared = await this.#preparePrompt(chatId, prompt, opts);
     if (!prepared.dispatch) return;
     assertExecutionAdmissionOpen(opts);
@@ -639,12 +643,11 @@ export class AgentRuntimeRouter {
       : [];
   }
 
-  async #resolveExecutionTarget(
+  #resolveExecutionSelection(
     persistedEntry: AgentChatEntry | null | undefined,
     entry: ReturnType<typeof requireAgentChatEntry>,
     opts: Pick<RunAgentTurnOptions, 'model' | 'apiProviderId' | 'modelEndpointId'>,
   ) {
-    const integration = this.#directory.require(entry.agentId);
     const previous = this.#endpointResolver.resolveSelection({
       agentId: entry.agentId,
       model: persistedEntry?.model || entry.model,
@@ -659,8 +662,7 @@ export class AgentRuntimeRouter {
         opts.modelEndpointId !== undefined ? opts.modelEndpointId : entry.modelEndpointId,
     });
     assertSameApiProviderBoundary(previous, selection);
-    await this.#validateEndpoint(integration, selection);
-    return { integration, selection };
+    return selection;
   }
 
   async #validateEndpoint(
