@@ -92,21 +92,13 @@
 {/if}
 
 {#if onOpenInNewWindow}
-	<DropdownMenuItem
-		disabled={newWindowBlocked}
-		title={newWindowBlocked ? m.workspace_drop_zone_max_windows() : undefined}
-		onclick={() => onOpenInNewWindow?.(session.id)}
-	>
-		<PanelRight />
-		{m.sidebar_chat_open_new_window()}
-	</DropdownMenuItem>
 	<DropdownMenuSub>
 		<DropdownMenuSubTrigger
 			disabled={newWindowBlocked}
 			title={newWindowBlocked ? m.workspace_drop_zone_max_windows() : undefined}
 		>
 			<PanelRight />
-			{m.sidebar_chat_open_new_window_direction()}
+			{m.sidebar_chat_open_new_window()}
 		</DropdownMenuSubTrigger>
 		<DropdownMenuSubContent class="w-56">
 			<DropdownMenuItem onclick={() => onOpenInNewWindow?.(session.id, 'left')}>

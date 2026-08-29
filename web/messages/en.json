@@ -1765,7 +1765,6 @@
 	"workspace_open_new_window_above": "Open new window above",
 	"workspace_open_new_window_below": "Open new window below",
 	"sidebar_chat_open_new_window": "Open in new window",
-	"sidebar_chat_open_new_window_direction": "Open in new window at edge",
 	"workspace_drop_zone_max_windows": "4 windows max",
 	"workspace_drop_zone_same_window": "Already in this window",
 	"workspace_window_drop_target": "Workspace window drop target",

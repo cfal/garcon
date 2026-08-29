@@ -1022,6 +1022,8 @@ export class SpaDriver {
     }, text);
     await this.waitForMenuItemEnabled('Open in new window');
     await this.clickMenuItem('Open in new window');
+    await this.waitForMenuItemEnabled('Open new window right');
+    await this.clickMenuItem('Open new window right');
   }
 
   async waitForSidebarPreview(chatText: string, previewText: string): Promise<void> {

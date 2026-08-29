@@ -477,7 +477,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
 	});
 
-	it('opens a sidebar chat in a new workspace window from the keyboard menu', async () => {
+	it('opens a sidebar chat at an edge from the single new-window submenu', async () => {
 		const onOpenInNewWindow = vi.fn();
 		render(SidebarChatItemHost, {
 			session: createChat(),
@@ -485,9 +485,15 @@ describe('shared sidebar chat row', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-		await fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new window' }));
+		const openSubmenu = screen.getByRole('menuitem', { name: 'Open in new window' });
+		openSubmenu.focus();
+		await fireEvent.keyDown(openSubmenu, { key: 'ArrowRight' });
+		await fireEvent.click(
+			await screen.findByRole('menuitem', { name: 'Open new window right' }),
+		);
 
-		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1');
+		expect(onOpenInNewWindow).toHaveBeenCalledWith('chat-1', 'right');
+		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
 	});
 
 	it('disables sidebar Chat window placement at the window cap', async () => {
@@ -501,11 +507,7 @@ describe('shared sidebar chat row', () => {
 		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
 		expect(openItem.getAttribute('title')).toBe('4 windows max');
-		expect(
-			screen
-				.getByRole('menuitem', { name: 'Open in new window at edge' })
-				.getAttribute('aria-disabled'),
-		).toBe('true');
+		expect(screen.queryByRole('menuitem', { name: 'Open in new window at edge' })).toBeNull();
 	});
 
 	it('disables sidebar fork while processing when running fork is unsupported', async () => {
@@ -567,7 +569,7 @@ describe('shared sidebar chat row', () => {
 	it('pulses processing only when system and local motion preferences allow it', () => {
 		expect(appCss).toContain('@keyframes sidebar-processing-pulse');
 		expect(appCss).toMatch(
-			/@media \(prefers-reduced-motion: no-preference\)\s*\{[\s\S]*?\.sidebar-processing-indicator\s*\{[\s\S]*?animation: sidebar-processing-pulse 1\.6s ease-in-out infinite;[\s\S]*?\}/,
+			/@media \(prefers-reduced-motion: no-preference\)\s*\{[\s\S]*?\.sidebar-processing-indicator,\s*\.workspace-chat-processing-indicator\s*\{[\s\S]*?animation: sidebar-processing-pulse 1\.6s ease-in-out infinite;[\s\S]*?\}/,
 		);
 		expect(appCss).toMatch(
 			/\.sidebar-reduce-motion \.sidebar-processing-indicator\s*\{\s*animation: none;\s*\}/,
