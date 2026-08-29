@@ -27,7 +27,7 @@ describe('TranscriptLedgerService', () => {
         const notifications = [];
         ledger.subscribe((event) => notifications.push(event));
         requests.mockImplementation((input) => {
-          expect(ledger.currentRows('chat-1')).toHaveLength(2);
+          expect(ledger.currentRows('chat-1')).toHaveLength(1);
           expect(notifications).toEqual([]);
           expect(input).toMatchObject({ chatId: 'chat-1', runId: 'run-1' });
         });
@@ -48,20 +48,15 @@ describe('TranscriptLedgerService', () => {
             kind: 'provider-row',
             message: { type: 'assistant-message', content: 'Continuing the response.' },
           },
-          {
-            kind: 'notice',
-            message: 'Agent requested chat ID',
-            detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-          },
         ]);
         await tick();
         expect(notifications).toHaveLength(1);
       }, {
-        chatIdRequests: { enabled: () => true, request: requests },
+        chatIdRequests: { request: requests },
       });
     });
 
-    it('[TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01] records a disabled failure without dispatching', async () => {
+    it('dispatches a marker-only request without committing a row', async () => {
       const requests = mock(() => undefined);
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
@@ -72,18 +67,15 @@ describe('TranscriptLedgerService', () => {
           rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
         });
 
-        expect(requests).not.toHaveBeenCalled();
-        expect(ledger.currentRows('chat-1')).toMatchObject([{
-          kind: 'notice',
-          message: 'Chat ID auto-discovery is disabled.',
-          detail: {
-            type: 'chat-id-discovery-failure',
-            reason: 'disabled',
-            title: 'Request: Garcon Chat ID',
-          },
-        }]);
+        expect(requests).toHaveBeenCalledWith({
+          chatId: 'chat-1',
+          viewId: expect.any(String),
+          runId: null,
+          at: TS,
+        });
+        expect(ledger.currentRows('chat-1')).toEqual([]);
       }, {
-        chatIdRequests: { enabled: () => false, request: requests },
+        chatIdRequests: { request: requests },
       });
     });
   });

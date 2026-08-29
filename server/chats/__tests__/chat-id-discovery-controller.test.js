@@ -6,14 +6,6 @@ const CHAT_ID = '1787836573296800';
 const VIEW_ID = 'view-1';
 const AT = '2026-08-28T00:00:00.000Z';
 
-function target(turnId = 'run-1') {
-  return {
-    attempt: {},
-    identity: { turnId },
-    providerTarget: { turnId },
-  };
-}
-
 function deferred() {
   let resolve;
   let reject;
@@ -24,26 +16,39 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function createController(overrides = {}) {
+  const appendNotice = mock(() => undefined);
+  const deliverControlInput = mock(async () => undefined);
+  const options = {
+    execution: { deliverControlInput },
+    notices: { appendNotice },
+    isEnabled: () => true,
+    ...overrides,
+  };
+  const controller = new ChatIdDiscoveryController(options);
+  return {
+    appendNotice,
+    controller,
+    deliverControlInput: options.execution.deliverControlInput,
+  };
+}
+
 describe('ChatIdDiscoveryController', () => {
-  it('starts a provider-only control steer immediately and records success after delivery', async () => {
+  it('records one success notice as soon as delivery is accepted', async () => {
     const delivery = deferred();
-    const deliverControlSteer = mock(() => delivery.promise);
-    const appendNotice = mock(() => undefined);
-    const controller = new ChatIdDiscoveryController({
-      execution: {
-        captureSteerTarget: mock(() => target()),
-        deliverControlSteer,
-      },
-      notices: { appendNotice },
+    const deliverControlInput = mock(() => delivery.promise);
+    const { appendNotice, controller } = createController({
+      execution: { deliverControlInput },
     });
 
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
 
-    expect(deliverControlSteer).toHaveBeenCalledWith(
+    expect(deliverControlInput).toHaveBeenCalledWith(
       CHAT_ID,
       '<garcon-chat-id>1787836573296800</garcon-chat-id>',
       VIEW_ID,
-      target(),
+      expect.anything(),
+      expect.any(Function),
     );
     expect(appendNotice).not.toHaveBeenCalled();
 
@@ -51,95 +56,181 @@ describe('ChatIdDiscoveryController', () => {
     await delivery.promise;
     await Promise.resolve();
     expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
-      title: 'Response: Garcon Chat ID',
-      content: 'Sent chat ID 1787836573296800 to agent',
+      title: 'Chat ID auto-discovery',
+      content: 'Sent chat ID 1787836573296800 to agent.',
       detail: { type: 'chat-id-disclosure' },
       at: AT,
     });
   });
 
-  it('dispatches at most once for each chat run', () => {
-    let activeRun = 'run-1';
-    const deliverControlSteer = mock(() => new Promise(() => undefined));
-    const controller = new ChatIdDiscoveryController({
-      execution: {
-        captureSteerTarget: mock(() => target(activeRun)),
-        deliverControlSteer,
-      },
-      notices: { appendNotice: mock(() => undefined) },
+  it('[TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01] records one disabled notice without attempting delivery', () => {
+    const { appendNotice, controller, deliverControlInput } = createController({
+      isEnabled: () => false,
     });
 
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
-    activeRun = 'run-2';
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
 
-    expect(deliverControlSteer).toHaveBeenCalledTimes(2);
+    expect(deliverControlInput).not.toHaveBeenCalled();
+    expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
+      title: 'Chat ID auto-discovery',
+      content: 'Chat ID auto-discovery is disabled.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
+      at: AT,
+    });
   });
 
-  it('records unsupported steering as a typed failure', async () => {
-    const appendNotice = mock(() => undefined);
+  it('deduplicates each run and serializes overlapping requests per chat', async () => {
+    const delivery = deferred();
+    const deliverControlInput = mock(() => delivery.promise);
+    const { appendNotice, controller } = createController({ execution: { deliverControlInput } });
+
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
+
+    expect(deliverControlInput).toHaveBeenCalledTimes(1);
+    expect(appendNotice).not.toHaveBeenCalled();
+
+    delivery.resolve();
+    await delivery.promise;
+    await Promise.resolve();
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
+
+    expect(deliverControlInput).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats independent no-run markers as separate requests', async () => {
+    const deliverControlInput = mock(async () => undefined);
+    const { controller } = createController({ execution: { deliverControlInput } });
+
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
+    await Promise.resolve();
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
+    await Promise.resolve();
+
+    expect(deliverControlInput).toHaveBeenCalledTimes(2);
+  });
+
+  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-RECURSION-UNIT-01] suppresses uncorrelated markers after its hidden turn', async () => {
+    const deliverControlInput = mock(async (_chatId, _content, _viewId, _signal, onHiddenRun) => {
+      onHiddenRun('hidden-turn');
+    });
+    const { controller } = createController({ execution: { deliverControlInput } });
+
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    await Promise.resolve();
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'hidden-turn', at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
+    await Promise.resolve();
+
+    expect(deliverControlInput).toHaveBeenCalledTimes(2);
+  });
+
+  it('contains synchronous delivery setup failures', () => {
+    const { appendNotice, controller } = createController({
+      execution: {
+        deliverControlInput: mock(() => { throw new Error('execution unavailable'); }),
+      },
+    });
+
+    expect(() => controller.request({
+      chatId: CHAT_ID,
+      viewId: VIEW_ID,
+      runId: 'run-1',
+      at: AT,
+    })).not.toThrow();
+    expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
+      title: 'Chat ID auto-discovery',
+      content: 'Garcon could not send the chat ID to the agent.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
+      at: AT,
+    });
+  });
+
+  it('records unsupported delivery as one typed failure', async () => {
     const error = new DomainError(
       'OPERATION_UNSUPPORTED',
       'This agent does not support steering',
       422,
     );
-    const controller = new ChatIdDiscoveryController({
+    const { appendNotice, controller } = createController({
       execution: {
-        captureSteerTarget: mock(() => target()),
-        deliverControlSteer: mock(async () => { throw error; }),
+        deliverControlInput: mock(async () => { throw error; }),
       },
-      notices: { appendNotice },
     });
 
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
     await Promise.resolve();
 
     expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
-      title: 'Response: Garcon Chat ID',
-      content: 'This agent does not support chat ID auto-discovery steering.',
+      title: 'Chat ID auto-discovery',
+      content: 'This agent does not support chat ID auto-discovery.',
       detail: { type: 'chat-id-discovery-failure', reason: 'unsupported' },
+      at: AT,
     });
   });
 
-  it('records one failure for repeated requests without an active run', () => {
-    const appendNotice = mock(() => undefined);
-    const deliverControlSteer = mock(async () => undefined);
-    const captureSteerTarget = mock(() => null);
-    const controller = new ChatIdDiscoveryController({
+  it('records a generic failure when no route accepts the input', async () => {
+    const { appendNotice, controller } = createController({
       execution: {
-        captureSteerTarget,
-        deliverControlSteer,
+        deliverControlInput: mock(async () => {
+          throw new DomainError('SESSION_BUSY', 'No route', 409);
+        }),
       },
-      notices: { appendNotice },
     });
 
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: null, at: AT });
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    await Promise.resolve();
 
-    expect(deliverControlSteer).not.toHaveBeenCalled();
-    expect(captureSteerTarget).not.toHaveBeenCalled();
-    expect(appendNotice).toHaveBeenCalledTimes(1);
     expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
-      title: 'Response: Garcon Chat ID',
-      content: 'The active turn ended before Garcon could send the chat ID.',
-      detail: { type: 'chat-id-discovery-failure', reason: 'turn-unavailable' },
+      title: 'Chat ID auto-discovery',
+      content: 'Garcon could not send the chat ID to the agent.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
+      at: AT,
+    });
+  });
+
+  it('records an unknown delivery outcome as the generic failure', async () => {
+    const { appendNotice, controller } = createController({
+      execution: {
+        deliverControlInput: mock(async () => {
+          throw new DomainError(
+            'STEER_OUTCOME_UNKNOWN',
+            'The provider may have accepted the input',
+            409,
+          );
+        }),
+      },
+    });
+
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    await Promise.resolve();
+
+    expect(appendNotice).toHaveBeenCalledWith(CHAT_ID, VIEW_ID, {
+      title: 'Chat ID auto-discovery',
+      content: 'Garcon could not send the chat ID to the agent.',
+      detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
+      at: AT,
     });
   });
 
   it('does not record a delivery outcome after the chat is discarded', async () => {
     const delivery = deferred();
-    const appendNotice = mock(() => undefined);
-    const controller = new ChatIdDiscoveryController({
+    let signal;
+    const { appendNotice, controller } = createController({
       execution: {
-        captureSteerTarget: mock(() => target()),
-        deliverControlSteer: mock(() => delivery.promise),
+        deliverControlInput: mock((_chatId, _content, _viewId, inputSignal) => {
+          signal = inputSignal;
+          return delivery.promise;
+        }),
       },
-      notices: { appendNotice },
     });
 
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
     controller.discard(CHAT_ID);
+    expect(signal.aborted).toBe(true);
     delivery.resolve();
     await delivery.promise;
     await Promise.resolve();

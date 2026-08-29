@@ -442,9 +442,6 @@ export function wireServerEvents({
         );
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'finished');
-        void queue.checkChatIdle(chatId).catch((err) => {
-          logger.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
       }
     });
   });
@@ -461,10 +458,13 @@ export function wireServerEvents({
         await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata);
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
-        void queue.checkChatIdle(chatId).catch((err) => {
-          logger.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
       }
+    });
+  });
+  agentRegistry.onRunActivityCleared((chatId) => {
+    if (!chatExists(chatId)) return;
+    void queue.checkChatIdle(chatId).catch((err) => {
+      logger.warn('queue: checkChatIdle error:', errorMessage(err));
     });
   });
 

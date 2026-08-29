@@ -35,7 +35,6 @@ import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isChatIdDisclosureNoticeDetail,
   isChatIdDiscoveryFailureNoticeDetail,
-  isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
   type TranscriptNoticeDetail,
 } from './transcript-notice-details.js';
@@ -45,7 +44,6 @@ export {
   isCarryoverMigrationQuarantineNoticeDetail,
   isChatIdDisclosureNoticeDetail,
   isChatIdDiscoveryFailureNoticeDetail,
-  isChatIdRequestNoticeDetail,
   isHandoffSummaryNoticeDetail,
 } from './transcript-notice-details.js';
 export type {
@@ -53,7 +51,6 @@ export type {
   ChatIdDisclosureNoticeDetail,
   ChatIdDiscoveryFailureNoticeDetail,
   ChatIdDiscoveryFailureReason,
-  ChatIdRequestNoticeDetail,
   HandoffSummaryNoticeDetail,
   TranscriptNoticeDetail,
 } from './transcript-notice-details.js';
@@ -1183,7 +1180,6 @@ function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | n
     };
   }
   if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
-  if (isChatIdRequestNoticeDetail(value)) return { type: value.type };
   if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
   if (isChatIdDiscoveryFailureNoticeDetail(value)) {
     return { type: value.type, reason: value.reason };

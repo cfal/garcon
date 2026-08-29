@@ -51,9 +51,10 @@ describe('transcript notice contracts', () => {
 
   it('round-trips typed chat ID discovery notices', () => {
     for (const detail of [
-      { type: 'chat-id-request' },
       { type: 'chat-id-disclosure' },
+      { type: 'chat-id-discovery-failure', reason: 'disabled' },
       { type: 'chat-id-discovery-failure', reason: 'unsupported' },
+      { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
     ]) {
       const message = {
         type: 'transcript-notice',

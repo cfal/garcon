@@ -37,6 +37,9 @@ export class AgentEventBus {
     errorCode: string,
     metadata?: TurnEventMetadata,
   ) => void | Promise<void>>();
+  readonly #runActivityClearedListeners = new Set<(
+    chatId: string,
+  ) => void | Promise<void>>();
 
   trackTurn(chatId: string, opts: TurnEventMetadata): void {
     if (!opts.clientRequestId && !opts.commandType && !opts.turnId) {
@@ -121,23 +124,32 @@ export class AgentEventBus {
     this.#failedListeners.add(cb);
   }
 
+  onRunActivityCleared(cb: (chatId: string) => void | Promise<void>): void {
+    this.#runActivityClearedListeners.add(cb);
+  }
+
   async publishSession(chatId: string): Promise<void> {
     for (const listener of this.#sessionListeners) await listener(chatId);
   }
 
   async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow): Promise<void> {
-    const metadata = this.#terminalMetadata(chatId, runId);
-    if (!metadata) return;
-    this.#settledTurnByChatId.delete(chatId);
-    this.#turnMetadataByChatId.delete(chatId);
-    if (row.outcome === 'failed') {
-      const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
-      const code = row.error?.code ?? 'INTERNAL_ERROR';
-      for (const listener of this.#failedListeners) await listener(chatId, message, code, metadata);
-      return;
-    }
-    for (const listener of this.#finishedListeners) {
-      await listener(chatId, 0, metadata, row.outcome);
+    try {
+      const metadata = this.#terminalMetadata(chatId, runId);
+      if (!metadata) return;
+      this.#settledTurnByChatId.delete(chatId);
+      this.#turnMetadataByChatId.delete(chatId);
+      if (row.outcome === 'failed') {
+        const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
+        const code = row.error?.code ?? 'INTERNAL_ERROR';
+        for (const listener of this.#failedListeners) await listener(chatId, message, code, metadata);
+        return;
+      }
+      for (const listener of this.#finishedListeners) {
+        await listener(chatId, 0, metadata, row.outcome);
+      }
+    } finally {
+      // Wakes provider-idle observers even when turn correlation is unavailable.
+      for (const listener of this.#runActivityClearedListeners) await listener(chatId);
     }
   }
 

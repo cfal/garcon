@@ -7,12 +7,7 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
-import {
-  CHAT_ID_REQUEST_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_TITLE,
-  chatIdDiscoveryFailureContent,
-  transformChatIdRequest,
-} from '../../common/chat-id-discovery.js';
+import { transformChatIdRequest } from '../../common/chat-id-discovery.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
@@ -102,7 +97,6 @@ export interface TranscriptLedgerServiceOptions {
 }
 
 export interface ChatIdRequestSink {
-  enabled(): boolean;
   request(input: {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
@@ -112,7 +106,6 @@ export interface ChatIdRequestSink {
 }
 
 const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
-  enabled: () => false,
   request: () => undefined,
 });
 
@@ -670,7 +663,6 @@ export class TranscriptLedgerService {
     switch (event.type) {
       case 'rows': {
         const drafts: LedgerRowDraft[] = [];
-        let discoveryEnabled: boolean | undefined;
         let discoveryRequestAt: string | undefined;
         for (const row of event.rows) {
           const request = transformChatIdRequest(row.message);
@@ -684,33 +676,18 @@ export class TranscriptLedgerService {
             });
           }
           if (!request) continue;
-          discoveryEnabled ??= this.#chatIdRequests.enabled();
           discoveryRequestAt ??= row.message.timestamp;
-          drafts.push({
-            kind: 'notice',
-            at: row.message.timestamp,
-            message: discoveryEnabled
-              ? CHAT_ID_REQUEST_NOTICE_CONTENT
-              : chatIdDiscoveryFailureContent('disabled'),
-            detail: discoveryEnabled
-              ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-              : {
-                  type: 'chat-id-discovery-failure',
-                  reason: 'disabled',
-                  title: CHAT_ID_REQUEST_NOTICE_TITLE,
-                },
-            providerMeta: null,
-          });
         }
-        if (drafts.length === 0) return;
-        const rows = this.#store.append(chatId, viewId, drafts);
-        this.#notify({ type: 'rows', chatId, viewId, rows });
-        if (discoveryEnabled === true) {
+        if (drafts.length > 0) {
+          const rows = this.#store.append(chatId, viewId, drafts);
+          this.#notify({ type: 'rows', chatId, viewId, rows });
+        }
+        if (discoveryRequestAt !== undefined) {
           this.#chatIdRequests.request({
             chatId,
             viewId,
             runId: this.#activeRuns.get(chatId) ?? null,
-            at: discoveryRequestAt!,
+            at: discoveryRequestAt,
           });
         }
         return;

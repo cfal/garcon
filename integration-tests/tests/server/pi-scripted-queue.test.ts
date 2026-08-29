@@ -161,16 +161,11 @@ describe('scripted Pi queue lifecycle', () => {
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))
-          .toEqual([
-            expect.objectContaining({
-              content: 'Agent requested chat ID',
-              detail: { type: 'chat-id-request' },
-            }),
-            expect.objectContaining({
-              content: `Sent chat ID ${chatId} to agent`,
-              detail: { type: 'chat-id-disclosure' },
-            }),
-          ]);
+          .toEqual([expect.objectContaining({
+            title: 'Chat ID auto-discovery',
+            content: `Sent chat ID ${chatId} to agent.`,
+            detail: { type: 'chat-id-disclosure' },
+          })]);
 
         await reloadUntilNativeContains(fixture, chatId, receivedReply);
         const reloaded = await fixture.client.getMessages(chatId);

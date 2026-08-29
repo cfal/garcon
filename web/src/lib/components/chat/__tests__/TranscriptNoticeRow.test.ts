@@ -10,14 +10,14 @@ describe('TranscriptNoticeRow', () => {
 		const { container } = render(TranscriptNoticeRow, {
 			message: new TranscriptNoticeMessage(
 				AT,
-				'This agent does not support chat ID auto-discovery steering.',
+				'This agent does not support chat ID auto-discovery.',
 				{ type: 'chat-id-discovery-failure', reason: 'unsupported' },
-				'Response: Garcon Chat ID',
+				'Chat ID auto-discovery',
 			),
 		});
 
-		expect(screen.getByText('Response: Garcon Chat ID')).toBeTruthy();
-		expect(screen.getByText(/does not support chat ID auto-discovery steering/)).toBeTruthy();
+		expect(screen.getByText('Chat ID auto-discovery')).toBeTruthy();
+		expect(screen.getByText(/does not support chat ID auto-discovery/)).toBeTruthy();
 		expect(container.querySelector('article')?.className).toContain('border-status-error-border');
 	});
 });

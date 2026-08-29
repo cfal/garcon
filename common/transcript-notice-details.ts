@@ -8,10 +8,6 @@ export interface HandoffSummaryNoticeDetail {
   readonly type: 'handoff-summary';
 }
 
-export interface ChatIdRequestNoticeDetail {
-  readonly type: 'chat-id-request';
-}
-
 export interface ChatIdDisclosureNoticeDetail {
   readonly type: 'chat-id-disclosure';
 }
@@ -19,7 +15,6 @@ export interface ChatIdDisclosureNoticeDetail {
 export type ChatIdDiscoveryFailureReason =
   | 'disabled'
   | 'unsupported'
-  | 'turn-unavailable'
   | 'delivery-failed';
 
 export interface ChatIdDiscoveryFailureNoticeDetail {
@@ -30,7 +25,6 @@ export interface ChatIdDiscoveryFailureNoticeDetail {
 export type TranscriptNoticeDetail =
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
-  | ChatIdRequestNoticeDetail
   | ChatIdDisclosureNoticeDetail
   | ChatIdDiscoveryFailureNoticeDetail;
 
@@ -52,12 +46,6 @@ export function isHandoffSummaryNoticeDetail(
   return hasType(value, 'handoff-summary');
 }
 
-export function isChatIdRequestNoticeDetail(
-  value: unknown,
-): value is ChatIdRequestNoticeDetail {
-  return hasType(value, 'chat-id-request');
-}
-
 export function isChatIdDisclosureNoticeDetail(
   value: unknown,
 ): value is ChatIdDisclosureNoticeDetail {
@@ -71,7 +59,6 @@ export function isChatIdDiscoveryFailureNoticeDetail(
   const reason = (value as Record<string, unknown>).reason;
   return reason === 'disabled'
     || reason === 'unsupported'
-    || reason === 'turn-unavailable'
     || reason === 'delivery-failed';
 }
 

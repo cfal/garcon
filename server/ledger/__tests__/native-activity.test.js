@@ -112,8 +112,8 @@ describe('NativeTranscriptActivityService', () => {
       store.append(CHAT_ID, view.viewId, [{
         kind: 'notice',
         at: IMPORTED_AT,
-        message: 'Agent requested chat ID',
-        detail: { type: 'chat-id-request' },
+        message: 'Chat ID auto-discovery is disabled.',
+        detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
@@ -124,20 +124,8 @@ describe('NativeTranscriptActivityService', () => {
       store.append(CHAT_ID, view.viewId, [{
         kind: 'notice',
         at: IMPORTED_AT,
-        message: 'Chat ID auto-discovery is disabled.',
-        detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
-        providerMeta: null,
-      }]);
-      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 9,
-        at: IMPORTED_AT,
-      });
-
-      store.append(CHAT_ID, view.viewId, [{
-        kind: 'notice',
-        at: IMPORTED_AT,
-        message: 'The active turn ended before Garcon could send the chat ID.',
-        detail: { type: 'chat-id-discovery-failure', reason: 'turn-unavailable' },
+        message: 'Garcon could not send the chat ID to the agent.',
+        detail: { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(9);
@@ -154,7 +142,7 @@ describe('NativeTranscriptActivityService', () => {
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 11,
+        ordinal: 10,
         at: IMPORTED_AT,
       });
     });

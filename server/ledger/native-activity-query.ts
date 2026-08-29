@@ -30,15 +30,9 @@ export function readProviderActivityWatermark(
       )
       OR (
         kind = 'notice'
-        AND (
-          json_extract(payload_json, '$.value.detail.type') IN (
-            'chat-id-request',
-            'chat-id-disclosure'
-          )
-          OR (
-            json_extract(payload_json, '$.value.detail.type') = 'chat-id-discovery-failure'
-            AND json_extract(payload_json, '$.value.detail.reason') = 'disabled'
-          )
+        AND json_extract(payload_json, '$.value.detail.type') IN (
+          'chat-id-disclosure',
+          'chat-id-discovery-failure'
         )
       )
     )
