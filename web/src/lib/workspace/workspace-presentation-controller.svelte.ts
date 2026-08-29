@@ -271,12 +271,12 @@ export class WorkspacePresentationController {
 		if (this.isMobile || this.layout.snapshot.fullscreenWindowId) return;
 		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
 		if (windows.length < 2) return;
-		const ownerWindowId =
-			owner.kind === 'window-chrome'
-				? owner.windowId
-				: owner.kind === 'surface'
-					? this.windowOf(owner.surfaceId)
-					: null;
+		let ownerWindowId: WorkspaceWindowId | null = null;
+		if (owner.kind === 'window-chrome') {
+			ownerWindowId = owner.windowId;
+		} else if (owner.kind === 'surface') {
+			ownerWindowId = this.windowOf(owner.surfaceId);
+		}
 		const currentIndex = windows.findIndex(
 			(workspaceWindow) => workspaceWindow.id === ownerWindowId,
 		);

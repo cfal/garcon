@@ -332,17 +332,18 @@ describe('WorkspaceWindowTitleBar', () => {
 
 	it('disables directional new-window actions in both tab menus at the window cap', async () => {
 		const node = workspaceWindow([chatSurface.id, gitSurface.id]);
+		const directionalActionLabels = [
+			m.workspace_open_tab_new_window_left(),
+			m.workspace_open_tab_new_window_right(),
+			m.workspace_open_tab_new_window_above(),
+			m.workspace_open_tab_new_window_below(),
+		];
 		runtime.windowCount = 4;
 		runtime.desktopRoot = fourWindowRoot(node.tabs);
 		renderTitleBar(node);
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
-		for (const label of [
-			m.workspace_open_tab_new_window_left(),
-			m.workspace_open_tab_new_window_right(),
-			m.workspace_open_tab_new_window_above(),
-			m.workspace_open_tab_new_window_below(),
-		]) {
+		for (const label of directionalActionLabels) {
 			expect(
 				screen.getByRole('menuitem', { name: label }).getAttribute('data-disabled'),
 			).not.toBeNull();
@@ -355,12 +356,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 
 		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
-		for (const label of [
-			m.workspace_open_tab_new_window_left(),
-			m.workspace_open_tab_new_window_right(),
-			m.workspace_open_tab_new_window_above(),
-			m.workspace_open_tab_new_window_below(),
-		]) {
+		for (const label of directionalActionLabels) {
 			expect(
 				(await screen.findByRole('menuitem', { name: label })).getAttribute('data-disabled'),
 			).not.toBeNull();
