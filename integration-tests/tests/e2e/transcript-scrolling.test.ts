@@ -347,7 +347,7 @@ describe("Lightpanda transcript scrolling", () => {
       expect(loaded.mountedCount).toBeLessThan(loaded.modelCount);
       expect(await pageRequestCount(fixture.page)).toBeGreaterThan(1);
 
-      await app.clickButton("Workspace actions");
+      await app.clickButton("Window actions");
       await app.clickMenuItem("Jump to user message");
       await app.waitForText("User messages");
       const navigatorRows = await app.userMessageNavigatorRows();

@@ -23,7 +23,7 @@ describe('Lightpanda user-message navigation', () => {
       await app.sendComposer(third);
       await app.waitForText(`echo:${third}`);
 
-      await app.clickButton('Workspace actions');
+      await app.clickButton('Window actions');
       await app.clickMenuItem('Jump to user message');
       await app.waitForText('User messages');
 

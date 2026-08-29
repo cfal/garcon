@@ -11,7 +11,10 @@ async function runGit(projectPath: string, args: string[]): Promise<void> {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [stderr, exitCode] = await Promise.all([new Response(process.stderr).text(), process.exited]);
+  const [stderr, exitCode] = await Promise.all([
+    new Response(process.stderr).text(),
+    process.exited,
+  ]);
   if (exitCode !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim()}`);
 }
 
@@ -32,6 +35,7 @@ describe('Lightpanda Git Changes comments', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-changes-comment-seed');
       await app.waitForText('echo:git-changes-comment-seed');
+      const chatWindowId = await app.currentWorkspaceWindowId();
       await fixture.page.evaluate(() => {
         window.dispatchEvent(
           new KeyboardEvent('keydown', {
@@ -43,15 +47,18 @@ describe('Lightpanda Git Changes comments', () => {
       });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
       await fixture.page.evaluate(() => {
-        const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) =>
-          button.textContent?.includes('Switch to Git'),
+        const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+          (button) => button.textContent?.includes('Switch to Git'),
         );
         if (!option) throw new Error('Missing Switch to Git command.');
         option.click();
       });
-      await fixture.page.waitForSelector('[data-git-virtual-diff-root] button[aria-label="Add to chat"]', {
-        timeout: 20_000,
-      });
+      await fixture.page.waitForSelector(
+        '[data-git-virtual-diff-root] button[aria-label="Add to chat"]',
+        {
+          timeout: 20_000,
+        },
+      );
       await fixture.page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>(
           '[data-git-virtual-diff-root] button[aria-label="Add to chat"]',
@@ -70,9 +77,21 @@ describe('Lightpanda Git Changes comments', () => {
         button.click();
       });
       await app.waitForText('Added to the Chat composer.');
-      await app.selectMainWorkspaceSurface('Chat');
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${chatWindowId}`, chatWindowId);
+      await fixture.page.waitForFunction(
+        () => {
+          const textarea = document.querySelector<HTMLTextAreaElement>(
+            '[data-conversation-workspace-layer] textarea[placeholder="Reply..."]',
+          );
+          return (
+            textarea?.value.includes('Git review comment') === true &&
+            textarea.value.includes('Please verify the current change.')
+          );
+        },
+        { timeout: 20_000 },
+      );
       const draft = await fixture.page.$eval(
-        'textarea[placeholder="Reply..."]',
+        '[data-conversation-workspace-layer] textarea[placeholder="Reply..."]',
         (element) => (element as HTMLTextAreaElement).value,
       );
       expect(draft).toContain('Git review comment');

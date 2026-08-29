@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
-const GIT_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
+const GIT_PANEL =
+  '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
 
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const process = Bun.spawn(['git', ...args], {
@@ -13,7 +14,10 @@ async function runGit(projectPath: string, args: string[]): Promise<void> {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [stderr, exitCode] = await Promise.all([new Response(process.stderr).text(), process.exited]);
+  const [stderr, exitCode] = await Promise.all([
+    new Response(process.stderr).text(),
+    process.exited,
+  ]);
   if (exitCode !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim()}`);
 }
 
@@ -24,7 +28,11 @@ async function createRepo(projectPath: string, prefix: string): Promise<void> {
   await writeFile(join(projectPath, `${prefix}-notes.txt`), `${prefix} base\n`, 'utf8');
   await runGit(projectPath, ['add', `${prefix}-notes.txt`]);
   await runGit(projectPath, ['commit', '-m', `${prefix} base`]);
-  await writeFile(join(projectPath, `${prefix}-notes.txt`), `${prefix} base\n${prefix} change\n`, 'utf8');
+  await writeFile(
+    join(projectPath, `${prefix}-notes.txt`),
+    `${prefix} base\n${prefix} change\n`,
+    'utf8',
+  );
   await writeFile(join(projectPath, `${prefix}-untracked.txt`), `${prefix} untracked\n`, 'utf8');
 }
 
@@ -43,9 +51,13 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat('multi-repo-chat-a', { projectPath: repoA });
+      await app.startOpenAiDirectChat('multi-repo-chat-a', {
+        projectPath: repoA,
+      });
       await app.waitForText('echo:multi-repo-chat-a');
-      await app.startOpenAiDirectChat('multi-repo-chat-b', { projectPath: repoB });
+      await app.startOpenAiDirectChat('multi-repo-chat-b', {
+        projectPath: repoB,
+      });
       await app.waitForText('echo:multi-repo-chat-b');
 
       const chats = (await fixture.integration.client.listChats()).sessions;
@@ -59,7 +71,12 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       await app.clickSidebarChatContaining('multi-repo-chat-a');
       await app.waitForSelectedChat(chatA.id);
       await switchToGitSurface(fixture);
-      await waitForPanelFiles(fixture, ['alpha-notes.txt', 'alpha-untracked.txt'], ['beta-notes.txt']);
+      const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
+      await waitForPanelFiles(
+        fixture,
+        ['alpha-notes.txt', 'alpha-untracked.txt'],
+        ['beta-notes.txt'],
+      );
 
       // Switch the workbench target to repo B from within chat A.
       await app.waitForButton(repoA);
@@ -77,7 +94,11 @@ describe('Lightpanda Git multi-repo chat switching', () => {
         { timeout: 20_000 },
       );
       await app.clickButton('OK');
-      await waitForPanelFiles(fixture, ['beta-notes.txt', 'beta-untracked.txt'], ['alpha-notes.txt']);
+      await waitForPanelFiles(
+        fixture,
+        ['beta-notes.txt', 'beta-untracked.txt'],
+        ['alpha-notes.txt'],
+      );
 
       // Chat B defaults to its own project, the same physical repo chat A's
       // workbench just selected; the listing must stay coherent for the new
@@ -86,7 +107,11 @@ describe('Lightpanda Git multi-repo chat switching', () => {
       await app.clickSidebarChatContaining('multi-repo-chat-b');
       await app.waitForSelectedChat(chatB.id);
       await switchToGitSurface(fixture);
-      await waitForPanelFiles(fixture, ['beta-notes.txt', 'beta-untracked.txt'], ['alpha-notes.txt']);
+      await waitForPanelFiles(
+        fixture,
+        ['beta-notes.txt', 'beta-untracked.txt'],
+        ['alpha-notes.txt'],
+      );
 
       // Change repo B's git state on disk while chat B is active, then refresh.
       await writeFile(join(repoB, 'beta-extra.txt'), 'beta extra untracked\n', 'utf8');
@@ -143,7 +168,8 @@ describe('Lightpanda Git multi-repo chat switching', () => {
           .then(() => true)
           .catch(() => false);
       }
-      if (!composerOpen) throw new Error('Comment composer did not open after clicking Add to chat.');
+      if (!composerOpen)
+        throw new Error('Comment composer did not open after clicking Add to chat.');
       await app.fill('[data-git-comment-composer] textarea', 'Cross-repo review comment.');
       await fixture.page.evaluate(() => {
         const composer = document.querySelector('[data-git-comment-composer]');
@@ -154,9 +180,31 @@ describe('Lightpanda Git multi-repo chat switching', () => {
         button.click();
       });
       await app.waitForText('Added to the Chat composer.');
-      await app.selectMainWorkspaceSurface('Chat');
+      const storedDrafts = await fixture.page.evaluate(
+        ({ chatAId, chatBId }) => ({
+          chatA: localStorage.getItem(`chat_draft_${chatAId}`),
+          chatB: localStorage.getItem(`chat_draft_${chatBId}`),
+        }),
+        { chatAId: chatA.id, chatBId: chatB.id },
+      );
+      expect(storedDrafts.chatA).toContain('Git review comment');
+      expect(storedDrafts.chatA).toContain('Cross-repo review comment.');
+      expect(storedDrafts.chatB).toBeNull();
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${gitWindowId}`, gitWindowId);
+      await fixture.page.waitForFunction(
+        () => {
+          const textarea = document.querySelector<HTMLTextAreaElement>(
+            '[data-conversation-workspace-layer] textarea[placeholder="Reply..."]',
+          );
+          return (
+            textarea?.value.includes('Git review comment') === true &&
+            textarea.value.includes('Cross-repo review comment.')
+          );
+        },
+        { timeout: 20_000 },
+      );
       const draft = await fixture.page.$eval(
-        'textarea[placeholder="Reply..."]',
+        '[data-conversation-workspace-layer] textarea[placeholder="Reply..."]',
         (element) => (element as HTMLTextAreaElement).value,
       );
       expect(draft).toContain('Git review comment');
@@ -175,9 +223,7 @@ async function switchToGitSurface(
   );
   if (alreadyVisible) return;
   await fixture.page.evaluate(() => {
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }),
-    );
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
   });
   await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
   await fixture.page.evaluate(() => {
@@ -203,8 +249,9 @@ async function waitForPanelFiles(
     ({ panelSelector, present, absent }) => {
       const panel = document.querySelector(panelSelector);
       const text = panel?.textContent ?? '';
-      return present.every((name) => text.includes(name))
-        && absent.every((name) => !text.includes(name));
+      return (
+        present.every((name) => text.includes(name)) && absent.every((name) => !text.includes(name))
+      );
     },
     { timeout: 20_000 },
     { panelSelector: GIT_PANEL, present: presentFiles, absent: absentFiles },
@@ -218,11 +265,14 @@ async function clickPanelButton(
   await fixture.page.waitForFunction(
     ({ panelSelector, label }) => {
       const panel = document.querySelector(panelSelector);
-      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((element) => {
-        if (element.hasAttribute('data-surface-action-measure')) return false;
-        const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-        return accessible === label;
-      });
+      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (element) => {
+          if (element.hasAttribute('data-surface-action-measure')) return false;
+          const accessible =
+            element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return accessible === label;
+        },
+      );
       if (button) return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
       const menuTrigger = panel?.querySelector<HTMLButtonElement>(
         '[data-responsive-surface-menu-trigger]',
@@ -235,11 +285,14 @@ async function clickPanelButton(
   const destination = await fixture.page.evaluate(
     ({ panelSelector, label }) => {
       const panel = document.querySelector(panelSelector);
-      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((element) => {
-        if (element.hasAttribute('data-surface-action-measure')) return false;
-        const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-        return accessible === label;
-      });
+      const button = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (element) => {
+          if (element.hasAttribute('data-surface-action-measure')) return false;
+          const accessible =
+            element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return accessible === label;
+        },
+      );
       if (button) {
         button.click();
         return 'direct';
@@ -257,22 +310,29 @@ async function clickPanelButton(
 
   await fixture.page.waitForFunction(
     (label) => {
-      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) => {
-        const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-        return accessible === label;
-      });
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (element) => {
+          const accessible =
+            element.getAttribute('aria-label') || element.textContent?.trim() || '';
+          return accessible === label;
+        },
+      );
       return Boolean(
-        item && !item.hasAttribute('data-disabled') && item.getAttribute('aria-disabled') !== 'true',
+        item &&
+        !item.hasAttribute('data-disabled') &&
+        item.getAttribute('aria-disabled') !== 'true',
       );
     },
     { timeout: 20_000 },
     name,
   );
   await fixture.page.evaluate((label) => {
-    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((element) => {
-      const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-      return accessible === label;
-    });
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (element) => {
+        const accessible = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+        return accessible === label;
+      },
+    );
     if (!item) throw new Error(`Missing panel menu action: ${label}`);
     item.click();
   }, name);

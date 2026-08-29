@@ -5,8 +5,8 @@ import type { Page } from 'puppeteer-core';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
-const COMPARE_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-  + '[aria-hidden="false"]';
+const COMPARE_PANEL =
+  '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' + '[aria-hidden="false"]';
 
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const process = Bun.spawn(['git', ...args], {
@@ -31,10 +31,12 @@ async function waitForComparisonMarkers(
     ({ panelSelector, expected, excluded }) => {
       const panel = document.querySelector(panelSelector);
       const text = panel?.textContent ?? '';
-      return panel?.querySelector('[data-git-diff-document]') !== null
-        && !text.includes('Loading comparison')
-        && expected.every((marker) => text.includes(marker))
-        && excluded.every((marker) => !text.includes(marker));
+      return (
+        panel?.querySelector('[data-git-diff-document]') !== null &&
+        !text.includes('Loading comparison') &&
+        expected.every((marker) => text.includes(marker)) &&
+        excluded.every((marker) => !text.includes(marker))
+      );
     },
     { timeout: 20_000 },
     { panelSelector: COMPARE_PANEL, expected: present, excluded: absent },
@@ -61,10 +63,15 @@ describe('Lightpanda Git comparison', () => {
       await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat('git-comparison-chat-a', { projectPath: project });
+      await app.startOpenAiDirectChat('git-comparison-chat-a', {
+        projectPath: project,
+      });
       await app.waitForText('echo:git-comparison-chat-a');
-      await app.startOpenAiDirectChat('git-comparison-chat-b', { projectPath: project });
+      await app.startOpenAiDirectChat('git-comparison-chat-b', {
+        projectPath: project,
+      });
       await app.waitForText('echo:git-comparison-chat-b');
+      const chatWindowId = await app.currentWorkspaceWindowId();
 
       const chats = (await fixture.integration.client.listChats()).sessions;
       const chatA = chats.find((chat) => chat.preview.firstMessage === 'git-comparison-chat-a');
@@ -73,52 +80,68 @@ describe('Lightpanda Git comparison', () => {
 
       await app.clickSidebarChatContaining('git-comparison-chat-a');
       await app.waitForSelectedChat(chatA.id);
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(COMPARE_PANEL);
-      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
-        'head comparison marker',
-      ]);
+      const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
+      await waitForComparisonMarkers(
+        fixture.page,
+        ['working tree marker'],
+        ['head comparison marker'],
+      );
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
       await app.fill('#git-comparison-from', 'origin/main');
       await app.clickDialogButton('Revision');
       await app.fill('#git-comparison-to', 'HEAD');
       await app.clickDialogButton('Compare');
-      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
-        'working tree marker',
-      ]);
+      await waitForComparisonMarkers(
+        fixture.page,
+        ['head comparison marker'],
+        ['working tree marker'],
+      );
 
+      await app.focusWorkspaceWindow(chatWindowId);
       await app.clickSidebarChatContaining('git-comparison-chat-b');
       await app.waitForSelectedChat(chatB.id);
-      await app.selectMainWorkspaceSurface('Compare');
-      await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
-        'head comparison marker',
-      ]);
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
+      await waitForComparisonMarkers(
+        fixture.page,
+        ['working tree marker'],
+        ['head comparison marker'],
+      );
 
+      await app.focusWorkspaceWindow(chatWindowId);
       await app.clickSidebarChatContaining('git-comparison-chat-a');
       await app.waitForSelectedChat(chatA.id);
-      await app.selectMainWorkspaceSurface('Compare');
-      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
-        'working tree marker',
-      ]);
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
+      await waitForComparisonMarkers(
+        fixture.page,
+        ['head comparison marker'],
+        ['working tree marker'],
+      );
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
-      expect(await fixture.page.$eval(
-        '#git-comparison-from',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('origin/main');
-      expect(await fixture.page.$eval(
-        '#git-comparison-to',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('HEAD');
-      expect(await fixture.page.$eval(
-        '[role="dialog"] button[aria-pressed="true"]',
-        (element) => element.textContent?.trim(),
-      )).toBe('Revision');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-from',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('origin/main');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-to',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('HEAD');
+      expect(
+        await fixture.page.$eval('[role="dialog"] button[aria-pressed="true"]', (element) =>
+          element.textContent?.trim(),
+        ),
+      ).toBe('Revision');
       await app.clickDialogButton('Cancel');
 
       await fixture.page.waitForFunction(
-        () => localStorage.getItem('workspace_layout_v1')?.includes('git-compare') === true,
+        () => localStorage.getItem('workspace_layout_v2')?.includes('git-compare') === true,
         { timeout: 20_000 },
       );
       await fixture.page.waitForFunction(
@@ -130,8 +153,10 @@ describe('Lightpanda Git comparison', () => {
               version?: unknown;
               entries?: Array<{ chatId?: unknown }>;
             };
-            return parsed.version === 1
-              && parsed.entries?.some((entry) => entry.chatId === chatId) === true;
+            return (
+              parsed.version === 1 &&
+              parsed.entries?.some((entry) => entry.chatId === chatId) === true
+            );
           } catch {
             return false;
           }
@@ -141,23 +166,33 @@ describe('Lightpanda Git comparison', () => {
       );
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
-      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await fixture.waitForSpaWebSocket({
+        afterConnectionCount: beforeReloadConnections,
+      });
       await app.waitForSelectedChat(chatA.id);
-      await fixture.page.waitForSelector('[id="main-panel-singleton:git-compare"]');
-      await app.selectMainWorkspaceSurface('Compare');
-      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
-        'working tree marker',
-      ]);
+      await fixture.page.waitForSelector(
+        `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"]`,
+      );
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
+      await waitForComparisonMarkers(
+        fixture.page,
+        ['head comparison marker'],
+        ['working tree marker'],
+      );
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
-      expect(await fixture.page.$eval(
-        '#git-comparison-from',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('origin/main');
-      expect(await fixture.page.$eval(
-        '#git-comparison-to',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('HEAD');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-from',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('origin/main');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-to',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('HEAD');
       await app.clickDialogButton('Cancel');
       fixture.assertNoBrowserErrors();
     });
@@ -171,7 +206,9 @@ describe('Lightpanda Git comparison', () => {
       await runGit(project, ['config', 'user.name', 'E2E Test']);
       const shared = Array.from({ length: 1_000 }, (_, index) => `shared ${index}`).join('\n');
       const afterTail = Array.from({ length: 1_000 }, (_, index) => `after ${index}`).join('\n');
-      const refreshedTail = Array.from({ length: 1_000 }, (_, index) => `refreshed ${index}`).join('\n');
+      const refreshedTail = Array.from({ length: 1_000 }, (_, index) => `refreshed ${index}`).join(
+        '\n',
+      );
       const before = `large before marker\n${shared}`;
       const after = `large after marker\n${shared}\n${afterTail}`;
       const refreshed = `large refreshed marker\n${shared}\n${refreshedTail}`;
@@ -197,40 +234,44 @@ describe('Lightpanda Git comparison', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-comparison-seed');
       await app.waitForText('echo:git-comparison-seed');
+      const chatWindowId = await app.currentWorkspaceWindowId();
 
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
+      const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
       await fixture.page.waitForSelector('[data-git-diff-document]');
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('Working Tree') === true
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('Working Tree') === true &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
-      expect(await fixture.page.$eval(
-        '[data-git-diff-document]',
-        (element) => element.textContent,
-      )).toContain('Working Tree');
+      expect(
+        await fixture.page.$eval('[data-git-diff-document]', (element) => element.textContent),
+      ).toContain('Working Tree');
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
 
-      expect(await fixture.page.$eval(
-        '#git-comparison-from',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('HEAD');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-from',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('HEAD');
       await app.fill('#git-comparison-from', 'origin/main');
-      expect(await fixture.page.$eval(
-        '[role="dialog"]',
-        (element) => element.textContent,
-      )).toContain('staged, unstaged, untracked');
+      expect(
+        await fixture.page.$eval('[role="dialog"]', (element) => element.textContent),
+      ).toContain('staged, unstaged, untracked');
       await app.clickDialogButton('Compare');
       await fixture.page.waitForFunction(
         () => !document.querySelector('[role="dialog"][aria-label="Compare revisions"]'),
@@ -238,14 +279,14 @@ describe('Lightpanda Git comparison', () => {
       );
       await fixture.page.waitForSelector('[data-git-diff-document]');
       await fixture.page.waitForFunction(
-        () => document.querySelector('[data-git-diff-document]')
-          ?.getAttribute('data-git-history-layout') === 'narrow',
+        () =>
+          document
+            .querySelector('[data-git-diff-document]')
+            ?.getAttribute('data-git-history-layout') === 'narrow',
         { timeout: 20_000 },
       );
       await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
-      await fixture.page.waitForSelector(
-        '[data-git-history-files-pane] [title="large.txt"]',
-      );
+      await fixture.page.waitForSelector('[data-git-history-files-pane] [title="large.txt"]');
       await fixture.page.evaluate(() => {
         const label = document.querySelector<HTMLElement>(
           '[data-git-history-files-pane] [title="large.txt"]',
@@ -263,19 +304,16 @@ describe('Lightpanda Git comparison', () => {
       );
       expect(mountedRows).toBeLessThan(30);
 
-      await app.selectMainWorkspaceSurface('Chat');
-      await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
-      );
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${chatWindowId}`, chatWindowId);
       await writeFile(join(project, 'large.txt'), `${refreshed}\n`, 'utf8');
-      await app.selectMainWorkspaceSurface('Compare');
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
       await fixture.page.waitForFunction(
         () => document.body.textContent?.includes('The Working Tree changed.'),
-        { timeout: 5_000 },
+        { timeout: 20_000 },
       );
       expect(await fixture.page.$eval('body', (element) => element.textContent)).toContain(
         'large after marker',
@@ -284,30 +322,29 @@ describe('Lightpanda Git comparison', () => {
         'large refreshed marker',
       );
       await fixture.page.evaluate(() => {
-        const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
-          .find((candidate) => candidate.textContent?.trim() === 'Refresh comparison');
+        const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent?.trim() === 'Refresh comparison',
+        );
         if (!button) throw new Error('Missing stale comparison refresh action.');
         button.click();
       });
       await fixture.page.waitForFunction(
         () => {
           const button = document.querySelector<HTMLButtonElement>(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"] button[aria-label="Refresh"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"] button[aria-label="Refresh"]',
           );
           return Boolean(
-            button
-              && !button.disabled
-              && !document.body.textContent?.includes('The Working Tree changed.'),
+            button &&
+            !button.disabled &&
+            !document.body.textContent?.includes('The Working Tree changed.'),
           );
         },
         { timeout: 20_000 },
       );
       await app.clickButton('Files (12)');
       await app.fill('[data-git-history-files-pane] input[type="search"]', 'large.txt');
-      await fixture.page.waitForSelector(
-        '[data-git-history-files-pane] [title="large.txt"]',
-      );
+      await fixture.page.waitForSelector('[data-git-history-files-pane] [title="large.txt"]');
       await fixture.page.evaluate(() => {
         const label = document.querySelector<HTMLElement>(
           '[data-git-history-files-pane] [title="large.txt"]',
@@ -320,9 +357,9 @@ describe('Lightpanda Git comparison', () => {
       await app.waitForText('large refreshed marker');
       await fixture.page.waitForFunction(
         () => {
-          const button = [...document.querySelectorAll<HTMLButtonElement>(
-            'button[aria-label="Add to chat"]',
-          )].find((element) => !element.closest('[aria-hidden="true"]'));
+          const button = [
+            ...document.querySelectorAll<HTMLButtonElement>('button[aria-label="Add to chat"]'),
+          ].find((element) => !element.closest('[aria-hidden="true"]'));
           if (!button) return false;
           button.click();
           return true;
@@ -340,11 +377,12 @@ describe('Lightpanda Git comparison', () => {
           button.click();
         });
       } catch (error) {
-        if (!(error instanceof Error) || !error.message.includes('Promise was collected')) throw error;
+        if (!(error instanceof Error) || !error.message.includes('Promise was collected'))
+          throw error;
       }
       expect(await fixture.page.$('[data-git-virtual-diff-root]')).not.toBeNull();
 
-      await app.selectMainWorkspaceSurface('Chat');
+      await app.selectWorkspaceWindowSurfaceById(`chat-view:${chatWindowId}`, chatWindowId);
       await fixture.page.waitForSelector('textarea[placeholder="Reply..."]');
       const draft = await fixture.page.$eval(
         'textarea[placeholder="Reply..."]',
@@ -353,8 +391,11 @@ describe('Lightpanda Git comparison', () => {
       expect(draft).toContain('Git review comment');
       expect(draft).toContain('Please verify this line.');
 
-      expect(fixture.integration.fakeProviders.openAi.requests().filter((request) =>
-        request.lastUserText === 'git-comparison-seed')).toHaveLength(1);
+      expect(
+        fixture.integration.fakeProviders.openAi
+          .requests()
+          .filter((request) => request.lastUserText === 'git-comparison-seed'),
+      ).toHaveLength(1);
       fixture.assertNoBrowserErrors();
     });
   });
@@ -377,20 +418,22 @@ describe('Lightpanda Git comparison', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-revision-freshness-seed');
       await app.waitForText('echo:git-revision-freshness-seed');
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
       await fixture.page.waitForSelector('[data-git-diff-document]');
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('Working Tree') === true
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('Working Tree') === true &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
@@ -406,9 +449,7 @@ describe('Lightpanda Git comparison', () => {
       );
       await fixture.page.waitForSelector('[data-git-diff-document]');
       await app.fill('[data-git-history-files-pane] input[type="search"]', 'review.txt');
-      await fixture.page.waitForSelector(
-        '[data-git-history-files-pane] [title="review.txt"]',
-      );
+      await fixture.page.waitForSelector('[data-git-history-files-pane] [title="review.txt"]');
       await fixture.page.evaluate(() => {
         const label = document.querySelector<HTMLElement>(
           '[data-git-history-files-pane] [title="review.txt"]',

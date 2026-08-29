@@ -6,8 +6,8 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { setLightpandaVirtualScrollTop } from '../../support/lightpanda-virtual-scroll.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
-const COMPARE_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-  + '[aria-hidden="false"]';
+const COMPARE_PANEL =
+  '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' + '[aria-hidden="false"]';
 
 async function runGit(projectPath: string, args: string[]): Promise<string> {
   const process = Bun.spawn(['git', ...args], {
@@ -39,11 +39,13 @@ async function createHistoryFixture(projectPath: string): Promise<void> {
 
 function largeFileContents(file: string, revision: string): string {
   const stem = file.replace(/\W/g, '_');
-  return Array.from(
-    { length: 180 },
-    (_, index) =>
-      `export const ${stem}_${revision}_${String(index + 1).padStart(3, '0')} = ${index + 1};`,
-  ).join('\n') + '\n';
+  return (
+    Array.from(
+      { length: 180 },
+      (_, index) =>
+        `export const ${stem}_${revision}_${String(index + 1).padStart(3, '0')} = ${index + 1};`,
+    ).join('\n') + '\n'
+  );
 }
 
 async function createPinnedHeaderFixture(projectPath: string): Promise<void> {
@@ -71,8 +73,8 @@ async function pinnedHeaderSnapshot(page: Page, panelSelector: string) {
     const source = overlay
       ? [...panel.querySelectorAll<HTMLElement>('[data-git-virtual-row]')].find(
           (row) =>
-            row.querySelector('[data-git-file-header]')?.getAttribute('data-file-path')
-              === overlay.dataset.filePath,
+            row.querySelector('[data-git-file-header]')?.getAttribute('data-file-path') ===
+            overlay.dataset.filePath,
         )
       : null;
     if (!viewport) throw new Error('Missing Git virtual diff viewport');
@@ -197,15 +199,15 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
 
       await app.setViewport(390, 844);
-      expect(await fixture.page.evaluate(
-        () => matchMedia('(max-width: 768px)').matches,
-      )).toBe(true);
+      expect(await fixture.page.evaluate(() => matchMedia('(max-width: 768px)').matches)).toBe(
+        true,
+      );
       expect(await fixture.page.$('.mobile-shell')).not.toBeNull();
 
       await app.setViewport(1_440, 900);
-      expect(await fixture.page.evaluate(
-        () => matchMedia('(max-width: 768px)').matches,
-      )).toBe(false);
+      expect(await fixture.page.evaluate(() => matchMedia('(max-width: 768px)').matches)).toBe(
+        false,
+      );
       expect(await fixture.page.$('.mobile-shell')).toBeNull();
       fixture.assertNoBrowserErrors();
     });
@@ -218,11 +220,11 @@ describe('Lightpanda standalone Git views', () => {
       const workbenchPanel =
         '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
       const comparePanel =
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-        + '[aria-hidden="false"]';
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+        '[aria-hidden="false"]';
       const historyPanel =
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]'
-        + '[aria-hidden="false"]';
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]' +
+        '[aria-hidden="false"]';
 
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_440, 900);
@@ -230,8 +232,10 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-pinned-file-header-seed');
       await app.waitForText('echo:git-pinned-file-header-seed');
+      const chatWindowId = await app.currentWorkspaceWindowId();
 
       await switchToGitWorkbench(fixture.page);
+      const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       await fixture.page.waitForSelector(`${workbenchPanel} [data-git-file-header]`);
       const initialWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
       expect(initialWorkbench.path).toBeNull();
@@ -245,16 +249,13 @@ describe('Lightpanda standalone Git views', () => {
         expect(pinnedWorkbench.sourceAriaHidden).toBe('true');
       }
 
-      await fixture.page.$eval(
-        `${workbenchPanel} [data-git-pinned-file-header]`,
-        (header) => {
-          const button = [...header.querySelectorAll<HTMLButtonElement>('button')].find(
-            (candidate) => candidate.textContent?.trim() === 'Stage file',
-          );
-          if (!button) throw new Error('Missing pinned Stage file action.');
-          button.click();
-        },
-      );
+      await fixture.page.$eval(`${workbenchPanel} [data-git-pinned-file-header]`, (header) => {
+        const button = [...header.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent?.trim() === 'Stage file',
+        );
+        if (!button) throw new Error('Missing pinned Stage file action.');
+        button.click();
+      });
       await fixture.page.waitForFunction(
         (selector) =>
           [...(document.querySelector(selector)?.querySelectorAll('button') ?? [])].some(
@@ -278,7 +279,7 @@ describe('Lightpanda standalone Git views', () => {
       await waitForPinnedPath(fixture.page, workbenchPanel, 'alpha.ts');
       const retainedWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
 
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
       await fixture.page.waitForSelector(`${comparePanel} [data-git-file-header]`);
       await scrollDiffTo(fixture.page, comparePanel, 60);
       await waitForPinnedPath(fixture.page, comparePanel, 'alpha.ts');
@@ -286,7 +287,7 @@ describe('Lightpanda standalone Git views', () => {
       const compareSnapshot = await pinnedHeaderSnapshot(fixture.page, comparePanel);
       expect(compareSnapshot.scrollTop).toBe(60);
 
-      await app.selectMainWorkspaceSurface('Git');
+      await app.selectWorkspaceWindowSurface('Git', gitWindowId);
       await fixture.page.waitForSelector(workbenchPanel);
       const restoredWorkbench = await pinnedHeaderSnapshot(fixture.page, workbenchPanel);
       expect(restoredWorkbench.path).toBe(retainedWorkbench.path);
@@ -294,7 +295,7 @@ describe('Lightpanda standalone Git views', () => {
       expect(restoredWorkbench.scrollHeight).toBe(retainedWorkbench.scrollHeight);
       expect(restoredWorkbench.spacerHeight).toBe(retainedWorkbench.spacerHeight);
 
-      await app.selectMainWorkspaceSurface('Open Git History');
+      await app.selectWorkspaceWindowSurface('Open Git History', gitWindowId);
       await fixture.page.waitForSelector(historyPanel);
       await fixture.page.waitForSelector(
         `${historyPanel} button[data-git-history-commit-row][aria-label*="large revision"]`,
@@ -308,11 +309,12 @@ describe('Lightpanda standalone Git views', () => {
       await waitForPinnedPath(fixture.page, historyPanel, 'alpha.ts');
       await fixture.page.waitForSelector(`${historyPanel} .cm-code-keyword`);
 
+      await app.focusWorkspaceWindow(gitWindowId);
       await app.setViewport(390, 844);
       await app.waitForButton('Close view');
       await app.clickButton('Close view');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"][aria-hidden="false"]',
+        `.mobile-shell [data-workspace-surface-id="chat-view:${chatWindowId}"]`,
       );
       await app.waitForButton('Settings');
       await app.clickButton('Settings');
@@ -337,13 +339,15 @@ describe('Lightpanda standalone Git views', () => {
       });
       await scrollDiffTo(fixture.page, historyPanel, 60);
       await waitForPinnedPath(fixture.page, historyPanel, 'alpha.ts');
-      expect(await fixture.page.$eval(
-        `${historyPanel} [data-git-pinned-file-header]`,
-        (header) =>
-          header.closest(
-            '[data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]',
-          ) !== null,
-      )).toBe(true);
+      expect(
+        await fixture.page.$eval(
+          `${historyPanel} [data-git-pinned-file-header]`,
+          (header) =>
+            header.closest(
+              '[data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]',
+            ) !== null,
+        ),
+      ).toBe(true);
 
       await app.clickButton('Close view');
       await fixture.page.waitForFunction(
@@ -366,102 +370,117 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-desktop-seed');
       await app.waitForText('echo:git-view-desktop-seed');
 
-      await app.selectMainWorkspaceSurface('Open Git History');
+      await app.openNewWorkspaceWindow('Open History');
+      const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
       await fixture.page.waitForSelector(
-        '[id="main-panel-singleton:git-history"][aria-hidden="false"]',
+        `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]`,
       );
       await app.waitForText('second revision');
 
-      await app.clickButton('Open sidebar');
-      await app.selectSidebarWorkspaceSurface('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
+      const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
       await fixture.page.waitForSelector(
-        '[id="sidebar-panel-singleton:git-compare"][aria-hidden="false"]',
+        `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"][aria-hidden="false"]`,
       );
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"] [data-git-diff-document]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"] [data-git-diff-document]',
       );
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('Working Tree') === true
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('Working Tree') === true &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
-      expect(await fixture.page.$eval(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + ' [data-git-diff-document]',
-        (element) => element.textContent,
-      )).toContain('Working Tree');
+      expect(
+        await fixture.page.$eval(
+          '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+            ' [data-git-diff-document]',
+          (element) => element.textContent,
+        ),
+      ).toContain('Working Tree');
 
-      expect(await fixture.page.$(
-        '[id="main-panel-singleton:git-history"]',
-      )).not.toBeNull();
-      expect(await fixture.page.$(
-        '[id="sidebar-panel-singleton:git-compare"]',
-      )).not.toBeNull();
+      expect(
+        await fixture.page.$(
+          `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"]`,
+        ),
+      ).not.toBeNull();
+      expect(
+        await fixture.page.$(
+          `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"]`,
+        ),
+      ).not.toBeNull();
 
-      await app.selectMainWorkspaceSurface('History');
+      await app.selectWorkspaceWindowSurface('History', historyWindowId);
       await app.clickButton('Select commits');
       await app.clickButton('Select first revision as From');
       await app.clickButton('Select second revision as To');
       await app.clickButton('Compare');
       await fixture.page.waitForSelector(
-        '[id="main-panel-singleton:git-history"][aria-hidden="false"]'
-          + ' [data-git-diff-document]',
+        `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]` +
+          ' [data-git-diff-document]',
       );
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('first revision') === true
-            && panel.textContent.includes('second revision');
+          return (
+            panel?.textContent?.includes('first revision') === true &&
+            panel.textContent.includes('second revision')
+          );
         },
         { timeout: 20_000 },
       );
-      expect(await fixture.page.$eval(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
-        (element) => element.textContent,
-      )).toContain('Working Tree');
+      expect(
+        await fixture.page.$eval(
+          '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+            '[aria-hidden="false"]',
+          (element) => element.textContent,
+        ),
+      ).toContain('Working Tree');
       await app.clickButton('Back to commit selection');
       await app.waitForText('second revision');
 
       await fixture.page.waitForFunction(
         () => {
-          const raw = localStorage.getItem('workspace_layout_v1');
+          const raw = localStorage.getItem('workspace_layout_v2');
           return raw?.includes('git-history') === true && raw.includes('git-compare');
         },
         { timeout: 20_000 },
       );
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
-      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await fixture.waitForSpaWebSocket({
+        afterConnectionCount: beforeReloadConnections,
+      });
       await fixture.page.waitForSelector(
-        '[id="main-panel-singleton:git-history"]',
+        `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"]`,
       );
       await fixture.page.waitForSelector(
-        '[id="sidebar-panel-singleton:git-compare"]',
+        `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"]`,
       );
 
-      await app.selectSidebarWorkspaceSurface('Compare');
-      await app.openWorkspaceActions('sidebar');
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
+      await app.openWorkspaceWindowActions(compareWindowId);
       await app.waitForMenuItemEnabled('Close tab');
       await app.clickMenuItem('Close tab');
       await fixture.page.waitForFunction(
-        () => !document.querySelector(
-          '[data-workspace-surface-id="singleton:git-compare"]',
-        ),
+        () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.openWorkspaceActions('sidebar');
-      await app.waitForMenuItemEnabled('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
+      expect(await app.workspaceWindowIdForSurface('singleton:git-compare')).not.toBe(
+        compareWindowId,
+      );
       fixture.assertNoBrowserErrors();
     });
   });
@@ -478,10 +497,11 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-view-virtual-history-seed');
       await app.waitForText('echo:git-view-virtual-history-seed');
-      await app.selectMainWorkspaceSurface('Open Git History');
+      await app.openNewWorkspaceWindow('Open History');
+      const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
 
       await fixture.page.waitForSelector(
-        '[id="main-panel-singleton:git-history"][aria-hidden="false"]',
+        `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]`,
       );
       const panelSelector = '[data-workspace-surface-id="singleton:git-history"]';
       const viewportSelector = `${panelSelector} [data-git-history-commit-list]`;
@@ -568,14 +588,15 @@ describe('Lightpanda standalone Git views', () => {
       await app.clickMenuItem('Open Git History');
 
       const viewportSelector =
-        '[data-workspace-surface-id="singleton:git-history"]'
-        + ' [data-git-history-commit-list]';
+        '[data-workspace-surface-id="singleton:git-history"]' + ' [data-git-history-commit-list]';
       await fixture.page.waitForSelector(`${viewportSelector} [data-git-history-virtual-row]`);
       await loadDeepHistoryPages(fixture.page, viewportSelector);
-      expect(await fixture.page.$eval(
-        `${viewportSelector} [data-git-history-virtual-spacer]`,
-        (element) => Number(element.getAttribute('data-git-history-loaded-count')),
-      )).toBe(262);
+      expect(
+        await fixture.page.$eval(
+          `${viewportSelector} [data-git-history-virtual-spacer]`,
+          (element) => Number(element.getAttribute('data-git-history-loaded-count')),
+        ),
+      ).toBe(262);
       const mountedMobileRows = await fixture.page.$$eval(
         `${viewportSelector} [data-git-history-virtual-row]`,
         (rows) => rows.length,
@@ -605,10 +626,10 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-compare-target-seed');
       await app.waitForText('echo:git-view-compare-target-seed');
 
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await app.openNewWorkspaceWindow('Open Compare');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
       await app.waitForButton(chatProject);
       await app.clickButton(chatProject);
@@ -629,31 +650,32 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.page.waitForFunction(
         (expectedPath) => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
           const hasSelectedTarget = [...(panel?.querySelectorAll('button') ?? [])].some(
             (element) => element.getAttribute('aria-label') === expectedPath,
           );
-          return hasSelectedTarget
-            && panel?.textContent?.includes('selected repository working tree') === true
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            hasSelectedTarget &&
+            panel?.textContent?.includes('selected repository working tree') === true &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
         selectedProject,
       );
-      expect(await fixture.page.evaluate(
-        (expectedPath) => {
+      expect(
+        await fixture.page.evaluate((expectedPath) => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
           return [...(panel?.querySelectorAll('button') ?? [])].some(
             (element) => element.getAttribute('aria-label') === expectedPath,
           );
-        },
-        selectedProject,
-      )).toBe(true);
+        }, selectedProject),
+      ).toBe(true);
       fixture.assertNoBrowserErrors();
     });
   });
@@ -669,6 +691,7 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-view-mobile-seed');
       await app.waitForText('echo:git-view-mobile-seed');
+      const chatWindowId = await app.currentWorkspaceWindowId();
       await app.setViewport(390, 844);
       await fixture.page.waitForSelector('nav[aria-label="Workspace navigation"]');
       await app.waitForButton('Settings');
@@ -677,8 +700,8 @@ describe('Lightpanda standalone Git views', () => {
       await app.waitForMenuItemEnabled('Open Git History');
       await app.clickMenuItem('Open Git History');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"]' +
+          '[aria-hidden="false"]',
       );
       await app.waitForButton('Close view');
       expect(await fixture.page.$('nav[aria-label="Workspace navigation"]')).toBeNull();
@@ -697,19 +720,18 @@ describe('Lightpanda standalone Git views', () => {
 
       await app.clickButton('Close view');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"]'
-          + '[aria-hidden="false"]',
+        `.mobile-shell [data-workspace-surface-id="chat-view:${chatWindowId}"]`,
       );
-      expect(await fixture.page.$(
-        '[data-workspace-surface-id="singleton:git-history"]',
-      )).toBeNull();
+      expect(
+        await fixture.page.$('[data-workspace-surface-id="singleton:git-history"]'),
+      ).toBeNull();
 
       await app.clickButton('Settings');
       await app.waitForMenuItemEnabled('Open Git Compare');
       await app.clickMenuItem('Open Git Compare');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
       await app.waitForButton('Close view');
       expect(await fixture.page.$('nav[aria-label="Workspace navigation"]')).toBeNull();
@@ -719,11 +741,13 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('working tree revision') === true
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('working tree revision') === true &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
@@ -736,65 +760,70 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('second revision') === true
-            && !panel.textContent.includes('working tree revision')
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('second revision') === true &&
+            !panel.textContent.includes('working tree revision') &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
 
       await app.clickButton('Close view');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:chat"]'
-          + '[aria-hidden="false"]',
+        `.mobile-shell [data-workspace-surface-id="chat-view:${chatWindowId}"]`,
       );
-      expect(await fixture.page.$(
-        '[data-workspace-surface-id="singleton:git-compare"]',
-      )).toBeNull();
+      expect(
+        await fixture.page.$('[data-workspace-surface-id="singleton:git-compare"]'),
+      ).toBeNull();
 
       await app.clickButton('Settings');
       await app.waitForMenuItemEnabled('Open Git Compare');
       await app.clickMenuItem('Open Git Compare');
       await fixture.page.waitForSelector(
-        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-          + '[aria-hidden="false"]',
+        '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+          '[aria-hidden="false"]',
       );
       await fixture.page.waitForFunction(
         () => {
           const panel = document.querySelector(
-            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]'
-              + '[aria-hidden="false"]',
+            '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
+              '[aria-hidden="false"]',
           );
-          return panel?.textContent?.includes('second revision') === true
-            && !panel.textContent.includes('working tree revision')
-            && !panel.textContent.includes('Loading comparison');
+          return (
+            panel?.textContent?.includes('second revision') === true &&
+            !panel.textContent.includes('working tree revision') &&
+            !panel.textContent.includes('Loading comparison')
+          );
         },
         { timeout: 20_000 },
       );
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
-      expect(await fixture.page.$eval(
-        '#git-comparison-from',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('HEAD~1');
-      expect(await fixture.page.$eval(
-        '#git-comparison-to',
-        (element) => (element as HTMLInputElement).value,
-      )).toBe('HEAD');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-from',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('HEAD~1');
+      expect(
+        await fixture.page.$eval(
+          '#git-comparison-to',
+          (element) => (element as HTMLInputElement).value,
+        ),
+      ).toBe('HEAD');
       await app.clickDialogButton('Cancel');
 
       await app.setViewport(1_440, 900);
-      await fixture.page.waitForSelector('[data-floating-workspace-toolbar]');
+      await fixture.page.waitForSelector('[data-workspace-window-titlebar]');
       await fixture.page.waitForFunction(
-        () => !document.querySelector(
-          '[data-workspace-surface-id="singleton:git-compare"]',
-        ),
+        () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.openWorkspaceActions('main');
+      await app.openWorkspaceWindowActions(chatWindowId);
       await app.waitForMenuItemEnabled('Open Git Compare');
       fixture.assertNoBrowserErrors();
     });

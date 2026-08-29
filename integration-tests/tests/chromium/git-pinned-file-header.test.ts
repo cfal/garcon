@@ -68,32 +68,19 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator('[data-floating-workspace-toolbar]').waitFor({ state: 'visible' });
+  await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
-  });
-  await page.locator('[role="dialog"][aria-label="Command palette"]').waitFor();
-  await page.evaluate(() => {
-    const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
-      (button) => button.textContent?.includes('Switch to Git'),
-    );
-    if (!option) throw new Error('Missing Switch to Git command.');
-    option.click();
-  });
+  await openWorkspaceSurface(page, 'Open Git Workbench');
   await page.locator(WORKBENCH_PANEL).waitFor({ state: 'visible' });
 }
 
 async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
   await page
-    .locator(
-      '[data-floating-workspace-toolbar] [data-workspace-taskbar-end]' +
-        ' [data-slot="dropdown-menu-trigger"]',
-    )
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]')
     .click();
-  await page.getByRole('menuitem', { name: label }).click();
+  await page.getByRole('menuitem', { name: label, exact: true }).click();
 }
 
 async function waitForDiff(page: Page, panelSelector: string): Promise<void> {
@@ -106,6 +93,16 @@ async function waitForDiff(page: Page, panelSelector: string): Promise<void> {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   );
+}
+
+async function showGitDiff(page: Page, panelSelector: string): Promise<void> {
+  const diffPane = page.locator(`${panelSelector} [data-git-diff-pane]`);
+  if ((await diffPane.getAttribute('aria-hidden')) === 'true') {
+    await page
+      .locator(`${panelSelector} [data-git-segmented-navigation] button`, { hasText: 'Diff' })
+      .click();
+  }
+  await diffPane.waitFor({ state: 'visible' });
 }
 
 async function scrollDiffTo(page: Page, panelSelector: string, scrollTop: number): Promise<void> {
@@ -252,6 +249,7 @@ describe('Chromium pinned Git file headers', () => {
       markPhase('opening the Git Workbench');
       await openChatWorkspace(fixture, project);
       await switchToGitWorkbench(fixture.page);
+      await showGitDiff(fixture.page, WORKBENCH_PANEL);
       await waitForDiff(fixture.page, WORKBENCH_PANEL);
 
       const initialGeometry = await fixture.page.locator(WORKBENCH_PANEL).evaluate((panel) => {
@@ -312,10 +310,7 @@ describe('Chromium pinned Git file headers', () => {
       markPhase('checking mobile containment');
       await fixture.page.setViewportSize({ width: 390, height: 844 });
       await fixture.page.locator(WORKBENCH_PANEL).waitFor({ state: 'visible' });
-      const diffTab = fixture.page.locator(`${WORKBENCH_PANEL} button`, {
-        hasText: 'Diff',
-      });
-      if (await diffTab.count()) await diffTab.first().click();
+      await showGitDiff(fixture.page, WORKBENCH_PANEL);
       await scrollDiffTo(fixture.page, WORKBENCH_PANEL, 60);
       await waitForPinnedPath(fixture.page, WORKBENCH_PANEL, 'alpha.ts');
       const mobileGeometry = await diffGeometry(fixture.page, WORKBENCH_PANEL);
@@ -324,7 +319,7 @@ describe('Chromium pinned Git file headers', () => {
 
       markPhase('checking the Compare header variant');
       await fixture.page.setViewportSize({ width: 1_440, height: 900 });
-      await fixture.page.locator('[data-floating-workspace-toolbar]').waitFor({ state: 'visible' });
+      await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
       await openWorkspaceSurface(fixture.page, 'Open Git Compare');
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);

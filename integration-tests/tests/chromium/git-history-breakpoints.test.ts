@@ -21,7 +21,7 @@ const SEGMENTED_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-segmented-navi
 const FILES_PANE_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-files-pane]`;
 const DIFF_PANE_SELECTOR = `${DETAILS_SELECTOR} [data-git-history-diff-pane]`;
 
-// Desktop viewport whose workspace main pane lands inside the 560-839px band the
+// Desktop viewport whose workspace window lands inside the 560-839px band the
 // removed compact tier once covered: viewport minus chat list and divider.
 const BAND_VIEWPORT = { width: 1_000, height: 900 };
 const WIDE_VIEWPORT = { width: 1_440, height: 900 };
@@ -273,7 +273,7 @@ async function openChatWorkspace(
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator('[data-floating-workspace-toolbar]').waitFor({
+  await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({
     state: 'visible',
     timeout: 20_000,
   });
@@ -281,10 +281,7 @@ async function openChatWorkspace(
 
 async function openWorkspaceSurface(page: Page, label: string): Promise<void> {
   await page
-    .locator(
-      '[data-floating-workspace-toolbar] [data-workspace-taskbar-end]' +
-        ' [data-slot="dropdown-menu-trigger"]',
-    )
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]')
     .click();
   await page.getByRole('menuitem', { name: label }).click();
 }

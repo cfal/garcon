@@ -43,10 +43,6 @@ async function switchToGit(page: Page): Promise<void> {
   await switchWorkspaceSurface(page, 'Switch to Git', '[data-git-virtual-diff-root]');
 }
 
-async function switchToChat(page: Page): Promise<void> {
-  await switchWorkspaceSurface(page, 'Switch to Chat', 'textarea[placeholder="Reply..."]');
-}
-
 async function showWorkbenchDiff(page: Page): Promise<void> {
   const isHidden = await page.$eval(
     '[data-git-diff-pane]',
@@ -177,6 +173,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       await app.startOpenAiDirectChat('git-virtual-demand-seed');
       await app.waitForText('echo:git-virtual-demand-seed');
       await switchToGit(fixture.page);
+      const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       await showWorkbenchDiff(fixture.page);
       await fixture.page.waitForFunction(
         () => document.querySelectorAll('[data-git-virtual-row]').length > 0,
@@ -242,7 +239,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
       expect(retainedBefore.scrollTop).toBeGreaterThan(0);
       expect(retainedBefore.firstIndex).toBeGreaterThan(0);
 
-      await switchToChat(fixture.page);
+      await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
       await fixture.page.waitForFunction(
         () =>
           document
@@ -251,7 +248,7 @@ describe('Lightpanda Git virtual demand lifecycle', () => {
             ?.getAttribute('aria-hidden') === 'true',
         { timeout: 20_000 },
       );
-      await switchToGit(fixture.page);
+      await app.selectWorkspaceWindowSurfaceById('singleton:git', gitWindowId);
       await fixture.page.waitForFunction(
         () =>
           document

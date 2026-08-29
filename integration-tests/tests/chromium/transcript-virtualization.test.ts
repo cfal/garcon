@@ -239,26 +239,31 @@ function mixedOrderingRows(firstOrdinal: number): {
   let ordinal = firstOrdinal;
 
   const addMessage = (message: ChatMessage, clientMessageId?: string): void => {
-    const draft: LedgerRowDraft = message instanceof UserMessage
-      ? {
-          kind: 'user-input',
-          at: message.timestamp,
-          detail: {
-            clientMessageId: clientMessageId ?? `mixed-client-${ordinal}`,
+    const draft: LedgerRowDraft =
+      message instanceof UserMessage
+        ? {
+            kind: 'user-input',
+            at: message.timestamp,
+            detail: {
+              clientMessageId: clientMessageId ?? `mixed-client-${ordinal}`,
+              message,
+              attachments: [],
+              steer: false,
+            },
+            providerMeta: null,
+          }
+        : {
+            kind: 'provider-row',
+            at: message.timestamp,
             message,
-            attachments: [],
-            steer: false,
-          },
-          providerMeta: null,
-        }
-      : {
-          kind: 'provider-row',
-          at: message.timestamp,
-          message,
-          providerMeta: null,
-        };
+            providerMeta: null,
+          };
     drafts.push(draft);
-    expected.push({ ordinal, type: message.type, text: exactTranscriptText(message) });
+    expected.push({
+      ordinal,
+      type: message.type,
+      text: exactTranscriptText(message),
+    });
     ordinal += 1;
   };
   const timestamp = () => new Date(Date.UTC(2026, 7, 15) + ordinal).toISOString();
@@ -278,11 +283,7 @@ function mixedOrderingRows(firstOrdinal: number): {
     );
     if ((commandIndex + 1) % 5 === 0) {
       addMessage(
-        new CompactionMessage(
-          timestamp(),
-          'auto',
-          `mixed-compaction-${(commandIndex + 1) / 5}`,
-        ),
+        new CompactionMessage(timestamp(), 'auto', `mixed-compaction-${(commandIndex + 1) / 5}`),
       );
       addMessage(new AssistantMessage(timestamp(), 'repeated-equal-assistant-content'));
     }
@@ -336,12 +337,7 @@ function crossPageToolPairRows(firstOrdinal: number): {
     new WebSearchToolUseMessage(timestamp(), toolId, 'cross-page transcript stability'),
   );
   const toolResultOrdinal = add(
-    new ToolResultMessage(
-      timestamp(),
-      toolId,
-      { raw: 'cross-page-search-result' },
-      false,
-    ),
+    new ToolResultMessage(timestamp(), toolId, { raw: 'cross-page-search-result' }, false),
   );
   for (let index = 0; index < 49; index += 1) {
     add(new AssistantMessage(timestamp(), `tool-boundary-after-${index}`));
@@ -447,11 +443,13 @@ function publicationReady(
   baseline: TouchPublicationSnapshot,
   expectedEntryCount: number,
 ): boolean {
-  return snapshot.entryCount === expectedEntryCount
-    && snapshot.modelCount === baseline.modelCount + (expectedEntryCount - baseline.entryCount)
-    && snapshot.dataRevision > baseline.dataRevision
-    && !snapshot.busy
-    && !snapshot.layoutPending;
+  return (
+    snapshot.entryCount === expectedEntryCount &&
+    snapshot.modelCount === baseline.modelCount + (expectedEntryCount - baseline.entryCount) &&
+    snapshot.dataRevision > baseline.dataRevision &&
+    !snapshot.busy &&
+    !snapshot.layoutPending
+  );
 }
 
 async function transcriptEntryCount(page: Page): Promise<number> {
@@ -517,7 +515,10 @@ async function scanLoadedTranscript(page: Page): Promise<TranscriptViewportScan>
         const previous = mounted[index - 1];
         const next = mounted[index];
         if (previous && next && next.rect.top < previous.rect.top) {
-          visualOrderViolations.push({ previous: previous.rowId, next: next.rowId });
+          visualOrderViolations.push({
+            previous: previous.rowId,
+            next: next.rowId,
+          });
         }
       }
     };
@@ -597,26 +598,27 @@ async function waitForDistanceFromEnd(page: Page, maximum: number): Promise<void
   );
 }
 
-async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnamed'): Promise<void> {
+async function waitForStablePinnedTranscriptLayout(
+  page: Page,
+  scenario = 'unnamed',
+): Promise<void> {
   await withDiagnosticTimeout(
     `the pinned transcript geometry to settle (${scenario})`,
     page.locator(FEED_SELECTOR).evaluate(
       async (feedElement, input) => {
         const feed = feedElement as HTMLElement;
         const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        let previous:
-          | {
-              dataRevision: number;
-              distanceFromEnd: number;
-              itemCount: number;
-              lastBottom: number;
-              lastHeight: number;
-              lastKey: string;
-              modelCount: number;
-              scrollHeight: number;
-              scrollTop: number;
-            }
-          | null = null;
+        let previous: {
+          dataRevision: number;
+          distanceFromEnd: number;
+          itemCount: number;
+          lastBottom: number;
+          lastHeight: number;
+          lastKey: string;
+          modelCount: number;
+          scrollHeight: number;
+          scrollTop: number;
+        } | null = null;
         let stableFrames = 0;
         let diagnostic: unknown = null;
 
@@ -631,17 +633,33 @@ async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnam
             }))
             .filter((item) => Number.isFinite(item.index))
             .sort((left, right) => left.index - right.index);
-          const overlaps: Array<{ previous: string; next: string; amount: number }> = [];
-          const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+          const overlaps: Array<{
+            previous: string;
+            next: string;
+            amount: number;
+          }> = [];
+          const discontinuities: Array<{
+            previous: string;
+            next: string;
+            delta: number;
+          }> = [];
           for (let index = 1; index < items.length; index += 1) {
             const prior = items[index - 1];
             const current = items[index];
             if (!prior || !current || current.index !== prior.index + 1) continue;
             const delta = current.rect.top - prior.rect.bottom;
             if (delta < -1) {
-              overlaps.push({ previous: prior.key, next: current.key, amount: -delta });
+              overlaps.push({
+                previous: prior.key,
+                next: current.key,
+                amount: -delta,
+              });
             } else if (delta > 1) {
-              discontinuities.push({ previous: prior.key, next: current.key, delta });
+              discontinuities.push({
+                previous: prior.key,
+                next: current.key,
+                delta,
+              });
             }
           }
           const last = items.at(-1);
@@ -677,7 +695,13 @@ async function waitForStablePinnedTranscriptLayout(page: Page, scenario = 'unnam
             Math.abs(current.scrollHeight - previous.scrollHeight) <= 0.5 &&
             Math.abs(current.scrollTop - previous.scrollTop) <= 0.5;
           stableFrames = ready && unchanged ? stableFrames + 1 : 0;
-          diagnostic = { current, discontinuities, overlaps, ready, stableFrames };
+          diagnostic = {
+            current,
+            discontinuities,
+            overlaps,
+            ready,
+            stableFrames,
+          };
           previous = current;
           if (stableFrames >= 7) return;
         }
@@ -710,7 +734,6 @@ async function surfaceIdentity(page: Page): Promise<string> {
     });
 }
 
-
 async function waitForSurfaceIdentity(page: Page, expected: string): Promise<void> {
   await page.waitForFunction(
     ({ selector, expectedIdentity }) => {
@@ -735,7 +758,9 @@ async function synchronizeNativeTranscriptGeneration(
   fixture: ChromiumFixture,
   chatId: string,
 ): Promise<void> {
-  const transcript = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const transcript = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   expect(transcript.hasMore).toBe(false);
   await waitForSurfaceIdentity(fixture.page, `${chatId}:${transcript.transcriptViewId}`);
   await waitForTranscriptReady(fixture.page);
@@ -1261,7 +1286,10 @@ async function startTranscriptMomentum(page: Page): Promise<void> {
   });
 }
 
-async function waitForTranscriptMomentumFrames(page: Page, additionalFrames: number): Promise<void> {
+async function waitForTranscriptMomentumFrames(
+  page: Page,
+  additionalFrames: number,
+): Promise<void> {
   const target = await page.evaluate((frames) => {
     const browserGlobal = globalThis as typeof globalThis & {
       __chatMomentum?: { frame: number };
@@ -1343,37 +1371,40 @@ async function anchorByKey(
     })();
     const current = await page
       .locator(FEED_SELECTOR)
-      .evaluate((feedElement, input) => {
-        const feed = feedElement as HTMLElement;
-        const mountedKeys = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].flatMap(
-          (item) => item.dataset.chatVirtualItem ?? [],
-        );
-        const mountedIdentities = [
-          ...new Set(
-            mountedKeys.flatMap((mountedKey) => {
-              try {
-                const parsed = JSON.parse(mountedKey);
-                return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
-              } catch {
-                return [];
-              }
-            }),
-          ),
-        ];
-        const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
-        return {
-          mountedIdentities,
-          mountedKeys,
-          scrollTop: feed.scrollTop,
-          maximumScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
-          distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
-          pinned: feed.dataset.chatPinnedToBottom === 'true',
-          userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
-          modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
-          dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
-          scale: sizer?.dataset.chatTranscriptScale,
-        };
-      }, { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR })
+      .evaluate(
+        (feedElement, input) => {
+          const feed = feedElement as HTMLElement;
+          const mountedKeys = [...feed.querySelectorAll<HTMLElement>(input.itemSelector)].flatMap(
+            (item) => item.dataset.chatVirtualItem ?? [],
+          );
+          const mountedIdentities = [
+            ...new Set(
+              mountedKeys.flatMap((mountedKey) => {
+                try {
+                  const parsed = JSON.parse(mountedKey);
+                  return Array.isArray(parsed) && typeof parsed[0] === 'string' ? [parsed[0]] : [];
+                } catch {
+                  return [];
+                }
+              }),
+            ),
+          ];
+          const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
+          return {
+            mountedIdentities,
+            mountedKeys,
+            scrollTop: feed.scrollTop,
+            maximumScrollTop: Math.max(0, feed.scrollHeight - feed.clientHeight),
+            distanceFromEnd: feed.scrollHeight - feed.clientHeight - feed.scrollTop,
+            pinned: feed.dataset.chatPinnedToBottom === 'true',
+            userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
+            modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
+            dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
+            scale: sizer?.dataset.chatTranscriptScale,
+          };
+        },
+        { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR },
+      )
       .catch(() => null);
     throw new Error(
       `Timed out waiting for the strict reading anchor:\n${JSON.stringify(
@@ -1541,23 +1572,26 @@ async function waitForRowCentered(page: Page, rowId: string, tolerance = 2): Pro
   );
 }
 
-async function activeMainSurfaceLabel(page: Page): Promise<string> {
+async function currentWorkspaceIdentity(
+  page: Page,
+): Promise<{ windowId: string; surfaceId: string }> {
   return page.evaluate(() => {
-    const active = document.querySelector<HTMLElement>(
-      '[data-floating-workspace-toolbar] [role="tab"][aria-selected="true"]',
+    const workspaceWindow = document.querySelector<HTMLElement>(
+      '[data-workspace-window-current="true"]',
     );
-    const label = active?.getAttribute('aria-label') || active?.textContent?.trim();
-    if (!label) throw new Error('Active main workspace tab is missing.');
-    return label;
+    const windowId = workspaceWindow?.dataset.workspaceWindowId;
+    const surfaceId = workspaceWindow?.dataset.workspaceWindowActiveSurface;
+    if (!windowId || !surfaceId) throw new Error('Current workspace window identity is missing.');
+    return { windowId, surfaceId };
   });
 }
 
-async function openMainWorkspaceActions(page: Page): Promise<void> {
+async function openCurrentWorkspaceActions(page: Page): Promise<void> {
   await page.evaluate(() => {
     const trigger = document.querySelector<HTMLButtonElement>(
-      '[data-floating-workspace-toolbar] [data-workspace-taskbar-end] [data-slot="dropdown-menu-trigger"]',
+      '[data-workspace-window-current="true"] [data-workspace-window-menu-trigger]',
     );
-    if (!trigger) throw new Error('Main workspace menu is missing.');
+    if (!trigger) throw new Error('Current workspace window menu is missing.');
     if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
   });
 }
@@ -1566,18 +1600,57 @@ async function clickMenuItem(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitem', { name, exact: true }).click();
 }
 
-async function selectMainWorkspaceSurface(page: Page, name: string): Promise<void> {
-  await page
-    .locator('[data-floating-workspace-toolbar] [data-workspace-taskbar]')
-    .getByRole('tab', { name, exact: true })
-    .click();
+async function openNewWorkspaceWindow(page: Page, name: string): Promise<string> {
+  const previousCount = await page.locator('[data-workspace-window-id]').count();
+  await page.locator('[data-workspace-new-window-menu]').click();
+  await clickMenuItem(page, name);
+  await page.waitForFunction(
+    (expectedCount) =>
+      document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
+    previousCount + 1,
+  );
+  return (await currentWorkspaceIdentity(page)).windowId;
 }
 
-async function selectMainWorkspaceSurfaceProgrammatically(page: Page, name: string): Promise<void> {
+async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void> {
   await page
-    .locator('[data-floating-workspace-toolbar] [data-workspace-taskbar]')
-    .getByRole('tab', { name, exact: true })
-    .evaluate((tab) => (tab as HTMLElement).click());
+    .locator(`[data-workspace-window-id="${windowId}"]`)
+    .dispatchEvent('pointerdown', { bubbles: true });
+  await page.waitForFunction(
+    (expectedWindowId) =>
+      document
+        .querySelector('[data-workspace-window-current="true"]')
+        ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+    windowId,
+  );
+}
+
+async function closeWorkspaceWindow(page: Page, windowId: string): Promise<void> {
+  await page.locator(`[data-workspace-window-close="${windowId}"]`).click();
+  await page.locator(`[data-workspace-window-id="${windowId}"]`).waitFor({ state: 'detached' });
+}
+
+async function selectWorkspaceWindowSurface(
+  page: Page,
+  windowId: string,
+  surfaceId: string,
+  programmatically = false,
+): Promise<void> {
+  const workspaceWindow = page.locator(`[data-workspace-window-id="${windowId}"]`);
+  if ((await workspaceWindow.getAttribute('data-workspace-window-active-surface')) === surfaceId)
+    return;
+  const tab = workspaceWindow.locator(
+    `[role="tab"][aria-controls="${windowId}-panel-${surfaceId}"]`,
+  );
+  if (programmatically) await tab.evaluate((element) => (element as HTMLElement).click());
+  else await tab.click();
+  await page.waitForFunction(
+    ({ expectedWindowId, expectedSurfaceId }) =>
+      document
+        .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+        ?.getAttribute('data-workspace-window-active-surface') === expectedSurfaceId,
+    { expectedWindowId: windowId, expectedSurfaceId: surfaceId },
+  );
 }
 
 async function waitForTranscriptScale(page: Page, scale: number): Promise<void> {
@@ -1589,36 +1662,6 @@ async function waitForTranscriptScale(page: Page, scale: number): Promise<void> 
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
   });
-}
-
-async function addSidebarChatToSplit(page: Page, chatId: string): Promise<void> {
-  const source = page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
-  await source.waitFor({ state: 'visible' });
-  const previousPaneCount = await page.locator('[data-pane-id]').count();
-  const targetPane = page.locator('[data-pane-id]').first();
-  const targetRect = await targetPane.boundingBox();
-  if (!targetRect) throw new Error('The split target pane has no browser geometry.');
-
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  try {
-    await source.dispatchEvent('dragstart', { dataTransfer });
-    const dropLayer = page.locator('[data-split-drag-layer]');
-    await dropLayer.waitFor({ state: 'visible' });
-    const point = {
-      clientX: targetRect.x + targetRect.width - 8,
-      clientY: targetRect.y + targetRect.height / 2,
-      dataTransfer,
-    };
-    await dropLayer.dispatchEvent('dragover', point);
-    await dropLayer.dispatchEvent('drop', point);
-    await source.dispatchEvent('dragend', { dataTransfer });
-    await page.waitForFunction(
-      (expected) => document.querySelectorAll('[data-pane-id]').length === expected,
-      previousPaneCount + 1,
-    );
-  } finally {
-    await dataTransfer.dispose();
-  }
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
@@ -1679,7 +1722,7 @@ async function selectAndVerifyEdgeNavigatorTarget(
   marker: string,
   edge: 'start' | 'end',
 ): Promise<void> {
-  await openMainWorkspaceActions(page);
+  await openCurrentWorkspaceActions(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1777,7 +1820,7 @@ async function selectNavigatorTargetDuringAppend(
   chatId: string,
   marker: string,
 ): Promise<void> {
-  await openMainWorkspaceActions(fixture.page);
+  await openCurrentWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'Jump to user message');
   await fixture.page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(fixture.page, marker);
@@ -1871,7 +1914,7 @@ async function installDelayedTargetCompletion(page: Page, rowId: string): Promis
 }
 
 async function selectAndVerifyNavigatorTarget(page: Page, marker: string): Promise<void> {
-  await openMainWorkspaceActions(page);
+  await openCurrentWorkspaceActions(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1881,7 +1924,7 @@ async function selectAndVerifyNavigatorTarget(page: Page, marker: string): Promi
 }
 
 async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string): Promise<void> {
-  await openMainWorkspaceActions(page);
+  await openCurrentWorkspaceActions(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -1892,7 +1935,7 @@ async function selectAndVerifyDelayedNavigatorTarget(page: Page, marker: string)
 }
 
 async function interruptNavigatorJump(page: Page, marker: string): Promise<void> {
-  await openMainWorkspaceActions(page);
+  await openCurrentWorkspaceActions(page);
   await clickMenuItem(page, 'Jump to user message');
   await page.getByText('User messages', { exact: true }).waitFor();
   const rowId = await userMessageNavigatorRowIdContaining(page, marker);
@@ -2024,7 +2067,11 @@ async function mountedConversationDiscontinuities(
       }))
       .filter((item) => Number.isFinite(item.index))
       .sort((left, right) => left.index - right.index);
-    const discontinuities: Array<{ previous: string; next: string; delta: number }> = [];
+    const discontinuities: Array<{
+      previous: string;
+      next: string;
+      delta: number;
+    }> = [];
     for (let index = 1; index < items.length; index += 1) {
       const previous = items[index - 1];
       const next = items[index];
@@ -2074,16 +2121,19 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
   const chatId = await seedTranscript(fixture.integration, 90, 'chromium-processing-prefetch');
   await prepareTranscript(fixture, chatId);
   const prompt = 'chromium-processing-prefetch-held';
-  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: prompt });
+  const heldCompletion = fixture.integration.fakeProviders.openAi.holdNext({
+    lastUserText: prompt,
+  });
   let releaseFirstPage!: () => void;
   const firstPageGate = new Promise<void>((resolve) => (releaseFirstPage = resolve));
   let earlierRequestCount = 0;
   let firstDemandRequestBaseline = 0;
   let turnId: string | null = null;
-  const waitForEarlierRequest = () => fixture.page.waitForRequest((request) => {
-    const url = new URL(request.url());
-    return url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal');
-  });
+  const waitForEarlierRequest = () =>
+    fixture.page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.searchParams.get('chatId') === chatId && url.searchParams.has('beforeOrdinal');
+    });
 
   try {
     const accepted = await fixture.integration.client.runDirectChat({
@@ -2093,7 +2143,9 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     });
     turnId = accepted.turnId ?? null;
     await withDiagnosticTimeout('the held processing turn', heldCompletion.received);
-    await fixture.page.locator('[data-slot="chat-processing-status"]').waitFor({ state: 'visible' });
+    await fixture.page
+      .locator('[data-slot="chat-processing-status"]')
+      .waitFor({ state: 'visible' });
     const modelCountBeforePrefetch = await waitForStableModelCount(fixture.page, 50);
     firstDemandRequestBaseline = earlierRequestCount;
     await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
@@ -2129,15 +2181,13 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
     await withDiagnosticTimeout('the first held earlier-page request', firstPageRequest);
     expect(loadAheadDistance).toBeGreaterThan(0);
     expect(await transcriptBoundaryIntersectsViewport(fixture.page, 'earlier')).toBe(false);
-    const earlierLoadingIndicator = fixture.page.locator(
-      '[data-chat-earlier-loading-indicator]',
-    );
+    const earlierLoadingIndicator = fixture.page.locator('[data-chat-earlier-loading-indicator]');
     await earlierLoadingIndicator.waitFor({ state: 'visible' });
 
-    expect(
-      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
-    ).toBe(0);
-    const boundarySweep = await fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
+    expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count()).toBe(0);
+    const boundarySweep = await fixture.page
+      .locator(FEED_SELECTOR)
+      .evaluate(async (feedElement) => {
         const feed = feedElement as HTMLElement;
         const offsets: number[] = [];
         const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -2151,9 +2201,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
         return { offsets, scrollTop: feed.scrollTop };
       });
     expect(boundarySweep.scrollTop, JSON.stringify(boundarySweep, null, 2)).toBe(0);
-    expect(
-      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
-    ).toBe(0);
+    expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count()).toBe(0);
     const prependAnchor = await readingAnchor(fixture.page);
     await startReadingAnchorFrameSampler(fixture.page, prependAnchor);
     await fixture.page.locator(FEED_SELECTOR).evaluate(
@@ -2178,9 +2226,7 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
           feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }));
           pumpState.frames += 1;
           const sizer = feed.querySelector<HTMLElement>(input.sizerSelector);
-          pumpState.observedModelCount = Number(
-            sizer?.dataset.chatVirtualModelCount ?? Number.NaN,
-          );
+          pumpState.observedModelCount = Number(sizer?.dataset.chatVirtualModelCount ?? Number.NaN);
           if (pumpState.observedModelCount > input.initialModelCount) {
             pumpState.growthFrame = pumpState.frames;
             pumpState.complete = true;
@@ -2192,7 +2238,10 @@ async function verifyEarlierPrefetchDuringProcessing(fixture: ChromiumFixture): 
         };
         requestAnimationFrame(pump);
       },
-      { initialModelCount: modelCountBeforePrefetch, sizerSelector: SIZER_SELECTOR },
+      {
+        initialModelCount: modelCountBeforePrefetch,
+        sizerSelector: SIZER_SELECTOR,
+      },
     );
 
     releaseFirstPage();
@@ -2275,11 +2324,7 @@ async function verifyTouchDragPrepend(
   scenario: TouchPrependScenario,
 ): Promise<void> {
   await fixture.page.setViewportSize(scenario.viewport);
-  const chatId = await seedTranscript(
-    fixture.integration,
-    90,
-    `chromium-touch-${scenario.label}`,
-  );
+  const chatId = await seedTranscript(fixture.integration, 90, `chromium-touch-${scenario.label}`);
   let releaseEarlierPage!: () => void;
   const earlierPageGate = new Promise<void>((resolve) => (releaseEarlierPage = resolve));
   let resolveEarlierRequest!: () => void;
@@ -2385,16 +2430,15 @@ async function verifyTouchDragPrepend(
         clientRequestId: crypto.randomUUID(),
       });
       expect((await stopLiveTurn).outcome).toBe('interrupt-requested');
-      await fixture.integration.client.waitForProcessing(chatId, false, { afterIndex: stopCursor });
+      await fixture.integration.client.waitForProcessing(chatId, false, {
+        afterIndex: stopCursor,
+      });
       // The interrupt lifecycle must be published in the model before the
       // baseline-delta oracle is established, or the delta misattributes it.
-      await fixture.page.waitForFunction(
-        (preStopRevision) => {
-          const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
-          return Number(sizer?.dataset.chatVirtualDataRevision ?? 0) > preStopRevision;
-        },
-        preStopPublication.dataRevision,
-      );
+      await fixture.page.waitForFunction((preStopRevision) => {
+        const sizer = document.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
+        return Number(sizer?.dataset.chatVirtualDataRevision ?? 0) > preStopRevision;
+      }, preStopPublication.dataRevision);
     }
     const baselinePublication = await touchPublicationSnapshot(fixture.page);
     releaseEarlierPage();
@@ -2502,8 +2546,8 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       get: () =>
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) '
-        + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) ' +
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
     });
   });
   await fixture.page.setViewportSize({ width: 390, height: 700 });
@@ -2523,9 +2567,9 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
       const url = new URL(route.request().url());
       if (
-        !heldRequest
-        && url.searchParams.get('chatId') === chatId
-        && url.searchParams.has('beforeOrdinal')
+        !heldRequest &&
+        url.searchParams.get('chatId') === chatId &&
+        url.searchParams.has('beforeOrdinal')
       ) {
         heldRequest = true;
         resolveEarlierRequest();
@@ -2556,9 +2600,9 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     const response = fixture.page.waitForResponse((candidate) => {
       const url = new URL(candidate.url());
       return (
-        url.pathname === '/api/v1/chats/messages'
-        && url.searchParams.get('chatId') === chatId
-        && url.searchParams.has('beforeOrdinal')
+        url.pathname === '/api/v1/chats/messages' &&
+        url.searchParams.get('chatId') === chatId &&
+        url.searchParams.has('beforeOrdinal')
       );
     });
     releaseEarlierPage();
@@ -2579,11 +2623,11 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
     expect(
       frames.filter(
         (frame) =>
-          !frame.connected
-          || !frame.sameNode
-          || frame.offset === null
-          || frame.rowId !== anchor.rowId
-          || frame.text !== anchor.text,
+          !frame.connected ||
+          !frame.sameNode ||
+          frame.offset === null ||
+          frame.rowId !== anchor.rowId ||
+          frame.text !== anchor.text,
       ),
       JSON.stringify({ anchor, frames }, null, 2),
     ).toEqual([]);
@@ -2604,28 +2648,18 @@ async function verifyPostTouchMomentumPrepend(fixture: ChromiumFixture): Promise
   }
 }
 
-async function verifyNoOwnedScrollWritesDuringCoasting(
-  fixture: ChromiumFixture,
-): Promise<void> {
+async function verifyNoOwnedScrollWritesDuringCoasting(fixture: ChromiumFixture): Promise<void> {
   await fixture.context.addInitScript(() => {
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       get: () =>
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) '
-        + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) ' +
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
     });
   });
   await fixture.page.setViewportSize({ width: 390, height: 700 });
-  const chatId = await seedTranscript(
-    fixture.integration,
-    90,
-    'chromium-coasting-write-gate',
-  );
-  const prependChatId = await seedTranscript(
-    fixture.integration,
-    90,
-    'chromium-coasting-prepend',
-  );
+  const chatId = await seedTranscript(fixture.integration, 90, 'chromium-coasting-write-gate');
+  const prependChatId = await seedTranscript(fixture.integration, 90, 'chromium-coasting-prepend');
   let drag: TranscriptTouchDrag | null = null;
   let trapInstalled = false;
   let routeInstalled = false;
@@ -2650,9 +2684,7 @@ async function verifyNoOwnedScrollWritesDuringCoasting(
     drag = await beginTranscriptTouchDrag(fixture.page);
     await moveTranscriptTouch(fixture.page, drag, -24);
     expect(
-      await fixture.page
-        .locator(FEED_SELECTOR)
-        .getAttribute('data-chat-pinned-to-bottom'),
+      await fixture.page.locator(FEED_SELECTOR).getAttribute('data-chat-pinned-to-bottom'),
     ).toBe('true');
     await finishTranscriptTouchDrag(drag);
     drag = null;
@@ -2702,9 +2734,9 @@ async function verifyNoOwnedScrollWritesDuringCoasting(
     await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
       const url = new URL(route.request().url());
       if (
-        !earlierRequestStarted
-        && url.searchParams.get('chatId') === prependChatId
-        && url.searchParams.has('beforeOrdinal')
+        !earlierRequestStarted &&
+        url.searchParams.get('chatId') === prependChatId &&
+        url.searchParams.has('beforeOrdinal')
       ) {
         earlierRequestStarted = true;
         resolveEarlierRequest();
@@ -2738,9 +2770,9 @@ async function verifyNoOwnedScrollWritesDuringCoasting(
     const response = fixture.page.waitForResponse((candidate) => {
       const url = new URL(candidate.url());
       return (
-        url.pathname === '/api/v1/chats/messages'
-        && url.searchParams.get('chatId') === prependChatId
-        && url.searchParams.has('beforeOrdinal')
+        url.pathname === '/api/v1/chats/messages' &&
+        url.searchParams.get('chatId') === prependChatId &&
+        url.searchParams.has('beforeOrdinal')
       );
     });
     releaseEarlierPage();
@@ -2860,9 +2892,7 @@ async function verifyScrollbarDragPrepend(
     expect(
       Math.max(
         ...frames.map((frame) =>
-          frame.offset === null
-            ? Number.POSITIVE_INFINITY
-            : Math.abs(frame.offset - anchor.offset),
+          frame.offset === null ? Number.POSITIVE_INFINITY : Math.abs(frame.offset - anchor.offset),
         ),
       ),
       JSON.stringify({ anchor, frames, upwardScrollTop, reversedScrollTop }, null, 2),
@@ -2938,9 +2968,7 @@ async function verifyKeyboardPrepend(
       }
       throw new Error('Keyboard transcript paging did not settle before publication.');
     });
-    expect(
-      await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count(),
-    ).toBe(0);
+    expect(await fixture.page.locator('[data-transcript-page-boundary="earlier"]').count()).toBe(0);
 
     const anchor = await readingAnchor(fixture.page);
     await startReadingAnchorFrameSampler(fixture.page, anchor);
@@ -2961,9 +2989,7 @@ async function verifyKeyboardPrepend(
     expect(
       Math.max(
         ...frames.map((frame) =>
-          frame.offset === null
-            ? Number.POSITIVE_INFINITY
-            : Math.abs(frame.offset - anchor.offset),
+          frame.offset === null ? Number.POSITIVE_INFINITY : Math.abs(frame.offset - anchor.offset),
         ),
       ),
       JSON.stringify({ anchor, frames }, null, 2),
@@ -3015,7 +3041,11 @@ async function revealEarlierTranscript(
       const prefetchPosition = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
         const feed = feedElement as HTMLElement;
         const settle = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const attempts: Array<{ maximum: number; target: number; scrollTop: number }> = [];
+        const attempts: Array<{
+          maximum: number;
+          target: number;
+          scrollTop: number;
+        }> = [];
         for (let attempt = 0; attempt < 8; attempt += 1) {
           const maximum = Math.max(0, feed.scrollHeight - feed.clientHeight);
           const target = Math.min(maximum, Math.max(101, feed.clientHeight * 0.75));
@@ -3026,10 +3056,16 @@ async function revealEarlierTranscript(
           attempts.push({ maximum, target, scrollTop: feed.scrollTop });
           // First measurements may correct the offset; the anchor sampler starts after they settle.
           if (feed.scrollTop > 100 && feed.scrollTop <= feed.clientHeight) {
-            return { attempts, scrollTop: feed.scrollTop, viewportHeight: feed.clientHeight };
+            return {
+              attempts,
+              scrollTop: feed.scrollTop,
+              viewportHeight: feed.clientHeight,
+            };
           }
         }
-        throw new Error(`The earlier prefetch position did not settle: ${JSON.stringify(attempts)}`);
+        throw new Error(
+          `The earlier prefetch position did not settle: ${JSON.stringify(attempts)}`,
+        );
       });
       expect(prefetchPosition.scrollTop, JSON.stringify(prefetchPosition)).toBeGreaterThan(100);
       expect(prefetchPosition.scrollTop).toBeLessThanOrEqual(prefetchPosition.viewportHeight);
@@ -3187,14 +3223,16 @@ async function verifyLaterPageReadingPosition(
   let releaseLatestRequest!: () => void;
   const latestRequestGate = new Promise<void>((resolve) => (releaseLatestRequest = resolve));
   let resolveLatestRequestStarted!: () => void;
-  const latestRequestStarted = new Promise<void>((resolve) => (resolveLatestRequestStarted = resolve));
+  const latestRequestStarted = new Promise<void>(
+    (resolve) => (resolveLatestRequestStarted = resolve),
+  );
   let heldLatestRequest = false;
   await fixture.page.route('**/api/v1/chats/messages?**', async (route) => {
     const url = new URL(route.request().url());
     if (
-      !heldLatestRequest
-      && url.searchParams.get('chatId') === chatId
-      && !url.searchParams.has('beforeOrdinal')
+      !heldLatestRequest &&
+      url.searchParams.get('chatId') === chatId &&
+      !url.searchParams.has('beforeOrdinal')
     ) {
       heldLatestRequest = true;
       resolveLatestRequestStarted();
@@ -3321,12 +3359,12 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     pinned: false,
     userScrolledUp: true,
   });
-  const chatSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
-  await openMainWorkspaceActions(fixture.page);
+  const chatIdentity = await currentWorkspaceIdentity(fixture.page);
+  await openCurrentWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-hidden-append');
-  await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
+  await selectWorkspaceWindowSurface(fixture.page, chatIdentity.windowId, chatIdentity.surfaceId);
   await waitForTranscriptReady(fixture.page);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: false,
@@ -3346,12 +3384,16 @@ async function verifyAppendGeometry(fixture: ChromiumFixture, chatId: string): P
     .waitFor();
   await waitForStablePinnedTranscriptLayout(fixture.page, 'pinned-append');
 
-  const pinnedSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
-  await openMainWorkspaceActions(fixture.page);
+  const pinnedIdentity = await currentWorkspaceIdentity(fixture.page);
+  await openCurrentWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await appendTurn(fixture.integration, chatId, 'chromium-pinned-hidden-append');
-  await selectMainWorkspaceSurface(fixture.page, pinnedSurfaceLabel);
+  await selectWorkspaceWindowSurface(
+    fixture.page,
+    pinnedIdentity.windowId,
+    pinnedIdentity.surfaceId,
+  );
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText('echo:chromium-pinned-hidden-append', { exact: true })
@@ -3483,18 +3525,32 @@ async function expectNoSwitchPaintFlicker(
           settledGeometry = currentGeometry;
         }
       } else if (settledGeometry) {
-        recordViolation({ attempt, kind: 'settled-feed-became-unsettled', busy, contentVisible });
+        recordViolation({
+          attempt,
+          kind: 'settled-feed-became-unsettled',
+          busy,
+          contentVisible,
+        });
       }
       settledFrames = settled ? settledFrames + 1 : 0;
     }
     delete browserGlobal.__chatSwitchPaintSamplerReady;
-    return { settledFrames, switchObserved, transition, violationCount, violations };
+    return {
+      settledFrames,
+      switchObserved,
+      transition,
+      violationCount,
+      violations,
+    };
   });
   await fixture.page.waitForFunction(
     () =>
       Boolean(
-        (globalThis as typeof globalThis & { __chatSwitchPaintSamplerReady?: boolean })
-          .__chatSwitchPaintSamplerReady,
+        (
+          globalThis as typeof globalThis & {
+            __chatSwitchPaintSamplerReady?: boolean;
+          }
+        ).__chatSwitchPaintSamplerReady,
       ),
     undefined,
     { timeout: 5_000 },
@@ -3577,9 +3633,11 @@ async function verifyChatSwitchBottomRestore(
     selectSidebarChat(fixture.page, secondaryChatId, secondaryMarker),
   );
   await waitForStablePinnedTranscriptLayout(fixture.page, 'switch-to-secondary');
-  const visibleHeights = await fixture.page.locator(ITEM_SELECTOR).evaluateAll((items) =>
-    items.map((item) => Math.round((item as HTMLElement).getBoundingClientRect().height)),
-  );
+  const visibleHeights = await fixture.page
+    .locator(ITEM_SELECTOR)
+    .evaluateAll((items) =>
+      items.map((item) => Math.round((item as HTMLElement).getBoundingClientRect().height)),
+    );
   expect(new Set(visibleHeights).size, JSON.stringify(visibleHeights)).toBeGreaterThanOrEqual(3);
 
   await expectNoSwitchPaintFlicker(fixture, () =>
@@ -3677,10 +3735,7 @@ async function verifyHeldEarlierPageChatSwitch(
       targetChatId,
       `held-page-switch-target-${viewport.width}-0`,
     );
-    await waitForSurfaceIdentity(
-      fixture.page,
-      `${targetChatId}:${targetPage.transcriptViewId}`,
-    );
+    await waitForSurfaceIdentity(fixture.page, `${targetChatId}:${targetPage.transcriptViewId}`);
     const targetRevision = await virtualDataRevision(fixture.page);
     const targetEntryCount = await transcriptEntryCount(fixture.page);
     releaseEarlierPage();
@@ -3698,9 +3753,7 @@ async function verifyHeldEarlierPageChatSwitch(
     );
     const targetScan = await scanLoadedTranscript(fixture.page);
     expect(targetScan.rows.map((row) => row.rowId)).toEqual(
-      targetPage.messages.map(
-        (entry) => `${targetPage.transcriptViewId}:${entry.ordinal}`,
-      ),
+      targetPage.messages.map((entry) => `${targetPage.transcriptViewId}:${entry.ordinal}`),
     );
     expect(targetScan.rows.map((row) => row.messageType)).toEqual(
       targetPage.messages.map((entry) => entry.message.type),
@@ -3711,7 +3764,9 @@ async function verifyHeldEarlierPageChatSwitch(
     expect(
       await fixture.page
         .locator(FEED_SELECTOR)
-        .getByText(`held-page-switch-source-${viewport.width}-0`, { exact: true })
+        .getByText(`held-page-switch-source-${viewport.width}-0`, {
+          exact: true,
+        })
         .count(),
     ).toBe(0);
     expect(earlierRequestCount).toBe(1);
@@ -3762,7 +3817,9 @@ async function verifyDetachedNativeReload(
   viewport: { height: number; width: number },
 ): Promise<void> {
   const chatId = await seedHeterogeneousTranscript(fixture, environment);
-  const beforeReload = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const beforeReload = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   await fixture.page.setViewportSize(viewport);
   await prepareTranscript(fixture, chatId, 1);
   await scrollToPosition(fixture.page, 'middle');
@@ -3797,7 +3854,9 @@ async function verifyDetachedNativeReload(
   await waitForTranscriptReady(fixture.page);
   expect(await surfaceIdentity(fixture.page)).not.toBe(oldSurfaceIdentity);
 
-  const canonical = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const canonical = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   expect(canonical.transcriptViewId).toBe(reloaded.transcriptViewId);
   expect(canonical.messages.at(-1)).toMatchObject({
     message: { type: 'assistant-message', content: externalContent },
@@ -3808,9 +3867,7 @@ async function verifyDetachedNativeReload(
   );
   const scan = await scanLoadedTranscript(fixture.page);
   expect(scan.rows.map((row) => row.rowId)).toEqual(
-    renderedExpected.map(
-      (entry) => `${canonical.transcriptViewId}:${entry.ordinal}`,
-    ),
+    renderedExpected.map((entry) => `${canonical.transcriptViewId}:${entry.ordinal}`),
   );
   expect(scan.rows.map((row) => row.messageType)).toEqual(
     renderedExpected.map((entry) => entry.message.type),
@@ -3821,7 +3878,10 @@ async function verifyDetachedNativeReload(
     text: externalContent,
   });
   expect(
-    await fixture.page.locator(FEED_SELECTOR).getByText(externalContent, { exact: true }).isVisible(),
+    await fixture.page
+      .locator(FEED_SELECTOR)
+      .getByText(externalContent, { exact: true })
+      .isVisible(),
   ).toBe(true);
   fixture.assertNoBrowserErrors();
 }
@@ -3966,8 +4026,14 @@ async function verifyHeldEarlierPageNativeReload(
     });
     expect(canonical.messages.map(exactTranscriptRow)).toEqual([
       expect.objectContaining({ type: 'user-message', text: baseUserContent }),
-      expect.objectContaining({ type: 'assistant-message', text: baseAssistantContent }),
-      expect.objectContaining({ type: 'assistant-message', text: externalContent }),
+      expect.objectContaining({
+        type: 'assistant-message',
+        text: baseAssistantContent,
+      }),
+      expect.objectContaining({
+        type: 'assistant-message',
+        text: externalContent,
+      }),
     ]);
     expect(JSON.stringify(canonical.messages)).not.toContain(
       'mixed-final-assistant-after-all-tools',
@@ -4008,13 +4074,18 @@ async function verifyHeldEarlierPageNativeReload(
 }
 
 async function verifyDirectChatExposesNativeReload(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(fixture.integration, 15, 'chromium-direct-native-reload-base');
+  const chatId = await seedTranscript(
+    fixture.integration,
+    15,
+    'chromium-direct-native-reload-base',
+  );
   await prepareTranscript(fixture, chatId, 20);
   await scrollToPosition(fixture.page, 'end');
   await waitForStablePinnedTranscriptLayout(fixture.page, 'direct-native-reload-baseline');
-  await openMainWorkspaceActions(fixture.page);
-  expect(await fixture.page.getByRole('menuitem', { name: 'Reload from native history' }).count())
-    .toBe(1);
+  await openCurrentWorkspaceActions(fixture.page);
+  expect(
+    await fixture.page.getByRole('menuitem', { name: 'Reload from native history' }).count(),
+  ).toBe(1);
   await fixture.page.keyboard.press('Escape');
   fixture.assertNoBrowserErrors();
 }
@@ -4022,12 +4093,12 @@ async function verifyDirectChatExposesNativeReload(fixture: ChromiumFixture): Pr
 async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: string): Promise<void> {
   await prepareTranscript(fixture, chatId);
   await scrollToPosition(fixture.page, 'middle');
-  const chatSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
-  await openMainWorkspaceActions(fixture.page);
+  const chatIdentity = await currentWorkspaceIdentity(fixture.page);
+  await openCurrentWorkspaceActions(fixture.page);
   await clickMenuItem(fixture.page, 'New Terminal');
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
-  const terminalSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
-  await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
+  const terminalIdentity = await currentWorkspaceIdentity(fixture.page);
+  await selectWorkspaceWindowSurface(fixture.page, chatIdentity.windowId, chatIdentity.surfaceId);
   await waitForTranscriptReady(fixture.page);
   await scrollToPosition(fixture.page, 'middle');
 
@@ -4058,7 +4129,12 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
   await menu.waitFor({ state: 'visible' });
   await menu.getByRole('menuitem', { name: 'Copy text' }).focus();
 
-  await selectMainWorkspaceSurfaceProgrammatically(fixture.page, terminalSurfaceLabel);
+  await selectWorkspaceWindowSurface(
+    fixture.page,
+    terminalIdentity.windowId,
+    terminalIdentity.surfaceId,
+    true,
+  );
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   await menu.waitFor({ state: 'detached' });
   const hiddenState = await fixture.page.evaluate(() => {
@@ -4077,7 +4153,7 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
     focusInsideHiddenConversation: false,
   });
 
-  await selectMainWorkspaceSurface(fixture.page, chatSurfaceLabel);
+  await selectWorkspaceWindowSurface(fixture.page, chatIdentity.windowId, chatIdentity.surfaceId);
   await waitForTranscriptReady(fixture.page);
   await openVisibleMessageMenu();
   await menu.waitFor({ state: 'visible' });
@@ -4091,113 +4167,72 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await scrollToPosition(fixture.page, 'middle');
-  await seedTranscript(fixture.integration, 1);
-
+  const chatIdentity = await currentWorkspaceIdentity(fixture.page);
   const detachedAnchor = await readingAnchor(fixture.page);
-  const detachedIdentity = await surfaceIdentity(fixture.page);
-  const detachedPolicy = await viewportPolicy(fixture.page);
   const detachedLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Split view');
-  await waitForTranscriptScale(fixture.page, 0.85);
-  const splitAnchor = await anchorByKey(fixture.page, detachedAnchor.key, {
-    phase: 'post-split-scale',
-    detachedAnchor,
-    detachedIdentity,
-    detachedPolicy,
-    detachedLayout,
-  });
-  const splitLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
-  expect(
-    Math.abs(splitAnchor.offset - detachedAnchor.offset),
-    JSON.stringify({ detachedAnchor, splitAnchor, detachedLayout, splitLayout }, null, 2),
-  ).toBeLessThanOrEqual(1);
-  const splitGeometry = await transcriptGeometry(fixture.page);
-  expect(splitGeometry.overlaps).toEqual([]);
-  expect(splitGeometry.horizontalOverflow).toEqual([]);
 
-  const originalSurfaceIdentity = await surfaceIdentity(fixture.page);
-  const originalPaneId = await fixture.page
-    .locator('[data-pane-id]')
-    .first()
-    .getAttribute('data-pane-id');
-  if (!originalPaneId) throw new Error('The original split pane is missing its identity.');
-  const thirdChatId = await seedTranscript(fixture.integration, 1);
-  await addSidebarChatToSplit(fixture.page, thirdChatId);
-  const fourthChatId = await seedTranscript(fixture.integration, 1);
-  await addSidebarChatToSplit(fixture.page, fourthChatId);
-  await fixture.page
-    .locator(`[data-pane-id="${originalPaneId}"]`)
-    .locator(':scope > [role="button"]')
-    .first()
-    .click();
-  await fixture.page.waitForFunction(
-    ({ itemSelector, expectedIdentity }) =>
-      [...document.querySelectorAll<HTMLElement>(itemSelector)].some((item) => {
-        const value = item.dataset.chatVirtualItem;
-        if (!value) return false;
-        try {
-          const parsed = JSON.parse(value);
-          return Array.isArray(parsed) && parsed[0] === expectedIdentity;
-        } catch {
-          return false;
-        }
-      }),
-    { itemSelector: ITEM_SELECTOR, expectedIdentity: originalSurfaceIdentity },
-  );
+  const terminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
+  await waitForTranscriptReady(fixture.page);
+  await waitForTranscriptScale(fixture.page, 0.85);
+  const twoWindowAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
+  const twoWindowLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
+  expect(
+    Math.abs(twoWindowAnchor.offset - detachedAnchor.offset),
+    JSON.stringify({ detachedAnchor, twoWindowAnchor, detachedLayout, twoWindowLayout }, null, 2),
+  ).toBeLessThanOrEqual(1);
+
+	const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+	const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await waitForTranscriptScale(fixture.page, 0.7);
   await scrollToPosition(fixture.page, 'middle');
-  const fourPaneAnchor = await readingAnchor(fixture.page);
-  const fourPaneLayout = await transcriptLayoutSnapshot(fixture.page, fourPaneAnchor.key);
-  const fourPaneGeometry = await transcriptGeometry(fixture.page);
-  expect(fourPaneGeometry.overlaps).toEqual([]);
-  expect(fourPaneGeometry.horizontalOverflow).toEqual([]);
+  const fourWindowAnchor = await readingAnchor(fixture.page);
+  const fourWindowLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
+  const fourWindowGeometry = await transcriptGeometry(fixture.page);
+  expect(fourWindowGeometry.overlaps).toEqual([]);
+  expect(fourWindowGeometry.horizontalOverflow).toEqual([]);
 
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Exit split view');
+	await closeWorkspaceWindow(fixture.page, filesWindowId);
+	await closeWorkspaceWindow(fixture.page, secondTerminalWindowId);
+	await closeWorkspaceWindow(fixture.page, terminalWindowId);
   await waitForTranscriptScale(fixture.page, 1);
-  const restoredAnchor = await anchorByKey(fixture.page, fourPaneAnchor.key);
-  const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourPaneAnchor.key);
+  const restoredAnchor = await anchorByKey(fixture.page, fourWindowAnchor.key);
+  const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
   expect(
-    Math.abs(restoredAnchor.offset - fourPaneAnchor.offset),
-    JSON.stringify({ fourPaneAnchor, restoredAnchor, fourPaneLayout, restoredLayout }, null, 2),
+    Math.abs(restoredAnchor.offset - fourWindowAnchor.offset),
+    JSON.stringify({ fourWindowAnchor, restoredAnchor, fourWindowLayout, restoredLayout }, null, 2),
   ).toBeLessThanOrEqual(1);
   const restoredGeometry = await transcriptGeometry(fixture.page);
   expect(restoredGeometry.overlaps).toEqual([]);
   expect(restoredGeometry.horizontalOverflow).toEqual([]);
 
   await scrollToPosition(fixture.page, 'end');
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Split view');
+	const visibleScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptScale(fixture.page, 0.85);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-enter');
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Exit split view');
+  await closeWorkspaceWindow(fixture.page, visibleScaleWindowId);
   await waitForTranscriptScale(fixture.page, 1);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-exit');
 
-  // Publishes new geometry while an already-scaled surface is hidden. The show-time
-  // attachment must restore the pinned end before the later visible scale reset.
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Split view');
+  const hiddenScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptScale(fixture.page, 0.85);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-enter');
-  const scaleSurfaceLabel = await activeMainSurfaceLabel(fixture.page);
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'New Terminal');
+  await focusWorkspaceWindow(fixture.page, hiddenScaleWindowId);
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
   const hiddenAppendMarker = 'chromium-hidden-scaled-append';
   await appendTurn(fixture.integration, chatId, hiddenAppendMarker);
-  await selectMainWorkspaceSurface(fixture.page, scaleSurfaceLabel);
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptScale(fixture.page, 0.85);
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText(`echo:${hiddenAppendMarker}`, { exact: true })
     .waitFor();
   await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-show');
-  await openMainWorkspaceActions(fixture.page);
-  await clickMenuItem(fixture.page, 'Exit split view');
+  await closeWorkspaceWindow(fixture.page, hiddenScaleWindowId);
   await waitForTranscriptScale(fixture.page, 1);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-exit');
   fixture.assertNoBrowserErrors();
@@ -4229,7 +4264,9 @@ async function readCompleteCanonicalTranscript(
   fixture: ChromiumFixture,
   chatId: string,
 ): Promise<{ messages: TranscriptMessage[]; transcriptViewId: string }> {
-  let response = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  let response = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   const transcriptViewId = response.transcriptViewId;
   let messages = [...response.messages];
   for (let pageCount = 1; response.hasMore; pageCount += 1) {
@@ -4294,14 +4331,23 @@ async function verifyLiveEdgeRetention(
 
   await dispatchClockedTranscriptPosition(fixture.page, 'away');
   await fixture.page.clock.runFor(100);
-  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: false, userScrolledUp: true });
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: false,
+    userScrolledUp: true,
+  });
 
   await dispatchClockedTranscriptPosition(fixture.page, 'end');
   await fixture.page.clock.runFor(100);
-  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: true,
+    userScrolledUp: false,
+  });
   await fixture.page.clock.runFor(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
-  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: true,
+    userScrolledUp: false,
+  });
 
   const canonicalAfterIdle = await readCompleteCanonicalTranscript(fixture, chatId);
   expect(canonicalAfterIdle.transcriptViewId).toBe(canonicalBeforeIdle.transcriptViewId);
@@ -4329,7 +4375,10 @@ async function verifyLiveEdgeRetention(
     await appendTurn(fixture.integration, chatId, prompt);
   }
   await fixture.page.clock.runFor(100);
-  expect(await viewportPolicy(fixture.page)).toEqual({ pinned: true, userScrolledUp: false });
+  expect(await viewportPolicy(fixture.page)).toEqual({
+    pinned: true,
+    userScrolledUp: false,
+  });
   const expectedAfterGrowth = expectedEntryCount + laterPrompts.length * 2;
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedAfterGrowth);
 
@@ -4338,14 +4387,22 @@ async function verifyLiveEdgeRetention(
 
   const canonicalAfterGrowth = await readCompleteCanonicalTranscript(fixture, chatId);
   expect(canonicalAfterGrowth.transcriptViewId).toBe(canonicalBeforeIdle.transcriptViewId);
-  expect(canonicalAfterGrowth.messages.slice(0, canonicalBeforeIdle.messages.length).map(
-    exactTranscriptRow,
-  )).toEqual(canonicalBeforeIdle.messages.map(exactTranscriptRow));
-  expect(canonicalAfterGrowth.messages.slice(-laterPrompts.length * 2).map(exactTranscriptRow))
-    .toEqual(laterPrompts.flatMap((prompt) => [
+  expect(
+    canonicalAfterGrowth.messages
+      .slice(0, canonicalBeforeIdle.messages.length)
+      .map(exactTranscriptRow),
+  ).toEqual(canonicalBeforeIdle.messages.map(exactTranscriptRow));
+  expect(
+    canonicalAfterGrowth.messages.slice(-laterPrompts.length * 2).map(exactTranscriptRow),
+  ).toEqual(
+    laterPrompts.flatMap((prompt) => [
       expect.objectContaining({ type: 'user-message', text: prompt }),
-      expect.objectContaining({ type: 'assistant-message', text: `echo:${prompt}` }),
-    ]));
+      expect.objectContaining({
+        type: 'assistant-message',
+        text: `echo:${prompt}`,
+      }),
+    ]),
+  );
   const finalLiveEntry = canonicalAfterGrowth.messages.at(-1);
   expect(finalLiveEntry).toMatchObject({
     message: {
@@ -4353,9 +4410,11 @@ async function verifyLiveEdgeRetention(
       content: `echo:${laterPrompts.at(-1)}`,
     },
   });
-  await fixture.page.locator(
-    `[data-chat-row-id="${canonicalAfterGrowth.transcriptViewId}:${finalLiveEntry?.ordinal}"]`,
-  ).waitFor({ state: 'visible' });
+  await fixture.page
+    .locator(
+      `[data-chat-row-id="${canonicalAfterGrowth.transcriptViewId}:${finalLiveEntry?.ordinal}"]`,
+    )
+    .waitFor({ state: 'visible' });
   fixture.assertNoBrowserErrors();
 }
 
@@ -4380,7 +4439,10 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
     const assistant = scan.rows[turnIndex * 2 + 1];
     const prompt = `${promptPrefix}-${turnIndex}`;
     expect(user).toMatchObject({ messageType: 'user-message', text: prompt });
-    expect(assistant).toMatchObject({ messageType: 'assistant-message', text: `echo:${prompt}` });
+    expect(assistant).toMatchObject({
+      messageType: 'assistant-message',
+      text: `echo:${prompt}`,
+    });
     expect(user?.itemIndex).toBeLessThan(assistant?.itemIndex ?? -1);
     if (turnIndex + 1 < turnCount) {
       expect(assistant?.itemIndex).toBeLessThan(scan.rows[(turnIndex + 1) * 2]?.itemIndex ?? -1);
@@ -4402,26 +4464,35 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
     .getByText(`echo:${livePrompt}`, { exact: true })
     .waitFor();
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount + 2);
-  const tail = await fixture.page.locator(FEED_SELECTOR).evaluate((feedElement, input) =>
-    [...feedElement.querySelectorAll<HTMLElement>('[data-chat-row-id]')]
-      .flatMap((row) => {
-        const text = row.innerText.trim();
-        if (text !== input.user && text !== input.assistant) return [];
-        return [
-          {
-            itemIndex: Number(row.closest<HTMLElement>('[data-chat-virtual-item]')?.dataset.index),
-            messageType: row.dataset.chatMessageType ?? '',
-            rowId: row.dataset.chatRowId ?? '',
-            text,
-          },
-        ];
-      })
-      .sort((left, right) => left.itemIndex - right.itemIndex),
+  const tail = await fixture.page.locator(FEED_SELECTOR).evaluate(
+    (feedElement, input) =>
+      [...feedElement.querySelectorAll<HTMLElement>('[data-chat-row-id]')]
+        .flatMap((row) => {
+          const text = row.innerText.trim();
+          if (text !== input.user && text !== input.assistant) return [];
+          return [
+            {
+              itemIndex: Number(
+                row.closest<HTMLElement>('[data-chat-virtual-item]')?.dataset.index,
+              ),
+              messageType: row.dataset.chatMessageType ?? '',
+              rowId: row.dataset.chatRowId ?? '',
+              text,
+            },
+          ];
+        })
+        .sort((left, right) => left.itemIndex - right.itemIndex),
     { user: livePrompt, assistant: `echo:${livePrompt}` },
   );
   expect(tail).toHaveLength(2);
-  expect(tail[0]).toMatchObject({ messageType: 'user-message', text: livePrompt });
-  expect(tail[1]).toMatchObject({ messageType: 'assistant-message', text: `echo:${livePrompt}` });
+  expect(tail[0]).toMatchObject({
+    messageType: 'user-message',
+    text: livePrompt,
+  });
+  expect(tail[1]).toMatchObject({
+    messageType: 'assistant-message',
+    text: `echo:${livePrompt}`,
+  });
   expect(tail[0]?.itemIndex).toBeLessThan(tail[1]?.itemIndex ?? -1);
 
   const retainedGeometry = await transcriptGeometry(fixture.page);
@@ -4433,21 +4504,14 @@ async function verifyDetachedWindowRetention(fixture: ChromiumFixture): Promise<
 }
 
 async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<void> {
-  const chatId = await seedTranscript(
-    fixture.integration,
-    1,
-    'mixed-ordering-ledger-baseline',
-  );
-  const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const chatId = await seedTranscript(fixture.integration, 1, 'mixed-ordering-ledger-baseline');
+  const initial = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   const generated = mixedOrderingRows(initial.lastOrdinal + 1);
   const expected = [...initial.messages.map(exactTranscriptRow), ...generated.expected];
   expect(expected).toHaveLength(268);
-  await appendLedgerRows(
-    fixture,
-    chatId,
-    initial.transcriptViewId,
-    generated.drafts,
-  );
+  await appendLedgerRows(fixture, chatId, initial.transcriptViewId, generated.drafts);
 
   const canonical = await readCompleteCanonicalTranscript(fixture, chatId);
   expect(canonical.transcriptViewId).toBe(initial.transcriptViewId);
@@ -4471,12 +4535,14 @@ async function verifyMixedTranscriptOrdering(fixture: ChromiumFixture): Promise<
     expect(scan.indexChanges, diagnostic).toEqual([]);
     expect(scan.visualOrderViolations, diagnostic).toEqual([]);
     expect(scan.rows, diagnostic).toHaveLength(renderedExpected.length);
-    expect(scan.rows.map((row) => row.rowId), diagnostic).toEqual(
-      renderedExpected.map((row) => `${initial.transcriptViewId}:${row.ordinal}`),
-    );
-    expect(scan.rows.map((row) => row.messageType), diagnostic).toEqual(
-      renderedExpected.map((row) => row.type),
-    );
+    expect(
+      scan.rows.map((row) => row.rowId),
+      diagnostic,
+    ).toEqual(renderedExpected.map((row) => `${initial.transcriptViewId}:${row.ordinal}`));
+    expect(
+      scan.rows.map((row) => row.messageType),
+      diagnostic,
+    ).toEqual(renderedExpected.map((row) => row.type));
 
     for (const [index, expectedRow] of renderedExpected.entries()) {
       const rendered = scan.rows[index];
@@ -4530,14 +4596,11 @@ async function verifyCrossPageToolPairPrepend(
   viewport: { height: number; width: number },
 ): Promise<void> {
   const chatId = await seedTranscript(fixture.integration, 1, 'tool-boundary-baseline');
-  const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+  const initial = await fixture.integration.client.getMessages(chatId, {
+    limit: 200,
+  });
   const generated = crossPageToolPairRows(initial.lastOrdinal + 1);
-  await appendLedgerRows(
-    fixture,
-    chatId,
-    initial.transcriptViewId,
-    generated.drafts,
-  );
+  await appendLedgerRows(fixture, chatId, initial.transcriptViewId, generated.drafts);
 
   await fixture.page.setViewportSize(viewport);
   const prepared = await prepareTranscript(fixture, chatId);
@@ -4555,20 +4618,18 @@ async function verifyCrossPageToolPairPrepend(
   expect(
     frames.filter(
       (frame) =>
-        !frame.connected
-        || !frame.sameNode
-        || frame.offset === null
-        || frame.rowId !== anchor.rowId
-        || frame.text !== anchor.text,
+        !frame.connected ||
+        !frame.sameNode ||
+        frame.offset === null ||
+        frame.rowId !== anchor.rowId ||
+        frame.text !== anchor.text,
     ),
     JSON.stringify({ anchor, frames }, null, 2),
   ).toEqual([]);
   expect(
     Math.max(
       ...frames.map((frame) =>
-        frame.offset === null
-          ? Number.POSITIVE_INFINITY
-          : Math.abs(frame.offset - anchor.offset),
+        frame.offset === null ? Number.POSITIVE_INFINITY : Math.abs(frame.offset - anchor.offset),
       ),
     ),
     JSON.stringify({ anchor, frames }, null, 2),
@@ -4658,10 +4719,10 @@ async function verifyPermissionDraftPersistence(
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await waitForTranscriptReady(fixture.page);
+	await waitForTranscriptReady(fixture.page);
 
-  const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
-  await postgres.waitFor({ state: 'visible' });
+	const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
+	await postgres.waitFor({ state: 'visible' });
   await postgres.check();
   expect(await postgres.isChecked()).toBe(true);
   const permissionItem = fixture.page.locator(ITEM_SELECTOR).filter({ has: postgres });
@@ -4742,10 +4803,13 @@ async function verifyHistoricalPermissionIsInertAfterRestart(
   if (snapshot.transcript.availability !== 'available') {
     throw new Error('The restarted permission transcript is unavailable.');
   }
-  expect(snapshot.transcript.messages.some((entry) => (
-    entry.message.type === 'permission-request'
-    && entry.message.permissionOccurrenceId === permissionOccurrenceId
-  ))).toBe(true);
+  expect(
+    snapshot.transcript.messages.some(
+      (entry) =>
+        entry.message.type === 'permission-request' &&
+        entry.message.permissionOccurrenceId === permissionOccurrenceId,
+    ),
+  ).toBe(true);
 
   const postgres = fixture.page.getByRole('radio', { name: /Postgres/ });
   await postgres.waitFor({ state: 'visible' });
@@ -4775,18 +4839,17 @@ type PermissionLifecycleMessage = Extract<
   ChatMessage,
   {
     type:
-      | 'permission-request'
-      | 'permission-cancelled'
-      | 'permission-resolved'
-      | 'permission-expired';
+      'permission-request' | 'permission-cancelled' | 'permission-resolved' | 'permission-expired';
   }
 >;
 
 function isPermissionLifecycleMessage(message: ChatMessage): message is PermissionLifecycleMessage {
-  return message.type === 'permission-request'
-    || message.type === 'permission-cancelled'
-    || message.type === 'permission-resolved'
-    || message.type === 'permission-expired';
+  return (
+    message.type === 'permission-request' ||
+    message.type === 'permission-cancelled' ||
+    message.type === 'permission-resolved' ||
+    message.type === 'permission-expired'
+  );
 }
 
 async function readJsonLineLog(path: string): Promise<Record<string, unknown>[]> {
@@ -4814,24 +4877,29 @@ async function waitForJsonLineLog(
   description: string,
   predicate: (records: readonly Record<string, unknown>[]) => boolean,
 ): Promise<Record<string, unknown>[]> {
-  return await withDiagnosticTimeout(description, (async () => {
-    for (;;) {
-      const records = await readJsonLineLog(path);
-      if (predicate(records)) return records;
-      await Bun.sleep(20);
-    }
-  })(), 30_000);
+  return await withDiagnosticTimeout(
+    description,
+    (async () => {
+      for (;;) {
+        const records = await readJsonLineLog(path);
+        if (predicate(records)) return records;
+        await Bun.sleep(20);
+      }
+    })(),
+    30_000,
+  );
 }
 
 function permissionRequestForCommand(
   messages: readonly TranscriptMessage[],
   command: string,
 ): TranscriptMessage {
-  const request = messages.find((entry) => (
-    entry.message.type === 'permission-request'
-    && entry.message.requestedTool.type === 'bash-tool-use'
-    && entry.message.requestedTool.command === command
-  ));
+  const request = messages.find(
+    (entry) =>
+      entry.message.type === 'permission-request' &&
+      entry.message.requestedTool.type === 'bash-tool-use' &&
+      entry.message.requestedTool.command === command,
+  );
   if (!request) throw new Error(`Permission request was not committed for ${command}.`);
   return request;
 }
@@ -4842,13 +4910,19 @@ async function waitForPermissionTranscript(
   predicate: (messages: readonly TranscriptMessage[]) => boolean,
   description: string,
 ): Promise<Awaited<ReturnType<IntegrationFixture['client']['getMessages']>>> {
-  return await withDiagnosticTimeout(description, (async () => {
-    for (;;) {
-      const page = await fixture.integration.client.getMessages(chatId, { limit: 100 });
-      if (predicate(page.messages)) return page;
-      await Bun.sleep(20);
-    }
-  })(), 30_000);
+  return await withDiagnosticTimeout(
+    description,
+    (async () => {
+      for (;;) {
+        const page = await fixture.integration.client.getMessages(chatId, {
+          limit: 100,
+        });
+        if (predicate(page.messages)) return page;
+        await Bun.sleep(20);
+      }
+    })(),
+    30_000,
+  );
 }
 
 async function verifyReusedPermissionOccurrence(
@@ -4858,17 +4932,21 @@ async function verifyReusedPermissionOccurrence(
   scenario: ReusedPermissionScenario,
 ): Promise<void> {
   environment.model.scriptTurn([
-    claudeToolUse(scenario.firstToolUseId, 'Bash', { command: scenario.firstCommand }),
+    claudeToolUse(scenario.firstToolUseId, 'Bash', {
+      command: scenario.firstCommand,
+    }),
   ]);
   environment.model.scriptTurn([claudeText(scenario.finalReply)]);
 
   const chatId = fixture.integration.newChatId();
   const eventCursor = fixture.integration.client.markEvents();
-  const turn = await fixture.integration.client.startChat(liveClaudeStartRequest({
-    chatId,
-    projectPath: fixture.integration.dirs.project,
-    command: scenario.prompt,
-  }));
+  const turn = await fixture.integration.client.startChat(
+    liveClaudeStartRequest({
+      chatId,
+      projectPath: fixture.integration.dirs.project,
+      command: scenario.prompt,
+    }),
+  );
   const firstTransient = await fixture.integration.client.waitForTransientPermission(
     chatId,
     (row) => JSON.stringify(row.message).includes(scenario.firstCommand),
@@ -4880,8 +4958,8 @@ async function verifyReusedPermissionOccurrence(
     { afterIndex: eventCursor, timeoutMs: 30_000 },
   );
   if (
-    firstTransient.message.type !== 'permission-request'
-    || secondTransient.message.type !== 'permission-request'
+    firstTransient.message.type !== 'permission-request' ||
+    secondTransient.message.type !== 'permission-request'
   ) {
     throw new Error('The reused Claude permission requests were not published.');
   }
@@ -4923,8 +5001,8 @@ async function verifyReusedPermissionOccurrence(
     scenario.secondCommand,
   );
   if (
-    firstRequest.message.type !== 'permission-request'
-    || secondRequest.message.type !== 'permission-request'
+    firstRequest.message.type !== 'permission-request' ||
+    secondRequest.message.type !== 'permission-request'
   ) {
     throw new Error('The committed reused permission rows changed type.');
   }
@@ -4935,8 +5013,9 @@ async function verifyReusedPermissionOccurrence(
   expect(secondOccurrenceId).not.toBe(firstOccurrenceId);
   expect(firstTransient.permissionOccurrenceId).toBe(firstOccurrenceId);
   expect(secondTransient.permissionOccurrenceId).toBe(secondOccurrenceId);
-  expect(beforeTerminal.transientFeed.rows.map((row) => row.permissionOccurrenceId).sort())
-    .toEqual([firstOccurrenceId, secondOccurrenceId].sort());
+  expect(beforeTerminal.transientFeed.rows.map((row) => row.permissionOccurrenceId).sort()).toEqual(
+    [firstOccurrenceId, secondOccurrenceId].sort(),
+  );
 
   const transcriptViewId = beforeTerminal.transcript.transcriptViewId;
   const firstRowId = `${transcriptViewId}:${firstRequest.ordinal}`;
@@ -4972,34 +5051,37 @@ async function verifyReusedPermissionOccurrence(
   expect(await secondAllow.isEnabled()).toBe(true);
 
   await writeFile(paths.cancelRelease, 'cancel first occurrence');
-  await waitForJsonLineLog(
-    paths.requestLog,
-    'the delayed provider cancellation',
-    (records) => records.some((record) => record.terminal === 'cancelled'),
+  await waitForJsonLineLog(paths.requestLog, 'the delayed provider cancellation', (records) =>
+    records.some((record) => record.terminal === 'cancelled'),
   );
   const afterCancellation = await waitForPermissionTranscript(
     fixture,
     chatId,
-    (messages) => messages.some((entry) => (
-      entry.message.type === 'permission-cancelled'
-      && entry.message.permissionOccurrenceId === firstOccurrenceId
-    )),
+    (messages) =>
+      messages.some(
+        (entry) =>
+          entry.message.type === 'permission-cancelled' &&
+          entry.message.permissionOccurrenceId === firstOccurrenceId,
+      ),
     'the first permission occurrence cancellation',
   );
   const terminalRows = afterCancellation.messages.filter(
-    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } => (
-      entry.message.type === 'permission-cancelled'
-      || entry.message.type === 'permission-resolved'
-      || entry.message.type === 'permission-expired'
-    ),
+    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } =>
+      entry.message.type === 'permission-cancelled' ||
+      entry.message.type === 'permission-resolved' ||
+      entry.message.type === 'permission-expired',
   );
-  expect(terminalRows.map((entry) => ({
-    type: entry.message.type,
-    permissionOccurrenceId: entry.message.permissionOccurrenceId,
-  }))).toEqual([{
-    type: 'permission-cancelled',
-    permissionOccurrenceId: firstOccurrenceId,
-  }]);
+  expect(
+    terminalRows.map((entry) => ({
+      type: entry.message.type,
+      permissionOccurrenceId: entry.message.permissionOccurrenceId,
+    })),
+  ).toEqual([
+    {
+      type: 'permission-cancelled',
+      permissionOccurrenceId: firstOccurrenceId,
+    },
+  ]);
   await firstAllow.waitFor({ state: 'hidden' });
   await secondAllow.waitFor({ state: 'visible' });
   expect(await secondAllow.isEnabled()).toBe(true);
@@ -5011,26 +5093,31 @@ async function verifyReusedPermissionOccurrence(
     permissionOccurrenceId: firstOccurrenceId,
   };
   fixture.assertNoBrowserErrors();
-  const staleResponse = await fixture.page.evaluate(async (input) => {
-    const stale = await fetch('/api/v1/chats/permissions/decision', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    return { status: stale.status, body: await stale.json() as unknown };
-  }, {
-    clientRequestId: crypto.randomUUID(),
-    chatId,
-    permissionOccurrenceId: firstOccurrenceId,
-    allow: true,
-    alwaysAllow: false,
-    control: firstControl,
-  });
+  const staleResponse = await fixture.page.evaluate(
+    async (input) => {
+      const stale = await fetch('/api/v1/chats/permissions/decision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      return { status: stale.status, body: (await stale.json()) as unknown };
+    },
+    {
+      clientRequestId: crypto.randomUUID(),
+      chatId,
+      permissionOccurrenceId: firstOccurrenceId,
+      allow: true,
+      alwaysAllow: false,
+      control: firstControl,
+    },
+  );
   expect(staleResponse).toMatchObject({
     status: 409,
     body: { errorCode: 'VALIDATION_FAILED', retryable: false },
   });
-  await fixture.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await fixture.page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
   expect(fixture.browserErrors.splice(0)).toEqual([
     'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)',
   ]);
@@ -5044,34 +5131,46 @@ async function verifyReusedPermissionOccurrence(
     'the second permission provider callback',
     (records) => records.length === 1,
   );
-  expect(callbacks).toEqual([{
-    requestId: reusedNativeRequestId,
-    subtype: 'success',
-    response: {
-      behavior: 'allow',
-      updatedInput: { command: scenario.secondCommand },
+  expect(callbacks).toEqual([
+    {
+      requestId: reusedNativeRequestId,
+      subtype: 'success',
+      response: {
+        behavior: 'allow',
+        updatedInput: { command: scenario.secondCommand },
+      },
     },
-  }]);
+  ]);
 
-  const terminal = await fixture.integration.client.waitForTurnTerminal(
-    chatId,
-    turn.turnId,
-    { afterIndex: eventCursor, timeoutMs: 30_000 },
-  );
+  const terminal = await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId, {
+    afterIndex: eventCursor,
+    timeoutMs: 30_000,
+  });
   expect(terminal.type).toBe('agent-run-finished');
-  const completed = await fixture.integration.client.getMessages(chatId, { limit: 100 });
+  const completed = await fixture.integration.client.getMessages(chatId, {
+    limit: 100,
+  });
   const permissionRows = completed.messages.filter(
-    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } => (
-      isPermissionLifecycleMessage(entry.message)
-    ),
+    (entry): entry is TranscriptMessage & { message: PermissionLifecycleMessage } =>
+      isPermissionLifecycleMessage(entry.message),
   );
-  expect(permissionRows.map((entry) => ({
-    ordinal: entry.ordinal,
-    type: entry.message.type,
-    permissionOccurrenceId: entry.message.permissionOccurrenceId,
-  }))).toEqual([
-    { ordinal: firstRequest.ordinal, type: 'permission-request', permissionOccurrenceId: firstOccurrenceId },
-    { ordinal: secondRequest.ordinal, type: 'permission-request', permissionOccurrenceId: secondOccurrenceId },
+  expect(
+    permissionRows.map((entry) => ({
+      ordinal: entry.ordinal,
+      type: entry.message.type,
+      permissionOccurrenceId: entry.message.permissionOccurrenceId,
+    })),
+  ).toEqual([
+    {
+      ordinal: firstRequest.ordinal,
+      type: 'permission-request',
+      permissionOccurrenceId: firstOccurrenceId,
+    },
+    {
+      ordinal: secondRequest.ordinal,
+      type: 'permission-request',
+      permissionOccurrenceId: secondOccurrenceId,
+    },
     {
       ordinal: expect.any(Number),
       type: 'permission-cancelled',
@@ -5083,9 +5182,12 @@ async function verifyReusedPermissionOccurrence(
       permissionOccurrenceId: secondOccurrenceId,
     },
   ]);
-  expect(completed.messages.some((entry) => (
-    entry.message.type === 'assistant-message' && entry.message.content === scenario.finalReply
-  ))).toBe(true);
+  expect(
+    completed.messages.some(
+      (entry) =>
+        entry.message.type === 'assistant-message' && entry.message.content === scenario.finalReply,
+    ),
+  ).toBe(true);
   expect(await readJsonLineLog(paths.callbackLog)).toEqual(callbacks);
   await secondAllow.waitFor({ state: 'hidden' });
   environment.model.assertSettled();
@@ -5448,9 +5550,10 @@ describe('Chromium transcript virtualization', () => {
       );
     }, 180_000);
 
-    const reloadCaseId = viewport.label === 'compact'
-      ? '[TLV5-UX.11-COMPACT-RELOAD-01]'
-      : '[TLV5-UX.11-WIDE-RELOAD-01]';
+    const reloadCaseId =
+      viewport.label === 'compact'
+        ? '[TLV5-UX.11-COMPACT-RELOAD-01]'
+        : '[TLV5-UX.11-WIDE-RELOAD-01]';
     test(`${reloadCaseId} replaces an idle detached ${viewport.label} transcript from native history`, async () => {
       if (!environment) throw new Error('Scripted Claude environment was not initialized.');
       const testEnvironment = environment;
