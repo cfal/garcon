@@ -187,6 +187,34 @@ describe('InterAgentMessageController', () => {
     expect(fixture.execution.deliverInterAgentControlInput).toHaveBeenCalledTimes(3);
   });
 
+  it('records every recipient when one target lock fails unexpectedly', async () => {
+    const lockError = new Error('target lock failed');
+    const chatMutationLock = {
+      runExclusive: mock((key, work) => key === `chat:${TARGET_CHAT_ID}`
+        ? Promise.reject(lockError)
+        : work()),
+    };
+    const fixture = createFixture({ chatMutationLock });
+
+    fixture.controller.request(request({
+      recipients: [TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID],
+    }));
+    await waitFor(() => sourceNotices(fixture).length === 1);
+
+    expect(sourceNotices(fixture)[0][2].detail.results).toEqual([
+      { chatId: TARGET_CHAT_ID, status: 'failed', reason: 'delivery-failed' },
+      { chatId: SECOND_TARGET_CHAT_ID, status: 'delivered' },
+    ]);
+    expect(fixture.errors).toContainEqual({
+      error: lockError,
+      context: {
+        sourceChatId: SOURCE_CHAT_ID,
+        targetChatId: TARGET_CHAT_ID,
+        phase: 'target-delivery',
+      },
+    });
+  });
+
   it('classifies adoption failure and provider rejection without target receipts', async () => {
     const fixture = createFixture({
       adoption: {

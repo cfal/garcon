@@ -47,7 +47,12 @@ export interface InterAgentMessageDispositionEvent {
 export interface InterAgentMessageErrorContext {
   readonly sourceChatId: string;
   readonly targetChatId?: string;
-  readonly phase: 'source-validation' | 'target-adoption' | 'target-receipt' | 'source-outcome';
+  readonly phase:
+    | 'source-validation'
+    | 'target-adoption'
+    | 'target-delivery'
+    | 'target-receipt'
+    | 'source-outcome';
 }
 
 export interface InterAgentMessageControllerOptions {
@@ -102,10 +107,20 @@ export class InterAgentMessageController {
     }
 
     try {
-      const results = await Promise.all(input.recipients.map((targetChatId) => (
+      const settled = await Promise.allSettled(input.recipients.map((targetChatId) => (
         this.#deliverToTarget(input, sourceChatId, targetChatId, signal)
       )));
       signal.throwIfAborted();
+      const results = settled.map((result, index): InterAgentMessageResult => {
+        if (result.status === 'fulfilled') return result.value;
+        const targetChatId = input.recipients[index]!;
+        this.#reportError(result.reason, {
+          sourceChatId: input.sourceChatId,
+          targetChatId,
+          phase: 'target-delivery',
+        });
+        return this.#result(input.sourceChatId, targetChatId, 'delivery-failed');
+      });
       this.#recordOutcome(input, attempt, results);
     } catch (error) {
       if (signal.aborted) return;
