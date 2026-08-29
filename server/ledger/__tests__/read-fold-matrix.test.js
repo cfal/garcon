@@ -228,13 +228,6 @@ describe('transcript ledger read-fold matrix', () => {
           },
         },
         {
-          kind: 'notice',
-          at: AT,
-          providerMeta: null,
-          message: 'Agent requested chat ID',
-          detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-        },
-        {
           kind: 'provider-row',
           at: DISCOVERY_PROVIDER_AT,
           providerMeta: null,
@@ -242,7 +235,7 @@ describe('transcript ledger read-fold matrix', () => {
         },
       ])];
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 3,
+        ordinal: 2,
         at: DISCOVERY_PROVIDER_AT,
       });
       rows.push(...store.append(CHAT_ID, VIEW_ID, [{
@@ -257,12 +250,12 @@ describe('transcript ledger read-fold matrix', () => {
         },
       }]));
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
-        ordinal: 3,
+        ordinal: 2,
         at: DISCOVERY_PROVIDER_AT,
       });
       const disclosure = ledger.appendNotice(CHAT_ID, VIEW_ID, {
-        title: 'Response: Garcon Chat ID',
-        content: 'Sent chat ID 1787836573296800 to agent',
+        title: 'Chat ID auto-discovery',
+        content: 'Sent chat ID 1787836573296800 to agent.',
         detail: { type: 'chat-id-disclosure' },
         at: AT,
       });
@@ -276,13 +269,12 @@ describe('transcript ledger read-fold matrix', () => {
         detail: {
           type: 'chat-id-discovery-failure',
           reason: 'delivery-failed',
-          title: 'Response: Garcon Chat ID',
+          title: 'Chat ID auto-discovery',
         },
       }]));
 
       expect(ledgerRowsToTranscriptMessages(rows).map((entry) => entry.message.type)).toEqual([
         'user-message',
-        'transcript-notice',
         'assistant-message',
         'user-message',
         'transcript-notice',
@@ -305,11 +297,10 @@ describe('transcript ledger read-fold matrix', () => {
       ]);
       expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
         [1, 'conversation'],
-        [2, 'diagnostics'],
+        [2, 'conversation'],
         [3, 'conversation'],
-        [4, 'conversation'],
+        [4, 'diagnostics'],
         [5, 'diagnostics'],
-        [6, 'diagnostics'],
       ]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
         ordinal: 5,

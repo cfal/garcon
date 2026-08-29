@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { EventEmitter } from 'events';
 import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
@@ -66,6 +67,10 @@ import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
 import type { AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { GoalControlDelivery } from './goal-control-delivery.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
+import {
+  ControlInputBlockedError,
+  ControlInputDelivery,
+} from './control-input-delivery.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -97,6 +102,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #acceptedInputTranscript: AcceptedInputTranscript;
   #goalControlDelivery: GoalControlDelivery;
   #steerInputDelivery: SteerInputDelivery;
+  #controlInputDelivery: ControlInputDelivery;
 
   constructor(
     _workspaceDir: string,
@@ -147,6 +153,22 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#steerInputDelivery = new SteerInputDelivery({
       ...inputDeliveryOptions,
       isShuttingDown: () => this.#shuttingDown,
+    });
+    this.#controlInputDelivery = new ControlInputDelivery({
+      captureTarget: (chatId) => this.#steerInputDelivery.captureTarget(chatId),
+      deliverSteer: (chatId, content, viewId, target) => (
+        this.#steerInputDelivery.deliverControl(chatId, content, viewId, target)
+      ),
+      scheduleRun: (chatId, content, viewId, onReserved, onOwnershipAcquired) => (
+        this.#scheduleControlRun(
+          chatId,
+          content,
+          viewId,
+          onReserved,
+          onOwnershipAcquired,
+        )
+      ),
+      watchRouteChange: (chatId) => this.#ownership.watchOwnerChange(chatId),
     });
     this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
@@ -278,6 +300,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (this.#shuttingDown) return;
     if (this.#ownership.isDraining(chatId)) return;
     if (this.#turnRunner.isChatRunning(chatId)) return;
+    this.#ownership.notifyOwnersChanged(chatId);
     const queue = await this.readChatExecutionControl(chatId);
     if (this.#isDrainSuppressed(chatId)) {
       if (queue.entries.length === 0) {
@@ -380,10 +403,20 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#steerInputDelivery.captureTarget(chatId);
   }
 
-  async deliverControlSteer(
-    chatId: string, content: string, transcriptViewId: string, target: CapturedSteerTarget,
+  async deliverControlInput(
+    chatId: string,
+    content: string,
+    transcriptViewId: string,
+    signal: AbortSignal,
+    onHiddenRun: (turnId: string) => void,
   ): Promise<void> {
-    return this.#steerInputDelivery.deliverControl(chatId, content, transcriptViewId, target);
+    return this.#controlInputDelivery.deliver(
+      chatId,
+      content,
+      transcriptViewId,
+      signal,
+      onHiddenRun,
+    );
   }
 
   async deliverGoalControlInput(
@@ -480,7 +513,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void> {
     this.#ownership.releaseTranscriptSnapshot(reservation);
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
-    this.#ownership.notifyOwnersChanged();
+    this.#ownership.notifyOwnersChanged(reservation.chatId);
     if (!drainRequested || !this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
     await this.triggerDrain(reservation.chatId);
   }
@@ -577,7 +610,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     } finally {
       this.#ownership.endDrain(chatId);
       this.#ownership.exitManualStop(chatId, { drainStillActive: false });
-      this.#ownership.notifyOwnersChanged();
+      this.#ownership.notifyOwnersChanged(chatId);
       this.#invalidateProcessing(chatId);
     }
     if (!this.#shuttingDown && this.#ownership.hasDrainRequest(chatId)) await this.triggerDrain(chatId);
@@ -610,6 +643,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
     const reservation = this.#ownership.reserveDirect(chatId, turn);
+    this.#ownership.notifyOwnersChanged(chatId);
     this.#invalidateProcessing(chatId);
     return reservation;
   }
@@ -668,10 +702,67 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
   }
 
+  // Uses direct ownership without AcceptedInputHandler because server control
+  // has no user-input admission or command-ledger settlement.
+  async #scheduleControlRun(
+    chatId: string,
+    content: string,
+    transcriptViewId: string,
+    onReserved: (turnId: string) => void,
+    onOwnershipAcquired: () => void,
+  ): Promise<void> {
+    const clientRequestId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const reservation = this.#reserveDirect(chatId, { clientRequestId, turnId });
+    let options: RunAgentTurnOptions;
+    try {
+      onOwnershipAcquired();
+      this.#checkpointDirect(reservation);
+      if (this.#isDrainSuppressed(chatId) || !this.#chatExists(chatId)) {
+        throw new ControlInputBlockedError();
+      }
+      reservation.executionAdmission.signal.throwIfAborted();
+      const control = await this.#controlOperations.read(chatId);
+      this.#checkpointDirect(reservation);
+      reservation.executionAdmission.signal.throwIfAborted();
+      if (control.entries.length > 0 || control.pause) {
+        throw new ControlInputBlockedError();
+      }
+      options = {
+        ...this.#getDrainOptions(chatId),
+        clientRequestId,
+        clientMessageId: crypto.randomUUID(),
+        transcriptViewId,
+        turnId,
+        commandType: 'agent-run',
+      };
+      onReserved(turnId);
+    } catch (error) {
+      try {
+        await this.#finishDirect(reservation, 'released');
+      } catch (releaseError) {
+        throw new AggregateError(
+          [error, releaseError],
+          `Failed to release hidden control turn for ${chatId}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+
+    const task = this.#runDirect(reservation, content, options).catch((error) => {
+      logger.error(
+        'queue: Server control turn failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+    this.#trackDispatch(task);
+  }
+
   #retireAttempt(chatId: string, attempt: QueueExecutionAttempt, reason?: Error): void {
     if (!this.#ownership.retireAttempt(chatId, attempt, reason)) return;
     this.emit('turn-settled', chatId, attempt.identity());
-    this.#ownership.notifyOwnersChanged();
+    this.#ownership.notifyOwnersChanged(chatId);
   }
 
   async #finishDirect(
@@ -687,7 +778,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const attempt = this.#ownership.attempt(reservation.chatId);
     if (attempt && outcome !== 'completed') this.#retireAttempt(reservation.chatId, attempt);
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
-    this.#ownership.notifyOwnersChanged();
+    this.#ownership.notifyOwnersChanged(reservation.chatId);
     this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
     if (outcome === 'completed' || drainRequested) await this.triggerDrain(reservation.chatId);

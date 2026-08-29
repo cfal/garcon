@@ -297,20 +297,25 @@ export async function startServer(): Promise<void> {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
       chatIdRequests: {
-        enabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
         request: (input) => chatIdDiscovery.request(input),
       },
     });
     const chatIdDiscovery = new ChatIdDiscoveryController({
       execution: {
-        captureSteerTarget: (chatId) => requireExecutionQueue().captureSteerTarget(chatId),
-        deliverControlSteer: (chatId, content, viewId, target) => (
-          requireExecutionQueue().deliverControlSteer(chatId, content, viewId, target)
+        deliverControlInput: (chatId, content, viewId, signal, onHiddenRun) => (
+          requireExecutionQueue().deliverControlInput(
+            chatId,
+            content,
+            viewId,
+            signal,
+            onHiddenRun,
+          )
         ),
       },
       notices: transcriptLedger,
+      isEnabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
       onError(error, chatId) {
-        logger.warn('Chat ID auto-discovery steering failed', {
+        logger.warn('Chat ID auto-discovery delivery failed', {
           chatId,
           reason: errorMessage(error),
         });

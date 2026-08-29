@@ -1,10 +1,30 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 26 integrated design. Supersedes
+Status: revision 27 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 27 collapses chat-ID discovery into one outcome notice and adds a
+hidden new-turn fallback. Core still strips the exact assistant marker before
+storage, but stores no request notice. Delivery first targets the active turn;
+definitive steering state changes fall back to a direct turn carrying only the
+disclosure envelope, using the same three-attempt run/steer alternation as
+`garcon-cli send-async --allow-steer`. Server control accepts a deliberately
+wider set of definitive non-delivery outcomes because it has no committed user
+row to reuse. A definitive steer rejection waits for
+that captured execution attempt to settle before selecting the next route.
+Neither route creates a `user-input` row
+or queue entry. Acceptance of either route immediately appends one success
+notice and returns; later turn failure remains ordinary provider/run history.
+Disabled, unsupported, and unavailable-route outcomes each append one typed
+error notice. Native import drops request markers and reconstructs an exact
+hidden disclosure input as the single success notice.
+The hidden turn's identity remains a recursion fence for its view: its own
+markers and later markers with no active-run attribution are suppressed until
+view replacement or deletion. When no discovery delivery is pending, markers
+correlated to a different run remain eligible.
 
 Revision 26 adds provider-neutral chat-ID auto-discovery as a core
 canonicalization and control-steering rule. An assistant message beginning
@@ -548,10 +568,9 @@ Kind semantics:
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload. Chat-ID discovery uses `{type: 'chat-id-request'}` for a recognized
-  request, `{type: 'chat-id-disclosure'}` after accepted control steering, and
-  `{type: 'chat-id-discovery-failure', reason}` for disabled, unsupported,
-  unavailable-turn, or failed delivery outcomes. They are presentation-only
+  Reload. Chat-ID discovery uses `{type: 'chat-id-disclosure'}` after accepted
+  steer or hidden-turn delivery and `{type: 'chat-id-discovery-failure', reason}`
+  for disabled, unsupported, or failed delivery outcomes. They are presentation-only
   diagnostics: they render, replay, share, and export, but do not enter search,
   preview, model context, resend, carryover, or fork seeds. Rendered
   `TranscriptNoticeMessage` and `ErrorMessage` instances own
@@ -576,8 +595,8 @@ Kind semantics:
   message beginning exactly with `<get-garcon-chat-id />`, removes that prefix
   and leading remainder whitespace before append, and omits the provider row
   when no non-whitespace remainder exists. The original `providerMeta` remains
-  attached to a cleaned row. The adjacent request or disabled-error notice is
-  part of the same append batch.
+  attached to a cleaned row. Marker recognition invokes discovery delivery after
+  the cleaned provider batch commits; it stores no request row.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -1109,16 +1128,27 @@ The guarantee is durable before provider dispatch, not durable at send:
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
   fold.
-- A **chat-ID discovery control steer** is server-originated rather than a user
-  submission. Its typed request notice commits before delivery starts, but the
-  control itself creates no `user-input` row and does not participate in resend,
-  queueing, or command idempotency. Core captures the active run target
-  synchronously, sends only the disclosure envelope, and appends a typed outcome
-  notice asynchronously. Provider correlation uses an ephemeral generated
-  `clientMessageId`; no prepared transcript input exists to consume or discard.
-  Provider delivery reuses the same steering transport as
-  `garcon-cli send --allow-steer`, whose prepared-input lookup is therefore an
-  inert miss for this generated identity.
+- A **chat-ID discovery control input** is server-originated rather than a user
+  submission. It creates no `user-input` row and does not participate in resend,
+  queueing, or command idempotency. Core first uses the ordinary steering
+  transport against an active turn. A definitive state change waits for the
+  captured attempt to settle, then falls back to a direct turn using the same
+  execution ownership, control-state checks, and background lifecycle as an
+  ordinary run, but sends only the disclosure
+  envelope and admits no transcript input. Route selection uses the CLI's bounded
+  alternation shape but additionally treats unsupported, non-steerable, and
+  confirmed-not-sent control delivery as safe fallback outcomes. Unsupported is
+  terminal only when three consecutive active turns keep all three attempts on
+  the steering route, so no hidden direct route can be attempted. Acceptance of
+  either route immediately appends one outcome notice; provider completion is not part of discovery and
+  any later failure uses the ordinary provider/run error path.
+  A hidden direct route registers its turn identity before provider dispatch.
+  Discovery suppresses markers correlated to that turn and, because late
+  provider rows carry no active-run attribution, every later uncorrelated
+  marker until view replacement or deletion. Outside the per-chat in-flight
+  delivery gate, a marker correlated to a different run remains eligible. This
+  conservative recursion fence may drop an independent uncorrelated request
+  rather than recursively dispatching a hidden turn's late output.
 - A **future-turn queued input** remains only in the process-ephemeral
   queue, indexed by `clientMessageId`. It is not a transcript row.
   Dequeue is one synchronous block: commit the `user-input` row (the
@@ -1644,17 +1674,12 @@ are self-contained snapshots.
 Native import treats an exact synthetic chat-ID disclosure input as server
 control rather than user conversation and reconstructs a typed disclosure
 notice at its provider timestamp. It applies the same assistant request-marker
-canonicalization without dispatching control. Request, disabled-request, and
-disclosure notices may therefore serve as native-activity watermarks; the live
-disclosure starts from the requesting provider row's timestamp for the same reason.
-Core clamps it forward to the current provider watermark so an asynchronously
-accepted disclosure cannot regress that watermark. An asynchronous failed-delivery
-notice cannot serve as a watermark because it proves no provider-native entry.
-
-The native marker does not encode whether discovery was disabled at the time it
-was emitted. A manual Reload therefore reconstructs the request notice but not
-the live core-only disabled failure; this is ordinary native-import lossiness,
-not a claim that the request was delivered.
+canonicalization without dispatching control or reconstructing a request row.
+Live success and failure notices start from the requesting provider row's
+timestamp and clamp forward to the current provider watermark so asynchronous
+delivery cannot regress it. A manual Reload reconstructs success from the exact
+provider-native disclosure input. Disabled, unsupported, and failed-delivery
+notices are core-only outcomes that native history cannot reconstruct and drops.
 
 The product rule for history: external or crash-missed native activity
 is adoptable only while its session is the current binding. Once
@@ -2075,6 +2100,32 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     response and UI disclose this with `resultsTruncated`; exact queries below
     the cap remain complete. This bounded degradation is preferred to an
     unbounded synchronous reader monopolizing the fixed pool.
+19. After a hidden chat-ID disclosure turn is scheduled, a request marker in
+    provider content with no active-run attribution is suppressed until view
+    replacement or deletion. Core cannot distinguish that row from late output
+    produced by the hidden turn. After the pending discovery delivery settles,
+    a marker correlated to a different active run remains eligible; the
+    conservative bias is against recursive control.
+20. Native import drops an exact marker-only chat-ID request when no synthetic
+    disclosure input follows; it does not fabricate a request or failure outcome.
+    After Reload, the provider watermark may therefore transiently precede that
+    native entry and a later activation may warn about drift until subsequent
+    provider activity advances the watermark. Existing ledgers may contain
+    diagnostics from the earlier two-row discovery implementation. This revision
+    does not migrate them; they may lose typed presentation or watermark
+    eligibility and cause the same transient warning. Earlier failure diagnostics
+    may conversely become watermark-eligible at their append-time timestamps,
+    briefly advancing the watermark past native activity and masking drift in
+    that interval.
+21. A hidden chat-ID disclosure turn uses the ordinary background lifecycle.
+    The requesting turn and hidden turn may therefore each emit an idle or
+    attention notification; hidden describes its transcript input, not its
+    processing and notification lifecycle.
+22. While one discovery delivery is pending, later request markers for that
+    chat are suppressed without a separate outcome, including markers correlated
+    to a different run. One serialized delivery may retarget the successor turn;
+    avoiding duplicate control input takes priority over an outcome for every
+    overlapping marker.
 
 ## 17. Testing Strategy
 

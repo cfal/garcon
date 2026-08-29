@@ -175,13 +175,11 @@ describeOnLinux('scripted OpenCode steering', () => {
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))
-          .toEqual([
-            expect.objectContaining({ detail: { type: 'chat-id-request' } }),
-            expect.objectContaining({
-              content: `Sent chat ID ${chatId} to agent`,
-              detail: { type: 'chat-id-disclosure' },
-            }),
-          ]);
+          .toEqual([expect.objectContaining({
+            title: 'Chat ID auto-discovery',
+            content: `Sent chat ID ${chatId} to agent.`,
+            detail: { type: 'chat-id-disclosure' },
+          })]);
 
         await reloadUntilNativeContains(fixture, chatId, receivedReply);
         const reloaded = await fixture.client.getMessages(chatId);

@@ -15,7 +15,7 @@ import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('imported transcript drafts', () => {
-  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] canonicalizes chat ID requests and synthetic control steers as notices', () => {
+  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] strips requests and maps synthetic control inputs to one notice', () => {
     expect(importedDrafts([
       {
         message: new AssistantMessage(
@@ -41,18 +41,37 @@ describe('imported transcript drafts', () => {
       {
         kind: 'notice',
         at: AT,
-        message: 'Agent requested chat ID',
-        detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-        providerMeta: null,
-      },
-      {
-        kind: 'notice',
-        at: AT,
-        message: 'Sent chat ID 1787836573296800 to agent',
-        detail: { type: 'chat-id-disclosure', title: 'Response: Garcon Chat ID' },
+        message: 'Sent chat ID 1787836573296800 to agent.',
+        detail: { type: 'chat-id-disclosure', title: 'Chat ID auto-discovery' },
         providerMeta: null,
       },
     ]);
+  });
+
+  it('drops a marker-only native request without synthesizing an outcome', () => {
+    expect(importedDrafts([
+      { message: new AssistantMessage(AT, '<get-garcon-chat-id />'), providerMeta: null },
+    ], () => AT)).toEqual([]);
+  });
+
+  it('preserves non-standalone disclosure content', () => {
+    const user = new UserMessage(
+      AT,
+      'Continue\n<garcon-chat-id>1787836573296800</garcon-chat-id>',
+    );
+    expect(importedDrafts([
+      { message: user, providerMeta: null },
+    ], () => AT)).toEqual([{
+      kind: 'user-input',
+      at: AT,
+      detail: {
+        clientMessageId: null,
+        message: user,
+        attachments: [],
+        steer: false,
+      },
+      providerMeta: null,
+    }]);
   });
 });
 

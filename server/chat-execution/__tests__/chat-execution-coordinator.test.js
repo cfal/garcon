@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
+import { DomainError } from '../../lib/domain-error.ts';
 
 function deferred() {
   let resolve;
@@ -51,13 +52,14 @@ function createFixture(overrides = {}) {
     '/unused',
     turnRunner,
     projection,
-    () => ({
+    overrides.getDrainOptions ?? (() => ({
       model: 'test-model',
       permissionMode: 'default',
       thinkingMode: 'none',
-    }),
-    () => true,
-    new InMemoryChatExecutionControlRepository('server-instance-test'),
+    })),
+    overrides.chatExists ?? (() => true),
+    overrides.controlRepository
+      ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
   );
   return { coordinator, events, projection, turnRunner };
 }
@@ -223,13 +225,12 @@ describe('ChatExecutionCoordinator', () => {
     });
     coordinator = fixture.coordinator;
     const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
-    const target = coordinator.captureSteerTarget('chat-1');
-
-    await coordinator.deliverControlSteer(
+    await coordinator.deliverControlInput(
       'chat-1',
       '<garcon-chat-id>1787836573296800</garcon-chat-id>',
       'view-1',
-      target,
+      new AbortController().signal,
+      mock(() => undefined),
     );
 
     expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
@@ -246,6 +247,325 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.projection.admitInput).not.toHaveBeenCalled();
     expect(fixture.projection.discardPreparedInput).not.toHaveBeenCalled();
     await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('does not fall back after steering accepts without preparing delivery', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => ({ kind: 'accepted' })),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({ code: 'STEER_OUTCOME_UNKNOWN' });
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('[TLV5-CHAT-ID-DISCOVERY.04-CORE-HIDDEN-RUN-UNIT-01] schedules a hidden control turn without admitting user input', async () => {
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => null),
+        runAgentTurn: mock(() => provider.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const onHiddenRun = mock(() => undefined);
+
+    await coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      onHiddenRun,
+    );
+
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    const runCall = fixture.turnRunner.runAgentTurn.mock.calls[0];
+    expect(runCall[0]).toBe('chat-1');
+    expect(runCall[1]).toBe('<garcon-chat-id>1787836573296800</garcon-chat-id>');
+    expect(runCall[2]).toMatchObject({
+      clientRequestId: expect.any(String),
+      clientMessageId: expect.any(String),
+      transcriptViewId: 'view-1',
+      turnId: expect.any(String),
+      commandType: 'agent-run',
+    });
+    expect(onHiddenRun).toHaveBeenCalledWith(runCall[2].turnId);
+    expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+
+    const activeTarget = coordinator.captureSteerTarget('chat-1');
+    await coordinator.onAgentTurnTerminal('chat-1', activeTarget.identity);
+    provider.resolve();
+    await coordinator.waitForDispatches();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('releases hidden control ownership when run options cannot be resolved', async () => {
+    const fixture = createFixture({
+      getDrainOptions: () => { throw new Error('session disappeared'); },
+    });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toThrow('session disappeared');
+
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await coordinator.waitForExecutionOwners();
+  });
+
+  it('blocks hidden control delivery when pause state exists without entries', async () => {
+    const controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const control = controlRepository.load('chat-1');
+    control.pause = {
+      id: 'pause-1',
+      kind: 'manual',
+      pausedAt: '2026-08-29T00:00:00.000Z',
+    };
+    controlRepository.save('chat-1', control);
+    const fixture = createFixture({ controlRepository });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      message: 'Server control input is blocked by paused or pending queue work',
+    });
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('blocks hidden control delivery while chat deletion is suppressing execution', async () => {
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+    expect(await coordinator.abortForChatDeletion('chat-1')).toBe(true);
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      message: 'Server control input is blocked by paused or pending queue work',
+    });
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    coordinator.rollbackChatDeletion('chat-1');
+  });
+
+  it('blocks hidden control delivery after the chat leaves the registry', async () => {
+    const fixture = createFixture({ chatExists: () => false });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('reports pending queue work after unsupported steering and releases ownership', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => {
+          throw new DomainError(
+            'OPERATION_UNSUPPORTED',
+            'This turn cannot be steered',
+            422,
+          );
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'queued work');
+
+    const delivery = coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    );
+    await waitFor(() => fixture.turnRunner.steerInput.mock.calls.length === 1);
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1' });
+
+    await expect(delivery).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
+  it('treats an accepted queued steer without preparation as an unknown outcome', async () => {
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async () => ({ kind: 'accepted' })),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const queued = await coordinator.createChatQueueEntry('chat-1', 'queued steer');
+    const target = coordinator.captureSteerTarget('chat-1');
+    const settlement = {
+      markScheduled: mock(async () => undefined),
+      settleSteerFailure: mock(async () => undefined),
+    };
+
+    const error = await coordinator.deliverAcceptedQueueEntrySteer({
+      command: {
+        key: 'queued-steer-command',
+        chatId: 'chat-1',
+        clientRequestId: 'queued-steer-request',
+        entryId: queued.entryId,
+      },
+      content: 'queued steer',
+      providerContent: 'queued steer',
+      clientMessageId: 'queued-steer-message',
+      transcriptViewId: 'view-1',
+      target,
+      expectedRevision: queued.entry.revision,
+      expectedReorderRevision: queued.control.reorderRevision,
+      settlement,
+    }).catch((failure) => failure);
+
+    expect(error).toMatchObject({
+      code: 'STEER_OUTCOME_UNKNOWN',
+      deliveryOutcome: 'unknown',
+    });
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.entries).toEqual([]);
+    expect(control.recentlyDispatched).toEqual([
+      expect.objectContaining({ entryId: queued.entryId, revision: queued.entry.revision }),
+    ]);
+    expect(settlement.settleSteerFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ entryId: queued.entryId }),
+      error,
+      'unknown',
+    );
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('steers a queued successor after the requesting turn settles', async () => {
+    const queuedRun = deferred();
+    let steerAttempt = 0;
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => ({ providerTurnId: `provider-turn-${steerAttempt + 1}` })),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
+          steerAttempt += 1;
+          if (steerAttempt === 1) {
+            throw new DomainError(
+              'OPERATION_UNSUPPORTED',
+              'This turn cannot be steered',
+              422,
+            );
+          }
+          await prepare();
+          return { kind: 'accepted' };
+        }),
+        runAgentTurn: mock(() => queuedRun.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'queued successor');
+
+    const delivery = coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      new AbortController().signal,
+      mock(() => undefined),
+    );
+    await waitFor(() => fixture.turnRunner.steerInput.mock.calls.length === 1);
+
+    const terminal = coordinator.onAgentTurnTerminal('chat-1', { turnId: 'turn-1' });
+    const drain = coordinator.triggerDrain('chat-1');
+    await delivery;
+
+    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(2);
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledWith(
+      'chat-1',
+      'queued successor',
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
+    const successor = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: successor.turnId });
+    queuedRun.resolve();
+    await Promise.all([terminal, drain]);
+  });
+
+  it('wakes hidden control delivery when provider-only running state clears', async () => {
+    const provider = deferred();
+    let running = true;
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(() => null),
+        isChatRunning: mock(() => running),
+        runAgentTurn: mock(() => provider.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const abortController = new AbortController();
+    const delivery = coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      abortController.signal,
+      mock(() => undefined),
+    );
+
+    await waitFor(() => fixture.turnRunner.isChatRunning.mock.calls.length > 0);
+    running = false;
+    await coordinator.checkChatIdle('chat-1');
+
+    try {
+      await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+      await delivery;
+      expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    } finally {
+      abortController.abort();
+      const runOptions = fixture.turnRunner.runAgentTurn.mock.calls[0]?.[2];
+      if (runOptions) {
+        await coordinator.onAgentTurnTerminal('chat-1', { turnId: runOptions.turnId });
+      }
+      provider.resolve();
+      await delivery.catch(() => undefined);
+      await coordinator.waitForDispatches();
+    }
   });
 
   it('retires an interrupted run immediately and starts its queued successor', async () => {
