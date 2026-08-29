@@ -822,7 +822,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.03-RUNTIME-UNIT-01    | `server/agents/__tests__/runtime-router-seed.test.js`: native resume has no native-activity scheduling dependency | L09.03 |
 | TLV5-L09.03-SNAPSHOT-ROUTE-UNIT-01 | `server/routes/__tests__/chat-snapshot.test.js`: bounded background snapshots do not activate the probe | L09.03 |
 | TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background visible-demand paging carries no activation purpose | L09.03 |
-| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/split/__tests__/split-pane-preview-store.test.ts`: split-pane preview paging carries no activation purpose | L09.03 |
+| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/transcript/__tests__/chat-window-preview-store.test.ts`: Chat-window preview paging carries no activation purpose | L09.03 |
 | TLV5-L09.03-WEB-UNIT-01        | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: only active newest visible demand is marked across hidden raw budgets | L09.03 |
 | TLV5-L09.04-CORE-UNIT-01       | `server/ledger/__tests__/native-activity.test.js`: every changed agent, view, session ordinal/ref, or provider ordinal/timestamp supersedes and fences the old attempt | L09.04 |
 | TLV5-L09.04-CORE-UNIT-02       | `server/ledger/__tests__/native-activity.test.js`: ineligible, failed, execution-owned, invalid, unavailable, and timed-out probes emit nothing | L09.04 |
@@ -946,8 +946,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PAGE.09-SERVER-UNIT-01    | `server/ledger/__tests__/view-reader.test.js`: one hidden-only raw page returns no messages and advances without a presentation scan loop                 | PAGE.09                     |
 | TLV5-PAGE.09-WEB-BACKGROUND-01 | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background newest loading crosses two hidden raw budgets and installs the aggregated bounded snapshot once | PAGE.09 |
 | TLV5-PAGE.09-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: the client contract accepts an empty presented page with a strict raw continuation                    | PAGE.09                     |
-| TLV5-PAGE.09-WEB-SPLIT-01      | `web/src/lib/chat/split/__tests__/split-pane-preview-store.test.ts`: split preview loading crosses two hidden raw budgets before installing its visible target | PAGE.09                  |
-| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: active, background, and split newest paths call the shared visible-demand helper | PAGE.09, supplementary |
+| TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01 | `web/src/lib/chat/transcript/__tests__/chat-window-preview-store.test.ts`: window-preview loading crosses two hidden raw budgets before installing its visible target | PAGE.09                  |
+| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: active, background, and window-preview newest paths call the shared visible-demand helper | PAGE.09, supplementary |
 | TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
 | TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action aggregates fifty sparse bounded pages before one interval mutation with the exact cursor | PAGE.09 |
 | TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
