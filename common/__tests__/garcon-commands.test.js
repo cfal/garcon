@@ -67,6 +67,85 @@ describe('Garcon edge commands', () => {
     });
   });
 
+  it('keeps a quoted send opener inside a trailing command body', () => {
+    const quotedOpener = `<garcon-send-message to="${SECOND}" hide_sender="false">`;
+    const command = [
+      `<garcon-send-message to="${FIRST}" hide_sender="false">`,
+      'Use it like this:',
+      quotedOpener,
+      'example',
+      '</garcon-send-message>',
+    ].join('\n');
+
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${command}`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, 'answer'),
+      commands: [{
+        type: 'send-message',
+        recipients: [FIRST],
+        hideSender: false,
+        body: `Use it like this:\n${quotedOpener}\nexample`,
+      }],
+      issues: [],
+    });
+  });
+
+  it('does not reroute a trailing command through a complete nested command', () => {
+    const command = send(
+      FIRST,
+      false,
+      `before\n${send(SECOND, false, 'nested')}\nafter`,
+    );
+    const content = `answer\n${command}`;
+
+    expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+      message: new AssistantMessage(AT, content),
+      commands: [],
+      issues: [{ command: 'send-message', reason: 'malformed', edge: 'trailing' }],
+    });
+  });
+
+  it('rejects a closing delimiter inside a trailing command body', () => {
+    const command = send(
+      FIRST,
+      false,
+      'Close with </garcon-send-message> when done.',
+    );
+    const content = `answer\n${command}`;
+
+    expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+      message: new AssistantMessage(AT, content),
+      commands: [],
+      issues: [{ command: 'send-message', reason: 'malformed', edge: 'trailing' }],
+    });
+  });
+
+  it('extracts stacked trailing send commands in document order', () => {
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${send(FIRST, false, 'first')}\n${send(SECOND, true, 'second')}`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, 'answer'),
+      commands: [
+        {
+          type: 'send-message',
+          recipients: [FIRST],
+          hideSender: false,
+          body: 'first',
+        },
+        {
+          type: 'send-message',
+          recipients: [SECOND],
+          hideSender: true,
+          body: 'second',
+        },
+      ],
+      issues: [],
+    });
+  });
+
   it('preserves body bytes except one adjacent newline on each side', () => {
     expect(extractGarconCommands(new AssistantMessage(
       AT,
