@@ -7,6 +7,7 @@
 	import type { ActiveSurfaceKind, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
+	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
 	import { cn } from '$lib/utils/cn';
@@ -119,6 +120,7 @@
 	</div>
 	<div class="flex min-w-0 shrink-0 items-center gap-0.5">
 		<div class="flex min-w-0 shrink empty:hidden">{@render auxiliaryActions?.()}</div>
+		<WorkspaceWindowAddMenu windowId={workspaceWindow.id} tabs={workspaceWindow.tabs} />
 		<WorkspaceWindowMenu
 			windowId={workspaceWindow.id}
 			tabs={workspaceWindow.tabs}

@@ -11,7 +11,6 @@
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import ConversationTranscript from './ConversationTranscript.svelte';
-	import ChatWindowComposerBar from './ChatWindowComposerBar.svelte';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
@@ -158,5 +157,4 @@
 		<Scrollbar orientation="vertical" class="w-1.5" />
 		<ScrollAreaPrimitive.Corner />
 	</ScrollAreaPrimitive.Root>
-	<ChatWindowComposerBar {chatId} title={chatTitle} {onFocus} />
 </div>

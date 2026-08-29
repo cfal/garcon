@@ -872,6 +872,7 @@
 	"workspace_surface_file": "File",
 	"workspace_workspace_region": "Workspace",
 	"workspace_open_tabs": "Open tabs",
+	"workspace_add_to_window": "Add to window",
 	"workspace_window_actions": "Window actions",
 	"workspace_surface_actions": "View actions",
 	"workspace_new_terminal": "New Terminal",

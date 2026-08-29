@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import ChatWindowPreviewTestHost from './ChatWindowPreviewTestHost.svelte';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
-import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() =>
@@ -40,7 +39,7 @@ vi.mock('$lib/api/chats.js', () => ({
 }));
 
 describe('ChatWindowPreview', () => {
-	it('shows chat history with a window-local composer when unfocused', async () => {
+	it('gives the full unfocused window body to chat history', async () => {
 		const onFocus = vi.fn();
 		render(ChatWindowPreviewTestHost, { onFocus });
 
@@ -57,62 +56,11 @@ describe('ChatWindowPreview', () => {
 		expect(await screen.findByText('rg split')).toBeTruthy();
 		expect(await screen.findByText('pwd')).toBeTruthy();
 		expect(await screen.findByText('rg split')).toBeTruthy();
-		expect(
-			screen.getByRole('textbox', { name: 'Focus chat composer for Window Test Chat' }),
-		).toBeTruthy();
+		expect(screen.queryByRole('textbox')).toBeNull();
 
 		await fireEvent.click(focusTarget);
 
 		expect(onFocus).toHaveBeenCalledTimes(1);
-	});
-
-	it('persists window-local composer input as the chat draft before focusing', async () => {
-		vi.useFakeTimers();
-		const onFocus = vi.fn();
-		const draftKey = chatDraftStorageKey('chat-1');
-		localStorage.removeItem(draftKey);
-		const { unmount } = render(ChatWindowPreviewTestHost, { onFocus });
-
-		try {
-			const composer = screen.getByRole('textbox', {
-				name: 'Focus chat composer for Window Test Chat',
-			});
-			await fireEvent.focus(composer);
-			expect(onFocus).not.toHaveBeenCalled();
-
-			await fireEvent.input(composer, { target: { value: 'draft from inactive window' } });
-
-			expect(localStorage.getItem(draftKey)).toBe('draft from inactive window');
-			expect(onFocus).toHaveBeenCalledTimes(1);
-		} finally {
-			unmount();
-			localStorage.removeItem(draftKey);
-			vi.useRealTimers();
-		}
-	});
-
-	it('synchronizes duplicate previews with the live composer and external appends', async () => {
-		const onFocus = vi.fn();
-		render(ChatWindowPreviewTestHost, { onFocus, draftSyncFixture: true });
-		const composers = screen.getAllByRole('textbox', {
-			name: 'Focus chat composer for Window Test Chat',
-		}) as HTMLTextAreaElement[];
-
-		await fireEvent.input(composers[0], { target: { value: 'shared preview draft' } });
-
-		expect(composers[1].value).toBe('shared preview draft');
-		expect(document.querySelector('[data-live-composer-draft]')?.textContent).toBe(
-			'shared preview draft',
-		);
-		expect(onFocus).toHaveBeenCalledOnce();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Append external draft block' }));
-
-		expect(composers[0].value).toBe('shared preview draft\n\nExternal review block');
-		expect(composers[1].value).toBe('shared preview draft\n\nExternal review block');
-		expect(document.querySelector('[data-live-composer-draft]')?.textContent).toBe(
-			'shared preview draft\n\nExternal review block',
-		);
 	});
 
 	it('focuses a window on pointer down so the composer can accept typing immediately', async () => {

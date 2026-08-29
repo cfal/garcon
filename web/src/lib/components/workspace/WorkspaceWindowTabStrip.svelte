@@ -19,7 +19,10 @@
 		WorkspaceWindowId,
 		WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
-	import { collectWindowNodes } from '$lib/workspace/window-tree.js';
+	import {
+		openWorkspaceTabInNewWindow,
+		resolveWorkspaceWindowTabActions,
+	} from '$lib/workspace/workspace-window-tab-actions.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import { cn } from '$lib/utils/cn';
 	import {
@@ -56,11 +59,6 @@
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
-	const otherWindows = $derived(
-		collectWindowNodes(workspace.layout.snapshot.desktopRoot).filter(
-			(workspaceWindow) => workspaceWindow.id !== windowId,
-		),
-	);
 
 	$effect(() => {
 		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
@@ -104,12 +102,15 @@
 	}
 
 	function canMoveBetweenWindows(surfaceId: string): boolean {
-		return canDrag(surfaceId);
+		return tabActions(surfaceId).canMoveBetweenWindows;
 	}
 
 	function canOpenInNewWindow(surfaceId: string): boolean {
-		const surface = workspace.layout.surface(surfaceId);
-		return Boolean(surface && (surface.type !== 'chat' || surface.chatId));
+		return tabActions(surfaceId).canOpenInNewWindow;
+	}
+
+	function tabActions(surfaceId: string) {
+		return resolveWorkspaceWindowTabActions(workspace.layout.snapshot, windowId, tabs, surfaceId);
 	}
 
 	function recomputeVisibleTabs(): void {
@@ -151,24 +152,17 @@
 	}
 
 	function moveTabLeft(surfaceId: string): void {
-		const index = tabs.order.indexOf(surfaceId);
+		const { index } = tabActions(surfaceId);
 		if (index > 0) moveTab(surfaceId, windowId, index - 1);
 	}
 
 	function moveTabRight(surfaceId: string): void {
-		const index = tabs.order.indexOf(surfaceId);
+		const { index } = tabActions(surfaceId);
 		if (index >= 0 && index < tabs.order.length - 1) moveTab(surfaceId, windowId, index + 1);
 	}
 
 	function openInNewWindow(surfaceId: string, edge: WorkspaceWindowEdge): void {
-		const surface = workspace.layout.surface(surfaceId);
-		const action =
-			surface?.type === 'chat'
-				? surface.chatId
-					? workspace.openChatInNewWindow(surface.chatId, windowId, edge)
-					: Promise.resolve()
-				: workspace.openTabInNewWindow(surfaceId, windowId, edge);
-		void action.catch(notifyFailure);
+		void openWorkspaceTabInNewWindow(workspace, surfaceId, windowId, edge).catch(notifyFailure);
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
@@ -283,7 +277,8 @@
 				{/snippet}
 			</ContextMenuTrigger>
 			<ContextMenuContent class="w-64">
-				{@const index = tabs.order.indexOf(surfaceId)}
+				{@const actionState = tabActions(surfaceId)}
+				{@const index = actionState.index}
 				<ContextMenuItem disabled={index <= 0} onclick={() => moveTabLeft(surfaceId)}>
 					<ArrowLeft />
 					{m.workspace_move_tab_left()}
@@ -296,7 +291,7 @@
 					{m.workspace_move_tab_right()}
 				</ContextMenuItem>
 				{#if canMoveBetweenWindows(surfaceId)}
-					{#each otherWindows as destination (destination.id)}
+					{#each actionState.otherWindows as destination (destination.id)}
 						<ContextMenuItem onclick={() => moveTab(surfaceId, destination.id)}>
 							<PanelRight />
 							{m.workspace_move_to_window({ window: labelFor(destination.tabs.activeId) })}

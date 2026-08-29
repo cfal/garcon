@@ -259,6 +259,7 @@ describe('WorkspaceRoot', () => {
 		expect(panel.tabIndex).toBe(-1);
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
+		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 	});
 
 	it('keeps one live Chat surface mounted while its local tab becomes hidden', async () => {
@@ -312,6 +313,11 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-window-preview').dataset.chatId).toBe('chat-b');
 		expect(screen.getByTestId('chat-window-preview').dataset.textScale).toBe('0.85');
 		expect(liveChat.dataset.textScale).toBe('0.85');
+		expect(
+			container
+				.querySelector('[data-workspace-window-focus-ring]')
+				?.classList.contains('ring-workspace-window-focus'),
+		).toBe(true);
 
 		await workspace.focusSurface(chatViewSurfaceId('window-2'));
 		await tick();
@@ -377,9 +383,7 @@ describe('WorkspaceRoot', () => {
 		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
 		expect(layout.snapshot.desktopRoot).toBe(beforeRoot);
 		expect(layout.snapshot.fullscreenWindowId).toBe('window-2');
-		expect(
-			container.querySelectorAll('[data-workspace-window-focus-ring="window-2"]'),
-		).toHaveLength(1);
+		expect(container.querySelectorAll('[data-workspace-window-focus-ring]')).toHaveLength(0);
 		const gitPanel = container.querySelector(
 			'[data-workspace-surface-id="singleton:git"]',
 		) as HTMLElement;

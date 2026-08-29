@@ -146,6 +146,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
 		expect(screen.getByText('Chat A')).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_fullscreen() })).toBeTruthy();
 		const close = screen.getByRole('button', { name: m.workspace_close_window() });
@@ -200,22 +201,30 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(enterWindowFullscreen).not.toHaveBeenCalled();
 	});
 
-	it('opens title-bar menu views as tabs in that window', async () => {
+	it('opens plus-menu views as tabs in that window', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
 
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
 	});
 
-	it('closes the window menu when New Terminal enters its busy state', async () => {
+	it('closes the plus menu when New Terminal enters its busy state', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
-		const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+		const trigger = screen.getByRole('button', { name: m.workspace_add_to_window() });
 		await fireEvent.click(trigger);
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_new_terminal() }));
 
 		expect(createTerminal).toHaveBeenCalledWith('window-main', 'workspace-window:window-main');
 		await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+	});
+
+	it('keeps creation actions out of the current-tab menu', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+
+		expect(screen.queryByRole('menuitem', { name: m.workspace_new_terminal() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
 	});
 
 	it('closes the active movable tab from the window menu', async () => {
@@ -224,6 +233,38 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_close_tab() }));
 
 		expect(closeSurface).toHaveBeenCalledWith(gitSurface.id);
+	});
+
+	it('places active-tab movement actions before current-tab actions', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+
+		const menu = document.querySelector('[data-workspace-window-menu="window-main"]')!;
+		const actions = Array.from(
+			menu.querySelectorAll<HTMLElement>('[data-workspace-window-tab-action]'),
+		);
+		expect(actions.map((item) => item.dataset.workspaceWindowTabAction)).toEqual([
+			'move-left',
+			'move-right',
+			'open-left',
+			'open-right',
+			'open-top',
+			'open-bottom',
+		]);
+		expect(menu.querySelector('[data-workspace-window-tab-actions-separator]')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_move_tab_left() }));
+		expect(moveTabToWindow).toHaveBeenCalledWith(gitSurface.id, 'window-main', 0);
+	});
+
+	it('offers Chat directional actions from the current-tab menu', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+		);
+
+		expect(openChatInNewWindow).toHaveBeenCalledWith('chat-a', 'window-main', 'right');
 	});
 
 	it('offers keyboard-accessible ordering for movable local tabs', async () => {

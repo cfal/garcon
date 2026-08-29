@@ -372,12 +372,12 @@
 		</div>
 	</div>
 
-	{#if !isMobile}
+	{#if !isMobile && !fullscreenWindowId && geometry.windows.length > 1}
 		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
-			{#if workspaceWindow.id === presentedCurrentWindowId && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
+			{#if workspaceWindow.id === presentedCurrentWindowId}
 				<div
 					data-workspace-window-focus-ring={workspaceWindow.id}
-					class="pointer-events-none absolute z-40 ring-1 ring-inset ring-ring/80"
+					class="pointer-events-none absolute z-40 ring-1 ring-inset ring-workspace-window-focus"
 					style={rectStyle(displayRect(workspaceWindow.id, rect))}
 				></div>
 			{/if}
