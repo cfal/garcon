@@ -2,10 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
+import {
+  expectFinished,
+  LIVE_TURN_TIMEOUT_MS,
+  reloadFromNativeHistory,
+  reloadUntilNativeContains,
+} from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import {
   startScriptedClaudeTestEnvironment,
@@ -119,6 +125,49 @@ describe('scripted Claude inter-agent messaging', () => {
             detail: { type: 'inter-agent-message-received', fromChatId: sourceChatId },
           }),
         );
+
+        await reloadFromNativeHistory(fixture, sourceChatId);
+        const reloadedSource = await fixture.client.getMessages(sourceChatId);
+        expect(messagesOfType(reloadedSource.messages, 'transcript-notice').filter(
+          (message) => message.detail?.type === 'inter-agent-message-outcome',
+        )).toEqual([]);
+        expect(JSON.stringify(reloadedSource.messages)).not.toContain('<garcon-send-message');
+
+        const store = new TranscriptLedgerStore(
+          path.join(fixture.dirs.workspace, 'transcript-ledgers'),
+        );
+        try {
+          const sourceView = store.currentView(sourceChatId);
+          if (!sourceView) throw new Error('Reloaded source has no current transcript view.');
+          expect(reloadedSource.transcriptViewId).toBe(sourceView.viewId);
+          expect(store.rowsAfter(sourceChatId, sourceView.viewId, 0)).toContainEqual(
+            expect.objectContaining({
+              kind: 'notice',
+              detail: {
+                type: 'inter-agent-send-request',
+                recipients: [targetChatId],
+                hideSender: false,
+                body,
+              },
+            }),
+          );
+        } finally {
+          store.close();
+        }
+
+        await reloadUntilNativeContains(fixture, targetChatId, 'Target received the message.');
+        const reloadedTarget = await fixture.client.getMessages(targetChatId);
+        expect(userContents(reloadedTarget.messages)).toEqual([targetPrompt]);
+        expect(JSON.stringify(reloadedTarget.messages)).not.toContain('<garcon-message');
+        expect(messagesOfType(reloadedTarget.messages, 'transcript-notice').filter(
+          (message) => message.detail?.type === 'inter-agent-message-received',
+        )).toEqual([
+          expect.objectContaining({
+            title: `Message from chat ${sourceChatId}`,
+            content: body,
+            detail: { type: 'inter-agent-message-received', fromChatId: sourceChatId },
+          }),
+        ]);
         testEnvironment.model.assertSettled();
       }, { serverEnvironment: testEnvironment.serverEnvironment });
     } finally {
