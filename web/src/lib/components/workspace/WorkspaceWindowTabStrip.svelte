@@ -223,6 +223,8 @@
 	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
 	{@const chatIsProcessing = !measurement && isChatProcessing(surfaceId)}
 	{@const processingStatusId = `${windowId}-tab-${surfaceId}-processing`}
+	{@const isSelected = !measurement && tabs.activeId === surfaceId}
+	{@const showSelectedBackground = isSelected && tabs.order.length > 1}
 	<button
 		{...triggerProps}
 		type="button"
@@ -241,10 +243,12 @@
 			renderedLabelMode === 'full' && 'w-max shrink-0 px-2',
 			renderedLabelMode === 'truncated' && 'min-w-16 flex-1 px-2',
 			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
-			!measurement && tabs.activeId === surfaceId
+			showSelectedBackground
 				? isCurrent
 					? 'bg-workspace-window-tab-selected text-foreground'
 					: 'bg-workspace-window-tab-selected-inactive text-foreground'
+				: isSelected
+					? 'text-foreground'
 				: 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
 		)}
 		title={labelFor(surfaceId)}

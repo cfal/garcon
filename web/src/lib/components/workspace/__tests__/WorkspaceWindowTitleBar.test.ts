@@ -311,7 +311,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		).toBeTruthy();
 	});
 
-	it('uses the active title-bar token only for the current window in a multi-window layout', () => {
+	it('leaves the sole selected tab transparent in current and inactive windows', () => {
 		runtime.windowCount = 2;
 		const currentRender = renderTitleBar(workspaceWindow([chatSurface.id]));
 		const current = currentRender.container.querySelector('[data-workspace-window-titlebar]')!;
@@ -320,7 +320,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			currentRender
 				.getByRole('tab', { name: 'Chat A' })
 				.classList.contains('bg-workspace-window-tab-selected'),
-		).toBe(true);
+		).toBe(false);
 		cleanup();
 
 		const inactiveRender = renderTitleBar(workspaceWindow([chatSurface.id]), false);
@@ -330,6 +330,29 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(
 			inactiveRender
 				.getByRole('tab', { name: 'Chat A' })
+				.classList.contains('bg-workspace-window-tab-selected-inactive'),
+		).toBe(false);
+	});
+
+	it('uses current and inactive selected-tab tokens when a window has multiple tabs', () => {
+		runtime.windowCount = 2;
+		const currentRender = renderTitleBar(
+			workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id),
+		);
+		expect(
+			currentRender
+				.getByRole('tab', { name: 'Git' })
+				.classList.contains('bg-workspace-window-tab-selected'),
+		).toBe(true);
+		cleanup();
+
+		const inactiveRender = renderTitleBar(
+			workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id),
+			false,
+		);
+		expect(
+			inactiveRender
+				.getByRole('tab', { name: 'Git' })
 				.classList.contains('bg-workspace-window-tab-selected-inactive'),
 		).toBe(true);
 	});
