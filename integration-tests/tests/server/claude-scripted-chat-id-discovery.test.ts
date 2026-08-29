@@ -114,7 +114,7 @@ describe('scripted Claude chat ID discovery', () => {
     try {
       await withIntegrationFixture('claude-chat-id-disabled', async (fixture) => {
         await fixture.client.updateSettings({
-          features: { chatIdDiscovery: { enabled: false } },
+          features: { agentCommands: { chatIdDiscovery: false } },
         });
         try {
           const chatId = fixture.newChatId();
@@ -145,7 +145,7 @@ describe('scripted Claude chat ID discovery', () => {
           testEnvironment.model.assertSettled();
         } finally {
           await fixture.client.updateSettings({
-            features: { chatIdDiscovery: { enabled: true } },
+            features: { agentCommands: { chatIdDiscovery: true } },
           });
         }
       }, { serverEnvironment: testEnvironment.serverEnvironment });

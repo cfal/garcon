@@ -48,7 +48,12 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			chatIdDiscovery: { enabled: true },
+			agentCommands: {
+				enabled: true,
+				chatIdDiscovery: true,
+				sendMessage: true,
+				subAgents: true,
+			},
 		},
 		ui: {},
 		uiEffective: {},
@@ -119,9 +124,9 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 				...current.features.transcriptSearch,
 				...(patch.features?.transcriptSearch ?? {}),
 			},
-			chatIdDiscovery: {
-				...current.features.chatIdDiscovery,
-				...(patch.features?.chatIdDiscovery ?? {}),
+			agentCommands: {
+				...current.features.agentCommands,
+				...(patch.features?.agentCommands ?? {}),
 			},
 		};
 		if (patch.ui?.chatTitle) {
@@ -205,28 +210,59 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('disables chat ID discovery through the positive remote feature patch', async () => {
+	it('persists agent command children while the parent hides and restores them', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot());
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		const toggle = screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' });
-		expect(toggle.getAttribute('aria-checked')).toBe('true');
-		expect(screen.getByText(/Allows an agent to automatically discover their own chat ID/)).toBeTruthy();
-		expect(screen.getByRole('link', { name: 'See Garcon Skills' }).getAttribute('href')).toBe(
+		const parent = screen.getByRole('switch', { name: 'Enable agent commands' });
+		expect(parent.getAttribute('aria-checked')).toBe('true');
+		expect(screen.getByText(/Allows agents to discover chat IDs/)).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Learn more in Garcon Skills' }).getAttribute('href')).toBe(
 			'https://github.com/cfal/garcon-skills',
 		);
+		expect(screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' })).toBeTruthy();
+		expect(screen.getByRole('switch', { name: 'Enable sub-agents' })).toBeTruthy();
 
-		await fireEvent.click(toggle);
+		await fireEvent.click(screen.getByRole('switch', { name: 'Enable send message' }));
 
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
-				features: { chatIdDiscovery: { enabled: false } },
+				features: { agentCommands: { sendMessage: false } },
 			});
-			expect(store.snapshot?.features.chatIdDiscovery.enabled).toBe(false);
+			expect(store.snapshot?.features.agentCommands.sendMessage).toBe(false);
 		});
+
+		await fireEvent.click(parent);
+		await waitFor(() => {
+			expect(store.snapshot?.features.agentCommands.enabled).toBe(false);
+			expect(screen.queryByRole('switch', { name: 'Enable send message' })).toBeNull();
+		});
+		expect(store.snapshot?.features.agentCommands.sendMessage).toBe(false);
+
+		await fireEvent.click(parent);
+		await waitFor(() => {
+			expect(store.snapshot?.features.agentCommands.enabled).toBe(true);
+			expect(screen.getByRole('switch', { name: 'Enable send message' }).getAttribute('aria-checked'))
+				.toBe('false');
+		});
+	});
+
+	it('keeps agent command state unchanged when saving fails', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
+		render(RemoteSettingsSectionTestHost);
+
+		const toggle = screen.getByRole('switch', { name: 'Enable sub-agents' });
+		await fireEvent.click(toggle);
+
+		expect((await screen.findByRole('alert')).textContent).toContain('Settings are unavailable.');
+		expect(toggle.getAttribute('aria-checked')).toBe('true');
+		expect(store.snapshot?.features.agentCommands.subAgents).toBe(true);
 	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {

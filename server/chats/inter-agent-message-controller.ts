@@ -61,6 +61,7 @@ export interface InterAgentMessageControllerOptions {
   readonly execution: InterAgentMessageExecution;
   readonly notices: Pick<TranscriptLedgerService, 'appendNotice'>;
   readonly chatMutationLock: KeyedPromiseLock;
+  readonly isEnabled: () => boolean;
   readonly onDisposition?: (event: InterAgentMessageDispositionEvent) => void;
   readonly onError?: (error: unknown, context: InterAgentMessageErrorContext) => void;
 }
@@ -89,6 +90,18 @@ export class InterAgentMessageController {
     attempt: InterAgentMessageAttempt,
   ): Promise<void> {
     const signal = attempt.abortController.signal;
+    if (!this.options.isEnabled()) {
+      this.#recordOutcome(
+        input,
+        attempt,
+        input.recipients.map((chatId) => ({
+          chatId,
+          status: 'failed',
+          reason: 'disabled',
+        })),
+      );
+      return;
+    }
     let sourceChatId: ChatId;
     try {
       sourceChatId = parseChatId(input.sourceChatId);
@@ -339,6 +352,8 @@ function renderOutcome(body: string, results: readonly InterAgentMessageResult[]
 
 function failureReasonContent(reason: InterAgentMessageFailureReason): string {
   switch (reason) {
+    case 'disabled':
+      return 'agent messaging is disabled';
     case 'self-send':
       return 'cannot send to the source chat';
     case 'target-not-found':

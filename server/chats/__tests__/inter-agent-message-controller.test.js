@@ -69,6 +69,7 @@ function createFixture(overrides = {}) {
     execution,
     notices,
     chatMutationLock: overrides.chatMutationLock ?? new KeyedPromiseLock(),
+    isEnabled: overrides.isEnabled ?? (() => true),
     onDisposition: (event) => dispositions.push(event),
     onError: (error, context) => errors.push({ error, context }),
   });
@@ -80,6 +81,25 @@ function sourceNotices(fixture) {
 }
 
 describe('InterAgentMessageController', () => {
+  it('records a disabled outcome without adopting or delivering to targets', async () => {
+    const fixture = createFixture({ isEnabled: () => false });
+
+    fixture.controller.request(request({ recipients: [TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID] }));
+    await waitFor(() => sourceNotices(fixture).length === 1);
+
+    expect(fixture.adoption.ensure).not.toHaveBeenCalled();
+    expect(fixture.execution.deliverInterAgentControlInput).not.toHaveBeenCalled();
+    expect(sourceNotices(fixture)[0][2]).toMatchObject({
+      content: `Failed: ${TARGET_CHAT_ID} (agent messaging is disabled)\nFailed: ${SECOND_TARGET_CHAT_ID} (agent messaging is disabled)\n\nmessage body`,
+      detail: {
+        results: [
+          { chatId: TARGET_CHAT_ID, status: 'failed', reason: 'disabled' },
+          { chatId: SECOND_TARGET_CHAT_ID, status: 'failed', reason: 'disabled' },
+        ],
+      },
+    });
+  });
+
   it('delivers the exact visible-sender envelope and records target then source notices', async () => {
     const fixture = createFixture();
 

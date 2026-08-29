@@ -10,14 +10,43 @@ import {
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from '../generation-prompts.js';
 
 describe('generation settings contracts', () => {
-  it('defaults chat ID discovery to enabled and preserves an explicit disable', () => {
+  it('defaults agent commands to enabled and normalizes partial command settings', () => {
     expect(normalizeRemoteFeatureSettings(undefined)).toEqual({
       transcriptSearch: { enabled: false },
-      chatIdDiscovery: { enabled: true },
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: true,
+        subAgents: true,
+      },
     });
     expect(normalizeRemoteFeatureSettings({
+      agentCommands: { enabled: false, sendMessage: false },
+    }).agentCommands).toEqual({
+      enabled: false,
+      chatIdDiscovery: true,
+      sendMessage: false,
+      subAgents: true,
+    });
+  });
+
+  it('migrates legacy discovery only when the agent command object is absent or invalid', () => {
+    expect(normalizeRemoteFeatureSettings({
       chatIdDiscovery: { enabled: false },
-    }).chatIdDiscovery).toEqual({ enabled: false });
+    }).agentCommands).toEqual({
+      enabled: true,
+      chatIdDiscovery: false,
+      sendMessage: true,
+      subAgents: true,
+    });
+    expect(normalizeRemoteFeatureSettings({
+      agentCommands: { enabled: true },
+      chatIdDiscovery: { enabled: false },
+    }).agentCommands.chatIdDiscovery).toBe(true);
+    expect(normalizeRemoteFeatureSettings({
+      agentCommands: 'invalid',
+      chatIdDiscovery: { enabled: false },
+    }).agentCommands.chatIdDiscovery).toBe(false);
   });
   it('accepts only supported compaction context-window presets', () => {
     for (const contextWindowTokens of [200_000, 500_000, 1_000_000]) {

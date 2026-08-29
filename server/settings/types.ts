@@ -10,9 +10,9 @@ import type {
 } from '../../common/chat-order-contracts.js';
 import type {
   AppIdentityUiSettings,
+  AgentCommandsFeatureSettings,
   ChatTitleUiSettings,
   CommitMessageUiSettings,
-  ChatIdDiscoveryFeatureSettings,
   PromptRefinementUiSettings,
   TranscriptSearchFeatureSettings,
   AgentSwitchCompactionUiSettings,
@@ -73,7 +73,7 @@ export interface ProjectSettings {
 
 export interface FeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
-  chatIdDiscovery: ChatIdDiscoveryFeatureSettings;
+  agentCommands: AgentCommandsFeatureSettings;
 }
 
 export interface RecentAgentSetting {

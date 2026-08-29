@@ -85,7 +85,7 @@
 		snapshot: {
 			features: {
 				transcriptSearch: { enabled: true },
-				chatIdDiscovery: { enabled: true },
+				agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
 			},
 		},
 	} as never);

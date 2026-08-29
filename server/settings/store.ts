@@ -163,6 +163,19 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
     ? rawFeatures.transcriptSearch
     : null;
   if (typeof rawTranscriptSearch?.enabled !== 'boolean') migrated = true;
+  const rawAgentCommands = isRecord(rawFeatures?.agentCommands)
+    ? rawFeatures.agentCommands
+    : null;
+  if (
+    !rawAgentCommands
+    || typeof rawAgentCommands.enabled !== 'boolean'
+    || typeof rawAgentCommands.chatIdDiscovery !== 'boolean'
+    || typeof rawAgentCommands.sendMessage !== 'boolean'
+    || typeof rawAgentCommands.subAgents !== 'boolean'
+    || Boolean(rawFeatures && 'chatIdDiscovery' in rawFeatures)
+  ) {
+    migrated = true;
+  }
   const features = normalizeRemoteFeatureSettings(raw.features);
   const chatFolders = Array.isArray(raw.chatFolders)
     ? raw.chatFolders.map(sanitizeFolder).filter((folder): folder is ChatFolder => Boolean(folder))

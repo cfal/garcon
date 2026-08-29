@@ -10,7 +10,7 @@ function createHarness(enabled = false) {
   const settings = {
     getFeatureSettings: () => ({
       transcriptSearch: { enabled: current },
-      chatIdDiscovery: { enabled: true },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
     }),
     setFeatureSettings: mock(async (patch) => {
       events.push(`persist:${patch.transcriptSearch.enabled}`);
@@ -89,13 +89,13 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     const harness = createHarness(false);
 
     await harness.coordinator.setEnabled(true, {
-      chatIdDiscovery: { enabled: false },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, subAgents: true },
     });
 
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: true },
-      chatIdDiscovery: { enabled: false },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, subAgents: true },
     });
   });
 
@@ -107,13 +107,13 @@ describe('TranscriptSearchSettingsCoordinator', () => {
     });
 
     await expect(harness.coordinator.setEnabled(false, {
-      chatIdDiscovery: { enabled: false },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, subAgents: true },
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_SEARCH_CLEANUP_FAILED' });
 
     expect(harness.events).toEqual(['persist:false', 'delete']);
     expect(harness.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: false },
-      chatIdDiscovery: { enabled: false },
+      agentCommands: { enabled: false, chatIdDiscovery: false, sendMessage: true, subAgents: true },
     });
   });
 });

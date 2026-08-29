@@ -30,6 +30,7 @@ export interface ChatIdDiscoveryFailureNoticeDetail {
 export type InterAgentMessageDeliveryStatus = 'delivered' | 'queued' | 'failed';
 
 export type InterAgentMessageFailureReason =
+  | 'disabled'
   | 'self-send'
   | 'target-not-found'
   | 'target-unavailable'
@@ -265,7 +266,8 @@ function isSubAgentResultDeliveryStatus(value: unknown): value is SubAgentResult
 }
 
 function isInterAgentMessageFailureReason(value: unknown): value is InterAgentMessageFailureReason {
-  return value === 'self-send'
+  return value === 'disabled'
+    || value === 'self-send'
     || value === 'target-not-found'
     || value === 'target-unavailable'
     || value === 'queue-full'

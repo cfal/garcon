@@ -19,6 +19,7 @@ import {
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
+  type AgentCommandsFeatureSettings,
   type RemoteSettingsSnapshot,
   type RemoteFeatureSettings,
   type RemoteUiEffectiveSettings,
@@ -192,6 +193,33 @@ export default function createWorkspaceRoutes(
     return `features.${key}.enabled must be a boolean`;
   }
 
+  function agentCommandsPatch(
+    input: Record<string, unknown>,
+  ): Partial<AgentCommandsFeatureSettings> | undefined | string {
+    if (!('features' in input)) return undefined;
+    const features = input.features;
+    if (!features || typeof features !== 'object' || Array.isArray(features)) {
+      return 'features.agentCommands must be an object';
+    }
+    const featureRecord = features as Record<string, unknown>;
+    if (!('agentCommands' in featureRecord)) return undefined;
+    const raw = featureRecord.agentCommands;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return 'features.agentCommands must be an object';
+    }
+
+    const patch: Partial<AgentCommandsFeatureSettings> = {};
+    const setting = raw as Record<string, unknown>;
+    for (const key of ['enabled', 'chatIdDiscovery', 'sendMessage', 'subAgents'] as const) {
+      if (!(key in setting)) continue;
+      if (typeof setting[key] !== 'boolean') {
+        return `features.agentCommands.${key} must be a boolean`;
+      }
+      patch[key] = setting[key];
+    }
+    return patch;
+  }
+
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const patch = { ...asPlainObject(raw) };
@@ -295,7 +323,7 @@ export default function createWorkspaceRoutes(
       }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
       const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');
-      const chatIdDiscoveryEnabled = featureEnabledPatch(input, 'chatIdDiscovery');
+      const commandsPatch = agentCommandsPatch(input);
       if (transcriptSearchEnabled === null) {
         return jsonError(
           featureEnabledPatchError('transcriptSearch'),
@@ -304,17 +332,20 @@ export default function createWorkspaceRoutes(
           false,
         );
       }
-      if (chatIdDiscoveryEnabled === null) {
+      if (typeof commandsPatch === 'string') {
         return jsonError(
-          featureEnabledPatchError('chatIdDiscovery'),
+          commandsPatch,
           400,
           'INVALID_REMOTE_SETTINGS',
           false,
         );
       }
       const featurePatch: Partial<RemoteFeatureSettings> = {};
-      if (chatIdDiscoveryEnabled !== undefined) {
-        featurePatch.chatIdDiscovery = { enabled: chatIdDiscoveryEnabled };
+      if (commandsPatch && Object.keys(commandsPatch).length > 0) {
+        featurePatch.agentCommands = {
+          ...settings.getFeatureSettings().agentCommands,
+          ...commandsPatch,
+        };
       }
       if (transcriptSearchEnabled !== undefined) {
         if (transcriptSearchSettings) {
@@ -325,7 +356,7 @@ export default function createWorkspaceRoutes(
             transcriptSearch: { enabled: transcriptSearchEnabled },
           });
         }
-      } else if (chatIdDiscoveryEnabled !== undefined) {
+      } else if (featurePatch.agentCommands) {
         await settings.setFeatureSettings(featurePatch);
       }
       if (uiPatch) {

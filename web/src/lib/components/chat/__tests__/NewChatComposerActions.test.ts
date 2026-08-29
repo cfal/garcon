@@ -54,7 +54,7 @@ function makeSnapshot(): RemoteSettingsSnapshot {
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			chatIdDiscovery: { enabled: true },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
 		},
 		ui: {},
 		uiEffective: {},

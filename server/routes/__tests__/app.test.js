@@ -53,7 +53,11 @@ function createMockCtx() {
       setUiSettings: mock(() => Promise.resolve({})),
       setFeatureSettings: mock(() => Promise.resolve({
         transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: true },
+        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+      })),
+      getFeatureSettings: mock(() => ({
+        transcriptSearch: { enabled: false },
+        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
       })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
@@ -88,6 +92,10 @@ const appRoutes = createWorkspaceRoutes(ctx.settings, ctx.agents);
 
 beforeEach(() => {
   ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource());
+  ctx.settings.getFeatureSettings.mockImplementation(() => ({
+    transcriptSearch: { enabled: false },
+    agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+  }));
 });
 
 function makeRequest(url, method, body) {
@@ -696,14 +704,28 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
-  it('patches chat ID discovery only with a boolean setting', async () => {
+  it('merges a partial agent command patch without losing sibling settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      features: { chatIdDiscovery: { enabled: false } },
+      features: { agentCommands: { chatIdDiscovery: false } },
     }));
     ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
       features: {
         transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+          subAgents: true,
+        },
+      },
+    }));
+    ctx.settings.getFeatureSettings.mockImplementation(() => ({
+      transcriptSearch: { enabled: false },
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: false,
+        subAgents: true,
       },
     }));
 
@@ -711,9 +733,14 @@ describe('PUT /api/app/settings', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.settings.features.chatIdDiscovery.enabled).toBe(false);
+    expect(body.settings.features.agentCommands.chatIdDiscovery).toBe(false);
     expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
-      chatIdDiscovery: { enabled: false },
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: false,
+        subAgents: true,
+      },
     });
   });
 
@@ -721,7 +748,7 @@ describe('PUT /api/app/settings', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
+        agentCommands: { enabled: false },
       },
     }));
 
@@ -731,11 +758,16 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setFeatureSettings).toHaveBeenCalledTimes(1);
     expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
       transcriptSearch: { enabled: true },
-      chatIdDiscovery: { enabled: false },
+      agentCommands: {
+        enabled: false,
+        chatIdDiscovery: true,
+        sendMessage: true,
+        subAgents: true,
+      },
     });
   });
 
-  it('forwards the chat ID patch through the transcript search coordinator', async () => {
+  it('forwards the complete agent command object through the transcript search coordinator', async () => {
     const transcriptSearchSettings = { setEnabled: mock(async () => undefined) };
     const routes = createWorkspaceRoutes(
       ctx.settings,
@@ -748,7 +780,7 @@ describe('PUT /api/app/settings', () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: false },
+        agentCommands: { sendMessage: false },
       },
     }));
 
@@ -758,17 +790,22 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(transcriptSearchSettings.setEnabled).toHaveBeenCalledWith(true, {
-      chatIdDiscovery: { enabled: false },
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: false,
+        subAgents: true,
+      },
     });
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed chat ID discovery settings', async () => {
+  it('rejects malformed agent command settings without mutation', async () => {
     ctx.settings.setFeatureSettings.mockClear();
     parseJsonBody.mockImplementation(() => Promise.resolve({
       features: {
         transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: 'no' },
+        agentCommands: { subAgents: 'no' },
       },
     }));
 
@@ -776,7 +813,7 @@ describe('PUT /api/app/settings', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('features.chatIdDiscovery.enabled must be a boolean');
+    expect(body.error).toBe('features.agentCommands.subAgents must be a boolean');
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });

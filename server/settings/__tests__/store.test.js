@@ -613,7 +613,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         features: {
           transcriptSearch: { enabled: false },
-          chatIdDiscovery: { enabled: true },
+          agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
@@ -629,7 +629,7 @@ describe('settings store', () => {
       expect(settings).toEqual({
         features: {
           transcriptSearch: { enabled: false },
-          chatIdDiscovery: { enabled: true },
+          agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
@@ -1038,17 +1038,56 @@ describe('settings store', () => {
   });
 
   describe('feature settings', () => {
-    it('defaults malformed transcript search to disabled and missing discovery to enabled', async () => {
-      await writeRaw({ features: { transcriptSearch: { enabled: 'yes' } } });
+    it('normalizes malformed feature settings and persists the complete command object', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: 'yes' },
+          agentCommands: { enabled: false, chatIdDiscovery: 'no' },
+        },
+      });
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: true },
+        agentCommands: {
+          enabled: false,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+        },
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features).toEqual({
         transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: true },
+        agentCommands: {
+          enabled: false,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+        },
       });
+    });
+
+    it('migrates legacy chat ID discovery without disabling other commands', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: false },
+          chatIdDiscovery: { enabled: false },
+        },
+      });
+
+      expect(store.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: true,
+        subAgents: true,
+      });
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features.agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: true,
+        subAgents: true,
+      });
+      expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
 
     it('persists enabled and increments the remote settings version once', async () => {
@@ -1057,7 +1096,7 @@ describe('settings store', () => {
       await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: true },
+        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
       expect(events).toEqual(['changed']);
@@ -1066,25 +1105,42 @@ describe('settings store', () => {
       await reloaded.init();
       expect(reloaded.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: true },
-        chatIdDiscovery: { enabled: true },
+        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
       });
     });
 
-    it('persists disabled chat ID discovery and emits one remote change', async () => {
+    it('persists the complete agent command settings and emits one remote change', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));
-      await store.setFeatureSettings({ chatIdDiscovery: { enabled: false } });
+      await store.setFeatureSettings({
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+          subAgents: true,
+        },
+      });
 
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: false },
-        chatIdDiscovery: { enabled: false },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: false,
+          sendMessage: false,
+          subAgents: true,
+        },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
       expect(events).toEqual(['changed']);
 
       const reloaded = new SettingsStore(tmpDir);
       await reloaded.init();
-      expect(reloaded.getFeatureSettings().chatIdDiscovery).toEqual({ enabled: false });
+      expect(reloaded.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: false,
+        sendMessage: false,
+        subAgents: true,
+      });
     });
   });
 });

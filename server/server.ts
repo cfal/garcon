@@ -317,7 +317,10 @@ export async function startServer(): Promise<void> {
         ),
       },
       notices: transcriptLedger,
-      isEnabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
+      isEnabled: () => {
+        const commands = settings.getFeatureSettings().agentCommands;
+        return commands.enabled && commands.chatIdDiscovery;
+      },
       onError(error, chatId) {
         logger.warn('Chat ID auto-discovery delivery failed', {
           chatId,
@@ -549,6 +552,10 @@ export async function startServer(): Promise<void> {
       execution: queue,
       notices: transcriptLedger,
       chatMutationLock,
+      isEnabled: () => {
+        const commands = settings.getFeatureSettings().agentCommands;
+        return commands.enabled && commands.sendMessage;
+      },
     });
     executionQueries = queue;
     const transcriptReload = new TranscriptReloadService({

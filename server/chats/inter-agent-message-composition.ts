@@ -13,7 +13,7 @@ const logger = createLogger('inter-agent-messages');
 
 type InterAgentMessageCompositionOptions = Pick<
   InterAgentMessageControllerOptions,
-  'registry' | 'adoption' | 'execution' | 'notices' | 'chatMutationLock'
+  'registry' | 'adoption' | 'execution' | 'notices' | 'chatMutationLock' | 'isEnabled'
 >;
 
 export class InterAgentMessageComposition implements InterAgentMessageRequestSink {

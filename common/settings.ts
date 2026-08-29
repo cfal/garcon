@@ -126,18 +126,26 @@ export interface TranscriptSearchFeatureSettings {
   enabled: boolean;
 }
 
-export interface ChatIdDiscoveryFeatureSettings {
+export interface AgentCommandsFeatureSettings {
   enabled: boolean;
+  chatIdDiscovery: boolean;
+  sendMessage: boolean;
+  subAgents: boolean;
 }
 
 export interface RemoteFeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
-  chatIdDiscovery: ChatIdDiscoveryFeatureSettings;
+  agentCommands: AgentCommandsFeatureSettings;
 }
 
 export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
   transcriptSearch: { enabled: false },
-  chatIdDiscovery: { enabled: true },
+  agentCommands: {
+    enabled: true,
+    chatIdDiscovery: true,
+    sendMessage: true,
+    subAgents: true,
+  },
 };
 
 export interface RecentAgentSetting {
@@ -175,7 +183,7 @@ export interface RemoteSettingsSnapshot {
 export interface UpdateRemoteSettingsInput {
   features?: {
     transcriptSearch?: Partial<TranscriptSearchFeatureSettings>;
-    chatIdDiscovery?: Partial<ChatIdDiscoveryFeatureSettings>;
+    agentCommands?: Partial<AgentCommandsFeatureSettings>;
   };
   ui?: Partial<RemoteUiSettings>;
   paths?: Partial<RemotePathSettings>;
@@ -478,16 +486,27 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
   const raw = asRecord(value);
   const transcriptSearch = asRecord(raw?.transcriptSearch);
-  const chatIdDiscovery = asRecord(raw?.chatIdDiscovery);
+  const agentCommands = asRecord(raw?.agentCommands);
+  const legacyChatIdDiscovery = asRecord(raw?.chatIdDiscovery);
+  const chatIdDiscovery = agentCommands
+    ? agentCommands.chatIdDiscovery
+    : legacyChatIdDiscovery?.enabled;
   return {
     transcriptSearch: {
       enabled: typeof transcriptSearch?.enabled === 'boolean'
         ? transcriptSearch.enabled
         : false,
     },
-    chatIdDiscovery: {
-      enabled: typeof chatIdDiscovery?.enabled === 'boolean'
-        ? chatIdDiscovery.enabled
+    agentCommands: {
+      enabled: typeof agentCommands?.enabled === 'boolean'
+        ? agentCommands.enabled
+        : true,
+      chatIdDiscovery: typeof chatIdDiscovery === 'boolean' ? chatIdDiscovery : true,
+      sendMessage: typeof agentCommands?.sendMessage === 'boolean'
+        ? agentCommands.sendMessage
+        : true,
+      subAgents: typeof agentCommands?.subAgents === 'boolean'
+        ? agentCommands.subAgents
         : true,
     },
   };

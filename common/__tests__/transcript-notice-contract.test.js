@@ -89,6 +89,7 @@ describe('transcript notice contracts', () => {
         { chatId: '1787974832309199', status: 'delivered' },
         { chatId: '1787973671383699', status: 'queued' },
         { chatId: '1787971111111111', status: 'failed', reason: 'target-not-found' },
+        { chatId: '1787972222222222', status: 'failed', reason: 'disabled' },
       ],
     };
     const received = {
