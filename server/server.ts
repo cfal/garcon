@@ -544,8 +544,10 @@ export async function startServer(): Promise<void> {
       interAgentMessages.appendControlReceipt,
     );
     interAgentMessages.initialize({
-      registry: chatRegistry, adoption: transcriptAdoption,
-      execution: queue, notices: transcriptLedger,
+      registry: chatRegistry,
+      adoption: transcriptAdoption,
+      execution: queue,
+      notices: transcriptLedger,
       chatMutationLock,
     });
     executionQueries = queue;

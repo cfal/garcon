@@ -541,7 +541,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   reserveTranscriptSnapshot(chatId: string): TranscriptSnapshotReservation {
     if (this.#shuttingDown) {
-      throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
+      throw serverShuttingDownError();
     }
     if (this.ownsExecution(chatId)) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
@@ -676,7 +676,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   #reserveDirect(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {
     if (this.#shuttingDown) {
-      throw new DomainError('SERVER_SHUTTING_DOWN', 'The server is shutting down', 503, true);
+      throw serverShuttingDownError();
     }
     if (this.ownsExecution(chatId)) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);

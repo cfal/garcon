@@ -512,7 +512,6 @@ export class ChatExecutionControlOperations {
       laneDepth: control.controlEntries.length,
     });
   }
-
 }
 
 function isPendingQueueEntry(entry: StoredQueueEntry): boolean {

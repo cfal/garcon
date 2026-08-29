@@ -325,12 +325,14 @@ function classifyDeliveryFailure(error: unknown): InterAgentMessageFailureReason
 
 function renderOutcome(body: string, results: readonly InterAgentMessageResult[]): string {
   const lines = results.map((result) => {
-    if (result.status === 'delivered') return `Delivered: ${result.chatId}`;
-    if (result.status === 'queued') {
-      return `Queued: ${result.chatId} (pending delivery is not retained across server restart)`;
+    switch (result.status) {
+      case 'delivered':
+        return `Delivered: ${result.chatId}`;
+      case 'queued':
+        return `Queued: ${result.chatId} (pending delivery is not retained across server restart)`;
+      case 'failed':
+        return `Failed: ${result.chatId} (${failureReasonContent(result.reason)})`;
     }
-    const reason = 'reason' in result ? result.reason : 'delivery-failed';
-    return `Failed: ${result.chatId} (${failureReasonContent(reason)})`;
   });
   return `${lines.join('\n')}\n\n${body}`;
 }

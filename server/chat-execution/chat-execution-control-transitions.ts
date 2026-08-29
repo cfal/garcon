@@ -526,10 +526,7 @@ export function reserveQueueSteer(
   entry.status = 'steering';
   bump(next, context.now);
   return accepted(next, {
-    entry: {
-      ...entry,
-      ...(entry.submission ? { submission: { ...entry.submission } } : {}),
-    },
+    entry: cloneQueueEntry(entry),
   }, true);
 }
 

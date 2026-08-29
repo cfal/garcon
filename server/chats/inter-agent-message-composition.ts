@@ -6,6 +6,7 @@ import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
   InterAgentMessageController,
   type InterAgentMessageControllerOptions,
+  type InterAgentMessageRequest,
 } from './inter-agent-message-controller.js';
 
 const logger = createLogger('inter-agent-messages');
@@ -19,7 +20,7 @@ export class InterAgentMessageComposition implements InterAgentMessageRequestSin
   #controller: InterAgentMessageController | null = null;
   #notices: Pick<TranscriptLedgerService, 'appendNotice'> | null = null;
 
-  request(input: Parameters<InterAgentMessageRequestSink['request']>[0]): void {
+  request(input: InterAgentMessageRequest): void {
     if (!this.#controller) {
       throw new Error('Inter-agent message controller is not initialized');
     }

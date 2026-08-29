@@ -4,7 +4,6 @@ import type {
   SteerDeliveryOutcome,
 } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
-import type { InterAgentMessageReceivedNoticeDetail } from '../../common/transcript-notice-details.ts';
 import type {
   ChatStopIntent,
   ChatStopOutcome,
@@ -24,6 +23,7 @@ import type {
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
+  type StoredControlInputEntry,
 } from './control-state.ts';
 import { DomainError } from '../lib/domain-error.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
@@ -206,16 +206,7 @@ export interface CapturedSteerTarget {
   readonly providerTarget: AgentSteerTarget | null;
 }
 
-export interface InterAgentControlInput {
-  readonly content: string;
-  readonly transcriptViewId: string;
-  readonly createdAt: string;
-  readonly receipt: {
-    readonly title: string;
-    readonly content: string;
-    readonly detail: InterAgentMessageReceivedNoticeDetail;
-  };
-}
+export type InterAgentControlInput = Omit<StoredControlInputEntry, 'id'>;
 
 export type InterAgentControlDisposition = 'delivered' | 'queued';
 
