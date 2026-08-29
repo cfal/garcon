@@ -105,6 +105,7 @@ export function scriptedPiStartRequest(input: {
   thinkingMode?: StartChatCommandRequest['thinkingMode'];
 }): StartChatCommandRequest {
   return {
+    origin: 'interactive',
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     chatId: input.chatId,

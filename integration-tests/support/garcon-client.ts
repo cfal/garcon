@@ -558,6 +558,7 @@ export class GarconTestClient {
 
   directStartRequest(input: DirectStartInput): StartChatCommandRequest {
     return {
+      origin: 'interactive',
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
       chatId: input.chatId,

@@ -52,6 +52,7 @@ describe('native transcript reload', () => {
 
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -316,6 +317,7 @@ describe('native transcript reload', () => {
 
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -426,6 +428,7 @@ describe('native transcript reload', () => {
 
       const chatId = fixture.newChatId();
       const source = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,

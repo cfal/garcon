@@ -50,6 +50,7 @@ describe('Claude project path relocation', () => {
 
         const chatId = fixture.newChatId();
         const first = await fixture.client.startChat({
+          origin: 'interactive',
           clientRequestId: randomUUID(),
           clientMessageId: randomUUID(),
           chatId,

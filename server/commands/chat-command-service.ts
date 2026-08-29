@@ -12,6 +12,7 @@ import {
   CommandSupport,
   type ChatCommandServiceDeps,
   type ChatStartInput,
+  type AgentCommandChatStartInput,
   type CompactInput,
   type DeleteChatInput,
   type PermissionDecisionInput,
@@ -38,6 +39,7 @@ export {
 } from './command-support.js';
 export type {
   ChatStartInput,
+  AgentCommandChatStartInput,
   ScheduledChatStartInput,
   ScheduledExistingChatInput,
   ScheduledExistingChatOutcome,
@@ -71,6 +73,10 @@ export class ChatCommandService {
 
   submitScheduledStart(input: ScheduledChatStartInput) {
     return this.#start.submitScheduledStart(input);
+  }
+
+  submitAgentCommandStart(input: AgentCommandChatStartInput) {
+    return this.#start.submitAgentCommandStart(input);
   }
 
   submitRun(input: SubmitRunInput) {

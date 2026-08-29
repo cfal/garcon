@@ -27,6 +27,7 @@ describe('Claude fork while a turn is running', () => {
 
       const sourceChatId = fixture.newChatId();
       const settled = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: randomUUID(),
         clientMessageId: randomUUID(),
         chatId: sourceChatId,

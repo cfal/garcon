@@ -189,6 +189,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-a',
       clientMessageId: 'msg-start-a',
       chatId: CHAT_ID,
@@ -241,6 +242,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-b',
       clientMessageId: 'msg-start-b',
       chatId: '1783725900000101',
@@ -280,6 +282,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-c');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-c',
       clientMessageId: 'msg-start-c',
       chatId: '1783725900000102',
@@ -308,6 +311,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-d');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-d',
       clientMessageId: 'msg-start-d',
       chatId: '1783725900000103',
@@ -358,6 +362,7 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-e');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-e',
       clientMessageId: 'msg-start-e',
       chatId: '1783725900000104',
@@ -380,6 +385,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.mkdir(projectPath, { recursive: true });
     agents.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-start-f',
       clientMessageId: 'msg-start-f',
       chatId: '1783725900000105',
@@ -419,7 +425,7 @@ describe('POST /api/v1/chats/start', () => {
   });
 
   it('requires request and message identity', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: CHAT_ID }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ origin: 'interactive', chatId: CHAT_ID }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
     const body = await response.json();
@@ -431,6 +437,7 @@ describe('POST /api/v1/chats/start', () => {
 
   it('rejects oversized numeric chat IDs before persistence', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
       clientRequestId: 'req-oversized',
       clientMessageId: 'msg-oversized',
       chatId: '178372590000007231252',

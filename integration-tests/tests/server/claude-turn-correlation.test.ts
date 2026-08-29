@@ -449,6 +449,7 @@ describe('Claude turn correlation', () => {
       const clientRequestId = crypto.randomUUID();
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId,
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -516,6 +517,7 @@ describe('Claude turn correlation', () => {
       const chatId = fixture.newChatId();
       const firstCursor = fixture.client.markEvents();
       const first = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -596,6 +598,7 @@ describe('Claude turn correlation', () => {
       const chatId = fixture.newChatId();
       const firstCursor = fixture.client.markEvents();
       const first = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -688,6 +691,7 @@ describe('Claude turn correlation', () => {
     await withIntegrationFixture('claude-pre-start-cancellation', async (fixture) => {
       const chatId = fixture.newChatId();
       const accepted = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -741,6 +745,7 @@ describe('Claude turn correlation', () => {
     await withIntegrationFixture('claude-active-cancellation', async (fixture) => {
       const chatId = fixture.newChatId();
       const accepted = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -793,6 +798,7 @@ describe('Claude turn correlation', () => {
       const clientRequestId = crypto.randomUUID();
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId,
         clientMessageId: crypto.randomUUID(),
         chatId,
@@ -850,6 +856,7 @@ describe('Claude turn correlation', () => {
         const chatId = fixture.newChatId();
         const cursor = fixture.client.markEvents();
         const accepted = await fixture.client.startChat({
+          origin: 'interactive',
           clientRequestId: crypto.randomUUID(),
           clientMessageId: crypto.randomUUID(),
           chatId,

@@ -351,6 +351,7 @@ async function seedClaudeHistory(
   if (!first) throw new Error('At least one turn is required.');
   const chatId = fixture.newChatId();
   const started = await fixture.client.startChat({
+    origin: 'interactive',
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     chatId,

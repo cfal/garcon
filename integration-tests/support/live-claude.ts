@@ -55,6 +55,7 @@ export function liveClaudeStartRequest(input: {
   permissionMode?: StartChatCommandRequest['permissionMode'];
 }): StartChatCommandRequest {
   return {
+    origin: 'interactive',
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     chatId: input.chatId,

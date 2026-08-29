@@ -43,6 +43,7 @@ describe('chat command request parsers', () => {
 
   it('normalizes start modes and tags once at the wire boundary', () => {
     const parsed = parseStartChatCommandRequest({
+      origin: 'interactive',
       clientRequestId: ' request-1 ',
       clientMessageId: ' message-1 ',
       chatId: CHAT_ID,
@@ -65,7 +66,31 @@ describe('chat command request parsers', () => {
       thinkingMode: 'none',
       command: 'hello',
       tags: ['qa', 'review-needed'],
+      origin: 'interactive',
     });
+  });
+
+  it('accepts only public chat start origins', () => {
+    const input = {
+      origin: 'cli',
+      clientRequestId: 'request-origin',
+      clientMessageId: 'message-origin',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+      projectPath: '/repo',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: agentSettings(),
+      command: 'hello',
+    };
+
+    expect(parseStartChatCommandRequest(input).origin).toBe('cli');
+    for (const origin of [undefined, 'scheduled', 'agent-command', 'other']) {
+      expect(() => parseStartChatCommandRequest({ ...input, origin })).toThrow(
+        'origin must be interactive or cli',
+      );
+    }
   });
 
   it('preserves omitted resume overrides and normalizes additive tags', () => {

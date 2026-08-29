@@ -11,6 +11,7 @@ import {
   type AgentRunCommandRequest,
   type AgentStopCommandRequest,
   type AgentTurnCommandResponse,
+  type ChatStartOrigin,
   type CompactCommandRequest,
   type CommandAcceptedResponse,
   type ForkRunCommandRequest,
@@ -187,7 +188,14 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   allowHandoffFork?: boolean;
 }
 
-export type ChatStartInput = StartChatCommandRequest;
+export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & {
+  origin: ChatStartOrigin;
+};
+
+export type AgentCommandChatStartInput = Omit<
+  ChatStartInput,
+  'origin' | 'images' | 'userMessagePresentation'
+>;
 
 export interface ScheduledChatStartInput {
   chatId: ChatId;
@@ -207,6 +215,7 @@ export interface ScheduledChatStartInput {
 }
 
 export interface NormalizedChatStart {
+  origin: ChatStartOrigin;
   chatId: ChatId;
   clientRequestId: string;
   clientMessageId: string;

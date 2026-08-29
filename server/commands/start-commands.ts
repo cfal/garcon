@@ -1,6 +1,9 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
-import type { StartChatCommandResponse } from '../../common/chat-command-contracts.js';
+import {
+  recordsStartupPreferences,
+  type StartChatCommandResponse,
+} from '../../common/chat-command-contracts.js';
 
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { createLogger } from '../lib/log.js';
@@ -9,6 +12,7 @@ import {
   CommandSupport,
   CommandValidationError,
   agentTurnResultFromRecord,
+  type AgentCommandChatStartInput,
   type ChatStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
@@ -44,8 +48,17 @@ export class StartCommands {
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
     return this.submitStart({
       ...input,
+      origin: 'scheduled',
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
+    });
+  }
+
+  async submitAgentCommandStart(input: AgentCommandChatStartInput): Promise<StartChatCommandResponse> {
+    return this.submitStart({
+      ...input,
+      origin: 'agent-command',
+      images: [],
     });
   }
 
@@ -73,6 +86,7 @@ export class StartCommands {
     }
 
     return {
+      origin: input.origin,
       chatId,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
@@ -151,17 +165,19 @@ export class StartCommands {
             agentSettingsById: { [input.agentId]: input.agentSettings },
           });
           this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
-          await this.deps.settings.recordChatStartup({
-            agentId: input.agentId,
-            projectPath: input.projectPath,
-            model: input.model,
-            apiProviderId: input.apiProviderId,
-            modelEndpointId: input.modelEndpointId,
-            modelProtocol: input.modelProtocol,
-            permissionMode: input.permissionMode,
-            thinkingMode: input.thinkingMode,
-            agentSettingsById: { [input.agentId]: input.agentSettings },
-          });
+          if (recordsStartupPreferences(input.origin)) {
+            await this.deps.settings.recordChatStartup({
+              agentId: input.agentId,
+              projectPath: input.projectPath,
+              model: input.model,
+              apiProviderId: input.apiProviderId,
+              modelEndpointId: input.modelEndpointId,
+              modelProtocol: input.modelProtocol,
+              permissionMode: input.permissionMode,
+              thinkingMode: input.thinkingMode,
+              agentSettingsById: { [input.agentId]: input.agentSettings },
+            });
+          }
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
         },
@@ -275,6 +291,7 @@ export class StartCommands {
 
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
+    origin: input.origin,
     chatId: input.chatId,
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
@@ -298,6 +315,7 @@ function startReplayPayload(
   chatId: NormalizedChatStart['chatId'],
 ): Record<string, unknown> {
   return {
+    origin: input.origin,
     chatId,
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,

@@ -524,6 +524,7 @@ function startRequest(
   command: string,
 ) {
   return {
+    origin: 'interactive' as const,
     clientRequestId: randomUUID(),
     clientMessageId: randomUUID(),
     chatId,

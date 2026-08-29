@@ -96,6 +96,7 @@ async function submitStart(
   let lastCollision: GarconHttpError | undefined;
   for (let attempt = 0; attempt < START_CHAT_ID_ATTEMPTS; attempt += 1) {
     const request: StartChatCommandRequest = {
+      origin: 'cli',
       clientRequestId: createId(),
       clientMessageId: createId(),
       chatId: createChatId(),

@@ -680,6 +680,7 @@ describe('queue lifecycle', () => {
       const chatId = fixture.newChatId();
       const cursor = fixture.client.markEvents();
       const accepted = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,

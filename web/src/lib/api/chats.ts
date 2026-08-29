@@ -177,6 +177,7 @@ export async function startChat(
 ): Promise<StartChatCommandResponse & { chat: ChatListEntry }> {
 	const { permissionMode, thinkingMode, ...rest } = params;
 	const response = await apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
+		origin: 'interactive',
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),

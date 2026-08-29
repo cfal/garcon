@@ -19,6 +19,7 @@ describe('transcript search maintenance adoption', () => {
         features: { transcriptSearch: { enabled: true } },
       });
       const started = await fixture.client.startChat({
+        origin: 'interactive',
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,

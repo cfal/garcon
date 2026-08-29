@@ -122,6 +122,20 @@ export interface StartChatCommandResponse extends AgentTurnCommandResponse {
   chat: ChatListEntry | null;
 }
 
+export const CHAT_START_ORIGINS = [
+  'interactive',
+  'cli',
+  'scheduled',
+  'agent-command',
+] as const;
+
+export type ChatStartOrigin = typeof CHAT_START_ORIGINS[number];
+export type ClientChatStartOrigin = Extract<ChatStartOrigin, 'interactive' | 'cli'>;
+
+export function recordsStartupPreferences(origin: ChatStartOrigin): boolean {
+  return origin === 'interactive';
+}
+
 export interface ForkChatResponse {
   success: true;
   chat: ChatListEntry;
@@ -150,6 +164,7 @@ export interface CommandErrorResponse extends HttpErrorResponse {
 }
 
 export interface StartChatCommandRequest {
+  origin: ClientChatStartOrigin;
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
@@ -456,6 +471,7 @@ export interface RunningChatsResponse {
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
   const body = requestRecord(value);
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
+  const origin = clientChatStartOrigin(body.origin);
   const clientRequestId = requiredCommandCorrelationId(body, 'clientRequestId');
   const clientMessageId = requiredCommandCorrelationId(body, 'clientMessageId');
   const chatId = requiredChatId(body, 'chatId');
@@ -468,6 +484,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     throw new CommandRequestValidationError('agentSettings must be owned by agentId');
   }
   return {
+    origin,
     clientRequestId,
     clientMessageId,
     chatId,
@@ -485,6 +502,11 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     tags: normalizeTags(Array.isArray(body.tags) ? body.tags : []),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
   };
+}
+
+function clientChatStartOrigin(value: unknown): ClientChatStartOrigin {
+  if (value === 'interactive' || value === 'cli') return value;
+  throw new CommandRequestValidationError('origin must be interactive or cli');
 }
 
 export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequest {

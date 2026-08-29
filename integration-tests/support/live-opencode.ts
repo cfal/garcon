@@ -174,6 +174,7 @@ export function liveOpenCodeStartRequest(input: {
   command: string;
 }): StartChatCommandRequest {
   return {
+    origin: 'interactive',
     clientRequestId: crypto.randomUUID(),
     clientMessageId: crypto.randomUUID(),
     chatId: input.chatId,

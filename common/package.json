@@ -53,6 +53,7 @@
     "./share-types": "./share-types.ts",
     "./slash-commands": "./slash-commands.ts",
     "./snippets": "./snippets.ts",
+    "./start-selection": "./start-selection.ts",
     "./tags": "./tags.ts",
     "./terminal": "./terminal.ts",
     "./transcript-notice-details": "./transcript-notice-details.ts",
