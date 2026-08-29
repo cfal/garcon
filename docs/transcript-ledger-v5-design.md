@@ -1,10 +1,33 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 27 integrated design. Supersedes
+Status: revision 28 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 28 keeps revision 27's single visible discovery outcome while
+restoring the request marker as one ledger-private hidden notice. The cleaned
+assistant remainder, when present, and `{type: 'chat-id-request'}` support row
+commit atomically at the marker timestamp before delivery starts. The shared
+presentation boundary drops that row, and every conversational fold already
+excludes notices; native import reconstructs it without redispatching. It is
+therefore durable provider evidence without becoming a second visible row,
+model input, queue entry, share/export entry, or public message contract. The
+native-activity predicate returns exactly to revision 26: request, disclosure,
+and disabled notices qualify while generic delivery failures do not; probe
+scheduling remains activation-only and is unchanged.
+
+Control delivery now captures only the emitting run, steers it once, and
+falls back only after definitive non-delivery and settlement of that exact
+attempt. Fallback makes one direct server-control reservation and sends the
+disclosure envelope without admitting a user input. Ambiguous delivery is
+terminal because it cannot authorize duplication. There is no retry,
+successor retarget, route watcher, priority queue, or discovery-specific
+execution notification. The visible success notice is the sole transcript
+representation of accepted disclosure; the control turn's processing and
+provider output retain ordinary lifecycle behavior. Unsupported steering is a
+fallback trigger rather than a terminal discovery outcome.
 
 Revision 27 collapses chat-ID discovery into one outcome notice and adds a
 hidden new-turn fallback. Core still strips the exact assistant marker before
@@ -543,7 +566,7 @@ by reload, continuation/fork seeding, and adoption.
 | Kind | Writer | Rendered |
 | --- | --- | --- |
 | `user-input` | core | yes |
-| `notice` | core, including `add-row`, chat-ID discovery, and accepted producer advisories | yes |
+| `notice` | core, including `add-row`, chat-ID discovery, and accepted producer advisories | yes, except the ledger-private chat-ID request row |
 | `agent-switch` | core | yes |
 | `permission-resolved` | core | specialized |
 | `provider-row` | integration | yes |
@@ -568,11 +591,14 @@ Kind semantics:
   `{type: 'carryover-migration-quarantine', artifactId, errorCode}`; it has no
   action. The typed detail is how the frozen projection preserves this notice
   while dropping ordinary notices, because the loss cannot be repaired by
-  Reload. Chat-ID discovery uses `{type: 'chat-id-disclosure'}` after accepted
-  steer or hidden-turn delivery and `{type: 'chat-id-discovery-failure', reason}`
-  for disabled, unsupported, or failed delivery outcomes. They are presentation-only
-  diagnostics: they render, replay, share, and export, but do not enter search,
-  preview, model context, resend, carryover, or fork seeds. Rendered
+  Reload. Every chat-ID request also creates the ledger-private support detail
+  `{type: 'chat-id-request'}` at the marker timestamp. It is dropped by the
+  server presentation boundary and enters no public or conversational fold,
+  but remains native-activity evidence. Accepted disclosure uses the shared
+  `{type: 'chat-id-disclosure'}` detail; disabled or failed delivery uses
+  `{type: 'chat-id-discovery-failure', reason}`. Those outcome notices are
+  presentation-only diagnostics: they render, replay, share, and export, but
+  do not enter search, preview, model context, resend, carryover, or fork seeds. Rendered
   `TranscriptNoticeMessage` and `ErrorMessage` instances own
   their optional top-level `title`; a rendered CLI row's detail is only the
   `{type: 'cli-row'}` provenance marker.
@@ -595,8 +621,9 @@ Kind semantics:
   message beginning exactly with `<get-garcon-chat-id />`, removes that prefix
   and leading remainder whitespace before append, and omits the provider row
   when no non-whitespace remainder exists. The original `providerMeta` remains
-  attached to a cleaned row. Marker recognition invokes discovery delivery after
-  the cleaned provider batch commits; it stores no request row.
+  attached to a cleaned row. Each marker appends a ledger-private
+  `chat-id-request` notice after its cleaned remainder in the same batch.
+  Marker recognition invokes discovery delivery only after that batch commits.
 - `session`: a newly established native session for this chat. `detail`
   holds `agentSessionId`, encoded native-session ref, seed receipt. The
   latest session row at or after the view's `content_start_ordinal` is
@@ -1130,25 +1157,27 @@ The guarantee is durable before provider dispatch, not durable at send:
   fold.
 - A **chat-ID discovery control input** is server-originated rather than a user
   submission. It creates no `user-input` row and does not participate in resend,
-  queueing, or command idempotency. Core first uses the ordinary steering
-  transport against an active turn. A definitive state change waits for the
-  captured attempt to settle, then falls back to a direct turn using the same
-  execution ownership, control-state checks, and background lifecycle as an
-  ordinary run, but sends only the disclosure
-  envelope and admits no transcript input. Route selection uses the CLI's bounded
-  alternation shape but additionally treats unsupported, non-steerable, and
-  confirmed-not-sent control delivery as safe fallback outcomes. Unsupported is
-  terminal only when three consecutive active turns keep all three attempts on
-  the steering route, so no hidden direct route can be attempted. Acceptance of
-  either route immediately appends one outcome notice; provider completion is not part of discovery and
+  queueing, or command idempotency. Core captures a steering target once and
+  uses it only when its turn identity equals the marker's emitting run. It
+  attempts that steer once. Accepted delivery finishes; ambiguous delivery and
+  unexpected failures stop without fallback. A definitive unavailable,
+  changed, non-steerable, unsupported, or confirmed-not-sent result waits for
+  that exact attempt to settle, then makes one direct server-control
+  reservation. A missing or mismatched emitting target goes directly to that
+  reservation without steering a successor. The direct route uses ordinary
+  execution ownership, deletion/drain/queue/pause checks, and background
+  lifecycle, but sends only the disclosure envelope and admits no transcript
+  input. Contention fails immediately: there is no retry, route watch,
+  successor retarget, or queue entry. Acceptance of either route immediately
+  appends one outcome notice; provider completion is not part of discovery and
   any later failure uses the ordinary provider/run error path.
-  A hidden direct route registers its turn identity before provider dispatch.
-  Discovery suppresses markers correlated to that turn and, because late
-  provider rows carry no active-run attribution, every later uncorrelated
+  The direct route registers its control-turn identity before provider
+  dispatch. Discovery suppresses markers correlated to that turn and, because
+  late provider rows carry no active-run attribution, every later uncorrelated
   marker until view replacement or deletion. Outside the per-chat in-flight
   delivery gate, a marker correlated to a different run remains eligible. This
   conservative recursion fence may drop an independent uncorrelated request
-  rather than recursively dispatching a hidden turn's late output.
+  rather than recursively dispatching a control turn's late output.
 - A **future-turn queued input** remains only in the process-ephemeral
   queue, indexed by `clientMessageId`. It is not a transcript row.
   Dequeue is one synchronous block: commit the `user-input` row (the
@@ -1351,7 +1380,8 @@ presentation-only in every consumer fold.
 | `user-input` | yes | yes | candidate | yes, excluding current-prompt rows | yes | yes |
 | conversational `provider-row` | yes | yes | candidate | yes | yes | yes |
 | error `provider-row` | yes | no | no | no | yes | yes |
-| `notice` | yes | no | no | no | yes | yes |
+| ledger-private `chat-id-request` notice | no | no | no | no | no | no |
+| every other `notice` | yes | no | no | no | yes | yes |
 | `agent-switch` | yes | no | no | no | yes | yes |
 | permission rows | specialized | no | no | no | specialized | yes |
 | `session` | no | no | no | no | no | support export only |
@@ -1361,9 +1391,11 @@ The native-drift operational warning is outside this matrix. It is a transient
 server event and enters no ledger page, replay, search result, preview, share,
 model context, carryover, or export.
 
-- **Rendering** shows conversational rows, notices, provider errors, and
-  specialized permission rows; turn state derives from `run-ended` rows and
-  live execution state. Late content renders in observed order.
+- **Rendering** shows conversational rows, public notices, provider errors,
+  and specialized permission rows; the ledger-private chat-ID request notice
+  is filtered at this shared server boundary. Turn state derives from
+  `run-ended` rows and live execution state. Late content renders in observed
+  order.
 - **Search** indexes conversational content only, keyed
   `(chatId, transcriptViewId, ordinal)` with an appended-through
   watermark; normal appends index only the suffix; nothing is ever
@@ -1403,9 +1435,10 @@ model context, carryover, or export.
   is unchanged.
 - **Ordinary user export** captures the current view through one pinned
   watermark and folds raw ledger rows into export entries. It includes
-  `user-input`, every rendered `provider-row`, `notice`, `agent-switch`,
-  permission lifecycle, and `run-ended`; it excludes support-only `session`
-  rows. Entry objects contain the durable ordinal and projected message or
+  `user-input`, every rendered `provider-row`, every public `notice`,
+  `agent-switch`, permission lifecycle, and `run-ended`; it excludes the
+  ledger-private chat-ID request and support-only `session` rows. Entry objects
+  contain the durable ordinal and projected message or
   sanitized terminal detail, never `providerMeta`, so storage-private metadata
   and native refs/paths are unreachable to renderers by construction. A raw
   support export for explicit diagnostics remains a separate future surface.
@@ -1500,14 +1533,17 @@ One strict rule, single mode:
 > Warn when the native session's last conversation-relevant entry is strictly
 > newer than the provider watermark timestamp for that session.
 
-The provider watermark is the latest integration-emitted native-evidence row
-for that session: `provider-row`, `session`, provider-origin `run-ended`, and
-integration-emitted permission rows. The watermark carries both row ordinal
-and timestamp: timestamp remains the native comparison value, while ordinal
-fences ledger changes whose timestamps collide. Rows that do not evidence
-native provider history — user inputs, notices, `permission-resolved`, and
-core-origin `run-ended` — are excluded, so they cannot hide missed native
-output behind unrelated activity. Computing the watermark is a descending
+The provider watermark is the latest native-evidence row for that session:
+`provider-row`, `session`, provider-origin `run-ended`, integration-emitted
+permission rows, imported provider inputs with no `clientMessageId`, and the
+chat-ID request, disclosure, or disabled notice. The request row carries the
+marker's provider timestamp; disclosure reconstructs a provider-native control
+input; disabled is synchronously anchored to the same request. Other user
+inputs and notices — including generic discovery failures — plus
+`permission-resolved` and core-origin `run-ended` are excluded, so they cannot
+hide missed native output behind unrelated activity. The watermark carries
+both row ordinal and timestamp: timestamp remains the native comparison value,
+while ordinal fences ledger changes whose timestamps collide. Computing the watermark is a descending
 primary-key scan bounded by `content_start_ordinal`, using a payload predicate (for
 example `json_extract`) for `run-ended` origin; no normalized column or
 index is added before measurement. Rows imported by reload carry native
@@ -1674,12 +1710,14 @@ are self-contained snapshots.
 Native import treats an exact synthetic chat-ID disclosure input as server
 control rather than user conversation and reconstructs a typed disclosure
 notice at its provider timestamp. It applies the same assistant request-marker
-canonicalization without dispatching control or reconstructing a request row.
+canonicalization and reconstructs the ledger-private request row without
+dispatching control. A marker-only native entry therefore remains hidden
+provider evidence without fabricating an outcome.
 Live success and failure notices start from the requesting provider row's
 timestamp and clamp forward to the current provider watermark so asynchronous
 delivery cannot regress it. A manual Reload reconstructs success from the exact
-provider-native disclosure input. Disabled, unsupported, and failed-delivery
-notices are core-only outcomes that native history cannot reconstruct and drops.
+provider-native disclosure input. Disabled and failed-delivery notices are
+core-only outcomes that native history cannot reconstruct and drops.
 
 The product rule for history: external or crash-missed native activity
 is adoptable only while its session is the current binding. Once
@@ -2100,32 +2138,21 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     response and UI disclose this with `resultsTruncated`; exact queries below
     the cap remain complete. This bounded degradation is preferred to an
     unbounded synchronous reader monopolizing the fixed pool.
-19. After a hidden chat-ID disclosure turn is scheduled, a request marker in
+19. After a chat-ID disclosure control turn is scheduled, a request marker in
     provider content with no active-run attribution is suppressed until view
     replacement or deletion. Core cannot distinguish that row from late output
-    produced by the hidden turn. After the pending discovery delivery settles,
+    produced by the control turn. After the pending discovery delivery settles,
     a marker correlated to a different active run remains eligible; the
     conservative bias is against recursive control.
-20. Native import drops an exact marker-only chat-ID request when no synthetic
-    disclosure input follows; it does not fabricate a request or failure outcome.
-    After Reload, the provider watermark may therefore transiently precede that
-    native entry and a later activation may warn about drift until subsequent
-    provider activity advances the watermark. Existing ledgers may contain
-    diagnostics from the earlier two-row discovery implementation. This revision
-    does not migrate them; they may lose typed presentation or watermark
-    eligibility and cause the same transient warning. Earlier failure diagnostics
-    may conversely become watermark-eligible at their append-time timestamps,
-    briefly advancing the watermark past native activity and masking drift in
-    that interval.
-21. A hidden chat-ID disclosure turn uses the ordinary background lifecycle.
-    The requesting turn and hidden turn may therefore each emit an idle or
-    attention notification; hidden describes its transcript input, not its
-    processing and notification lifecycle.
-22. While one discovery delivery is pending, later request markers for that
+20. A chat-ID disclosure control turn uses the ordinary background lifecycle.
+    The requesting turn and control turn may therefore each emit an idle or
+    attention notification. Only the control input is absent from user-authored
+    transcript rows; processing and provider output are ordinary.
+21. While one discovery delivery is pending, later request markers for that
     chat are suppressed without a separate outcome, including markers correlated
-    to a different run. One serialized delivery may retarget the successor turn;
-    avoiding duplicate control input takes priority over an outcome for every
-    overlapping marker.
+    to a different run. The serialized delivery remains bound to its original
+    emitting run; avoiding duplicate control input takes priority over an outcome
+    for every overlapping marker.
 
 ## 17. Testing Strategy
 
@@ -2178,6 +2205,18 @@ The catalog cites this revision, but its inventory is not repeated here.
   handoff with guidance; steers and immediate inputs committed before
   dispatch/delivery; the no-redispatch rule for duplicate committed
   submissions.
+- **Chat-ID discovery**: the cleaned assistant remainder and hidden request row
+  commit atomically before synchronous delivery capture, including a
+  marker-only batch. Reopen preserves the physical row. Page, replay, fanout,
+  rendering snapshot, share, export, conversation, search, preview, resend,
+  frozen projection, Reload, handoff, continuation, and fork surfaces never
+  expose it. Native import reconstructs it without dispatch. Control tests pin
+  one exact emitting-run steer, ambiguity without fallback, exact-attempt
+  settlement after definitive non-delivery, one direct control reservation,
+  no successor retarget or retry, no user/prepared/queue input, reservation
+  release on every blocked path, and the control-turn recursion fence. Scripted
+  reference providers retain immediate-steer coverage; a server integration
+  case proves the direct control turn.
 - **Presentation-only chat rows**: strict view-qualified notice/error request
   and response contracts; exact content plus normalized title boundaries; the
   shared submission index returning one row for an identical retry and
@@ -2242,7 +2281,9 @@ The catalog cites this revision, but its inventory is not repeated here.
   `{requestId, incarnation}` payload as the sole public UUID, while an encode
   assertion proves the durable key remains `incarnation`.
 - **Read folds**: the section 9 matrix as executable assertions per surface;
-  ordinary, CLI, and producer advisories remain notice rows, provider errors
+  the ledger-private chat-ID request is hidden from every public and
+  conversational fold, while ordinary, CLI, and producer advisories remain
+  notice rows; provider errors
   remain presentation-only provider rows, and rendered notice and error titles
   round-trip only through their top-level field while CLI detail remains
   provenance. Search stays suffix-only within a live view;
@@ -2263,9 +2304,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   awaits the probe; earlier, replay, background, preview, failed-read,
   dispatch, timer, and startup paths schedule nothing; equal pending work
   coalesces while every changed eligibility dimension aborts, supersedes, and
-  fences stale results. The integration-emitted watermark is `(ordinal, at)`
-  from the bounded descending scan with the payload predicate; rows that do not
-  evidence native provider activity never raise it, and imported rows count. Timeout, failure,
+  fences stale results. The native-evidence watermark is `(ordinal, at)` from
+  the bounded descending scan with the payload predicate; request, disclosure,
+  and disabled chat-ID notices qualify, generic failure does not, and imported
+  rows count. Timeout, failure,
   `unavailable`, ownership change, invalid timestamps, and abort-ignoring
   probes emit nothing. A strictly newer idle tail emits only a transient
   `chat-operational-notice`, appends no ledger row, and may warn again on a
@@ -2534,6 +2576,10 @@ stabilization defects. The current case inventory and gate status live in
    process-ephemeral. A duplicate committed `clientMessageId` retry
    returns the row and never re-dispatches; the crash window between
    commit and dispatch is an accepted loss recovered by the next scan.
+   Chat-ID discovery commits its ledger-private request evidence before one
+   emitting-run steer or one direct control reservation; the disclosure itself
+   creates no user input or queue entry, and its visible outcome notice is the
+   sole transcript representation of accepted control delivery.
 9. Submission idempotency uses the existing `clientMessageId` contract,
    scoped `(chatId, transcriptViewId, clientMessageId)` and enforced by
    the partial unique index; stale-view submissions are rejected with a

@@ -15,7 +15,7 @@ its absence in two unrelated places:
 
 - control delivery became a three-attempt route-selection state machine that
   watches execution ownership, retargets successor turns, and alternates
-  between steering and a hidden direct turn;
+  between steering and a direct server-control turn;
 - native-activity watermark logic began treating every discovery failure as
   provider evidence, and outcome notices acquired marker-anchored timestamps.
 
@@ -41,8 +41,8 @@ its timestamp without producing a second visible transcript row.
 - Keep the request row out of every user-facing and conversational read fold.
 - Restore the native-activity watermark predicate and activation-only timing
   that existed before revision 27.
-- Deliver once to the emitting captured turn, then make at most one hidden
-  direct-turn attempt after definitive non-delivery.
+- Deliver once to the emitting captured turn, then make at most one direct
+  server-control turn attempt after definitive non-delivery.
 - Never retry, retarget a successor turn, or fall back after an ambiguous
   steering outcome.
 - Retain lifecycle, deletion, view-replacement, queue, and recursion fences
@@ -54,14 +54,14 @@ its timestamp without producing a second visible transcript row.
 
 - The hidden request row is not durable queued work. Restart does not replay or
   redispatch discovery.
-- The hidden direct turn does not become invisible processing. It retains the
-  ordinary background turn lifecycle and may emit ordinary run errors or
-  attention notifications.
+- The direct control turn omits only a user-authored transcript input. Its
+  processing and provider output retain the ordinary background turn lifecycle
+  and may emit ordinary run errors or attention notifications.
 - This change does not alter the settings surface, request marker syntax,
   disclosure envelope, provider interfaces, command ledger, user-input
   idempotency, or public WebSocket payload shape.
-- This change does not add delivery acknowledgement or wait for the hidden
-  provider turn to finish.
+- This change does not add delivery acknowledgement or wait for the direct
+  control turn to finish.
 - This change does not infer whether an ambiguous steer reached the provider.
   It reports the existing generic discovery failure and does not risk a
   duplicate disclosure.
@@ -128,7 +128,7 @@ and retarget successor turns. Supporting that loop added:
   wiring to wake a watcher when ledger run state clears without an ownership
   transition.
 
-The hidden direct route itself is smaller. `#scheduleControlRun` reserves
+The direct control route itself is smaller. `#scheduleControlRun` reserves
 ordinary direct ownership, checks deletion/drain/queue state, creates generated
 turn identities, and calls the ordinary `runAgentTurn` path without admitting
 user input. Its reservation and lifecycle checks remain necessary.
@@ -287,12 +287,12 @@ synchronously, before its first `await`.
 
 ```text
 exact target for emitting run?
-  no  -> attempt one hidden direct reservation
+  no  -> attempt one direct control reservation
   yes -> attempt one steer
            accepted or prepared success -> finish
            ambiguous/unknown             -> fail, no fallback
            definitive non-delivery       -> await that exact attempt settlement
-                                             -> attempt one hidden direct reservation
+                                             -> attempt one direct control reservation
 ```
 
 Definitive non-delivery consists only of:
@@ -317,7 +317,7 @@ async deliver(
   transcriptViewId: string,
   emittingRunId: string | null,
   signal: AbortSignal,
-  onHiddenRun: (turnId: string) => void,
+  onControlRun: (turnId: string) => void,
 ): Promise<void> {
   signal.throwIfAborted();
   const captured = emittingRunId === null
@@ -341,7 +341,7 @@ async deliver(
     chatId,
     content,
     transcriptViewId,
-    onHiddenRun,
+    onControlRun,
   );
 }
 ```
@@ -355,11 +355,11 @@ route watch, ownership-acquired callback, or successor capture.
 reservation and lifecycle path. It drops only route-watch bookkeeping and the
 special blocked-error subclass.
 
-The direct disclosure has no separate hidden transcript input row. Garcon
+The direct disclosure has no separate transcript input row. Garcon
 passes the disclosure envelope directly to `runAgentTurn`; the one visible
 success notice is the durable audit and presentation of that accepted control
-delivery. The turn is “hidden” only in the narrow sense that no user-authored
-`user-input` row is fabricated.
+delivery. It is a server-control turn: no user-authored `user-input` row is
+fabricated, while processing and provider output remain ordinary.
 
 The route:
 
@@ -368,7 +368,7 @@ The route:
   predicate;
 - rejects deletion/drain suppression, missing chats, aborted admission,
   pending queue entries, and paused queues;
-- registers the hidden turn ID before dispatch for recursion fencing;
+- registers the control turn ID before dispatch for recursion fencing;
 - calls `#runDirect` with the exact disclosure envelope and a fresh
   `clientMessageId` that cannot match prepared user input;
 - returns after the run is scheduled, not after provider completion;
@@ -429,11 +429,11 @@ stronger correctness property than one definitive fallback.
 - one per-chat in-flight attempt and abort controller;
 - same-non-null-run deduplication;
 - abort/cleanup on view replacement or deletion;
-- the hidden turn ID recursion fence.
+- the control turn ID recursion fence.
 
 The redundant stored `hasRun` flag is removed; `runId !== null` carries the
 same information. A pending attempt still suppresses overlapping markers to
-avoid duplicate control delivery. Markers from the hidden turn, and later
+avoid duplicate control delivery. Markers from the control turn, and later
 uncorrelated markers that cannot be distinguished from its late output, remain
 suppressed until view replacement or deletion.
 
@@ -461,7 +461,7 @@ coordinator directly generates identities.
 
 Keep the accepted-without-prepare steer classification as `unknown`. Positive
 provider acceptance cannot honestly be called not-sent, and treating it as
-definitive would permit duplicate hidden fallback. This also preserves the
+definitive would permit duplicate direct fallback. This also preserves the
 ordinary queued-steer pause-for-review behavior introduced with revision 27.
 
 ## Failure Semantics
@@ -469,15 +469,15 @@ ordinary queued-steer pause-for-review behavior introduced with revision 27.
 | Condition | Outcome |
 | --- | --- |
 | Discovery disabled | Hidden request persists; one visible disabled failure; no delivery. |
-| Exact emitting target accepts steer | One visible success; no hidden turn. |
+| Exact emitting target accepts steer | One visible success; no control turn. |
 | Steer definitively rejects | Wait for the captured attempt to settle, then attempt one direct reservation. |
 | Steer outcome unknown | One generic visible failure; no direct fallback. |
 | Captured target missing or mismatched | Attempt one direct reservation without steering another run. |
 | Successor or queue wins the direct reservation race | One generic visible failure; no retarget or retry. |
 | Queue paused or contains pending work | One generic visible failure; reservation released. |
 | View replacement or deletion aborts while waiting | No stale outcome notice; controller state is discarded. |
-| Hidden turn schedules | One visible success immediately; later provider failure remains ordinary run history. |
-| Hidden turn emits the request marker | Hidden request row persists; controller recursion fence suppresses delivery and outcome. |
+| Control turn schedules | One visible success immediately; later provider failure remains ordinary run history. |
+| Control turn emits the request marker | Hidden request row persists; controller recursion fence suppresses delivery and outcome. |
 | Restart after request commit, before outcome | Hidden evidence remains; no redispatch and no fabricated outcome. |
 | Native Reload sees marker-only request | Hidden request reconstructed; no redispatch and no fabricated outcome. |
 
@@ -520,7 +520,7 @@ therefore cannot expose the support row accidentally.
 ## Observability
 
 - Visible success/failure notices remain the user diagnostic.
-- Hidden direct provider failure remains an ordinary `turn-failed` row/log.
+- A control-turn provider failure remains an ordinary `turn-failed` row/log.
 - Existing structured `onError` logging remains for failed discovery
   delivery and notice append.
 - No new metric or persisted retry state is required.
@@ -621,7 +621,7 @@ Required unit cases:
 - mismatched successor is never steered;
 - direct busy rejects immediately without a watch or retry;
 - abort interrupts settlement wait and prevents direct scheduling;
-- direct schedule registers the hidden turn before provider dispatch;
+- direct schedule registers the control turn before provider dispatch;
 - direct queue and pause blocks release ownership;
 - no user-input admission, prepared-input match, or queue row occurs.
 
@@ -669,7 +669,7 @@ Work:
 - Pass the emitting run ID into delivery.
 - Remove redundant attempt state and unsupported classification.
 - Preserve enabled gating, abort, same-run dedupe, pending gate, notice identity
-  fencing, and hidden-run recursion fencing.
+  fencing, and control-turn recursion fencing.
 - Remove unreachable unsupported copy and contract variants.
 
 ### Update normative design and conformance traceability
@@ -688,7 +688,7 @@ Work:
 - Restore native-activity text to marker evidence and remove revision-27
   limitations caused by marker loss, failure-watermark broadening, retargeting,
   and overlapping route waits.
-- Keep the hidden-run recursion and ordinary-background-lifecycle limitations.
+- Keep the control-turn recursion and ordinary-background-lifecycle limitations.
 - Update the design SHA-256 pin and exact CTS evidence mapping.
 - Rename or replace cases where their semantics changed; keep every inventory
   ID backed by one real tagged test.
@@ -717,7 +717,7 @@ bun test tests/server/claude-scripted-chat-id-discovery.test.ts
 bun test tests/server/codex-scripted-steer.test.ts -t "requested chat ID"
 bun test tests/server/opencode-scripted-steer.test.ts -t "requested chat ID"
 bun test tests/server/pi-scripted-queue.test.ts -t "requested chat ID"
-bun test tests/server/chat-lifecycle.test.ts -t "hidden direct turn"
+bun test tests/server/chat-lifecycle.test.ts -t "direct control turn"
 ```
 
 Run those from `integration-tests/`. Then run repository gates:
@@ -748,7 +748,7 @@ Finally start an isolated server with a fresh disk-backed workspace,
 - Ambiguous delivery never permits fallback.
 - Direct contention fails immediately; no successor retarget, route watch, or
   retry exists.
-- Hidden direct scheduling is success; provider completion remains ordinary
+- Control-turn scheduling is success; provider completion remains ordinary
   lifecycle.
 - Unsupported steering is a fallback trigger, not a terminal feature reason.
 - Recursion fencing, in-flight serialization, deletion/view abort, and direct
@@ -761,11 +761,11 @@ Finally start an isolated server with a fresh disk-backed workspace,
 - A provider attempt that never settles can keep the single delivery pending
   until view replacement or deletion aborts it. No timeout is added because a
   timeout cannot prove non-delivery and would reintroduce duplicate risk.
-- The hidden background turn may create a second processing/attention lifecycle
+- The direct control turn may create a second processing/attention lifecycle
   notification. Suppressing it would require a separate lifecycle contract and
   is outside this simplification.
 - The conservative recursion fence may suppress a later uncorrelated genuine
-  marker after a hidden turn. Durable rows do not carry run attribution, so
+  marker after a control turn. Durable rows do not carry run attribution, so
   relaxing it would risk recursive disclosure.
 - A crash after the hidden request commit and before an outcome leaves no
   visible outcome. Restart intentionally does not replay ephemeral execution.
