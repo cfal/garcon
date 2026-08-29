@@ -230,7 +230,7 @@ describe('workspace layout reducer', () => {
 		);
 		const next = reduceWorkspaceLayout(base, [
 			{
-				type: 'open-tab-in-new-window',
+				type: 'move-tab-to-new-window',
 				surfaceId: 'singleton:git',
 				targetWindowId: 'window-chat',
 				edge: 'bottom',
@@ -246,7 +246,7 @@ describe('workspace layout reducer', () => {
 		expect(tabs(next, 'window-new')).toEqual(['singleton:git']);
 	});
 
-	it('reorders an anchored Chat view locally but rejects moving it to another window', () => {
+	it('reorders a Chat view locally but keeps generic cross-window movement rejected', () => {
 		const local = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'register-surface',
@@ -281,6 +281,205 @@ describe('workspace layout reducer', () => {
 				},
 			]),
 		).toThrow('cannot move');
+	});
+
+	it('moves Chat into a Chat-less window and rekeys transient references', () => {
+		const sourceSurfaceId = chatViewSurfaceId('window-source');
+		const destinationSurfaceId = chatViewSurfaceId('window-destination');
+		const initial = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-source', [sourceSurfaceId, 'singleton:git']),
+				workspaceWindow('window-destination', ['singleton:files']),
+			),
+		);
+		const base: WorkspaceLayoutSnapshot = {
+			...initial,
+			surfaces: {
+				...initial.surfaces,
+				[sourceSurfaceId]: { id: sourceSurfaceId, type: 'chat', chatId: 'chat-a' },
+			},
+			fullscreenWindowId: 'window-source',
+			mobileActiveSurfaceId: sourceSurfaceId,
+			mobileReturnStack: [
+				{
+					invokerSurfaceId: sourceSurfaceId,
+					invokerHost: 'window-source',
+					chatId: 'chat-a',
+					effectiveProjectKey: null,
+					routeIdentity: '/chat/chat-a',
+				},
+			],
+		};
+
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'move-chat-to-window',
+				sourceWindowId: 'window-source',
+				destinationWindowId: 'window-destination',
+			},
+		]);
+
+		expect(tabs(next, 'window-source')).toEqual(['singleton:git']);
+		expect(tabs(next, 'window-destination')).toEqual([destinationSurfaceId, 'singleton:files']);
+		expect(windowNodeById(next.desktopRoot, 'window-destination')?.tabs.activeId).toBe(
+			destinationSurfaceId,
+		);
+		expect(next.surfaces[sourceSurfaceId]).toBeUndefined();
+		expect(next.surfaces[destinationSurfaceId]).toEqual({
+			id: destinationSurfaceId,
+			type: 'chat',
+			chatId: 'chat-a',
+		});
+		expect(next.mobileActiveSurfaceId).toBe(destinationSurfaceId);
+		expect(next.mobileReturnStack[0]?.invokerSurfaceId).toBe(destinationSurfaceId);
+		expect(next.fullscreenWindowId).toBeNull();
+	});
+
+	it('replaces destination Chat in place and collapses a sole-tab source window', () => {
+		const sourceSurfaceId = chatViewSurfaceId('window-source');
+		const destinationSurfaceId = chatViewSurfaceId('window-destination');
+		const initial = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-source', [sourceSurfaceId]),
+				workspaceWindow(
+					'window-destination',
+					['singleton:git', destinationSurfaceId, 'singleton:files'],
+					'singleton:files',
+				),
+			),
+		);
+		const base: WorkspaceLayoutSnapshot = {
+			...initial,
+			surfaces: {
+				...initial.surfaces,
+				[sourceSurfaceId]: { id: sourceSurfaceId, type: 'chat', chatId: 'chat-a' },
+				[destinationSurfaceId]: {
+					id: destinationSurfaceId,
+					type: 'chat',
+					chatId: 'chat-b',
+				},
+			},
+			fullscreenWindowId: 'window-destination',
+		};
+
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'move-chat-to-window',
+				sourceWindowId: 'window-source',
+				destinationWindowId: 'window-destination',
+			},
+		]);
+
+		expect(collectWindowNodes(next.desktopRoot).map((item) => item.id)).toEqual([
+			'window-destination',
+		]);
+		expect(tabs(next, 'window-destination')).toEqual([
+			'singleton:git',
+			destinationSurfaceId,
+			'singleton:files',
+		]);
+		expect(windowNodeById(next.desktopRoot, 'window-destination')?.tabs.activeId).toBe(
+			destinationSurfaceId,
+		);
+		expect(next.surfaces[sourceSurfaceId]).toBeUndefined();
+		expect(next.surfaces[destinationSurfaceId]).toMatchObject({ chatId: 'chat-a' });
+		expect(Object.values(next.surfaces).filter((surface) => surface.type === 'chat')).toHaveLength(
+			1,
+		);
+		expect(next.fullscreenWindowId).toBe('window-destination');
+	});
+
+	it('rejects moving an empty Chat view or moving Chat to its source window', () => {
+		const sourceSurfaceId = chatViewSurfaceId('window-source');
+		const base = snapshotWith(
+			partition(
+				'partition-root',
+				workspaceWindow('window-source', [sourceSurfaceId, 'singleton:git']),
+				workspaceWindow('window-destination', ['singleton:files']),
+			),
+		);
+
+		expect(() =>
+			reduceWorkspaceLayout(base, [
+				{
+					type: 'move-chat-to-window',
+					sourceWindowId: 'window-source',
+					destinationWindowId: 'window-destination',
+				},
+			]),
+		).toThrow('empty');
+
+		const populated = reduceWorkspaceLayout(base, [
+			{ type: 'set-window-chat', windowId: 'window-source', chatId: 'chat-a' },
+		]);
+		expect(() =>
+			reduceWorkspaceLayout(populated, [
+				{
+					type: 'move-chat-to-window',
+					sourceWindowId: 'window-source',
+					destinationWindowId: 'window-source',
+				},
+			]),
+		).toThrow('different');
+	});
+
+	it('moves a populated Chat tab to a new window with a destination-derived identity', () => {
+		const sourceSurfaceId = chatViewSurfaceId('window-source');
+		const destinationSurfaceId = chatViewSurfaceId('window-new');
+		const initial = snapshotWith(
+			workspaceWindow('window-source', [sourceSurfaceId, 'singleton:git']),
+		);
+		const base: WorkspaceLayoutSnapshot = {
+			...initial,
+			surfaces: {
+				...initial.surfaces,
+				[sourceSurfaceId]: { id: sourceSurfaceId, type: 'chat', chatId: 'chat-a' },
+			},
+			fullscreenWindowId: 'window-source',
+			mobileActiveSurfaceId: sourceSurfaceId,
+		};
+
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'move-tab-to-new-window',
+				surfaceId: sourceSurfaceId,
+				targetWindowId: 'window-source',
+				edge: 'right',
+				newWindowId: 'window-new',
+				partitionId: 'partition-new',
+			},
+		]);
+
+		expect(tabs(next, 'window-source')).toEqual(['singleton:git']);
+		expect(tabs(next, 'window-new')).toEqual([destinationSurfaceId]);
+		expect(next.surfaces[sourceSurfaceId]).toBeUndefined();
+		expect(next.surfaces[destinationSurfaceId]).toEqual({
+			id: destinationSurfaceId,
+			type: 'chat',
+			chatId: 'chat-a',
+		});
+		expect(next.mobileActiveSurfaceId).toBe(destinationSurfaceId);
+		expect(next.fullscreenWindowId).toBeNull();
+	});
+
+	it('keeps a sole-tab directional Chat move as an identity no-op', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId: 'chat-a' },
+		]);
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'move-tab-to-new-window',
+				surfaceId: CANONICAL_CHAT_SURFACE_ID,
+				targetWindowId: CANONICAL_WINDOW_ID,
+				edge: 'right',
+				newWindowId: 'window-new',
+				partitionId: 'partition-new',
+			},
+		]);
+
+		expect(next).toBe(base);
 	});
 
 	it('allows closing a Chat view only while another Chat view remains', () => {
@@ -319,7 +518,7 @@ describe('workspace layout reducer', () => {
 		const full = snapshotWith(root);
 		const netZero = reduceWorkspaceLayout(full, [
 			{
-				type: 'open-tab-in-new-window',
+				type: 'move-tab-to-new-window',
 				surfaceId: 'terminal:4',
 				targetWindowId: 'window-1',
 				edge: 'left',
@@ -339,12 +538,33 @@ describe('workspace layout reducer', () => {
 		expect(() =>
 			reduceWorkspaceLayout(withExtraTab, [
 				{
-					type: 'open-tab-in-new-window',
+					type: 'move-tab-to-new-window',
 					surfaceId: 'singleton:git',
 					targetWindowId: 'window-1',
 					edge: 'right',
 					newWindowId: 'window-overflow',
 					partitionId: 'partition-overflow',
+				},
+			]),
+		).toThrow('count limit');
+
+		const populatedChat = reduceWorkspaceLayout(full, [
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('git'),
+				windowId: 'window-1',
+			},
+			{ type: 'set-window-chat', windowId: 'window-1', chatId: 'chat-a' },
+		]);
+		expect(() =>
+			reduceWorkspaceLayout(populatedChat, [
+				{
+					type: 'move-tab-to-new-window',
+					surfaceId: chatViewSurfaceId('window-1'),
+					targetWindowId: 'window-1',
+					edge: 'right',
+					newWindowId: 'window-chat-overflow',
+					partitionId: 'partition-chat-overflow',
 				},
 			]),
 		).toThrow('count limit');

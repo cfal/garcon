@@ -21,8 +21,7 @@ const {
 	moveTabToWindow,
 	noteWindowChromeFocus,
 	openSingletonAsTab,
-	openChatInNewWindow,
-	openTabInNewWindow,
+	moveTabToNewWindow,
 	runtime,
 } = vi.hoisted(() => ({
 	closeSurface: vi.fn(async () => true),
@@ -34,8 +33,7 @@ const {
 	moveTabToWindow: vi.fn(async () => undefined),
 	noteWindowChromeFocus: vi.fn(),
 	openSingletonAsTab: vi.fn(async () => undefined),
-	openChatInNewWindow: vi.fn(async () => 'window-chat-copy'),
-	openTabInNewWindow: vi.fn(async () => undefined),
+	moveTabToNewWindow: vi.fn(async () => undefined),
 	runtime: {
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		desktopRoot: null as DesktopWorkspaceNode | null,
@@ -74,8 +72,7 @@ vi.mock('$lib/context', () => ({
 		noteWindowChromeFocus,
 		focusSurface,
 		moveTabToWindow,
-		openChatInNewWindow,
-		openTabInNewWindow,
+		moveTabToNewWindow,
 		openSingletonAsTab,
 		createTerminal,
 		openTerminalSession: vi.fn(async () => undefined),
@@ -155,11 +152,41 @@ function fourWindowRoot(tabs: WorkspaceWindowNode['tabs']): DesktopWorkspaceNode
 	};
 }
 
+function twoWindowRoot(
+	mainTabs: WorkspaceWindowNode['tabs'],
+	secondSurfaceId: string,
+): DesktopWorkspaceNode {
+	return {
+		type: 'partition',
+		id: 'partition-root',
+		direction: 'horizontal',
+		ratio: 0.5,
+		children: [
+			{ type: 'window', id: 'window-main', tabs: mainTabs },
+			{
+				type: 'window',
+				id: 'window-two',
+				tabs: {
+					order: [secondSurfaceId],
+					activeId: secondSurfaceId,
+					mru: [secondSurfaceId],
+				},
+			},
+		],
+	};
+}
+
+function labelFor(surfaceId: string): string {
+	if (surfaceId === chatSurface.id) return 'Chat A';
+	if (surfaceId === otherChatSurface.id) return 'Chat B';
+	if (surfaceId === gitSurface.id) return 'Git';
+	return surfaceId;
+}
+
 function renderTitleBar(node: WorkspaceWindowNode, isCurrent = true) {
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
-		labelFor: (surfaceId: string) =>
-			surfaceId === chatSurface.id ? 'Chat A' : surfaceId === gitSurface.id ? 'Git' : surfaceId,
+		labelFor,
 		dnd: new WorkspaceWindowDndController(createWorkspaceLayoutStore()),
 		isCurrent,
 	});
@@ -345,25 +372,57 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(actions.map((item) => item.dataset.workspaceWindowTabAction)).toEqual([
 			'move-left',
 			'move-right',
-			'open-left',
-			'open-right',
-			'open-top',
-			'open-bottom',
+			'move-new-left',
+			'move-new-right',
+			'move-new-top',
+			'move-new-bottom',
+			'close-tab',
 		]);
-		expect(menu.querySelector('[data-workspace-window-tab-actions-separator]')).toBeTruthy();
+		const separator = menu.querySelector('[data-workspace-window-tab-actions-separator]');
+		expect(separator).toBeTruthy();
+		expect(actions.at(-1)?.nextElementSibling).toBe(separator);
+		expect(actions.at(-1)?.getAttribute('data-variant')).toBe('default');
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_move_tab_left() }));
 		expect(moveTabToWindow).toHaveBeenCalledWith(gitSurface.id, 'window-main', 0);
 	});
 
-	it('offers Chat directional actions from the current-tab menu', async () => {
+	it('moves Chat directionally from the current-tab menu', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
 		await fireEvent.click(
-			screen.getByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+			screen.getByRole('menuitem', { name: m.workspace_move_tab_to_new_window_right() }),
 		);
 
-		expect(openChatInNewWindow).toHaveBeenCalledWith('chat-a', 'window-main', 'right');
+		expect(moveTabToNewWindow).toHaveBeenCalledWith(chatSurface.id, 'window-main', 'right');
+	});
+
+	it('offers every other window as a Chat move destination', async () => {
+		const node = workspaceWindow([chatSurface.id, gitSurface.id]);
+		runtime.windowCount = 2;
+		runtime.desktopRoot = twoWindowRoot(node.tabs, otherChatSurface.id);
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[gitSurface.id]: gitSurface,
+			[otherChatSurface.id]: otherChatSurface,
+		};
+		renderTitleBar(node);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(
+			screen.getByRole('menuitem', {
+				name: m.workspace_move_to_window({ window: 'Chat B' }),
+			}),
+		);
+
+		expect(moveTabToWindow).toHaveBeenCalledWith(chatSurface.id, 'window-two', undefined);
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		await fireEvent.click(
+			await screen.findByRole('menuitem', {
+				name: m.workspace_move_to_window({ window: 'Chat B' }),
+			}),
+		);
+		expect(moveTabToWindow).toHaveBeenCalledTimes(2);
 	});
 
 	it('offers keyboard-accessible ordering for movable local tabs', async () => {
@@ -378,25 +437,39 @@ describe('WorkspaceWindowTitleBar', () => {
 		);
 	});
 
-	it('offers Chat tabs the directional new-window context actions', async () => {
+	it('moves Chat directionally from the tab context menu', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
 		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
 		await fireEvent.click(
-			await screen.findByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+			await screen.findByRole('menuitem', {
+				name: m.workspace_move_tab_to_new_window_right(),
+			}),
 		);
 
 		await waitFor(() =>
-			expect(openChatInNewWindow).toHaveBeenCalledWith('chat-a', 'window-main', 'right'),
+			expect(moveTabToNewWindow).toHaveBeenCalledWith(chatSurface.id, 'window-main', 'right'),
 		);
+	});
+
+	it('keeps neutral Close Tab directly after directional actions in the context menu', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Git' }));
+		const below = await screen.findByRole('menuitem', {
+			name: m.workspace_move_tab_to_new_window_below(),
+		});
+		const close = screen.getByRole('menuitem', { name: m.workspace_close_tab() });
+
+		expect(below.nextElementSibling).toBe(close);
+		expect(close.getAttribute('data-variant')).toBe('default');
 	});
 
 	it('disables directional new-window actions in both tab menus at the window cap', async () => {
 		const node = workspaceWindow([chatSurface.id, gitSurface.id]);
 		const directionalActionLabels = [
-			m.workspace_open_tab_new_window_left(),
-			m.workspace_open_tab_new_window_right(),
-			m.workspace_open_tab_new_window_above(),
-			m.workspace_open_tab_new_window_below(),
+			m.workspace_move_tab_to_new_window_left(),
+			m.workspace_move_tab_to_new_window_right(),
+			m.workspace_move_tab_to_new_window_above(),
+			m.workspace_move_tab_to_new_window_below(),
 		];
 		runtime.windowCount = 4;
 		runtime.desktopRoot = fourWindowRoot(node.tabs);
@@ -411,7 +484,9 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.keyDown(document, { key: 'Escape' });
 		await waitFor(() =>
 			expect(
-				screen.queryByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+				screen.queryByRole('menuitem', {
+					name: m.workspace_move_tab_to_new_window_right(),
+				}),
 			).toBeNull(),
 		);
 

@@ -24,7 +24,7 @@
 		WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
 	import {
-		openWorkspaceTabInNewWindow,
+		moveWorkspaceTabToNewWindow,
 		resolveWorkspaceWindowTabActions,
 	} from '$lib/workspace/workspace-window-tab-actions.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
@@ -78,8 +78,8 @@
 			moveTab(windowId, tabActions.index + 1);
 	}
 
-	function openInNewWindow(edge: WorkspaceWindowEdge): void {
-		void openWorkspaceTabInNewWindow(workspace, tabs.activeId, windowId, edge).catch(notifyFailure);
+	function moveToNewWindow(edge: WorkspaceWindowEdge): void {
+		void moveWorkspaceTabToNewWindow(workspace, tabs.activeId, windowId, edge).catch(notifyFailure);
 	}
 
 	function closeActiveTab(): void {
@@ -127,37 +127,47 @@
 			{/each}
 		{/if}
 		<DropdownMenuItem
-			data-workspace-window-tab-action="open-left"
-			disabled={!tabActions.canOpenInNewWindow}
-			onSelect={() => openInNewWindow('left')}
+			data-workspace-window-tab-action="move-new-left"
+			disabled={!tabActions.canMoveToNewWindow}
+			onSelect={() => moveToNewWindow('left')}
 		>
 			<PanelRight class="rotate-180" />
-			{m.workspace_open_tab_new_window_left()}
+			{m.workspace_move_tab_to_new_window_left()}
 		</DropdownMenuItem>
 		<DropdownMenuItem
-			data-workspace-window-tab-action="open-right"
-			disabled={!tabActions.canOpenInNewWindow}
-			onSelect={() => openInNewWindow('right')}
+			data-workspace-window-tab-action="move-new-right"
+			disabled={!tabActions.canMoveToNewWindow}
+			onSelect={() => moveToNewWindow('right')}
 		>
 			<PanelRight />
-			{m.workspace_open_tab_new_window_right()}
+			{m.workspace_move_tab_to_new_window_right()}
 		</DropdownMenuItem>
 		<DropdownMenuItem
-			data-workspace-window-tab-action="open-top"
-			disabled={!tabActions.canOpenInNewWindow}
-			onSelect={() => openInNewWindow('top')}
+			data-workspace-window-tab-action="move-new-top"
+			disabled={!tabActions.canMoveToNewWindow}
+			onSelect={() => moveToNewWindow('top')}
 		>
 			<PanelTop />
-			{m.workspace_open_tab_new_window_above()}
+			{m.workspace_move_tab_to_new_window_above()}
 		</DropdownMenuItem>
 		<DropdownMenuItem
-			data-workspace-window-tab-action="open-bottom"
-			disabled={!tabActions.canOpenInNewWindow}
-			onSelect={() => openInNewWindow('bottom')}
+			data-workspace-window-tab-action="move-new-bottom"
+			disabled={!tabActions.canMoveToNewWindow}
+			onSelect={() => moveToNewWindow('bottom')}
 		>
 			<PanelTop class="rotate-180" />
-			{m.workspace_open_tab_new_window_below()}
+			{m.workspace_move_tab_to_new_window_below()}
 		</DropdownMenuItem>
+		{#if canOfferCloseTab}
+			<DropdownMenuItem
+				data-workspace-window-tab-action="close-tab"
+				disabled={workspace.isSurfaceCloseBlocked(tabs.activeId)}
+				onSelect={closeActiveTab}
+			>
+				<X />
+				{m.workspace_close_tab()}
+			</DropdownMenuItem>
+		{/if}
 		<DropdownMenuSeparator data-workspace-window-tab-actions-separator />
 		{#if hiddenSurfaceIds.length > 0}
 			<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
@@ -187,19 +197,6 @@
 			<DropdownMenuItem onSelect={() => void workspace.popOutFile(activeSurface.id)}>
 				<Maximize2 />
 				{m.workspace_pop_out()}
-			</DropdownMenuItem>
-		{/if}
-		{#if canOfferCloseTab}
-			{#if menuItems || (activeSurface?.type === 'singleton' && activeSurface.kind === 'files') || activeSurface?.type === 'file'}
-				<DropdownMenuSeparator />
-			{/if}
-			<DropdownMenuItem
-				variant="destructive"
-				disabled={workspace.isSurfaceCloseBlocked(tabs.activeId)}
-				onSelect={closeActiveTab}
-			>
-				<X />
-				{m.workspace_close_tab()}
 			</DropdownMenuItem>
 		{/if}
 	</DropdownMenuContent>

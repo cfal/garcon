@@ -314,6 +314,88 @@ describe('WorkspaceCoordinator', () => {
 		).toHaveLength(1);
 	});
 
+	it('moves Chat into a Chat-less window and presents its destination identity', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const destinationWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+
+		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId);
+
+		expect(layout.surface(sourceSurfaceId)).toBeNull();
+		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
+		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
+		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
+	});
+
+	it('replaces and focuses an existing destination Chat presentation', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const destinationWindowId = await coordinator.openChatInNewWindow(
+			'chat-b',
+			'window-main',
+			'right',
+		);
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+
+		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId);
+
+		expect(layout.surface(sourceSurfaceId)).toBeNull();
+		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
+		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
+		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+	});
+
+	it('moves Chat directionally instead of copying its source presentation', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+
+		await coordinator.moveTabToNewWindow(sourceSurfaceId, 'window-main', 'right');
+
+		const movedChat = Object.values(layout.snapshot.surfaces).find(
+			(surface) => surface.type === 'chat' && surface.chatId === 'chat-a',
+		);
+		expect(movedChat?.id).not.toBe(sourceSurfaceId);
+		expect(layout.surface(sourceSurfaceId)).toBeNull();
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		expect(coordinator.lastFocusedSurfaceId).toBe(movedChat?.id);
+	});
+
+	it('keeps the explicit sidebar-style Chat new-window intent as a copy', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+
+		const destinationWindowId = await coordinator.openChatInNewWindow(
+			'chat-a',
+			'window-main',
+			'right',
+		);
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId(destinationWindowId))).toMatchObject({
+			chatId: 'chat-a',
+		});
+	});
+
+	it('keeps a sole-tab directional Chat move as a no-op', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		const before = layout.snapshot;
+
+		await coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right');
+
+		expect(layout.snapshot).toBe(before);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+	});
+
 	it('blocks closing the window that owns the final Chat view', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonInNewWindow('git-history');
@@ -1042,7 +1124,7 @@ describe('WorkspaceCoordinator', () => {
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
 				{
-					type: 'open-tab-in-new-window',
+					type: 'move-tab-to-new-window',
 					surfaceId: 'singleton:git',
 					targetWindowId: 'window-main',
 					edge: 'right',
@@ -1197,6 +1279,20 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface('singleton:commit')).toBeNull();
 	});
 
+	it('rejects a directional Chat move beyond the window limit', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		await coordinator.openSingletonInNewWindow('git-compare');
+		await coordinator.openSingletonInNewWindow('files');
+		expect(windowCountOf(layout.snapshot)).toBe(4);
+
+		await expect(
+			coordinator.moveTabToNewWindow(chatViewSurfaceId('window-main'), 'window-main', 'right'),
+		).rejects.toBeInstanceOf(WorkspaceWindowLimitError);
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+	});
+
 	it('coalesces concurrent singleton opens into one placement', async () => {
 		const { coordinator, layout } = createHarness();
 
@@ -1250,7 +1346,7 @@ describe('WorkspaceCoordinator', () => {
 		const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')!;
 		expect(windowCountOf(layout.snapshot)).toBe(4);
 
-		await coordinator.openTabInNewWindow('singleton:files', 'window-main', 'left');
+		await coordinator.moveTabToNewWindow('singleton:files', 'window-main', 'left');
 
 		expect(windowCountOf(layout.snapshot)).toBe(4);
 		expect(windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:files')).not.toBe(

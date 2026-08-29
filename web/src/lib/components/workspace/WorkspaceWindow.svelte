@@ -127,7 +127,7 @@
 			} else if (commit.target.zone === 'center') {
 				await workspace.moveTabToWindow(commit.payload.surfaceId, workspaceWindow.id);
 			} else {
-				await workspace.openTabInNewWindow(
+				await workspace.moveTabToNewWindow(
 					commit.payload.surfaceId,
 					workspaceWindow.id,
 					commit.target.zone,

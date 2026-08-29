@@ -10,6 +10,7 @@
 		ContextMenu,
 		ContextMenuContent,
 		ContextMenuItem,
+		ContextMenuSeparator,
 		ContextMenuTrigger,
 	} from '$lib/components/ui/context-menu';
 	import { getNotifications, getWorkspaceCoordinator } from '$lib/context';
@@ -20,7 +21,7 @@
 		WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
 	import {
-		openWorkspaceTabInNewWindow,
+		moveWorkspaceTabToNewWindow,
 		resolveWorkspaceWindowTabActions,
 	} from '$lib/workspace/workspace-window-tab-actions.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
@@ -105,8 +106,8 @@
 		return tabActions(surfaceId).canMoveBetweenWindows;
 	}
 
-	function canOpenInNewWindow(surfaceId: string): boolean {
-		return tabActions(surfaceId).canOpenInNewWindow;
+	function canMoveToNewWindow(surfaceId: string): boolean {
+		return tabActions(surfaceId).canMoveToNewWindow;
 	}
 
 	function tabActions(surfaceId: string) {
@@ -161,8 +162,8 @@
 		if (index >= 0 && index < tabs.order.length - 1) moveTab(surfaceId, windowId, index + 1);
 	}
 
-	function openInNewWindow(surfaceId: string, edge: WorkspaceWindowEdge): void {
-		void openWorkspaceTabInNewWindow(workspace, surfaceId, windowId, edge).catch(notifyFailure);
+	function moveToNewWindow(surfaceId: string, edge: WorkspaceWindowEdge): void {
+		void moveWorkspaceTabToNewWindow(workspace, surfaceId, windowId, edge).catch(notifyFailure);
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
@@ -299,47 +300,47 @@
 					{/each}
 				{/if}
 				<ContextMenuItem
-					disabled={!canOpenInNewWindow(surfaceId)}
-					onclick={() => openInNewWindow(surfaceId, 'left')}
+					disabled={!canMoveToNewWindow(surfaceId)}
+					onclick={() => moveToNewWindow(surfaceId, 'left')}
 				>
 					<PanelRight class="rotate-180" />
-					{m.workspace_open_tab_new_window_left()}
+					{m.workspace_move_tab_to_new_window_left()}
 				</ContextMenuItem>
 				<ContextMenuItem
-					disabled={!canOpenInNewWindow(surfaceId)}
-					onclick={() => openInNewWindow(surfaceId, 'right')}
+					disabled={!canMoveToNewWindow(surfaceId)}
+					onclick={() => moveToNewWindow(surfaceId, 'right')}
 				>
 					<PanelRight />
-					{m.workspace_open_tab_new_window_right()}
+					{m.workspace_move_tab_to_new_window_right()}
 				</ContextMenuItem>
 				<ContextMenuItem
-					disabled={!canOpenInNewWindow(surfaceId)}
-					onclick={() => openInNewWindow(surfaceId, 'top')}
+					disabled={!canMoveToNewWindow(surfaceId)}
+					onclick={() => moveToNewWindow(surfaceId, 'top')}
 				>
 					<PanelTop />
-					{m.workspace_open_tab_new_window_above()}
+					{m.workspace_move_tab_to_new_window_above()}
 				</ContextMenuItem>
 				<ContextMenuItem
-					disabled={!canOpenInNewWindow(surfaceId)}
-					onclick={() => openInNewWindow(surfaceId, 'bottom')}
+					disabled={!canMoveToNewWindow(surfaceId)}
+					onclick={() => moveToNewWindow(surfaceId, 'bottom')}
 				>
 					<PanelTop class="rotate-180" />
-					{m.workspace_open_tab_new_window_below()}
+					{m.workspace_move_tab_to_new_window_below()}
 				</ContextMenuItem>
-				{#if workspace.layout.surface(surfaceId)?.type === 'file'}
-					<ContextMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
-						<Maximize2 />
-						{m.workspace_pop_out()}
-					</ContextMenuItem>
-				{/if}
 				<ContextMenuItem
-					variant="destructive"
 					disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
 					onclick={() => void workspace.closeSurface(surfaceId)}
 				>
 					<X />
 					{m.workspace_close_tab()}
 				</ContextMenuItem>
+				{#if workspace.layout.surface(surfaceId)?.type === 'file'}
+					<ContextMenuSeparator />
+					<ContextMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
+						<Maximize2 />
+						{m.workspace_pop_out()}
+					</ContextMenuItem>
+				{/if}
 			</ContextMenuContent>
 		</ContextMenu>
 	{/if}

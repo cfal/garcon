@@ -15,7 +15,7 @@ export interface WorkspaceWindowTabActionState {
 	readonly index: number;
 	readonly canReorder: boolean;
 	readonly canMoveBetweenWindows: boolean;
-	readonly canOpenInNewWindow: boolean;
+	readonly canMoveToNewWindow: boolean;
 	readonly otherWindows: readonly WorkspaceWindowNode[];
 }
 
@@ -28,7 +28,8 @@ export function resolveWorkspaceWindowTabActions(
 	const surface = snapshot.surfaces[surfaceId] ?? null;
 	const index = tabs.order.indexOf(surfaceId);
 	const canReorder = surface !== null && surface.type !== 'terminal-launcher' && index >= 0;
-	const canMoveBetweenWindows = canReorder && surface !== null && surface.type !== 'chat';
+	const hasMovableChat = surface?.type !== 'chat' || Boolean(surface.chatId);
+	const canMoveBetweenWindows = canReorder && hasMovableChat;
 	const windows = collectWindowNodes(snapshot.desktopRoot);
 	const canCreateWindow = windows.length < MAX_WORKSPACE_WINDOWS;
 	return {
@@ -36,34 +37,25 @@ export function resolveWorkspaceWindowTabActions(
 		index,
 		canReorder,
 		canMoveBetweenWindows,
-		canOpenInNewWindow:
+		canMoveToNewWindow:
 			canCreateWindow &&
-			canReorder &&
-			surface !== null &&
-			(surface.type !== 'chat' || Boolean(surface.chatId)),
+			canMoveBetweenWindows &&
+			(surface?.type !== 'chat' || tabs.order.length > 1),
 		otherWindows: canMoveBetweenWindows
 			? windows.filter((workspaceWindow) => workspaceWindow.id !== windowId)
 			: [],
 	};
 }
 
-type NewWindowActionPort = Pick<
-	WorkspaceCoordinator,
-	'layout' | 'openChatInNewWindow' | 'openTabInNewWindow'
->;
+type MoveToNewWindowActionPort = Pick<WorkspaceCoordinator, 'layout' | 'moveTabToNewWindow'>;
 
-export function openWorkspaceTabInNewWindow(
-	workspace: NewWindowActionPort,
+export function moveWorkspaceTabToNewWindow(
+	workspace: MoveToNewWindowActionPort,
 	surfaceId: string,
 	windowId: WorkspaceWindowId,
 	edge: WorkspaceWindowEdge,
 ): Promise<unknown> {
 	const surface = workspace.layout.surface(surfaceId);
 	if (!surface || surface.type === 'terminal-launcher') return Promise.resolve();
-	if (surface.type === 'chat') {
-		return surface.chatId
-			? workspace.openChatInNewWindow(surface.chatId, windowId, edge)
-			: Promise.resolve();
-	}
-	return workspace.openTabInNewWindow(surfaceId, windowId, edge);
+	return workspace.moveTabToNewWindow(surfaceId, windowId, edge);
 }

@@ -472,43 +472,86 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		destinationWindowId: WorkspaceWindowId,
 		index?: number,
 	): Promise<void> {
+		if (this.isMobile) return;
+		const initialSourceWindowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
 		if (
 			this.#reservedSurfaceIds.has(surfaceId) ||
+			(initialSourceWindowId !== null && this.#reservedWindowIds.has(initialSourceWindowId)) ||
 			this.#reservedWindowIds.has(destinationWindowId)
 		) {
 			return;
 		}
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		let movedSurfaceId: string | null = null;
 		const current = await this.#presentation.commit((latest) => {
+			const surface = latest.surfaces[surfaceId];
+			const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
 			if (
-				!latest.surfaces[surfaceId] ||
-				!windowIdOfSurface(latest.desktopRoot, surfaceId) ||
-				!windowNodeById(latest.desktopRoot, destinationWindowId)
+				!surface ||
+				!sourceWindowId ||
+				!windowNodeById(latest.desktopRoot, destinationWindowId) ||
+				this.#reservedSurfaceIds.has(surfaceId) ||
+				this.#reservedWindowIds.has(sourceWindowId) ||
+				this.#reservedWindowIds.has(destinationWindowId)
 			) {
 				return [];
 			}
+			if (surface.type === 'chat' && sourceWindowId !== destinationWindowId) {
+				const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+				if (!surface.chatId || this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
+				movedSurfaceId = destinationSurfaceId;
+				return [
+					{
+						type: 'move-chat-to-window',
+						sourceWindowId,
+						destinationWindowId,
+					},
+				];
+			}
+			movedSurfaceId = surfaceId;
 			return [{ type: 'move-tab', surfaceId, destinationWindowId, index }];
 		});
-		if (current) this.#presentation.presentSurface(surfaceId);
+		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
+			this.#presentation.presentSurface(movedSurfaceId);
+		}
 	}
 
-	async openTabInNewWindow(
+	async moveTabToNewWindow(
 		surfaceId: string,
 		targetWindowId: WorkspaceWindowId,
 		edge: WorkspaceWindowEdge,
 	): Promise<void> {
-		if (this.#reservedSurfaceIds.has(surfaceId) || this.#reservedWindowIds.has(targetWindowId)) {
+		if (this.isMobile) return;
+		const initialSourceWindowId = windowIdOfSurface(this.layout.snapshot.desktopRoot, surfaceId);
+		if (
+			this.#reservedSurfaceIds.has(surfaceId) ||
+			(initialSourceWindowId !== null && this.#reservedWindowIds.has(initialSourceWindowId)) ||
+			this.#reservedWindowIds.has(targetWindowId)
+		) {
 			return;
 		}
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
+		let movedSurfaceId: string | null = null;
 		const current = await this.#presentation.commit((latest) => {
+			const surface = latest.surfaces[surfaceId];
 			const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
 			if (
-				!latest.surfaces[surfaceId] ||
+				!surface ||
 				!sourceWindowId ||
-				!windowNodeById(latest.desktopRoot, targetWindowId)
+				!windowNodeById(latest.desktopRoot, targetWindowId) ||
+				this.#reservedSurfaceIds.has(surfaceId) ||
+				this.#reservedWindowIds.has(sourceWindowId) ||
+				this.#reservedWindowIds.has(targetWindowId)
+			) {
+				return [];
+			}
+			const sourceWindow = windowNodeById(latest.desktopRoot, sourceWindowId);
+			if (
+				surface.type === 'chat' &&
+				(!surface.chatId ||
+					(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1))
 			) {
 				return [];
 			}
@@ -518,9 +561,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			) {
 				throw new WorkspaceWindowLimitError();
 			}
+			movedSurfaceId = surface.type === 'chat' ? chatViewSurfaceId(newWindowId) : surfaceId;
 			return [
 				{
-					type: 'open-tab-in-new-window',
+					type: 'move-tab-to-new-window',
 					surfaceId,
 					targetWindowId,
 					edge,
@@ -529,7 +573,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				},
 			];
 		});
-		if (current) this.#presentation.presentSurface(surfaceId);
+		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
+			this.#presentation.presentSurface(movedSurfaceId);
+		}
 	}
 
 	async setPartitionRatio(partitionId: WorkspacePartitionId, ratio: number): Promise<void> {

@@ -412,10 +412,32 @@ function swapTerminalPlacements(
 	};
 }
 
-function assertMovableSurface(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): void {
+function movableWindowChat(snapshot: WorkspaceLayoutSnapshot, windowId: WorkspaceWindowId) {
+	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+	if (!workspaceWindow) throw new Error(`Workspace window does not exist: ${windowId}`);
+	const surfaceId = chatViewSurfaceId(windowId);
 	const surface = snapshot.surfaces[surfaceId];
-	if (!surface) throw new Error(`Surface does not exist: ${surfaceId}`);
-	if (surface.type === 'chat') throw new Error('A window Chat view cannot move between windows');
+	if (surface?.type !== 'chat' || !workspaceWindow.tabs.order.includes(surfaceId)) {
+		throw new Error(`Workspace window does not contain its Chat view: ${windowId}`);
+	}
+	if (!surface.chatId) throw new Error(`Workspace Chat view is empty: ${windowId}`);
+	return { surfaceId, chatId: surface.chatId };
+}
+
+function rekeyChatSurfaceReferences(
+	snapshot: WorkspaceLayoutSnapshot,
+	previousId: string,
+	nextId: string,
+): WorkspaceLayoutSnapshot {
+	return {
+		...snapshot,
+		mobileActiveSurfaceId:
+			snapshot.mobileActiveSurfaceId === previousId ? nextId : snapshot.mobileActiveSurfaceId,
+		mobileReturnStack: snapshot.mobileReturnStack.map((target) => ({
+			...target,
+			invokerSurfaceId: target.invokerSurfaceId === previousId ? nextId : target.invokerSurfaceId,
+		})),
+	};
 }
 
 function moveTab(
@@ -462,11 +484,42 @@ function moveTab(
 	};
 }
 
-function openTabInNewWindow(
+function moveChatToWindow(
 	snapshot: WorkspaceLayoutSnapshot,
-	mutation: Extract<WorkspaceLayoutMutation, { type: 'open-tab-in-new-window' }>,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-chat-to-window' }>,
 ): WorkspaceLayoutSnapshot {
-	assertMovableSurface(snapshot, mutation.surfaceId);
+	if (mutation.sourceWindowId === mutation.destinationWindowId) {
+		throw new Error('A Chat view must move to a different workspace window');
+	}
+	if (!windowNodeById(snapshot.desktopRoot, mutation.destinationWindowId)) {
+		throw new Error(`Workspace window does not exist: ${mutation.destinationWindowId}`);
+	}
+	const source = movableWindowChat(snapshot, mutation.sourceWindowId);
+	const destinationSurfaceId = chatViewSurfaceId(mutation.destinationWindowId);
+	const removed = removeEveryPlacement(snapshot, source.surfaceId);
+	if (!windowNodeById(removed.desktopRoot, mutation.destinationWindowId)) {
+		throw new Error(`Destination window closed while moving Chat: ${mutation.destinationWindowId}`);
+	}
+	const surfaces = { ...removed.surfaces };
+	delete surfaces[source.surfaceId];
+	const rekeyed = rekeyChatSurfaceReferences(
+		{ ...removed, surfaces },
+		source.surfaceId,
+		destinationSurfaceId,
+	);
+	const moved = setWindowChat(rekeyed, mutation.destinationWindowId, source.chatId);
+	return {
+		...moved,
+		fullscreenWindowId: fullscreenAfterActivation(moved, mutation.destinationWindowId),
+	};
+}
+
+function moveTabToNewWindow(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'move-tab-to-new-window' }>,
+): WorkspaceLayoutSnapshot {
+	const surface = snapshot.surfaces[mutation.surfaceId];
+	if (!surface) throw new Error(`Surface does not exist: ${mutation.surfaceId}`);
 	if (!windowNodeById(snapshot.desktopRoot, mutation.targetWindowId)) {
 		throw new Error(`Workspace window does not exist: ${mutation.targetWindowId}`);
 	}
@@ -475,6 +528,9 @@ function openTabInNewWindow(
 		throw new Error(`Surface is not in a workspace window: ${mutation.surfaceId}`);
 	const sourceTabs = windowNodeById(snapshot.desktopRoot, sourceWindowId)?.tabs;
 	if (sourceWindowId === mutation.targetWindowId && sourceTabs?.order.length === 1) return snapshot;
+	if (surface.type === 'chat' && !surface.chatId) {
+		throw new Error(`Workspace Chat view is empty: ${sourceWindowId}`);
+	}
 	if (
 		projectedWindowCountAfterTabMove(
 			snapshot.desktopRoot,
@@ -486,18 +542,39 @@ function openTabInNewWindow(
 	}
 	const next = removeEveryPlacement(snapshot, mutation.surfaceId);
 	if (!windowNodeById(next.desktopRoot, mutation.targetWindowId)) {
-		throw new Error(`Target window closed while opening a new window: ${mutation.targetWindowId}`);
+		throw new Error(`Target window closed while moving a tab: ${mutation.targetWindowId}`);
 	}
 	if (windowNodeById(next.desktopRoot, mutation.newWindowId)) {
 		throw new Error(`Workspace window already exists: ${mutation.newWindowId}`);
 	}
+	let moved = next;
+	let destinationSurfaceId = mutation.surfaceId;
+	if (surface.type === 'chat') {
+		const newChatSurfaceId = chatViewSurfaceId(mutation.newWindowId);
+		destinationSurfaceId = newChatSurfaceId;
+		if (next.surfaces[newChatSurfaceId]) {
+			throw new Error(`Surface already exists: ${newChatSurfaceId}`);
+		}
+		const surfaces: Record<string, SurfaceDescriptor> = { ...next.surfaces };
+		delete surfaces[mutation.surfaceId];
+		surfaces[newChatSurfaceId] = {
+			id: newChatSurfaceId,
+			type: 'chat',
+			chatId: surface.chatId,
+		};
+		moved = rekeyChatSurfaceReferences(
+			{ ...next, surfaces },
+			mutation.surfaceId,
+			destinationSurfaceId,
+		);
+	}
 	return {
-		...next,
+		...moved,
 		desktopRoot: insertWindowAtEdge(
-			next.desktopRoot,
+			moved.desktopRoot,
 			mutation.targetWindowId,
 			mutation.edge,
-			singleTabWindow(mutation.newWindowId, mutation.surfaceId),
+			singleTabWindow(mutation.newWindowId, destinationSurfaceId),
 			mutation.partitionId,
 		),
 		fullscreenWindowId: null,
@@ -615,6 +692,8 @@ function applyMutation(
 		}
 		case 'move-tab':
 			return moveTab(snapshot, mutation, true);
+		case 'move-chat-to-window':
+			return moveChatToWindow(snapshot, mutation);
 		case 'assign-to-window':
 			return moveTab(
 				snapshot,
@@ -626,8 +705,8 @@ function applyMutation(
 				},
 				false,
 			);
-		case 'open-tab-in-new-window':
-			return openTabInNewWindow(snapshot, mutation);
+		case 'move-tab-to-new-window':
+			return moveTabToNewWindow(snapshot, mutation);
 		case 'close-window':
 			return closeWindow(snapshot, mutation.windowId);
 		case 'set-partition-ratio':

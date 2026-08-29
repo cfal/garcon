@@ -151,13 +151,18 @@ export type WorkspaceLayoutMutation =
 			index?: number;
 	  }
 	| {
+			type: 'move-chat-to-window';
+			sourceWindowId: WorkspaceWindowId;
+			destinationWindowId: WorkspaceWindowId;
+	  }
+	| {
 			type: 'assign-to-window';
 			surfaceId: string;
 			destinationWindowId: WorkspaceWindowId;
 			index?: number;
 	  }
 	| {
-			type: 'open-tab-in-new-window';
+			type: 'move-tab-to-new-window';
 			surfaceId: string;
 			targetWindowId: WorkspaceWindowId;
 			edge: WorkspaceWindowEdge;

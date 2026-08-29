@@ -21,7 +21,7 @@ describe('WorkspaceTransitionArbiter', () => {
 		]);
 		const second = arbiter.commit([
 			{
-				type: 'open-tab-in-new-window',
+				type: 'move-tab-to-new-window',
 				surfaceId: 'singleton:git',
 				targetWindowId: 'window-main',
 				edge: 'right',

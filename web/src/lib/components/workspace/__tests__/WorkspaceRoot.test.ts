@@ -143,11 +143,11 @@ function installContext() {
 				commit([{ type: 'move-tab', surfaceId, destinationWindowId, index }]);
 			},
 		),
-		openTabInNewWindow: vi.fn(
+		moveTabToNewWindow: vi.fn(
 			async (surfaceId: string, targetWindowId: WorkspaceWindowId, edge: WorkspaceWindowEdge) => {
 				commit([
 					{
-						type: 'open-tab-in-new-window',
+						type: 'move-tab-to-new-window',
 						surfaceId,
 						targetWindowId,
 						edge,
