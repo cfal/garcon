@@ -21,22 +21,31 @@ describe('workspace window theme tokens', () => {
 		expect(theme).toContain(
 			'--color-workspace-window-titlebar-active: hsl(var(--workspace-window-titlebar-active));',
 		);
+		expect(theme).toContain(
+			'--color-workspace-window-tab-selected: hsl(var(--workspace-window-tab-selected));',
+		);
+		expect(theme).toContain('--color-workspace-window-tab-selected-inactive: hsl(');
+		expect(theme).not.toContain('workspace-window-focus');
 	});
 
-	it('uses sharp light chrome with a softer light focus border', () => {
+	it('uses distinct light chrome and muted inactive-window tab selection', () => {
 		const root = cssBlock(':root');
 
-		expect(root).toContain('--workspace-window-titlebar: 0 0% 91%;');
+		expect(root).toContain('--workspace-window-titlebar: 0 0% 93%;');
 		expect(root).toContain('--workspace-window-titlebar-active: 0 0% 84%;');
-		expect(root).toContain('--workspace-window-focus: 0 0% 82%;');
+		expect(root).toContain('--workspace-window-tab-selected: 0 0% 96%;');
+		expect(root).toContain('--workspace-window-tab-selected-inactive: 0 0% 88%;');
+		expect(root).not.toContain('workspace-window-focus');
 	});
 
-	it('uses almost-black dark chrome with a softer dark focus border', () => {
+	it('uses distinct dark chrome and muted inactive-window tab selection', () => {
 		const dark = cssBlock('.dark');
 
-		expect(dark).toContain('--workspace-window-titlebar: 0 0% 4%;');
+		expect(dark).toContain('--workspace-window-titlebar: 0 0% 7%;');
 		expect(dark).toContain('--workspace-window-titlebar-active: 0 0% 1%;');
-		expect(dark).toContain('--workspace-window-focus: 0 0% 28%;');
+		expect(dark).toContain('--workspace-window-tab-selected: 0 0% 18%;');
+		expect(dark).toContain('--workspace-window-tab-selected-inactive: 0 0% 12%;');
+		expect(dark).not.toContain('workspace-window-focus');
 	});
 
 	it('animates workspace activity only when reduced motion is not requested', () => {

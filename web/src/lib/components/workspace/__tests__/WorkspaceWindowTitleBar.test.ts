@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
+import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 import type {
 	DesktopWorkspaceNode,
 	SurfaceDescriptor,
@@ -41,6 +42,9 @@ const {
 		closeBlocked: true,
 		surfaceCloseBlocked: false,
 		processingChatIds: new Set<string>(),
+		terminalSessions: [] as Array<{
+			metadata: { terminalId: string; displaySequence: number };
+		}>,
 		surfaces: {} as Record<string, SurfaceDescriptor>,
 	},
 }));
@@ -88,7 +92,11 @@ vi.mock('$lib/context', () => ({
 	}),
 	getNotifications: () => ({ error: vi.fn() }),
 	getFileSessions: () => ({ showOpenFiles: vi.fn() }),
-	getTerminalRegistry: () => ({ orderedSessions: [] }),
+	getTerminalRegistry: () => ({
+		get orderedSessions() {
+			return runtime.terminalSessions;
+		},
+	}),
 	getGhCapability: () => ({ hasChecked: true, available: true }),
 	getOptionalTransientLayers: () => null,
 }));
@@ -107,6 +115,11 @@ const otherChatSurface = {
 	id: 'chat-view:window-two',
 	type: 'chat',
 	chatId: 'chat-b',
+} as const satisfies SurfaceDescriptor;
+const emptyChatSurface = {
+	id: 'chat-view:window-main',
+	type: 'chat',
+	chatId: null,
 } as const satisfies SurfaceDescriptor;
 
 function workspaceWindow(
@@ -205,6 +218,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.closeBlocked = true;
 		runtime.surfaceCloseBlocked = false;
 		runtime.processingChatIds.clear();
+		runtime.terminalSessions = [];
 		runtime.surfaces = { [chatSurface.id]: chatSurface, [gitSurface.id]: gitSurface };
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
@@ -214,22 +228,28 @@ describe('WorkspaceWindowTitleBar', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('shows a title and direct controls for a one-tab window', () => {
+	it('shows a draggable tab and direct controls for a one-tab window', () => {
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 
-		expect(screen.queryByRole('tablist')).toBeNull();
+		expect(screen.getByRole('tablist')).toBeTruthy();
+		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('draggable')).toBe('true');
 		const toolbar = screen.getByRole('toolbar');
 		expect(toolbar.classList.contains('relative')).toBe(true);
 		expect(toolbar.classList.contains('z-50')).toBe(true);
+		expect(toolbar.classList.contains('h-10')).toBe(true);
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar')).toBe(true);
 		expect(toolbar.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
-		expect(screen.getByText('Chat A')).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_add_to_window() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_window_actions() })).toBeTruthy();
 		expect(screen.getByRole('button', { name: m.workspace_fullscreen() })).toBeTruthy();
-		const close = screen.getByRole('button', { name: m.workspace_close_window() });
-		expect((close as HTMLButtonElement).disabled).toBe(true);
-		expect(close.title).toBe(m.workspace_close_window_disabled());
+		expect(screen.queryByRole('button', { name: m.workspace_close_window() })).toBeNull();
+	});
+
+	it('keeps an empty Chat tab non-draggable', () => {
+		runtime.surfaces = { [emptyChatSurface.id]: emptyChatSurface };
+		renderTitleBar(workspaceWindow([emptyChatSurface.id]));
+
+		expect(screen.getByRole('tab', { name: 'Chat A' }).hasAttribute('draggable')).toBe(false);
 	});
 
 	it('uses a window-local tablist when multiple tabs exist', () => {
@@ -277,30 +297,41 @@ describe('WorkspaceWindowTitleBar', () => {
 		).toHaveLength(0);
 	});
 
-	it('replaces the single-tab Chat title icon while processing', () => {
+	it('replaces the one-tab Chat icon while processing', () => {
 		runtime.processingChatIds.add('chat-a');
 		const { container } = renderTitleBar(workspaceWindow([chatSurface.id]));
 
+		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+		expect(chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]')).toBeTruthy();
+		expect(chatTab.querySelector('.lucide-message-square')).toBeNull();
 		expect(
-			container.querySelector('[data-slot="workspace-chat-processing-indicator"]'),
+			container.querySelector(
+				`[data-window-tab-measure-id="${chatSurface.id}"] .lucide-message-square`,
+			),
 		).toBeTruthy();
-		expect(container.querySelector('.lucide-message-square')).toBeNull();
 	});
 
 	it('uses the active title-bar token only for the current window in a multi-window layout', () => {
 		runtime.windowCount = 2;
-		const current = renderTitleBar(workspaceWindow([chatSurface.id])).container.querySelector(
-			'[data-workspace-window-titlebar]',
-		)!;
+		const currentRender = renderTitleBar(workspaceWindow([chatSurface.id]));
+		const current = currentRender.container.querySelector('[data-workspace-window-titlebar]')!;
 		expect(current.classList.contains('bg-workspace-window-titlebar-active')).toBe(true);
+		expect(
+			currentRender
+				.getByRole('tab', { name: 'Chat A' })
+				.classList.contains('bg-workspace-window-tab-selected'),
+		).toBe(true);
 		cleanup();
 
-		const inactive = renderTitleBar(
-			workspaceWindow([chatSurface.id]),
-			false,
-		).container.querySelector('[data-workspace-window-titlebar]')!;
+		const inactiveRender = renderTitleBar(workspaceWindow([chatSurface.id]), false);
+		const inactive = inactiveRender.container.querySelector('[data-workspace-window-titlebar]')!;
 		expect(inactive.classList.contains('bg-workspace-window-titlebar')).toBe(true);
 		expect(inactive.classList.contains('bg-workspace-window-titlebar-active')).toBe(false);
+		expect(
+			inactiveRender
+				.getByRole('tab', { name: 'Chat A' })
+				.classList.contains('bg-workspace-window-tab-selected-inactive'),
+		).toBe(true);
 	});
 
 	it('keeps the fullscreen title bar muted', () => {
@@ -384,6 +415,45 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_open_git_history() }));
 
 		expect(openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
+	});
+
+	it('keeps all available view commands in canonical order before open terminals', async () => {
+		const kinds = [
+			'git',
+			'git-history',
+			'git-compare',
+			'pull-requests',
+			'files',
+			'commit',
+		] as const;
+		runtime.surfaces = Object.fromEntries(
+			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
+				surface.id,
+				surface,
+			]),
+		);
+		runtime.terminalSessions = [{ metadata: { terminalId: 'terminal-seven', displaySequence: 7 } }];
+		renderTitleBar(workspaceWindow([chatSurface.id]));
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
+
+		expect(screen.getByText(m.workspace_open_views())).toBeTruthy();
+		const items = screen.getAllByRole('menuitem');
+		const viewLabels = [
+			m.workspace_open_surface({ surface: m.workspace_surface_git_workbench() }),
+			m.workspace_open_git_history(),
+			m.workspace_open_git_compare(),
+			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+		];
+		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
+		const terminal = screen.getByRole('menuitem', {
+			name: m.workspace_surface_terminal_number({ number: 7 }),
+		});
+
+		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));
 	});
 
 	it('closes the plus menu when New Terminal enters its busy state', async () => {

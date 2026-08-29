@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
-import { WorkspaceWindowDndController } from '../window-dnd.svelte.js';
+import {
+	resolveWorkspaceWindowCenterDropResult,
+	WorkspaceWindowDndController,
+} from '../window-dnd.svelte.js';
 import {
 	portableSingletonDescriptor,
 	type WorkspacePartitionId,
@@ -94,6 +97,38 @@ describe('WorkspaceWindowDndController', () => {
 		});
 		expect(dnd.payload).toBeNull();
 		expect(dnd.activeTarget).toBeNull();
+	});
+
+	it('classifies Chat center drops by destination ownership', () => {
+		const chatlessDestination = twoWindowLayout();
+		const payload = {
+			kind: 'surface-tab',
+			surfaceId: 'chat-view:window-main',
+			sourceWindowId: 'window-main',
+			sourceIndex: 0,
+		} as const;
+		expect(
+			resolveWorkspaceWindowCenterDropResult(chatlessDestination.snapshot, payload, 'window-files'),
+		).toBe('add-tab');
+
+		const occupiedDestination = createWorkspaceLayoutStore();
+		occupiedDestination.publish(
+			occupiedDestination.revision,
+			reduceWorkspaceLayout(occupiedDestination.snapshot, [
+				{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-chat',
+					partitionId: 'partition-chat',
+				},
+			]),
+		);
+		expect(
+			resolveWorkspaceWindowCenterDropResult(occupiedDestination.snapshot, payload, 'window-chat'),
+		).toBe('replace-chat');
 	});
 
 	it('blocks opening the sole tab from a window beside itself', () => {

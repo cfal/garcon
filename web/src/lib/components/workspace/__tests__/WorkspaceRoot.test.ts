@@ -18,6 +18,7 @@ import {
 } from '$lib/workspace/surface-types.js';
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
@@ -252,8 +253,9 @@ describe('WorkspaceRoot', () => {
 		const { container } = renderRoot();
 
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(1);
-		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(0);
-		expect(screen.getByText('Chat A')).toBeTruthy();
+		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(1);
+		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('draggable')).toBe('true');
+		expect(container.querySelector('[data-workspace-window-close]')).toBeNull();
 		const panel = container.querySelector(
 			'[data-workspace-surface-id="chat-view:window-main"]',
 		) as HTMLElement;
@@ -261,6 +263,43 @@ describe('WorkspaceRoot', () => {
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
+	});
+
+	it('labels an occupied Chat center drop as replacement', async () => {
+		const { layout, windowDnd } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		const sourceTab = screen.getByRole('tab', { name: 'Chat A' });
+		const destination = container.querySelector(
+			'[data-workspace-window-id="window-2"]',
+		) as HTMLElement;
+		vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+		windowDnd.beginSurfaceTabDrag(
+			chatViewSurfaceId('window-main'),
+			'window-main',
+			0,
+			positionedDragEvent('dragstart', 0, 0),
+		);
+		await tick();
+
+		await fireEvent(destination, positionedDragEvent('dragover', 50, 50));
+
+		expect(sourceTab.getAttribute('draggable')).toBe('true');
+		expect(
+			container.querySelector('[data-workspace-window-drop-result]')?.textContent?.trim(),
+		).toBe(m.workspace_drop_zone_replace_chat());
 	});
 
 	it('keeps one live Chat surface mounted while its local tab becomes hidden', async () => {
@@ -311,20 +350,20 @@ describe('WorkspaceRoot', () => {
 		);
 		const { container } = renderRoot();
 		const liveChat = screen.getByTestId('chat-surface-stub');
+		const liveChatBody = container.querySelector('[data-workspace-live-chat-body]')!;
 		expect(screen.getByTestId('chat-window-preview').dataset.chatId).toBe('chat-b');
 		expect(screen.getByTestId('chat-window-preview').dataset.textScale).toBe('0.85');
 		expect(liveChat.dataset.textScale).toBe('0.85');
-		expect(
-			container
-				.querySelector('[data-workspace-window-focus-ring]')
-				?.classList.contains('ring-workspace-window-focus'),
-		).toBe(true);
+		expect(liveChatBody.classList.contains('top-10')).toBe(true);
+		expect(liveChatBody.classList.contains('inset-0')).toBe(false);
+		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 
 		await workspace.focusSurface(chatViewSurfaceId('window-2'));
 		await tick();
 
 		expect(screen.getByTestId('chat-surface-stub')).toBe(liveChat);
 		expect(screen.getByTestId('chat-window-preview').dataset.chatId).toBe('chat-a');
+		expect(liveChatBody.classList.contains('top-10')).toBe(true);
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
 	});
 

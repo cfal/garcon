@@ -63,7 +63,7 @@ function createHarness(
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialActiveSurfaceId?: string;
-		onLayoutChanged?: () => void;
+		onLayoutChanged?: (snapshot: WorkspaceLayoutSnapshot) => void;
 		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
@@ -331,6 +331,50 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
 		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
 		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
+	});
+
+	it('publishes a collapsing Chat move with the destination already current', async () => {
+		let coordinator: WorkspaceCoordinator | null = null;
+		let observeMove = false;
+		let observed:
+			| {
+					currentWindowId: WorkspaceWindowId;
+					focusOwner: WorkspaceCoordinator['focusOwner'];
+					lastFocusedSurfaceId: string;
+			  }
+			| undefined;
+		const harness = createHarness({
+			includePortableTabs: false,
+			onLayoutChanged: () => {
+				if (!observeMove || !coordinator) return;
+				observed = {
+					currentWindowId: coordinator.currentWindowId,
+					focusOwner: coordinator.focusOwner,
+					lastFocusedSurfaceId: coordinator.lastFocusedSurfaceId,
+				};
+			},
+		});
+		coordinator = harness.coordinator;
+		const { layout } = harness;
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const destinationWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+		await coordinator.focusSurface(sourceSurfaceId);
+		observeMove = true;
+
+		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId);
+
+		expect(observed).toEqual({
+			currentWindowId: destinationWindowId,
+			focusOwner: { kind: 'surface', surfaceId: destinationSurfaceId },
+			lastFocusedSurfaceId: destinationSurfaceId,
+		});
+		expect(windowCountOf(layout.snapshot)).toBe(1);
 	});
 
 	it('replaces and focuses an existing destination Chat presentation', async () => {
