@@ -1516,7 +1516,7 @@ successful active newest-history load returns its page before scheduling the
 probe in a microtask. The read explicitly carries the sole
 `purpose: 'activation'` marker; only the active transcript's newest request may
 set it. Older pages, bounded replay continuations, background snapshots,
-split-pane previews, search, provider dispatch or resume, timers, and startup
+Chat-window previews, search, provider dispatch or resume, timers, and startup
 never schedule a probe. A failed history read schedules nothing.
 
 Each chat has at most one pending check. Eligibility is the exact tuple of
