@@ -90,6 +90,20 @@ function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
   };
 }
 
+function controlEntry(id, content = 'control') {
+  return {
+    id,
+    content: `<garcon-message>\n${content}\n</garcon-message>`,
+    transcriptViewId: 'view-1',
+    createdAt: '2026-02-27T00:00:00.000Z',
+    receipt: {
+      title: 'Inter-agent message',
+      content,
+      detail: { type: 'inter-agent-message-received', fromChatId: null },
+    },
+  };
+}
+
 function storedQueue(entries = [], overrides = {}) {
   return {
     serverInstanceId: 'server-instance-test',
@@ -5137,6 +5151,24 @@ describe('ChatCommandService', () => {
     queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([
       queueEntry('steering-1', 'continue', 'steering'),
     ]));
+
+    await expect(
+      service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects project path updates while private control input is waiting', async () => {
+    const { service, queue, agents } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    queue.readChatExecutionControl.mockResolvedValueOnce(storedQueue([], {
+      controlEntries: [controlEntry('control-1')],
+    }));
 
     await expect(
       service.updateProjectPath({

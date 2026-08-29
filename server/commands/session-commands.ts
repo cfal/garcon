@@ -13,6 +13,7 @@ import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
 import {
+  hasPendingTurnInput,
   toClientChatExecutionControlState,
 } from '../chat-execution/control-state.ts';
 import { createLogger } from '../lib/log.js';
@@ -616,20 +617,10 @@ export class SessionCommands {
     }
 
     const queue = await this.deps.queue.readChatExecutionControl(chatId);
-    const steeringEntry = queue.entries.find((entry) => entry.status === 'steering');
-    if (steeringEntry) {
+    if (hasPendingTurnInput(queue)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
-        'Cannot update project path while a queued message is being steered',
-        409,
-        true,
-      );
-    }
-    const queuedEntry = queue.entries.find((entry) => entry.status === 'queued');
-    if (queuedEntry) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Clear or run queued messages before updating the project path',
+        'Clear or run pending messages before updating the project path',
         409,
         true,
       );
