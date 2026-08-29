@@ -5,7 +5,7 @@ import {
 } from './chat-types.js';
 import type { ChatIdDiscoveryFailureReason } from './transcript-notice-details.js';
 
-export const CHAT_ID_DISCOVERY_REQUEST_MARKER = '<get-garcon-chat-id />';
+export const CHAT_ID_DISCOVERY_REQUEST_MARKER = '<garcon-get-chat-id />';
 export const CHAT_ID_DISCLOSURE_OPEN = '<garcon-chat-id>';
 export const CHAT_ID_DISCLOSURE_CLOSE = '</garcon-chat-id>';
 export const CHAT_ID_DISCOVERY_NOTICE_TITLE = 'Chat ID auto-discovery';

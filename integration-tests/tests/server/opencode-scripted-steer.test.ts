@@ -127,7 +127,7 @@ describeOnLinux('scripted OpenCode steering', () => {
     let releasePath = '';
     const receivedReply = marker('CHAT_ID_RECEIVED');
     testEnvironment.model.scriptTurn(() => [
-      chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      chatCompletionsText(`<garcon-get-chat-id />${marker('CHAT_ID_REQUEST')}`),
       chatCompletionsToolUse('call_oc_chat_id', 'bash', {
         command: `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
       }),
@@ -171,7 +171,7 @@ describeOnLinux('scripted OpenCode steering', () => {
 
         const page = await fixture.client.getMessages(chatId);
         expect(userContents(page.messages)).toHaveLength(1);
-        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-get-chat-id />');
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))

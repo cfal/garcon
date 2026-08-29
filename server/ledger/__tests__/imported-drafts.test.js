@@ -20,7 +20,7 @@ describe('imported transcript drafts', () => {
       {
         message: new AssistantMessage(
           AT,
-          '<get-garcon-chat-id />\nContinuing the response.',
+          '<garcon-get-chat-id />\nContinuing the response.',
         ),
         providerMeta: { nativeIdentity: { id: 'assistant-1' } },
       },
@@ -57,7 +57,7 @@ describe('imported transcript drafts', () => {
 
   it('retains a hidden marker-only request without synthesizing an outcome', () => {
     expect(importedDrafts([
-      { message: new AssistantMessage(AT, '<get-garcon-chat-id />'), providerMeta: null },
+      { message: new AssistantMessage(AT, '<garcon-get-chat-id />'), providerMeta: null },
     ], () => AT)).toEqual([{
       kind: 'notice',
       at: AT,

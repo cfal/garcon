@@ -8,7 +8,7 @@ Baseline: `origin/main` at `f4d81593ab0370b2ec6f12c9cf0cfd10f0434d6f`
 
 ## Problem
 
-Chat-ID auto-discovery currently removes `<get-garcon-chat-id />` from an
+Chat-ID auto-discovery currently removes `<garcon-get-chat-id />` from an
 assistant message and shows one success or failure notice. Revision 27 achieved
 that visible result by deleting the durable request row and compensating for
 its absence in two unrelated places:

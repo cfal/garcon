@@ -113,7 +113,7 @@ describe('scripted Pi queue lifecycle', () => {
     const receivedReply = marker('CHAT_ID_RECEIVED');
     let releasePath = '';
     testEnvironment.model.scriptTurn(() => [
-      chatCompletionsText(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      chatCompletionsText(`<garcon-get-chat-id />${marker('CHAT_ID_REQUEST')}`),
       chatCompletionsToolUse('call_pi_chat_id', 'bash', {
         command: `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
       }),
@@ -157,7 +157,7 @@ describe('scripted Pi queue lifecycle', () => {
 
         const page = await fixture.client.getMessages(chatId);
         expect(userContents(page.messages)).toEqual([firstPrompt]);
-        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-get-chat-id />');
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))

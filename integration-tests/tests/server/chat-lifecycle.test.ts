@@ -146,7 +146,7 @@ describe('chat lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await first.received;
-      first.releaseText('<get-garcon-chat-id />');
+      first.releaseText('<garcon-get-chat-id />');
 
       const hiddenRequest = await hidden.received;
       expect(hiddenRequest.lastUserText).toBe(disclosure);

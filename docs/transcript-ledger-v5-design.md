@@ -51,7 +51,7 @@ correlated to a different run remain eligible.
 
 Revision 26 adds provider-neutral chat-ID auto-discovery as a core
 canonicalization and control-steering rule. An assistant message beginning
-exactly with `<get-garcon-chat-id />` has that prefix removed before storage;
+exactly with `<garcon-get-chat-id />` has that prefix removed before storage;
 the cleaned provider row and a typed request notice commit together. When the
 default-enabled remote setting is enabled, core synchronously captures the
 emitting run's active steering target and starts one provider-only steer carrying
@@ -618,7 +618,7 @@ Kind semantics:
   `ErrorMessage` is presentation-only even though its integration provenance
   keeps it in this row kind; every other provider row is conversational.
   Streaming deltas are overlay, never rows. Core recognizes only an assistant
-  message beginning exactly with `<get-garcon-chat-id />`, removes that prefix
+  message beginning exactly with `<garcon-get-chat-id />`, removes that prefix
   and leading remainder whitespace before append, and omits the provider row
   when no non-whitespace remainder exists. The original `providerMeta` remains
   attached to a cleaned row. Each marker appends a ledger-private

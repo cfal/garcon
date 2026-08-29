@@ -16,7 +16,7 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 
-const REQUEST_MARKER = '<get-garcon-chat-id />';
+const REQUEST_MARKER = '<garcon-get-chat-id />';
 
 describe('scripted Claude chat ID discovery', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;

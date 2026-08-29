@@ -13,7 +13,7 @@ revision 24 makes its rendered artifacts transcript-first and succinct.
 Governing artifact:
 
 - `docs/transcript-ledger-v5-design.md`, revision 28, SHA-256
-  `1a5e9ff4ba21c8fbf71b384bbce40503080bf38a981bdfc47f1ea76af2e600b0`
+  `8c6c1a937bb46495519c00c5df79137ca03dd91a7cf762c562d3a17db7ae1abe`
 
 Current inventory: 401 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against

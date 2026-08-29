@@ -131,7 +131,7 @@ describe('scripted Codex strict steering', () => {
     let releasePath = '';
     const receivedReply = marker('CHAT_ID_RECEIVED');
     testEnvironment.model.scriptTurn(() => [
-      codexAssistantMessage(`<get-garcon-chat-id />${marker('CHAT_ID_REQUEST')}`),
+      codexAssistantMessage(`<garcon-get-chat-id />${marker('CHAT_ID_REQUEST')}`),
       codexExecCommandCall(
         'call_chat_id_gate',
         `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
@@ -177,7 +177,7 @@ describe('scripted Codex strict steering', () => {
 
         const page = await fixture.client.getMessages(chatId);
         expect(userContents(page.messages)).toHaveLength(1);
-        expect(JSON.stringify(page.messages)).not.toContain('<get-garcon-chat-id />');
+        expect(JSON.stringify(page.messages)).not.toContain('<garcon-get-chat-id />');
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))
