@@ -119,7 +119,7 @@ describe('TranscriptLedgerService', () => {
             message: new AssistantMessage(
               TS,
               '<garcon-get-chat-id />\n'
-                + '<garcon-send-message to="1787974832309199, 1787973671383699" hide_sender="true">\n'
+                + '<garcon-send-message to="1787974832309199, 1787973671383699" hide-sender="true">\n'
                 + 'message body\n'
                 + '</garcon-send-message>\n'
                 + 'Continuing the response.',
@@ -180,7 +180,7 @@ describe('TranscriptLedgerService', () => {
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
         const lease = ledger.openProducer('chat-1', 'test');
-        const content = '<garcon-send-message to="invalid" hide_sender="false">body</garcon-send-message>';
+        const content = '<garcon-send-message to="invalid" hide-sender="false">body</garcon-send-message>';
 
         lease.sink.publish({
           type: 'rows',

@@ -16,7 +16,7 @@ describe('inter-agent messaging', () => {
       const sourcePrompt = 'Send the requested message.';
       const body = 'Coordinate the next verification pass.';
       const envelope = `<garcon-message from="${sourceChatId}">\n${body}\n</garcon-message>`;
-      const command = `<garcon-send-message to="${targetChatId}" hide_sender="false">\n${body}\n</garcon-send-message>`;
+      const command = `<garcon-send-message to="${targetChatId}" hide-sender="false">\n${body}\n</garcon-send-message>`;
 
       const targetInitial = fixture.fakeProviders.openAi.holdNext({ lastUserText: targetPrompt });
       const targetStarted = await fixture.client.startDirectChat({
@@ -106,7 +106,7 @@ describe('inter-agent messaging', () => {
       const afterRestartPrompt = 'Continue after restart.';
       const body = 'This control input must not survive restart.';
       const envelope = `<garcon-message from="${sourceChatId}">\n${body}\n</garcon-message>`;
-      const command = `<garcon-send-message to="${targetChatId}" hide_sender="false">\n${body}\n</garcon-send-message>`;
+      const command = `<garcon-send-message to="${targetChatId}" hide-sender="false">\n${body}\n</garcon-send-message>`;
 
       const heldTarget = fixture.fakeProviders.openAi.holdNext({ lastUserText: targetPrompt });
       const targetStarted = await fixture.client.startDirectChat({

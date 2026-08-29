@@ -43,7 +43,7 @@ describe('scripted Claude inter-agent messaging', () => {
         const sourcePrompt = marker('SOURCE_PROMPT');
         const body = marker('MESSAGE_BODY');
         const envelope = `<garcon-message from="${sourceChatId}">\n${body}\n</garcon-message>`;
-        const command = `<garcon-send-message to="${targetChatId}" hide_sender="false">\n${body}\n</garcon-send-message>`;
+        const command = `<garcon-send-message to="${targetChatId}" hide-sender="false">\n${body}\n</garcon-send-message>`;
         const startedPath = path.join(fixture.dirs.project, 'inter-agent-target-started');
         releasePath = path.join(fixture.dirs.project, 'inter-agent-target-release');
 

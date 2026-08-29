@@ -73,7 +73,7 @@ describe('imported transcript drafts', () => {
         message: new AssistantMessage(
           AT,
           'Retained answer.\n'
-            + '<garcon-send-message to="1787974832309199, 1787973671383699" hide_sender="false">\n'
+            + '<garcon-send-message to="1787974832309199, 1787973671383699" hide-sender="false">\n'
             + 'message body\n'
             + '</garcon-send-message>',
         ),
@@ -140,7 +140,7 @@ describe('imported transcript drafts', () => {
   it('preserves malformed outgoing commands without synthesizing a diagnostic', () => {
     const message = new AssistantMessage(
       AT,
-      '<garcon-send-message to="invalid" hide_sender="false">body</garcon-send-message>',
+      '<garcon-send-message to="invalid" hide-sender="false">body</garcon-send-message>',
     );
     expect(importedDrafts([{ message, providerMeta: null }], () => AT)).toEqual([{
       kind: 'provider-row',

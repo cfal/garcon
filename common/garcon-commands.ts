@@ -12,7 +12,7 @@ export const MALFORMED_INTER_AGENT_MESSAGE_CONTENT =
 export const MAX_GARCON_MESSAGE_RECIPIENTS = 16;
 export const GARCON_MESSAGE_BODY_MAX_BYTES = 60 * 1024;
 
-const SEND_MESSAGE_OPEN = /^<garcon-send-message to="([^"]*)" hide_sender="(true|false)">$/;
+const SEND_MESSAGE_OPEN = /^<garcon-send-message to="([^"]*)" hide-sender="(true|false)">$/;
 const RECEIVED_MESSAGE_OPEN = /^<garcon-message from="([^"]*)">$/;
 const utf8Encoder = new TextEncoder();
 

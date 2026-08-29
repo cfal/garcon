@@ -14,7 +14,7 @@ const FIRST = parseChatId('1787974832309199');
 const SECOND = parseChatId('1787973671383699');
 
 function send(to, hideSender, body = 'message') {
-  return `<garcon-send-message to="${to}" hide_sender="${hideSender}">\n${body}\n</garcon-send-message>`;
+  return `<garcon-send-message to="${to}" hide-sender="${hideSender}">\n${body}\n</garcon-send-message>`;
 }
 
 describe('Garcon edge commands', () => {
@@ -68,9 +68,9 @@ describe('Garcon edge commands', () => {
   });
 
   it('keeps a quoted send opener inside a trailing command body', () => {
-    const quotedOpener = `<garcon-send-message to="${SECOND}" hide_sender="false">`;
+    const quotedOpener = `<garcon-send-message to="${SECOND}" hide-sender="false">`;
     const command = [
-      `<garcon-send-message to="${FIRST}" hide_sender="false">`,
+      `<garcon-send-message to="${FIRST}" hide-sender="false">`,
       'Use it like this:',
       quotedOpener,
       'example',
@@ -156,7 +156,7 @@ describe('Garcon edge commands', () => {
       hideSender: false,
       body: '\n  body  \n',
     });
-    const crlf = `<garcon-send-message to="${FIRST}" hide_sender="true">\r\nbody\r\n</garcon-send-message>`;
+    const crlf = `<garcon-send-message to="${FIRST}" hide-sender="true">\r\nbody\r\n</garcon-send-message>`;
     expect(extractGarconCommands(new AssistantMessage(AT, crlf)).commands[0].body)
       .toBe('body');
   });
@@ -165,11 +165,11 @@ describe('Garcon edge commands', () => {
     for (const content of [
       send('invalid', false),
       send(`${FIRST},`, false),
-      `<garcon-send-message hide_sender="false" to="${FIRST}">message</garcon-send-message>`,
-      `<garcon-send-message to="${FIRST}" hide_sender="FALSE">message</garcon-send-message>`,
-      `<garcon-send-message to="${FIRST}" hide_sender="false"></garcon-send-message>`,
-      `<garcon-send-message to="${FIRST}" hide_sender="false">message`,
-      `<garcon-send-message to="${FIRST}" hide_sender="false">${'x'.repeat(GARCON_MESSAGE_BODY_MAX_BYTES + 1)}</garcon-send-message>`,
+      `<garcon-send-message hide-sender="false" to="${FIRST}">message</garcon-send-message>`,
+      `<garcon-send-message to="${FIRST}" hide-sender="FALSE">message</garcon-send-message>`,
+      `<garcon-send-message to="${FIRST}" hide-sender="false"></garcon-send-message>`,
+      `<garcon-send-message to="${FIRST}" hide-sender="false">message`,
+      `<garcon-send-message to="${FIRST}" hide-sender="false">${'x'.repeat(GARCON_MESSAGE_BODY_MAX_BYTES + 1)}</garcon-send-message>`,
     ]) {
       const result = extractGarconCommands(new AssistantMessage(AT, content));
       expect(result?.message?.content).toBe(content);
