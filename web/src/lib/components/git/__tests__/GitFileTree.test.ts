@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import GitFileTree from '../GitFileTree.svelte';
 import type { GitTreeNode } from '$lib/api/git';
@@ -18,7 +18,7 @@ describe('GitFileTree', () => {
 			changeKind: 'modified',
 		};
 
-		render(GitFileTree, {
+		const props = {
 			tree: [node],
 			selectedFile: null,
 			collapsedDirs: new Set<string>(),
@@ -30,13 +30,23 @@ describe('GitFileTree', () => {
 			onSearchChange: vi.fn(),
 			onStageFile,
 			onUnstageFile,
-		});
+		};
+		const { rerender } = render(GitFileTree, props);
 
 		await fireEvent.click(screen.getByTitle('Stage file'));
 		await fireEvent.click(screen.getByTitle('Unstage file'));
 
 		expect(onStageFile).toHaveBeenCalledWith('src/a.ts');
 		expect(onUnstageFile).toHaveBeenCalledWith('src/a.ts');
+
+		await rerender({
+			...props,
+			isStageFilePending: () => true,
+			isUnstageFilePending: () => true,
+		});
+
+		expect((screen.getByTitle('Stage file') as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByTitle('Unstage file') as HTMLButtonElement).disabled).toBe(true);
 	});
 
 	it('renders hide-generated as an unchecked opt-in filter by default', async () => {
@@ -100,5 +110,230 @@ describe('GitFileTree', () => {
 		await fireEvent.click(checkbox);
 
 		expect(onHideOtherTabFilesChange).toHaveBeenCalledWith(false);
+	});
+
+	it('keeps directory selection separate from disclosure and directory actions', async () => {
+		const onSelectFile = vi.fn();
+		const onSelectDirectory = vi.fn();
+		const onToggleDir = vi.fn();
+		const onStageDir = vi.fn();
+		const tree: GitTreeNode[] = [
+			{
+				path: 'src',
+				name: 'src',
+				kind: 'directory',
+				staged: false,
+				hasUnstaged: true,
+				children: [
+					{
+						path: 'src/a.ts',
+						name: 'a.ts',
+						kind: 'file',
+						staged: false,
+						hasUnstaged: true,
+					},
+				],
+			},
+		];
+
+		render(GitFileTree, {
+			tree,
+			selectedFile: null,
+			collapsedDirs: new Set<string>(),
+			treeSearchQuery: '',
+			totalChangedFiles: 1,
+			alwaysShowActions: true,
+			onSelectFile,
+			onSelectDirectory,
+			onToggleDir,
+			onSearchChange: vi.fn(),
+			onStageDir,
+		});
+
+		const directoryRow = screen.getByRole('treeitem', { name: 'src' });
+		await fireEvent.click(within(directoryRow).getByRole('button', { name: 'Collapse' }));
+		await fireEvent.click(within(directoryRow).getByRole('button', { name: 'src' }));
+		await fireEvent.click(within(directoryRow).getByTitle('Stage directory'));
+
+		expect(onToggleDir).toHaveBeenCalledWith('src');
+		expect(onSelectDirectory).toHaveBeenCalledWith('src');
+		expect(onStageDir).toHaveBeenCalledWith('src');
+
+		onToggleDir.mockClear();
+		const treeRoot = screen.getByRole('tree', { name: 'Files' });
+		treeRoot.focus();
+		await fireEvent.keyDown(treeRoot, { key: 'ArrowRight' });
+		expect(
+			screen.getByRole('treeitem', { name: 'a.ts' }).hasAttribute('data-git-tree-row-active'),
+		).toBe(true);
+		await fireEvent.keyDown(treeRoot, { key: 'Enter' });
+		await fireEvent.keyDown(treeRoot, { key: 'ArrowLeft' });
+		await fireEvent.keyDown(treeRoot, { key: 'ArrowLeft' });
+
+		expect(onSelectFile).toHaveBeenCalledWith('src/a.ts');
+		expect(onToggleDir).toHaveBeenCalledWith('src');
+	});
+
+	it('moves tree focus when keyboard navigation starts from a row action', async () => {
+		const onStageFile = vi.fn();
+		const tree: GitTreeNode[] = ['a.ts', 'b.ts'].map((name) => ({
+			path: `src/${name}`,
+			name,
+			kind: 'file',
+			staged: false,
+			hasUnstaged: true,
+		}));
+
+		render(GitFileTree, {
+			tree,
+			selectedFile: null,
+			collapsedDirs: new Set<string>(),
+			treeSearchQuery: '',
+			totalChangedFiles: tree.length,
+			alwaysShowActions: true,
+			onSelectFile: vi.fn(),
+			onToggleDir: vi.fn(),
+			onSearchChange: vi.fn(),
+			onStageFile,
+		});
+
+		const firstRow = screen.getByRole('treeitem', { name: 'a.ts' });
+		const firstStageAction = within(firstRow).getByTitle('Stage file');
+		const treeRoot = screen.getByRole('tree', { name: 'Files' });
+		firstStageAction.focus();
+
+		await fireEvent.keyDown(firstStageAction, { key: 'ArrowDown' });
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(treeRoot);
+			expect(
+				screen.getByRole('treeitem', { name: 'b.ts' }).hasAttribute('data-git-tree-row-active'),
+			).toBe(true);
+		});
+		expect(onStageFile).not.toHaveBeenCalled();
+	});
+
+	it('keeps mounted rows bounded and preserves actions after virtual navigation', async () => {
+		const onSelectFile = vi.fn();
+		const onStageFile = vi.fn();
+		const children = Array.from({ length: 5_000 }, (_, index): GitTreeNode => ({
+			path: `src/file-${index}.ts`,
+			name: `file-${index}.ts`,
+			kind: 'file',
+			staged: false,
+			hasUnstaged: true,
+			changeKind: 'untracked',
+		}));
+		const tree: GitTreeNode[] = [
+			{
+				path: 'src',
+				name: 'src',
+				kind: 'directory',
+				staged: false,
+				hasUnstaged: true,
+				children,
+			},
+		];
+		const props = {
+			tree,
+			selectedFile: null as string | null,
+			collapsedDirs: new Set<string>(),
+			treeSearchQuery: '',
+			totalChangedFiles: children.length,
+			alwaysShowActions: true,
+			onSelectFile,
+			onToggleDir: vi.fn(),
+			onSearchChange: vi.fn(),
+			onStageFile,
+		};
+		const { container, rerender } = render(GitFileTree, props);
+		const treeRoot = screen.getByRole('tree', { name: 'Files' }) as HTMLElement;
+		const sizer = container.querySelector<HTMLElement>('[data-git-workbench-file-tree-sizer]')!;
+		Object.defineProperties(treeRoot, {
+			clientHeight: { configurable: true, value: 120 },
+			scrollHeight: {
+				configurable: true,
+				get: () => Number.parseFloat(sizer.style.height) || 0,
+			},
+		});
+		treeRoot.getBoundingClientRect = () => new DOMRect(0, 0, 300, 120);
+		sizer.getBoundingClientRect = () =>
+			new DOMRect(0, -treeRoot.scrollTop, 300, Number.parseFloat(sizer.style.height) || 0);
+		await waitFor(() =>
+			expect(
+				container.querySelectorAll('[data-git-workbench-file-tree-row]').length,
+			).toBeGreaterThan(0),
+		);
+
+		await rerender({ ...props, selectedFile: 'src/file-4999.ts' });
+		await waitFor(() =>
+			expect(
+				container
+					.querySelector('[data-git-file-tree-file][title="src/file-4999.ts"]')
+					?.getAttribute('aria-selected'),
+			).toBe('true'),
+		);
+
+		const filteredTree: GitTreeNode[] = [{ ...tree[0], children: [children[0]] }];
+		await rerender({
+			...props,
+			tree: filteredTree,
+			selectedFile: 'src/file-4999.ts',
+			treeSearchQuery: 'file-0',
+		});
+		await waitFor(() =>
+			expect(
+				container.querySelector('[data-git-file-tree-file][title="src/file-4999.ts"]'),
+			).toBeNull(),
+		);
+		treeRoot.scrollTop = 0;
+		await fireEvent.scroll(treeRoot);
+
+		await rerender({ ...props, selectedFile: 'src/file-4999.ts' });
+		await waitFor(() =>
+			expect(
+				container
+					.querySelector('[data-git-file-tree-file][title="src/file-4999.ts"]')
+					?.getAttribute('aria-selected'),
+			).toBe('true'),
+		);
+
+		treeRoot.focus();
+		await fireEvent.keyDown(treeRoot, { key: 'Home' });
+		await waitFor(() =>
+			expect(container.querySelector<HTMLElement>('[data-git-tree-row-active]')?.title).toBe('src'),
+		);
+		await fireEvent.keyDown(treeRoot, { key: 'End' });
+
+		const activeRow = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>('[data-git-tree-row-active]');
+			expect(row?.title).toBe('src/file-4999.ts');
+			return row!;
+		});
+		expect(container.querySelectorAll('[data-git-workbench-file-tree-row]').length).toBeLessThan(
+			40,
+		);
+		expect(treeRoot.getAttribute('aria-activedescendant')).toBe(activeRow.id);
+		expect(document.activeElement).toBe(treeRoot);
+
+		await fireEvent.keyDown(treeRoot, { key: 'Enter' });
+		const stageAction = within(activeRow).getByTitle('Stage file');
+		await fireEvent.click(stageAction);
+
+		expect(onSelectFile).toHaveBeenCalledWith('src/file-4999.ts');
+		expect(onStageFile).toHaveBeenCalledWith('src/file-4999.ts');
+
+		stageAction.focus();
+		treeRoot.scrollTop = 0;
+		await fireEvent.scroll(treeRoot);
+
+		const restoredActiveRow = await waitFor(() => {
+			expect(document.activeElement).toBe(treeRoot);
+			const row = container.querySelector<HTMLElement>('[data-git-tree-row-active]');
+			expect(row).toBeTruthy();
+			expect(treeRoot.getAttribute('aria-activedescendant')).toBe(row?.id);
+			return row!;
+		});
+		expect(restoredActiveRow).not.toBe(activeRow);
 	});
 });
