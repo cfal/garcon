@@ -872,6 +872,7 @@
 	"workspace_surface_file": "File",
 	"workspace_workspace_region": "Workspace",
 	"workspace_open_tabs": "Open tabs",
+	"workspace_open_views": "Open views",
 	"workspace_add_to_window": "Add to window",
 	"workspace_window_actions": "Window actions",
 	"workspace_surface_actions": "View actions",
@@ -1758,6 +1759,7 @@
 	"workspace_window_limit_reached": "Window limit reached (maximum {count})",
 	"workspace_open_failed": "Failed to open view",
 	"workspace_drop_zone_add_tab": "Add as tab",
+	"workspace_drop_zone_replace_chat": "Replace existing chat",
 	"workspace_open_new_window_left": "Open new window left",
 	"workspace_open_new_window_right": "Open new window right",
 	"workspace_open_new_window_above": "Open new window above",
@@ -1778,7 +1780,6 @@
 	"file_session_placement_window": "Window",
 	"workspace_window_number": "Window {number}",
 	"workspace_close_window": "Close window",
-	"workspace_close_window_disabled": "At least one window must remain",
 	"workspace_close_window_final_chat_disabled": "At least one Chat view must remain",
 	"workspace_close_window_unavailable": "This window cannot be closed right now"
 }

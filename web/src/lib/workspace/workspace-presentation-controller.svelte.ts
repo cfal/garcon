@@ -477,9 +477,25 @@ export class WorkspacePresentationController {
 		mutations: WorkspaceMutationPlan,
 		options: WorkspaceCommitOptions = {},
 	): Promise<boolean> {
+		return this.#commit(mutations, options);
+	}
+
+	async commitWithPresentationTarget(
+		mutations: WorkspaceMutationPlan,
+		resolveTarget: () => string | null,
+		options: WorkspaceCommitOptions = {},
+	): Promise<boolean> {
+		return this.#commit(mutations, options, resolveTarget);
+	}
+
+	async #commit(
+		mutations: WorkspaceMutationPlan,
+		options: WorkspaceCommitOptions,
+		resolveTarget?: () => string | null,
+	): Promise<boolean> {
 		this.#inFlightCommitCount += 1;
 		try {
-			return await this.#performCommit(mutations, options);
+			return await this.#performCommit(mutations, options, resolveTarget);
 		} finally {
 			this.#inFlightCommitCount -= 1;
 		}
@@ -527,6 +543,7 @@ export class WorkspacePresentationController {
 	async #performCommit(
 		mutations: WorkspaceMutationPlan,
 		options: WorkspaceCommitOptions,
+		resolveTarget?: () => string | null,
 	): Promise<boolean> {
 		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
 		let presentationGeneration: number | null = null;
@@ -585,6 +602,14 @@ export class WorkspacePresentationController {
 		if (!presentationTo) {
 			throw new WorkspacePublicationInvariantError('Workspace presentation mode was not prepared');
 		}
+		const presentationTarget = resolveTarget?.() ?? null;
+		if (presentationTarget) {
+			this.#adoptPublishedPresentationTarget(
+				this.layout.snapshot,
+				presentationTarget,
+				presentationTo,
+			);
+		}
 		this.#syncSingletonVisibility(this.layout.snapshot, presentationTo);
 		this.#normalizeFocusOwner(this.layout.snapshot, presentationTo);
 		try {
@@ -595,6 +620,18 @@ export class WorkspacePresentationController {
 		}
 		await Promise.all(expectations.map((expectation) => this.#frames.settle(expectation)));
 		return this.#frames.isTransitionCurrent(presentationGeneration);
+	}
+
+	#adoptPublishedPresentationTarget(
+		snapshot: WorkspaceLayoutSnapshot,
+		surfaceId: string,
+		mode: PresentationMode,
+	): void {
+		if (![...this.#visiblePresentations(snapshot, mode).values()].includes(surfaceId)) return;
+		this.focusOwner = { kind: 'surface', surfaceId };
+		this.lastFocusedSurfaceId = surfaceId;
+		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
+		if (windowId) this.lastFocusedWindowId = windowId;
 	}
 
 	#normalizeFocusOwner(

@@ -43,6 +43,7 @@
 		onSelect,
 		onFocus,
 		dnd,
+		isCurrent,
 		isChatProcessing = () => false,
 		onVisibleChange,
 	}: {
@@ -52,6 +53,7 @@
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
 		dnd: WorkspaceWindowDndController;
+		isCurrent: boolean;
 		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
 	} = $props();
@@ -97,7 +99,8 @@
 
 	function canDrag(surfaceId: string): boolean {
 		const surface = workspace.layout.surface(surfaceId);
-		return Boolean(surface && surface.type !== 'chat' && surface.type !== 'terminal-launcher');
+		if (!surface || surface.type === 'terminal-launcher') return false;
+		return surface.type !== 'chat' || Boolean(surface.chatId);
 	}
 
 	function hasContextMenu(surfaceId: string): boolean {
@@ -239,7 +242,9 @@
 			renderedLabelMode === 'truncated' && 'min-w-16 flex-1 px-2',
 			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
 			!measurement && tabs.activeId === surfaceId
-				? 'bg-accent text-accent-foreground'
+				? isCurrent
+					? 'bg-workspace-window-tab-selected text-foreground'
+					: 'bg-workspace-window-tab-selected-inactive text-foreground'
 				: 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
 		)}
 		title={labelFor(surfaceId)}

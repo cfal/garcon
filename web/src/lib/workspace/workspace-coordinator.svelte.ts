@@ -483,34 +483,37 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		let movedSurfaceId: string | null = null;
-		const current = await this.#presentation.commit((latest) => {
-			const surface = latest.surfaces[surfaceId];
-			const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
-			if (
-				!surface ||
-				!sourceWindowId ||
-				!windowNodeById(latest.desktopRoot, destinationWindowId) ||
-				this.#reservedSurfaceIds.has(surfaceId) ||
-				this.#reservedWindowIds.has(sourceWindowId) ||
-				this.#reservedWindowIds.has(destinationWindowId)
-			) {
-				return [];
-			}
-			if (surface.type === 'chat' && sourceWindowId !== destinationWindowId) {
-				const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
-				if (!surface.chatId || this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
-				movedSurfaceId = destinationSurfaceId;
-				return [
-					{
-						type: 'move-chat-to-window',
-						sourceWindowId,
-						destinationWindowId,
-					},
-				];
-			}
-			movedSurfaceId = surfaceId;
-			return [{ type: 'move-tab', surfaceId, destinationWindowId, index }];
-		});
+		const current = await this.#presentation.commitWithPresentationTarget(
+			(latest) => {
+				const surface = latest.surfaces[surfaceId];
+				const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+				if (
+					!surface ||
+					!sourceWindowId ||
+					!windowNodeById(latest.desktopRoot, destinationWindowId) ||
+					this.#reservedSurfaceIds.has(surfaceId) ||
+					this.#reservedWindowIds.has(sourceWindowId) ||
+					this.#reservedWindowIds.has(destinationWindowId)
+				) {
+					return [];
+				}
+				if (surface.type === 'chat' && sourceWindowId !== destinationWindowId) {
+					const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+					if (!surface.chatId || this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
+					movedSurfaceId = destinationSurfaceId;
+					return [
+						{
+							type: 'move-chat-to-window',
+							sourceWindowId,
+							destinationWindowId,
+						},
+					];
+				}
+				movedSurfaceId = surfaceId;
+				return [{ type: 'move-tab', surfaceId, destinationWindowId, index }];
+			},
+			() => movedSurfaceId,
+		);
 		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
 			this.#presentation.presentSurface(movedSurfaceId);
 		}
@@ -534,45 +537,48 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		let movedSurfaceId: string | null = null;
-		const current = await this.#presentation.commit((latest) => {
-			const surface = latest.surfaces[surfaceId];
-			const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
-			if (
-				!surface ||
-				!sourceWindowId ||
-				!windowNodeById(latest.desktopRoot, targetWindowId) ||
-				this.#reservedSurfaceIds.has(surfaceId) ||
-				this.#reservedWindowIds.has(sourceWindowId) ||
-				this.#reservedWindowIds.has(targetWindowId)
-			) {
-				return [];
-			}
-			const sourceWindow = windowNodeById(latest.desktopRoot, sourceWindowId);
-			if (
-				surface.type === 'chat' &&
-				(!surface.chatId ||
-					(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1))
-			) {
-				return [];
-			}
-			if (
-				projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
-				MAX_WORKSPACE_WINDOWS
-			) {
-				throw new WorkspaceWindowLimitError();
-			}
-			movedSurfaceId = surface.type === 'chat' ? chatViewSurfaceId(newWindowId) : surfaceId;
-			return [
-				{
-					type: 'move-tab-to-new-window',
-					surfaceId,
-					targetWindowId,
-					edge,
-					newWindowId,
-					partitionId,
-				},
-			];
-		});
+		const current = await this.#presentation.commitWithPresentationTarget(
+			(latest) => {
+				const surface = latest.surfaces[surfaceId];
+				const sourceWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
+				if (
+					!surface ||
+					!sourceWindowId ||
+					!windowNodeById(latest.desktopRoot, targetWindowId) ||
+					this.#reservedSurfaceIds.has(surfaceId) ||
+					this.#reservedWindowIds.has(sourceWindowId) ||
+					this.#reservedWindowIds.has(targetWindowId)
+				) {
+					return [];
+				}
+				const sourceWindow = windowNodeById(latest.desktopRoot, sourceWindowId);
+				if (
+					surface.type === 'chat' &&
+					(!surface.chatId ||
+						(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1))
+				) {
+					return [];
+				}
+				if (
+					projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
+					MAX_WORKSPACE_WINDOWS
+				) {
+					throw new WorkspaceWindowLimitError();
+				}
+				movedSurfaceId = surface.type === 'chat' ? chatViewSurfaceId(newWindowId) : surfaceId;
+				return [
+					{
+						type: 'move-tab-to-new-window',
+						surfaceId,
+						targetWindowId,
+						edge,
+						newWindowId,
+						partitionId,
+					},
+				];
+			},
+			() => movedSurfaceId,
+		);
 		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
 			this.#presentation.presentSurface(movedSurfaceId);
 		}

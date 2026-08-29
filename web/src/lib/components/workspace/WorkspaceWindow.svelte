@@ -5,6 +5,7 @@
 	import type { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
 	import { getNotifications, getWorkspaceCoordinator, getWorkspaceWindowDnd } from '$lib/context';
 	import type { WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
+	import { resolveWorkspaceWindowCenterDropResult } from '$lib/workspace/window-dnd.svelte.js';
 	import {
 		WORKSPACE_WINDOW_DROP_ZONES,
 		type WorkspaceWindowDropZonePresentation,
@@ -78,8 +79,7 @@
 	);
 	const dropLayerInsetClass = $derived.by(() => {
 		if (dnd.payload?.kind === 'chat') return 'inset-0';
-		if (workspaceWindow.tabs.order.length > 1) return 'inset-x-0 bottom-0 top-10';
-		return 'inset-x-0 bottom-0 top-8';
+		return 'inset-x-0 bottom-0 top-10';
 	});
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
@@ -104,6 +104,13 @@
 		}
 		if (activeDropTarget.blockedReason === 'same-window') {
 			return m.workspace_drop_zone_same_window();
+		}
+		if (
+			activeDropTarget.zone === 'center' &&
+			resolveWorkspaceWindowCenterDropResult(snapshot, dnd.payload, workspaceWindow.id) ===
+				'replace-chat'
+		) {
+			return m.workspace_drop_zone_replace_chat();
 		}
 		const zone = WORKSPACE_WINDOW_DROP_ZONES.find((entry) => entry.zone === activeDropTarget.zone);
 		return zone ? dropZoneLabel(zone) : '';

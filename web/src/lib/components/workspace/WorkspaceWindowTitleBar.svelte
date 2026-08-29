@@ -6,12 +6,9 @@
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import {
 		workspaceChatViewCount,
-		type ActiveSurfaceKind,
 		type WorkspaceWindowNode,
 	} from '$lib/workspace/surface-types.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
-	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
-	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
@@ -39,24 +36,10 @@
 	const notifications = getNotifications();
 	let visibleSurfaceIds = $state.raw<readonly string[]>([]);
 	const snapshot = $derived(workspace.layout.snapshot);
-	const hasTabBar = $derived(workspaceWindow.tabs.order.length > 1);
-	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
-	const activeKind = $derived.by((): ActiveSurfaceKind => {
-		if (!activeSurface) return 'file';
-		return activeSurface.type === 'singleton' ? activeSurface.kind : activeSurface.type;
-	});
-	const activeChat = $derived(
-		activeSurface?.type === 'chat' && activeSurface.chatId
-			? (sessions.byId[activeSurface.chatId] ?? null)
-			: null,
-	);
-	const activeChatIsProcessing = $derived(isSurfaceChatProcessing(workspaceWindow.tabs.activeId));
 	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
 	const showActiveTreatment = $derived(isCurrent && workspace.windowCount > 1 && !fullscreen);
 	const hiddenSurfaceIds = $derived(
-		hasTabBar
-			? workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId))
-			: [],
+		workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId)),
 	);
 	const closeDisabled = $derived(workspace.isWindowCloseBlocked(workspaceWindow.id));
 	const ownsFinalChatView = $derived(
@@ -65,7 +48,6 @@
 	);
 	const closeTitle = $derived.by(() => {
 		if (!closeDisabled) return m.workspace_close_window();
-		if (workspace.windowCount === 1) return m.workspace_close_window_disabled();
 		if (ownsFinalChatView) return m.workspace_close_window_final_chat_disabled();
 		return m.workspace_close_window_unavailable();
 	});
@@ -101,47 +83,24 @@
 	tabindex="-1"
 	data-workspace-window-titlebar={workspaceWindow.id}
 	class={cn(
-		'relative z-50 flex shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
+		'relative z-50 flex h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-workspace-window-titlebar px-1.5 transition-colors',
 		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
-	class:h-8={!hasTabBar}
-	class:h-10={hasTabBar}
 	onfocusin={noteFocus}
 	onpointerdown={noteFocus}
 >
 	<div class="relative flex min-w-0 flex-1 items-center">
-		{#if hasTabBar}
-			<WorkspaceWindowTabStrip
-				windowId={workspaceWindow.id}
-				tabs={workspaceWindow.tabs}
-				{labelFor}
-				onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-				onFocus={(surfaceId) => workspace.noteWindowChromeFocus(workspaceWindow.id, surfaceId)}
-				{dnd}
-				isChatProcessing={isSurfaceChatProcessing}
-				onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
-			/>
-		{:else}
-			<div
-				id={`${workspaceWindow.id}-tab-${workspaceWindow.tabs.activeId}`}
-				class="flex min-w-0 items-center gap-1.5 px-1.5 text-xs font-medium"
-			>
-				{#if activeChatIsProcessing}
-					<WorkspaceChatProcessingIndicator
-						statusId={`${workspaceWindow.id}-title-chat-processing`}
-					/>
-				{:else}
-					<WorkspaceSurfaceIcon kind={activeKind} />
-				{/if}
-				<span class="min-w-0 truncate">{labelFor(workspaceWindow.tabs.activeId)}</span>
-				{#if !activeChatIsProcessing && !isCurrent && activeChat?.isUnread}
-					<span
-						class="h-2 w-2 shrink-0 rounded-full bg-indicator-attention"
-						aria-label={m.chat_window_activity()}
-					></span>
-				{/if}
-			</div>
-		{/if}
+		<WorkspaceWindowTabStrip
+			windowId={workspaceWindow.id}
+			tabs={workspaceWindow.tabs}
+			{labelFor}
+			onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+			onFocus={(surfaceId) => workspace.noteWindowChromeFocus(workspaceWindow.id, surfaceId)}
+			{dnd}
+			{isCurrent}
+			isChatProcessing={isSurfaceChatProcessing}
+			onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
+		/>
 	</div>
 	<div class="flex min-w-0 shrink-0 items-center gap-0.5">
 		<div class="flex min-w-0 shrink empty:hidden">{@render auxiliaryActions?.()}</div>
@@ -164,16 +123,18 @@
 		>
 			{#if fullscreen}<Minimize2 class="h-3.5 w-3.5" />{:else}<Maximize2 class="h-3.5 w-3.5" />{/if}
 		</button>
-		<button
-			type="button"
-			class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-			aria-label={m.workspace_close_window()}
-			title={closeTitle}
-			disabled={closeDisabled}
-			data-workspace-window-close={workspaceWindow.id}
-			onclick={closeWindow}
-		>
-			<X class="h-3.5 w-3.5" />
-		</button>
+		{#if workspace.windowCount > 1}
+			<button
+				type="button"
+				class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+				aria-label={m.workspace_close_window()}
+				title={closeTitle}
+				disabled={closeDisabled}
+				data-workspace-window-close={workspaceWindow.id}
+				onclick={closeWindow}
+			>
+				<X class="h-3.5 w-3.5" />
+			</button>
+		{/if}
 	</div>
 </header>

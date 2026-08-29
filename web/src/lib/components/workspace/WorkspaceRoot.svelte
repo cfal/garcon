@@ -47,6 +47,7 @@
 		renderedPortablePresentations,
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
+	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -113,13 +114,10 @@
 			surface: ChatViewSurfaceDescriptor;
 			windowId: WorkspaceWindowId | null;
 			rect: WorkspaceWindowRect | null;
-			titleBarHeight: number;
 		} | null => {
 			if (isMobile) {
 				const surface = snapshot.surfaces[snapshot.mobileActiveSurfaceId];
-				return surface?.type === 'chat'
-					? { surface, windowId: null, rect: null, titleBarHeight: 0 }
-					: null;
+				return surface?.type === 'chat' ? { surface, windowId: null, rect: null } : null;
 			}
 			const workspaceWindow = windowNodeById(snapshot.desktopRoot, presentedCurrentWindowId);
 			if (!workspaceWindow) return null;
@@ -133,7 +131,6 @@
 						surface,
 						windowId: workspaceWindow.id,
 						rect: displayRect(workspaceWindow.id, rect),
-						titleBarHeight: workspaceWindow.tabs.order.length > 1 ? 40 : 32,
 					}
 				: null;
 		},
@@ -148,9 +145,6 @@
 				}),
 	);
 	const liveLayerRectStyle = $derived(liveChat?.rect ? rectStyle(liveChat.rect) : 'inset: 0;');
-	const liveLayerBodyStyle = $derived(
-		liveChat && !isMobile ? `inset: ${liveChat.titleBarHeight}px 0 0 0;` : 'inset: 0;',
-	);
 	const fallbackChatSurfaceId = $derived(
 		Object.values(snapshot.surfaces).find(
 			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
@@ -347,8 +341,11 @@
 		aria-hidden={!liveChat}
 	>
 		<div
-			class="pointer-events-auto absolute overflow-hidden bg-background"
-			style={liveLayerBodyStyle}
+			class={cn(
+				'pointer-events-auto absolute overflow-hidden bg-background',
+				liveChat && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
+			)}
+			data-workspace-live-chat-body
 			data-workspace-surface-id={liveChat?.surface.id}
 			use:surfaceFrame={{
 				registry: surfaceFrames,
@@ -375,18 +372,6 @@
 			/>
 		</div>
 	</div>
-
-	{#if !isMobile && !fullscreenWindowId && geometry.windows.length > 1}
-		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
-			{#if workspaceWindow.id === presentedCurrentWindowId}
-				<div
-					data-workspace-window-focus-ring={workspaceWindow.id}
-					class="pointer-events-none absolute z-40 ring-1 ring-inset ring-workspace-window-focus"
-					style={rectStyle(displayRect(workspaceWindow.id, rect))}
-				></div>
-			{/if}
-		{/each}
-	{/if}
 
 	{#if isMobile}
 		{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}

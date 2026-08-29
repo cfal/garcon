@@ -6,6 +6,7 @@ import {
 } from './window-drop-geometry.js';
 import {
 	MAX_WORKSPACE_WINDOWS,
+	type WorkspaceLayoutSnapshot,
 	type WorkspaceLayoutReader,
 	type WorkspaceWindowId,
 } from './surface-types.js';
@@ -45,6 +46,26 @@ export type WorkspaceWindowDropTarget =
 export interface WorkspaceWindowDropCommit {
 	payload: WorkspaceDragPayload;
 	target: WorkspaceWindowDropTarget;
+}
+
+export type WorkspaceWindowCenterDropResult = 'add-tab' | 'replace-chat';
+
+export function resolveWorkspaceWindowCenterDropResult(
+	snapshot: WorkspaceLayoutSnapshot,
+	payload: WorkspaceDragPayload | null,
+	destinationWindowId: WorkspaceWindowId,
+): WorkspaceWindowCenterDropResult {
+	if (
+		payload?.kind !== 'surface-tab' ||
+		payload.sourceWindowId === destinationWindowId ||
+		snapshot.surfaces[payload.surfaceId]?.type !== 'chat'
+	) {
+		return 'add-tab';
+	}
+	const destination = windowNodeById(snapshot.desktopRoot, destinationWindowId);
+	return destination?.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat')
+		? 'replace-chat'
+		: 'add-tab';
 }
 
 export class WorkspaceWindowDndController {

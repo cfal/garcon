@@ -45,16 +45,9 @@
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
 		),
 	);
-	const gitViewKinds = ['git-history', 'git-compare'] as const;
-	const availableGitViewKinds = $derived(
-		gitViewKinds.filter((kind) => !tabs.order.includes(singletonSurfaceId(kind))),
-	);
-	const otherAvailableSingletonKinds = $derived(
+	const availableSingletonKinds = $derived(
 		PORTABLE_SINGLETON_KINDS.filter(
-			(kind) =>
-				!gitViewKinds.includes(kind as (typeof gitViewKinds)[number]) &&
-				canOffer(kind) &&
-				!tabs.order.includes(singletonSurfaceId(kind)),
+			(kind) => canOffer(kind) && !tabs.order.includes(singletonSurfaceId(kind)),
 		),
 	);
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
@@ -81,6 +74,12 @@
 
 	function openSingleton(kind: PortableSingletonKind): void {
 		void workspace.openSingletonAsTab(kind, windowId).catch(notifyFailure);
+	}
+
+	function openSingletonLabel(kind: PortableSingletonKind): string {
+		if (kind === 'git-history') return m.workspace_open_git_history();
+		if (kind === 'git-compare') return m.workspace_open_git_compare();
+		return m.workspace_open_surface({ surface: singletonLabels[kind]() });
 	}
 
 	async function createTerminal(): Promise<void> {
@@ -114,12 +113,15 @@
 			<SquareTerminal />
 			{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 		</DropdownMenuItem>
-		{#each availableGitViewKinds as kind (kind)}
-			<DropdownMenuItem onSelect={() => openSingleton(kind)}>
-				<WorkspaceSurfaceIcon {kind} />
-				{kind === 'git-history' ? m.workspace_open_git_history() : m.workspace_open_git_compare()}
-			</DropdownMenuItem>
-		{/each}
+		{#if availableSingletonKinds.length > 0}
+			<DropdownMenuLabel>{m.workspace_open_views()}</DropdownMenuLabel>
+			{#each availableSingletonKinds as kind (kind)}
+				<DropdownMenuItem onSelect={() => openSingleton(kind)}>
+					<WorkspaceSurfaceIcon {kind} />
+					{openSingletonLabel(kind)}
+				</DropdownMenuItem>
+			{/each}
+		{/if}
 		{#if unplacedTerminalSessions.length > 0}
 			<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
 			{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
@@ -131,11 +133,5 @@
 				</DropdownMenuItem>
 			{/each}
 		{/if}
-		{#each otherAvailableSingletonKinds as kind (kind)}
-			<DropdownMenuItem onSelect={() => openSingleton(kind)}>
-				<WorkspaceSurfaceIcon {kind} />
-				{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
-			</DropdownMenuItem>
-		{/each}
 	</DropdownMenuContent>
 </DropdownMenu>
