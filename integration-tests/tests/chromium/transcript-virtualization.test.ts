@@ -1610,16 +1610,37 @@ async function clickMenuItem(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitem', { name, exact: true }).click();
 }
 
+async function workspaceWindowIds(page: Page): Promise<string[]> {
+  return page.locator('[data-workspace-window-id]').evaluateAll((windows) =>
+    windows.flatMap((workspaceWindow) => {
+      const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
+      return windowId ? [windowId] : [];
+    }),
+  );
+}
+
 async function openNewWorkspaceWindow(page: Page, name: string): Promise<string> {
-  const previousCount = await page.locator('[data-workspace-window-id]').count();
+  const workspaceWindows = page.locator('[data-workspace-window-id]');
+  const existingWindowIds = new Set(await workspaceWindowIds(page));
   await page.locator('[data-workspace-new-window-menu]').click();
   await clickMenuItem(page, name);
   await page.waitForFunction(
     (expectedCount) =>
       document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
-    previousCount + 1,
+    existingWindowIds.size + 1,
   );
-  return (await currentWorkspaceIdentity(page)).windowId;
+  const openedWindowId = (await workspaceWindowIds(page)).find(
+    (windowId) => !existingWindowIds.has(windowId),
+  );
+  if (!openedWindowId) throw new Error(`New workspace window did not open for ${name}.`);
+  await page.waitForFunction(
+    (expectedWindowId) =>
+      document
+        .querySelector('[data-workspace-window-current="true"]')
+        ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+    openedWindowId,
+  );
+  return openedWindowId;
 }
 
 async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void> {
@@ -4192,8 +4213,8 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
     JSON.stringify({ detachedAnchor, twoWindowAnchor, detachedLayout, twoWindowLayout }, null, 2),
   ).toBeLessThanOrEqual(1);
 
-	const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
-	const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await waitForTranscriptScale(fixture.page, 0.7);
@@ -4204,9 +4225,9 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   expect(fourWindowGeometry.overlaps).toEqual([]);
   expect(fourWindowGeometry.horizontalOverflow).toEqual([]);
 
-	await closeWorkspaceWindow(fixture.page, filesWindowId);
-	await closeWorkspaceWindow(fixture.page, secondTerminalWindowId);
-	await closeWorkspaceWindow(fixture.page, terminalWindowId);
+  await closeWorkspaceWindow(fixture.page, filesWindowId);
+  await closeWorkspaceWindow(fixture.page, secondTerminalWindowId);
+  await closeWorkspaceWindow(fixture.page, terminalWindowId);
   await waitForTranscriptScale(fixture.page, 1);
   const restoredAnchor = await anchorByKey(fixture.page, fourWindowAnchor.key);
   const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
@@ -4219,7 +4240,7 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   expect(restoredGeometry.horizontalOverflow).toEqual([]);
 
   await scrollToPosition(fixture.page, 'end');
-	const visibleScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  const visibleScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptScale(fixture.page, 0.85);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-enter');
