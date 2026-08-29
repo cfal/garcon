@@ -1,5 +1,35 @@
 import { parseChatId, type ChatId } from './chat-id.js';
 import { AssistantMessage, type ChatMessage } from './chat-types.js';
+import {
+  GARCON_START_AGENT_CLOSE,
+  GARCON_START_AGENT_PREFIX,
+  parseGarconStartAgent,
+  type GarconStartAgentCommand,
+} from './garcon-start-agent.js';
+
+export {
+  GARCON_CREATE_CHAT_MODEL_MAX_BYTES,
+  GARCON_CREATE_CHAT_PARAMS_PREFIX,
+  GARCON_CREATE_CHAT_RESULT_MESSAGES,
+  GARCON_CREATE_CHAT_RESULT_PREFIX,
+  GARCON_PROMPT_CLOSE,
+  GARCON_PROMPT_OPEN,
+  GARCON_START_AGENT_CLOSE,
+  GARCON_START_AGENT_OPEN,
+  GARCON_START_AGENT_PREFIX,
+  GARCON_START_PROMPT_MAX_BYTES,
+  MALFORMED_SUB_AGENT_START_CONTENT,
+  MAX_GARCON_CREATE_CHAT_PARAMS,
+  SUB_AGENT_START_NOTICE_TITLE,
+  garconCreateChatResultsContent,
+  isGarconCreateChatResult,
+  parseGarconCreateChatResults,
+  type GarconCreateChatFailureMessage,
+  type GarconCreateChatParams,
+  type GarconCreateChatResult,
+  type GarconCreateChatResultMessage,
+  type GarconStartAgentCommand,
+} from './garcon-start-agent.js';
 
 export const GARCON_GET_CHAT_ID = '<garcon-get-chat-id />';
 export const GARCON_SEND_MESSAGE_PREFIX = '<garcon-send-message';
@@ -23,10 +53,11 @@ export type GarconEdgeCommand =
       readonly recipients: readonly ChatId[];
       readonly hideSender: boolean;
       readonly body: string;
-    };
+    }
+  | GarconStartAgentCommand;
 
 export interface GarconCommandIssue {
-  readonly command: 'send-message';
+  readonly command: 'send-message' | 'start-agent';
   readonly reason: 'malformed';
   readonly edge: 'leading' | 'trailing';
 }
@@ -53,7 +84,9 @@ type ParsedEdge =
   | {
       readonly kind: 'malformed';
       readonly candidateStart: number;
+      readonly command: GarconCommandIssue['command'];
     };
+
 
 export function extractGarconCommands(
   message: ChatMessage,
@@ -72,7 +105,13 @@ export function extractGarconCommands(
     const parsed = parseLeadingCommand(content, start, end);
     if (parsed.kind === 'none') break;
     if (parsed.kind === 'malformed') {
-      recordIssue(issues, malformedStarts, parsed.candidateStart, 'leading');
+      recordIssue(
+        issues,
+        malformedStarts,
+        parsed.command,
+        parsed.candidateStart,
+        'leading',
+      );
       break;
     }
     leading.push(parsed.command);
@@ -83,7 +122,13 @@ export function extractGarconCommands(
     const parsed = parseTrailingCommand(content, start, end);
     if (parsed.kind === 'none') break;
     if (parsed.kind === 'malformed') {
-      recordIssue(issues, malformedStarts, parsed.candidateStart, 'trailing');
+      recordIssue(
+        issues,
+        malformedStarts,
+        parsed.command,
+        parsed.candidateStart,
+        'trailing',
+      );
       break;
     }
     trailing.push(parsed.command);
@@ -151,21 +196,26 @@ function parseLeadingCommand(content: string, start: number, end: number): Parse
       end: commandEnd,
     };
   }
+  if (content.startsWith(GARCON_START_AGENT_PREFIX, start)) {
+    return parseLeadingStartAgent(content, start, end);
+  }
   if (!content.startsWith(GARCON_SEND_MESSAGE_PREFIX, start)) return { kind: 'none' };
 
   const openerEnd = content.indexOf('>', start + GARCON_SEND_MESSAGE_PREFIX.length);
   if (openerEnd < 0 || openerEnd >= end) {
-    return { kind: 'malformed', candidateStart: start };
+    return { kind: 'malformed', command: 'send-message', candidateStart: start };
   }
   const closerStart = content.indexOf(GARCON_SEND_MESSAGE_CLOSE, openerEnd + 1);
   if (closerStart < 0 || closerStart + GARCON_SEND_MESSAGE_CLOSE.length > end) {
-    return { kind: 'malformed', candidateStart: start };
+    return { kind: 'malformed', command: 'send-message', candidateStart: start };
   }
   const command = parseSendMessage(
     content.slice(start, openerEnd + 1),
     content.slice(openerEnd + 1, closerStart),
   );
-  if (!command) return { kind: 'malformed', candidateStart: start };
+  if (!command) {
+    return { kind: 'malformed', command: 'send-message', candidateStart: start };
+  }
   const commandEnd = closerStart + GARCON_SEND_MESSAGE_CLOSE.length;
   if (hasOnlyTrailingWhitespace(content, commandEnd, end)) return { kind: 'none' };
   return {
@@ -173,6 +223,20 @@ function parseLeadingCommand(content: string, start: number, end: number): Parse
     command,
     start,
     end: commandEnd,
+  };
+}
+
+function parseLeadingStartAgent(content: string, start: number, end: number): ParsedEdge {
+  const parsed = parseGarconStartAgent(content, start, end);
+  if (!parsed) {
+    return { kind: 'malformed', command: 'start-agent', candidateStart: start };
+  }
+  if (hasOnlyTrailingWhitespace(content, parsed.end, end)) return { kind: 'none' };
+  return {
+    kind: 'valid',
+    command: parsed.command,
+    start,
+    end: parsed.end,
   };
 }
 
@@ -195,39 +259,139 @@ function parseTrailingCommand(content: string, start: number, end: number): Pars
     };
   }
 
-  const firstCandidateStart = findBoundarySendPrefix(content, start, start, end);
+  const startAgentCloserStart = end - GARCON_START_AGENT_CLOSE.length;
+  if (
+    startAgentCloserStart >= start
+    && content.startsWith(GARCON_START_AGENT_CLOSE, startAgentCloserStart)
+  ) {
+    const parsed = parseTrailingStartAgent(content, start, end);
+    if (parsed.kind !== 'none') return parsed;
+  }
+
+  const sendCloserStart = end - GARCON_SEND_MESSAGE_CLOSE.length;
+  if (
+    sendCloserStart >= start
+    && content.startsWith(GARCON_SEND_MESSAGE_CLOSE, sendCloserStart)
+  ) {
+    const parsed = parseTrailingSendMessage(content, start, end);
+    if (parsed.kind !== 'none') return parsed;
+  }
+
+  const sendCandidateStart = findBoundaryPrefix(
+    content,
+    start,
+    start,
+    end,
+    GARCON_SEND_MESSAGE_PREFIX,
+  );
+  const startAgentCandidateStart = findBoundaryPrefix(
+    content,
+    start,
+    start,
+    end,
+    GARCON_START_AGENT_PREFIX,
+  );
+  if (sendCandidateStart < 0 && startAgentCandidateStart < 0) return { kind: 'none' };
+  if (sendCandidateStart < 0 || (
+    startAgentCandidateStart >= 0
+    && startAgentCandidateStart < sendCandidateStart
+  )) {
+    return {
+      kind: 'malformed',
+      command: 'start-agent',
+      candidateStart: startAgentCandidateStart,
+    };
+  }
+  return {
+    kind: 'malformed',
+    command: 'send-message',
+    candidateStart: sendCandidateStart,
+  };
+}
+
+function parseTrailingStartAgent(content: string, start: number, end: number): ParsedEdge {
+  let candidateStart = findBoundaryPrefix(
+    content,
+    start,
+    start,
+    end,
+    GARCON_START_AGENT_PREFIX,
+  );
+  while (candidateStart >= 0) {
+    const parsed = parseGarconStartAgent(content, candidateStart, end);
+    if (!parsed) {
+      return { kind: 'malformed', command: 'start-agent', candidateStart };
+    }
+    if (parsed.end === end) {
+      return {
+        kind: 'valid',
+        command: parsed.command,
+        start: candidateStart,
+        end,
+      };
+    }
+    candidateStart = findBoundaryPrefix(
+      content,
+      start,
+      parsed.end,
+      end,
+      GARCON_START_AGENT_PREFIX,
+    );
+  }
+  return { kind: 'none' };
+}
+
+function parseTrailingSendMessage(content: string, start: number, end: number): ParsedEdge {
+  const firstCandidateStart = findBoundaryPrefix(
+    content,
+    start,
+    start,
+    end,
+    GARCON_SEND_MESSAGE_PREFIX,
+  );
   if (firstCandidateStart < 0) return { kind: 'none' };
 
   const closerStart = end - GARCON_SEND_MESSAGE_CLOSE.length;
   if (!content.startsWith(GARCON_SEND_MESSAGE_CLOSE, closerStart)) {
-    return { kind: 'malformed', candidateStart: firstCandidateStart };
+    return {
+      kind: 'malformed',
+      command: 'send-message',
+      candidateStart: firstCandidateStart,
+    };
   }
 
   const previousCloserStart = content.lastIndexOf(
     GARCON_SEND_MESSAGE_CLOSE,
     closerStart - 1,
   );
-  const candidateStart = findBoundarySendPrefix(
+  const candidateStart = findBoundaryPrefix(
     content,
     start,
     previousCloserStart < start
       ? start
       : previousCloserStart + GARCON_SEND_MESSAGE_CLOSE.length,
     closerStart,
+    GARCON_SEND_MESSAGE_PREFIX,
   );
   if (candidateStart < 0) {
-    return { kind: 'malformed', candidateStart: firstCandidateStart };
+    return {
+      kind: 'malformed',
+      command: 'send-message',
+      candidateStart: firstCandidateStart,
+    };
   }
 
   const openerEnd = content.indexOf('>', candidateStart + GARCON_SEND_MESSAGE_PREFIX.length);
   if (openerEnd < 0 || openerEnd >= closerStart) {
-    return { kind: 'malformed', candidateStart };
+    return { kind: 'malformed', command: 'send-message', candidateStart };
   }
   const command = parseSendMessage(
     content.slice(candidateStart, openerEnd + 1),
     content.slice(openerEnd + 1, closerStart),
   );
-  if (!command) return { kind: 'malformed', candidateStart };
+  if (!command) {
+    return { kind: 'malformed', command: 'send-message', candidateStart };
+  }
   return { kind: 'valid', command, start: candidateStart, end };
 }
 
@@ -235,20 +399,24 @@ function isTrailingCommandBoundary(content: string, start: number, commandStart:
   return commandStart === start || content[commandStart - 1] === '\n';
 }
 
-function findBoundarySendPrefix(
+function findBoundaryPrefix(
   content: string,
   boundaryStart: number,
   searchStart: number,
   end: number,
+  prefix: string,
 ): number {
-  let candidateStart = content.indexOf(GARCON_SEND_MESSAGE_PREFIX, searchStart);
+  let candidateStart = content.indexOf(prefix, searchStart);
   while (candidateStart >= 0 && candidateStart < end) {
-    if (isTrailingCommandBoundary(content, boundaryStart, candidateStart)) {
+    if (
+      candidateStart >= boundaryStart
+      && isTrailingCommandBoundary(content, boundaryStart, candidateStart)
+    ) {
       return candidateStart;
     }
     candidateStart = content.indexOf(
-      GARCON_SEND_MESSAGE_PREFIX,
-      candidateStart + GARCON_SEND_MESSAGE_PREFIX.length,
+      prefix,
+      candidateStart + prefix.length,
     );
   }
   return -1;
@@ -318,10 +486,11 @@ function trimEndIndex(content: string, start: number, end: number): number {
 function recordIssue(
   issues: GarconCommandIssue[],
   starts: Set<number>,
+  command: GarconCommandIssue['command'],
   candidateStart: number,
   edge: GarconCommandIssue['edge'],
 ): void {
   if (starts.has(candidateStart)) return;
   starts.add(candidateStart);
-  issues.push({ command: 'send-message', reason: 'malformed', edge });
+  issues.push({ command, reason: 'malformed', edge });
 }

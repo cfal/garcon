@@ -38,9 +38,11 @@ import type {
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
 import {
   canonicalizeGarconProducerRows,
+  DISABLED_AGENT_START_SINK,
   DISABLED_CHAT_ID_REQUEST_SINK,
   DISABLED_INTER_AGENT_MESSAGE_SINK,
   dispatchGarconCommands,
+  type AgentStartRequestSink,
   type ChatIdRequestSink,
   type InterAgentMessageRequestSink,
 } from './garcon-command-publication.js';
@@ -103,6 +105,7 @@ export interface TranscriptLedgerServiceOptions {
   readonly onListenerError?: (error: unknown) => void;
   readonly chatIdRequests?: ChatIdRequestSink;
   readonly interAgentMessages?: InterAgentMessageRequestSink;
+  readonly agentStarts?: AgentStartRequestSink;
 }
 
 export interface PermissionResolutionClaim {
@@ -142,6 +145,7 @@ export class TranscriptLedgerService {
   readonly #onListenerError: (error: unknown) => void;
   readonly #chatIdRequests: ChatIdRequestSink;
   readonly #interAgentMessages: InterAgentMessageRequestSink;
+  readonly #agentStarts: AgentStartRequestSink;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
   readonly #leases = new Map<string, ProducerLease>();
@@ -158,6 +162,7 @@ export class TranscriptLedgerService {
     this.#onListenerError = options.onListenerError ?? (() => undefined);
     this.#chatIdRequests = options.chatIdRequests ?? DISABLED_CHAT_ID_REQUEST_SINK;
     this.#interAgentMessages = options.interAgentMessages ?? DISABLED_INTER_AGENT_MESSAGE_SINK;
+    this.#agentStarts = options.agentStarts ?? DISABLED_AGENT_START_SINK;
   }
 
   subscribe(listener: (event: TranscriptCommitEvent) => void | Promise<void>): () => void {
@@ -677,6 +682,7 @@ export class TranscriptLedgerService {
           runId: this.#activeRuns.get(chatId) ?? null,
           chatIdRequests: this.#chatIdRequests,
           interAgentMessages: this.#interAgentMessages,
+          agentStarts: this.#agentStarts,
         });
         if (committed.length > 0) {
           this.#notify({ type: 'rows', chatId, viewId, rows: committed });

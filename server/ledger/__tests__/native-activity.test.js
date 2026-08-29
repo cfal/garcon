@@ -213,6 +213,58 @@ describe('NativeTranscriptActivityService', () => {
         providerMeta: null,
       }]);
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(14);
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Agent requested sub-agent creation',
+        detail: {
+          type: 'sub-agent-start-request',
+          prompt: 'Investigate.',
+          params: [{
+            ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
+            agentId: 'codex',
+            providerId: null,
+            endpointId: null,
+            model: 'gpt-5.4',
+            reasoningEffort: null,
+          }],
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(16);
+
+      const result = {
+        ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
+        error: false,
+        msg: 'created',
+        chatId: '1787974832309199',
+      };
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Results queued.',
+        detail: {
+          type: 'sub-agent-start-outcome',
+          deliveryStatus: 'queued',
+          results: [result],
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(16);
+
+      store.append(CHAT_ID, view.viewId, [{
+        kind: 'notice',
+        at: IMPORTED_AT,
+        message: 'Results delivered.',
+        detail: {
+          type: 'sub-agent-start-outcome',
+          deliveryStatus: 'delivered',
+          results: [result],
+        },
+        providerMeta: null,
+      }]);
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark?.ordinal).toBe(18);
     });
   });
 

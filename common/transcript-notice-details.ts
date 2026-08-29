@@ -1,4 +1,8 @@
 import { parseChatId } from './chat-id.js';
+import {
+  isGarconCreateChatResult,
+  type GarconCreateChatResult,
+} from './garcon-commands.js';
 
 export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly type: 'carryover-migration-quarantine';
@@ -56,13 +60,27 @@ export interface InterAgentMessageReceivedNoticeDetail {
   readonly fromChatId: string | null;
 }
 
+export type SubAgentResultDeliveryStatus =
+  | 'delivered'
+  | 'queued'
+  | 'delivery-unknown'
+  | 'delivery-failed'
+  | 'disabled';
+
+export interface SubAgentStartOutcomeNoticeDetail {
+  readonly type: 'sub-agent-start-outcome';
+  readonly deliveryStatus: SubAgentResultDeliveryStatus;
+  readonly results: readonly GarconCreateChatResult[];
+}
+
 export type TranscriptNoticeDetail =
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
   | ChatIdDisclosureNoticeDetail
   | ChatIdDiscoveryFailureNoticeDetail
   | InterAgentMessageOutcomeNoticeDetail
-  | InterAgentMessageReceivedNoticeDetail;
+  | InterAgentMessageReceivedNoticeDetail
+  | SubAgentStartOutcomeNoticeDetail;
 
 export function isCarryoverMigrationQuarantineNoticeDetail(
   value: unknown,
@@ -136,6 +154,23 @@ export function isInterAgentMessageReceivedNoticeDetail(
   }
 }
 
+export function isSubAgentStartOutcomeNoticeDetail(
+  value: unknown,
+): value is SubAgentStartOutcomeNoticeDetail {
+  if (!hasType(value, 'sub-agent-start-outcome')) return false;
+  const detail = value as Record<string, unknown>;
+  if (!isSubAgentResultDeliveryStatus(detail.deliveryStatus)) return false;
+  if (!Array.isArray(detail.results) || detail.results.length < 1 || detail.results.length > 16) {
+    return false;
+  }
+  const refs = new Set<string>();
+  for (const result of detail.results) {
+    if (!isGarconCreateChatResult(result) || refs.has(result.ref)) return false;
+    refs.add(result.ref);
+  }
+  return true;
+}
+
 function hasType(value: unknown, type: string): boolean {
   return value !== null
     && typeof value === 'object'
@@ -171,7 +206,62 @@ export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDet
   if (isInterAgentMessageReceivedNoticeDetail(value)) {
     return { type: value.type, fromChatId: value.fromChatId };
   }
+  if (isSubAgentStartOutcomeNoticeDetail(value)) {
+    return {
+      type: value.type,
+      deliveryStatus: value.deliveryStatus,
+      results: value.results.map((result): GarconCreateChatResult => {
+        if (result.error) {
+          return { ref: result.ref, error: true, msg: result.msg };
+        }
+        return {
+          ref: result.ref,
+          error: false,
+          msg: 'created',
+          chatId: result.chatId,
+        };
+      }),
+    };
+  }
   return null;
+}
+
+export function renderSubAgentStartOutcome(
+  deliveryStatus: SubAgentResultDeliveryStatus,
+  results: readonly GarconCreateChatResult[],
+): string {
+  const lines = [subAgentDeliveryContent(deliveryStatus)];
+  for (const result of results) {
+    if (result.error) {
+      lines.push(`Failed: ${result.ref} (${result.msg})`);
+    } else {
+      lines.push(`Created: ${result.ref} -> chat ${result.chatId}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function subAgentDeliveryContent(status: SubAgentResultDeliveryStatus): string {
+  switch (status) {
+    case 'delivered':
+      return 'Results delivered to the requesting agent.';
+    case 'queued':
+      return 'Results queued for delivery to the requesting agent. Pending delivery is not retained across server restart.';
+    case 'delivery-unknown':
+      return 'Result delivery may have occurred; no retry was queued.';
+    case 'delivery-failed':
+      return 'Garcon could not deliver results to the requesting agent.';
+    case 'disabled':
+      return 'Sub-agent creation is disabled.';
+  }
+}
+
+function isSubAgentResultDeliveryStatus(value: unknown): value is SubAgentResultDeliveryStatus {
+  return value === 'delivered'
+    || value === 'queued'
+    || value === 'delivery-unknown'
+    || value === 'delivery-failed'
+    || value === 'disabled';
 }
 
 function isInterAgentMessageFailureReason(value: unknown): value is InterAgentMessageFailureReason {
