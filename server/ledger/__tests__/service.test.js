@@ -217,6 +217,30 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('deduplicates only identical carryover notices in the current binding', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const summary = {
+        title: 'Handoff summary',
+        content: 'Original summary',
+        detail: { type: 'handoff-summary' },
+      };
+
+      const first = ledger.appendCarryoverNotice('chat-1', view.viewId, summary);
+      expect(ledger.appendCarryoverNotice('chat-1', view.viewId, summary)).toEqual(first);
+      const changed = ledger.appendCarryoverNotice('chat-1', view.viewId, {
+        ...summary,
+        content: 'Updated summary',
+      });
+
+      expect(changed.ordinal).toBe(first.ordinal + 1);
+      ledger.advanceContentStart('chat-1', view.viewId, changed.ordinal + 1);
+      const nextBinding = ledger.appendCarryoverNotice('chat-1', view.viewId, summary);
+      expect(nextBinding.ordinal).toBe(changed.ordinal + 1);
+      expect(ledger.currentRows('chat-1')).toEqual([first, changed, nextBinding]);
+    });
+  });
+
   it('rejects an invalid internal notice before append', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');

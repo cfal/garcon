@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentPermissionLifecycle,
   AgentPermissionResponseCapability,
@@ -123,6 +124,19 @@ interface ActivePermission {
   readonly permissionOccurrenceId: string;
   readonly decision: AgentPermissionResponseCapability;
   readonly claimId: string | null;
+}
+
+interface TranscriptNoticeInput {
+  readonly title: string;
+  readonly content: string;
+  readonly detail?: TranscriptNoticeDetail;
+  readonly at?: string;
+}
+
+interface NormalizedTranscriptNotice {
+  readonly content: string;
+  readonly detail: JsonObject;
+  readonly at?: string;
 }
 
 export class TranscriptLedgerService {
@@ -425,33 +439,38 @@ export class TranscriptLedgerService {
   appendNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    input: {
-      readonly title: string;
-      readonly content: string;
-      readonly detail?: TranscriptNoticeDetail;
-      readonly at?: string;
-    },
+    input: TranscriptNoticeInput,
   ): LedgerNoticeRow {
-    return this.#appendInternalNotice(chatId, viewId, {
-      title: input.title,
-      content: input.content,
-      detail: input.detail ? { ...input.detail } : {},
-      at: input.at,
-    });
+    return this.#appendInternalNotice(chatId, viewId, normalizeNotice(input));
+  }
+
+  appendCarryoverNotice(
+    chatId: string,
+    viewId: TranscriptViewId,
+    input: TranscriptNoticeInput,
+  ): LedgerNoticeRow {
+    const notice = normalizeNotice(input);
+    const current = this.#store.currentView(chatId);
+    if (current?.viewId === viewId) {
+      const existing = this.#store.rowsAfter(
+        chatId,
+        viewId,
+        current.contentStartOrdinal - 1,
+      ).find((row): row is LedgerNoticeRow => (
+        row.kind === 'notice'
+        && row.message === notice.content
+        && isDeepStrictEqual(row.detail, notice.detail)
+      ));
+      if (existing) return existing;
+    }
+    return this.#appendInternalNotice(chatId, viewId, notice);
   }
 
   #appendInternalNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    input: {
-      readonly title: string;
-      readonly content: string;
-      readonly detail: JsonObject;
-      readonly at?: string;
-    },
+    input: NormalizedTranscriptNotice,
   ): LedgerNoticeRow {
-    const title = parseChatRowTitle(input.title);
-    if (!title) throw new TypeError('Notice title is required');
     const at = input.at === undefined
       ? this.#now()
       : timestampAtOrAfter(
@@ -461,8 +480,8 @@ export class TranscriptLedgerService {
     const [row] = this.#store.append(chatId, viewId, [{
       kind: 'notice',
       at,
-      message: parseChatRowContent(input.content),
-      detail: { ...input.detail, title },
+      message: input.content,
+      detail: input.detail,
       providerMeta: null,
     }]);
     const notice = row as LedgerNoticeRow;
@@ -859,6 +878,16 @@ export class TranscriptLedgerService {
       }
     });
   }
+}
+
+function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNotice {
+  const title = parseChatRowTitle(input.title);
+  if (!title) throw new TypeError('Notice title is required');
+  return {
+    content: parseChatRowContent(input.content),
+    detail: { ...(input.detail ?? {}), title },
+    at: input.at,
+  };
 }
 
 function inputKey(chatId: string, clientMessageId: string): string {

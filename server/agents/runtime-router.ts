@@ -187,7 +187,7 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       const carryover = resolveCarryOverOutcome(outcome);
       if (carryover.notice) {
-        this.#ledger.appendNotice(chatId, prepared.viewId, carryover.notice);
+        this.#ledger.appendCarryoverNotice(chatId, prepared.viewId, carryover.notice);
       }
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),

@@ -334,6 +334,39 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(transcript.notices).toHaveLength(1);
   });
 
+  it('does not repeat an unchanged carryover notice after provider start fails', async () => {
+    let attempt = 0;
+    const start = mock(async (request) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('provider start failed');
+      request.sink.publish({
+        type: 'session',
+        session: {
+          agentSessionId: 'native-1',
+          nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'native-1' } },
+          nativeSeedReceipt: null,
+        },
+      });
+      request.sink.publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      return { id: 'start-handle' };
+    });
+    const { router, transcript } = makeRouter({
+      start,
+      createCarriedContext: async () => ({
+        kind: 'complete',
+        context: { prefix: 'complete seed' },
+      }),
+    });
+
+    await expect(router.runAgentTurn('chat-1', 'first attempt', {
+      turnId: 'turn-1',
+    })).rejects.toThrow('provider start failed');
+    await router.runAgentTurn('chat-1', 'retry', { turnId: 'turn-2' });
+
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(transcript.notices).toHaveLength(1);
+  });
+
   it('appends neither notice nor provider request when final admission closes', async () => {
     const admission = new AbortController();
     const { router, start, transcript } = makeRouter({
