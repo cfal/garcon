@@ -268,7 +268,7 @@ export class WorkspacePresentationController {
 	}
 
 	cycleWindowFocus(owner: FocusOwner, focusSurface: (surfaceId: string) => void): void {
-		if (this.isMobile) return;
+		if (this.isMobile || this.layout.snapshot.fullscreenWindowId) return;
 		const windows = collectWindowNodes(this.layout.snapshot.desktopRoot);
 		if (windows.length < 2) return;
 		const ownerWindowId =

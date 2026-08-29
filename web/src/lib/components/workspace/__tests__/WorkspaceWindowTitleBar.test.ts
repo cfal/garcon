@@ -4,6 +4,7 @@ import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 import type {
+	DesktopWorkspaceNode,
 	SurfaceDescriptor,
 	WorkspaceWindowId,
 	WorkspaceWindowNode,
@@ -37,6 +38,7 @@ const {
 	openTabInNewWindow: vi.fn(async () => undefined),
 	runtime: {
 		fullscreenWindowId: null as WorkspaceWindowId | null,
+		desktopRoot: null as DesktopWorkspaceNode | null,
 		windowCount: 1,
 		closeBlocked: true,
 		surfaceCloseBlocked: false,
@@ -50,7 +52,7 @@ vi.mock('$lib/context', () => ({
 			get snapshot() {
 				return {
 					fullscreenWindowId: runtime.fullscreenWindowId,
-					desktopRoot: {
+					desktopRoot: runtime.desktopRoot ?? {
 						type: 'window',
 						id: 'window-main',
 						tabs: {
@@ -112,6 +114,42 @@ function workspaceWindow(
 	};
 }
 
+function fourWindowRoot(tabs: WorkspaceWindowNode['tabs']): DesktopWorkspaceNode {
+	const otherWindow = (id: WorkspaceWindowId, surfaceId: string): WorkspaceWindowNode => ({
+		type: 'window',
+		id,
+		tabs: { order: [surfaceId], activeId: surfaceId, mru: [surfaceId] },
+	});
+	return {
+		type: 'partition',
+		id: 'partition-root',
+		direction: 'horizontal',
+		ratio: 0.5,
+		children: [
+			{
+				type: 'partition',
+				id: 'partition-left',
+				direction: 'vertical',
+				ratio: 0.5,
+				children: [
+					{ type: 'window', id: 'window-main', tabs },
+					otherWindow('window-two', 'terminal:two'),
+				],
+			},
+			{
+				type: 'partition',
+				id: 'partition-right',
+				direction: 'vertical',
+				ratio: 0.5,
+				children: [
+					otherWindow('window-three', 'terminal:three'),
+					otherWindow('window-four', 'terminal:four'),
+				],
+			},
+		],
+	};
+}
+
 function renderTitleBar(node: WorkspaceWindowNode, isCurrent = true) {
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
@@ -126,6 +164,7 @@ describe('WorkspaceWindowTitleBar', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		runtime.fullscreenWindowId = null;
+		runtime.desktopRoot = null;
 		runtime.windowCount = 1;
 		runtime.closeBlocked = true;
 		runtime.surfaceCloseBlocked = false;
@@ -289,6 +328,43 @@ describe('WorkspaceWindowTitleBar', () => {
 		await waitFor(() =>
 			expect(openChatInNewWindow).toHaveBeenCalledWith('chat-a', 'window-main', 'right'),
 		);
+	});
+
+	it('disables directional new-window actions in both tab menus at the window cap', async () => {
+		const node = workspaceWindow([chatSurface.id, gitSurface.id]);
+		runtime.windowCount = 4;
+		runtime.desktopRoot = fourWindowRoot(node.tabs);
+		renderTitleBar(node);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		for (const label of [
+			m.workspace_open_tab_new_window_left(),
+			m.workspace_open_tab_new_window_right(),
+			m.workspace_open_tab_new_window_above(),
+			m.workspace_open_tab_new_window_below(),
+		]) {
+			expect(
+				screen.getByRole('menuitem', { name: label }).getAttribute('data-disabled'),
+			).not.toBeNull();
+		}
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() =>
+			expect(
+				screen.queryByRole('menuitem', { name: m.workspace_open_tab_new_window_right() }),
+			).toBeNull(),
+		);
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		for (const label of [
+			m.workspace_open_tab_new_window_left(),
+			m.workspace_open_tab_new_window_right(),
+			m.workspace_open_tab_new_window_above(),
+			m.workspace_open_tab_new_window_below(),
+		]) {
+			expect(
+				(await screen.findByRole('menuitem', { name: label })).getAttribute('data-disabled'),
+			).not.toBeNull();
+		}
 	});
 
 	it('shows the final Chat close action as disabled', async () => {

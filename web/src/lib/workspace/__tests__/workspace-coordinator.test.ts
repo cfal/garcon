@@ -1005,6 +1005,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
 
+	it('does not cycle focus into hidden windows during fullscreen', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		await coordinator.enterWindowFullscreen('window-main');
+		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+
+		coordinator.cycleWindowFocus({ kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID });
+
+		expect(focusSurface).not.toHaveBeenCalled();
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+	});
+
 	it('does not navigate window tabs from the chat list or mobile presentation', async () => {
 		const { coordinator, appShell, layout } = createHarness();
 		coordinator.focusOwner = { kind: 'chat-list' };
