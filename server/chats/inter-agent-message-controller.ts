@@ -29,7 +29,7 @@ interface InterAgentMessageAttempt {
   readonly abortController: AbortController;
 }
 
-interface InterAgentMessageExecution {
+export interface InterAgentMessageExecution {
   deliverInterAgentControlInput(
     chatId: string,
     input: InterAgentControlInput,
@@ -50,7 +50,7 @@ export interface InterAgentMessageErrorContext {
   readonly phase: 'source-validation' | 'target-adoption' | 'target-receipt' | 'source-outcome';
 }
 
-interface InterAgentMessageControllerOptions {
+export interface InterAgentMessageControllerOptions {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
   readonly adoption: Pick<TranscriptAdoptionService, 'ensure'>;
   readonly execution: InterAgentMessageExecution;
