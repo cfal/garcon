@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 
 import { AgentRuntimeRouter } from '../runtime-router.ts';
+import { resetServerConfigForTests } from '../../config.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 
 function deferred() {
@@ -112,5 +113,28 @@ describe('AgentRuntimeRouter execution handles', () => {
 
     expect(execution.abort).toHaveBeenCalledWith(handle);
     expect(router.getRunningChatIdsSnapshot()).toEqual([]);
+  });
+
+  it('reports the concurrent session cap with a typed domain error', async () => {
+    const previousLimit = process.env.GARCON_MAX_SESSIONS;
+    process.env.GARCON_MAX_SESSIONS = '1';
+    resetServerConfigForTests();
+    try {
+      const execution = {
+        start: mock(async () => ({ id: 'handle-1' })),
+        resume: mock(async () => ({ id: 'handle-1' })),
+        abort: mock(async () => undefined),
+      };
+      const { router } = makeRouter(execution);
+      await router.startSession('chat-1', 'first', { turnId: 'turn-1' });
+
+      await expect(router.startSession('chat-1', 'second', { turnId: 'turn-2' }))
+        .rejects.toMatchObject({ code: 'SESSION_LIMIT', status: 429, retryable: true });
+      expect(execution.start).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousLimit === undefined) delete process.env.GARCON_MAX_SESSIONS;
+      else process.env.GARCON_MAX_SESSIONS = previousLimit;
+      resetServerConfigForTests();
+    }
   });
 });

@@ -157,8 +157,11 @@ export class AgentRuntimeRouter {
   } = {}): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     if (getMaxSessions() > 0 && this.getRunningSessionCount() >= getMaxSessions()) {
-      throw new Error(
+      throw new DomainError(
+        'SESSION_LIMIT',
         `Session limit reached (${getMaxSessions()}). Wait for existing sessions to complete or increase GARCON_MAX_SESSIONS.`,
+        429,
+        true,
       );
     }
     await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);

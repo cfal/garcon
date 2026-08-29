@@ -106,7 +106,6 @@ export class StartCommands {
     };
   }
 
-
   private async submitNormalizedStart(input: NormalizedChatStart): Promise<StartChatCommandResponse> {
     const existing = this.deps.chats.getChat(input.chatId);
     if (existing) {

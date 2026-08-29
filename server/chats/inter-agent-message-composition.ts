@@ -1,8 +1,5 @@
-import type { StoredControlInputEntry } from '../chat-execution/control-state.js';
 import { createLogger } from '../lib/log.js';
-import { transcriptViewId } from '../ledger/contracts.js';
 import type { InterAgentMessageRequestSink } from '../ledger/garcon-command-publication.js';
-import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
   InterAgentMessageController,
   type InterAgentMessageControllerOptions,
@@ -18,7 +15,6 @@ type InterAgentMessageCompositionOptions = Pick<
 
 export class InterAgentMessageComposition implements InterAgentMessageRequestSink {
   #controller: InterAgentMessageController | null = null;
-  #notices: Pick<TranscriptLedgerService, 'appendNotice'> | null = null;
 
   request(input: InterAgentMessageRequest): void {
     if (!this.#controller) {
@@ -30,19 +26,6 @@ export class InterAgentMessageComposition implements InterAgentMessageRequestSin
   discardSource(chatId: string): void {
     this.#controller?.discardSource(chatId);
   }
-
-  readonly appendControlReceipt = (
-    chatId: string,
-    entry: StoredControlInputEntry,
-  ): void => {
-    if (!this.#notices) {
-      throw new Error('Inter-agent message notices are not initialized');
-    }
-    this.#notices.appendNotice(chatId, transcriptViewId(entry.transcriptViewId), {
-      ...entry.receipt,
-      at: entry.createdAt,
-    });
-  };
 
   initialize(options: InterAgentMessageCompositionOptions): void {
     if (this.#controller) throw new Error('Inter-agent message controller is already initialized');
@@ -58,7 +41,6 @@ export class InterAgentMessageComposition implements InterAgentMessageRequestSin
         });
       },
     });
-    this.#notices = options.notices;
     this.#controller = controller;
   }
 }

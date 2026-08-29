@@ -188,13 +188,10 @@ export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   allowHandoffFork?: boolean;
 }
 
-export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & {
-  origin: ChatStartOrigin;
-};
+export type ChatStartInput = Omit<StartChatCommandRequest, 'origin'> & { origin: ChatStartOrigin };
 
 export type AgentCommandChatStartInput = Omit<
-  ChatStartInput,
-  'origin' | 'images' | 'userMessagePresentation'
+  ChatStartInput, 'origin' | 'images' | 'userMessagePresentation'
 >;
 
 export interface ScheduledChatStartInput {

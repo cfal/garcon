@@ -256,6 +256,7 @@ describe('chats API contract', () => {
 		expect(opts.method).toBe('POST');
 
 		expect(JSON.parse(opts.body)).toEqual({
+			origin: 'interactive',
 			clientRequestId: 'req-start-1',
 			clientMessageId: 'msg-start-1',
 			chatId: 'c-1',
