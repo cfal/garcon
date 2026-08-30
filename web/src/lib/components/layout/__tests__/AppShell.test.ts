@@ -356,6 +356,7 @@ describe('AppShell responsive workspace binding', () => {
 		const workspaceContent = document.querySelector<HTMLElement>('[data-workspace-content]');
 		const revealTrigger = screen.getByRole('button', { name: 'Show chat sidebar' });
 		expect(chatList?.style.width).toBe('0px');
+		expect(chatList?.classList.contains('z-50')).toBe(true);
 		expect(panel?.getAttribute('aria-hidden')).toBe('true');
 		expect(panel?.hasAttribute('inert')).toBe(true);
 

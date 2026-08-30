@@ -590,7 +590,7 @@
 		onpointerenter={() => chatListAutohide.reveal()}
 		onkeydown={handleDesktopChatListKeydown}
 		class={[
-			'relative h-full shrink-0',
+			'relative z-50 h-full shrink-0',
 			chatListAutohide.active && !hideLeftSidebar ? 'overflow-visible' : 'overflow-hidden',
 		]}
 		class:order-first={dock === 'left'}
