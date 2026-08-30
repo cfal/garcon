@@ -1,11 +1,12 @@
 import { AgentStartSelectionService } from '../agents/agent-start-selection-service.js';
+import { diagnosticErrorCode } from '../lib/errors.js';
+import { createLogger } from '../lib/log.js';
 import type { AgentStartRequestSink } from '../ledger/garcon-command-publication.js';
 import {
   AgentStartController,
   type AgentStartControllerOptions,
   type AgentStartRequest,
 } from './agent-start-controller.js';
-import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('agent-starts');
 
@@ -47,17 +48,9 @@ export class AgentStartComposition implements AgentStartRequestSink {
       onError(error, context) {
         logger.warn('Agent start batch failed', {
           ...context,
-          errorCode: structuredErrorCode(error),
+          errorCode: diagnosticErrorCode(error),
         });
       },
     });
   }
-}
-
-function structuredErrorCode(error: unknown): string {
-  if (error && typeof error === 'object' && 'code' in error) {
-    const code = (error as { readonly code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return error instanceof Error ? error.name : 'UNKNOWN';
 }

@@ -16,8 +16,9 @@ import {
 import type { AgentStartSelectionService } from '../agents/agent-start-selection-service.js';
 import type { ServerControlDisposition, ServerControlInput } from '../chat-execution/types.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
+import { structuredErrorCode } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import type { TranscriptView, TranscriptViewId } from '../ledger/contracts.js';
+import type { TranscriptViewId } from '../ledger/contracts.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { ChatIdAllocator } from './chat-id-allocator.js';
 import type { IChatRegistry } from './store.js';
@@ -151,7 +152,9 @@ export class AgentStartController {
 
     if (!this.options.isEnabled()) {
       const results = input.params.map((params) => failureResult(params.ref, 'disabled'));
-      await this.#appendOutcome(input, results, 'disabled', signal);
+      await this.#withCurrentSourceView(input, signal, () => {
+        this.#appendOutcome(input, results, 'disabled');
+      });
       return;
     }
 
@@ -192,7 +195,11 @@ export class AgentStartController {
     }
     if (!resolved.ok) return failureResult(params.ref, resolved.message);
 
-    for (let allocationAttempt = 0; allocationAttempt < CHAT_ID_ALLOCATION_ATTEMPTS; allocationAttempt += 1) {
+    for (
+      let allocationAttempt = 0;
+      allocationAttempt < CHAT_ID_ALLOCATION_ATTEMPTS;
+      allocationAttempt += 1
+    ) {
       attempt.abortController.signal.throwIfAborted();
       if (this.#shuttingDown) return failureResult(params.ref, 'server-shutting-down');
 
@@ -254,10 +261,7 @@ export class AgentStartController {
     results: readonly GarconCreateChatResult[],
     signal: AbortSignal,
   ): Promise<void> {
-    await this.options.chatMutationLock.runExclusive(`chat:${input.sourceChatId}`, async () => {
-      signal.throwIfAborted();
-      if (!this.#sourceViewIsCurrent(input)) return;
-
+    await this.#withCurrentSourceView(input, signal, async () => {
       const deliveredDetail = outcomeDetail('delivered', results);
       const controlInput: ServerControlInput = {
         content: garconCreateChatResultsContent(results),
@@ -288,24 +292,26 @@ export class AgentStartController {
           phase: 'result-delivery',
         });
       }
-      this.#appendOutcomeNow(input, results, deliveryStatus);
+      this.#appendOutcome(input, results, deliveryStatus);
     });
   }
 
-  async #appendOutcome(
+  async #withCurrentSourceView(
     input: AgentStartRequest,
-    results: readonly GarconCreateChatResult[],
-    deliveryStatus: SubAgentResultDeliveryStatus,
     signal: AbortSignal,
+    action: () => void | Promise<void>,
   ): Promise<void> {
-    await this.options.chatMutationLock.runExclusive(`chat:${input.sourceChatId}`, async () => {
-      signal.throwIfAborted();
-      if (!this.#sourceViewIsCurrent(input)) return;
-      this.#appendOutcomeNow(input, results, deliveryStatus);
-    });
+    await this.options.chatMutationLock.runExclusive(
+      `chat:${input.sourceChatId}`,
+      async () => {
+        signal.throwIfAborted();
+        if (!this.#sourceViewIsCurrent(input)) return;
+        await action();
+      },
+    );
   }
 
-  #appendOutcomeNow(
+  #appendOutcome(
     input: AgentStartRequest,
     results: readonly GarconCreateChatResult[],
     deliveryStatus: SubAgentResultDeliveryStatus,
@@ -329,7 +335,7 @@ export class AgentStartController {
 
   #sourceViewIsCurrent(input: AgentStartRequest): boolean {
     if (!this.options.registry.getChat(input.sourceChatId)) return false;
-    return sameView(this.options.notices.currentView(input.sourceChatId), input.sourceViewId);
+    return this.options.notices.currentView(input.sourceChatId)?.viewId === input.sourceViewId;
   }
 
   #registerAttempt(sourceChatId: string, attempt: AgentStartAttempt): void {
@@ -381,14 +387,4 @@ function outcomeDetail(
     deliveryStatus,
     results: results.map((result) => ({ ...result })),
   };
-}
-
-function sameView(view: TranscriptView | null, expected: TranscriptViewId): boolean {
-  return view?.viewId === expected;
-}
-
-function structuredErrorCode(error: unknown): string | null {
-  if (!error || typeof error !== 'object' || !('code' in error)) return null;
-  const code = (error as { readonly code?: unknown }).code;
-  return typeof code === 'string' ? code : null;
 }

@@ -1,3 +1,4 @@
+import { diagnosticErrorCode } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import type { InterAgentMessageRequestSink } from '../ledger/garcon-command-publication.js';
 import {
@@ -37,18 +38,10 @@ export class InterAgentMessageComposition implements InterAgentMessageRequestSin
       onError(error, context) {
         logger.warn('Inter-agent message routing failed', {
           ...context,
-          errorCode: structuredErrorCode(error),
+          errorCode: diagnosticErrorCode(error),
         });
       },
     });
     this.#controller = controller;
   }
-}
-
-function structuredErrorCode(error: unknown): string {
-  if (error && typeof error === 'object' && 'code' in error) {
-    const code = (error as { readonly code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return error instanceof Error ? error.name : 'UNKNOWN';
 }

@@ -15,3 +15,16 @@ export function hasNodeErrorCode(error: unknown, code: string): boolean {
       && (error as { code?: unknown }).code === code,
   );
 }
+
+export function structuredErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) return null;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
+
+export function diagnosticErrorCode(error: unknown): string {
+  const code = structuredErrorCode(error);
+  if (code !== null) return code;
+  if (error instanceof Error) return error.name;
+  return 'UNKNOWN';
+}
