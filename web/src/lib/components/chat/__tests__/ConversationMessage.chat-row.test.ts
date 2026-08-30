@@ -138,7 +138,10 @@ describe('ConversationMessage chat rows', () => {
 
 		const row = container.querySelector('[data-inter-agent-message-direction="received"]');
 		const card = row?.querySelector('article');
-		expect(screen.getByText('Message from Protocol review')).toBeTruthy();
+		expect(screen.getByText('Received Message')).toBeTruthy();
+		expect(screen.getByText('From')).toBeTruthy();
+		expect(screen.getByText('Protocol review')).toBeTruthy();
+		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
 		expect(screen.getByText('typed contract').tagName).toBe('STRONG');
 		expect(card?.className).toContain('border-status-neutral-border');
 		expect(card?.className).not.toContain('border-status-info-border');
@@ -163,7 +166,11 @@ describe('ConversationMessage chat rows', () => {
 			chatTitles: { [TARGET_CHAT_ID]: 'Parser cleanup' },
 		});
 
-		expect(screen.getByText('Sent message to Parser cleanup')).toBeTruthy();
+		expect(screen.getByText('Sent Message')).toBeTruthy();
+		expect(screen.getByText('To')).toBeTruthy();
+		expect(screen.getByText('Parser cleanup')).toBeTruthy();
+		expect(screen.getByText(`(${TARGET_CHAT_ID})`)).toBeTruthy();
+		expect(screen.getByLabelText('Sent')).toBeTruthy();
 		expect(screen.getByText('focused fix').tagName).toBe('CODE');
 		expect(container.querySelector('.markdown-body')).toBeTruthy();
 		expect(container.textContent).not.toContain('Queued:');
@@ -172,7 +179,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
 	});
 
-	it('falls back to IDs, protects hidden senders, and distinguishes failed outcomes', () => {
+	it('lists each target and marks only failed deliveries', () => {
 		const mixed = render(ConversationMessageHost, {
 			message: new TranscriptNoticeMessage(AT, 'Mixed delivery body.', {
 				type: 'inter-agent-message-outcome',
@@ -181,19 +188,22 @@ describe('ConversationMessage chat rows', () => {
 					{ chatId: SECOND_TARGET_CHAT_ID, status: 'failed', reason: 'target-not-found' },
 				],
 			}),
+			chatTitles: {
+				[TARGET_CHAT_ID]: 'Build verification',
+				[SECOND_TARGET_CHAT_ID]: 'Release coordinator',
+			},
 		});
 
-		expect(
-			screen.getByText(
-				`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`,
-			),
-		).toBeTruthy();
-		expect(screen.getByText('chat not found')).toBeTruthy();
-		expect(
-			screen
-				.getByText(`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`)
-				.getAttribute('title'),
-		).toBe(`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`);
+		expect(screen.getByText('Sent Message')).toBeTruthy();
+		expect(screen.getByText('To')).toBeTruthy();
+		const deliveredRecipient = screen.getByText('Build verification').closest('li');
+		const failedRecipient = screen.getByText('Release coordinator').closest('li');
+		expect(deliveredRecipient?.textContent).toContain(`(${TARGET_CHAT_ID})`);
+		expect(deliveredRecipient?.querySelector('[aria-label="Sent"]')).toBeTruthy();
+		expect(deliveredRecipient?.querySelector('[aria-label="Send failed"]')).toBeNull();
+		expect(failedRecipient?.textContent).toContain(`(${SECOND_TARGET_CHAT_ID})`);
+		expect(failedRecipient?.querySelector('[aria-label="Send failed"]')).toBeTruthy();
+		expect(failedRecipient?.querySelector('[aria-label="Sent"]')).toBeNull();
 		mixed.unmount();
 
 		const failed = render(ConversationMessageHost, {
@@ -202,8 +212,10 @@ describe('ConversationMessage chat rows', () => {
 				results: [{ chatId: TARGET_CHAT_ID, status: 'failed', reason: 'disabled' }],
 			}),
 		});
-		expect(screen.getByText(`Failed to send message to ${TARGET_CHAT_ID}`)).toBeTruthy();
-		expect(screen.getByText('agent messaging is disabled')).toBeTruthy();
+		expect(screen.getByText('Sent Message')).toBeTruthy();
+		expect(
+			screen.getByText(TARGET_CHAT_ID).closest('li')?.querySelector('[aria-label="Send failed"]'),
+		).toBeTruthy();
 		failed.unmount();
 
 		render(ConversationMessageHost, {
@@ -212,8 +224,9 @@ describe('ConversationMessage chat rows', () => {
 				fromChatId: null,
 			}),
 		});
-		expect(screen.getByText('Inter-agent message')).toBeTruthy();
-		expect(screen.queryByText(/Message from/)).toBeNull();
+		expect(screen.getByText('Received Message')).toBeTruthy();
+		expect(screen.getByText('From')).toBeTruthy();
+		expect(screen.getByText('Hidden sender')).toBeTruthy();
 		expect(screen.getByText('message').tagName).toBe('STRONG');
 	});
 
@@ -227,9 +240,24 @@ describe('ConversationMessage chat rows', () => {
 			chatTitleUpdate: { chatId: SOURCE_CHAT_ID, title: 'Renamed title' },
 		});
 
-		expect(screen.getByText('Message from Original title')).toBeTruthy();
+		expect(screen.getByText('Original title')).toBeTruthy();
+		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Update chat title' }));
-		await waitFor(() => expect(screen.getByText('Message from Renamed title')).toBeTruthy());
+		await waitFor(() => expect(screen.getByText('Renamed title')).toBeTruthy());
+		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
+	});
+
+	it('runs the message divider to the padded card edges', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Divider body.', {
+				type: 'inter-agent-message-outcome',
+				results: [{ chatId: TARGET_CHAT_ID, status: 'delivered' }],
+			}),
+		});
+
+		const divider = container.querySelector('.inter-agent-message-divider');
+		expect(divider?.className).toContain('-mx-3');
+		expect(divider?.className).toContain('border-t');
 	});
 
 	it('keeps provider errors on the generic error path', () => {
@@ -283,12 +311,7 @@ describe('ConversationMessage chat rows', () => {
 
 		titled.unmount();
 		const untitled = render(ConversationMessageHost, {
-			message: new CliRowMessage(
-				AT,
-				'Untitled CLI notice.',
-				{ style: 'notice' },
-				'plain',
-			),
+			message: new CliRowMessage(AT, 'Untitled CLI notice.', { style: 'notice' }, 'plain'),
 		});
 		const untitledCard = screen.getByText('CLI notice').closest('article');
 		expect(untitledCard?.className).toContain('border-status-info-border');
@@ -296,13 +319,7 @@ describe('ConversationMessage chat rows', () => {
 
 		untitled.unmount();
 		render(ConversationMessageHost, {
-			message: new CliRowMessage(
-				AT,
-				'Empty-title CLI notice.',
-				{ style: 'notice' },
-				'plain',
-				'',
-			),
+			message: new CliRowMessage(AT, 'Empty-title CLI notice.', { style: 'notice' }, 'plain', ''),
 		});
 		expect(screen.getByText('CLI notice').closest('article')).toBeTruthy();
 	});
@@ -327,12 +344,7 @@ describe('ConversationMessage chat rows', () => {
 
 		titled.unmount();
 		render(ConversationMessageHost, {
-			message: new CliRowMessage(
-				AT,
-				'Untitled CLI error.',
-				{ style: 'error' },
-				'plain',
-			),
+			message: new CliRowMessage(AT, 'Untitled CLI error.', { style: 'error' }, 'plain'),
 		});
 		const untitledCard = screen.getByText('CLI error').closest('article');
 		expect(untitledCard?.className).toContain('border-status-error-border');
@@ -356,7 +368,9 @@ describe('ConversationMessage chat rows', () => {
 		const card = screen.getByText('Deployment').closest('article');
 		expect(card?.className).toContain('cli-presentation-custom');
 		expect(screen.getByText('Deployment complete.').tagName).toBe('STRONG');
-		const scope = container.querySelector<HTMLElement>('[style*="--cli-presentation-accent-light"]');
+		const scope = container.querySelector<HTMLElement>(
+			'[style*="--cli-presentation-accent-light"]',
+		);
 		expect(scope?.style.getPropertyValue('--cli-presentation-accent-light')).toBe('#7c3aed');
 		expect(scope?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
 	});
@@ -460,9 +474,7 @@ describe('ConversationMessage chat rows', () => {
 		});
 
 		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
-		expect(
-			screen.getByText('Long CLI content').closest('.collapsible-body-collapsed'),
-		).toBeNull();
+		expect(screen.getByText('Long CLI content').closest('.collapsible-body-collapsed')).toBeNull();
 	});
 
 	it('collapses styleless CLI user messages without changing the bubble style', async () => {

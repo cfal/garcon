@@ -281,11 +281,13 @@ export function estimateConversationFeedItemSize(
 	if (layout === 'permission') return 240 + spacing;
 	if (renderItem.kind === 'local-notice') return 52 + spacing;
 	if (renderItem.message.type === 'transcript-notice') {
-		if (
-			isInterAgentMessageOutcomeNoticeDetail(renderItem.message.detail) ||
-			isInterAgentMessageReceivedNoticeDetail(renderItem.message.detail)
-		)
+		if (isInterAgentMessageOutcomeNoticeDetail(renderItem.message.detail)) {
+			const additionalRecipients = Math.max(0, renderItem.message.detail.results.length - 1);
+			return 230 + additionalRecipients * 26 + spacing;
+		}
+		if (isInterAgentMessageReceivedNoticeDetail(renderItem.message.detail)) {
 			return 230 + spacing;
+		}
 		// The collapsed handoff body is clamp-bounded, so its default height is stable
 		// enough to estimate even though expansion is measured after render.
 		return (isHandoffSummaryNoticeDetail(renderItem.message.detail) ? 230 : 52) + spacing;
