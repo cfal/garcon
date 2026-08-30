@@ -165,8 +165,14 @@ describe('runConsultation', () => {
       createId: () => 'request', createChatId: () => CHAT_ID,
     });
     expect(testClient.starts[0]).toMatchObject({
-      chatId: CHAT_ID, agentId: 'codex', projectPath: '/repo', command: 'Implement it',
-      permissionMode: 'acceptEdits', thinkingMode: 'high', tags: ['cli', 'review-needed'],
+      origin: 'cli',
+      chatId: CHAT_ID,
+      agentId: 'codex',
+      projectPath: '/repo',
+      command: 'Implement it',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      tags: ['cli', 'review-needed'],
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
     });
     expect(testOutput.acceptedHandles).toEqual([{ chatId: CHAT_ID, turnId: 'turn-1' }]);
@@ -215,13 +221,19 @@ describe('runConsultation', () => {
     });
 
     expect(starts).toHaveLength(2);
-    expect(starts.map(({ chatId, clientRequestId, clientMessageId }) => ({
+    expect(starts.map(({ origin, chatId, clientRequestId, clientMessageId }) => ({
+      origin,
       chatId,
       clientRequestId,
       clientMessageId,
     }))).toEqual([
-      { chatId: CHAT_ID, clientRequestId: 'request-1', clientMessageId: 'message-1' },
-      { chatId: '1785337200123457', clientRequestId: 'request-2', clientMessageId: 'message-2' },
+      { origin: 'cli', chatId: CHAT_ID, clientRequestId: 'request-1', clientMessageId: 'message-1' },
+      {
+        origin: 'cli',
+        chatId: '1785337200123457',
+        clientRequestId: 'request-2',
+        clientMessageId: 'message-2',
+      },
     ]);
   });
 

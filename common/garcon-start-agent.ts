@@ -145,14 +145,14 @@ export function parseGarconStartAgent(
   if (!promptClose || !promptClose.hasLineBreak) {
     return { kind: 'malformed', nextCandidateStart: end };
   }
-  if (completesNestedStartAgent(content, nestedPromptOpeners, promptClose, end)) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
 
   const prompt = normalizeGarconCommandBody(
     content.slice(promptOpen.end, promptClose.start),
   );
   if (!isValidStartPrompt(prompt)) {
+    return { kind: 'malformed', nextCandidateStart: end };
+  }
+  if (completesNestedStartAgent(content, nestedPromptOpeners, promptClose, end)) {
     return { kind: 'malformed', nextCandidateStart: end };
   }
 
