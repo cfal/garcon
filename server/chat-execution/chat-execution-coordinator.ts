@@ -426,14 +426,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     input: ServerControlInput,
     signal: AbortSignal,
   ): Promise<ServerControlDisposition> {
-    return this.#deliverServerControlInput(chatId, input, signal);
-  }
-
-  async #deliverServerControlInput(
-    chatId: string,
-    input: ServerControlInput,
-    signal: AbortSignal,
-  ): Promise<ServerControlDisposition> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();

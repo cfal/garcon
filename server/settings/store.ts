@@ -169,9 +169,7 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
     : null;
   if (
     !rawAgentCommands
-    || typeof rawAgentCommands.enabled !== 'boolean'
-    || typeof rawAgentCommands.chatIdDiscovery !== 'boolean'
-    || typeof rawAgentCommands.sendMessage !== 'boolean'
+    || AGENT_COMMAND_SETTING_KEYS.some((key) => typeof rawAgentCommands[key] !== 'boolean')
     || Object.keys(rawAgentCommands).some((key) =>
       !AGENT_COMMAND_SETTING_KEYS.some((settingKey) => settingKey === key))
     || Boolean(rawFeatures && 'chatIdDiscovery' in rawFeatures)

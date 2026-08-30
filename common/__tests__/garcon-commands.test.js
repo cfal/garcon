@@ -206,6 +206,15 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, GARCON_GET_CHAT_ID))).toBeNull();
   });
 
+  it('treats removed start-agent envelopes as inert assistant text', () => {
+    for (const content of [
+      '<garcon-start-agent>\n{"prompt":"test"}\n</garcon-start-agent>',
+      '<garcon-start-agent>\n{"prompt":"test"}',
+    ]) {
+      expect(extractGarconCommands(new AssistantMessage(AT, content))).toBeNull();
+    }
+  });
+
   it('can consume a valid command at the opposite edge of a malformed one', () => {
     const malformed = send('invalid', false);
     expect(extractGarconCommands(new AssistantMessage(
