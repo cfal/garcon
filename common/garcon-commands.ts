@@ -309,6 +309,7 @@ function parseTrailingCommand(content: string, start: number, end: number): Pars
 }
 
 function parseTrailingStartAgent(content: string, start: number, end: number): ParsedEdge {
+  let malformedCandidateStart: number | null = null;
   let candidateStart = findBoundaryPrefix(
     content,
     start,
@@ -319,7 +320,15 @@ function parseTrailingStartAgent(content: string, start: number, end: number): P
   while (candidateStart >= 0) {
     const parsed = parseGarconStartAgent(content, candidateStart, end);
     if (!parsed) {
-      return { kind: 'malformed', command: 'start-agent', candidateStart };
+      malformedCandidateStart ??= candidateStart;
+      candidateStart = findBoundaryPrefix(
+        content,
+        start,
+        candidateStart + GARCON_START_AGENT_PREFIX.length,
+        end,
+        GARCON_START_AGENT_PREFIX,
+      );
+      continue;
     }
     if (parsed.end === end) {
       return {
@@ -336,6 +345,13 @@ function parseTrailingStartAgent(content: string, start: number, end: number): P
       end,
       GARCON_START_AGENT_PREFIX,
     );
+  }
+  if (malformedCandidateStart !== null) {
+    return {
+      kind: 'malformed',
+      command: 'start-agent',
+      candidateStart: malformedCandidateStart,
+    };
   }
   return { kind: 'none' };
 }

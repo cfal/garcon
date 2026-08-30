@@ -360,6 +360,22 @@ describe('Garcon start-agent commands', () => {
       .toEqual(['first', 'second']);
   });
 
+  it('peels a valid trailing block past an earlier malformed boundary candidate', () => {
+    const malformed = '<garcon-start-agent>\nnot a command';
+    const result = extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${malformed}\n${startAgent('valid trailing')}`,
+    ));
+
+    expect(result?.commands.map((command) => (
+      command.type === 'start-agent' ? command.prompt : command.type
+    ))).toEqual(['valid trailing']);
+    expect(result?.message?.content).toBe(`answer\n${malformed}`);
+    expect(result?.issues).toEqual([
+      { command: 'start-agent', reason: 'malformed', edge: 'trailing' },
+    ]);
+  });
+
   it('accepts 16 params and rejects zero, 17, and duplicate refs', () => {
     const params = Array.from({ length: 16 }, (_, index) => createParams({
       ref: `00000000-0000-0000-0000-${index.toString(16).padStart(12, '0')}`,
