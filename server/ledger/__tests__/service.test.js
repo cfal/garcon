@@ -199,6 +199,8 @@ describe('TranscriptLedgerService', () => {
               endpointId: null,
               model: 'gpt-5.4',
               reasoningEffort: 'high',
+              projectPath: '/projects/alpha',
+              permissionMode: 'bypassPermissions',
             }],
           });
         });
@@ -210,7 +212,7 @@ describe('TranscriptLedgerService', () => {
               TS,
               'Continuing the response.\n'
                 + '<garcon-start-agent>\n'
-                + '{"prompt":"Investigate the failure.","params":[{"ref":"69b623a7-757e-49f6-93b8-4b7ea1bc569b","agent":"codex","model":"gpt-5.4","reasoningEffort":"high"}]}\n'
+                + '{"prompt":"Investigate the failure.","params":[{"ref":"69b623a7-757e-49f6-93b8-4b7ea1bc569b","agent":"codex","model":"gpt-5.4","reasoningEffort":"high","projectPath":"/projects/alpha","permissions":"bypassPermissions"}]}\n'
                 + '</garcon-start-agent>',
             ),
           }],
@@ -230,7 +232,11 @@ describe('TranscriptLedgerService', () => {
             detail: {
               type: 'sub-agent-start-request',
               prompt: 'Investigate the failure.',
-              params: [{ ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b' }],
+              params: [{
+                ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
+                projectPath: '/projects/alpha',
+                permissionMode: 'bypassPermissions',
+              }],
             },
           },
         ]);

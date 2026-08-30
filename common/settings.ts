@@ -131,6 +131,8 @@ export interface AgentCommandsFeatureSettings {
   chatIdDiscovery: boolean;
   sendMessage: boolean;
   subAgents: boolean;
+  allowCustomSubAgentProjectPath: boolean;
+  allowCustomSubAgentPermissionLevel: boolean;
 }
 
 export interface RemoteFeatureSettings {
@@ -145,6 +147,8 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
     chatIdDiscovery: true,
     sendMessage: true,
     subAgents: true,
+    allowCustomSubAgentProjectPath: false,
+    allowCustomSubAgentPermissionLevel: false,
   },
 };
 
@@ -510,6 +514,14 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
       subAgents: typeof agentCommands?.subAgents === 'boolean'
         ? agentCommands.subAgents
         : true,
+      allowCustomSubAgentProjectPath:
+        typeof agentCommands?.allowCustomSubAgentProjectPath === 'boolean'
+          ? agentCommands.allowCustomSubAgentProjectPath
+          : false,
+      allowCustomSubAgentPermissionLevel:
+        typeof agentCommands?.allowCustomSubAgentPermissionLevel === 'boolean'
+          ? agentCommands.allowCustomSubAgentPermissionLevel
+          : false,
     },
   };
 }

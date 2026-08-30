@@ -71,7 +71,7 @@ function makeSettingsSnapshot(
 		version: 2,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
 		},
 		ui: {},
 		uiEffective: {},
@@ -499,16 +499,25 @@ describe('parseServerWsMessage', () => {
 				chatId: 'c-1',
 			}),
 		).toBeNull();
+		const settingsSnapshot = makeSettingsSnapshot({
+			ui: { appIdentity: { title: 'Garcon - Work' } },
+		});
+		settingsSnapshot.features.agentCommands.allowCustomSubAgentProjectPath = true;
+		settingsSnapshot.features.agentCommands.allowCustomSubAgentPermissionLevel = true;
 		const settingsChanged = parseServerWsMessage({
 			type: 'settings-changed',
-			settings: makeSettingsSnapshot({
-				ui: { appIdentity: { title: 'Garcon - Work' } },
-			}),
+			settings: settingsSnapshot,
 		});
 		expect(settingsChanged).toBeInstanceOf(SettingsChangedMessage);
 		expect((settingsChanged as SettingsChangedMessage).settings.ui.appIdentity?.title).toBe(
 			'Garcon - Work',
 		);
+		expect(
+			(settingsChanged as SettingsChangedMessage).settings.features.agentCommands,
+		).toMatchObject({
+			allowCustomSubAgentProjectPath: true,
+			allowCustomSubAgentPermissionLevel: true,
+		});
 		expect(
 			parseServerWsMessage({
 				type: 'client-request-error',

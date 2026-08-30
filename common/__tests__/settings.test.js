@@ -18,6 +18,8 @@ describe('generation settings contracts', () => {
         chatIdDiscovery: true,
         sendMessage: true,
         subAgents: true,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
       },
     });
     expect(normalizeRemoteFeatureSettings({
@@ -27,6 +29,8 @@ describe('generation settings contracts', () => {
       chatIdDiscovery: true,
       sendMessage: false,
       subAgents: true,
+      allowCustomSubAgentProjectPath: false,
+      allowCustomSubAgentPermissionLevel: false,
     });
   });
 
@@ -38,6 +42,8 @@ describe('generation settings contracts', () => {
       chatIdDiscovery: false,
       sendMessage: true,
       subAgents: true,
+      allowCustomSubAgentProjectPath: false,
+      allowCustomSubAgentPermissionLevel: false,
     });
     expect(normalizeRemoteFeatureSettings({
       agentCommands: { enabled: true },
@@ -47,6 +53,24 @@ describe('generation settings contracts', () => {
       agentCommands: 'invalid',
       chatIdDiscovery: { enabled: false },
     }).agentCommands.chatIdDiscovery).toBe(false);
+  });
+
+  it('preserves sub-agent override grants independently of disabled ancestors', () => {
+    expect(normalizeRemoteFeatureSettings({
+      agentCommands: {
+        enabled: false,
+        subAgents: false,
+        allowCustomSubAgentProjectPath: true,
+        allowCustomSubAgentPermissionLevel: true,
+      },
+    }).agentCommands).toEqual({
+      enabled: false,
+      chatIdDiscovery: true,
+      sendMessage: true,
+      subAgents: false,
+      allowCustomSubAgentProjectPath: true,
+      allowCustomSubAgentPermissionLevel: true,
+    });
   });
   it('accepts only supported compaction context-window presets', () => {
     for (const contextWindowTokens of [200_000, 500_000, 1_000_000]) {

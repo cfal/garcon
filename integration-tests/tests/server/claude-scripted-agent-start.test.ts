@@ -145,6 +145,7 @@ describe('scripted Claude agent-created chats', () => {
           agentId: 'claude',
           model: 'haiku',
           projectPath: fixture.dirs.project,
+          permissionMode: 'bypassPermissions',
           tags: ['sub-agent'],
         });
         const childTranscript = await fixture.client.getMessages(childChatId);
@@ -207,6 +208,8 @@ describe('scripted Claude agent-created chats', () => {
                     endpointId: null,
                     model: 'haiku',
                     reasoningEffort: 'low',
+                    projectPath: null,
+                    permissionMode: null,
                   },
                   {
                     ref: failureRef,
@@ -215,6 +218,8 @@ describe('scripted Claude agent-created chats', () => {
                     endpointId: null,
                     model: 'haiku',
                     reasoningEffort: 'extreme',
+                    projectPath: null,
+                    permissionMode: null,
                   },
                 ],
               },
@@ -303,6 +308,7 @@ describe('scripted Claude agent-created chats', () => {
             agentId: childAgent.agentId,
             model: childAgent.provider.model,
             projectPath: fixture.dirs.project,
+            permissionMode: 'bypassPermissions',
             tags: ['sub-agent'],
           });
           const transcript = await fixture.client.getMessages(child.id);

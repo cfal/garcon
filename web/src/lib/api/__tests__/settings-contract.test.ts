@@ -23,7 +23,7 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
 		},
 		ui: { pinnedInsertPosition: 'top' },
 		uiEffective: {},
@@ -96,6 +96,36 @@ describe('settings API contract', () => {
 		expect(url).toBe('/api/v1/app/settings');
 		expect(opts.method).toBe('PUT');
 		expect(JSON.parse(opts.body)).toEqual({ ui: { pinnedInsertPosition: 'bottom' } });
+	});
+
+	it('round-trips custom sub-agent authorization settings', async () => {
+		const snapshot = makeSnapshot();
+		snapshot.features.agentCommands.allowCustomSubAgentProjectPath = true;
+		snapshot.features.agentCommands.allowCustomSubAgentPermissionLevel = true;
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, settings: snapshot }));
+
+		const result = await updateRemoteSettings({
+			features: {
+				agentCommands: {
+					allowCustomSubAgentProjectPath: true,
+					allowCustomSubAgentPermissionLevel: true,
+				},
+			},
+		});
+
+		expect(result.settings.features.agentCommands).toMatchObject({
+			allowCustomSubAgentProjectPath: true,
+			allowCustomSubAgentPermissionLevel: true,
+		});
+		const [_url, opts] = fetchMock.mock.calls[0];
+		expect(JSON.parse(opts.body)).toEqual({
+			features: {
+				agentCommands: {
+					allowCustomSubAgentProjectPath: true,
+					allowCustomSubAgentPermissionLevel: true,
+				},
+			},
+		});
 	});
 
 	it('tests only the saved generation target through the long-running endpoint', async () => {
