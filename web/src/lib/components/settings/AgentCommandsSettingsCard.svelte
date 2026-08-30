@@ -107,7 +107,7 @@
 							</label>
 							<div
 								id="sub-agent-project-path-warning"
-								class="mt-0.5 text-xs text-status-warning-foreground"
+								class="mt-0.5 text-xs text-status-warning-muted-foreground"
 							>
 								{m.settings_custom_sub_agent_project_path_warning()}
 							</div>
@@ -128,7 +128,7 @@
 							</label>
 							<div
 								id="sub-agent-permission-level-warning"
-								class="mt-0.5 text-xs text-status-warning-foreground"
+								class="mt-0.5 text-xs text-status-warning-muted-foreground"
 							>
 								{m.settings_custom_sub_agent_permission_level_warning()}
 							</div>
