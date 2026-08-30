@@ -2,13 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
-import type {
-  ChatListRefreshRequestedMessage,
-  ChatMessagesMessage,
-} from '../../../common/ws-events.js';
+import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
+import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
@@ -233,13 +231,14 @@ describe('scripted Claude agent-created chats', () => {
   test('does not resume an in-flight multi-chat batch after a crash', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
-    const childTurns: Array<ReturnType<typeof testEnvironment.model.scriptHeldTurn>> = [];
 
     try {
       await withIntegrationFixture('claude-scripted-agent-start-crash', async (fixture) => {
         const sourceChatId = fixture.newChatId();
         const sourcePrompt = marker('CRASH_SOURCE_PROMPT');
         const childPrompt = marker('CRASH_CHILD_PROMPT');
+        const acceptedChildReply = marker('CRASH_ACCEPTED_CHILD_REPLY');
+        const childAgent = fixture.directAgents.openAi;
         const refs = Array.from(
           { length: 16 },
           (_, index) => `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
@@ -249,20 +248,18 @@ describe('scripted Claude agent-created chats', () => {
           '<garcon-prompt>',
           childPrompt,
           '</garcon-prompt>',
-          ...refs.map((ref) => (
-            `<garcon-create-chat-params ref="${ref}" agent="claude" model="haiku" reasoning-effort="low" />`
-          )),
+          ...refs.map((ref) => directStartParams(childAgent, ref)),
           '</garcon-start-agent>',
         ].join('\n');
 
         testEnvironment.model.scriptTurn([claudeText(startCommand)]);
-        for (let index = 0; index < refs.length; index += 1) {
-          childTurns.push(testEnvironment.model.scriptHeldTurn([
-            claudeText(marker(`CRASH_CHILD_REPLY_${index}`)),
-          ]));
-        }
+        const acceptedChildTurn = fixture.fakeProviders.openAi.holdNext({
+          lastUserText: childPrompt,
+        });
+        const interruptedChildTurn = fixture.fakeProviders.openAi.holdNext({
+          lastUserText: childPrompt,
+        });
 
-        const eventCursor = fixture.client.markEvents();
         await fixture.client.startChat({
           ...liveClaudeStartRequest({
             chatId: sourceChatId,
@@ -272,47 +269,47 @@ describe('scripted Claude agent-created chats', () => {
           }),
           origin: 'cli',
         });
-        await fixture.client.waitForEvent(
-          (event): event is ChatListRefreshRequestedMessage => (
-            event.type === 'chat-list-refresh-requested'
-            && event.reason === 'chat-added'
-            && event.chatId !== sourceChatId
-          ),
-          'first accepted sub-agent chat',
-          { afterIndex: eventCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
-        );
+        await acceptedChildTurn.received;
+        acceptedChildTurn.releaseText(acceptedChildReply);
+        await interruptedChildTurn.received;
 
+        const interruptedRequest = interruptedChildTurn.expectAbort();
         await fixture.crashAndRestartGarcon();
-        const requestCountAfterRestart = testEnvironment.model.requests().length;
+        await interruptedRequest;
+        interruptedChildTurn.releaseTruncatedStream();
+        const claudeRequestCountAfterRestart = testEnvironment.model.requests().length;
+        const directRequestCountAfterRestart = fixture.fakeProviders.openAi.requests().length;
 
-        const acceptedChildren = (await fixture.client.listChats()).sessions.filter(
+        const createdChildren = (await fixture.client.listChats()).sessions.filter(
           (chat) => chat.tags.includes('sub-agent'),
         );
-        expect(acceptedChildren.length).toBeGreaterThan(0);
-        expect(acceptedChildren.length).toBeLessThan(refs.length);
+        expect(createdChildren).toHaveLength(2);
 
-        for (const child of acceptedChildren) {
+        const observedChildReplies: string[] = [];
+        for (const child of createdChildren) {
           expect(child).toMatchObject({
-            agentId: 'claude',
-            model: 'haiku',
+            agentId: childAgent.agentId,
+            model: childAgent.provider.model,
             projectPath: fixture.dirs.project,
             tags: ['sub-agent'],
           });
           const transcript = await fixture.client.getMessages(child.id);
-          expect([[], [childPrompt]]).toContainEqual(userContents(transcript.messages));
+          expect(userContents(transcript.messages)).toEqual([childPrompt]);
+          observedChildReplies.push(...assistantContents(transcript.messages));
         }
+        expect(observedChildReplies).toEqual([acceptedChildReply]);
         const sourceTranscript = await fixture.client.getMessages(sourceChatId);
         expect(JSON.stringify(sourceTranscript.messages)).not.toContain('<garcon-start-agent>');
         expect(messagesOfType(sourceTranscript.messages, 'transcript-notice').filter(
           (message) => message.detail?.type === 'sub-agent-start-outcome',
         )).toEqual([]);
-        expect(testEnvironment.model.requests()).toHaveLength(requestCountAfterRestart);
+        expect(testEnvironment.model.requests()).toHaveLength(claudeRequestCountAfterRestart);
+        expect(fixture.fakeProviders.openAi.requests()).toHaveLength(directRequestCountAfterRestart);
         expect((await fixture.client.listChats()).sessions.filter(
           (chat) => chat.tags.includes('sub-agent'),
-        ).map((chat) => chat.id)).toEqual(acceptedChildren.map((chat) => chat.id));
+        ).map((chat) => chat.id)).toEqual(createdChildren.map((chat) => chat.id));
       }, { serverEnvironment: testEnvironment.serverEnvironment });
     } finally {
-      for (const childTurn of childTurns) childTurn.release();
       testEnvironment.model.reset();
     }
   }, 120_000);
@@ -320,6 +317,18 @@ describe('scripted Claude agent-created chats', () => {
 
 function marker(label: string): string {
   return `SCRIPTED_CLAUDE_AGENT_START_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+function directStartParams(agent: ConfiguredDirectTestAgent, ref: string): string {
+  const { provider } = agent;
+  return [
+    `<garcon-create-chat-params ref="${ref}"`,
+    `agent="${agent.agentId}"`,
+    `provider="${provider.providerId}"`,
+    `endpoint="${provider.endpointId}"`,
+    `model="${provider.model}"`,
+    'reasoning-effort="none" />',
+  ].join(' ');
 }
 
 async function waitForFile(filePath: string): Promise<void> {
