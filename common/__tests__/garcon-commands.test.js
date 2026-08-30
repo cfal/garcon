@@ -3,6 +3,7 @@ import { AssistantMessage, ThinkingMessage, UserMessage } from '../chat-types.ts
 import { parseChatId } from '../chat-id.ts';
 import {
   GARCON_CREATE_CHAT_MODEL_MAX_BYTES,
+  GARCON_CREATE_CHAT_PROJECT_PATH_MAX_BYTES,
   GARCON_GET_CHAT_ID,
   GARCON_MESSAGE_BODY_MAX_BYTES,
   GARCON_START_AGENT_PAYLOAD_MAX_BYTES,
@@ -31,6 +32,8 @@ function createParams({
   endpoint,
   model = 'gpt-5.4',
   reasoningEffort,
+  projectPath,
+  permissions,
 } = {}) {
   return {
     ref,
@@ -39,6 +42,8 @@ function createParams({
     ...(endpoint === undefined ? {} : { endpoint }),
     model,
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(projectPath === undefined ? {} : { projectPath }),
+    ...(permissions === undefined ? {} : { permissions }),
   };
 }
 
@@ -336,6 +341,8 @@ describe('Garcon edge commands', () => {
           endpointId: null,
           model: 'gpt-5.4',
           reasoningEffort: null,
+          projectPath: null,
+          permissionMode: null,
         }],
       }],
       issues: [{ command: 'send-message', reason: 'malformed', edge: 'trailing' }],
@@ -370,6 +377,8 @@ describe('Garcon start-agent commands', () => {
             endpointId: null,
             model: 'gpt-5.4',
             reasoningEffort: null,
+            projectPath: null,
+            permissionMode: null,
           }],
         },
         {
@@ -382,6 +391,8 @@ describe('Garcon start-agent commands', () => {
             endpointId: 'primary',
             model: 'claude-sonnet',
             reasoningEffort: 'high',
+            projectPath: null,
+            permissionMode: null,
           }],
         },
       ],
@@ -422,6 +433,8 @@ describe('Garcon start-agent commands', () => {
         endpointId: null,
         model: 'gpt-5.4',
         reasoningEffort: null,
+        projectPath: null,
+        permissionMode: null,
       }],
     }]);
   });
@@ -529,6 +542,18 @@ describe('Garcon start-agent commands', () => {
     ))?.issues).toHaveLength(1);
     expect(extractGarconCommands(new AssistantMessage(
       AT,
+      startAgent('prompt', [createParams({
+        projectPath: `/${'x'.repeat(GARCON_CREATE_CHAT_PROJECT_PATH_MAX_BYTES - 1)}`,
+      })]),
+    ))?.commands).toHaveLength(1);
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      startAgent('prompt', [createParams({
+        projectPath: `/${'x'.repeat(GARCON_CREATE_CHAT_PROJECT_PATH_MAX_BYTES)}`,
+      })]),
+    ))?.issues).toHaveLength(1);
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
       startAgent(' ', [createParams()]),
     ))?.issues).toHaveLength(1);
     expect(extractGarconCommands(new AssistantMessage(
@@ -566,6 +591,13 @@ describe('Garcon start-agent commands', () => {
       createParams({
         ref: '00000000-0000-0000-0000-000000000004',
         reasoningEffort: 'future_mode',
+        projectPath: '/projects/alpha',
+        permissions: 'bypassPermissions',
+      }),
+      createParams({
+        ref: '00000000-0000-0000-0000-000000000005',
+        projectPath: 'packages/api',
+        permissions: 'plan',
       }),
     ];
     const parsed = extractGarconCommands(new AssistantMessage(
@@ -573,11 +605,40 @@ describe('Garcon start-agent commands', () => {
       startAgent('prompt', params),
     ));
     expect(parsed?.commands[0].params).toEqual([
-      expect.objectContaining({ providerId: null, endpointId: null, reasoningEffort: null }),
+      expect.objectContaining({
+        providerId: null,
+        endpointId: null,
+        reasoningEffort: null,
+        projectPath: null,
+        permissionMode: null,
+      }),
       expect.objectContaining({ providerId: 'acme', endpointId: null }),
       expect.objectContaining({ providerId: 'acme', endpointId: 'primary' }),
-      expect.objectContaining({ reasoningEffort: 'future_mode' }),
+      expect.objectContaining({
+        reasoningEffort: 'future_mode',
+        projectPath: '/projects/alpha',
+        permissionMode: 'bypassPermissions',
+      }),
+      expect.objectContaining({
+        projectPath: 'packages/api',
+        permissionMode: 'plan',
+      }),
     ]);
+  });
+
+  it('accepts every shared permission mode', () => {
+    for (const permissions of [
+      'default',
+      'acceptEdits',
+      'manualBypass',
+      'bypassPermissions',
+      'plan',
+    ]) {
+      expect(extractGarconCommands(new AssistantMessage(
+        AT,
+        startAgent('prompt', [createParams({ permissions })]),
+      ))?.commands[0].params[0].permissionMode).toBe(permissions);
+    }
   });
 
   it('accepts order-independent keys and JSON-safe model text', () => {
@@ -603,6 +664,8 @@ describe('Garcon start-agent commands', () => {
           endpointId: null,
           model,
           reasoningEffort: 'low',
+          projectPath: null,
+          permissionMode: null,
         }],
       });
   });
@@ -631,6 +694,14 @@ describe('Garcon start-agent commands', () => {
       { prompt: 'prompt', params: [createParams({ agent: 'Codex' })] },
       { prompt: 'prompt', params: [createParams({ model: ' padded ' })] },
       { prompt: 'prompt', params: [createParams({ reasoningEffort: 'High' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: '' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: ' padded' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: 'line\nbreak' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: 'nul\0byte' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: '\ud800' })] },
+      { prompt: 'prompt', params: [createParams({ projectPath: null })] },
+      { prompt: 'prompt', params: [createParams({ permissions: 'unsafe' })] },
+      { prompt: 'prompt', params: [createParams({ permissions: null })] },
       { prompt: 'prompt', params: [{ ...createParams(), provider: null }] },
     ];
     const malformedBlocks = [
@@ -689,6 +760,24 @@ describe('Garcon create-chat results', () => {
       error: true,
       msg: 'disabled',
     }])).toThrow();
+  });
+
+  it('round-trips every override and validation failure token', () => {
+    const messages = [
+      'project-path-override-disabled',
+      'permission-override-disabled',
+      'unknown-project-path',
+      'unsupported-permission-mode',
+      'permission-override-required',
+    ];
+    const results = messages.map((msg, index) => ({
+      ref: `00000000-0000-0000-0000-${index.toString(16).padStart(12, '0')}`,
+      error: true,
+      msg,
+    }));
+
+    expect(parseGarconCreateChatResults(garconCreateChatResultsContent(results)))
+      .toEqual(results);
   });
 
   it('rejects noncanonical or internally inconsistent result content', () => {

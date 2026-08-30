@@ -228,6 +228,8 @@ describe('NativeTranscriptActivityService', () => {
             endpointId: null,
             model: 'gpt-5.4',
             reasoningEffort: null,
+            projectPath: null,
+            permissionMode: null,
           }],
         },
         providerMeta: null,

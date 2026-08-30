@@ -1,4 +1,5 @@
 import type { ChatId } from '../../common/chat-id.js';
+import type { PermissionMode } from '../../common/chat-modes.js';
 import type { GarconCreateChatParams } from '../../common/garcon-commands.js';
 import type { JsonObject } from '../../common/json.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
@@ -21,6 +22,8 @@ export interface SubAgentStartRequestParam extends JsonObject {
   readonly endpointId: string | null;
   readonly model: string;
   readonly reasoningEffort: string | null;
+  readonly projectPath: string | null;
+  readonly permissionMode: PermissionMode | null;
 }
 
 export interface SubAgentStartRequestLedgerDetail extends JsonObject {

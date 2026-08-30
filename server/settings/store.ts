@@ -172,6 +172,8 @@ function sanitizeProjectSettings(parsed: unknown): SanitizedSettingsResult {
     || typeof rawAgentCommands.chatIdDiscovery !== 'boolean'
     || typeof rawAgentCommands.sendMessage !== 'boolean'
     || typeof rawAgentCommands.subAgents !== 'boolean'
+    || typeof rawAgentCommands.allowCustomSubAgentProjectPath !== 'boolean'
+    || typeof rawAgentCommands.allowCustomSubAgentPermissionLevel !== 'boolean'
     || Boolean(rawFeatures && 'chatIdDiscovery' in rawFeatures)
   ) {
     migrated = true;

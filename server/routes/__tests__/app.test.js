@@ -53,11 +53,25 @@ function createMockCtx() {
       setUiSettings: mock(() => Promise.resolve({})),
       setFeatureSettings: mock(() => Promise.resolve({
         transcriptSearch: { enabled: false },
-        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
+        },
       })),
       getFeatureSettings: mock(() => ({
         transcriptSearch: { enabled: false },
-        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
+        },
       })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
@@ -94,7 +108,14 @@ beforeEach(() => {
   ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource());
   ctx.settings.getFeatureSettings.mockImplementation(() => ({
     transcriptSearch: { enabled: false },
-    agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+    agentCommands: {
+      enabled: true,
+      chatIdDiscovery: true,
+      sendMessage: true,
+      subAgents: true,
+      allowCustomSubAgentProjectPath: false,
+      allowCustomSubAgentPermissionLevel: false,
+    },
   }));
 });
 
@@ -716,6 +737,8 @@ describe('PUT /api/app/settings', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           subAgents: true,
+          allowCustomSubAgentProjectPath: true,
+          allowCustomSubAgentPermissionLevel: false,
         },
       },
     }));
@@ -726,6 +749,8 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: false,
         subAgents: true,
+        allowCustomSubAgentProjectPath: true,
+        allowCustomSubAgentPermissionLevel: false,
       },
     }));
 
@@ -740,6 +765,33 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: false,
         sendMessage: false,
         subAgents: true,
+        allowCustomSubAgentProjectPath: true,
+        allowCustomSubAgentPermissionLevel: false,
+      },
+    });
+  });
+
+  it('accepts independent custom sub-agent authorization patches', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        agentCommands: {
+          allowCustomSubAgentProjectPath: true,
+          allowCustomSubAgentPermissionLevel: true,
+        },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(200);
+    expect(ctx.settings.setFeatureSettings).toHaveBeenCalledWith({
+      agentCommands: {
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: true,
+        subAgents: true,
+        allowCustomSubAgentProjectPath: true,
+        allowCustomSubAgentPermissionLevel: true,
       },
     });
   });
@@ -763,6 +815,8 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: true,
         subAgents: true,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
       },
     });
   });
@@ -795,6 +849,8 @@ describe('PUT /api/app/settings', () => {
         chatIdDiscovery: true,
         sendMessage: false,
         subAgents: true,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
       },
     });
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
@@ -814,6 +870,25 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('features.agentCommands.subAgents must be a boolean');
+    expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed custom sub-agent authorization settings', async () => {
+    ctx.settings.setFeatureSettings.mockClear();
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: {
+        agentCommands: { allowCustomSubAgentPermissionLevel: 'no' },
+      },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(
+      'features.agentCommands.allowCustomSubAgentPermissionLevel must be a boolean',
+    );
     expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
     expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
   });

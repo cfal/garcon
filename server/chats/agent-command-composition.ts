@@ -1,4 +1,3 @@
-import type { AgentCommandsFeatureSettings } from '../../common/settings.js';
 import type { AgentRegistry } from '../agents/index.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
@@ -11,12 +10,13 @@ import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { SettingsStore } from '../settings/store.js';
 import { AgentStartComposition } from './agent-start-composition.js';
+import type { SubAgentOverridePolicy } from './agent-start-controller.js';
 import type { ChatIdAllocator } from './chat-id-allocator.js';
 import { ChatIdDiscoveryController } from './chat-id-discovery-controller.js';
 import { InterAgentMessageComposition } from './inter-agent-message-composition.js';
 import type { ChatRegistry } from './store.js';
 
-type AgentCommandSetting = Exclude<keyof AgentCommandsFeatureSettings, 'enabled'>;
+type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage' | 'subAgents';
 
 interface AgentCommandCompositionOptions {
   readonly registry: ChatRegistry;
@@ -84,6 +84,7 @@ export class AgentCommandComposition {
       notices: options.notices,
       chatMutationLock: options.chatMutationLock,
       getExecutionDefaults: () => options.settings.getExecutionDefaults(),
+      getOverridePolicy: () => subAgentOverridePolicy(options.settings),
       isEnabled: () => commandEnabled(options.settings, 'subAgents'),
     });
   }
@@ -101,6 +102,17 @@ export class AgentCommandComposition {
   async waitForIdle(): Promise<void> {
     await this.agentStarts.waitForIdle();
   }
+}
+
+function subAgentOverridePolicy(
+  settings: Pick<SettingsStore, 'getFeatureSettings'>,
+): SubAgentOverridePolicy {
+  const commands = settings.getFeatureSettings().agentCommands;
+  const ancestorsEnabled = commands.enabled && commands.subAgents;
+  return {
+    projectPath: ancestorsEnabled && commands.allowCustomSubAgentProjectPath,
+    permissionLevel: ancestorsEnabled && commands.allowCustomSubAgentPermissionLevel,
+  };
 }
 
 function commandEnabled(

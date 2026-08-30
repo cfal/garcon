@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
@@ -10,7 +11,11 @@
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import { chatListDividerEdge, type ChatListDock } from '$lib/layout/desktop-layout.js';
+	import {
+		chatListDividerEdge,
+		HOVER_CAPABLE_MEDIA_QUERY,
+		type ChatListDock,
+	} from '$lib/layout/desktop-layout.js';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
@@ -48,6 +53,7 @@
 	import { windowNodeById } from '$lib/workspace/window-tree.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
+	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -59,6 +65,7 @@
 	const projectCollapse = getSidebarProjectCollapse();
 	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
+	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
 	setChatDrafts(chatDrafts);
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
@@ -99,15 +106,17 @@
 	const workspaceFullscreen = $derived(
 		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
-	const focusedWindowKind = $derived(workspace.focusedWindowActiveKind);
-	const hideLeftForGit = $derived(
-		!isMobile &&
-			localSettings.hideChatListWhenGitFocused &&
-			(focusedWindowKind === 'git' ||
-				focusedWindowKind === 'git-history' ||
-				focusedWindowKind === 'git-compare'),
+	const hideLeftSidebar = $derived(workspaceFullscreen);
+	const chatListAutohideActive = $derived(
+		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
 	);
-	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
+	const chatListAutohide = new ChatListAutohideState({
+		get active() {
+			return chatListAutohideActive;
+		},
+	});
+	let desktopChatListPanelElement = $state<HTMLElement | null>(null);
+	let chatListRevealTrigger = $state<HTMLButtonElement | null>(null);
 	const mobileActiveDescriptor = $derived(
 		workspace.layout.surface(workspace.layout.snapshot.mobileActiveSurfaceId),
 	);
@@ -131,7 +140,10 @@
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
 	let notificationDesktopInlineStartPx = $derived(
-		!isMobile && !hideLeftSidebar && localSettings.chatListDock === 'left'
+		!isMobile &&
+			!hideLeftSidebar &&
+			!chatListAutohideActive &&
+			localSettings.chatListDock === 'left'
 			? localSettings.sidebarWidth + 16
 			: 16,
 	);
@@ -495,6 +507,50 @@
 
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => chatDrafts.destroy());
+
+	function handleChatListAutohideChange(enabled: boolean): void {
+		if (enabled) chatListAutohide.reveal();
+		else chatListAutohide.collapse();
+	}
+
+	function handleDesktopChatListFocus(): void {
+		workspace.noteChatListFocus();
+	}
+
+	function handleDesktopChatListKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Escape' || !chatListAutohide.revealed) return;
+		event.preventDefault();
+		event.stopPropagation();
+		chatListAutohide.collapse();
+		chatListRevealTrigger?.focus();
+	}
+
+	async function revealChatListFromTrigger(): Promise<void> {
+		chatListAutohide.reveal();
+		await tick();
+		if (chatListAutohide.revealed) desktopChatListPanelElement?.focus();
+	}
+
+	function collapseAutohiddenChatListOnWorkspaceInteraction(node: HTMLElement): {
+		destroy(): void;
+	} {
+		function handlePointerEnter(): void {
+			chatListAutohide.collapseUnlessEngaged(desktopChatListPanelElement);
+		}
+
+		function handlePointerDown(): void {
+			if (chatListAutohide.active) chatListAutohide.collapse();
+		}
+
+		node.addEventListener('pointerenter', handlePointerEnter);
+		node.addEventListener('pointerdown', handlePointerDown);
+		return {
+			destroy() {
+				node.removeEventListener('pointerenter', handlePointerEnter);
+				node.removeEventListener('pointerdown', handlePointerDown);
+			},
+		};
+	}
 </script>
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
@@ -516,6 +572,8 @@
 		onShareChat={requestShareChat}
 		onManageTags={requestTagsChat}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
+		chatListAutohideAvailable={hoverCapability.current}
+		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowSettings={() => appShell.openSettings()}
 		newWindowBlocked={!workspace.canOpenNewWindow}
@@ -524,28 +582,70 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
+	{@const panelHidden = hideLeftSidebar || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
-		onfocusin={() => workspace.noteChatListFocus()}
+		onfocusin={handleDesktopChatListFocus}
 		onpointerdown={() => workspace.noteChatListFocus()}
-		class="relative h-full shrink-0 overflow-hidden border-border"
+		onpointerenter={() => chatListAutohide.reveal()}
+		onkeydown={handleDesktopChatListKeydown}
+		class={[
+			'relative z-50 h-full shrink-0',
+			chatListAutohide.active && !hideLeftSidebar ? 'overflow-visible' : 'overflow-hidden',
+		]}
 		class:order-first={dock === 'left'}
 		class:order-last={dock === 'right'}
-		class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
-		class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
 		class:pointer-events-none={hideLeftSidebar}
-		style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
+		style:width={hideLeftSidebar || chatListAutohide.active
+			? '0px'
+			: `${localSettings.sidebarWidth}px`}
 		aria-hidden={hideLeftSidebar}
 		inert={hideLeftSidebar}
 	>
-		{@render sidebarContent(false, handleChatSelect)}
-		{#if !hideLeftSidebar}
-			<ResizeHandle
-				edge={dividerEdge}
-				width={localSettings.sidebarWidth}
-				onResize={(width) => localSettings.set('sidebarWidth', width)}
-			/>
+		{#if chatListAutohide.active}
+			<button
+				bind:this={chatListRevealTrigger}
+				type="button"
+				class="absolute inset-y-0 z-30 w-2.5 bg-transparent outline-none hover:bg-accent/30 focus-visible:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+				class:start-0={dock === 'left'}
+				class:end-0={dock === 'right'}
+				onclick={() => void revealChatListFromTrigger()}
+				aria-controls="desktop-chat-list-panel"
+				aria-expanded={chatListAutohide.revealed}
+				aria-label={m.layout_show_chat_list()}
+			></button>
 		{/if}
+		<div
+			bind:this={desktopChatListPanelElement}
+			id="desktop-chat-list-panel"
+			data-workspace-chat-list-panel
+			class={[
+				'h-full border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+				chatListAutohide.active && 'absolute inset-y-0 z-40 shadow-2xl',
+				chatListAutohide.active &&
+					!localSettings.reduceMotion &&
+					'transition-transform duration-150',
+				chatListAutohide.collapsed && dock === 'left' && '-translate-x-full',
+				chatListAutohide.collapsed && dock === 'right' && 'translate-x-full',
+			]}
+			class:start-0={chatListAutohide.active && dock === 'left'}
+			class:end-0={chatListAutohide.active && dock === 'right'}
+			class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
+			class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
+			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
+			tabindex="-1"
+			aria-hidden={panelHidden}
+			inert={panelHidden}
+		>
+			{@render sidebarContent(false, handleChatSelect)}
+			{#if !hideLeftSidebar}
+				<ResizeHandle
+					edge={dividerEdge}
+					width={localSettings.sidebarWidth}
+					onResize={(width) => localSettings.set('sidebarWidth', width)}
+				/>
+			{/if}
+		</div>
 	</div>
 {/snippet}
 
@@ -579,7 +679,11 @@
 		{#if !isMobile}
 			{@render desktopChatList(localSettings.chatListDock)}
 		{/if}
-		<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+		<div
+			data-workspace-content
+			class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+			use:collapseAutohiddenChatListOnWorkspaceInteraction
+		>
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<WorkspaceRoot
 					{isMobile}

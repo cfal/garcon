@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { ChatId } from '../../common/chat-id.js';
+import type { PermissionMode } from '../../common/chat-modes.js';
 import {
   garconCreateChatResultsContent,
   SUB_AGENT_START_NOTICE_TITLE,
@@ -38,11 +39,17 @@ export interface AgentStartRequest {
 interface AgentStartAttempt {
   readonly abortController: AbortController;
   readonly projectPath: string;
+  readonly permissionMode: PermissionMode;
   readonly executionDefaults: RemoteExecutionDefaults;
   readonly sourceViewId: TranscriptViewId;
   readonly requestRunId: string | null;
   readonly itemCount: number;
   completedCount: number;
+}
+
+export interface SubAgentOverridePolicy {
+  readonly projectPath: boolean;
+  readonly permissionLevel: boolean;
 }
 
 export interface AgentStartErrorContext {
@@ -112,6 +119,7 @@ export interface AgentStartControllerOptions {
   readonly chatMutationLock: KeyedPromiseLock;
   readonly batchLock?: KeyedPromiseLock;
   readonly getExecutionDefaults: () => RemoteExecutionDefaults;
+  readonly getOverridePolicy: () => SubAgentOverridePolicy;
   readonly isEnabled: () => boolean;
   readonly createId?: () => string;
   readonly onDiagnostic?: (event: AgentStartDiagnosticEvent) => void;
@@ -169,6 +177,7 @@ export class AgentStartController {
     const attempt: AgentStartAttempt = {
       abortController: new AbortController(),
       projectPath: source.projectPath,
+      permissionMode: source.permissionMode,
       executionDefaults,
       sourceViewId: input.sourceViewId,
       requestRunId: input.requestRunId,
@@ -269,7 +278,13 @@ export class AgentStartController {
         attempt.completedCount = results.length;
         break;
       }
-      results.push(await this.#startOne(input, params, index + 1, attempt));
+      results.push(await this.#startOne(
+        input,
+        params,
+        index + 1,
+        attempt,
+        this.options.getOverridePolicy(),
+      ));
       attempt.completedCount = results.length;
     }
 
@@ -282,6 +297,7 @@ export class AgentStartController {
     params: GarconCreateChatParams,
     itemIndex: number,
     attempt: AgentStartAttempt,
+    overridePolicy: SubAgentOverridePolicy,
   ): Promise<GarconCreateChatResult> {
     const startedAt = performance.now();
     let attemptCount = 0;
@@ -301,9 +317,22 @@ export class AgentStartController {
       return result;
     };
 
+    if (params.projectPath !== null && !overridePolicy.projectPath) {
+      return finish(failureResult(params.ref, 'project-path-override-disabled'));
+    }
+    if (params.permissionMode !== null && !overridePolicy.permissionLevel) {
+      return finish(failureResult(params.ref, 'permission-override-disabled'));
+    }
+    const effectiveProjectPath = params.projectPath ?? attempt.projectPath;
+    const effectivePermissionMode = params.permissionMode ?? attempt.permissionMode;
+
     let resolved: Awaited<ReturnType<AgentStartSelectionService['resolve']>>;
     try {
-      resolved = await this.options.selection.resolve(params, attempt.executionDefaults);
+      resolved = await this.options.selection.resolve(
+        params,
+        attempt.executionDefaults,
+        effectivePermissionMode,
+      );
     } catch (error) {
       this.#emitDiagnostic({
         ...diagnosticContext(input),
@@ -369,7 +398,7 @@ export class AgentStartController {
           clientRequestId: this.#createId(),
           clientMessageId: this.#createId(),
           agentId: params.agentId,
-          projectPath: attempt.projectPath,
+          projectPath: effectiveProjectPath,
           command: input.prompt,
           model: resolved.selection.model,
           apiProviderId: resolved.selection.apiProviderId,
@@ -406,6 +435,9 @@ export class AgentStartController {
         if (code === 'SESSION_LIMIT') return finish(failureResult(params.ref, 'session-limit'));
         if (code === 'SERVER_SHUTTING_DOWN') {
           return finish(failureResult(params.ref, 'server-shutting-down'));
+        }
+        if (code === 'PROJECT_PATH_OUTSIDE_BASE' || code === 'PROJECT_PATH_NOT_FOUND') {
+          return finish(failureResult(params.ref, 'unknown-project-path'));
         }
         this.#reportError(error, {
           ...errorContext(input, 'start'),
