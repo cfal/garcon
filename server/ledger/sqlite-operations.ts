@@ -8,8 +8,8 @@ export function nextOrdinal(db: Database, viewId: string): number {
 }
 
 export function runTransaction<T>(db: Database, work: () => T): T {
-  db.exec('BEGIN IMMEDIATE');
   try {
+    db.exec('BEGIN IMMEDIATE');
     const result = work();
     db.exec('COMMIT');
     return result;
@@ -19,7 +19,7 @@ export function runTransaction<T>(db: Database, work: () => T): T {
       try {
         db.exec('ROLLBACK');
       } catch (rollbackError) {
-        Object.defineProperty(failure, 'rollbackFailure', {
+        Object.defineProperty(failure, ROLLBACK_FAILURE_PROPERTY, {
           configurable: true,
           value: asError(rollbackError),
         });
@@ -27,6 +27,18 @@ export function runTransaction<T>(db: Database, work: () => T): T {
     }
     throw failure;
   }
+}
+
+const ROLLBACK_FAILURE_PROPERTY = 'rollbackFailure';
+
+interface TransactionFailure extends Error {
+  readonly rollbackFailure?: Error;
+}
+
+export function getTransactionRollbackFailure(error: unknown): Error | null {
+  if (!(error instanceof Error)) return null;
+  const rollbackFailure = (error as TransactionFailure)[ROLLBACK_FAILURE_PROPERTY];
+  return rollbackFailure instanceof Error ? rollbackFailure : null;
 }
 
 export function asError(error: unknown): Error {

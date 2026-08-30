@@ -255,6 +255,104 @@ describe('TranscriptLedgerStore', () => {
       .toThrow(LedgerFencedError);
   });
 
+  it('fences reads when rollback fails and leaves a failed write transaction active', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    let rollbackFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected transcript commit failure');
+      }
+      if (sql === 'ROLLBACK') {
+        rollbackFailed = true;
+        throw new Error('injected transcript rollback failure');
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must stay unreadable')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(rollbackFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected transcript commit failure',
+      rollbackFailure: { message: 'injected transcript rollback failure' },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+    closeStoreAfterInjectedRollbackFailure();
+  });
+
+  it('fences domain write failures when rollback fails and leaves the transaction active', () => {
+    const current = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('old-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('old')],
+    });
+    const staged = store.stageView('failed-chat', {
+      viewId: transcriptViewId('new-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('new')],
+    });
+    const exec = Database.prototype.exec;
+    const query = Database.prototype.query;
+    let promotionFailed = false;
+    let rollbackFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (sql === 'ROLLBACK') {
+        rollbackFailed = true;
+        throw new Error('injected cutover rollback failure');
+      }
+      return exec.call(this, sql);
+    };
+    Database.prototype.query = function (sql) {
+      if (!promotionFailed && sql.includes("UPDATE transcript_views SET status = 'current'")) {
+        return {
+          run() {
+            promotionFailed = true;
+            return { changes: 0 };
+          },
+        };
+      }
+      return query.call(this, sql);
+    };
+    let failure;
+    try {
+      store.replaceCurrentView('failed-chat', current.viewId, staged.viewId);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+      Database.prototype.query = query;
+    }
+
+    expect(promotionFailed).toBe(true);
+    expect(rollbackFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      name: 'LedgerSchemaError',
+      message: 'Transcript staging promotion failed',
+      rollbackFailure: { message: 'injected cutover rollback failure' },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', current.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+    closeStoreAfterInjectedRollbackFailure();
+  });
+
   it('keeps a ledger query failure fenced for both reads and writes', () => {
     const view = store.initializeCurrentView('failed-chat', {
       viewId: transcriptViewId('failed-view'),
@@ -1324,5 +1422,21 @@ function currentViewCount(ledgerRoot, chatId) {
       .get().count;
   } finally {
     db.close();
+  }
+}
+
+function closeStoreAfterInjectedRollbackFailure() {
+  const exec = Database.prototype.exec;
+  Database.prototype.exec = function (sql) {
+    if (sql === 'PRAGMA wal_checkpoint(PASSIVE)' && this.inTransaction) {
+      exec.call(this, 'ROLLBACK');
+    }
+    return exec.call(this, sql);
+  };
+  try {
+    store.close();
+  } finally {
+    Database.prototype.exec = exec;
+    store = null;
   }
 }

@@ -53,7 +53,7 @@ import {
 } from './errors.js';
 import { statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
-import { asError, nextOrdinal, runTransaction } from './sqlite-operations.js';
+import { asError, getTransactionRollbackFailure, nextOrdinal, runTransaction } from './sqlite-operations.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -652,7 +652,6 @@ export class TranscriptLedgerStore {
       throw new LedgerFencedError(chatId, { cause: entry.readFailure });
     }
   }
-
   #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
     const entry = this.#availableConnection(chatId);
     if (entry.readFailure) throw new LedgerFencedError(chatId, { cause: entry.readFailure });
@@ -660,13 +659,16 @@ export class TranscriptLedgerStore {
     try {
       return work(entry);
     } catch (error) {
-      if (isDomainError(error)) throw error;
       const failure = asError(error);
+      if (isDomainError(error) && !getTransactionRollbackFailure(failure) && !entry.db.inTransaction) throw error;
       entry.writeFailure = failure;
-      try {
-        rehydrateConnection(entry);
-      } catch (rehydrationError) {
-        entry.readFailure = asError(rehydrationError);
+      if (entry.db.inTransaction) entry.readFailure = failure;
+      else {
+        try {
+          rehydrateConnection(entry);
+        } catch (rehydrationError) {
+          entry.readFailure = asError(rehydrationError);
+        }
       }
       throw new LedgerFencedError(chatId, { cause: failure });
     }
