@@ -89,7 +89,7 @@ describe('scripted Claude inter-agent messaging', () => {
         const sourceTranscript = await fixture.client.getMessages(sourceChatId);
         expect(messagesOfType(sourceTranscript.messages, 'transcript-notice')).toContainEqual(
           expect.objectContaining({
-            content: `Delivered: ${targetChatId}\n\n${body}`,
+            content: body,
             detail: {
               type: 'inter-agent-message-outcome',
               results: [{ chatId: targetChatId, status: 'delivered' }],

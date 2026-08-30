@@ -60,6 +60,7 @@ describe('ChatActionDialogsState', () => {
 		expect(dialogs.chatDetailsDialog).toMatchObject({
 			chatId: chat.id,
 			chatTitle: 'New chat',
+			projectPath: '/workspace/repo',
 			isLoading: true,
 		});
 		expect(dialogs.tagDialog).toEqual({

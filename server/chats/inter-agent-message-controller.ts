@@ -258,7 +258,7 @@ export class InterAgentMessageController {
     try {
       this.options.notices.appendNotice(input.sourceChatId, input.sourceViewId, {
         title: INTER_AGENT_MESSAGE_NOTICE_TITLE,
-        content: renderOutcome(input.body, results),
+        content: input.body,
         detail: { type: 'inter-agent-message-outcome', results },
         at: input.requestAt,
       });
@@ -333,42 +333,5 @@ function classifyDeliveryFailure(error: unknown): InterAgentMessageFailureReason
       return 'target-unavailable';
     default:
       return 'delivery-failed';
-  }
-}
-
-function renderOutcome(body: string, results: readonly InterAgentMessageResult[]): string {
-  const lines = results.map((result) => {
-    switch (result.status) {
-      case 'delivered':
-        return `Delivered: ${result.chatId}`;
-      case 'queued':
-        return `Queued: ${result.chatId} (pending delivery is not retained across server restart)`;
-      case 'failed':
-        return `Failed: ${result.chatId} (${failureReasonContent(result.reason)})`;
-    }
-  });
-  return `${lines.join('\n')}\n\n${body}`;
-}
-
-function failureReasonContent(reason: InterAgentMessageFailureReason): string {
-  switch (reason) {
-    case 'disabled':
-      return 'agent messaging is disabled';
-    case 'self-send':
-      return 'cannot send to the source chat';
-    case 'target-not-found':
-      return 'chat not found';
-    case 'target-unavailable':
-      return 'chat unavailable';
-    case 'queue-full':
-      return 'control input queue full';
-    case 'provider-rejected':
-      return 'target agent rejected the message';
-    case 'delivery-unknown':
-      return 'delivery may have occurred; no retry was queued';
-    case 'server-shutting-down':
-      return 'server shutting down';
-    case 'delivery-failed':
-      return 'delivery failed';
   }
 }

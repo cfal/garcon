@@ -22,6 +22,7 @@ export interface ChatProjectPathDialog {
 export interface ChatDetailsDialog {
 	chatId: string;
 	chatTitle: string;
+	projectPath: string;
 	firstMessage: string | null;
 	createdAt: string | null;
 	lastActivityAt: string | null;
@@ -79,6 +80,7 @@ export class ChatActionDialogsState {
 		this.chatDetailsDialog = {
 			chatId: chat.id,
 			chatTitle: chat.title || fallbackTitle,
+			projectPath: chat.projectPath,
 			firstMessage: null,
 			createdAt: null,
 			lastActivityAt: null,

@@ -192,6 +192,40 @@ describe('conversation virtual feed model', () => {
 		expect(estimateConversationFeedItemSize(model.items[2])).toBe(242);
 	});
 
+	it('reserves compact Markdown geometry for sent and received inter-agent messages', () => {
+		const sent = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
+			type: 'inter-agent-message-outcome',
+			results: [{ chatId: '1788090107980901', status: 'delivered' }],
+		});
+		const received = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
+			type: 'inter-agent-message-received',
+			fromChatId: '1788090107980900',
+		});
+		const model = build([
+			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: sent },
+			{ kind: 'message', id: 'generation-1:2', index: 2, ordinal: 2, message: received },
+		]);
+
+		expect(estimateConversationFeedItemSize(model.items[1])).toBe(242);
+		expect(estimateConversationFeedItemSize(model.items[2])).toBe(242);
+	});
+
+	it('reserves one compact row per recipient for multi-target messages', () => {
+		const sent = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Message body.', {
+			type: 'inter-agent-message-outcome',
+			results: [
+				{ chatId: '1788090107980901', status: 'delivered' },
+				{ chatId: '1788090107980902', status: 'failed', reason: 'target-not-found' },
+				{ chatId: '1788090107980903', status: 'failed', reason: 'delivery-failed' },
+			],
+		});
+		const model = build([
+			{ kind: 'message', id: 'generation-1:1', index: 1, ordinal: 1, message: sent },
+		]);
+
+		expect(estimateConversationFeedItemSize(model.items[1])).toBe(294);
+	});
+
 	it('includes viewport geometry and established floating permission spacing', () => {
 		const permission: PendingPermissionRequest = {
 			chatId: 'chat-1',

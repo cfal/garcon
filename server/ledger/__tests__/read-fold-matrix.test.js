@@ -345,7 +345,7 @@ describe('transcript ledger read-fold matrix', () => {
         {
           kind: 'notice',
           at: AT,
-          message: 'Delivered: 1787974832309199\n\nmessage body',
+          message: 'message body',
           detail: {
             type: 'inter-agent-message-outcome',
             results: [{ chatId: '1787974832309199', status: 'delivered' }],

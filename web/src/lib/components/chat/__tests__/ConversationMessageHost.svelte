@@ -29,6 +29,8 @@
 		canForkAtMessageNow?: boolean;
 		alwaysExpandCliMessages?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
+		chatTitles?: Record<string, string>;
+		chatTitleUpdate?: { chatId: string; title: string };
 	}
 
 	let {
@@ -45,6 +47,8 @@
 		canForkAtMessageNow = true,
 		alwaysExpandCliMessages = false,
 		disclosureState,
+		chatTitles = {},
+		chatTitleUpdate,
 	}: Props = $props();
 	setCanonicalWorkspaceLayout();
 	const initialHost = untrack(() => ({
@@ -52,21 +56,30 @@
 		chatProjectPath,
 		isMobile,
 		alwaysExpandCliMessages,
+		chatTitles,
 	}));
 
 	const chatSessions = createChatSessionsStore();
-	chatSessions.createDraft({
-		id: 'chat-1',
-		projectPath: initialHost.chatProjectPath,
-		startup: {
-			agentId: 'claude',
-			model: 'opus',
-			permissionMode: 'default',
-			thinkingMode: 'none',
-			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
-			firstMessage: '',
-		},
-	});
+	function createDraft(chatId: string, title: string): void {
+		chatSessions.createDraft({
+			id: chatId,
+			projectPath: initialHost.chatProjectPath,
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+				firstMessage: title,
+			},
+		});
+	}
+	createDraft('chat-1', '');
+	for (const [chatId, title] of Object.entries(initialHost.chatTitles)) {
+		if (chatId === 'chat-1') chatSessions.patchChat(chatId, { title });
+		else createDraft(chatId, title);
+	}
+	chatSessions.setSelectedChatId('chat-1');
 	setChatSessions(chatSessions);
 
 	const fileSessions = new FileSessionRegistry({
@@ -111,3 +124,13 @@
 	{canForkAtMessageNow}
 	{disclosureState}
 />
+
+{#if chatTitleUpdate}
+	<button
+		type="button"
+		aria-label="Update chat title"
+		onclick={() => chatSessions.patchChat(chatTitleUpdate.chatId, { title: chatTitleUpdate.title })}
+	>
+		Update chat title
+	</button>
+{/if}

@@ -13,7 +13,7 @@
 		ContextMenuSeparator,
 		ContextMenuTrigger,
 	} from '$lib/components/ui/context-menu';
-	import { getNotifications, getWorkspaceCoordinator } from '$lib/context';
+	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import type {
 		ActiveSurfaceKind,
 		WorkspaceWindowEdge,
@@ -59,6 +59,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
@@ -95,6 +96,15 @@
 		const surface = workspace.layout.surface(surfaceId);
 		if (!surface) return 'file';
 		return surface.type === 'singleton' ? surface.kind : surface.type;
+	}
+
+	function tooltipFor(surfaceId: string): string {
+		const label = labelFor(surfaceId);
+		const surface = workspace.layout.surface(surfaceId);
+		if (surface?.type !== 'chat' || !surface.chatId) return label;
+		const projectPath = sessions.byId[surface.chatId]?.projectPath;
+		if (!projectPath) return label;
+		return `${label}\n${projectPath}\n${surface.chatId}`;
 	}
 
 	function canDrag(surfaceId: string): boolean {
@@ -252,7 +262,7 @@
 			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
 			tabTreatment(isSelected, showSelectedBackground),
 		)}
-		title={labelFor(surfaceId)}
+		title={tooltipFor(surfaceId)}
 		draggable={!measurement && canDrag(surfaceId) ? true : undefined}
 		ondragstart={!measurement ? (event) => handleTabDragStart(event, surfaceId) : undefined}
 		ondragover={!measurement

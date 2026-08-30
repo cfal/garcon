@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import { AssistantMessage } from '$shared/chat-types';
+import { AssistantMessage, TranscriptNoticeMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const TS = '2026-05-14T00:00:00.000Z';
@@ -76,6 +76,23 @@ describe('ConversationMessage file links', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('link', { name: 'secret' }));
+
+		expect(openAuto).not.toHaveBeenCalled();
+	});
+
+	it('does not resolve received inter-agent file links against the receiving chat project', async () => {
+		const openAuto = vi.fn();
+		render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(TS, 'Open [config](src/config.ts)', {
+				type: 'inter-agent-message-received',
+				fromChatId: '1788090107980900',
+			}),
+			openAuto,
+			projectBasePath: '/workspace',
+			chatProjectPath: '/workspace/receiver',
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'config' }));
 
 		expect(openAuto).not.toHaveBeenCalled();
 	});

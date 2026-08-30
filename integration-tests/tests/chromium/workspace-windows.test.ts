@@ -1025,11 +1025,15 @@ describe('Chromium workspace windows', () => {
         `echo:${content}`,
         terminalSurfaceId,
       );
-      const destinationTitle = await fixture.page
-        .locator(`[data-workspace-window-tabs="${destinationWindowId}"] [role="tab"]`)
-        .getAttribute('title');
-      if (!destinationTitle) throw new Error('Long Chat destination title is missing.');
-      const moveDestinationLabel = `Move to ${destinationTitle}`;
+      const destinationTab = fixture.page.locator(
+        `[data-workspace-window-tabs="${destinationWindowId}"] [role="tab"]`,
+      );
+      const destinationLabel = await destinationTab.getAttribute('aria-label');
+      if (!destinationLabel) throw new Error('Long Chat destination label is missing.');
+      expect(await destinationTab.getAttribute('title')).toBe(
+        `${destinationLabel}\n${fixture.integration.dirs.project}\n${chatId}`,
+      );
+      const moveDestinationLabel = `Move to ${destinationLabel}`;
 
       const expectTruncatedDestination = async (): Promise<void> => {
         const item = fixture.page.getByRole('menuitem', {

@@ -52,7 +52,7 @@ export interface FileTreeNavigationError {
 }
 
 export type FileTreeDirectoryTargetReason =
-	'initial' | 'directory-row' | 'parent-row' | 'breadcrumb' | 'chat-project';
+	'initial' | 'directory-row' | 'parent-row' | 'breadcrumb' | 'home' | 'chat-project';
 
 export interface FileTreeDirectoryTarget {
 	path: string;
@@ -291,6 +291,10 @@ export class FileTreeStore {
 		);
 	}
 
+	get isAtHome(): boolean {
+		return Boolean(this.fileRootPath && this.currentDirectoryPath === this.fileRootPath);
+	}
+
 	get visibleColumnKeys(): FileTreeColumnKey[] {
 		return FILE_TREE_COLUMN_KEYS.filter((column) => this.isColumnVisible(column));
 	}
@@ -401,6 +405,21 @@ export class FileTreeStore {
 			breadcrumbs: breadcrumbs.slice(0, index + 1),
 			reason: 'breadcrumb',
 			focusPathOnSuccess: breadcrumbs[index + 1]?.path,
+		});
+	}
+
+	async goToHome(): Promise<void> {
+		const response = this.retainedResponse;
+		const path = response?.fileRootPath;
+		if (!response || !path || this.isAtHome) return;
+		// The response contract anchors the leading breadcrumb to fileRootPath.
+		const breadcrumbs = response.directory.breadcrumbs.slice(0, 1);
+		await this.navigateTo({
+			path,
+			label: breadcrumbs[0]?.name ?? path,
+			breadcrumbs,
+			reason: 'home',
+			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 		});
 	}
 
