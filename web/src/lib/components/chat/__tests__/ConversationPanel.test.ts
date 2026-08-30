@@ -1,0 +1,272 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+import type {
+	ConversationPanelPresentationPort,
+	ConversationPanelRegistration,
+} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import type { ConversationPanelActions } from '../conversation-panel-actions.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatQueueState } from '$lib/types/chat.js';
+import type { GitQuickSummaryReady } from '$lib/api/git.js';
+import * as m from '$lib/paraglide/messages.js';
+
+const runtime = vi.hoisted(() => ({
+	processing: true,
+	queue: null as ChatQueueState | null,
+	summary: null as GitQuickSummaryReady | null,
+}));
+
+vi.mock('$lib/context', () => ({
+	getAppShell: () => ({ isMobile: false }),
+	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
+	getConversationUi: () => ({
+		getExecutionControl: () => (runtime.queue ? { queue: runtime.queue } : null),
+		pendingPermissionsFor: () => [],
+	}),
+	getGitBranchActions: () => ({
+		currentProjectPath: '/project',
+		lastError: null,
+		refs: [],
+		branchSort: { key: 'name', direction: 'asc' },
+		showBranchDropdown: false,
+		isLoadingBranches: false,
+	}),
+	getGitQuickSummary: () => ({
+		summaryFor: () => runtime.summary,
+		lastErrorFor: () => null,
+		isRefreshingFor: () => false,
+		canShowTrayFor: () => true,
+	}),
+	getLocalSettings: () => ({
+		autoScrollToBottom: false,
+		chatMaxWidth: 'default',
+		showQuickCommitTray: true,
+	}),
+	getModelCatalog: () => ({ supportsSteering: () => true }),
+	getOptionalTransientLayers: () => null,
+}));
+
+vi.mock('$lib/components/chat/ConversationFeed.svelte', async () => ({
+	default: (await import('./ConversationPanelFeedStub.svelte')).default,
+}));
+
+import ConversationPanel from '../ConversationPanel.svelte';
+
+function chat(): ChatSessionRecord {
+	return {
+		id: 'chat-1',
+		projectPath: '/project',
+		effectiveProjectKey: '/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
+		title: 'Chat',
+		agentId: 'claude',
+		model: 'sonnet',
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+		createdAt: null,
+		lastActivityAt: null,
+		lastReadAt: null,
+		isPinned: false,
+		isArchived: false,
+		isProcessing: runtime.processing,
+		processingPhase: runtime.processing ? 'running' : null,
+		isUnread: false,
+		canReloadFromNativeHistory: false,
+		status: runtime.processing ? 'running' : 'draft',
+		agentOwnershipEpoch: null,
+		tags: [],
+	};
+}
+
+function queue(): ChatQueueState {
+	return {
+		entries: [
+			{
+				id: 'queue-1',
+				content: 'Queued input',
+				revision: 1,
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+			},
+		],
+		steeringEntryId: null,
+		recentlyDispatched: [],
+		pause: null,
+		reorderRevision: 0,
+	};
+}
+
+function gitSummary(): GitQuickSummaryReady {
+	return {
+		status: 'ready',
+		project: '/project',
+		repoRoot: '/project',
+		branch: 'main',
+		hasCommits: true,
+		changedFiles: 2,
+		trackedChangedFiles: 1,
+		untrackedFiles: 1,
+		stagedFiles: 1,
+		unstagedFiles: 1,
+		additions: 3,
+		deletions: 1,
+		fingerprintVersion: 1,
+		fingerprint: 'v1:test',
+	};
+}
+
+function makePanel() {
+	const transcript = new ActiveTranscriptState(new ChatTranscriptCache({ limit: 50 }));
+	transcript.activateChat('chat-1');
+	const lifecycle = new ConversationLifecycleState();
+	lifecycle.beginTurn('chat-1');
+	let presentation: ConversationPanelPresentationPort | null = null;
+	const scroll = new ConversationScrollController({
+		getScrollContainer: () => presentation?.getScrollContainer() ?? null,
+		getViewport: () => presentation?.getViewport() ?? null,
+		getQueueContainer: () => presentation?.getQueueContainer(),
+		chatState: transcript,
+		getChatId: () => 'chat-1',
+	});
+	const prepareForInteractionLoss = vi.fn();
+	const panel: ConversationPanelRegistration = {
+		surfaceId: 'chat-view:window-panel-test',
+		chatId: 'chat-1',
+		transcript,
+		lifecycle,
+		scroll,
+		attachPresentation: (port) => {
+			presentation = port;
+			return () => {
+				if (presentation === port) presentation = null;
+			};
+		},
+		prepareForInteractionLoss,
+		prepareForHide: () => ({ kind: 'end' }),
+		restore: async () => {},
+		destroy: () => {},
+	};
+	return { panel, prepareForInteractionLoss };
+}
+
+function makeActions(): ConversationPanelActions {
+	return {
+		reload: vi.fn(),
+		decidePermission: vi.fn(),
+		exitPlanMode: vi.fn(),
+		fork: vi.fn(),
+		generateTitle: vi.fn().mockResolvedValue(undefined),
+		interruptQueue: vi.fn().mockResolvedValue(undefined),
+		steerQueue: vi.fn().mockResolvedValue(undefined),
+		pauseQueue: vi.fn().mockResolvedValue(undefined),
+		resumeQueue: vi.fn().mockResolvedValue(undefined),
+		reportQueueControlError: vi.fn(),
+		editQueue: vi.fn(),
+		openQueue: vi.fn(),
+		deleteQueue: vi.fn().mockResolvedValue(undefined),
+		stop: vi.fn().mockResolvedValue(undefined),
+		openCommit: vi.fn(),
+		toggleBranch: vi.fn(),
+		closeBranch: vi.fn(),
+		createBranch: vi.fn(),
+		switchBranch: vi.fn().mockResolvedValue(undefined),
+		searchBranches: vi.fn(),
+		sortBranches: vi.fn(),
+		closeSwitchBranchDialog: vi.fn(),
+	};
+}
+
+describe('ConversationPanel', () => {
+	afterEach(() => {
+		cleanup();
+		runtime.processing = true;
+		runtime.queue = null;
+		runtime.summary = null;
+		vi.clearAllMocks();
+	});
+
+	it('composes the full feed, queue, status, paging, and fork controls without a composer', async () => {
+		runtime.queue = queue();
+		const { panel } = makePanel();
+		const actions = makeActions();
+		const { container } = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCurrent: true,
+			actions,
+		});
+
+		expect(container.querySelector('[data-conversation-feed-stub]')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Load earlier' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Load later' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Fork' })).toBeTruthy();
+		expect(screen.getByText('Queued input')).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_pause() })).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_loading_stop() })).toBeTruthy();
+		expect(container.querySelector('[data-prompt-composer]')).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
+		expect(actions.pauseQueue).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
+	});
+
+	it('keeps composition mounted when currentness changes and closes interaction transients', async () => {
+		runtime.queue = queue();
+		const { panel, prepareForInteractionLoss } = makePanel();
+		const rendered = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCurrent: true,
+			actions: makeActions(),
+			composerInsetPx: 96,
+		});
+
+		const root = rendered.container.querySelector('[data-conversation-panel]');
+		expect(root?.getAttribute('data-conversation-panel-current')).toBe('true');
+		expect(
+			rendered.container.querySelector('[data-announcements-enabled]')?.getAttribute(
+				'data-announcements-enabled',
+			),
+		).toBe('true');
+
+		await rendered.rerender({
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCurrent: false,
+			actions: makeActions(),
+			composerInsetPx: 96,
+		});
+
+		await waitFor(() => expect(prepareForInteractionLoss).toHaveBeenCalled());
+		expect(root?.getAttribute('data-conversation-panel-current')).toBeNull();
+		expect(rendered.container.querySelector('[data-conversation-feed-stub]')).toBeTruthy();
+		expect(screen.getByText('Queued input')).toBeTruthy();
+	});
+
+	it('renders the shared Git tray and routes its buttons through surface-qualified actions', async () => {
+		runtime.processing = false;
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		const actions = makeActions();
+		render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCurrent: true,
+			actions,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
+		expect(actions.openCommit).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
+		await fireEvent.click(screen.getByRole('button', { name: /main/ }));
+		expect(actions.toggleBranch).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
+	});
+});

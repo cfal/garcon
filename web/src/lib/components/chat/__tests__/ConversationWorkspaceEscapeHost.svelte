@@ -17,6 +17,7 @@
 		setGitBranchActions,
 		setChatProcessingReconciler,
 		setChatDrafts,
+		setConversationUi,
 	} from '$lib/context';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -34,6 +35,7 @@
 	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
@@ -62,6 +64,7 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	setConversationUi(new ConversationUiState());
 
 	const sessions = {
 		get selectedChatId() {
@@ -82,6 +85,8 @@
 		startupByChatId: {},
 		hasChat: (chatId: string) => chatId === selectedChat.id,
 		isDraft: () => false,
+		isChatProcessing: (chatId: string) =>
+			chatId === selectedChat.id && selectedChat.isProcessing,
 		processingPhase: () => selectedChat.processingPhase,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},

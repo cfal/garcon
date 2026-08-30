@@ -249,7 +249,7 @@ export function buildConversationFeedRenderItems(
 
 export function visiblePendingPermissionRequests(
 	rows: ChatDisplayRow[],
-	pendingPermissionRequests: PendingPermissionRequest[],
+	pendingPermissionRequests: readonly PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
 	const renderedPermissionOccurrences = new Set<string>();
 	const renderedExitPlanOccurrences = new Set<string>();

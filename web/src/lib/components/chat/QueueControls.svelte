@@ -14,8 +14,7 @@
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
-	import { cn } from '$lib/utils/cn';
+	import QueueStatusSummary from './QueueStatusSummary.svelte';
 
 	interface Props {
 		chatId: string | null;
@@ -240,19 +239,8 @@
 </script>
 
 {#if previewEntry}
-	<section
-		class={cn(CHAT_DOCK_SURFACE_CLASS, 'text-foreground')}
-		aria-label={m.chat_queue_dialog_title()}
-	>
-		<div class="flex items-start gap-2 px-4 py-3">
-			<div class="min-w-0 flex-1 border-l-2 border-queue-entry-border pl-3">
-				<p
-					data-queue-preview
-					class="line-clamp-2 h-10 whitespace-pre-wrap break-words text-sm leading-5"
-				>
-					{previewEntry.content}
-				</p>
-			</div>
+	<QueueStatusSummary queue={queue!} entry={previewEntry} position={previewIndex + 1}>
+		{#snippet entryActions()}
 			<div class="flex shrink-0 items-center gap-0.5">
 				<button
 					type="button"
@@ -279,16 +267,15 @@
 					{/if}
 				</button>
 			</div>
-		</div>
+		{/snippet}
 
-		<footer class="flex items-center gap-3 border-t border-border px-3 py-2">
-			<div class="flex min-w-0 flex-wrap items-center gap-2">
-				{#if showQueueManager}
-					<div
-						role="group"
-						aria-label={m.chat_queue_browse_messages()}
-						class="flex shrink-0 items-center"
-					>
+		{#snippet navigation()}
+			{#if showQueueManager}
+				<div
+					role="group"
+					aria-label={m.chat_queue_browse_messages()}
+					class="flex shrink-0 items-center"
+				>
 						<button
 							type="button"
 							onclick={() => selectPreview(previewIndex - 1)}
@@ -319,29 +306,18 @@
 						>
 							<ChevronRight class="h-4 w-4" />
 						</button>
-					</div>
-				{:else}
-					<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
-				{/if}
+				</div>
+			{:else}
+				<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
+			{/if}
+		{/snippet}
 
-				{#if queue?.pause}
-					{#if queue.pause.kind === 'manual'}
-						<span class="text-xs font-medium text-queue-foreground">
-							{m.chat_queue_paused()}
-						</span>
-					{:else}
-						<span class="text-xs font-medium text-status-warning-muted-foreground">
-							{m.chat_queue_needs_attention()}
-						</span>
-					{/if}
-				{/if}
-			</div>
-
+		{#snippet actions()}
 			<ResponsiveSurfaceActions
 				actions={queueActions}
 				menuLabel={m.chat_queue_actions()}
 				class="ml-auto"
 			/>
-		</footer>
-	</section>
+		{/snippet}
+	</QueueStatusSummary>
 {/if}

@@ -58,7 +58,7 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
-		pendingPermissionRequests?: PendingPermissionRequest[];
+		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		onRetry?: () => void;
 		onLoadEarlier?: () => void;
 		onLoadLater?: () => void;
