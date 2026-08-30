@@ -152,6 +152,16 @@
 				class="min-w-0 max-h-[65vh] overflow-y-auto overflow-x-hidden px-6 pt-1 pb-6 sm:max-h-[60vh]"
 			>
 				<div class="space-y-4 min-w-0">
+					<ChatDetailsTextField
+						label={m.sidebar_details_chat_id()}
+						value={chatDetailsDialog?.chatId ?? null}
+						surfaceClass="min-h-12 max-h-24"
+					/>
+					<ChatDetailsTextField
+						label={m.sidebar_details_project_path()}
+						value={chatDetailsDialog?.projectPath ?? null}
+						surfaceClass="min-h-12 max-h-24"
+					/>
 					{#if chatDetailsDialog?.carryOverSegments.length}
 						<section class="min-w-0 space-y-2" aria-label={m.sidebar_details_carryover_history()}>
 							<h3 class="text-sm font-medium">{m.sidebar_details_carryover_history()}</h3>
@@ -202,11 +212,6 @@
 							{formatHumanDate(chatDetailsDialog?.createdAt || null)}
 						</div>
 					</div>
-					<ChatDetailsTextField
-						label={m.sidebar_details_chat_id()}
-						value={chatDetailsDialog?.chatId ?? null}
-						surfaceClass="min-h-12 max-h-24"
-					/>
 					{#if chatDetailsDialog?.transcriptSource}
 						<ChatDetailsTextField
 							label={chatDetailsDialog.transcriptSource.kind === 'filesystem-path'

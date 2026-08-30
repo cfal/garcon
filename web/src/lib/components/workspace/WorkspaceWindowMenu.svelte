@@ -16,7 +16,12 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import { getFileSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
+	import {
+		getChatSessions,
+		getFileSessions,
+		getNotifications,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
 	import type {
 		ActiveSurfaceKind,
 		WorkspaceWindowEdge,
@@ -27,6 +32,7 @@
 		moveWorkspaceTabToNewWindow,
 		resolveWorkspaceWindowTabActions,
 	} from '$lib/workspace/workspace-window-tab-actions.js';
+	import WorkspaceWindowChatMetadata from './WorkspaceWindowChatMetadata.svelte';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -47,12 +53,19 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
 	const notifications = getNotifications();
 	const tabActions = $derived(
 		resolveWorkspaceWindowTabActions(workspace.layout.snapshot, windowId, tabs, tabs.activeId),
 	);
 	const activeSurface = $derived(tabActions.surface);
+	const activeChatMetadata = $derived.by(() => {
+		const surface = activeSurface;
+		if (surface?.type !== 'chat' || !surface.chatId) return null;
+		const chat = sessions.byId[surface.chatId];
+		return chat ? { chatId: surface.chatId, projectPath: chat.projectPath } : null;
+	});
 	const canOfferCloseTab = $derived(tabActions.surface !== null);
 
 	function surfaceKind(surfaceId: string): ActiveSurfaceKind {
@@ -96,7 +109,17 @@
 	>
 		<EllipsisVertical class="h-3.5 w-3.5" />
 	</DropdownMenuTrigger>
-	<DropdownMenuContent align="end" class="w-64" data-workspace-window-menu={windowId}>
+	<DropdownMenuContent
+		align="end"
+		class={activeChatMetadata ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-64'}
+		data-workspace-window-menu={windowId}
+	>
+		{#if activeChatMetadata}
+			<WorkspaceWindowChatMetadata
+				projectPath={activeChatMetadata.projectPath}
+				chatId={activeChatMetadata.chatId}
+			/>
+		{/if}
 		<DropdownMenuItem
 			data-workspace-window-tab-action="move-left"
 			disabled={!tabActions.canReorder || tabActions.index <= 0}

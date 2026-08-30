@@ -25,6 +25,7 @@ describe('ChatActionDialogs', () => {
 			chatDetailsDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Chat one',
+				projectPath: '/workspace/project-one',
 				firstMessage: 'First message',
 				createdAt: '2026-06-27T00:00:00.000Z',
 				lastActivityAt: '2026-06-27T00:10:00.000Z',
@@ -51,17 +52,19 @@ describe('ChatActionDialogs', () => {
 		expect(screen.queryAllByRole('textbox')).toHaveLength(0);
 
 		const chatId = await screen.findByRole('region', { name: 'Chat ID' });
+		const projectPath = screen.getByRole('region', { name: 'Project path' });
 		const agentSessionId = screen.getByRole('region', { name: 'Agent session ID' });
 		const firstMessage = screen.getByRole('region', { name: 'First message' });
 		const nativePath = screen.getByRole('region', { name: 'Native path' });
 
-		for (const surface of [chatId, agentSessionId, firstMessage, nativePath]) {
+		for (const surface of [chatId, projectPath, agentSessionId, firstMessage, nativePath]) {
 			expect(surface.tagName.toLowerCase()).toBe('pre');
 			expect(surface.className).toContain('select-text');
 			expect(surface.className).toContain('text-xs');
 			expect(surface.className).not.toContain('chat-mobile-compact-textarea');
 		}
 		expect(chatId.textContent).toBe('chat-1');
+		expect(projectPath.textContent).toBe('/workspace/project-one');
 		expect(nativePath.textContent).toBe('/tmp/chat.jsonl');
 		expect(agentSessionId.textContent).toBe('agent-session-1');
 		expect(firstMessage.textContent).toBe('First message');
@@ -71,14 +74,16 @@ describe('ChatActionDialogs', () => {
 		expect(carryover.textContent).toContain('2/4 messages');
 		expect(carryover.textContent).toContain('Fork cutoff');
 		expect(carryover.textContent).toContain('11111111-1111-4111-8111-111111111111');
-		expect(chatId.parentElement?.nextElementSibling).toBe(nativePath.parentElement);
+		expect(chatId.parentElement?.nextElementSibling).toBe(projectPath.parentElement);
 
 		copyToClipboard.mockResolvedValue(true);
-		const chatIdField = chatId.parentElement;
-		expect(chatIdField).not.toBeNull();
+		const projectPathField = projectPath.parentElement;
+		expect(projectPathField).not.toBeNull();
 		await fireEvent.click(
-			within(chatIdField as HTMLElement).getByRole('button', { name: 'Copy to clipboard' }),
+			within(projectPathField as HTMLElement).getByRole('button', { name: 'Copy to clipboard' }),
 		);
-		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('chat-1', expect.anything()));
+		await waitFor(() =>
+			expect(copyToClipboard).toHaveBeenCalledWith('/workspace/project-one', expect.anything()),
+		);
 	});
 });

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
@@ -10,6 +10,7 @@ import type {
 	WorkspaceWindowId,
 	WorkspaceWindowNode,
 } from '$lib/workspace/surface-types.js';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
 
 const {
@@ -24,6 +25,7 @@ const {
 	noteWindowChromeFocus,
 	openSingletonAsTab,
 	moveTabToNewWindow,
+	copyToClipboard,
 	runtime,
 } = vi.hoisted(() => ({
 	activateWindow: vi.fn(),
@@ -37,6 +39,7 @@ const {
 	noteWindowChromeFocus: vi.fn(),
 	openSingletonAsTab: vi.fn(async () => undefined),
 	moveTabToNewWindow: vi.fn(async () => undefined),
+	copyToClipboard: vi.fn(async () => true),
 	runtime: {
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		desktopRoot: null as DesktopWorkspaceNode | null,
@@ -44,12 +47,15 @@ const {
 		closeBlocked: true,
 		surfaceCloseBlocked: false,
 		processingChatIds: new Set<string>(),
+		chatSessions: {} as Record<string, Pick<ChatSessionRecord, 'projectPath'>>,
 		terminalSessions: [] as Array<{
 			metadata: { terminalId: string; displaySequence: number };
 		}>,
 		surfaces: {} as Record<string, SurfaceDescriptor>,
 	},
 }));
+
+vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
 
 vi.mock('$lib/context', () => ({
 	getWorkspaceCoordinator: () => ({
@@ -90,7 +96,9 @@ vi.mock('$lib/context', () => ({
 		closeWindow,
 	}),
 	getChatSessions: () => ({
-		byId: {},
+		get byId() {
+			return runtime.chatSessions;
+		},
 		isChatProcessing: (chatId: string) => runtime.processingChatIds.has(chatId),
 	}),
 	getNotifications: () => ({ error: vi.fn() }),
@@ -225,6 +233,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		runtime.closeBlocked = true;
 		runtime.surfaceCloseBlocked = false;
 		runtime.processingChatIds.clear();
+		runtime.chatSessions = { 'chat-a': { projectPath: '/workspace/project-a' } };
 		runtime.terminalSessions = [];
 		runtime.surfaces = { [chatSurface.id]: chatSurface, [gitSurface.id]: gitSurface };
 		vi.stubGlobal('ResizeObserver', undefined);
@@ -257,6 +266,18 @@ describe('WorkspaceWindowTitleBar', () => {
 		renderTitleBar(workspaceWindow([emptyChatSurface.id]));
 
 		expect(screen.getByRole('tab', { name: 'Chat A' }).hasAttribute('draggable')).toBe(false);
+	});
+
+	it('adds project path and chat ID rows to Chat tab tooltips', () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+
+		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+		expect(chatTab.textContent?.trim()).toBe('Chat A');
+		expect(chatTab.getAttribute('aria-label')).toBe('Chat A');
+		expect(chatTab.getAttribute('title')).toBe(
+			'Chat A\n/workspace/project-a\nchat-a',
+		);
+		expect(screen.getByRole('tab', { name: 'Git' }).getAttribute('title')).toBe('Git');
 	});
 
 	it('uses a window-local tablist when multiple tabs exist', () => {
@@ -520,9 +541,48 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
 	});
 
+	it('shows persistent copyable metadata before actions for the active Chat', async () => {
+		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+		await fireEvent.click(trigger);
+
+		const menu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-menu="window-main"]',
+		)!;
+		const projectPath = within(menu).getByRole('menuitem', {
+			name: `${m.workspace_chat_metadata_copy({ field: 'Project path' })}: /workspace/project-a`,
+		});
+		const chatId = within(menu).getByRole('menuitem', {
+			name: `${m.workspace_chat_metadata_copy({ field: 'Chat ID' })}: chat-a`,
+		});
+		const metadata = menu.querySelector('[data-workspace-chat-metadata]');
+		const metadataSeparator = menu.querySelector('[data-workspace-chat-metadata-separator]');
+		const firstAction = menu.querySelector('[data-workspace-window-tab-action="move-left"]');
+
+		expect(projectPath.textContent).toContain('Project path');
+		expect(projectPath.textContent).toContain('/workspace/project-a');
+		expect(chatId.textContent).toContain('Chat ID');
+		expect(chatId.textContent).toContain('chat-a');
+		expect(menu.firstElementChild).toBe(metadata);
+		expect(projectPath.parentElement).toBe(metadata);
+		expect(projectPath.nextElementSibling).toBe(chatId);
+		expect(metadata?.nextElementSibling).toBe(metadataSeparator);
+		expect(metadataSeparator?.nextElementSibling).toBe(firstAction);
+
+		await fireEvent.click(projectPath);
+		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('/workspace/project-a'));
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		await waitFor(() =>
+			expect(projectPath.getAttribute('title')).toBe(
+				m.workspace_chat_metadata_copied({ field: 'Project path' }),
+			),
+		);
+	});
+
 	it('closes the active movable tab from the window menu', async () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		expect(document.querySelector('[data-workspace-chat-metadata-field]')).toBeNull();
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_close_tab() }));
 
 		expect(closeSurface).toHaveBeenCalledWith(gitSurface.id);
