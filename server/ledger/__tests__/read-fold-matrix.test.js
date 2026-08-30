@@ -14,7 +14,6 @@ import { TranscriptSearchController } from '../../chats/search/controller.ts';
 import {
   chatIdRequestNoticeDraft,
   interAgentSendRequestNoticeDraft,
-  subAgentStartRequestNoticeDraft,
 } from '../garcon-command-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
@@ -359,81 +358,6 @@ describe('transcript ledger read-fold matrix', () => {
           detail: {
             type: 'inter-agent-message-received',
             fromChatId: '1787974832309199',
-          },
-          providerMeta: null,
-        },
-      ]);
-
-      expect(ledgerRowsToTranscriptMessages(rows).map(({ ordinal, message }) => ({
-        ordinal,
-        type: message.type,
-      }))).toEqual([
-        { ordinal: 2, type: 'transcript-notice' },
-        { ordinal: 3, type: 'transcript-notice' },
-      ]);
-      expect(ledger.conversationMessages(CHAT_ID)).toEqual([]);
-      expect(ledger.resendCandidates(CHAT_ID)).toEqual([]);
-      expect(frozenConversationDrafts(rows)).toEqual([]);
-      expect((await initializeSearchFold(ledger, rows))).toEqual([]);
-      expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
-        [2, 'diagnostics'],
-        [3, 'diagnostics'],
-      ]);
-    } finally {
-      ledger.close();
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('keeps sub-agent request evidence private and outcomes presentation-only', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-sub-agent-fold-matrix-'));
-    const store = new TranscriptLedgerStore(root, {
-      createViewId: () => VIEW_ID,
-      now: () => AT,
-    });
-    const ledger = new TranscriptLedgerService(store, { now: () => AT });
-    try {
-      ledger.initializeChat(CHAT_ID);
-      const ref = '69b623a7-757e-49f6-93b8-4b7ea1bc569b';
-      const result = {
-        ref,
-        error: false,
-        msg: 'created',
-        chatId: '1787974832309199',
-      };
-      const rows = store.append(CHAT_ID, VIEW_ID, [
-        subAgentStartRequestNoticeDraft(AT, {
-          prompt: 'Investigate.',
-          params: [{
-            ref,
-            agentId: 'codex',
-            providerId: null,
-            endpointId: null,
-            model: 'gpt-5.4',
-            reasoningEffort: null,
-            projectPath: '/projects/alpha',
-            permissionMode: 'bypassPermissions',
-          }],
-        }),
-        {
-          kind: 'notice',
-          at: AT,
-          message: `Results queued for delivery.\nCreated: ${ref} -> chat 1787974832309199`,
-          detail: {
-            type: 'sub-agent-start-outcome',
-            deliveryStatus: 'queued',
-            results: [result],
-          },
-          providerMeta: null,
-        },
-        {
-          kind: 'notice',
-          at: AT,
-          message: `Results delivered.\nCreated: ${ref} -> chat 1787974832309199`,
-          detail: {
-            type: 'sub-agent-start-outcome',
-            deliveryStatus: 'delivered',
-            results: [result],
           },
           providerMeta: null,
         },

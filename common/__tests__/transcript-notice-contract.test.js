@@ -10,9 +10,7 @@ import {
   isHandoffSummaryNoticeDetail,
   isInterAgentMessageOutcomeNoticeDetail,
   isInterAgentMessageReceivedNoticeDetail,
-  isSubAgentStartOutcomeNoticeDetail,
   parseTranscriptNoticeDetail,
-  renderSubAgentStartOutcome,
 } from '../transcript-notice-details.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
@@ -137,63 +135,6 @@ describe('transcript notice contracts', () => {
       },
       { type: 'inter-agent-message-received', fromChatId: 'invalid' },
       { type: 'inter-agent-message-received' },
-    ]) {
-      expect(parseTranscriptNoticeDetail(detail)).toBeNull();
-    }
-  });
-
-  it('round-trips typed sub-agent start outcomes', () => {
-    const detail = {
-      type: 'sub-agent-start-outcome',
-      deliveryStatus: 'queued',
-      results: [
-        {
-          ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
-          error: false,
-          msg: 'created',
-          chatId: '1787974832309199',
-        },
-        {
-          ref: '2cf0e440-11b4-41aa-bc90-36145b214f66',
-          error: true,
-          msg: 'unknown-model',
-        },
-      ],
-    };
-    const message = {
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: renderSubAgentStartOutcome(detail.deliveryStatus, detail.results),
-      detail,
-      title: 'Sub-agent start',
-    };
-
-    expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
-    expect(isSubAgentStartOutcomeNoticeDetail(detail)).toBe(true);
-    expect(parseTranscriptNoticeDetail({ ...detail, ignored: true })).toEqual(detail);
-  });
-
-  it('rejects malformed sub-agent start outcomes', () => {
-    const ref = '69b623a7-757e-49f6-93b8-4b7ea1bc569b';
-    const result = { ref, error: true, msg: 'start-failed' };
-    for (const detail of [
-      { type: 'sub-agent-start-outcome', deliveryStatus: 'invalid', results: [result] },
-      { type: 'sub-agent-start-outcome', deliveryStatus: 'delivered', results: [] },
-      {
-        type: 'sub-agent-start-outcome',
-        deliveryStatus: 'delivered',
-        results: [result, result],
-      },
-      {
-        type: 'sub-agent-start-outcome',
-        deliveryStatus: 'delivered',
-        results: [{ ref, error: false, msg: 'created' }],
-      },
-      {
-        type: 'sub-agent-start-outcome',
-        deliveryStatus: 'delivered',
-        results: [{ ref, error: true, msg: 'created' }],
-      },
     ]) {
       expect(parseTranscriptNoticeDetail(detail)).toBeNull();
     }

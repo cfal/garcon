@@ -16,7 +16,7 @@ export function hasNodeErrorCode(error: unknown, code: string): boolean {
   );
 }
 
-export function structuredErrorCode(error: unknown): string | null {
+function structuredErrorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object' || !('code' in error)) return null;
   const code = (error as { readonly code?: unknown }).code;
   return typeof code === 'string' ? code : null;

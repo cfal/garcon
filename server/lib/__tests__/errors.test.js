@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   diagnosticErrorCode,
   errorMessage,
-  structuredErrorCode,
 } from '../errors.ts';
 
 describe('errorMessage', () => {
@@ -17,11 +16,6 @@ describe('errorMessage', () => {
 });
 
 describe('error codes', () => {
-  it('reads structural codes without inferring one from an Error name', () => {
-    expect(structuredErrorCode({ code: 'FAILED' })).toBe('FAILED');
-    expect(structuredErrorCode(new TypeError('failed'))).toBeNull();
-  });
-
   it('falls back to an Error name for diagnostics', () => {
     expect(diagnosticErrorCode({ code: 'FAILED' })).toBe('FAILED');
     expect(diagnosticErrorCode(new TypeError('failed'))).toBe('TypeError');

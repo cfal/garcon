@@ -1,22 +1,16 @@
-import type { AgentRegistry } from '../agents/index.js';
-import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import type { StoredControlInputEntry } from '../chat-execution/control-state.js';
-import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { ChatIdRequestSink } from '../ledger/garcon-command-publication.js';
 import { transcriptViewId } from '../ledger/contracts.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { SettingsStore } from '../settings/store.js';
-import { AgentStartComposition } from './agent-start-composition.js';
-import type { SubAgentOverridePolicy } from './agent-start-controller.js';
-import type { ChatIdAllocator } from './chat-id-allocator.js';
 import { ChatIdDiscoveryController } from './chat-id-discovery-controller.js';
 import { InterAgentMessageComposition } from './inter-agent-message-composition.js';
 import type { ChatRegistry } from './store.js';
 
-type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage' | 'subAgents';
+type AgentCommandSetting = 'chatIdDiscovery' | 'sendMessage';
 
 interface AgentCommandCompositionOptions {
   readonly registry: ChatRegistry;
@@ -24,17 +18,12 @@ interface AgentCommandCompositionOptions {
   readonly execution: ChatExecutionCoordinator;
   readonly notices: TranscriptLedgerService;
   readonly chatMutationLock: KeyedPromiseLock;
-  readonly settings: Pick<SettingsStore, 'getExecutionDefaults' | 'getFeatureSettings'>;
-  readonly commands: ChatCommandService;
-  readonly chatIds: ChatIdAllocator;
-  readonly agents: AgentRegistry;
-  readonly apiProviders: ApiProviderService;
+  readonly settings: Pick<SettingsStore, 'getFeatureSettings'>;
   readonly onChatIdError: (error: unknown, chatId: string) => void;
 }
 
 export class AgentCommandComposition {
   readonly interAgentMessages = new InterAgentMessageComposition();
-  readonly agentStarts = new AgentStartComposition();
   #chatIdDiscovery: ChatIdDiscoveryController | null = null;
   #notices: TranscriptLedgerService | null = null;
 
@@ -72,47 +61,12 @@ export class AgentCommandComposition {
       chatMutationLock: options.chatMutationLock,
       isEnabled: () => commandEnabled(options.settings, 'sendMessage'),
     });
-    this.agentStarts.initialize({
-      registry: options.registry,
-      selection: {
-        agents: options.agents,
-        apiProviders: options.apiProviders,
-      },
-      commands: options.commands,
-      chatIds: options.chatIds,
-      execution: options.execution,
-      notices: options.notices,
-      chatMutationLock: options.chatMutationLock,
-      getExecutionDefaults: () => options.settings.getExecutionDefaults(),
-      getOverridePolicy: () => subAgentOverridePolicy(options.settings),
-      isEnabled: () => commandEnabled(options.settings, 'subAgents'),
-    });
   }
 
   discardSource(chatId: string): void {
     this.#chatIdDiscovery?.discard(chatId);
     this.interAgentMessages.discardSource(chatId);
-    this.agentStarts.discardSource(chatId);
   }
-
-  beginShutdown(): void {
-    this.agentStarts.beginShutdown();
-  }
-
-  async waitForIdle(): Promise<void> {
-    await this.agentStarts.waitForIdle();
-  }
-}
-
-function subAgentOverridePolicy(
-  settings: Pick<SettingsStore, 'getFeatureSettings'>,
-): SubAgentOverridePolicy {
-  const commands = settings.getFeatureSettings().agentCommands;
-  const ancestorsEnabled = commands.enabled && commands.subAgents;
-  return {
-    projectPath: ancestorsEnabled && commands.allowCustomSubAgentProjectPath,
-    permissionLevel: ancestorsEnabled && commands.allowCustomSubAgentPermissionLevel,
-  };
 }
 
 function commandEnabled(

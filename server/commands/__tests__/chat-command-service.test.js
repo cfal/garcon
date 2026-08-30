@@ -37,7 +37,6 @@ let activeServices = [];
 const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
-const AGENT_COMMAND_CHAT_ID = '1783725900000003';
 const CLI_CHAT_ID = '1783725900000004';
 
 const runtimeHandoff = () => ({
@@ -1035,32 +1034,20 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-scheduled',
       agentSettingsById: { claude: agentSettings() },
     });
-    const agentCommand = await service.submitAgentCommandStart({
-      ...shared,
-      chatId: AGENT_COMMAND_CHAT_ID,
-      clientRequestId: 'req-agent-command',
-      clientMessageId: 'msg-agent-command',
-      agentSettings: agentSettings(),
-    });
-
     expect(cli.chatId).toBe(CLI_CHAT_ID);
     expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
-    expect(agentCommand.chatId).toBe(AGENT_COMMAND_CHAT_ID);
     expect(settings.recordChatStartup).toHaveBeenCalledTimes(1);
     const [
       { id: interactiveId, ...interactive },
       { id: cliId, ...cliEntry },
       { id: scheduledId, ...scheduledEntry },
-      { id: agentCommandId, ...agentCommandEntry },
     ] =
       chats.addChat.mock.calls.map(([entry]) => entry);
     expect(interactiveId).toBe(TARGET_CHAT_ID);
     expect(cliId).toBe(CLI_CHAT_ID);
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
-    expect(agentCommandId).toBe(AGENT_COMMAND_CHAT_ID);
     expect(cliEntry).toEqual(interactive);
     expect(scheduledEntry).toEqual(interactive);
-    expect(agentCommandEntry).toEqual(interactive);
     expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);
     expect(agents.startSession).toHaveBeenNthCalledWith(
@@ -1078,12 +1065,6 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).toHaveBeenNthCalledWith(
       3,
       SCHEDULED_CHAT_ID,
-      shared.command,
-      expect.objectContaining({ projectPath: projectBaseDir }),
-    );
-    expect(agents.startSession).toHaveBeenNthCalledWith(
-      4,
-      AGENT_COMMAND_CHAT_ID,
       shared.command,
       expect.objectContaining({ projectPath: projectBaseDir }),
     );
@@ -1751,7 +1732,7 @@ describe('ChatCommandService', () => {
     }
   });
 
-  it('reports a typed error when a chat start project path does not exist', async () => {
+  it('rejects a missing chat start project path before creating the chat', async () => {
     const { service, agents, chats } = makeService({ session: null });
 
     await expect(
@@ -1767,7 +1748,7 @@ describe('ChatCommandService', () => {
         clientMessageId: 'msg-start-missing',
       }),
     ).rejects.toMatchObject({
-      code: 'PROJECT_PATH_NOT_FOUND',
+      code: 'VALIDATION_FAILED',
       status: 404,
     });
 

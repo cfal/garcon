@@ -175,77 +175,6 @@ describe('TranscriptLedgerService', () => {
       });
     });
 
-    it('commits private start evidence before dispatching a run-bound agent start', async () => {
-      const agentStarts = mock(() => undefined);
-      await withService(async ({ ledger }) => {
-        ledger.initializeChat('chat-1');
-        const lease = ledger.openProducer('chat-1', 'test');
-        ledger.beginRun('chat-1', 'run-1');
-        const notifications = [];
-        ledger.subscribe((event) => notifications.push(event));
-        agentStarts.mockImplementation((input) => {
-          expect(ledger.currentRows('chat-1')).toHaveLength(2);
-          expect(notifications).toEqual([]);
-          expect(input).toEqual({
-            sourceChatId: 'chat-1',
-            sourceViewId: expect.any(String),
-            requestRunId: 'run-1',
-            requestAt: TS,
-            prompt: 'Investigate the failure.',
-            params: [{
-              ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
-              agentId: 'codex',
-              providerId: null,
-              endpointId: null,
-              model: 'gpt-5.4',
-              reasoningEffort: 'high',
-              projectPath: '/projects/alpha',
-              permissionMode: 'bypassPermissions',
-            }],
-          });
-        });
-
-        lease.sink.publish({
-          type: 'rows',
-          rows: [{
-            message: new AssistantMessage(
-              TS,
-              'Continuing the response.\n'
-                + '<garcon-start-agent>\n'
-                + '{"prompt":"Investigate the failure.","params":[{"ref":"69b623a7-757e-49f6-93b8-4b7ea1bc569b","agent":"codex","model":"gpt-5.4","reasoningEffort":"high","projectPath":"/projects/alpha","permissions":"bypassPermissions"}]}\n'
-                + '</garcon-start-agent>',
-            ),
-          }],
-        });
-
-        expect(agentStarts).toHaveBeenCalledTimes(1);
-        expect(ledger.currentRows('chat-1')).toMatchObject([
-          {
-            ordinal: 1,
-            kind: 'provider-row',
-            message: { type: 'assistant-message', content: 'Continuing the response.' },
-          },
-          {
-            ordinal: 2,
-            kind: 'notice',
-            message: 'Agent requested sub-agent creation',
-            detail: {
-              type: 'sub-agent-start-request',
-              prompt: 'Investigate the failure.',
-              params: [{
-                ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
-                projectPath: '/projects/alpha',
-                permissionMode: 'bypassPermissions',
-              }],
-            },
-          },
-        ]);
-        expect(ledger.conversationMessages('chat-1')).toEqual([
-          new AssistantMessage(TS, 'Continuing the response.'),
-        ]);
-      }, { agentStarts: { request: agentStarts } });
-    });
-
     it('keeps malformed commands as provider output and appends a visible diagnostic', async () => {
       const requests = mock(() => undefined);
       await withService(async ({ ledger }) => {
@@ -272,30 +201,6 @@ describe('TranscriptLedgerService', () => {
           },
         ]);
       }, { interAgentMessages: { request: requests } });
-    });
-
-    it('keeps malformed start commands as provider output and labels the diagnostic', async () => {
-      const requests = mock(() => undefined);
-      await withService(async ({ ledger }) => {
-        ledger.initializeChat('chat-1');
-        const lease = ledger.openProducer('chat-1', 'test');
-        const content = '<garcon-start-agent>\n{"prompt":"prompt"}\n</garcon-start-agent>';
-
-        lease.sink.publish({
-          type: 'rows',
-          rows: [{ message: new AssistantMessage(TS, content) }],
-        });
-
-        expect(requests).not.toHaveBeenCalled();
-        expect(ledger.currentRows('chat-1')).toMatchObject([
-          { kind: 'provider-row', message: { content } },
-          {
-            kind: 'notice',
-            message: 'Garcon could not parse a sub-agent start command.',
-            detail: { title: 'Sub-agent start' },
-          },
-        ]);
-      }, { agentStarts: { request: requests } });
     });
   });
 

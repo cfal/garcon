@@ -4,16 +4,12 @@ import {
   extractGarconCommands,
   INTER_AGENT_MESSAGE_NOTICE_TITLE,
   MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
-  MALFORMED_SUB_AGENT_START_CONTENT,
-  SUB_AGENT_START_NOTICE_TITLE,
-  type GarconCreateChatParams,
   type GarconEdgeCommand,
 } from '../../common/garcon-commands.js';
 import type { LedgerRowDraft, TranscriptViewId } from './contracts.js';
 import {
   chatIdRequestNoticeDraft,
   interAgentSendRequestNoticeDraft,
-  subAgentStartRequestNoticeDraft,
 } from './garcon-command-request.js';
 
 export interface ChatIdRequestSink {
@@ -36,26 +32,11 @@ export interface InterAgentMessageRequestSink {
   }): void;
 }
 
-export interface AgentStartRequestSink {
-  request(input: {
-    readonly sourceChatId: string;
-    readonly sourceViewId: TranscriptViewId;
-    readonly requestRunId: string | null;
-    readonly requestAt: string;
-    readonly prompt: string;
-    readonly params: readonly GarconCreateChatParams[];
-  }): void;
-}
-
 export const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
   request: () => undefined,
 });
 
 export const DISABLED_INTER_AGENT_MESSAGE_SINK: InterAgentMessageRequestSink = Object.freeze({
-  request: () => undefined,
-});
-
-export const DISABLED_AGENT_START_SINK: AgentStartRequestSink = Object.freeze({
   request: () => undefined,
 });
 
@@ -95,29 +76,14 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
             body: command.body,
           }));
           break;
-        case 'start-agent':
-          drafts.push(subAgentStartRequestNoticeDraft(row.message.timestamp, {
-            prompt: command.prompt,
-            params: command.params,
-          }));
-          break;
       }
     }
     for (const issue of transformed.issues) {
-      const malformed = issue.command === 'start-agent'
-        ? {
-            title: SUB_AGENT_START_NOTICE_TITLE,
-            content: MALFORMED_SUB_AGENT_START_CONTENT,
-          }
-        : {
-            title: INTER_AGENT_MESSAGE_NOTICE_TITLE,
-            content: MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
-          };
       drafts.push({
         kind: 'notice',
         at: row.message.timestamp,
-        message: malformed.content,
-        detail: { title: malformed.title },
+        message: MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
+        detail: { title: INTER_AGENT_MESSAGE_NOTICE_TITLE },
         providerMeta: null,
       });
     }
@@ -133,7 +99,6 @@ export function dispatchGarconCommands(
     readonly runId: string | null;
     readonly chatIdRequests: ChatIdRequestSink;
     readonly interAgentMessages: InterAgentMessageRequestSink;
-    readonly agentStarts: AgentStartRequestSink;
   },
 ): void {
   for (const { command, at } of commands) {
@@ -154,16 +119,6 @@ export function dispatchGarconCommands(
           recipients: command.recipients,
           hideSender: command.hideSender,
           body: command.body,
-        });
-        break;
-      case 'start-agent':
-        options.agentStarts.request({
-          sourceChatId: options.chatId,
-          sourceViewId: options.viewId,
-          requestRunId: options.runId,
-          requestAt: at,
-          prompt: command.prompt,
-          params: command.params,
         });
         break;
     }

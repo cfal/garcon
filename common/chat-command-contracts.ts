@@ -126,7 +126,6 @@ export const CHAT_START_ORIGINS = [
   'interactive',
   'cli',
   'scheduled',
-  'agent-command',
 ] as const;
 
 export type ChatStartOrigin = typeof CHAT_START_ORIGINS[number];

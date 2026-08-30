@@ -295,7 +295,6 @@ export async function startServer(): Promise<void> {
       },
       chatIdRequests: agentCommands.chatIdRequests,
       interAgentMessages: agentCommands.interAgentMessages,
-      agentStarts: agentCommands.agentStarts,
     });
     const preparedCarryover = new PreparedCarryoverStore();
     transcriptLedger.subscribe((event) => {
@@ -601,10 +600,6 @@ export async function startServer(): Promise<void> {
       notices: transcriptLedger,
       chatMutationLock,
       settings,
-      commands: chatCommands,
-      chatIds,
-      agents: agentRegistry,
-      apiProviders,
       onChatIdError(error, chatId) {
         logger.warn('Chat ID auto-discovery delivery failed', {
           chatId,
@@ -890,7 +885,6 @@ export async function startServer(): Promise<void> {
       shuttingDown = true;
       carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
-      agentCommands.beginShutdown();
       const reservedChatIds = queue.beginShutdown();
       handoffs.shutdown();
       let abortTimedOut = false;
@@ -916,7 +910,6 @@ export async function startServer(): Promise<void> {
           );
         }
         const backgroundTasks = await waitForShutdownPhasesWithTimeout([
-          () => agentCommands.waitForIdle(),
           () => chatCommands.waitForBackgroundTasks(),
           () => queue.waitForExecutionOwners(),
           () => eventWiring!.waitForIdle(),

@@ -41,25 +41,6 @@ function interAgentInput(content = 'message') {
   };
 }
 
-function agentCommandResultInput() {
-  const results = [{
-    ref: '69b623a7-757e-49f6-93b8-4b7ea1bc569b',
-    error: false,
-    msg: 'created',
-    chatId: '1787974832309199',
-  }];
-  return {
-    content: '<garcon-create-chat-result ref="69b623a7-757e-49f6-93b8-4b7ea1bc569b" error="false" msg="created" chat-id="1787974832309199" />',
-    transcriptViewId: 'view-1',
-    createdAt: '2026-08-29T00:00:00.000Z',
-    receipt: {
-      title: 'Sub-agent start',
-      content: 'Results delivered to the requesting agent.\nCreated: 69b623a7-757e-49f6-93b8-4b7ea1bc569b -> chat 1787974832309199',
-      detail: { type: 'sub-agent-start-outcome', deliveryStatus: 'delivered', results },
-    },
-  };
-}
-
 function createFixture(overrides = {}) {
   const events = [];
   const queuedAdmission = overrides.queuedAdmission ?? (() => ({ inserted: true }));
@@ -368,93 +349,6 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
       .toHaveLength(1);
-  });
-
-  it('steers agent-command results only to the publication-time source run', async () => {
-    const providerTarget = { providerTurnId: 'provider-turn-1' };
-    const onQueued = mock(() => undefined);
-    const fixture = createFixture({
-      turnRunner: {
-        captureSteerTarget: mock(() => providerTarget),
-        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
-          await prepare();
-          return { kind: 'accepted' };
-        }),
-      },
-    });
-    coordinator = fixture.coordinator;
-    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'source-turn' });
-
-    await expect(coordinator.deliverAgentCommandResult(
-      'chat-1',
-      agentCommandResultInput(),
-      'source-turn',
-      new AbortController().signal,
-      onQueued,
-    )).resolves.toBe('delivered');
-
-    expect(onQueued).not.toHaveBeenCalled();
-    expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
-    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
-    await coordinator.releaseDirectTurn(reservation);
-  });
-
-  it('queues agent-command results without steering a successor run', async () => {
-    let providerRunning = false;
-    const onQueued = mock(() => undefined);
-    const fixture = createFixture({
-      turnRunner: {
-        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-2' })),
-        isChatRunning: mock(() => providerRunning),
-      },
-    });
-    coordinator = fixture.coordinator;
-    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'successor-turn' });
-    providerRunning = true;
-
-    await expect(coordinator.deliverAgentCommandResult(
-      'chat-1',
-      agentCommandResultInput(),
-      'source-turn',
-      new AbortController().signal,
-      onQueued,
-    )).resolves.toBe('queued');
-
-    expect(onQueued).toHaveBeenCalledTimes(1);
-    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
-    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
-      .toEqual([expect.objectContaining({ content: agentCommandResultInput().content })]);
-    await coordinator.releaseDirectTurn(reservation);
-  });
-
-  it('records queued agent-command results before an idle source drains them', async () => {
-    const provider = deferred();
-    const events = [];
-    const fixture = createFixture({
-      appendControlReceipt: mock(() => { events.push('receipt'); }),
-      turnRunner: {
-        runAgentTurn: mock(() => {
-          events.push('provider');
-          return provider.promise;
-        }),
-      },
-    });
-    coordinator = fixture.coordinator;
-
-    await expect(coordinator.deliverAgentCommandResult(
-      'chat-1',
-      agentCommandResultInput(),
-      'completed-source-turn',
-      new AbortController().signal,
-      () => { events.push('queued'); },
-    )).resolves.toBe('queued');
-    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
-
-    expect(events).toEqual(['queued', 'receipt', 'provider']);
-    const runOptions = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
-    await coordinator.onAgentTurnTerminal('chat-1', { turnId: runOptions.turnId });
-    provider.resolve();
-    await coordinator.waitForDispatches();
   });
 
   it('drains queued inter-agent control input with a receipt and no user admission', async () => {

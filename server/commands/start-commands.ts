@@ -12,7 +12,6 @@ import {
   CommandSupport,
   CommandValidationError,
   agentTurnResultFromRecord,
-  type AgentCommandChatStartInput,
   type ChatStartInput,
   type NormalizedChatStart,
   type ScheduledChatStartInput,
@@ -51,14 +50,6 @@ export class StartCommands {
       origin: 'scheduled',
       images: [],
       agentSettings: input.agentSettingsById[input.agentId],
-    });
-  }
-
-  async submitAgentCommandStart(input: AgentCommandChatStartInput): Promise<StartChatCommandResponse> {
-    return this.submitStart({
-      ...input,
-      origin: 'agent-command',
-      images: [],
     });
   }
 
@@ -281,7 +272,7 @@ export class StartCommands {
     try {
       await fs.access(resolvedPath);
     } catch {
-      throw new CommandValidationError('PROJECT_PATH_NOT_FOUND', `Project path not found: ${resolvedPath}`, 404);
+      throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${resolvedPath}`, 404);
     }
 
     return resolvedPath;
