@@ -210,10 +210,7 @@ describe('TranscriptLedgerService', () => {
               TS,
               'Continuing the response.\n'
                 + '<garcon-start-agent>\n'
-                + '<garcon-prompt>\n'
-                + 'Investigate the failure.\n'
-                + '</garcon-prompt>\n'
-                + '<garcon-create-chat-params ref="69b623a7-757e-49f6-93b8-4b7ea1bc569b" agent="codex" model="gpt-5.4" reasoning-effort="high" />\n'
+                + '{"prompt":"Investigate the failure.","params":[{"ref":"69b623a7-757e-49f6-93b8-4b7ea1bc569b","agent":"codex","model":"gpt-5.4","reasoningEffort":"high"}]}\n'
                 + '</garcon-start-agent>',
             ),
           }],
@@ -276,7 +273,7 @@ describe('TranscriptLedgerService', () => {
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
         const lease = ledger.openProducer('chat-1', 'test');
-        const content = '<garcon-start-agent>\n<garcon-prompt>\nprompt\n</garcon-prompt>\n</garcon-start-agent>';
+        const content = '<garcon-start-agent>\n{"prompt":"prompt"}\n</garcon-start-agent>';
 
         lease.sink.publish({
           type: 'rows',

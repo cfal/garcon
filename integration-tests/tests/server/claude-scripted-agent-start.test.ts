@@ -48,11 +48,23 @@ describe('scripted Claude agent-created chats', () => {
         const failureRef = '2cf0e440-11b4-41aa-bc90-36145b214f66';
         const startCommand = [
           '<garcon-start-agent>',
-          '<garcon-prompt>',
-          childPrompt,
-          '</garcon-prompt>',
-          `<garcon-create-chat-params ref="${successRef}" agent="claude" model="haiku" reasoning-effort="low" />`,
-          `<garcon-create-chat-params ref="${failureRef}" agent="claude" model="haiku" reasoning-effort="extreme" />`,
+          JSON.stringify({
+            prompt: childPrompt,
+            params: [
+              {
+                ref: successRef,
+                agent: 'claude',
+                model: 'haiku',
+                reasoningEffort: 'low',
+              },
+              {
+                ref: failureRef,
+                agent: 'claude',
+                model: 'haiku',
+                reasoningEffort: 'extreme',
+              },
+            ],
+          }, null, 2),
           '</garcon-start-agent>',
         ].join('\n');
         const startedPath = path.join(fixture.dirs.project, 'agent-start-source-started');
@@ -245,10 +257,10 @@ describe('scripted Claude agent-created chats', () => {
         );
         const startCommand = [
           '<garcon-start-agent>',
-          '<garcon-prompt>',
-          childPrompt,
-          '</garcon-prompt>',
-          ...refs.map((ref) => directStartParams(childAgent, ref)),
+          JSON.stringify({
+            prompt: childPrompt,
+            params: refs.map((ref) => directStartParams(childAgent, ref)),
+          }, null, 2),
           '</garcon-start-agent>',
         ].join('\n');
 
@@ -319,16 +331,16 @@ function marker(label: string): string {
   return `SCRIPTED_CLAUDE_AGENT_START_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-function directStartParams(agent: ConfiguredDirectTestAgent, ref: string): string {
+function directStartParams(agent: ConfiguredDirectTestAgent, ref: string) {
   const { provider } = agent;
-  return [
-    `<garcon-create-chat-params ref="${ref}"`,
-    `agent="${agent.agentId}"`,
-    `provider="${provider.providerId}"`,
-    `endpoint="${provider.endpointId}"`,
-    `model="${provider.model}"`,
-    'reasoning-effort="none" />',
-  ].join(' ');
+  return {
+    ref,
+    agent: agent.agentId,
+    provider: provider.providerId,
+    endpoint: provider.endpointId,
+    model: provider.model,
+    reasoningEffort: 'none',
+  };
 }
 
 async function waitForFile(filePath: string): Promise<void> {

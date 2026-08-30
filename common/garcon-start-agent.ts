@@ -1,18 +1,15 @@
 import { parseChatId, type ChatId } from './chat-id.js';
-import { normalizeGarconCommandBody } from './garcon-command-text.js';
 
 export const GARCON_START_AGENT_PREFIX = '<garcon-start-agent';
 export const GARCON_START_AGENT_OPEN = '<garcon-start-agent>';
 export const GARCON_START_AGENT_CLOSE = '</garcon-start-agent>';
-export const GARCON_PROMPT_OPEN = '<garcon-prompt>';
-export const GARCON_PROMPT_CLOSE = '</garcon-prompt>';
-export const GARCON_CREATE_CHAT_PARAMS_PREFIX = '<garcon-create-chat-params';
 export const SUB_AGENT_START_NOTICE_TITLE = 'Sub-agent start';
 export const MALFORMED_SUB_AGENT_START_CONTENT =
   'Garcon could not parse a sub-agent start command.';
 export const MAX_GARCON_CREATE_CHAT_PARAMS = 16;
 export const GARCON_START_PROMPT_MAX_BYTES = 48 * 1024;
 export const GARCON_CREATE_CHAT_MODEL_MAX_BYTES = 256;
+export const GARCON_START_AGENT_PAYLOAD_MAX_BYTES = 384 * 1024;
 
 export const GARCON_CREATE_CHAT_RESULT_MESSAGES = [
   'created',
@@ -32,12 +29,20 @@ export const GARCON_CREATE_CHAT_RESULT_MESSAGES = [
   'start-failed',
 ] as const;
 
-const CREATE_CHAT_PARAMS = /^<garcon-create-chat-params ref="([^"]*)" agent="([^"]*)"(?: provider="([^"]*)"(?: endpoint="([^"]*)")?)? model="([^"]*)"(?: reasoning-effort="([^"]*)")? \/>$/;
 const CREATE_CHAT_RESULT_SUCCESS = /^<garcon-create-chat-result ref="([^"]*)" error="false" msg="created" chat-id="([^"]*)" \/>$/;
 const CREATE_CHAT_RESULT_FAILURE = /^<garcon-create-chat-result ref="([^"]*)" error="true" msg="([^"]*)" \/>$/;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SAFE_ID = /^[a-z][a-z0-9_-]{1,63}$/;
 const REASONING_EFFORT = /^[a-z][a-z0-9_-]{0,31}$/;
+const START_AGENT_PAYLOAD_KEYS = ['prompt', 'params'] as const;
+const CREATE_CHAT_PARAM_KEYS = [
+  'ref',
+  'agent',
+  'provider',
+  'endpoint',
+  'model',
+  'reasoningEffort',
+] as const;
 const utf8Encoder = new TextEncoder();
 const createChatFailureMessages = new Set<string>(
   GARCON_CREATE_CHAT_RESULT_MESSAGES.slice(1),
@@ -96,75 +101,35 @@ interface ContentLine {
   readonly hasLineBreak: boolean;
 }
 
-interface ParsedCreateChatParamsBlock {
-  readonly params: readonly GarconCreateChatParams[];
-  readonly end: number;
-}
-
 export function parseGarconStartAgent(
   content: string,
   start: number,
   end: number,
 ): GarconStartAgentParseResult {
-  const outerOpen = contentLine(content, start, end);
-  if (!lineEquals(content, outerOpen, GARCON_START_AGENT_OPEN)) {
-    return { kind: 'malformed', nextCandidateStart: outerOpen.nextStart };
-  }
-  if (!outerOpen.hasLineBreak) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
+  const parsed = parseStartAgentEnvelope(content, start, end);
+  if (parsed.kind === 'malformed') return parsed;
 
-  const promptOpen = contentLine(content, outerOpen.nextStart, end);
-  if (!lineEquals(content, promptOpen, GARCON_PROMPT_OPEN)) {
-    return { kind: 'malformed', nextCandidateStart: promptOpen.start };
-  }
-  if (!promptOpen.hasLineBreak) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
+  const command = parseStartAgentPayload(parsed.value);
+  return command
+    ? { kind: 'valid', command, end: parsed.end }
+    : { kind: 'malformed', nextCandidateStart: parsed.end };
+}
 
-  let promptClose: ContentLine | null = null;
-  const nestedPromptOpeners: ContentLine[] = [];
-  let cursor = promptOpen.nextStart;
+export function findGarconStartAgentCloser(
+  content: string,
+  searchStart: number,
+  end: number,
+): { readonly start: number; readonly end: number } | null {
+  let cursor = searchStart;
   while (cursor < end) {
     const line = contentLine(content, cursor, end);
-    if (lineEquals(content, line, GARCON_PROMPT_CLOSE)) {
-      promptClose = line;
-      break;
+    if (lineEquals(content, line, GARCON_START_AGENT_CLOSE)) {
+      return { start: line.start, end: line.end };
     }
-    if (lineEquals(content, line, GARCON_START_AGENT_OPEN) && line.hasLineBreak) {
-      const nextLine = contentLine(content, line.nextStart, end);
-      if (lineEquals(content, nextLine, GARCON_PROMPT_OPEN)) {
-        nestedPromptOpeners.push(nextLine);
-      }
-    }
-    if (!line.hasLineBreak) {
-      return { kind: 'malformed', nextCandidateStart: end };
-    }
+    if (!line.hasLineBreak) return null;
     cursor = line.nextStart;
   }
-  if (!promptClose || !promptClose.hasLineBreak) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
-
-  const prompt = normalizeGarconCommandBody(
-    content.slice(promptOpen.end, promptClose.start),
-  );
-  if (!isValidStartPrompt(prompt)) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
-  if (completesNestedStartAgent(content, nestedPromptOpeners, promptClose, end)) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
-
-  const parsedParams = parseCreateChatParamsBlock(content, promptClose.nextStart, end);
-  if (!parsedParams) {
-    return { kind: 'malformed', nextCandidateStart: end };
-  }
-  return {
-    kind: 'valid',
-    command: { type: 'start-agent', prompt, params: parsedParams.params },
-    end: parsedParams.end,
-  };
+  return null;
 }
 
 export function garconCreateChatResultsContent(
@@ -216,77 +181,131 @@ export function isGarconCreateChatResult(
     && candidate.chatId === undefined;
 }
 
-function completesNestedStartAgent(
-  content: string,
-  promptOpeners: readonly ContentLine[],
-  promptClose: ContentLine,
-  end: number,
-): boolean {
-  if (promptOpeners.length === 0) return false;
-  if (!parseCreateChatParamsBlock(content, promptClose.nextStart, end)) return false;
-
-  for (let index = promptOpeners.length - 1; index >= 0; index -= 1) {
-    const prompt = normalizeGarconCommandBody(
-      content.slice(promptOpeners[index].end, promptClose.start),
-    );
-    if (isValidStartPrompt(prompt)) return true;
+function parseStartAgentPayload(value: unknown): GarconStartAgentCommand | null {
+  if (
+    !isJsonObject(value)
+    || !hasOnlyJsonKeys(value, START_AGENT_PAYLOAD_KEYS)
+    || !Object.hasOwn(value, 'prompt')
+    || !Object.hasOwn(value, 'params')
+    || typeof value.prompt !== 'string'
+    || !isValidStartPrompt(value.prompt)
+    || !Array.isArray(value.params)
+    || value.params.length < 1
+    || value.params.length > MAX_GARCON_CREATE_CHAT_PARAMS
+  ) {
+    return null;
   }
-  return false;
-}
 
-function parseCreateChatParamsBlock(
-  content: string,
-  start: number,
-  end: number,
-): ParsedCreateChatParamsBlock | null {
   const params: GarconCreateChatParams[] = [];
   const refs = new Set<string>();
-  let cursor = start;
-  while (cursor < end) {
-    const line = contentLine(content, cursor, end);
-    if (lineEquals(content, line, GARCON_START_AGENT_CLOSE)) {
-      if (params.length === 0) return null;
-      return { params, end: line.end };
-    }
-    const parsedParams = parseCreateChatParams(content.slice(line.start, line.end));
-    if (
-      !parsedParams
-      || refs.has(parsedParams.ref)
-      || params.length === MAX_GARCON_CREATE_CHAT_PARAMS
-      || !line.hasLineBreak
-    ) {
-      return null;
-    }
-    refs.add(parsedParams.ref);
-    params.push(parsedParams);
-    cursor = line.nextStart;
+  for (const candidate of value.params) {
+    const parsed = parseCreateChatParams(candidate);
+    if (!parsed || refs.has(parsed.ref)) return null;
+    refs.add(parsed.ref);
+    params.push(parsed);
   }
-  return null;
+  return { type: 'start-agent', prompt: value.prompt, params };
 }
 
-function parseCreateChatParams(line: string): GarconCreateChatParams | null {
-  const match = CREATE_CHAT_PARAMS.exec(line);
-  if (!match) return null;
-
-  const [ref, agentId, providerId, endpointId, model, reasoningEffort] = match.slice(1);
+function parseCreateChatParams(value: unknown): GarconCreateChatParams | null {
   if (
-    !CANONICAL_UUID.test(ref)
+    !isJsonObject(value)
+    || !hasOnlyJsonKeys(value, CREATE_CHAT_PARAM_KEYS)
+    || !Object.hasOwn(value, 'ref')
+    || !Object.hasOwn(value, 'agent')
+    || !Object.hasOwn(value, 'model')
+  ) {
+    return null;
+  }
+
+  const ref = value.ref;
+  const agentId = value.agent;
+  const providerId = value.provider;
+  const endpointId = value.endpoint;
+  const model = value.model;
+  const reasoningEffort = value.reasoningEffort;
+  if (
+    typeof ref !== 'string'
+    || !CANONICAL_UUID.test(ref)
+    || typeof agentId !== 'string'
     || !SAFE_ID.test(agentId)
-    || (providerId !== undefined && !SAFE_ID.test(providerId))
-    || (endpointId !== undefined && !SAFE_ID.test(endpointId))
+    || (providerId !== undefined && (
+      typeof providerId !== 'string' || !SAFE_ID.test(providerId)
+    ))
+    || (endpointId !== undefined && (
+      providerId === undefined
+      || typeof endpointId !== 'string'
+      || !SAFE_ID.test(endpointId)
+    ))
+    || typeof model !== 'string'
     || !isValidCreateChatModel(model)
-    || (reasoningEffort !== undefined && !REASONING_EFFORT.test(reasoningEffort))
+    || (reasoningEffort !== undefined && (
+      typeof reasoningEffort !== 'string' || !REASONING_EFFORT.test(reasoningEffort)
+    ))
   ) {
     return null;
   }
   return {
     ref,
     agentId,
-    providerId: providerId ?? null,
-    endpointId: endpointId ?? null,
+    providerId: typeof providerId === 'string' ? providerId : null,
+    endpointId: typeof endpointId === 'string' ? endpointId : null,
     model,
-    reasoningEffort: reasoningEffort ?? null,
+    reasoningEffort: typeof reasoningEffort === 'string' ? reasoningEffort : null,
   };
+}
+
+function parseStartAgentEnvelope(
+  content: string,
+  start: number,
+  end: number,
+):
+  | { readonly kind: 'valid'; readonly value: unknown; readonly end: number }
+  | { readonly kind: 'malformed'; readonly nextCandidateStart: number } {
+  const openLine = contentLine(content, start, end);
+  if (!lineEquals(content, openLine, GARCON_START_AGENT_OPEN)) {
+    return { kind: 'malformed', nextCandidateStart: openLine.nextStart };
+  }
+  if (!openLine.hasLineBreak) {
+    return { kind: 'malformed', nextCandidateStart: end };
+  }
+
+  const closer = findGarconStartAgentCloser(content, openLine.nextStart, end);
+  if (!closer) return { kind: 'malformed', nextCandidateStart: end };
+
+  const value = parseBoundedStartAgentJson(
+    content.slice(openLine.nextStart, closer.start),
+  );
+  return value.ok
+    ? { kind: 'valid', value: value.value, end: closer.end }
+    : { kind: 'malformed', nextCandidateStart: closer.end };
+}
+
+function parseBoundedStartAgentJson(payload: string):
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false } {
+  if (
+    payload.length > GARCON_START_AGENT_PAYLOAD_MAX_BYTES
+    || utf8Encoder.encode(payload).byteLength > GARCON_START_AGENT_PAYLOAD_MAX_BYTES
+  ) {
+    return { ok: false };
+  }
+  try {
+    return { ok: true, value: JSON.parse(payload) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasOnlyJsonKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
 }
 
 function parseCreateChatResultLine(line: string): GarconCreateChatResult | null {
@@ -358,7 +377,7 @@ function isValidCreateChatModel(value: string): boolean {
   return trimmed.length > 0
     && trimmed === value
     && value.isWellFormed()
-    && !/["<>&\r\n]/.test(value)
+    && !/[\r\n]/.test(value)
     && utf8Encoder.encode(value).byteLength <= GARCON_CREATE_CHAT_MODEL_MAX_BYTES;
 }
 

@@ -5,6 +5,7 @@ import {
   GARCON_CREATE_CHAT_MODEL_MAX_BYTES,
   GARCON_GET_CHAT_ID,
   GARCON_MESSAGE_BODY_MAX_BYTES,
+  GARCON_START_AGENT_PAYLOAD_MAX_BYTES,
   GARCON_START_PROMPT_MAX_BYTES,
   extractGarconCommands,
   garconCreateChatResultsContent,
@@ -31,24 +32,27 @@ function createParams({
   model = 'gpt-5.4',
   reasoningEffort,
 } = {}) {
-  let routing = '';
-  if (provider !== undefined) {
-    routing = ` provider="${provider}"`;
-    if (endpoint !== undefined) routing += ` endpoint="${endpoint}"`;
-  }
-  const reasoning = reasoningEffort === undefined
-    ? ''
-    : ` reasoning-effort="${reasoningEffort}"`;
-  return `<garcon-create-chat-params ref="${ref}" agent="${agent}"${routing} model="${model}"${reasoning} />`;
+  return {
+    ref,
+    agent,
+    ...(provider === undefined ? {} : { provider }),
+    ...(endpoint === undefined ? {} : { endpoint }),
+    model,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  };
 }
 
 function startAgent(prompt = 'initial prompt', params = [createParams()], lineBreak = '\n') {
+  return startAgentPayload({ prompt, params }, lineBreak);
+}
+
+function startAgentPayload(payload, lineBreak = '\n') {
+  const json = typeof payload === 'string'
+    ? payload
+    : JSON.stringify(payload, null, 2);
   return [
     '<garcon-start-agent>',
-    '<garcon-prompt>',
-    prompt,
-    '</garcon-prompt>',
-    ...params,
+    json.replaceAll('\n', lineBreak),
     '</garcon-start-agent>',
   ].join(lineBreak);
 }
@@ -253,6 +257,90 @@ describe('Garcon edge commands', () => {
       issues: [{ command: 'send-message', reason: 'malformed', edge: 'leading' }],
     });
   });
+
+  it('does not dispatch commands inside an unclosed envelope of another family', () => {
+    const cases = [
+      {
+        outer: 'start-agent',
+        content: [
+          '<garcon-start-agent>',
+          '{"prompt":"outer","params":[',
+          send(FIRST, false, 'nested'),
+        ].join('\n'),
+      },
+      {
+        outer: 'start-agent',
+        content: [
+          '<garcon-start-agent>',
+          '{"prompt":"outer","params":[',
+          GARCON_GET_CHAT_ID,
+        ].join('\n'),
+      },
+      {
+        outer: 'send-message',
+        content: [
+          `<garcon-send-message to="${FIRST}" hide-sender="false">`,
+          'Example:',
+          startAgent('nested'),
+        ].join('\n'),
+      },
+    ];
+
+    for (const prefix of ['', 'answer\n']) {
+      for (const { outer, content: nestedContent } of cases) {
+        const content = `${prefix}${nestedContent}`;
+        expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+          message: new AssistantMessage(AT, content),
+          commands: [],
+          issues: [{
+            command: outer,
+            reason: 'malformed',
+            edge: prefix ? 'trailing' : 'leading',
+          }],
+        });
+      }
+    }
+  });
+
+  it('recovers trailing commands after a closed malformed envelope of another family', () => {
+    const malformedStart = startAgentPayload('{"prompt":');
+    const trailingSend = send(FIRST, false, 'valid');
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${malformedStart}\n${trailingSend}`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, `answer\n${malformedStart}`),
+      commands: [{
+        type: 'send-message',
+        recipients: [FIRST],
+        hideSender: false,
+        body: 'valid',
+      }],
+      issues: [{ command: 'start-agent', reason: 'malformed', edge: 'trailing' }],
+    });
+
+    const malformedSend = send('invalid', false);
+    const trailingStart = startAgent('valid');
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${malformedSend}\n${trailingStart}`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, `answer\n${malformedSend}`),
+      commands: [{
+        type: 'start-agent',
+        prompt: 'valid',
+        params: [{
+          ref: FIRST_REF,
+          agentId: 'codex',
+          providerId: null,
+          endpointId: null,
+          model: 'gpt-5.4',
+          reasoningEffort: null,
+        }],
+      }],
+      issues: [{ command: 'send-message', reason: 'malformed', edge: 'trailing' }],
+    });
+  });
 });
 
 describe('Garcon start-agent commands', () => {
@@ -318,8 +406,8 @@ describe('Garcon start-agent commands', () => {
     const prompt = [
       GARCON_GET_CHAT_ID,
       send(FIRST, false),
-      '<garcon-start-agent>',
-      'quoted without a prompt opener',
+      startAgent('nested example', [createParams({ ref: SECOND_REF })]),
+      'JSON-sensitive text: "quoted" <tag> & value',
     ].join('\n');
     expect(extractGarconCommands(new AssistantMessage(
       AT,
@@ -338,16 +426,12 @@ describe('Garcon start-agent commands', () => {
     }]);
   });
 
-  it('rejects a complete nested start block without dispatching either block', () => {
-    const content = startAgent(
-      `before\n${startAgent('nested')}\nafter`,
-      [createParams({ ref: SECOND_REF })],
-    );
-    expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
-      message: new AssistantMessage(AT, content),
-      commands: [],
-      issues: [{ command: 'start-agent', reason: 'malformed', edge: 'leading' }],
-    });
+  it('allows the exact envelope closer in the decoded prompt', () => {
+    const prompt = 'before\n</garcon-start-agent>\nafter';
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      startAgent(prompt),
+    ))?.commands[0].prompt).toBe(prompt);
   });
 
   it('peels three stacked trailing blocks in document order', () => {
@@ -364,7 +448,7 @@ describe('Garcon start-agent commands', () => {
   });
 
   it('peels a valid trailing block past an earlier malformed boundary candidate', () => {
-    const malformed = '<garcon-start-agent>\nnot a command';
+    const malformed = startAgentPayload('{"prompt":');
     const result = extractGarconCommands(new AssistantMessage(
       AT,
       `answer\n${malformed}\n${startAgent('valid trailing')}`,
@@ -382,8 +466,7 @@ describe('Garcon start-agent commands', () => {
   it('does not reroute a nested block through its malformed outer prompt', () => {
     const malformedOuter = [
       '<garcon-start-agent>',
-      '<garcon-prompt>',
-      'outer prompt',
+      '{"prompt":"outer","params":[',
       startAgent('nested'),
     ].join('\n');
 
@@ -401,16 +484,9 @@ describe('Garcon start-agent commands', () => {
     });
   });
 
-  it('bounds recovery across repeated prompt-owned candidates', () => {
-    const promptOpeners = '<garcon-start-agent>\n<garcon-prompt>\n'.repeat(1_400);
-    const content = [
-      'answer',
-      '<garcon-start-agent>',
-      '<garcon-prompt>',
-      promptOpeners,
-      '</garcon-prompt>',
-      '</garcon-start-agent>',
-    ].join('\n');
+  it('bounds recovery across repeated closed malformed envelopes', () => {
+    const malformed = startAgentPayload('{"prompt":');
+    const content = `answer\n${Array(1_000).fill(malformed).join('\n')}`;
 
     expect(content.length).toBeLessThan(64 * 1024);
     expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
@@ -442,7 +518,7 @@ describe('Garcon start-agent commands', () => {
     }
   });
 
-  it('enforces prompt and model byte bounds', () => {
+  it('enforces prompt and model value bounds', () => {
     expect(extractGarconCommands(new AssistantMessage(
       AT,
       startAgent('x'.repeat(GARCON_START_PROMPT_MAX_BYTES)),
@@ -461,9 +537,24 @@ describe('Garcon start-agent commands', () => {
         model: 'x'.repeat(GARCON_CREATE_CHAT_MODEL_MAX_BYTES + 1),
       })]),
     ))?.issues).toHaveLength(1);
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      startAgent('\ud800'),
+    ))?.issues).toHaveLength(1);
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      startAgent('prompt', [createParams({ model: 'model\nname' })]),
+    ))?.issues).toHaveLength(1);
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      startAgentPayload(
+        `${' '.repeat(GARCON_START_AGENT_PAYLOAD_MAX_BYTES + 1)}`
+          + JSON.stringify({ prompt: 'prompt', params: [createParams()] }),
+      ),
+    ))?.issues).toHaveLength(1);
   });
 
-  it('accepts every canonical optional-attribute combination', () => {
+  it('accepts every optional JSON field combination', () => {
     const params = [
       createParams(),
       createParams({ ref: SECOND_REF, provider: 'acme' }),
@@ -489,21 +580,64 @@ describe('Garcon start-agent commands', () => {
     ]);
   });
 
+  it('accepts order-independent keys and JSON-safe model text', () => {
+    const model = 'vendor/model"<>&';
+    const content = startAgentPayload(JSON.stringify({
+      params: [{
+        model,
+        reasoningEffort: 'low',
+        agent: 'codex',
+        ref: FIRST_REF,
+      }],
+      prompt: 'reordered fields',
+    }));
+
+    expect(extractGarconCommands(new AssistantMessage(AT, content))?.commands[0])
+      .toEqual({
+        type: 'start-agent',
+        prompt: 'reordered fields',
+        params: [{
+          ref: FIRST_REF,
+          agentId: 'codex',
+          providerId: null,
+          endpointId: null,
+          model,
+          reasoningEffort: 'low',
+        }],
+      });
+  });
+
   it('keeps structurally malformed blocks byte-identical as assistant text', () => {
-    const malformedParams = [
-      createParams({ ref: FIRST_REF.toUpperCase() }),
-      `<garcon-create-chat-params agent="codex" ref="${FIRST_REF}" model="gpt-5.4" />`,
-      `<garcon-create-chat-params ref="${FIRST_REF}" agent="codex" endpoint="primary" model="gpt-5.4" />`,
-      `<garcon-create-chat-params ref='${FIRST_REF}' agent="codex" model="gpt-5.4" />`,
-      `<garcon-create-chat-params ref="${FIRST_REF}" agent="codex" model="gpt-5.4" extra="x" />`,
-      ` ${createParams()}`,
-      createParams({ agent: 'Codex' }),
-      createParams({ model: ' padded ' }),
-      createParams({ model: 'bad&model' }),
-      createParams({ reasoningEffort: 'High' }),
+    const malformedPayloads = [
+      '{"prompt":',
+      "{'prompt':'prompt','params':[]}",
+      '{prompt:"prompt",params:[]}',
+      '{"prompt":"prompt","params":[],}',
+      '{"prompt":"prompt" /* comment */,"params":[]}',
+      'prompt: prompt\nparams: []',
+      null,
+      [],
+      { prompt: 'prompt' },
+      { prompt: 'prompt', params: 'not-an-array' },
+      { prompt: 'prompt', params: [createParams()], extra: true },
+      { prompt: 42, params: [createParams()] },
+      { prompt: 'prompt', params: [null] },
+      { prompt: 'prompt', params: [createParams({ ref: FIRST_REF.toUpperCase() })] },
+      { prompt: 'prompt', params: [{ agent: 'codex', model: 'gpt-5.4' }] },
+      { prompt: 'prompt', params: [{ ref: FIRST_REF, model: 'gpt-5.4' }] },
+      { prompt: 'prompt', params: [{ ref: FIRST_REF, agent: 'codex' }] },
+      { prompt: 'prompt', params: [createParams({ endpoint: 'primary' })] },
+      { prompt: 'prompt', params: [{ ...createParams(), extra: 'x' }] },
+      { prompt: 'prompt', params: [createParams({ agent: 'Codex' })] },
+      { prompt: 'prompt', params: [createParams({ model: ' padded ' })] },
+      { prompt: 'prompt', params: [createParams({ reasoningEffort: 'High' })] },
+      { prompt: 'prompt', params: [{ ...createParams(), provider: null }] },
     ];
-    for (const params of malformedParams) {
-      const content = startAgent('prompt', [params]);
+    const malformedBlocks = [
+      ...malformedPayloads.map((payload) => startAgentPayload(payload)),
+      '<garcon-start-agent extra>\n{}\n</garcon-start-agent>',
+    ];
+    for (const content of malformedBlocks) {
       const result = extractGarconCommands(new AssistantMessage(AT, content));
       expect(result?.message?.content).toBe(content);
       expect(result?.commands).toEqual([]);

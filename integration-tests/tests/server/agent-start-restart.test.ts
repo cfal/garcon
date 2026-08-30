@@ -169,12 +169,17 @@ function startAgentCommand(
 ): string {
   return [
     '<garcon-start-agent>',
-    '<garcon-prompt>',
-    prompt,
-    '</garcon-prompt>',
-    ...refs.map((ref) => (
-      `<garcon-create-chat-params ref="${ref}" agent="${agent.agentId}" provider="${agent.provider.providerId}" endpoint="${agent.provider.endpointId}" model="${agent.provider.model}" reasoning-effort="none" />`
-    )),
+    JSON.stringify({
+      prompt,
+      params: refs.map((ref) => ({
+        ref,
+        agent: agent.agentId,
+        provider: agent.provider.providerId,
+        endpoint: agent.provider.endpointId,
+        model: agent.provider.model,
+        reasoningEffort: 'none',
+      })),
+    }, null, 2),
     '</garcon-start-agent>',
   ].join('\n');
 }

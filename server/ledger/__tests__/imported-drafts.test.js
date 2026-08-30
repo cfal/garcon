@@ -145,10 +145,7 @@ describe('imported transcript drafts', () => {
           AT,
           'Retained answer.\n'
             + '<garcon-start-agent>\n'
-            + '<garcon-prompt>\n'
-            + 'Investigate the failure.\n'
-            + '</garcon-prompt>\n'
-            + `<garcon-create-chat-params ref="${ref}" agent="codex" model="gpt-5.4" />\n`
+            + `{"prompt":"Investigate the failure.","params":[{"ref":"${ref}","agent":"codex","model":"gpt-5.4"}]}\n`
             + '</garcon-start-agent>',
         ),
         providerMeta: { nativeIdentity: { id: 'assistant-start' } },
