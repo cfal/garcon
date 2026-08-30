@@ -8,6 +8,7 @@
 	import {
 		chatAttachmentAccept,
 		isImageAttachment,
+		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
@@ -126,7 +127,7 @@
 			snippetExpansion.cancel();
 			return true;
 		},
-		restoreFocus: () => void restoreTextareaFocus(),
+		restoreFocus: returnTextareaFocus,
 	});
 
 	let isMobile = $state(false);
@@ -280,16 +281,19 @@
 	}
 
 	function handleMessagePaste(event: ClipboardEvent): void {
-		if (promptTransformPending) return;
+		if (promptRefinement.pending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const pastedImages: File[] = [];
 		for (const item of items) {
 			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
-			if (file) pastedImages.push(file);
+			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
 		}
-		if (pastedImages.length > 0) form.addImages(pastedImages, attachmentSupport);
+		if (pastedImages.length > 0) {
+			snippetExpansion.cancel();
+			form.addImages(pastedImages, attachmentSupport);
+		}
 	}
 
 	function autoResizeTextarea(): void {
@@ -300,10 +304,11 @@
 
 	function handleMessageInput(event: Event): void {
 		const input = event.currentTarget as HTMLTextAreaElement;
-		if (promptTransformPending) {
+		if (promptRefinement.pending) {
 			input.value = form.firstMessage;
 			return;
 		}
+		if (snippetExpansion.pending) snippetExpansion.cancel();
 		form.firstMessage = input.value;
 		autoResizeTextarea();
 		if ((event as InputEvent).isComposing) return;
@@ -318,11 +323,14 @@
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	async function restoreTextareaFocus(caret?: number): Promise<void> {
+	function returnTextareaFocus(): void {
+		textareaRef?.focus({ preventScroll: true });
+	}
+
+	async function settleTextareaAfterSnippet(caret?: number): Promise<void> {
 		await tick();
 		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
 		autoResizeTextarea();
-		textareaRef?.focus();
 	}
 
 	function openExpandedEditor(): void {
@@ -352,11 +360,6 @@
 		composerEditor.updateSelection(selection);
 	}
 
-	async function focusPendingSnippetExpansion(): Promise<void> {
-		await tick();
-		if (snippetExpansion.pending) textareaRef?.focus();
-	}
-
 	function ensureProspectiveChatId(): ChatId {
 		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
 		return prospectiveChatId;
@@ -379,7 +382,7 @@
 		if (promptTransformPending || !textareaRef) return 'cancelled';
 		const context = expansionContext();
 		if (!context) {
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 			return 'cancelled';
 		}
 		const sourceText = form.firstMessage;
@@ -387,14 +390,11 @@
 		const start = range?.start ?? textareaRef.selectionStart;
 		const end = range?.end ?? textareaRef.selectionEnd;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: snippet.shortName,
-					arguments: { type: 'value', value: argumentsText },
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: snippet.shortName,
+				arguments: { type: 'value', value: argumentsText },
+				context,
+			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (
 				result.response.snippetId !== snippet.id ||
@@ -402,7 +402,7 @@
 			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
-				await restoreTextareaFocus();
+				await settleTextareaAfterSnippet();
 				return 'cancelled';
 			}
 			if (
@@ -418,12 +418,12 @@
 						caret: start + result.response.expandedText.length,
 					};
 			form.firstMessage = replacement.text;
-			await restoreTextareaFocus(replacement.caret);
+			await settleTextareaAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 			return 'failed';
 		}
 	}
@@ -437,14 +437,11 @@
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: command.shortName,
-					arguments: command.arguments,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: command.shortName,
+				arguments: command.arguments,
+				context,
+			});
 			if (result.kind !== 'expanded') return;
 			if (
 				form.trimmedPath !== projectPath ||
@@ -453,11 +450,11 @@
 			)
 				return;
 			form.firstMessage = result.response.expandedText;
-			await restoreTextareaFocus(result.response.expandedText.length);
+			await settleTextareaAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreTextareaFocus();
+			await settleTextareaAfterSnippet();
 		}
 	}
 
@@ -479,6 +476,7 @@
 			return;
 		}
 		if (command.kind === 'valid') {
+			returnTextareaFocus();
 			void expandSnippetInvocation(command);
 			return;
 		}
@@ -486,19 +484,27 @@
 		if (config) onStartChat(config, ensureProspectiveChatId());
 	}
 
-	function handleKeyDown(e: KeyboardEvent): void {
-		if (promptTransformPending) return;
-		if (
-			e.key === 'Enter' &&
+	function shouldSubmitMessageOnEnter(event: KeyboardEvent): boolean {
+		return (
+			event.key === 'Enter' &&
 			shouldSubmitOnEnter({
 				sendByShiftEnter: localSettings.sendByShiftEnter,
-				shiftKey: e.shiftKey,
-				ctrlKey: e.ctrlKey,
-				metaKey: e.metaKey,
-				isComposing: e.isComposing,
+				shiftKey: event.shiftKey,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				isComposing: event.isComposing,
 				isMobile,
 			})
-		) {
+		);
+	}
+
+	function handleKeyDown(e: KeyboardEvent): void {
+		const submitOnEnter = shouldSubmitMessageOnEnter(e);
+		if (promptTransformPending) {
+			if (submitOnEnter) e.preventDefault();
+			return;
+		}
+		if (submitOnEnter) {
 			if (!form.canSubmit) return;
 			e.preventDefault();
 			handleSubmit();
@@ -709,7 +715,7 @@
 					oninput={handleMessageInput}
 					onpaste={handleMessagePaste}
 					placeholder={form.placeholder}
-					readonly={promptTransformPending}
+					readonly={promptRefinement.pending}
 					aria-busy={promptTransformPending}
 					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
 					rows="2"></textarea>
@@ -782,8 +788,9 @@
 					onCancelled={() => {
 						const caret = snippetPalette.trigger?.end;
 						snippetPalette.dismiss();
-						void restoreTextareaFocus(caret);
+						void settleTextareaAfterSnippet(caret);
 					}}
+					onReturnFocus={returnTextareaFocus}
 					onEditSnippets={() => {
 						snippetPalette.dismiss();
 						editSnippets();

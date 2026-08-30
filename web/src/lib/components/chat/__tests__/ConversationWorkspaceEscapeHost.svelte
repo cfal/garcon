@@ -202,6 +202,7 @@
 			id: 'test-dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => testLayerElement,
 			onEscape: () => {
 				showTestLayer = false;

@@ -35,6 +35,7 @@
 			id: layerId,
 			kind: 'menu',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => ref,
 			onEscape: () => {
 				layerControl.close();

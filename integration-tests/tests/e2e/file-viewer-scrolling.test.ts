@@ -173,7 +173,7 @@ async function setScrollOffset(
           : expectedTarget === 'editor'
             ? surface?.querySelector<HTMLElement>('.cm-scroller')
             : surface?.querySelector<HTMLImageElement>(`img[alt="${expectedFileName}"]`)
-                ?.parentElement;
+                ?.closest<HTMLElement>('.overflow-auto');
       if (!element)
         throw new Error(`Missing ${expectedTarget} scroll target for ${expectedFileName}`);
       element.scrollTop = expectedOffset;
@@ -207,7 +207,7 @@ async function expectRestoredOffset(
           : expectedTarget === 'editor'
             ? surface?.querySelector<HTMLElement>('.cm-scroller')
             : surface?.querySelector<HTMLImageElement>(`img[alt="${expectedFileName}"]`)
-                ?.parentElement;
+                ?.closest<HTMLElement>('.overflow-auto');
       const tolerance = expectedTarget === 'image' ? 4 : 1;
       return element != null && Math.abs(element.scrollTop - expected) <= tolerance;
     },

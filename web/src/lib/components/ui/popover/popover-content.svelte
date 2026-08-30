@@ -31,6 +31,7 @@
 			id: layerId,
 			kind: 'popover',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => ref,
 			onEscape: () => {
 				layerControl.close();

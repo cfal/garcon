@@ -17,6 +17,7 @@ export interface TransientLayerRegistration {
 	id: string;
 	kind: TransientLayerKind;
 	modality: TransientLayerModality;
+	isOpen: () => boolean;
 	element: () => HTMLElement | null;
 	onEscape: () => boolean;
 	restoreFocus: () => void;
@@ -52,7 +53,8 @@ export class TransientLayerRegistry {
 
 	get makesMainInert(): boolean {
 		return (
-			this.#pendingMainInert > 0 || this.#layers.some((layer) => layer.modality === 'main-inert')
+			this.#pendingMainInert > 0 ||
+			this.#layers.some((layer) => layer.modality === 'main-inert' && layer.isOpen())
 		);
 	}
 
@@ -116,14 +118,13 @@ export class TransientLayerRegistry {
 	#topVisibleLayer(modality?: TransientLayerModality): RegisteredLayer | null {
 		return (
 			this.#layers
-					.filter((layer) => {
+				.filter((layer) => {
 					if (modality && layer.modality !== modality) return false;
+					if (!layer.isOpen()) return false;
 					const element = layer.element();
-						return Boolean(
-							element?.isConnected &&
-							!element.hidden &&
-							element.dataset.state !== 'closed',
-						);
+					return Boolean(
+						element?.isConnected && !element.hidden && element.dataset.state !== 'closed',
+					);
 				})
 				.sort((left, right) => {
 					const priority = PRIORITY[right.kind] - PRIORITY[left.kind];

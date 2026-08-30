@@ -77,28 +77,31 @@
 		},
 	});
 	setSnippets(snippetStore);
+	const mainInert = $derived(transientLayers.makesMainInert);
 </script>
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
-<input bind:this={composerInput} aria-label="Composer prompt" />
+<div inert={mainInert}>
+	<input bind:this={composerInput} aria-label="Composer prompt" />
 
-<ComposerSnippetPalette
-	{open}
-	onOpenChange={(nextOpen) => (open = nextOpen)}
-	{initialQuery}
-	{interactionKey}
-	{contextHint}
-	onInsert={(snippet, argumentsText) => {
-		selected = snippet.shortName;
-		selectedArguments = argumentsText;
-		return insertionResult;
-	}}
-	onCancelled={() => {
-		cancelCount += 1;
-		composerInput?.focus();
-	}}
-	onEditSnippets={() => (editCount += 1)}
-/>
+	<ComposerSnippetPalette
+		{open}
+		onOpenChange={(nextOpen) => (open = nextOpen)}
+		{initialQuery}
+		{interactionKey}
+		{contextHint}
+		onInsert={(snippet, argumentsText) => {
+			selected = snippet.shortName;
+			selectedArguments = argumentsText;
+			return insertionResult;
+		}}
+		onCancelled={() => {
+			cancelCount += 1;
+		}}
+		onReturnFocus={() => composerInput?.focus({ preventScroll: true })}
+		onEditSnippets={() => (editCount += 1)}
+	/>
+</div>
 
 <button
 	type="button"
@@ -130,6 +133,7 @@
 >
 
 <output data-testid="palette-open">{String(open)}</output>
+<output data-testid="main-inert">{String(mainInert)}</output>
 <output data-testid="selected-snippet">{selected}</output>
 <output data-testid="selected-arguments">{selectedArguments}</output>
 <output data-testid="cancel-count">{cancelCount}</output>

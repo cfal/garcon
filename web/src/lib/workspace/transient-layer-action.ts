@@ -22,6 +22,7 @@ function registerTransientLayer(
 		id: options.id,
 		kind: options.kind,
 		modality: options.modality,
+		isOpen: () => true,
 		element: () => node,
 		onEscape: options.onEscape,
 		restoreFocus: options.restoreFocus,

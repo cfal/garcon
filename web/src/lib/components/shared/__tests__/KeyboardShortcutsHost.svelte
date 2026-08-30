@@ -156,6 +156,7 @@
 				initialTransientKind === 'menu' || initialTransientKind === 'popover'
 					? 'nonmodal'
 					: 'main-inert',
+			isOpen: () => true,
 			element: () => transientElement,
 			onEscape: () => {
 				onTransientEscape();

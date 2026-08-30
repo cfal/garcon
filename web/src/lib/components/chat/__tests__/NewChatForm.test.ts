@@ -125,6 +125,7 @@ function stubMatchMedia(matches: boolean): void {
 async function renderSubmittableForm(
 	onStartChat: () => void,
 	props: {
+		supportsImages?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -545,7 +546,9 @@ describe('NewChatForm', () => {
 		const messageInput = await renderSubmittableForm(onStartChat);
 		await fireEvent.input(messageInput, { target: { value: '/snippet review the API' } });
 
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		const start = screen.getByRole('button', { name: 'Start session' });
+		start.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(document.activeElement).toBe(messageInput);
 
 		await waitFor(() => expect(messageInput.value).toBe('Review the API in /workspace/project'));
 		expect(onStartChat).not.toHaveBeenCalled();
@@ -926,7 +929,7 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
-	it('lets Escape cancel a pending expansion without changing the draft', async () => {
+	it('keeps the composer editable and cancels a pending expansion when the user types', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
@@ -941,9 +944,17 @@ describe('NewChatForm', () => {
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 		expect(document.activeElement).toBe(messageInput);
+		expect(messageInput.readOnly).toBe(false);
+		const pendingEnter = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			bubbles: true,
+			cancelable: true,
+		});
+		messageInput.dispatchEvent(pendingEnter);
+		expect(pendingEnter.defaultPrevented).toBe(true);
 
-		await fireEvent.keyDown(messageInput, { key: 'Escape' });
-		expect(messageInput.value).toBe('Keep this draft');
+		await fireEvent.input(messageInput, { target: { value: 'User edit wins' } });
+		expect(messageInput.value).toBe('User edit wins');
 		expect(messageInput.readOnly).toBe(false);
 		expect(onStartChat).not.toHaveBeenCalled();
 		pending.resolve({
@@ -957,7 +968,86 @@ describe('NewChatForm', () => {
 
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('User edit wins');
+	});
+
+	it('accepts a pasted image and cancels a pending expansion', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'cancellable' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		const attachment = new File(['image'], 'pasted.png', { type: 'image/png' });
+		await fireEvent.paste(messageInput, {
+			clipboardData: {
+				items: [{ type: 'image/png', getAsFile: () => attachment }],
+			},
+		});
+
+		expect(screen.getByRole('button', { name: 'Remove attachment pasted.png' })).toBeTruthy();
+		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
+		expect(expansionOptions?.signal?.aborted).toBe(true);
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(messageInput.value).toBe('Keep this draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('ignores an unsupported pasted image without cancelling a pending expansion', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat, { supportsImages: false });
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'still running' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		const attachment = new File(['image'], 'unsupported.png', { type: 'image/png' });
+		await fireEvent.paste(messageInput, {
+			clipboardData: {
+				items: [{ type: 'image/png', getAsFile: () => attachment }],
+			},
+		});
+
+		expect(screen.queryByRole('button', { name: 'Remove attachment unsupported.png' })).toBeNull();
+		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
+		expect(expansionOptions?.signal?.aborted).toBe(false);
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'expansion still applies',
+		});
+
+		await pending.promise;
+		await waitFor(() => expect(messageInput.value).toContain('expansion still applies'));
+		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
 	it('lets another form control cancel a pending expansion with Escape', async () => {

@@ -28,6 +28,7 @@
 
 	interface Props {
 		allowDirectChats?: boolean;
+		supportsImages?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -36,6 +37,7 @@
 
 	let {
 		allowDirectChats = false,
+		supportsImages = true,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
@@ -138,7 +140,7 @@
 				description: '',
 				supportsFork: true,
 				supportsUpdateProjectPath: true,
-				supportsImages: true,
+				supportsImages,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 				defaultModel: modelForAgent(agentId).value,
@@ -198,7 +200,7 @@
 			return [modelForAgent(agentId)];
 		},
 		supportsImages() {
-			return true;
+			return supportsImages;
 		},
 		getModelForSelection(agentId: string, model: string) {
 			const models = [modelForAgent(agentId)];
