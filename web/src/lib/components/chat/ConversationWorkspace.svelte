@@ -44,7 +44,6 @@
 		type UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
@@ -81,6 +80,7 @@
 		getGitBranchActions,
 		getChatProcessingReconciler,
 		getChatDrafts,
+		getConversationUi,
 	} from '$lib/context';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
@@ -175,7 +175,7 @@
 	});
 	const agentState = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
-	const conversationUi = new ConversationUiState();
+	const conversationUi = getConversationUi();
 	const processingReconciler = getChatProcessingReconciler();
 	const removeProcessingPresentation = processingReconciler.addPresentation({
 		get currentChatId() {
@@ -187,7 +187,8 @@
 		applyProcessingSnapshotPhase: (chatId, phase, sentAt) => {
 			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt);
 		},
-		clearTurnPermissionRequests: () => conversationUi.clearTurnPermissionRequests(),
+		clearTurnPermissionRequests: (chatId) =>
+			conversationUi.clearTurnPermissionRequestsForChat(chatId),
 	});
 
 	let queuedInputsDialogOpen = $state(false);
@@ -389,10 +390,6 @@
 		},
 	});
 	reconnectCoordinator.mount();
-
-	conversationUi.mountExecutionControlPruning({
-		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
-	});
 
 	// Scroll controller.
 	const scroll = new ConversationScrollController({

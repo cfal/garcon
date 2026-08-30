@@ -13,10 +13,13 @@
 		getChatSessions,
 		getFileSessions,
 		getGitBranchActions,
+		getChatProcessingReconciler,
 		getModelCatalog,
 		getSurfaceFrames,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
+		setConversationUi,
+		setConversationLifecycles,
 		type WorkspaceChatActions,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
@@ -28,6 +31,8 @@
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
+	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import {
 		chatViewSurfaceId,
 		type ChatViewSurfaceDescriptor,
@@ -70,9 +75,21 @@
 	const gitBranchActions = getGitBranchActions();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
+	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const chatWindowPreviews = new ChatWindowPreviewStore(chatTranscriptCache);
+	const conversationUi = new ConversationUiState();
+	setConversationUi(conversationUi);
+	const conversationLifecycles = new ConversationLifecycleRegistry({
+		sessions,
+		processing: processingReconciler,
+		conversationUi,
+	});
+	setConversationLifecycles(conversationLifecycles);
+	conversationUi.mountExecutionControlPruning({
+		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
+	});
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
@@ -168,7 +185,13 @@
 		untrack(() => chatWindowPreviews.prune(chatIds));
 	});
 
+	$effect(() => {
+		const activeChatIds = new Set(Object.keys(sessions.byId));
+		untrack(() => conversationLifecycles.prune(activeChatIds));
+	});
+
 	onDestroy(() => {
+		conversationLifecycles.destroy();
 		rootState.destroy();
 	});
 

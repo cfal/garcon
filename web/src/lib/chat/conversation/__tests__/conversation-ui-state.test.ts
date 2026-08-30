@@ -96,6 +96,48 @@ describe('ConversationUiState', () => {
 		]);
 	});
 
+	it('keeps permission projections independent by chat', () => {
+		const store = new ConversationUiState();
+		store.updatePendingPermissionsForChat('chat-a', [makePermissionRequest('a', 'chat-a')]);
+		store.updatePendingPermissionsForChat('chat-b', [
+			makePermissionRequest('b', 'chat-b'),
+			makeExitPlanRequest('plan-exit-b'),
+		]);
+
+		store.clearTurnPermissionRequestsForChat('chat-b');
+
+		expect(store.pendingPermissionsFor('chat-a').map((request) => request.chatId)).toEqual([
+			'chat-a',
+		]);
+		expect(
+			store.pendingPermissionsFor('chat-b').map((request) => request.permissionOccurrenceId),
+		).toEqual(['plan-exit-b']);
+		expect(store.pendingPermissionChatIds.sort()).toEqual(['chat-a', 'chat-b']);
+	});
+
+	it('projects compatibility permissions from the activated chat', () => {
+		const store = new ConversationUiState();
+		store.updatePendingPermissionsForChat('chat-a', [makePermissionRequest('a', 'chat-a')]);
+		store.updatePendingPermissionsForChat('chat-b', [makePermissionRequest('b', 'chat-b')]);
+
+		store.activateTransientFeed('chat-b');
+
+		expect(store.pendingPermissionRequests.map((request) => request.chatId)).toEqual(['chat-b']);
+	});
+
+	it('retains plan-mode restoration independently by chat', () => {
+		const store = new ConversationUiState();
+		store.beginPlanModeForChat('chat-a', 'default');
+		store.beginPlanModeForChat('chat-b', 'acceptEdits');
+		store.beginPlanModeForChat('chat-a', 'bypassPermissions');
+
+		expect(store.previousPermissionModeFor('chat-a')).toBe('default');
+		expect(store.previousPermissionModeFor('chat-b')).toBe('acceptEdits');
+		expect(store.finishPlanModeForChat('chat-a')).toBe('default');
+		expect(store.previousPermissionModeFor('chat-a')).toBeNull();
+		expect(store.previousPermissionModeFor('chat-b')).toBe('acceptEdits');
+	});
+
 	it('stores execution controls by chat and prunes controls for removed chats', () => {
 		const store = new ConversationUiState();
 		const control = makeControl();

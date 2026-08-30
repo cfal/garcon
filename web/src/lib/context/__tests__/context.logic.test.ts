@@ -28,6 +28,10 @@ import {
 	setAgentState,
 	getConversationLifecycle,
 	setConversationLifecycle,
+	getConversationLifecycles,
+	setConversationLifecycles,
+	getConversationUi,
+	setConversationUi,
 	getNotifications,
 	setNotifications,
 	getSidebarSearch,
@@ -58,6 +62,10 @@ describe('context factories', () => {
 		expect(typeof setWs).toBe('function');
 		expect(typeof getChatProcessingReconciler).toBe('function');
 		expect(typeof setChatProcessingReconciler).toBe('function');
+		expect(typeof getConversationLifecycles).toBe('function');
+		expect(typeof setConversationLifecycles).toBe('function');
+		expect(typeof getConversationUi).toBe('function');
+		expect(typeof setConversationUi).toBe('function');
 		expect(typeof getModelCatalog).toBe('function');
 		expect(typeof setModelCatalog).toBe('function');
 		expect(typeof getNotifications).toBe('function');

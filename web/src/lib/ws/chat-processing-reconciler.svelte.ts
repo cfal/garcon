@@ -7,7 +7,6 @@ import {
 } from '$shared/ws-events';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type {
 	ChatProcessingSnapshotSource,
 	WsConnection,
@@ -16,9 +15,10 @@ import type {
 
 export interface ChatProcessingPresentation {
 	readonly currentChatId: string | null;
+	matchesChat?: (chatId: string) => boolean;
 	applyProcessingPhase: ConversationLifecycleState['applyProcessingPhase'];
 	applyProcessingSnapshotPhase: ConversationLifecycleState['applyProcessingSnapshotPhase'];
-	clearTurnPermissionRequests: ConversationUiPort['clearTurnPermissionRequests'];
+	clearTurnPermissionRequests: (chatId: string) => void;
 }
 
 export interface ChatProcessingPresentationRegistry {
@@ -144,9 +144,9 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		chatId: string,
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
 	): void {
-		if (presentation.currentChatId !== chatId) return;
+		if (!this.#matchesPresentation(presentation, chatId)) return;
 		presentation.applyProcessingPhase(chatId, phase);
-		if (phase === null) presentation.clearTurnPermissionRequests();
+		if (phase === null) presentation.clearTurnPermissionRequests(chatId);
 	}
 
 	#applyPresentationSnapshot(
@@ -155,8 +155,12 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 		phase: Parameters<ConversationLifecycleState['applyProcessingPhase']>[1],
 		sentAt: number | null,
 	): void {
-		if (presentation.currentChatId !== chatId) return;
+		if (!this.#matchesPresentation(presentation, chatId)) return;
 		presentation.applyProcessingSnapshotPhase(chatId, phase, sentAt);
-		if (phase === null) presentation.clearTurnPermissionRequests();
+		if (phase === null) presentation.clearTurnPermissionRequests(chatId);
+	}
+
+	#matchesPresentation(presentation: ChatProcessingPresentation, chatId: string): boolean {
+		return presentation.matchesChat?.(chatId) ?? presentation.currentChatId === chatId;
 	}
 }
