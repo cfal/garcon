@@ -58,6 +58,9 @@ function createHarness() {
 		requestComposerFocus,
 		reportOpenError,
 		reportDeleteError,
+		get routeChatId() {
+			return routeChatId;
+		},
 		get selectedChatId() {
 			return selectedChatId;
 		},
@@ -103,21 +106,31 @@ describe('AppShellChatNavigationController', () => {
 		expect(harness.showChat).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('lets a newly focused window supersede an unresolved route navigation', async () => {
+	it('finishes the newest focused-window route last', async () => {
 		const harness = createHarness();
 		const firstNavigation = deferred<void>();
-		harness.navigateToChat.mockImplementationOnce(() => firstNavigation.promise);
+		harness.navigateToChat.mockImplementation(async (chatId) => {
+			if (chatId === 'chat-a') await firstNavigation.promise;
+			harness.setRouteChatId(chatId);
+		});
 
 		const first = harness.controller.synchronizeFocusedChat('chat-a');
 		expect(harness.controller.pendingWindowId).toBe('window-main');
+		await Promise.resolve();
+		expect(harness.navigateToChat).toHaveBeenCalledOnce();
 
 		harness.setCurrentWindowId('window-other');
-		await harness.controller.synchronizeFocusedChat('chat-b');
+		const second = harness.controller.synchronizeFocusedChat('chat-b');
 		expect(harness.selectedChatId).toBe('chat-b');
-		expect(harness.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(harness.navigateToChat).toHaveBeenCalledTimes(1);
 
 		firstNavigation.resolve();
-		await first;
+		await Promise.all([first, second]);
+		expect(harness.navigateToChat.mock.calls.map(([chatId]) => chatId)).toEqual([
+			'chat-a',
+			'chat-b',
+		]);
+		expect(harness.routeChatId).toBe('chat-b');
 		expect(harness.selectedChatId).toBe('chat-b');
 		expect(harness.requestComposerFocus).toHaveBeenCalledOnce();
 	});

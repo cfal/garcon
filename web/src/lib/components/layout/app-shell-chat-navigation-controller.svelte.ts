@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 interface AppShellChatNavigationControllerOptions {
@@ -35,6 +36,7 @@ export class AppShellChatNavigationController {
 	readonly #options: AppShellChatNavigationControllerOptions;
 	#generation = 0;
 	readonly #routeEchoes = new Set<RouteEcho>();
+	readonly #routeNavigationQueue = new SerialQueue();
 
 	constructor(options: AppShellChatNavigationControllerOptions) {
 		this.#options = options;
@@ -57,9 +59,7 @@ export class AppShellChatNavigationController {
 			if (!this.#isCurrent(generation)) return;
 			if (!this.#options.isLoadingChats && !this.#options.hasChat(chatId)) return;
 			this.#options.setSelectedChatId(chatId);
-			if (options.navigate && this.#options.routeChatId !== chatId) {
-				await this.#navigateToChat(chatId);
-			}
+			if (options.navigate) await this.#queueChatRoute(chatId, generation);
 			if (this.#isCurrent(generation)) this.#options.requestComposerFocus();
 		} catch (error) {
 			if (this.#isCurrent(generation)) this.#options.reportOpenError(error);
@@ -72,7 +72,7 @@ export class AppShellChatNavigationController {
 		const generation = this.#begin(chatId);
 		try {
 			this.#options.setSelectedChatId(chatId);
-			if (this.#options.routeChatId !== chatId) await this.#navigateToChat(chatId);
+			await this.#queueChatRoute(chatId, generation);
 			if (this.#isCurrent(generation)) this.#options.requestComposerFocus();
 		} catch (error) {
 			if (this.#isCurrent(generation)) this.#options.reportOpenError(error);
@@ -147,7 +147,14 @@ export class AppShellChatNavigationController {
 		this.pendingWindowId = null;
 	}
 
-	async #navigateToChat(chatId: string): Promise<void> {
+	async #queueChatRoute(chatId: string, generation: number): Promise<void> {
+		await this.#routeNavigationQueue.enqueue(async () => {
+			if (!this.#isCurrent(generation) || this.#options.routeChatId === chatId) return;
+			await this.#commitChatRoute(chatId);
+		});
+	}
+
+	async #commitChatRoute(chatId: string): Promise<void> {
 		const echo: RouteEcho = { chatId };
 		this.#routeEchoes.add(echo);
 		try {
