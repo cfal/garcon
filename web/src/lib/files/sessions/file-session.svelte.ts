@@ -9,8 +9,6 @@ export type FileRendererMode = 'code' | 'markdown' | 'image';
 export interface ImageViewState {
 	mode: 'fit' | 'manual';
 	scale: number;
-	focalX: number;
-	focalY: number;
 	scrollLeft: number;
 	scrollTop: number;
 }
@@ -19,8 +17,6 @@ export function defaultImageViewState(): ImageViewState {
 	return {
 		mode: 'fit',
 		scale: 1,
-		focalX: 0.5,
-		focalY: 0.5,
 		scrollLeft: 0,
 		scrollTop: 0,
 	};

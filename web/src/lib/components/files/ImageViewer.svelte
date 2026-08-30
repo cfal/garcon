@@ -6,10 +6,10 @@
 	import {
 		calculateFitScale,
 		captureZoomAnchor,
-		centerOfRect,
 		restoreZoomAnchor,
 		type ZoomAnchor,
 		type ZoomPoint,
+		type ZoomSize,
 	} from '$lib/components/shared/zoom-viewport.js';
 	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
@@ -22,16 +22,46 @@
 	const ZOOM_STEP = 0.25;
 	const ZOOM_MIN = 0.25;
 	const ZOOM_MAX = 5;
+	const VIEWPORT_PADDING = 16;
 	const primaryScrollRegion = nativeWorkspaceScrollRegion('primary');
+	let viewportSize = $state<ZoomSize>({ width: 1, height: 1 });
+	let naturalSize = $state<ZoomSize>({ width: 0, height: 0 });
 	let pendingZoomAnchor: ZoomAnchor | null = null;
 	let zoomFrame: number | null = null;
+	let savedViewportFrame: number | null = null;
 	let scrollReleaseFrame: number | null = null;
 	let correctingScroll = false;
+	const stageWidth = $derived(naturalSize.width * session.image.scale);
+	const stageHeight = $derived(naturalSize.height * session.image.scale);
+	const canvasWidth = $derived(Math.max(viewportSize.width, stageWidth + VIEWPORT_PADDING * 2));
+	const canvasHeight = $derived(Math.max(viewportSize.height, stageHeight + VIEWPORT_PADDING * 2));
+	const stageLeft = $derived((canvasWidth - stageWidth) / 2);
+	const stageTop = $derived((canvasHeight - stageHeight) / 2);
 
 	function cancelPendingManualZoom(): void {
 		if (zoomFrame !== null) cancelAnimationFrame(zoomFrame);
 		zoomFrame = null;
 		pendingZoomAnchor = null;
+	}
+
+	function updateViewportSize(): void {
+		if (!viewportElement) return;
+		const width = Math.max(1, viewportElement.clientWidth);
+		const height = Math.max(1, viewportElement.clientHeight);
+		if (viewportSize.width === width && viewportSize.height === height) return;
+		viewportSize = { width, height };
+	}
+
+	function updateNaturalSize(): boolean {
+		if (!imageElement || imageElement.naturalWidth <= 0 || imageElement.naturalHeight <= 0) {
+			return false;
+		}
+		const width = imageElement.naturalWidth;
+		const height = imageElement.naturalHeight;
+		if (naturalSize.width !== width || naturalSize.height !== height) {
+			naturalSize = { width, height };
+		}
+		return true;
 	}
 
 	function scheduleScrollRelease(): void {
@@ -44,12 +74,8 @@
 
 	function setManualScale(scale: number, client?: ZoomPoint): void {
 		const anchor = pendingZoomAnchor ?? captureViewport(client);
-		session.image = {
-			...session.image,
-			mode: 'manual',
-			scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale)),
-			...(anchor ? { focalX: anchor.focal.x, focalY: anchor.focal.y } : {}),
-		};
+		session.image.mode = 'manual';
+		session.image.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
 		if (!anchor) return;
 		pendingZoomAnchor = anchor;
 		if (zoomFrame !== null) return;
@@ -62,26 +88,21 @@
 	}
 
 	function fitToWindow(): void {
-		const image = imageElement;
 		const viewport = viewportElement;
-		if (!image || !viewport) return;
+		if (!viewport || !updateNaturalSize()) return;
 		cancelPendingManualZoom();
+		updateViewportSize();
 		const scale = calculateFitScale({
-			viewport: { width: viewport.clientWidth, height: viewport.clientHeight },
-			content: { width: image.naturalWidth, height: image.naturalHeight },
-			padding: 16,
+			viewport: viewportSize,
+			content: naturalSize,
+			padding: VIEWPORT_PADDING,
 			minScale: ZOOM_MIN,
 			maxScale: ZOOM_MAX,
 		});
-		session.image = {
-			...session.image,
-			mode: 'fit',
-			scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale)),
-			focalX: 0.5,
-			focalY: 0.5,
-			scrollLeft: 0,
-			scrollTop: 0,
-		};
+		session.image.mode = 'fit';
+		session.image.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale));
+		session.image.scrollLeft = 0;
+		session.image.scrollTop = 0;
 		correctingScroll = true;
 		viewport.scrollLeft = 0;
 		viewport.scrollTop = 0;
@@ -92,23 +113,13 @@
 		if (!viewportElement || !imageElement) return null;
 		const viewportRect = viewportElement.getBoundingClientRect();
 		const imageRect = imageElement.getBoundingClientRect();
-		return captureZoomAnchor(viewportRect, imageRect, client ?? centerOfRect(viewportRect), {
-			x: session.image.focalX,
-			y: session.image.focalY,
-		});
+		return captureZoomAnchor(viewportRect, imageRect, client);
 	}
 
 	function persistViewport(viewport = viewportElement): void {
 		if (!viewport || correctingScroll) return;
-		const anchor = captureViewport();
-		if (!anchor) return;
-		session.image = {
-			...session.image,
-			focalX: anchor.focal.x,
-			focalY: anchor.focal.y,
-			scrollLeft: viewport.scrollLeft,
-			scrollTop: viewport.scrollTop,
-		};
+		session.image.scrollLeft = viewport.scrollLeft;
+		session.image.scrollTop = viewport.scrollTop;
 	}
 
 	function restoreManualFocalPoint(anchor: ZoomAnchor): void {
@@ -116,20 +127,31 @@
 		const imageRect = imageElement.getBoundingClientRect();
 		correctingScroll = true;
 		restoreZoomAnchor(viewportElement, imageRect, anchor);
-		session.image = {
-			...session.image,
-			scrollLeft: viewportElement.scrollLeft,
-			scrollTop: viewportElement.scrollTop,
-		};
+		session.image.scrollLeft = viewportElement.scrollLeft;
+		session.image.scrollTop = viewportElement.scrollTop;
 		scheduleScrollRelease();
 	}
 
-	function restoreSavedManualFocalPoint(): void {
-		if (!viewportElement) return;
-		restoreManualFocalPoint({
-			client: centerOfRect(viewportElement.getBoundingClientRect()),
-			focal: { x: session.image.focalX, y: session.image.focalY },
+	function restoreSavedViewport(): void {
+		if (!viewportElement || session.image.mode !== 'manual') return;
+		correctingScroll = true;
+		viewportElement.scrollLeft = session.image.scrollLeft;
+		viewportElement.scrollTop = session.image.scrollTop;
+		scheduleScrollRelease();
+	}
+
+	function scheduleSavedViewportRestore(): void {
+		if (savedViewportFrame !== null) cancelAnimationFrame(savedViewportFrame);
+		savedViewportFrame = requestAnimationFrame(() => {
+			savedViewportFrame = null;
+			restoreSavedViewport();
 		});
+	}
+
+	function handleImageLoad(): void {
+		if (!updateNaturalSize()) return;
+		if (session.image.mode === 'fit') fitToWindow();
+		else scheduleSavedViewportRestore();
 	}
 
 	function handleWheel(event: WheelEvent): void {
@@ -142,24 +164,30 @@
 	$effect(() => {
 		const viewport = viewportElement;
 		if (!viewport) return;
-		correctingScroll = true;
+		let resizeFrame: number | null = null;
 		const observer = new ResizeObserver(() => {
-			if (session.image.mode === 'fit') fitToWindow();
+			if (resizeFrame !== null) return;
+			resizeFrame = requestAnimationFrame(() => {
+				resizeFrame = null;
+				updateViewportSize();
+				if (session.image.mode === 'fit') fitToWindow();
+			});
 		});
 		observer.observe(viewport);
+		correctingScroll = true;
 		const frame = requestAnimationFrame(() => {
-			correctingScroll = true;
-			viewport.scrollLeft = session.image.scrollLeft;
-			viewport.scrollTop = session.image.scrollTop;
+			updateViewportSize();
 			if (session.image.mode === 'fit') fitToWindow();
-			else restoreSavedManualFocalPoint();
+			else restoreSavedViewport();
 			scheduleScrollRelease();
 		});
 		// Scroll events persist offsets before detached browser viewports report zero.
 		return () => {
 			cancelAnimationFrame(frame);
 			cancelPendingManualZoom();
+			if (savedViewportFrame !== null) cancelAnimationFrame(savedViewportFrame);
 			if (scrollReleaseFrame !== null) cancelAnimationFrame(scrollReleaseFrame);
+			if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
 			observer.disconnect();
 		};
 	});
@@ -201,23 +229,28 @@
 	<div
 		bind:this={viewportElement}
 		{@attach primaryScrollRegion}
-		class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted p-4"
+		class="min-h-0 flex-1 overflow-auto bg-muted"
 		onwheel={handleWheel}
 		onscroll={(event) => persistViewport(event.currentTarget)}
 	>
-		{#if session.imageObjectUrl}
-			<img
-				bind:this={imageElement}
-				src={session.imageObjectUrl}
-				alt={session.fileName}
-				class="max-w-none object-contain"
-				style:transform={`scale(${session.image.scale})`}
-				style:transform-origin={`${session.image.focalX * 100}% ${session.image.focalY * 100}%`}
-				onload={() => {
-					if (session.image.mode === 'fit') fitToWindow();
-					else restoreSavedManualFocalPoint();
-				}}
-			/>
-		{/if}
+		<div class="relative" style:width={`${canvasWidth}px`} style:height={`${canvasHeight}px`}>
+			{#if session.imageObjectUrl}
+				<div
+					class="absolute"
+					style:left={`${stageLeft}px`}
+					style:top={`${stageTop}px`}
+					style:width={`${stageWidth}px`}
+					style:height={`${stageHeight}px`}
+				>
+					<img
+						bind:this={imageElement}
+						src={session.imageObjectUrl}
+						alt={session.fileName}
+						class="block size-full max-w-none object-contain"
+						onload={handleImageLoad}
+					/>
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
