@@ -236,6 +236,25 @@ describe('AgentStartController', () => {
     );
   });
 
+  it('reports a content-free diagnostic for an invalid selection catalog', async () => {
+    const fixture = createFixture({
+      selection: {
+        resolve: mock(async () => ({ ok: false, message: 'start-failed' })),
+      },
+    });
+    fixture.controller.request(request());
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.errors).toEqual([{
+      error: { code: 'INVALID_CATALOG' },
+      context: {
+        sourceChatId: SOURCE_CHAT_ID,
+        ref: REF,
+        phase: 'selection',
+      },
+    }]);
+  });
+
   it('retries chat ID collisions with fresh command identities and reports exhaustion', async () => {
     const fixture = createFixture({
       allocated: [CREATED_CHAT_ID, SECOND_CREATED_CHAT_ID, '1787974832309302'],

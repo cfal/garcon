@@ -7,7 +7,6 @@ export const GARCON_START_AGENT_CLOSE = '</garcon-start-agent>';
 export const GARCON_PROMPT_OPEN = '<garcon-prompt>';
 export const GARCON_PROMPT_CLOSE = '</garcon-prompt>';
 export const GARCON_CREATE_CHAT_PARAMS_PREFIX = '<garcon-create-chat-params';
-export const GARCON_CREATE_CHAT_RESULT_PREFIX = '<garcon-create-chat-result';
 export const SUB_AGENT_START_NOTICE_TITLE = 'Sub-agent start';
 export const MALFORMED_SUB_AGENT_START_CONTENT =
   'Garcon could not parse a sub-agent start command.';

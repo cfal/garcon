@@ -194,7 +194,16 @@ export class AgentStartController {
       });
       return failureResult(params.ref, 'start-failed');
     }
-    if (!resolved.ok) return failureResult(params.ref, resolved.message);
+    if (!resolved.ok) {
+      if (resolved.message === 'start-failed') {
+        this.#reportError({ code: 'INVALID_CATALOG' }, {
+          sourceChatId: input.sourceChatId,
+          ref: params.ref,
+          phase: 'selection',
+        });
+      }
+      return failureResult(params.ref, resolved.message);
+    }
 
     for (
       let allocationAttempt = 0;

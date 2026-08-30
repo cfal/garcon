@@ -573,9 +573,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     await this.triggerDrain(reservation.chatId);
   }
 
-  async completeDirectTurn(reservation: DirectTurnReservation): Promise<void> {
-    await this.#finishDirect(reservation, 'completed');
-  }
+  completeDirectTurn(reservation: DirectTurnReservation): Promise<void> { return this.#finishDirect(reservation, 'completed'); }
 
   async failDirectTurn(reservation: DirectTurnReservation): Promise<void> {
     await this.#finishDirect(reservation, 'failed');
