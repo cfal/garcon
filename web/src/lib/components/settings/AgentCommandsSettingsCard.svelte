@@ -98,6 +98,52 @@
 					onCheckedChange={(checked) => void setCommandSetting('subAgents', checked)}
 				/>
 			</div>
+			{#if commands?.subAgents !== false}
+				<div class="ml-4 space-y-3 border-l border-border pl-4">
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<label for="sub-agent-project-path-enabled" class="text-sm text-foreground">
+								{m.settings_allow_custom_sub_agent_project_path()}
+							</label>
+							<div
+								id="sub-agent-project-path-warning"
+								class="mt-0.5 text-xs text-status-warning-muted-foreground"
+							>
+								{m.settings_custom_sub_agent_project_path_warning()}
+							</div>
+						</div>
+						<Switch
+							id="sub-agent-project-path-enabled"
+							aria-describedby="sub-agent-project-path-warning"
+							checked={commands?.allowCustomSubAgentProjectPath ?? false}
+							disabled={isSaving}
+							onCheckedChange={(checked) =>
+								void setCommandSetting('allowCustomSubAgentProjectPath', checked)}
+						/>
+					</div>
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<label for="sub-agent-permission-level-enabled" class="text-sm text-foreground">
+								{m.settings_allow_custom_sub_agent_permission_level()}
+							</label>
+							<div
+								id="sub-agent-permission-level-warning"
+								class="mt-0.5 text-xs text-status-warning-muted-foreground"
+							>
+								{m.settings_custom_sub_agent_permission_level_warning()}
+							</div>
+						</div>
+						<Switch
+							id="sub-agent-permission-level-enabled"
+							aria-describedby="sub-agent-permission-level-warning"
+							checked={commands?.allowCustomSubAgentPermissionLevel ?? false}
+							disabled={isSaving}
+							onCheckedChange={(checked) =>
+								void setCommandSetting('allowCustomSubAgentPermissionLevel', checked)}
+						/>
+					</div>
+				</div>
+			{/if}
 		</div>
 	{/if}
 

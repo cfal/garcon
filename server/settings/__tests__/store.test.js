@@ -613,7 +613,14 @@ describe('settings store', () => {
       expect(settings).toEqual({
         features: {
           transcriptSearch: { enabled: false },
-          agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+          agentCommands: {
+            enabled: true,
+            chatIdDiscovery: true,
+            sendMessage: true,
+            subAgents: true,
+            allowCustomSubAgentProjectPath: false,
+            allowCustomSubAgentPermissionLevel: false,
+          },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
@@ -629,7 +636,14 @@ describe('settings store', () => {
       expect(settings).toEqual({
         features: {
           transcriptSearch: { enabled: false },
-          agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+          agentCommands: {
+            enabled: true,
+            chatIdDiscovery: true,
+            sendMessage: true,
+            subAgents: true,
+            allowCustomSubAgentProjectPath: false,
+            allowCustomSubAgentPermissionLevel: false,
+          },
         },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
@@ -1038,6 +1052,33 @@ describe('settings store', () => {
   });
 
   describe('feature settings', () => {
+    it('migrates old complete command settings with both grants disabled', async () => {
+      await writeRaw({
+        features: {
+          transcriptSearch: { enabled: false },
+          agentCommands: {
+            enabled: true,
+            chatIdDiscovery: true,
+            sendMessage: true,
+            subAgents: false,
+          },
+        },
+      });
+
+      expect(store.getFeatureSettings().agentCommands).toEqual({
+        enabled: true,
+        chatIdDiscovery: true,
+        sendMessage: true,
+        subAgents: false,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
+      });
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features.agentCommands).toEqual(
+        store.getFeatureSettings().agentCommands,
+      );
+    });
+
     it('normalizes malformed feature settings and persists the complete command object', async () => {
       await writeRaw({
         features: {
@@ -1052,6 +1093,8 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
         },
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
@@ -1062,6 +1105,8 @@ describe('settings store', () => {
           chatIdDiscovery: true,
           sendMessage: true,
           subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
         },
       });
     });
@@ -1079,6 +1124,8 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: true,
         subAgents: true,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
       });
       const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
       expect(persisted.features.agentCommands).toEqual({
@@ -1086,6 +1133,8 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: true,
         subAgents: true,
+        allowCustomSubAgentProjectPath: false,
+        allowCustomSubAgentPermissionLevel: false,
       });
       expect(persisted.features.chatIdDiscovery).toBeUndefined();
     });
@@ -1096,7 +1145,14 @@ describe('settings store', () => {
       await store.setFeatureSettings({ transcriptSearch: { enabled: true } });
       expect(store.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: true },
-        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
+        },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
       expect(events).toEqual(['changed']);
@@ -1105,7 +1161,14 @@ describe('settings store', () => {
       await reloaded.init();
       expect(reloaded.getFeatureSettings()).toEqual({
         transcriptSearch: { enabled: true },
-        agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true },
+        agentCommands: {
+          enabled: true,
+          chatIdDiscovery: true,
+          sendMessage: true,
+          subAgents: true,
+          allowCustomSubAgentProjectPath: false,
+          allowCustomSubAgentPermissionLevel: false,
+        },
       });
     });
 
@@ -1118,6 +1181,8 @@ describe('settings store', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           subAgents: true,
+          allowCustomSubAgentProjectPath: true,
+          allowCustomSubAgentPermissionLevel: true,
         },
       });
 
@@ -1128,6 +1193,8 @@ describe('settings store', () => {
           chatIdDiscovery: false,
           sendMessage: false,
           subAgents: true,
+          allowCustomSubAgentProjectPath: true,
+          allowCustomSubAgentPermissionLevel: true,
         },
       });
       expect(store.getRemoteSettingsVersion()).toBe(1);
@@ -1140,6 +1207,8 @@ describe('settings store', () => {
         chatIdDiscovery: false,
         sendMessage: false,
         subAgents: true,
+        allowCustomSubAgentProjectPath: true,
+        allowCustomSubAgentPermissionLevel: true,
       });
     });
   });

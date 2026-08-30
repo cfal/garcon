@@ -94,7 +94,8 @@ function expectVisibleResponseBeforeSettlement(input: {
 }
 
 // A turn's execution reservation outlives its terminal event, so a reload issued as soon as the
-// turn ends is briefly refused as CHAT_RUNNING. The refusal is retryable by contract.
+// turn ends is briefly refused as CHAT_RUNNING. This waits only for that reservation, not for
+// provider-native history to finish persisting.
 export async function reloadFromNativeHistory(
   fixture: IntegrationFixture,
   chatId: string,

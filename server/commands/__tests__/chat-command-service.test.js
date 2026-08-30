@@ -1751,6 +1751,30 @@ describe('ChatCommandService', () => {
     }
   });
 
+  it('reports a typed error when a chat start project path does not exist', async () => {
+    const { service, agents, chats } = makeService({ session: null });
+
+    await expect(
+      service.submitStart({
+        origin: 'interactive',
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath: path.join(projectBaseDir, 'missing-project'),
+        command: 'hello',
+        model: 'opus',
+        agentSettings: agentSettings(),
+        clientRequestId: 'req-start-missing',
+        clientMessageId: 'msg-start-missing',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PROJECT_PATH_NOT_FOUND',
+      status: 404,
+    });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
   it('deduplicates HTTP retries without resubmitting queue work', async () => {
     const { service, queue } = makeService();
     const input = {

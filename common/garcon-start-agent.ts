@@ -1,4 +1,5 @@
 import { parseChatId, type ChatId } from './chat-id.js';
+import { isPermissionMode, type PermissionMode } from './chat-modes.js';
 
 export const GARCON_START_AGENT_PREFIX = '<garcon-start-agent';
 export const GARCON_START_AGENT_OPEN = '<garcon-start-agent>';
@@ -9,6 +10,7 @@ export const MALFORMED_SUB_AGENT_START_CONTENT =
 export const MAX_GARCON_CREATE_CHAT_PARAMS = 16;
 export const GARCON_START_PROMPT_MAX_BYTES = 48 * 1024;
 export const GARCON_CREATE_CHAT_MODEL_MAX_BYTES = 256;
+export const GARCON_CREATE_CHAT_PROJECT_PATH_MAX_BYTES = 4 * 1024;
 export const GARCON_START_AGENT_PAYLOAD_MAX_BYTES = 384 * 1024;
 
 export const GARCON_CREATE_CHAT_RESULT_MESSAGES = [
@@ -23,6 +25,10 @@ export const GARCON_CREATE_CHAT_RESULT_MESSAGES = [
   'unknown-model',
   'unsupported-reasoning-effort',
   'permission-override-required',
+  'project-path-override-disabled',
+  'permission-override-disabled',
+  'unknown-project-path',
+  'unsupported-permission-mode',
   'session-limit',
   'server-shutting-down',
   'chat-id-collision',
@@ -42,6 +48,8 @@ const CREATE_CHAT_PARAM_KEYS = [
   'endpoint',
   'model',
   'reasoningEffort',
+  'projectPath',
+  'permissions',
 ] as const;
 const utf8Encoder = new TextEncoder();
 const createChatFailureMessages = new Set<string>(
@@ -62,6 +70,8 @@ export interface GarconCreateChatParams {
   readonly endpointId: string | null;
   readonly model: string;
   readonly reasoningEffort: string | null;
+  readonly projectPath: string | null;
+  readonly permissionMode: PermissionMode | null;
 }
 
 export interface GarconStartAgentCommand {
@@ -224,6 +234,8 @@ function parseCreateChatParams(value: unknown): GarconCreateChatParams | null {
   const endpointId = value.endpoint;
   const model = value.model;
   const reasoningEffort = value.reasoningEffort;
+  const projectPath = value.projectPath;
+  const permissionMode = value.permissions;
   if (
     typeof ref !== 'string'
     || !CANONICAL_UUID.test(ref)
@@ -242,6 +254,10 @@ function parseCreateChatParams(value: unknown): GarconCreateChatParams | null {
     || (reasoningEffort !== undefined && (
       typeof reasoningEffort !== 'string' || !REASONING_EFFORT.test(reasoningEffort)
     ))
+    || (projectPath !== undefined && (
+      typeof projectPath !== 'string' || !isValidCreateChatProjectPath(projectPath)
+    ))
+    || (permissionMode !== undefined && !isPermissionMode(permissionMode))
   ) {
     return null;
   }
@@ -252,6 +268,8 @@ function parseCreateChatParams(value: unknown): GarconCreateChatParams | null {
     endpointId: typeof endpointId === 'string' ? endpointId : null,
     model,
     reasoningEffort: typeof reasoningEffort === 'string' ? reasoningEffort : null,
+    projectPath: typeof projectPath === 'string' ? projectPath : null,
+    permissionMode: isPermissionMode(permissionMode) ? permissionMode : null,
   };
 }
 
@@ -379,6 +397,15 @@ function isValidCreateChatModel(value: string): boolean {
     && value.isWellFormed()
     && !/[\r\n]/.test(value)
     && utf8Encoder.encode(value).byteLength <= GARCON_CREATE_CHAT_MODEL_MAX_BYTES;
+}
+
+function isValidCreateChatProjectPath(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0
+    && trimmed === value
+    && value.isWellFormed()
+    && !/[\r\n\0]/.test(value)
+    && utf8Encoder.encode(value).byteLength <= GARCON_CREATE_CHAT_PROJECT_PATH_MAX_BYTES;
 }
 
 function contentLine(content: string, start: number, end: number): ContentLine {

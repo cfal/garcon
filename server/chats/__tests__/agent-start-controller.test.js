@@ -35,6 +35,8 @@ function params(overrides = {}) {
     endpointId: null,
     model: 'claude-sonnet',
     reasoningEffort: 'high',
+    projectPath: null,
+    permissionMode: null,
     ...overrides,
   };
 }
@@ -78,8 +80,8 @@ function executionDefaults(overrides = {}) {
 
 function createFixture(overrides = {}) {
   const chats = overrides.chats ?? new Map([
-    [SOURCE_CHAT_ID, { projectPath: '/repo/source' }],
-    [SECOND_SOURCE_CHAT_ID, { projectPath: '/repo/second' }],
+    [SOURCE_CHAT_ID, { projectPath: '/repo/source', permissionMode: 'bypassPermissions' }],
+    [SECOND_SOURCE_CHAT_ID, { projectPath: '/repo/second', permissionMode: 'acceptEdits' }],
   ]);
   const views = overrides.views ?? new Map([
     [SOURCE_CHAT_ID, { viewId: 'source-view' }],
@@ -92,7 +94,10 @@ function createFixture(overrides = {}) {
     getChat: mock((chatId) => chats.get(chatId) ?? null),
   };
   const selectionService = {
-    resolve: mock(async () => ({ ok: true, selection: selection() })),
+    resolve: mock(async (_params, _defaults, permissionMode) => ({
+      ok: true,
+      selection: selection({ permissionMode }),
+    })),
     ...overrides.selection,
   };
   const commands = {
@@ -118,6 +123,7 @@ function createFixture(overrides = {}) {
   const errors = [];
   const events = [];
   const defaults = overrides.defaults ?? executionDefaults();
+  let overridePolicy = overrides.overridePolicy ?? { projectPath: false, permissionLevel: false };
   const controller = new AgentStartController({
     registry,
     selection: selectionService,
@@ -128,6 +134,7 @@ function createFixture(overrides = {}) {
     chatMutationLock: overrides.chatMutationLock ?? new KeyedPromiseLock(),
     batchLock: overrides.batchLock ?? new KeyedPromiseLock(),
     getExecutionDefaults: overrides.getExecutionDefaults ?? (() => defaults),
+    getOverridePolicy: () => overridePolicy,
     isEnabled: () => enabled,
     createId: () => `generated-${++nextId}`,
     onDiagnostic: (event) => events.push(event),
@@ -146,6 +153,7 @@ function createFixture(overrides = {}) {
     errors,
     events,
     setEnabled(value) { enabled = value; },
+    setOverridePolicy(value) { overridePolicy = value; },
   };
 }
 
@@ -175,6 +183,11 @@ describe('AgentStartController', () => {
     await fixture.controller.waitForIdle();
 
     expect(fixture.commands.submitAgentCommandStart).toHaveBeenCalledTimes(2);
+    expect(fixture.selection.resolve.mock.calls[0]).toEqual([
+      params(),
+      executionDefaults(),
+      'bypassPermissions',
+    ]);
     expect(fixture.commands.submitAgentCommandStart.mock.calls[0][0]).toEqual({
       chatId: CREATED_CHAT_ID,
       clientRequestId: 'generated-1',
@@ -186,7 +199,7 @@ describe('AgentStartController', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
-      permissionMode: 'acceptEdits',
+      permissionMode: 'bypassPermissions',
       thinkingMode: 'high',
       agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { mode: 'saved' } },
       tags: ['sub-agent'],
@@ -247,6 +260,99 @@ describe('AgentStartController', () => {
     ]);
     expect(JSON.stringify(fixture.events)).not.toContain('Investigate the failure.');
     expect(JSON.stringify(fixture.events)).not.toContain('claude-sonnet');
+  });
+
+  it('honors independently authorized project-path and permission overrides', async () => {
+    const fixture = createFixture({
+      overridePolicy: { projectPath: true, permissionLevel: true },
+    });
+    fixture.controller.request(request({
+      params: [params({
+        projectPath: '/repo/custom',
+        permissionMode: 'default',
+      })],
+    }));
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.selection.resolve.mock.calls[0][2]).toBe('default');
+    expect(fixture.commands.submitAgentCommandStart.mock.calls[0][0]).toMatchObject({
+      projectPath: '/repo/custom',
+      permissionMode: 'default',
+    });
+  });
+
+  it('denies unauthorized overrides per ref with deterministic precedence', async () => {
+    const fixture = createFixture();
+    fixture.controller.request(request({
+      params: [
+        params({ projectPath: '/repo/custom', permissionMode: 'default' }),
+        params({ ref: SECOND_REF, permissionMode: 'default' }),
+      ],
+    }));
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.selection.resolve).not.toHaveBeenCalled();
+    expect(fixture.commands.submitAgentCommandStart).not.toHaveBeenCalled();
+    expect(fixture.execution.deliverAgentCommandResult.mock.calls[0][1].receipt.detail.results)
+      .toEqual([
+        { ref: REF, error: true, msg: 'project-path-override-disabled' },
+        { ref: SECOND_REF, error: true, msg: 'permission-override-disabled' },
+      ]);
+  });
+
+  it('rechecks override policy before every unstarted ref', async () => {
+    let fixture;
+    fixture = createFixture({
+      overridePolicy: { projectPath: true, permissionLevel: false },
+      commands: {
+        submitAgentCommandStart: mock(async () => {
+          fixture.setOverridePolicy({ projectPath: false, permissionLevel: false });
+        }),
+      },
+    });
+    fixture.controller.request(request({
+      params: [
+        params({ projectPath: '/repo/first' }),
+        params({ ref: SECOND_REF, projectPath: '/repo/second' }),
+      ],
+    }));
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.commands.submitAgentCommandStart).toHaveBeenCalledTimes(1);
+    expect(fixture.execution.deliverAgentCommandResult.mock.calls[0][1].receipt.detail.results)
+      .toEqual([
+        { ref: REF, error: false, msg: 'created', chatId: CREATED_CHAT_ID },
+        { ref: SECOND_REF, error: true, msg: 'project-path-override-disabled' },
+      ]);
+  });
+
+  it('collapses rejected and missing custom paths into one expected result token', async () => {
+    const fixture = createFixture({
+      overridePolicy: { projectPath: true, permissionLevel: false },
+      commands: {
+        submitAgentCommandStart: mock(async (input) => {
+          throw {
+            code: input.projectPath === '/repo/outside'
+              ? 'PROJECT_PATH_OUTSIDE_BASE'
+              : 'PROJECT_PATH_NOT_FOUND',
+          };
+        }),
+      },
+    });
+    fixture.controller.request(request({
+      params: [
+        params({ projectPath: '/repo/outside' }),
+        params({ ref: SECOND_REF, projectPath: '/repo/missing' }),
+      ],
+    }));
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.execution.deliverAgentCommandResult.mock.calls[0][1].receipt.detail.results)
+      .toEqual([
+        { ref: REF, error: true, msg: 'unknown-project-path' },
+        { ref: SECOND_REF, error: true, msg: 'unknown-project-path' },
+      ]);
+    expect(fixture.errors).toEqual([]);
   });
 
   it('isolates semantic and typed start failures while preserving result order', async () => {
@@ -397,7 +503,7 @@ describe('AgentStartController', () => {
     });
   });
 
-  it('captures the source project path and execution defaults at admission', async () => {
+  it('captures source context and execution defaults at admission', async () => {
     const gate = deferred();
     const defaults = executionDefaults();
     const fixture = createFixture({
@@ -411,11 +517,13 @@ describe('AgentStartController', () => {
     });
     fixture.controller.request(request());
     fixture.chats.get(SOURCE_CHAT_ID).projectPath = '/repo/changed';
+    fixture.chats.get(SOURCE_CHAT_ID).permissionMode = 'default';
     defaults.global.permissionMode = 'default';
     gate.resolve();
     await fixture.controller.waitForIdle();
 
     expect(fixture.selection.resolve.mock.calls[0][1].global.permissionMode).toBe('acceptEdits');
+    expect(fixture.selection.resolve.mock.calls[0][2]).toBe('bypassPermissions');
     expect(fixture.commands.submitAgentCommandStart.mock.calls[0][0].projectPath).toBe('/repo/source');
   });
 

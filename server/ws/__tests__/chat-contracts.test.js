@@ -692,4 +692,25 @@ describe('chat WebSocket handler', () => {
       retryable: true,
     });
   });
+
+  it('returns retryable HISTORY_LOAD_FAILED when native history is not present yet', async () => {
+    mockTranscriptReload.mockRejectedValueOnce(
+      Object.assign(new Error('native history is not present yet'), { code: 'ENOENT' }),
+    );
+
+    await chatHandler.message(ws, {
+      type: 'chat-reload',
+      chatId: '123',
+      clientRequestId: 'req-reload-history-pending',
+    });
+
+    expect(lastSentPayload()).toMatchObject({
+      type: 'client-request-error',
+      clientRequestId: 'req-reload-history-pending',
+      requestType: 'chat-reload',
+      chatId: '123',
+      code: 'HISTORY_LOAD_FAILED',
+      retryable: true,
+    });
+  });
 });
