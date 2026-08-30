@@ -1,4 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import { tick } from 'svelte';
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
@@ -81,6 +82,7 @@ export class WorkspacePresentationController {
 	#presentationMode = $state<PresentationMode>('desktop');
 	#requestedPresentationMode: PresentationMode = 'desktop';
 	#responsiveGeneration = 0;
+	#focusIntentGeneration = 0;
 	readonly #mobilePresentation: MobilePresentationPlanner;
 	readonly #frames: WorkspacePresentationFrames;
 
@@ -201,25 +203,51 @@ export class WorkspacePresentationController {
 
 	noteSurfaceFocus(surfaceId: string): void {
 		if (!this.isSurfacePresented(surfaceId)) return;
+		const windowId = this.windowOf(surfaceId);
+		if (windowId && windowId !== this.currentWindowId) return;
+		this.#supersedeFocusIntent();
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedSurfaceId = surfaceId;
-		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
 	}
 
 	noteChatListFocus(): void {
+		this.#supersedeFocusIntent();
 		this.focusOwner = { kind: 'chat-list' };
 	}
 
 	noteWindowChromeFocus(windowId: WorkspaceWindowId, surfaceId: string): void {
 		if (!windowNodeById(this.layout.snapshot.desktopRoot, windowId)) return;
+		this.#supersedeFocusIntent();
 		this.focusOwner = { kind: 'window-chrome', windowId, surfaceId };
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
 	}
 
+	activateWindow(windowId: WorkspaceWindowId): void {
+		if (this.isMobile) return;
+		const snapshot = this.layout.snapshot;
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return;
+
+		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		const generation = this.#supersedeFocusIntent();
+		const surfaceId = workspaceWindow.tabs.activeId;
+		this.focusOwner = { kind: 'surface', surfaceId };
+		this.lastFocusedWindowId = windowId;
+		this.lastFocusedSurfaceId = surfaceId;
+
+		void tick().then(() => {
+			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
+			const currentWindow = windowNodeById(this.layout.snapshot.desktopRoot, windowId);
+			if (currentWindow?.tabs.activeId !== surfaceId) return;
+			this.focusPresentedSurface(surfaceId);
+		});
+	}
+
 	async focusChat(): Promise<void> {
 		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		this.#supersedeFocusIntent();
 		let surfaceId: string | null = null;
 		const current = await this.commit((latest) => {
 			const preferredWindowId = this.resolveCurrentWindow(latest);
@@ -244,6 +272,7 @@ export class WorkspacePresentationController {
 		const windowId = this.windowOf(surfaceId);
 		if (!windowId && !this.isMobile) return;
 		this.deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		this.#supersedeFocusIntent();
 		const current = this.isMobile
 			? await this.commit((latest) =>
 					latest.surfaces[surfaceId]
@@ -401,6 +430,7 @@ export class WorkspacePresentationController {
 	}
 
 	presentSurface(surfaceId: string): void {
+		this.#focusIntentGeneration += 1;
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
@@ -415,6 +445,12 @@ export class WorkspacePresentationController {
 		}
 		const host = this.#presentationHostOf(surfaceId);
 		if (host) this.deps.surfaceFrames?.focus(surfaceId, host);
+	}
+
+	#supersedeFocusIntent(): number {
+		this.#frames.supersedePendingTransition();
+		this.#focusIntentGeneration += 1;
+		return this.#focusIntentGeneration;
 	}
 
 	clearAttachmentError(surfaceId: string): void {

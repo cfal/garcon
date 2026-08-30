@@ -10,15 +10,7 @@
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
-	let {
-		textScale = 1,
-		hiddenToolTypes = [],
-		onFocus = () => {},
-	}: {
-		textScale?: number;
-		hiddenToolTypes?: HideableToolType[];
-		onFocus?: () => void;
-	} = $props();
+	let { hiddenToolTypes = [] }: { hiddenToolTypes?: HideableToolType[] } = $props();
 
 	const previewStore = new ChatWindowPreviewStore();
 	const chatSessions = createChatSessionsStore();
@@ -66,4 +58,4 @@
 	});
 </script>
 
-<ChatWindowPreview chatId="chat-1" {previewStore} {textScale} {onFocus} />
+<ChatWindowPreview chatId="chat-1" {previewStore} />

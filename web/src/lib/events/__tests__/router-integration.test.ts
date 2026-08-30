@@ -168,14 +168,14 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			startupCoordinator: new StartupCoordinator(),
 			onExternalChatCreated: vi.fn(),
 		},
-			readState: {
-				enqueueReadReceipt: vi.fn(),
-			},
-			chatPresentations: {
-				clearDeletedChat: vi.fn(),
-			},
-			...overrides,
-		};
+		readState: {
+			enqueueReadReceipt: vi.fn(),
+		},
+		chatPresentations: {
+			clearDeletedChat: vi.fn(),
+		},
+		...overrides,
+	};
 }
 
 function renderRouterWithRawMessages(
@@ -213,10 +213,7 @@ describe('event router integration', () => {
 
 	it('clears workspace Chat presentations when a chat is deleted remotely', () => {
 		const stores = createStores();
-		renderRouterWithRawMessages(
-			[{ type: 'chat-session-deleted', chatId: 'chat-a' }],
-			stores,
-		);
+		renderRouterWithRawMessages([{ type: 'chat-session-deleted', chatId: 'chat-a' }], stores);
 
 		expect(stores.chatPresentations.clearDeletedChat).toHaveBeenCalledWith('chat-a');
 	});

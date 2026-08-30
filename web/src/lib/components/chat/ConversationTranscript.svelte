@@ -10,6 +10,7 @@
 		filterHiddenToolRenderItems,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
+	import { CHAT_FEED_CONTENT_BASE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -25,16 +26,8 @@
 		hiddenToolTypes?: HideableToolType[];
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
-		textScale?: number;
-		onPermissionDecision?: (
-			permissionOccurrenceId: string,
-			decision: PermissionDecision,
-		) => void;
-		onExitPlanMode?: (
-			permissionOccurrenceId: string,
-			choice: string,
-			plan: string,
-		) => void;
+		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
+		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
@@ -47,7 +40,6 @@
 		hiddenToolTypes = [],
 		pendingPermissionRequests = [],
 		chatContext = null,
-		textScale = 1,
 		onPermissionDecision,
 		onExitPlanMode,
 		onForkChat,
@@ -59,11 +51,7 @@
 	const renderItems = $derived(filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes));
 </script>
 
-<div
-	class="flex w-full flex-col gap-2 sm:gap-3"
-	style:zoom={textScale}
-	data-chat-transcript-scale={String(textScale)}
->
+<div class={CHAT_FEED_CONTENT_BASE_CLASS}>
 	{#each renderItems as item (item.id)}
 		<ConversationTranscriptItem
 			{item}

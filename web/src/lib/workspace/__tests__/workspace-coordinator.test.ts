@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
@@ -355,6 +356,20 @@ describe('WorkspaceCoordinator', () => {
 		});
 	});
 
+	it('keeps a current-window Chat intent anchored when focus changes before its commit', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const otherWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		coordinator.noteWindowChromeFocus('window-main', chatViewSurfaceId('window-main'));
+
+		const placement = coordinator.showChatInCurrentWindow('chat-a');
+		coordinator.noteWindowChromeFocus(otherWindowId, 'singleton:git-history');
+		await placement;
+
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId(otherWindowId))).toBeNull();
+	});
+
 	it('replaces Chat in an exact occupied window without changing another presentation', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.showChatInCurrentWindow('chat-a');
@@ -399,10 +414,14 @@ describe('WorkspaceCoordinator', () => {
 		const sourceSurfaceId = chatViewSurfaceId('window-main');
 		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
 
-		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId);
+		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId, 1);
 
 		expect(layout.surface(sourceSurfaceId)).toBeNull();
 		expect(layout.surface(destinationSurfaceId)).toMatchObject({ chatId: 'chat-a' });
+		expect(windowTabs(layout.snapshot, destinationWindowId).order).toEqual([
+			'singleton:git-history',
+			destinationSurfaceId,
+		]);
 		expect(windowTabs(layout.snapshot, destinationWindowId).activeId).toBe(destinationSurfaceId);
 		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
 	});
@@ -997,6 +1016,18 @@ describe('WorkspaceCoordinator', () => {
 		},
 	);
 
+	it('returns from a removed mobile-active window tab to an inactive Chat tab', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.focusSurface('singleton:git');
+		await coordinator.enterMobilePresentation();
+
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe('singleton:git');
+		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(true);
+
+		expect(layout.surface('singleton:git')).toBeNull();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
 	it('destroys every mobile-only Git view on responsive desktop return', async () => {
 		const { coordinator, layout, singletons } = createHarness();
 		await coordinator.enterMobilePresentation();
@@ -1151,6 +1182,90 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(surfaceId)).not.toBeNull();
 	});
 
+	it('keeps a later Chat focus when an older file presentation settles', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
+		const filesWindowId = 'window-files' as WorkspaceWindowId;
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('files'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: filesWindowId,
+					partitionId: 'partition-files',
+				},
+			]),
+		);
+		coordinator.noteSurfaceFocus('singleton:files');
+		const surfaceId = fileSurfaceId('delayed-file');
+		const placement = coordinator.placeFileSession('delayed-file', {
+			type: 'window',
+			windowId: filesWindowId,
+		});
+		await vi.waitFor(() =>
+			expect(windowTabs(layout.snapshot, filesWindowId).activeId).toBe(surfaceId),
+		);
+
+		await coordinator.focusSurface(CANONICAL_CHAT_SURFACE_ID);
+		const staleFileFocus = vi.fn();
+		frames.register(surfaceId, filesWindowId, {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: staleFileFocus,
+		});
+
+		await expect(placement).resolves.toBe('placed');
+		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(staleFileFocus).not.toHaveBeenCalled();
+	});
+
+	it('keeps later window chrome focus when an older file presentation settles', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
+		const filesWindowId = 'window-files' as WorkspaceWindowId;
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('files'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: filesWindowId,
+					partitionId: 'partition-files',
+				},
+			]),
+		);
+		const surfaceId = fileSurfaceId('delayed-file');
+		const placement = coordinator.placeFileSession('delayed-file', {
+			type: 'window',
+			windowId: filesWindowId,
+		});
+		await vi.waitFor(() =>
+			expect(windowTabs(layout.snapshot, filesWindowId).activeId).toBe(surfaceId),
+		);
+
+		coordinator.noteWindowChromeFocus('window-main', CANONICAL_CHAT_SURFACE_ID);
+		const staleFileFocus = vi.fn();
+		frames.register(surfaceId, filesWindowId, {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: staleFileFocus,
+		});
+
+		await expect(placement).resolves.toBe('placed');
+		expect(coordinator.focusOwner).toEqual({
+			kind: 'window-chrome',
+			windowId: 'window-main',
+			surfaceId: CANONICAL_CHAT_SURFACE_ID,
+		});
+		expect(staleFileFocus).not.toHaveBeenCalled();
+	});
+
 	it('focuses an existing surface by activating its window-local tab', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.openSingletonAsTab('files', 'window-main');
@@ -1168,6 +1283,55 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.focusChat();
 
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+	});
+
+	it('activates an inactive window synchronously and focuses its active surface after rendering', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout, appShell } = createHarness({ surfaceFrames: frames });
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('files'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-files',
+					partitionId: 'partition-files',
+				},
+			]),
+		);
+		coordinator.noteWindowChromeFocus('window-files', 'singleton:files');
+
+		coordinator.activateWindow('window-main');
+
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
+		await tick();
+		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
+	});
+
+	it('does not let passive focus bookkeeping activate an inactive window', () => {
+		const { coordinator, layout } = createHarness();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('files'),
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-files',
+					partitionId: 'partition-files',
+				},
+			]),
+		);
+
+		coordinator.noteSurfaceFocus('singleton:files');
+
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
 	it('moves between tabs in the focused window without wrapping at either boundary', async () => {
@@ -1495,6 +1659,25 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('one'));
 		expect(windowTabs(layout.snapshot, 'window-main').order).toContain(terminalSurfaceId('two'));
 		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('returns to an inactive Chat when mobile terminal reconciliation removes the active tab', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const terminalId = 'mobile-active';
+		const surfaceId = terminalSurfaceId(terminalId);
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		await coordinator.focusSurface(surfaceId);
+		await coordinator.enterMobilePresentation();
+
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
+		await coordinator.reconcileTerminals([], { deriveLauncher: false });
+
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
 	it('reuses the launcher Create request ID after an indeterminate response', async () => {

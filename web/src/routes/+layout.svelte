@@ -126,7 +126,6 @@
 				terminalIdentity.clientId,
 			),
 	});
-	const workspaceLayoutRestore = workspaceServices.restore;
 	const workspaceLayout = workspaceServices.layout;
 	const workspaceContext = workspaceServices.context;
 	const terminals = workspaceServices.terminals;

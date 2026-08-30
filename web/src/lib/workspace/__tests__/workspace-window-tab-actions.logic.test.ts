@@ -117,6 +117,24 @@ describe('workspace window tab actions', () => {
 		expect(actions.canMoveToNewWindow).toBe(false);
 	});
 
+	it('disables a sole ordinary tab directional no-op', () => {
+		const source = workspaceWindow('window-source', ['terminal:source']);
+		const destination = workspaceWindow('window-destination', [
+			chatViewSurfaceId('window-destination'),
+		]);
+		const snapshot = snapshotWithWindows([source, destination], 'chat-a');
+
+		const actions = resolveWorkspaceWindowTabActions(
+			snapshot,
+			source.id,
+			source.tabs,
+			'terminal:source',
+		);
+
+		expect(actions.canMoveBetweenWindows).toBe(true);
+		expect(actions.canMoveToNewWindow).toBe(false);
+	});
+
 	it('offers no cross-window movement for an empty Chat view', () => {
 		const source = workspaceWindow('window-source', [
 			chatViewSurfaceId('window-source'),

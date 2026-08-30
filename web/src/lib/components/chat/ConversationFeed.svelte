@@ -61,7 +61,6 @@
 		onLoadLater?: () => void;
 		reserveComposerTraySpace?: boolean;
 		isPreparingInitialScroll?: boolean;
-		textScale?: number;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
@@ -85,7 +84,6 @@
 		onLoadLater = () => {},
 		reserveComposerTraySpace = false,
 		isPreparingInitialScroll = false,
-		textScale = 1,
 		isProcessing = false,
 		onForkChat,
 		onGenerateTitleFromMessage,
@@ -202,7 +200,6 @@
 		mutationClock: chatState.feedMutationClock,
 		hiddenToolTypes: localSettings.hiddenToolTypes,
 		showThinking: localSettings.showThinking,
-		textScale,
 		isLiveWindow: !chatState.hasLaterMessages,
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
 		showEarlierBoundary:
@@ -374,7 +371,6 @@
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-entry-count={chatState.entries.length}
-			data-chat-transcript-scale={String(textScale)}
 			{@attach virtualController.sizer}
 		>
 			{#each virtualItems as virtualItem (virtualItem.key)}
@@ -390,7 +386,6 @@
 						renderModel={projection.renderModel}
 						agentId={agentState.agentId}
 						showThinking={localSettings.showThinking}
-						{textScale}
 						{pendingPermissionRequests}
 						earlierPageState={chatState.pageStates.earlier}
 						laterPageState={chatState.pageStates.later}

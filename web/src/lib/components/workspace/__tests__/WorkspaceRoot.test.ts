@@ -92,6 +92,20 @@ function installContext() {
 		runtime.currentWindowId = windowId;
 		commit([{ type: 'activate-window-tab', windowId, surfaceId }]);
 	});
+	const activateWindow = vi.fn((windowId: WorkspaceWindowId) => {
+		const workspaceWindow = collectWindowNodes(layout.snapshot.desktopRoot).find(
+			(item) => item.id === windowId,
+		);
+		if (!workspaceWindow) return;
+		runtime.currentWindowId = windowId;
+		commit([
+			{
+				type: 'activate-window-tab',
+				windowId,
+				surfaceId: workspaceWindow.tabs.activeId,
+			},
+		]);
+	});
 	const workspace = {
 		layout,
 		attachmentErrors: {} as Record<string, string>,
@@ -116,6 +130,7 @@ function installContext() {
 		noteWindowChromeFocus: vi.fn((windowId: WorkspaceWindowId) => {
 			runtime.currentWindowId = windowId;
 		}),
+		activateWindow,
 		focusSurface,
 		isWindowCloseBlocked: (windowId: WorkspaceWindowId) =>
 			collectWindowNodes(layout.snapshot.desktopRoot).length === 1 ||
@@ -407,6 +422,11 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-surface-stub')).toBe(liveChat);
 		expect(liveChat.getAttribute('data-visible')).toBe('false');
 		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(1);
+		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+		const chatPanelId = chatTab.getAttribute('aria-controls');
+		expect(chatPanelId).not.toBeNull();
+		expect(document.getElementById(chatPanelId!)).not.toBeNull();
+		expect(document.getElementById(chatPanelId!)?.getAttribute('aria-hidden')).toBe('true');
 		await workspace.focusSurface(chatViewSurfaceId('window-main'));
 		await tick();
 		expect(screen.getByTestId('chat-surface-stub')).toBe(liveChat);
@@ -432,8 +452,6 @@ describe('WorkspaceRoot', () => {
 		const liveChat = screen.getByTestId('chat-surface-stub');
 		const liveChatBody = container.querySelector('[data-workspace-live-chat-body]')!;
 		expect(screen.getByTestId('chat-window-preview').dataset.chatId).toBe('chat-b');
-		expect(screen.getByTestId('chat-window-preview').dataset.textScale).toBe('0.85');
-		expect(liveChat.dataset.textScale).toBe('0.85');
 		expect(liveChatBody.classList.contains('top-10')).toBe(true);
 		expect(liveChatBody.classList.contains('inset-0')).toBe(false);
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
@@ -445,6 +463,56 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-window-preview').dataset.chatId).toBe('chat-a');
 		expect(liveChatBody.classList.contains('top-10')).toBe(true);
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
+	});
+
+	it('uses one window-level activation shield for all inactive content', async () => {
+		const { layout, workspace } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		const inactiveWindow = container.querySelector<HTMLElement>(
+			'[data-workspace-window-id="window-2"]',
+		)!;
+		const inactiveContent = inactiveWindow.querySelector<HTMLElement>(
+			'[data-workspace-window-content]',
+		)!;
+		const shield = inactiveWindow.querySelector<HTMLElement>(
+			'[data-workspace-window-activation-shield]',
+		)!;
+		const previewControl = inactiveWindow.querySelector<HTMLButtonElement>(
+			'[data-testid="chat-window-preview"]',
+		)!;
+		const previewClick = vi.fn();
+		previewControl.addEventListener('click', previewClick);
+
+		expect(inactiveContent.hasAttribute('inert')).toBe(true);
+		expect(inactiveContent.getAttribute('aria-hidden')).toBe('true');
+		expect(shield.classList.contains('top-10')).toBe(true);
+
+		await fireEvent.pointerDown(shield, { pointerId: 1, button: 0 });
+		await fireEvent.pointerUp(shield, { pointerId: 1, button: 0 });
+		await fireEvent.click(shield);
+		await tick();
+
+		expect(workspace.activateWindow).toHaveBeenCalledOnce();
+		expect(previewClick).not.toHaveBeenCalled();
+		expect(inactiveWindow.getAttribute('data-workspace-window-current')).toBe('true');
+		expect(inactiveContent.hasAttribute('inert')).toBe(false);
+		expect(inactiveWindow.querySelector('[data-workspace-window-activation-shield]')).toBeNull();
+
+		await fireEvent.click(previewControl);
+		expect(previewClick).toHaveBeenCalledOnce();
 	});
 
 	it('does not render hidden desktop Chat previews in mobile mode', () => {
@@ -467,7 +535,6 @@ describe('WorkspaceRoot', () => {
 
 		expect(screen.queryAllByTestId('chat-window-preview')).toHaveLength(0);
 		expect(screen.getByTestId('chat-surface-stub').dataset.visible).toBe('true');
-		expect(screen.getByTestId('chat-surface-stub').dataset.textScale).toBe('1');
 	});
 
 	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {

@@ -114,7 +114,6 @@
 		) => boolean | void;
 		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
 		markVisiblePreviewStale?: (chatId: string) => void;
-		textScale?: number;
 		isVisible?: boolean;
 		isPresented?: boolean;
 	}
@@ -143,7 +142,6 @@
 		applyVisiblePreviewMessages,
 		loadVisiblePreviewSnapshot,
 		markVisiblePreviewStale,
-		textScale = 1,
 		isVisible = true,
 		isPresented: isPresentedOverride,
 	}: ConversationWorkspaceProps = $props();
@@ -787,7 +785,6 @@
 				{onRegisterPrepareHide}
 				onInitialEndRestored={() => scroll.completeInitialBottomRestore()}
 				isProcessing={selectedIsProcessing}
-				{textScale}
 			/>
 			{#snippet failed(error)}
 				<MessageRenderFallback {error} />

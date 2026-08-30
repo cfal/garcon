@@ -233,6 +233,7 @@ function setWindowChat(
 	snapshot: WorkspaceLayoutSnapshot,
 	windowId: WorkspaceWindowId,
 	chatId: string | null,
+	index = 0,
 ): WorkspaceLayoutSnapshot {
 	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
 	if (!workspaceWindow) throw new Error(`Workspace window does not exist: ${windowId}`);
@@ -253,7 +254,7 @@ function setWindowChat(
 			if (candidate.id !== windowId) return candidate;
 			const tabs = candidate.tabs.order.includes(surfaceId)
 				? candidate.tabs
-				: insertTab(candidate.tabs, surfaceId, 0);
+				: insertTab(candidate.tabs, surfaceId, index);
 			return { ...candidate, tabs: activateTab(tabs, surfaceId) };
 		}),
 	};
@@ -507,7 +508,7 @@ function moveChatToWindow(
 		source.surfaceId,
 		destinationSurfaceId,
 	);
-	const moved = setWindowChat(rekeyed, mutation.destinationWindowId, source.chatId);
+	const moved = setWindowChat(rekeyed, mutation.destinationWindowId, source.chatId, mutation.index);
 	return {
 		...moved,
 		fullscreenWindowId: fullscreenAfterActivation(moved, mutation.destinationWindowId),
@@ -894,6 +895,9 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 	}
 	for (const id of buckets.keys()) {
 		if (!snapshot.surfaces[id]) throw new Error(`Placement references missing surface: ${id}`);
+	}
+	if (workspaceChatViewCount(snapshot) === 0) {
+		throw new Error('At least one Chat view must remain');
 	}
 	if (snapshot.fullscreenWindowId) {
 		if (!windowIds.has(snapshot.fullscreenWindowId)) {

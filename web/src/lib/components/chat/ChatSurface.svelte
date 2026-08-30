@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { getChatSessions, getGitViewLauncher, getModelCatalog } from '$lib/context';
+	import {
+		getChatSessions,
+		getGitViewLauncher,
+		getModelCatalog,
+		type WorkspaceChatActions,
+	} from '$lib/context';
 	import ChatEmptyState from './ChatEmptyState.svelte';
 	import ChatLoadingState from './ChatLoadingState.svelte';
 	import ConversationWorkspace from './ConversationWorkspace.svelte';
@@ -17,17 +22,6 @@
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
-
-	interface WorkspaceChatActions {
-		requestDelete: (chat: ChatSessionRecord) => void;
-		requestRename: (chat: ChatSessionRecord) => void;
-		requestDetails: (chat: ChatSessionRecord) => void;
-		requestShare: (chat: ChatSessionRecord) => void;
-		requestProjectPath: (chat: ChatSessionRecord) => void;
-		fork: (chat: ChatSessionRecord) => void;
-		reload: (chat: ChatSessionRecord) => void;
-	}
 
 	const noopChatActions: WorkspaceChatActions = {
 		requestDelete() {},
@@ -52,7 +46,6 @@
 		transcriptCache: providedTranscriptCache,
 		previewStore: providedPreviewStore,
 		getVisibleChatIds,
-		textScale = 1,
 	}: {
 		isMobile: boolean;
 		isVisible: boolean;
@@ -66,7 +59,6 @@
 		transcriptCache?: ChatTranscriptCache;
 		previewStore?: ChatWindowPreviewStore;
 		getVisibleChatIds?: () => string[];
-		textScale?: number;
 	} = $props();
 
 	const sessions = getChatSessions();
@@ -196,7 +188,6 @@
 			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspaceVisible}
-			{textScale}
 			getVisibleChatIds={() => getVisibleChatIds?.() ?? []}
 			{isVisiblePreviewChat}
 			getVisiblePreviewCursor={(chatId) => previewStore.cursor(chatId)}

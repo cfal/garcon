@@ -51,14 +51,15 @@ not own together:
 
 - Dynamic rows whose height changes after mount, including streaming messages,
   syntax highlighting, CodeMirror-backed tool content, images, disclosures,
-  permissions, and responsive text scaling.
+  permissions, and responsive width reflow.
 - Earlier-history prepend while preserving one exact keyed reading position.
 - End pinning that depends on mutation intent, not merely distance from the
   bottom.
 - Retained off-range rows for focus, selection, transient UI, target
   navigation, pending earlier-page ownership, and the active transcript tail.
-- Cancellation across navigation, chat switch, reset, visibility, scale, user
-  reversal, custom scrollbar dragging, touch dragging, and momentum.
+- Cancellation across navigation, chat switch, reset, visibility, viewport
+  resize, user reversal, custom scrollbar dragging, touch dragging, and
+  momentum.
 - iOS WebKit, where writing `scrollTop` during momentum interrupts the fling.
 - Transcript-ledger paging rules: the selected transcript never trims either
   edge while the user reads or a paging/scroll mutation is in flight; expanded
@@ -77,7 +78,7 @@ local patch fixed specific upstream races, but not the ownership boundary.
 ## Goals
 
 - Preserve a stable keyed row and its viewport offset through prepend,
-  estimate correction, measured resize, reset, and responsive scale changes.
+  estimate correction, measured resize, reset, and responsive width changes.
 - Measure first-time mounted rows before paint in one read batch, including
   while the user is scrolling.
 - Never write `scrollTop` during touch dragging or momentum for measurement,
@@ -849,7 +850,7 @@ dirty. A transaction rebuilds from the smallest dirty index once.
 `setItems` compares the incoming sequence with the current keys using a common
 prefix and common suffix. It deletes only removed keys, inserts only new keys,
 and rewrites suffix map indexes only when their numeric positions shifted.
-Estimates are compared independently so a same-key scale reset dirties the
+Estimates are compared independently so a same-key estimate reset dirties the
 first changed estimate without rebuilding `#indexByKey`. Consequences:
 
 - Tail append/remove performs map writes proportional to changed keys and
@@ -1444,7 +1445,6 @@ The chat shell reads a snapshot and derives retained items declaratively:
 	data-chat-virtual-model-count={projection.model.items.length}
 	data-chat-virtual-data-revision={projection.projectedDataRevision}
 	data-chat-transcript-entry-count={chatState.entries.length}
-	data-chat-transcript-scale={String(textScale)}
 	{@attach virtualController.sizer}
 >
 	{#each virtualItems as virtualItem (virtualItem.key)}
@@ -1568,6 +1568,17 @@ viewport-offset capture read Virt's full position and pair its `paintedOffset`
 with `positions.itemAtOffset()`. The narrower `ConversationViewportPosition`
 returned through the port contains only the logical fields consumed by
 `ConversationScrollController`.
+
+Hidden responsive reflow remains an adapter concern. Before suspension, the
+Chat controller captures the viewport width plus either end pinning or a keyed
+transcript row and its viewport offset. On show, an unchanged width resumes
+directly. If the width changed, cached row heights describe the old line
+wrapping: the adapter applies `reset-measurements` while Virt is still
+suspended, resumes the captured end or keyed target against current estimates,
+then calls `remeasureAll()` for mounted rows. Virt does not infer width changes
+or choose a Chat reading target; it supplies only the generic measurement-reset,
+suspend, resume, and remeasurement primitives.
+
 `ConversationScrollController` renames its previous physical offset to a
 previous logical offset and uses the query for direction inference,
 `#syncViewportStart`, and earlier-page proximity. Earlier proximity requires
@@ -1671,6 +1682,7 @@ it waits for; only loops that repair TanStack ordering are deleted.
 | Surface replacement with pending deviation              | Clear old deviation, measurements, elements, and attachments; ignore clamp events until the first explicit target.                                                                               |
 | `apply()` while suspended                               | Update/prune source geometry without correction or range publication; preserve same-surface deviation.                                                                                           |
 | `resume(target)` after hidden updates                   | Publish only zero-deviation current keys and geometry, resolve one target atomically, and never expose the stale pre-suspension snapshot; a missing key returns after publication with no write. |
+| Chat viewport width changes while suspended             | The Chat adapter resets stale measurements before `resume(target)`, restores end pinning or the keyed reading offset, then remeasures mounted rows; generic Virt never infers width policy.       |
 | Leading offset changes without resize                   | Fold its delta into the selected anchor correction before any write.                                                                                                                             |
 | Elastic touch offset                                    | Defer physical write until offset is in bounds and activity is idle.                                                                                                                             |
 | Controller destroyed twice                              | Idempotent cleanup; no observed nodes, listeners, timers, or pending callbacks remain.                                                                                                           |
@@ -1885,8 +1897,8 @@ separate evidence and browser coverage.
 
 ### Fenwick tree or size-run tree
 
-Rejected for v1. Current scale and preliminary measurement favor simple typed
-arrays. The design records a measurable escalation trigger.
+Rejected for v1. Current list sizes and preliminary measurement favor simple
+typed arrays. The design records a measurable escalation trigger.
 
 ## Implementation history
 
@@ -2002,7 +2014,7 @@ Chromium scenarios:
 - Interrupted compact touch prepend.
 - Scrollbar and keyboard reversal.
 - Tool-pair completion.
-- Text-scale reset.
+- Same-key estimate reset.
 - Chat switch and held earlier page.
 - Detached live following.
 
@@ -2327,7 +2339,8 @@ coverage while removing TanStack mocks. Retain exact cases for:
 - Clamped scrollbar-drag prepend.
 - User cancellation after publication.
 - Retained but unmounted anchor target.
-- Visible and hidden text-scale reset.
+- Visible and hidden wholesale measurement reset.
+- Hidden Chat width change resets cached heights before resume while preserving both end pinning and a keyed reading-row viewport offset.
 - Show-time concurrent geometry.
 - Surface identity replacement.
 - Clamp-driven scroll events ignored between replacement and its first target.
@@ -2354,7 +2367,8 @@ records, published coordinates, physical writes, and viewport ownership.
 `integration-tests/tests/chromium/transcript-virtualization.test.ts` remains
 the acceptance suite and passes without weaker tolerances. It covers:
 
-- Paging, append, and scale geometry.
+- Paging, append, and responsive-width geometry.
+- A bottom-pinned live Chat narrowed while hidden returns at the exact end with remeasured wrapped tail content.
 - Earlier prefetch during active processing.
 - Compact/wide touch and momentum prepend.
 - Compact paused/interrupted prepend.
@@ -2401,7 +2415,7 @@ Physical iPhone checklist:
 - Stream while pinned.
 - Stream while reading earlier content.
 - Mount and expand long tool/code rows during a fling.
-- Change scale while detached from the end.
+- Resize the viewport while detached from the end.
 - Navigate to an unmounted target mid-fling.
 - Switch chats and replace the transcript mid-fling.
 - Return to a cached chat and page earlier again.

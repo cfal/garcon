@@ -30,7 +30,6 @@ export interface ConversationFeedProjectionInput {
 	mutationClock: ConversationFeedMutationClock;
 	hiddenToolTypes: readonly string[];
 	showThinking: boolean;
-	textScale: number;
 	isLiveWindow: boolean;
 	showRefreshError: boolean;
 	showEarlierBoundary: boolean;
@@ -73,7 +72,6 @@ function sameInput(
 		left.mutationClock.lastRevisionByKind === right.mutationClock.lastRevisionByKind &&
 		left.hiddenToolTypes === right.hiddenToolTypes &&
 		left.showThinking === right.showThinking &&
-		left.textScale === right.textScale &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
@@ -92,7 +90,6 @@ function sameProjectionConfiguration(
 		left.surfaceIdentity === right.surfaceIdentity &&
 		left.hiddenToolTypes === right.hiddenToolTypes &&
 		left.showThinking === right.showThinking &&
-		left.textScale === right.textScale &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
 		left.showEarlierBoundary === right.showEarlierBoundary &&
@@ -135,12 +132,9 @@ export class ConversationFeedProjectionState {
 			pendingPermissions: input.pendingPermissions,
 		});
 		const keys = model.items.map((item) => item.key);
-		const estimates = model.items.map((item) =>
-			estimateConversationFeedItemSize(item, input.textScale),
-		);
+		const estimates = model.items.map(estimateConversationFeedItemSize);
 		const previousGeometry = this.#lastProjection?.geometry;
 		const identityChanged = previousGeometry?.surfaceIdentity !== input.surfaceIdentity;
-		const textScaleChanged = this.#lastInput?.textScale !== input.textScale;
 		const geometryChanged =
 			!previousGeometry ||
 			identityChanged ||
@@ -158,8 +152,7 @@ export class ConversationFeedProjectionState {
 					geometryRevision: ++this.#geometryRevision,
 					keys,
 					estimates,
-					measurementReset:
-						textScaleChanged && !identityChanged ? ('all' as const) : ('none' as const),
+					measurementReset: 'none' as const,
 					mutationKinds,
 					endBehavior: conversationFeedEndBehavior(mutationKinds, input.isLiveWindow),
 				}
@@ -200,21 +193,14 @@ export class ConversationFeedProjectionState {
 			const estimates = previous.geometry.estimates.slice();
 			const insertIndex = previous.model.transcriptEndIndex;
 			if (insertIndex > previous.model.transcriptStartIndex) {
-				estimates[insertIndex - 1] = estimateConversationFeedItemSize(
-					model.items[insertIndex - 1],
-					input.textScale,
-				);
+				estimates[insertIndex - 1] = estimateConversationFeedItemSize(model.items[insertIndex - 1]);
 			}
 			const insertedItems = model.items.slice(
 				insertIndex,
 				insertIndex + visibleAppendedItems.length,
 			);
 			keys.splice(insertIndex, 0, ...insertedItems.map((item) => item.key));
-			estimates.splice(
-				insertIndex,
-				0,
-				...insertedItems.map((item) => estimateConversationFeedItemSize(item, input.textScale)),
-			);
+			estimates.splice(insertIndex, 0, ...insertedItems.map(estimateConversationFeedItemSize));
 			geometry = {
 				surfaceIdentity: input.surfaceIdentity,
 				geometryRevision: ++this.#geometryRevision,

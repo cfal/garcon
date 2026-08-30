@@ -317,11 +317,12 @@ describe('workspace layout reducer', () => {
 				type: 'move-chat-to-window',
 				sourceWindowId: 'window-source',
 				destinationWindowId: 'window-destination',
+				index: 1,
 			},
 		]);
 
 		expect(tabs(next, 'window-source')).toEqual(['singleton:git']);
-		expect(tabs(next, 'window-destination')).toEqual([destinationSurfaceId, 'singleton:files']);
+		expect(tabs(next, 'window-destination')).toEqual(['singleton:files', destinationSurfaceId]);
 		expect(windowNodeById(next.desktopRoot, 'window-destination')?.tabs.activeId).toBe(
 			destinationSurfaceId,
 		);
@@ -719,6 +720,13 @@ describe('workspace layout reducer', () => {
 });
 
 describe('workspace layout invariants', () => {
+	it('requires at least one Chat view', () => {
+		const withoutChat = snapshotWith(workspaceWindow('window-main', ['singleton:git']));
+		expect(() => assertWorkspaceLayoutInvariants(withoutChat)).toThrow(
+			'At least one Chat view must remain',
+		);
+	});
+
 	it('rejects a Chat descriptor in the wrong window or two Chat views in one window', () => {
 		const wrong = snapshotWith(workspaceWindow('window-wrong', [CANONICAL_CHAT_SURFACE_ID]));
 		expect(() => assertWorkspaceLayoutInvariants(wrong)).toThrow('does not match');

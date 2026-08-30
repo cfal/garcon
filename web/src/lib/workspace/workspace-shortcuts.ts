@@ -52,6 +52,7 @@ export class WorkspaceShortcutDispatcher {
 	readonly #handlers = new Map<string, Set<WorkspaceSurfaceShortcutHandler>>();
 	readonly #localOwners = new Map<HTMLElement, Set<WorkspaceLocalShortcutOwner>>();
 	#toggleCommandMenu: (() => void) | null = null;
+	#userInteractionGeneration = 0;
 	#lastInteractedScrollRegion: HTMLElement | null = null;
 	#pendingPointerFocus: { region: HTMLElement } | null = null;
 
@@ -59,6 +60,14 @@ export class WorkspaceShortcutDispatcher {
 
 	setCommandMenuHandler(handler: (() => void) | null): void {
 		this.#toggleCommandMenu = handler;
+	}
+
+	get userInteractionGeneration(): number {
+		return this.#userInteractionGeneration;
+	}
+
+	noteUserInteraction(): void {
+		this.#userInteractionGeneration += 1;
 	}
 
 	registerSurface(surfaceId: string, handler: WorkspaceSurfaceShortcutHandler): () => void {

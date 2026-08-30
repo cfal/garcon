@@ -73,11 +73,23 @@ export class MobilePresentationPlanner {
 		const recent = this.#mostRecentSurfaceIds.find(
 			(surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]),
 		);
-		const fallback = collectWindowNodes(snapshot.desktopRoot)
+		const workspaceWindows = collectWindowNodes(snapshot.desktopRoot);
+		const activeWindowFallback = workspaceWindows
 			.map((workspaceWindow) => workspaceWindow.tabs.activeId)
 			.find((surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]));
+		const inactiveWindowFallback = workspaceWindows
+			.flatMap((workspaceWindow) => workspaceWindow.tabs.mru)
+			.find((surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]));
+		const currentMobileFallback =
+			!isExcluded(snapshot.mobileActiveSurfaceId) &&
+			snapshot.surfaces[snapshot.mobileActiveSurfaceId]
+				? snapshot.mobileActiveSurfaceId
+				: null;
+		const activeId =
+			recent ?? activeWindowFallback ?? inactiveWindowFallback ?? currentMobileFallback;
+		if (!activeId) throw new Error('No mobile return surface is available');
 		return {
-			activeId: recent ?? fallback ?? snapshot.mobileActiveSurfaceId,
+			activeId,
 			returnStack: [],
 		};
 	}

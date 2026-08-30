@@ -100,14 +100,9 @@ export class ChatDraftStore {
 		this.load(chatId);
 		const current = this.view(chatId);
 		if (current.text.includes(block)) return 'duplicate';
-		const separator =
-			current.text.length === 0
-				? ''
-				: current.text.endsWith('\n\n')
-					? ''
-					: current.text.endsWith('\n')
-						? '\n'
-						: '\n\n';
+		let separator = '\n\n';
+		if (current.text.length === 0 || current.text.endsWith('\n\n')) separator = '';
+		else if (current.text.endsWith('\n')) separator = '\n';
 		this.setTextAndFlush(chatId, `${current.text}${separator}${block}`);
 		return 'appended';
 	}

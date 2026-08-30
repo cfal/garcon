@@ -111,7 +111,7 @@ describe('conversation virtual feed model', () => {
 			innerRowId: resultRowId,
 		});
 		expect(model.items[2]).toMatchObject({ spacingAfter: 'none' });
-		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBe(0);
+		expect(estimateConversationFeedItemSize(model.items[2])).toBe(0);
 	});
 
 	it('gives visible collapsible tool results their own estimated geometry', () => {
@@ -123,11 +123,11 @@ describe('conversation virtual feed model', () => {
 		]);
 		const model = build(renderModel.items);
 
-		expect(model.items[2]).toMatchObject({ spacingAfter: 'scaled-transcript' });
-		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBeGreaterThan(0);
+		expect(model.items[2]).toMatchObject({ spacingAfter: 'transcript' });
+		expect(estimateConversationFeedItemSize(model.items[2])).toBeGreaterThan(0);
 	});
 
-	it('scales transcript estimates without scaling feed controls', () => {
+	it('keeps transcript and feed controls in one unscaled coordinate system', () => {
 		const transcript = build([userItem(1)]).items[1];
 		const boundary = buildConversationVirtualFeedModel({
 			showRefreshError: false,
@@ -140,8 +140,8 @@ describe('conversation virtual feed model', () => {
 			pendingPermissions: [],
 		}).items[1];
 
-		expect(estimateConversationFeedItemSize(transcript, 0.7)).toBeCloseTo(86.8);
-		expect(estimateConversationFeedItemSize(boundary, 0.7)).toBe(44);
+		expect(estimateConversationFeedItemSize(transcript)).toBe(124);
+		expect(estimateConversationFeedItemSize(boundary)).toBe(44);
 	});
 
 	it('reserves header geometry for presented user messages', () => {
@@ -165,9 +165,9 @@ describe('conversation virtual feed model', () => {
 		);
 		const presented = build([presentedItem]).items[1]!;
 
-		expect(estimateConversationFeedItemSize(ordinary, 1)).toBe(124);
-		expect(estimateConversationFeedItemSize(collapsible, 1)).toBe(124);
-		expect(estimateConversationFeedItemSize(presented, 1)).toBe(156);
+		expect(estimateConversationFeedItemSize(ordinary)).toBe(124);
+		expect(estimateConversationFeedItemSize(collapsible)).toBe(124);
+		expect(estimateConversationFeedItemSize(presented)).toBe(156);
 	});
 
 	it('bounds collapsed handoff notices while plain notices stay compact', () => {
@@ -188,8 +188,8 @@ describe('conversation virtual feed model', () => {
 			{ kind: 'message', id: 'generation-1:2', index: 2, ordinal: 2, message: handoff },
 		]);
 
-		expect(estimateConversationFeedItemSize(model.items[1], 1)).toBe(64);
-		expect(estimateConversationFeedItemSize(model.items[2], 1)).toBe(242);
+		expect(estimateConversationFeedItemSize(model.items[1])).toBe(64);
+		expect(estimateConversationFeedItemSize(model.items[2])).toBe(242);
 	});
 
 	it('includes viewport geometry and established floating permission spacing', () => {
@@ -224,7 +224,7 @@ describe('conversation virtual feed model', () => {
 		]);
 		expect(model.items[2]).toMatchObject({ leadingSpacing: true, spacingAfter: 'responsive-feed' });
 		expect(model.items[3]).toMatchObject({ leadingSpacing: false, spacingAfter: 'none' });
-		expect(estimateConversationFeedItemSize(model.items.at(-1), 1)).toBe(56);
+		expect(estimateConversationFeedItemSize(model.items.at(-1))).toBe(56);
 	});
 
 	it('gives permission occurrences distinct virtual identities', () => {
@@ -290,9 +290,9 @@ describe('conversation virtual feed model', () => {
 			'permission',
 			'viewport-end-spacer',
 		]);
-		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(appended?.items[1]).toMatchObject({ spacingAfter: 'transcript' });
 		expect(appended?.items[1]).toBe(priorTranscriptTail);
-		expect(appended?.items[2]).toMatchObject({ spacingAfter: 'scaled-transcript' });
+		expect(appended?.items[2]).toMatchObject({ spacingAfter: 'transcript' });
 		expect(appended?.indexByKey).not.toBe(model.indexByKey);
 		expect(appended?.indexByRowId).not.toBe(model.indexByRowId);
 		expect(appended?.targetByDomAnchorId).not.toBe(model.targetByDomAnchorId);

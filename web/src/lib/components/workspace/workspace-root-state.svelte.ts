@@ -61,11 +61,6 @@ export class WorkspaceRootState {
 		return this.partitionRatioPreviews[partitionId] ?? fallback;
 	}
 
-	surfaceStyle(presentation: string): string {
-		if (presentation === 'mobile') return 'inset: 0;';
-		return 'inset: 0;';
-	}
-
 	destroy(): void {
 		for (const bridge of this.#frameBridges.values()) bridge.deactivate();
 		this.#frameBridges.clear();

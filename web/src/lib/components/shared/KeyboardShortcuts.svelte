@@ -9,11 +9,16 @@
 	let { onToggleCommandMenu }: KeyboardShortcutsProps = $props();
 
 	const shortcuts = getWorkspaceShortcuts();
-	const handleKeydown = (event: KeyboardEvent) => shortcuts.handle(event);
+	const handleKeydown = (event: KeyboardEvent) => {
+		shortcuts.noteUserInteraction();
+		shortcuts.handle(event);
+	};
 	const noteFocusInteraction = (event: FocusEvent) =>
 		shortcuts.noteScrollRegionInteraction(event.target, 'focus');
-	const notePointerInteraction = (event: PointerEvent) =>
+	const notePointerInteraction = (event: PointerEvent) => {
+		shortcuts.noteUserInteraction();
 		shortcuts.noteScrollRegionInteraction(event.target, 'pointer');
+	};
 	const noteWheelInteraction = (event: WheelEvent) =>
 		shortcuts.noteScrollRegionInteraction(event.target, 'wheel');
 

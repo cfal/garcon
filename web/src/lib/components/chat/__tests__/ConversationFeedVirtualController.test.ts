@@ -28,8 +28,9 @@ interface ControllerExposure {
 	prependDuring(activity: 'dragging' | 'coasting'): Promise<void>;
 	replaceSurface(): Promise<void>;
 	setPinned(value: boolean): Promise<void>;
-	toggleScale(): Promise<void>;
-	hideAndShow(): Promise<void>;
+	resetMeasurements(): Promise<void>;
+	hide(): Promise<void>;
+	showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
 }
 
 function nextFrame(): Promise<void> {
@@ -357,18 +358,77 @@ describe('ConversationFeedVirtualController', () => {
 		expect(exposure.controller.viewportPosition()).not.toBeNull();
 	});
 
-	it('resets measurements on scale changes and resumes current geometry after hiding', async () => {
+	it('resets measurements after wholesale estimate changes', async () => {
 		const { exposure } = await renderController();
 		const initialSize = exposure.controller.snapshot.sizerSize;
 
-		await exposure.toggleScale();
+		await exposure.resetMeasurements();
 		await settleController();
 		expect(exposure.controller.snapshot.sizerSize).toBeLessThan(initialSize);
+	});
 
-		await exposure.hideAndShow();
+	it('invalidates hidden row measurements when the viewport width changes', async () => {
+		const { exposure } = await renderController();
+		exposure.controller.scrollToEnd();
 		await settleController();
+
+		await exposure.hide();
+		await exposure.showAtLayout(240, 80);
+		await settleController();
+
 		expect(exposure.controller.isReady()).toBe(true);
-		expect(exposure.controller.snapshot.positions.count).toBe(12);
+		expect(exposure.controller.snapshot.positions.itemAt(11)?.size).toBe(80);
+		const viewport = exposure.viewport();
+		expect(viewport).not.toBeNull();
+		expect(
+			Math.abs(
+				exposure.controller.snapshot.sizerSize -
+					((viewport?.scrollTop ?? 0) + (viewport?.clientHeight ?? 0)),
+			),
+		).toBeLessThanOrEqual(0.5);
+	});
+
+	it('retains hidden row measurements when the viewport width is unchanged', async () => {
+		const { exposure } = await renderController();
+		exposure.controller.scrollToEnd();
+		await settleController();
+
+		await exposure.hide();
+		await exposure.showAtLayout(400, 80);
+		await settleController();
+
+		expect(exposure.controller.snapshot.positions.itemAt(11)?.size).toBe(40);
+		const viewport = exposure.viewport();
+		expect(viewport).not.toBeNull();
+		expect(
+			Math.abs(
+				exposure.controller.snapshot.sizerSize -
+					((viewport?.scrollTop ?? 0) + (viewport?.clientHeight ?? 0)),
+			),
+		).toBeLessThanOrEqual(0.5);
+	});
+
+	it('preserves a hidden reading anchor when the viewport width changes', async () => {
+		const { exposure } = await renderController();
+		await exposure.setPinned(false);
+		exposure.controller.scrollToStart();
+		await settleController();
+		exposure.controller.scrollBy(240);
+		await settleController();
+		const viewport = exposure.viewport();
+		const before = exposure.controller.snapshot.positions.itemAt(6);
+		if (!viewport || !before) throw new Error('Expected the reading row to be available');
+		const viewportOffset = before.start - viewport.scrollTop;
+
+		await exposure.hide();
+		await exposure.showAtLayout(240, 80);
+		await settleController();
+
+		const after = exposure.controller.snapshot.positions.itemAt(6);
+		expect(after?.size).toBe(80);
+		expect(Math.abs((after?.start ?? 0) - viewport.scrollTop - viewportOffset)).toBeLessThanOrEqual(
+			0.5,
+		);
 	});
 
 	it('owns every programmatic scroll synchronously and destroys idempotently', async () => {

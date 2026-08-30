@@ -23,6 +23,10 @@ export class WorkspacePresentationFrames {
 		return this.versions[surfaceId] ?? 0;
 	}
 
+	supersedePendingTransition(): void {
+		this.#presentationGeneration += 1;
+	}
+
 	async retry(surfaceId: string, host: PresentationHostId): Promise<boolean> {
 		const frames = this.deps.frames;
 		if (!frames) return false;

@@ -31,10 +31,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
-	import {
-		resolveAdjacentChatId,
-		shouldSynchronizeFocusedChat,
-	} from './app-shell-chat-navigation';
+	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileDialogHost from '../files/FileDialogHost.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
@@ -50,6 +47,7 @@
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import { windowNodeById } from '$lib/workspace/window-tree.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -146,32 +144,54 @@
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
-	let chatNavigationGeneration = 0;
-	let pendingChatTarget = $state<string | null>(null);
+	const chatNavigation = new AppShellChatNavigationController({
+		get routeChatId() {
+			return page.params.id as string | undefined;
+		},
+		get selectedChatId() {
+			return sessions.selectedChatId;
+		},
+		get isLoadingChats() {
+			return sessions.isLoadingChats;
+		},
+		get currentWindowId() {
+			return workspace.currentWindowId;
+		},
+		hasChat: (chatId) => sessions.hasChat(chatId),
+		showChatInCurrentWindow: (chatId) => workspace.showChatInCurrentWindow(chatId),
+		setSelectedChatId: (chatId) => sessions.setSelectedChatId(chatId),
+		navigateToChat: gotoChat,
+		navigateToBareRoute: () => goto('/'),
+		requestComposerFocus: () => appShell.requestComposerFocus(),
+		reportOpenError: (error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		},
+		reportDeleteError: (error) => {
+			notifications.error(
+				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
+			);
+		},
+	});
 
 	$effect(() => {
 		const chatId = page.params.id as string | undefined;
 		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
 		if (selectedChatId === undefined) return;
-		untrack(() => {
-			if (selectedChatId) {
-				void showChatInCurrentWindow(selectedChatId, { navigate: false });
-			} else if (!pendingChatTarget) {
-				sessions.setSelectedChatId(null);
-			}
-		});
+		untrack(() => chatNavigation.handleRouteChat(selectedChatId));
 	});
 
 	$effect(() => {
+		const lastSelectedChatId = sessions.lastSelectedChatId;
 		const target = restoreChatIdForBareRoute({
 			pathname: page.url.pathname,
 			routeChatId: page.params.id as string | undefined,
 			isLoadingChats: sessions.isLoadingChats,
-			lastSelectedChatId: sessions.lastSelectedChatId,
+			lastSelectedChatId,
+			lastSelectedChatExists: lastSelectedChatId ? sessions.hasChat(lastSelectedChatId) : false,
 			selectedChatId: sessions.selectedChatId,
 		});
 		if (!target) return;
-		untrack(() => void showChatInCurrentWindow(target, { navigate: true }));
+		untrack(() => void chatNavigation.showChatInCurrentWindow(target, { navigate: true }));
 	});
 
 	$effect(() => {
@@ -185,15 +205,17 @@
 		if (
 			!chatId ||
 			!shouldSynchronizeFocusedChat({
+				focusedWindowId: currentWindowId,
 				focusedChatId: chatId,
 				focusedChatExists: sessions.hasChat(chatId),
 				selectedChatId: sessions.selectedChatId,
-				pendingChatTarget,
+				pendingChatTarget: chatNavigation.pendingChatTarget,
+				pendingWindowId: chatNavigation.pendingWindowId,
 			})
 		) {
 			return;
 		}
-		untrack(() => void synchronizeFocusedChat(chatId));
+		untrack(() => void chatNavigation.synchronizeFocusedChat(chatId));
 	});
 
 	$effect(() => {
@@ -295,42 +317,8 @@
 		void sessions.refreshChats();
 	});
 
-	async function showChatInCurrentWindow(
-		chatId: string,
-		options: { navigate: boolean },
-	): Promise<void> {
-		const generation = ++chatNavigationGeneration;
-		pendingChatTarget = chatId;
-		try {
-			await workspace.showChatInCurrentWindow(chatId);
-			if (generation !== chatNavigationGeneration) return;
-			sessions.setSelectedChatId(chatId);
-			if (options.navigate && page.params.id !== chatId) await gotoChat(chatId);
-			if (generation !== chatNavigationGeneration) return;
-			appShell.requestComposerFocus();
-		} catch (error) {
-			if (generation === chatNavigationGeneration) {
-				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-			}
-		} finally {
-			if (generation === chatNavigationGeneration) pendingChatTarget = null;
-		}
-	}
-
-	async function synchronizeFocusedChat(chatId: string): Promise<void> {
-		const generation = ++chatNavigationGeneration;
-		pendingChatTarget = chatId;
-		try {
-			sessions.setSelectedChatId(chatId);
-			if (page.params.id !== chatId) await gotoChat(chatId);
-			if (generation === chatNavigationGeneration) appShell.requestComposerFocus();
-		} finally {
-			if (generation === chatNavigationGeneration) pendingChatTarget = null;
-		}
-	}
-
 	function handleChatSelect(chatId: string): void {
-		void showChatInCurrentWindow(chatId, { navigate: true });
+		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true });
 	}
 
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
@@ -356,7 +344,7 @@
 			offset,
 		});
 		if (!targetId) return;
-		void showChatInCurrentWindow(targetId, { navigate: true });
+		void chatNavigation.showChatInCurrentWindow(targetId, { navigate: true });
 	}
 
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
@@ -367,18 +355,15 @@
 		const wasSelected = sessions.selectedChatId === chatId;
 		const index = sessions.order.indexOf(chatId);
 		const neighborId = sessions.order[index - 1] ?? sessions.order[index + 1] ?? null;
-		sessions.removeChat(chatId);
-		chatDrafts.discardChat(chatId);
-		void workspace.clearDeletedChat(chatId).then(() => {
-			if (!wasSelected) return;
-			if (neighborId) {
-				void showChatInCurrentWindow(neighborId, { navigate: true });
-				return;
-			}
-			chatNavigationGeneration += 1;
-			pendingChatTarget = null;
-			sessions.setSelectedChatId(null);
-			void goto('/');
+		void chatNavigation.reconcileDeletedChat({
+			chatId,
+			wasSelected,
+			neighborId,
+			removeLocal: () => {
+				sessions.removeChat(chatId);
+				chatDrafts.discardChat(chatId);
+			},
+			clearPresentation: () => workspace.clearDeletedChat(chatId),
 		});
 	}
 

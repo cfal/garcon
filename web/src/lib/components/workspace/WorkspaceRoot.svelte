@@ -26,13 +26,13 @@
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
-	import { getChatWindowTextScale } from '$lib/chat/transcript/chat-window-text-scale.js';
 	import {
 		chatViewSurfaceId,
 		type ChatViewSurfaceDescriptor,
 		type WorkspacePartitionNode,
 		type WorkspaceWindowId,
 	} from '$lib/workspace/surface-types.js';
+	import { CANONICAL_WINDOW_ID } from '$lib/workspace/canonical-layout.js';
 	import {
 		computeWindowRects,
 		windowNodeById,
@@ -73,9 +73,9 @@
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
+	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
-	const mobileActive = $derived(snapshot.mobileActiveSurfaceId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const rootState = new WorkspaceRootState({
 		get snapshot() {
@@ -105,8 +105,6 @@
 		),
 	);
 	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
-	const visibleWindowCount = $derived(fullscreenWindowId ? 1 : geometry.windows.length);
-	const chatWindowTextScale = $derived(getChatWindowTextScale(visibleWindowCount));
 	const currentWindowId = $derived(workspace.currentWindowId);
 	const presentedCurrentWindowId = $derived(fullscreenWindowId ?? currentWindowId);
 	const liveChat = $derived.by(
@@ -148,7 +146,7 @@
 	const fallbackChatSurfaceId = $derived(
 		Object.values(snapshot.surfaces).find(
 			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
-		)?.id ?? chatViewSurfaceId('window-main'),
+		)?.id ?? chatViewSurfaceId(CANONICAL_WINDOW_ID),
 	);
 
 	$effect(() => {
@@ -210,9 +208,7 @@
 		return fullscreenWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
 	}
 
-	function chatContentModeForWindow(
-		windowId: WorkspaceWindowId,
-	): 'live' | 'preview' | 'none' {
+	function chatContentModeForWindow(windowId: WorkspaceWindowId): 'live' | 'preview' | 'none' {
 		if (isMobile) return 'none';
 		if (fullscreenWindowId && fullscreenWindowId !== windowId) return 'none';
 		if (liveChat?.windowId === windowId) return 'live';
@@ -279,7 +275,7 @@
 				{surface}
 				{presentation}
 				{visible}
-				style={rootState.surfaceStyle(presentation)}
+				style={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
 				frameBridge={rootState.frameBridge(surface.id)}
@@ -310,11 +306,10 @@
 				style={rectStyle(displayRect(workspaceWindow.id, rect))}
 				labelFor={label}
 				previewStore={chatWindowPreviews}
-				previewTextScale={chatWindowTextScale}
 				{subagentToolbar}
 				{chatMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
-				surfaceStyle={(presentation) => rootState.surfaceStyle(presentation)}
+				surfaceStyle={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
 			/>
@@ -368,7 +363,6 @@
 				transcriptCache={chatTranscriptCache}
 				previewStore={chatWindowPreviews}
 				getVisibleChatIds={() => previewChatIds}
-				textScale={isMobile ? 1 : chatWindowTextScale}
 			/>
 		</div>
 	</div>

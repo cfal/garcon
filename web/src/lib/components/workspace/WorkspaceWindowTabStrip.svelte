@@ -216,6 +216,13 @@
 		if (target?.kind !== 'tab' || target.windowId !== windowId) return null;
 		return target.referenceSurfaceId === surfaceId ? target.position : null;
 	}
+
+	function tabTreatment(isSelected: boolean, showSelectedBackground: boolean): string {
+		if (!isSelected) return 'text-muted-foreground hover:bg-accent/60 hover:text-foreground';
+		if (!showSelectedBackground) return 'text-foreground';
+		if (isCurrent) return 'bg-workspace-window-tab-selected text-foreground';
+		return 'bg-workspace-window-tab-selected-inactive text-foreground';
+	}
 </script>
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
@@ -243,13 +250,7 @@
 			renderedLabelMode === 'full' && 'w-max shrink-0 px-2',
 			renderedLabelMode === 'truncated' && 'min-w-16 flex-1 px-2',
 			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
-			showSelectedBackground
-				? isCurrent
-					? 'bg-workspace-window-tab-selected text-foreground'
-					: 'bg-workspace-window-tab-selected-inactive text-foreground'
-				: isSelected
-					? 'text-foreground'
-				: 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+			tabTreatment(isSelected, showSelectedBackground),
 		)}
 		title={labelFor(surfaceId)}
 		draggable={!measurement && canDrag(surfaceId) ? true : undefined}
@@ -313,9 +314,16 @@
 				</ContextMenuItem>
 				{#if canMoveBetweenWindows(surfaceId)}
 					{#each actionState.otherWindows as destination (destination.id)}
-						<ContextMenuItem onclick={() => moveTab(surfaceId, destination.id)}>
+						{@const moveLabel = m.workspace_move_to_window({
+							window: labelFor(destination.tabs.activeId),
+						})}
+						<ContextMenuItem
+							class="min-w-0"
+							title={moveLabel}
+							onclick={() => moveTab(surfaceId, destination.id)}
+						>
 							<PanelRight />
-							{m.workspace_move_to_window({ window: labelFor(destination.tabs.activeId) })}
+							<span class="min-w-0 flex-1 truncate">{moveLabel}</span>
 						</ContextMenuItem>
 					{/each}
 				{/if}

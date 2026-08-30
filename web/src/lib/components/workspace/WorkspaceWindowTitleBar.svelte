@@ -56,6 +56,17 @@
 		workspace.noteWindowChromeFocus(workspaceWindow.id, workspaceWindow.tabs.activeId);
 	}
 
+	function handleChromePointerDown(event: PointerEvent): void {
+		if (
+			event.target instanceof Element &&
+			event.target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]')
+		) {
+			noteFocus();
+			return;
+		}
+		workspace.activateWindow(workspaceWindow.id);
+	}
+
 	function isSurfaceChatProcessing(surfaceId: string): boolean {
 		const surface = snapshot.surfaces[surfaceId];
 		if (surface?.type !== 'chat' || !surface.chatId) return false;
@@ -87,7 +98,7 @@
 		showActiveTreatment && 'bg-workspace-window-titlebar-active',
 	)}
 	onfocusin={noteFocus}
-	onpointerdown={noteFocus}
+	onpointerdown={handleChromePointerDown}
 >
 	<div class="relative flex min-w-0 flex-1 items-center">
 		<WorkspaceWindowTabStrip

@@ -117,12 +117,17 @@
 		</DropdownMenuItem>
 		{#if tabActions.canMoveBetweenWindows}
 			{#each tabActions.otherWindows as destination (destination.id)}
+				{@const moveLabel = m.workspace_move_to_window({
+					window: labelFor(destination.tabs.activeId),
+				})}
 				<DropdownMenuItem
+					class="min-w-0"
 					data-workspace-window-tab-action="move-to-window"
+					title={moveLabel}
 					onSelect={() => moveTab(destination.id)}
 				>
 					<PanelRight />
-					{m.workspace_move_to_window({ window: labelFor(destination.tabs.activeId) })}
+					<span class="min-w-0 flex-1 truncate">{moveLabel}</span>
 				</DropdownMenuItem>
 			{/each}
 		{/if}

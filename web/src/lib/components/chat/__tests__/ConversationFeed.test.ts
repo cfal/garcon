@@ -121,6 +121,14 @@ describe('ConversationFeed', () => {
 		expect(viewport.classList.contains('pb-3')).toBe(false);
 	});
 
+	it('uses fixed transcript typography without CSS zoom', async () => {
+		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'row-ids' });
+
+		await waitFor(() => expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy());
+		expect(container.querySelector('[data-chat-transcript-scale]')).toBeNull();
+		expect(container.querySelector('[style*="zoom"]')).toBeNull();
+	});
+
 	it('keeps feed content and scrollbar invisible while preparing the initial position', async () => {
 		const { container, rerender } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'row-ids',

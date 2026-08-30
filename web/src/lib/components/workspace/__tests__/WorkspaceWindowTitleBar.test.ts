@@ -16,6 +16,7 @@ const {
 	closeSurface,
 	closeWindow,
 	createTerminal,
+	activateWindow,
 	enterWindowFullscreen,
 	exitWindowFullscreen,
 	focusSurface,
@@ -25,6 +26,7 @@ const {
 	moveTabToNewWindow,
 	runtime,
 } = vi.hoisted(() => ({
+	activateWindow: vi.fn(),
 	closeSurface: vi.fn(async () => true),
 	closeWindow: vi.fn(async () => true),
 	createTerminal: vi.fn(async () => 'terminal-created'),
@@ -75,6 +77,7 @@ vi.mock('$lib/context', () => ({
 		isWindowCloseBlocked: () => runtime.closeBlocked,
 		isSurfaceCloseBlocked: () => runtime.surfaceCloseBlocked,
 		noteWindowChromeFocus,
+		activateWindow,
 		focusSurface,
 		moveTabToWindow,
 		moveTabToNewWindow,
@@ -200,10 +203,14 @@ function labelFor(surfaceId: string): string {
 	return surfaceId;
 }
 
-function renderTitleBar(node: WorkspaceWindowNode, isCurrent = true) {
+function renderTitleBar(
+	node: WorkspaceWindowNode,
+	isCurrent = true,
+	resolveLabel: (surfaceId: string) => string = labelFor,
+) {
 	return render(WorkspaceWindowTitleBar, {
 		workspaceWindow: node,
-		labelFor,
+		labelFor: resolveLabel,
 		dnd: new WorkspaceWindowDndController(createWorkspaceLayoutStore()),
 		isCurrent,
 	});
@@ -332,6 +339,22 @@ describe('WorkspaceWindowTitleBar', () => {
 				.getByRole('tab', { name: 'Chat A' })
 				.classList.contains('bg-workspace-window-tab-selected-inactive'),
 		).toBe(false);
+	});
+
+	it('activates the surface from inactive window chrome without hijacking controls', async () => {
+		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]), false);
+		const toolbar = rendered.getByRole('toolbar');
+
+		await fireEvent.pointerDown(toolbar);
+		expect(activateWindow).toHaveBeenCalledWith('window-main');
+		expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+
+		activateWindow.mockClear();
+		await fireEvent.pointerDown(
+			rendered.getByRole('button', { name: m.workspace_add_to_window() }),
+		);
+		expect(activateWindow).not.toHaveBeenCalled();
+		expect(noteWindowChromeFocus).toHaveBeenCalledWith('window-main', chatSurface.id);
 	});
 
 	it('uses current and inactive selected-tab tokens when a window has multiple tabs', () => {
@@ -567,6 +590,42 @@ describe('WorkspaceWindowTitleBar', () => {
 			}),
 		);
 		expect(moveTabToWindow).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps long move-destination labels on one truncated line in both tab menus', async () => {
+		const node = workspaceWindow([chatSurface.id, gitSurface.id]);
+		const destinationTitle =
+			'Chat B with a deliberately long title that cannot fit inside the destination menu';
+		const moveLabel = m.workspace_move_to_window({ window: destinationTitle });
+		const resolveLabel = (surfaceId: string): string =>
+			surfaceId === otherChatSurface.id ? destinationTitle : labelFor(surfaceId);
+		runtime.windowCount = 2;
+		runtime.desktopRoot = twoWindowRoot(node.tabs, otherChatSurface.id);
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[gitSurface.id]: gitSurface,
+			[otherChatSurface.id]: otherChatSurface,
+		};
+		renderTitleBar(node, true, resolveLabel);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		const actionsItem = screen.getByRole('menuitem', { name: moveLabel });
+		const actionsLabel = actionsItem.querySelector('span');
+		expect(actionsItem.className).toContain('min-w-0');
+		expect(actionsItem.getAttribute('title')).toBe(moveLabel);
+		expect(actionsLabel?.className).toContain('truncate');
+		expect(actionsLabel?.textContent).toBe(moveLabel);
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('menuitem', { name: moveLabel })).toBeNull());
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		const contextItem = await screen.findByRole('menuitem', { name: moveLabel });
+		const contextLabel = contextItem.querySelector('span');
+		expect(contextItem.className).toContain('min-w-0');
+		expect(contextItem.getAttribute('title')).toBe(moveLabel);
+		expect(contextLabel?.className).toContain('truncate');
+		expect(contextLabel?.textContent).toBe(moveLabel);
 	});
 
 	it('offers keyboard-accessible ordering for movable local tabs', async () => {

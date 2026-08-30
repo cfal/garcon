@@ -28,7 +28,6 @@
 		style,
 		labelFor,
 		previewStore,
-		previewTextScale,
 		subagentToolbar,
 		chatMenuItems,
 		frameBridge,
@@ -44,11 +43,10 @@
 		style: string;
 		labelFor: (surfaceId: string) => string;
 		previewStore: ChatWindowPreviewStore;
-		previewTextScale: number;
 		subagentToolbar: SubagentToolbarState;
 		chatMenuItems?: Snippet<[string]>;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
-		surfaceStyle(presentation: string): string;
+		surfaceStyle: string;
 		onSendToChat(message: string): Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
 	} = $props();
@@ -59,6 +57,14 @@
 	const snapshot = $derived(workspace.layout.snapshot);
 	const activeChatIsLive = $derived(chatContentMode === 'live');
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
+	const chatSurface = $derived.by(() => {
+		for (const surfaceId of workspaceWindow.tabs.order) {
+			const surface = snapshot.surfaces[surfaceId];
+			if (surface?.type === 'chat') return surface;
+		}
+		return null;
+	});
+	const chatIsActive = $derived(activeSurface?.id === chatSurface?.id);
 	const windowPresentations = $derived(
 		presentations.filter((item) => item.windowId === workspaceWindow.id),
 	);
@@ -111,6 +117,12 @@
 		return zone ? dropZoneLabel(zone) : '';
 	}
 
+	function dropResultClass(): string {
+		if (activeDropTarget?.blockedReason) return 'border-destructive/50 bg-destructive/15';
+		if (activeDropTarget?.zone === 'center') return 'border-accent/50 bg-accent/20';
+		return 'border-primary/50 bg-primary/20';
+	}
+
 	function notifyFailure(error: unknown): void {
 		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 	}
@@ -143,8 +155,15 @@
 		}
 	}
 
-	function focusChat(): void {
-		if (activeSurface?.type === 'chat') void workspace.focusSurface(activeSurface.id);
+	function stopInactiveContentPointer(event: PointerEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	function activateWindow(event: MouseEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+		workspace.activateWindow(workspaceWindow.id);
 	}
 </script>
 
@@ -162,8 +181,6 @@
 	inert={!isVisible}
 	aria-hidden={!isVisible}
 	aria-label={m.workspace_window_region({ title: labelFor(workspaceWindow.tabs.activeId) })}
-	onfocusin={() => workspace.noteSurfaceFocus(workspaceWindow.tabs.activeId)}
-	onpointerdown={() => workspace.noteSurfaceFocus(workspaceWindow.tabs.activeId)}
 	ondragover={(event) => dnd.handleWindowDragOver(workspaceWindow.id, event)}
 	ondragleave={(event) => dnd.handleWindowDragLeave(event)}
 	ondrop={(event) => void handleDrop(event)}
@@ -184,26 +201,28 @@
 			{/if}
 		{/snippet}
 	</WorkspaceWindowTitleBar>
-	<div class="relative min-h-0 flex-1 overflow-hidden">
-		{#if activeSurface?.type === 'chat'}
+	<div
+		class="relative min-h-0 flex-1 overflow-hidden"
+		data-workspace-window-content={workspaceWindow.id}
+		inert={!isCurrent}
+		aria-hidden={!isCurrent}
+	>
+		{#if chatSurface}
 			<div
-				data-workspace-surface-id={activeSurface.id}
-				id={`${workspaceWindow.id}-panel-${activeSurface.id}`}
+				data-workspace-surface-id={chatSurface.id}
+				id={`${workspaceWindow.id}-panel-${chatSurface.id}`}
 				role="tabpanel"
 				tabindex="-1"
-				aria-labelledby={`${workspaceWindow.id}-tab-${activeSurface.id}`}
+				aria-labelledby={`${workspaceWindow.id}-tab-${chatSurface.id}`}
+				inert={!chatIsActive}
+				aria-hidden={!chatIsActive}
 				class="absolute inset-0"
-				onfocusin={() => workspace.noteSurfaceFocus(activeSurface.id)}
-				onpointerdown={() => workspace.noteSurfaceFocus(activeSurface.id)}
+				class:invisible={!chatIsActive}
+				class:pointer-events-none={!chatIsActive}
 			>
-				{#if chatContentMode === 'preview' && activeSurface.chatId}
-					<ChatWindowPreview
-						chatId={activeSurface.chatId}
-						{previewStore}
-						textScale={previewTextScale}
-						onFocus={focusChat}
-					/>
-				{:else if chatContentMode === 'preview'}
+				{#if chatIsActive && chatContentMode === 'preview' && chatSurface.chatId}
+					<ChatWindowPreview chatId={chatSurface.chatId} {previewStore} />
+				{:else if chatIsActive && chatContentMode === 'preview'}
 					<div class="grid h-full place-items-center text-sm text-muted-foreground">
 						{m.workspace_chat_window_empty()}
 					</div>
@@ -218,7 +237,7 @@
 						{surface}
 						presentation={item.presentation}
 						visible={item.visible}
-						style={surfaceStyle(item.presentation)}
+						style={surfaceStyle}
 						{onSendToChat}
 						{onAppendToChatDraft}
 						frameBridge={frameBridge(surface.id)}
@@ -227,12 +246,23 @@
 			{/if}
 		{/each}
 	</div>
+	{#if !isCurrent && isVisible && !dnd.isDragging}
+		<button
+			type="button"
+			tabindex="-1"
+			class="absolute inset-x-0 bottom-0 top-10 z-40 cursor-default"
+			data-workspace-window-activation-shield={workspaceWindow.id}
+			aria-label={m.workspace_activate_window({
+				title: labelFor(workspaceWindow.tabs.activeId),
+			})}
+			onpointerdown={stopInactiveContentPointer}
+			onclick={activateWindow}
+			oncontextmenu={activateWindow}
+		></button>
+	{/if}
 	{#if dnd.isDragging}
 		<div
-			class={cn(
-				'pointer-events-auto absolute z-50',
-				dropLayerInsetClass,
-			)}
+			class={cn('pointer-events-auto absolute z-50', dropLayerInsetClass)}
 			data-workspace-window-drop-layer={workspaceWindow.id}
 			role="status"
 			aria-label={m.workspace_window_drop_target()}
@@ -254,11 +284,7 @@
 					class={cn(
 						'absolute flex items-center justify-center rounded-lg border-2 transition-all duration-150',
 						activeResultInset,
-						activeDropTarget.blockedReason
-							? 'border-destructive/50 bg-destructive/15'
-							: activeDropTarget.zone === 'center'
-								? 'border-accent/50 bg-accent/20'
-								: 'border-primary/50 bg-primary/20',
+						dropResultClass(),
 					)}
 				>
 					<span class="rounded-md bg-background/90 px-2 py-0.5 text-[10px] font-medium shadow-sm">

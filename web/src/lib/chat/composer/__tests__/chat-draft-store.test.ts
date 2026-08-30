@@ -47,6 +47,18 @@ describe('ChatDraftStore', () => {
 		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBe('Existing\n\nReview block');
 	});
 
+	it.each([
+		{ initial: '', expected: 'Review block' },
+		{ initial: 'Existing\n', expected: 'Existing\n\nReview block' },
+		{ initial: 'Existing\n\n', expected: 'Existing\n\nReview block' },
+	])('appends with the required separator after "$initial"', ({ initial, expected }) => {
+		const drafts = new ChatDraftStore();
+		drafts.setText('chat-a', initial);
+
+		expect(drafts.appendBlock('chat-a', 'Review block')).toBe('appended');
+		expect(drafts.view('chat-a').text).toBe(expected);
+	});
+
 	it('clears text, attachments, pending persistence, and stored text atomically', () => {
 		vi.useFakeTimers();
 		const drafts = new ChatDraftStore();

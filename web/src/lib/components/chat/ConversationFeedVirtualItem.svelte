@@ -28,7 +28,6 @@
 		renderModel: ConversationFeedRenderModel;
 		agentId: SessionAgentId | string;
 		showThinking: boolean;
-		textScale: number;
 		pendingPermissionRequests: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
@@ -51,7 +50,6 @@
 		renderModel,
 		agentId,
 		showThinking,
-		textScale,
 		pendingPermissionRequests,
 		chatContext = null,
 		earlierPageState,
@@ -130,7 +128,7 @@
 		{/if}
 	</div>
 {:else}
-	<div class="flow-root" style:zoom={textScale}>
+	<div class="flow-root">
 		<ConversationTranscriptItem
 			item={item.item}
 			{renderModel}
@@ -146,7 +144,7 @@
 			{itemState}
 			{acquireTransientActivity}
 		/>
-		{#if item.spacingAfter === 'scaled-transcript'}
+		{#if item.spacingAfter === 'transcript'}
 			<div aria-hidden="true" class="h-2 sm:h-3"></div>
 		{/if}
 	</div>

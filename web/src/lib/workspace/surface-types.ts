@@ -154,6 +154,7 @@ export type WorkspaceLayoutMutation =
 			type: 'move-chat-to-window';
 			sourceWindowId: WorkspaceWindowId;
 			destinationWindowId: WorkspaceWindowId;
+			index?: number;
 	  }
 	| {
 			type: 'assign-to-window';

@@ -21,6 +21,7 @@
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import { WORKSPACE_DRAG_MIME } from '$lib/workspace/window-dnd.svelte.js';
 
 	interface SidebarChatItemProps {
 		session: ChatSessionRecord;
@@ -167,7 +168,7 @@
 	function handleDragStart(e: DragEvent) {
 		if (!e.dataTransfer) return;
 		e.dataTransfer.effectAllowed = 'move';
-		e.dataTransfer.setData('application/x-garcon-workspace-drag', '1');
+		e.dataTransfer.setData(WORKSPACE_DRAG_MIME, '1');
 		windowDnd.beginChatDrag(session.id);
 	}
 

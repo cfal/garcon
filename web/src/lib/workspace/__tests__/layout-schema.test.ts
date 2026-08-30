@@ -247,6 +247,25 @@ describe('workspace layout V2 schema', () => {
 		}
 	});
 
+	it('falls back when restored topology has no Chat view', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'window',
+					id: 'window-main',
+					order: [{ type: 'singleton', kind: 'git' }],
+					active: { type: 'singleton', kind: 'git' },
+					mru: [],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('fallback');
+		expect(result.snapshot).toEqual(canonicalWorkspaceSnapshot());
+	});
+
 	it('omits fullscreen, files, dialog, mobile, and focus projections from serialization', () => {
 		const fileSnapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{

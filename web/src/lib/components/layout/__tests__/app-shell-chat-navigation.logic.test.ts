@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
-import {
-	resolveAdjacentChatId,
-	shouldSynchronizeFocusedChat,
-} from '../app-shell-chat-navigation';
+import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation';
 
 function chat(
 	id: string,
@@ -83,21 +80,38 @@ describe('shouldSynchronizeFocusedChat', () => {
 	it('does not let stale focus replace an explicit Chat navigation in flight', () => {
 		expect(
 			shouldSynchronizeFocusedChat({
+				focusedWindowId: 'window-main',
 				focusedChatId: 'chat-old',
 				focusedChatExists: true,
 				selectedChatId: null,
 				pendingChatTarget: 'chat-route',
+				pendingWindowId: 'window-main',
 			}),
 		).toBe(false);
+	});
+
+	it('lets a newly focused window supersede an older navigation in flight', () => {
+		expect(
+			shouldSynchronizeFocusedChat({
+				focusedWindowId: 'window-other',
+				focusedChatId: 'chat-focused',
+				focusedChatExists: true,
+				selectedChatId: 'chat-selected',
+				pendingChatTarget: 'chat-route',
+				pendingWindowId: 'window-main',
+			}),
+		).toBe(true);
 	});
 
 	it('synchronizes a changed focused Chat after explicit navigation settles', () => {
 		expect(
 			shouldSynchronizeFocusedChat({
+				focusedWindowId: 'window-main',
 				focusedChatId: 'chat-focused',
 				focusedChatExists: true,
 				selectedChatId: 'chat-selected',
 				pendingChatTarget: null,
+				pendingWindowId: null,
 			}),
 		).toBe(true);
 	});
@@ -105,10 +119,12 @@ describe('shouldSynchronizeFocusedChat', () => {
 	it('does not reselect a focused Chat after its session is deleted', () => {
 		expect(
 			shouldSynchronizeFocusedChat({
+				focusedWindowId: 'window-main',
 				focusedChatId: 'chat-deleted',
 				focusedChatExists: false,
 				selectedChatId: null,
 				pendingChatTarget: null,
+				pendingWindowId: null,
 			}),
 		).toBe(false);
 	});

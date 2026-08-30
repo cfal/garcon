@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 import ChatWindowPreviewTestHost from './ChatWindowPreviewTestHost.svelte';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 
@@ -40,12 +40,7 @@ vi.mock('$lib/api/chats.js', () => ({
 
 describe('ChatWindowPreview', () => {
 	it('gives the full unfocused window body to chat history', async () => {
-		const onFocus = vi.fn();
-		render(ChatWindowPreviewTestHost, { onFocus });
-
-		const focusTarget = screen.getByRole('button', {
-			name: 'Focus chat composer for Window Test Chat',
-		});
+		render(ChatWindowPreviewTestHost);
 
 		expect(document.querySelector('[data-chat-window-preview]')).toBeTruthy();
 		expect(await screen.findByText('Unfocused user question')).toBeTruthy();
@@ -54,45 +49,22 @@ describe('ChatWindowPreview', () => {
 		// Bash rows render individually now, so each command keeps its own stable row.
 		expect(await screen.findByText('pwd')).toBeTruthy();
 		expect(await screen.findByText('rg split')).toBeTruthy();
-		expect(await screen.findByText('pwd')).toBeTruthy();
-		expect(await screen.findByText('rg split')).toBeTruthy();
 		expect(screen.queryByRole('textbox')).toBeNull();
-
-		await fireEvent.click(focusTarget);
-
-		expect(onFocus).toHaveBeenCalledTimes(1);
+		expect(document.querySelector('[data-chat-window-preview]')?.getAttribute('role')).toBeNull();
+		expect(
+			document.querySelector('[data-chat-window-preview]')?.getAttribute('tabindex'),
+		).toBeNull();
 	});
 
-	it('focuses a window on pointer down so the composer can accept typing immediately', async () => {
-		const onFocus = vi.fn();
-		render(ChatWindowPreviewTestHost, { onFocus });
-
-		const focusTarget = screen.getByRole('button', {
-			name: 'Focus chat composer for Window Test Chat',
-		});
-		await fireEvent.pointerDown(focusTarget);
-
-		expect(onFocus).toHaveBeenCalledTimes(1);
-	});
-
-	it('does not focus twice for a full pointer click sequence', async () => {
-		const onFocus = vi.fn();
-		render(ChatWindowPreviewTestHost, { onFocus });
-
-		const focusTarget = screen.getByRole('button', {
-			name: 'Focus chat composer for Window Test Chat',
-		});
-		await fireEvent.pointerDown(focusTarget);
-		await fireEvent.click(focusTarget);
-
-		expect(onFocus).toHaveBeenCalledTimes(1);
-	});
-
-	it('applies the provided text scale to the preview transcript', async () => {
-		const { container } = render(ChatWindowPreviewTestHost, { textScale: 0.7 });
+	it('uses the live feed background without inline transcript scaling', async () => {
+		const { container } = render(ChatWindowPreviewTestHost);
 
 		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
-		expect(container.querySelector('[data-chat-transcript-scale="0.7"]')).toBeTruthy();
+		const preview = container.querySelector('[data-chat-window-preview]');
+		expect(preview?.className).toContain('bg-background');
+		expect(preview?.className).not.toContain('transition-colors');
+		expect(container.querySelector('[style*="zoom"]')).toBeNull();
+		expect(container.querySelector('[data-chat-transcript-scale]')).toBeNull();
 	});
 
 	it('hides Bash commands in the preview when command execution is hidden', async () => {

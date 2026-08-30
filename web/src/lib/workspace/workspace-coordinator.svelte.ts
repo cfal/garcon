@@ -288,6 +288,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.noteWindowChromeFocus(windowId, surfaceId);
 	}
 
+	activateWindow(windowId: WorkspaceWindowId): void {
+		this.#presentation.activateWindow(windowId);
+	}
+
 	async focusChat(): Promise<void> {
 		await this.#presentation.focusChat();
 	}
@@ -312,15 +316,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {
+		const intendedWindowId = this.currentWindowId;
 		return this.#showChat(chatId, (latest) =>
-			this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId),
+			windowNodeById(latest.desktopRoot, intendedWindowId)
+				? intendedWindowId
+				: this.#resolveWindowId(latest, this.#presentation.lastFocusedWindowId),
 		);
 	}
 
-	async showChatInWindow(
-		chatId: string,
-		windowId: WorkspaceWindowId,
-	): Promise<ChatViewSurfaceId> {
+	async showChatInWindow(chatId: string, windowId: WorkspaceWindowId): Promise<ChatViewSurfaceId> {
 		return this.#showChat(chatId, (latest) =>
 			windowNodeById(latest.desktopRoot, windowId) ? windowId : null,
 		);
@@ -532,6 +536,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 							type: 'move-chat-to-window',
 							sourceWindowId,
 							destinationWindowId,
+							index,
 						},
 					];
 				}

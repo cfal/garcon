@@ -7,6 +7,7 @@ import {
 	resetPromptEditorStub,
 } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
+import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte.js';
 import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 
@@ -147,6 +148,31 @@ describe('PromptComposer focus', () => {
 
 		expect(textarea.value).toBe('');
 		expect(textarea.style.height).toBe('140px');
+	});
+
+	it('does not resync attachment URLs for text-only draft changes', async () => {
+		const syncUrls = vi.spyOn(ImageAttachmentState.prototype, 'syncUrls');
+		try {
+			const { container } = render(PromptComposerTestHost, {
+				selectedChatId: 'chat-attachment-sync',
+			});
+			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+			const attachment = new File(['notes'], 'notes.pdf', { type: 'application/pdf' });
+
+			await fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+				target: { files: [attachment] },
+			});
+			await waitFor(() => expect(syncUrls).toHaveBeenCalledTimes(1));
+
+			await fireEvent.input(textarea, { target: { value: 'Text-only change' } });
+			await nextAnimationFrame();
+			expect(syncUrls).toHaveBeenCalledTimes(1);
+
+			await fireEvent.click(screen.getByRole('button', { name: /notes\.pdf/ }));
+			await waitFor(() => expect(syncUrls).toHaveBeenCalledTimes(2));
+		} finally {
+			syncUrls.mockRestore();
+		}
 	});
 
 	it('opens a live expanded editor and restores directional selection on Escape', async () => {
@@ -490,6 +516,61 @@ describe('PromptComposer focus', () => {
 			focusRequestToken: 1,
 		});
 		await expectComposerFocus(textarea);
+	});
+
+	it('retries a visible focus request until focus actually lands', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-focus-retry',
+			focusRequestToken: 0,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await expectComposerFocus(textarea);
+
+		const outsideButton = document.createElement('button');
+		outsideButton.dataset.testid = 'outside-focus';
+		document.body.append(outsideButton);
+		outsideButton.focus();
+		const nativeFocus = textarea.focus.bind(textarea);
+		const focus = vi.spyOn(textarea, 'focus');
+		focus.mockImplementationOnce(() => undefined);
+		focus.mockImplementation(() => nativeFocus());
+
+		await rerender({
+			selectedChatId: 'chat-focus-retry',
+			focusRequestToken: 1,
+		});
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+
+		expect(focus.mock.calls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('cancels focus retries when the user starts another interaction', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-focus-cancel',
+			focusRequestToken: 0,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await expectComposerFocus(textarea);
+
+		const outsideButton = document.createElement('button');
+		outsideButton.dataset.testid = 'outside-focus';
+		document.body.append(outsideButton);
+		outsideButton.focus();
+		const focus = vi.spyOn(textarea, 'focus').mockImplementation(() => undefined);
+
+		await rerender({
+			selectedChatId: 'chat-focus-cancel',
+			focusRequestToken: 1,
+		});
+		await nextAnimationFrame();
+		await fireEvent.pointerDown(outsideButton);
+		const callsAfterCancellation = focus.mock.calls.length;
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+
+		expect(focus).toHaveBeenCalled();
+		expect(focus).toHaveBeenCalledTimes(callsAfterCancellation);
+		expect(document.activeElement).toBe(outsideButton);
 	});
 
 	it('keeps focused input editable while quick commit tray props refresh', async () => {

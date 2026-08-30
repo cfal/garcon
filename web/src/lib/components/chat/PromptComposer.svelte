@@ -22,6 +22,7 @@
 		getNotifications,
 		getSnippets,
 		getTransientLayers,
+		getWorkspaceShortcuts,
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
@@ -99,6 +100,7 @@
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
+	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
 	interface Props {
 		onsubmit: () => void;
 		onSteerPreferredSubmit: () => void;
@@ -154,6 +156,7 @@
 	const notifications = getNotifications();
 	const snippets = getSnippets();
 	const transientLayers = getTransientLayers();
+	const workspaceShortcuts = getWorkspaceShortcuts();
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -172,10 +175,9 @@
 	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let handledDraftAppendRequestId = 0;
-	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	const focusDelivery = new PromptComposerFocusDelivery();
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
 		return chat
@@ -187,9 +189,10 @@
 	);
 
 	function requestComposerFocusForChat(chatId: string | null): void {
-		if (!chatId) return;
-		nextFocusRequestId += 1;
-		pendingFocusRequest = { chatId, requestId: nextFocusRequestId };
+		focusDelivery.request(
+			chatId,
+			untrack(() => workspaceShortcuts.userInteractionGeneration),
+		);
 	}
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
@@ -261,29 +264,18 @@
 		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Focuses after the textarea is enabled and visible; draft startup can
-	// briefly disable it, and the composer stays mounted-but-hidden while
-	// another tab (e.g. Git) is active. Requests stay pending until the
-	// composer is both enabled and visible, so returning to the chat tab
-	// re-runs this effect and focuses reliably instead of wasting the request
-	// on a display:none textarea.
-	$effect(() => {
-		const request = pendingFocusRequest;
-		const disabled = isDisabled;
-		const target = textarea;
-		if (!request || disabled || !isVisible || !target) return;
-		const frameId = requestAnimationFrame(() => {
-			if (pendingFocusRequest?.requestId !== request.requestId) return;
-			if (sessions.selectedChatId !== request.chatId || isDisabled || !isVisible || !textarea)
-				return;
-			autoResize();
-			textarea.focus();
-			if (pendingFocusRequest?.requestId === request.requestId) {
-				pendingFocusRequest = null;
-			}
-		});
-		return () => cancelAnimationFrame(frameId);
-	});
+	// Focus remains pending until it lands because a newly presented composer
+	// can still inherit visibility:hidden for a frame while its window moves.
+	$effect(() =>
+		focusDelivery.deliver({
+			selectedChatId: sessions.selectedChatId,
+			disabled: isDisabled,
+			visible: isVisible,
+			textarea,
+			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
+			resize: autoResize,
+		}),
+	);
 
 	// Shared image URL lifecycle management. Syncs blob URLs with
 	// composerState.images and revokes stale URLs automatically.
@@ -292,6 +284,11 @@
 	$effect(() => {
 		const images = composerState.images;
 		untrack(() => {
+			const currentImages = imageAttachments.images;
+			const unchanged =
+				images.length === currentImages.length &&
+				images.every((file, index) => file === currentImages[index]);
+			if (unchanged) return;
 			imageAttachments.images = images;
 			imageAttachments.syncUrls();
 		});
@@ -838,7 +835,7 @@
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -- labeled region accepts native file drops; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
-				class="relative bg-transparent focus-within:ring-0 transition-all duration-200 overflow-hidden"
+				class="relative overflow-hidden bg-transparent focus-within:ring-0"
 				ondragover={(event) => attachmentController.handleDragOver(event)}
 				ondragleave={() => attachmentController.handleDragLeave()}
 				ondrop={(event) => attachmentController.handleDrop(event)}

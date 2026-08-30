@@ -37,10 +37,7 @@ export function resolveWorkspaceWindowTabActions(
 		index,
 		canReorder,
 		canMoveBetweenWindows,
-		canMoveToNewWindow:
-			canCreateWindow &&
-			canMoveBetweenWindows &&
-			(surface?.type !== 'chat' || tabs.order.length > 1),
+		canMoveToNewWindow: canCreateWindow && canMoveBetweenWindows && tabs.order.length > 1,
 		otherWindows: canMoveBetweenWindows
 			? windows.filter((workspaceWindow) => workspaceWindow.id !== windowId)
 			: [],

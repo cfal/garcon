@@ -29,7 +29,6 @@
 		renderModel: ConversationFeedRenderModel;
 		agentId: SessionAgentId | string;
 		showThinking: boolean;
-		textScale: number;
 		pendingPermissionRequests: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
@@ -54,7 +53,6 @@
 		renderModel,
 		agentId,
 		showThinking,
-		textScale,
 		pendingPermissionRequests,
 		chatContext = null,
 		earlierPageState,
@@ -105,7 +103,6 @@
 			{renderModel}
 			{agentId}
 			{showThinking}
-			{textScale}
 			{pendingPermissionRequests}
 			{chatContext}
 			{earlierPageState}

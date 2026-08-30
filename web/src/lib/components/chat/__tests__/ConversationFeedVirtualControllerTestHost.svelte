@@ -25,8 +25,9 @@
 		prependDuring(activity: 'dragging' | 'coasting'): Promise<void>;
 		replaceSurface(): Promise<void>;
 		setPinned(value: boolean): Promise<void>;
-		toggleScale(): Promise<void>;
-		hideAndShow(): Promise<void>;
+		resetMeasurements(): Promise<void>;
+		hide(): Promise<void>;
+		showAtLayout(viewportWidth: number, itemSize: number): Promise<void>;
 	}
 
 	interface Props {
@@ -43,8 +44,10 @@
 	let measurementReset = $state<ConversationVirtualGeometrySnapshot['measurementReset']>('none');
 	let pinned = $state(true);
 	let surfaceIdentity = $state('surface-1');
-	let textScale = $state(1);
+	let itemEstimate = $state(40);
+	let renderedItemSize = $state(40);
 	let visible = $state(true);
+	let viewportWidth = $state(400);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let virtualRoot: HTMLDivElement | null = $state(null);
 	let scrollbarDragActive = false;
@@ -82,7 +85,7 @@
 		surfaceIdentity,
 		geometryRevision,
 		keys,
-		estimates: keys.map(() => 40 * textScale),
+		estimates: keys.map(() => itemEstimate),
 		measurementReset,
 		mutationKinds: new Set(historyEarlierMutation ? ['history-earlier' as const] : []),
 		endBehavior: 'restore-if-pinned',
@@ -167,19 +170,20 @@
 	const installViewportGeometry: Attachment<HTMLElement> = (element) => {
 		Object.defineProperties(element, {
 			clientHeight: { configurable: true, value: 200 },
+			clientWidth: { configurable: true, get: () => viewportWidth },
 			scrollHeight: { configurable: true, get: () => controller.snapshot.sizerSize },
 		});
-		element.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
+		element.getBoundingClientRect = () => new DOMRect(0, 0, viewportWidth, 200);
 	};
 	const installSizerGeometry: Attachment<HTMLElement> = (element) => {
 		element.getBoundingClientRect = () =>
 			new DOMRect(0, -((viewportElement?.scrollTop ?? 0) as number), 400, snapshot.sizerSize);
 	};
-	function installItemGeometry(index: number): Attachment<HTMLElement> {
+	function installItemGeometry(): Attachment<HTMLElement> {
 		return (element) => {
 			Object.defineProperty(element, 'offsetHeight', {
 				configurable: true,
-				value: geometry.estimates[index] ?? 0,
+				get: () => renderedItemSize,
 			});
 		};
 	}
@@ -195,8 +199,9 @@
 			prependDuring,
 			replaceSurface,
 			setPinned,
-			toggleScale,
-			hideAndShow,
+			resetMeasurements,
+			hide,
+			showAtLayout,
 		});
 	});
 
@@ -242,17 +247,22 @@
 		await tick();
 	}
 
-	async function toggleScale(): Promise<void> {
-		textScale = textScale === 1 ? 0.85 : 1;
+	async function resetMeasurements(): Promise<void> {
+		itemEstimate = itemEstimate === 40 ? 34 : 40;
 		measurementReset = 'all';
 		geometryRevision += 1;
 		await tick();
 	}
 
-	async function hideAndShow(): Promise<void> {
+	async function hide(): Promise<void> {
 		controller.prepareForHide();
 		visible = false;
 		await tick();
+	}
+
+	async function showAtLayout(nextViewportWidth: number, nextItemSize: number): Promise<void> {
+		viewportWidth = nextViewportWidth;
+		renderedItemSize = nextItemSize;
 		visible = true;
 		await tick();
 	}
@@ -281,10 +291,10 @@
 			<div
 				data-index={virtualItem.index}
 				data-chat-virtual-item={virtualItem.key}
-				style:height={`${geometry.estimates[virtualItem.index]}px`}
+				style:height={`${renderedItemSize}px`}
 				style:position="absolute"
 				style:transform={`translateY(${virtualItem.start}px)`}
-				{@attach installItemGeometry(virtualItem.index)}
+				{@attach installItemGeometry()}
 				{@attach controller.item(virtualItem.key)}
 			></div>
 		{/each}

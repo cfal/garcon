@@ -13,15 +13,17 @@ export function resolveAdjacentChatId(input: {
 }
 
 export function shouldSynchronizeFocusedChat(input: {
+	focusedWindowId: string;
 	focusedChatId: string | null;
 	focusedChatExists: boolean;
 	selectedChatId: string | null;
 	pendingChatTarget: string | null;
+	pendingWindowId: string | null;
 }): boolean {
 	return (
 		input.focusedChatId !== null &&
 		input.focusedChatExists &&
 		input.focusedChatId !== input.selectedChatId &&
-		input.pendingChatTarget === null
+		(input.pendingChatTarget === null || input.pendingWindowId !== input.focusedWindowId)
 	);
 }

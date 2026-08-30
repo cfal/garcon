@@ -16,7 +16,7 @@ import {
 	windowNodeById,
 } from './window-tree.js';
 
-const WORKSPACE_DRAG_MIME = 'application/x-garcon-workspace-drag';
+export const WORKSPACE_DRAG_MIME = 'application/x-garcon-workspace-drag';
 
 export type WorkspaceDragPayload =
 	| {

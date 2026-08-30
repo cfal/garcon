@@ -16,22 +16,11 @@
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let {
-		chatId,
-		previewStore,
-		textScale = 1,
-		onFocus,
-	}: {
-		chatId: string;
-		previewStore: ChatWindowPreviewStore;
-		textScale?: number;
-		onFocus: () => void;
-	} = $props();
+	let { chatId, previewStore }: { chatId: string; previewStore: ChatWindowPreviewStore } = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	let previewScrollContainer: HTMLDivElement | null = $state(null);
-	let lastPointerFocusAt = 0;
 
 	const previewEntry = $derived(previewStore.entry(chatId));
 	const previewRows = $derived.by((): ChatDisplayRow[] =>
@@ -80,51 +69,9 @@
 		if (!region) return;
 		return registerNativeWorkspaceScrollRegion(region, 'contextual');
 	});
-
-	function isInteractiveTarget(target: EventTarget | null, container: EventTarget | null): boolean {
-		if (!(target instanceof Element) || !(container instanceof Element)) return false;
-		const interactive = target.closest('button,a,input,textarea,select,[role="button"]');
-		return Boolean(interactive && interactive !== container);
-	}
-
-	function consumePointerFocusClick(): boolean {
-		if (lastPointerFocusAt === 0) return false;
-		const ageMs = performance.now() - lastPointerFocusAt;
-		lastPointerFocusAt = 0;
-		return ageMs < 750;
-	}
-
-	function handlePointerDown(event: PointerEvent): void {
-		if (isInteractiveTarget(event.target, event.currentTarget)) return;
-		event.preventDefault();
-		lastPointerFocusAt = performance.now();
-		onFocus();
-	}
-
-	function handleClick(event: MouseEvent): void {
-		if (consumePointerFocusClick() || isInteractiveTarget(event.target, event.currentTarget))
-			return;
-		onFocus();
-	}
 </script>
 
-<div
-	class={cn(
-		'flex h-full min-h-0 flex-col text-left',
-		'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-		'transition-colors',
-	)}
-	onpointerdown={handlePointerDown}
-	onclick={handleClick}
-	onkeydown={(event) => {
-		if (isInteractiveTarget(event.target, event.currentTarget)) return;
-		if (event.key === 'Enter' || event.key === ' ') onFocus();
-	}}
-	role="button"
-	tabindex="0"
-	aria-label={m.chat_window_focus_composer({ title: chatTitle })}
-	data-chat-window-preview={chatId}
->
+<div class="flex h-full min-h-0 flex-col bg-background text-left" data-chat-window-preview={chatId}>
 	<ScrollAreaPrimitive.Root type="auto" class="min-h-0 flex-1 overflow-hidden relative">
 		<ScrollAreaPrimitive.Viewport
 			bind:ref={previewScrollContainer}
@@ -149,7 +96,6 @@
 						showThinking={localSettings.showThinking}
 						hiddenToolTypes={localSettings.hiddenToolTypes}
 						chatContext={previewChatContext}
-						{textScale}
 					/>
 				</div>
 			{/if}

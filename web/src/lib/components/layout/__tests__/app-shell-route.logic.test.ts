@@ -27,6 +27,7 @@ describe('selectedChatIdFromRoute', () => {
 				routeChatId: undefined,
 				isLoadingChats: false,
 				lastSelectedChatId: 'chat-1',
+				lastSelectedChatExists: true,
 				selectedChatId: null,
 			}),
 		).toBe('chat-1');
@@ -37,6 +38,7 @@ describe('selectedChatIdFromRoute', () => {
 				routeChatId: undefined,
 				isLoadingChats: true,
 				lastSelectedChatId: 'chat-1',
+				lastSelectedChatExists: true,
 				selectedChatId: null,
 			}),
 		).toBeNull();
@@ -47,6 +49,7 @@ describe('selectedChatIdFromRoute', () => {
 				routeChatId: 'chat-2',
 				isLoadingChats: false,
 				lastSelectedChatId: 'chat-1',
+				lastSelectedChatExists: true,
 				selectedChatId: null,
 			}),
 		).toBeNull();
@@ -57,7 +60,21 @@ describe('selectedChatIdFromRoute', () => {
 				routeChatId: undefined,
 				isLoadingChats: false,
 				lastSelectedChatId: 'chat-1',
+				lastSelectedChatExists: true,
 				selectedChatId: 'chat-1',
+			}),
+		).toBeNull();
+	});
+
+	it('does not restore a remembered chat missing from the loaded session list', () => {
+		expect(
+			restoreChatIdForBareRoute({
+				pathname: '/',
+				routeChatId: undefined,
+				isLoadingChats: false,
+				lastSelectedChatId: 'chat-deleted',
+				lastSelectedChatExists: false,
+				selectedChatId: null,
 			}),
 		).toBeNull();
 	});

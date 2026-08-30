@@ -86,7 +86,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#nativeScrollActivity: ConversationNativeScrollActivity = 'idle';
 	#pendingEndScroll = false;
 	#pendingEndFlushQueued = false;
-	#measureOnShow = false;
+	#remeasureOnShow = false;
+	#hiddenViewportWidth: number | null = null;
 	#earlierPrependAnchor = new ConversationEarlierPrependAnchorOwnership();
 	#mountedItems = new ConversationMountedVirtualItems();
 	#itemAttachments = new Map<string, Attachment<HTMLElement>>();
@@ -276,12 +277,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.#itemAttachments.clear();
 			this.#hiddenAnchor = null;
 			this.#hiddenResumeResult = null;
-			this.#measureOnShow = false;
+			this.#remeasureOnShow = false;
+			this.#hiddenViewportWidth = null;
 			this.#pendingEndScroll = restoreEnd;
 			if (this.options.visible)
 				this.#resumeCurrentSurface(restoreEnd ? { kind: 'end' } : { kind: 'start' });
 		} else if (!this.options.visible && nextGeometry.measurementReset === 'all') {
-			this.#measureOnShow = true;
+			this.#remeasureOnShow = true;
 		}
 		return true;
 	}
@@ -289,6 +291,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	prepareForHide(): void {
 		if (this.#destroyed || !this.#configuredVisible) return;
 		this.#hiddenAnchor = this.options.pinned ? null : this.#captureVirtualAnchor(true);
+		this.#hiddenViewportWidth = this.#viewportWidth();
 		this.#hiddenResumeResult = null;
 		this.#configuredVisible = false;
 		this.#pendingResumeTarget = null;
@@ -573,21 +576,42 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			this.prepareForHide();
 			return;
 		}
+		this.#invalidateMeasurementsAfterHiddenResize();
 		this.#configuredVisible = true;
 		const anchor = this.#resolveAnchor(this.#hiddenAnchor, this.#configuredModel);
-		const target: VirtualResumeTarget =
-			this.#pendingEndScroll || this.options.pinned
-				? { kind: 'end' }
-				: anchor
-					? { kind: 'anchor', key: anchor.key, viewportOffset: anchor.viewportOffset }
-					: { kind: 'start' };
+		let target: VirtualResumeTarget = { kind: 'start' };
+		if (this.#pendingEndScroll || this.options.pinned) {
+			target = { kind: 'end' };
+		} else if (anchor) {
+			target = { kind: 'anchor', key: anchor.key, viewportOffset: anchor.viewportOffset };
+		}
 		this.#hiddenResumeResult = this.#resumeCurrentSurface(target);
 		this.#hiddenAnchor = null;
 		this.#pendingEndScroll = false;
-		if (this.#measureOnShow) {
-			this.#measureOnShow = false;
+		if (this.#remeasureOnShow) {
+			this.#remeasureOnShow = false;
 			this.#virt.remeasureAll();
 		}
+	}
+
+	#invalidateMeasurementsAfterHiddenResize(): void {
+		const previousWidth = this.#hiddenViewportWidth;
+		const currentWidth = this.#viewportWidth();
+		this.#hiddenViewportWidth = null;
+		if (previousWidth === null || currentWidth === null || previousWidth === currentWidth) return;
+		const result = this.#virt.apply({
+			kind: 'reset-measurements',
+			keys: this.#configuredGeometry.keys,
+			estimates: this.#configuredGeometry.estimates,
+			anchor: { kind: 'none' },
+		});
+		if (result.kind === 'applied') this.#remeasureOnShow = true;
+	}
+
+	#viewportWidth(): number | null {
+		const width = this.options.viewport?.clientWidth;
+		if (!width || !Number.isFinite(width)) return null;
+		return width;
 	}
 
 	#resumeCurrentSurface(target: VirtualResumeTarget): HiddenReadingRestoreResult {

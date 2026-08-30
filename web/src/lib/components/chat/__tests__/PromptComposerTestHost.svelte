@@ -29,6 +29,7 @@
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
+	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -392,7 +393,7 @@
 	);
 </script>
 
-<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
+<KeyboardShortcuts />
 <PromptComposer
 	{onsubmit}
 	{onSteerPreferredSubmit}

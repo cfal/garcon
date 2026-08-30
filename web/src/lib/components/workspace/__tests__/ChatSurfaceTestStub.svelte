@@ -11,14 +11,12 @@
 		isInteractive,
 		onRegisterUserMessageNavigator,
 		onRegisterAppendToDraft,
-		textScale,
 	}: {
 		subagentToolbar: SubagentToolbarState;
 		isVisible: boolean;
 		isInteractive: boolean;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
-		textScale: number;
 	} = $props();
 	let navigatorOpenCount = $state(0);
 	let draft = $state('');
@@ -76,7 +74,6 @@
 	data-navigator-open-count={navigatorOpenCount}
 	data-visible={isVisible}
 	data-interactive={isInteractive}
-	data-text-scale={textScale}
 >
 	Chat surface
 	<textarea aria-label="Chat focus target" bind:value={draft}></textarea>
