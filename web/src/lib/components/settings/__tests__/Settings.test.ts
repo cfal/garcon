@@ -21,8 +21,18 @@ vi.mock('$lib/api/agents.js', () => ({
 	launchAgentAuthLogin: vi.fn(),
 }));
 
+vi.mock('$lib/notifications/completion-sound.js', () => ({
+	CUSTOM_COMPLETION_SOUND_ACCEPT: '.mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg',
+	playCompletionSound: vi.fn(),
+	removeCustomCompletionSound: vi.fn(),
+	storeCustomCompletionSound: vi.fn(),
+	unlockCompletionSound: vi.fn(),
+	validateCustomCompletionSound: vi.fn(() => null),
+}));
+
 const settingsApi = await import('$lib/api/settings.js');
 const providersApi = await import('$lib/api/agents.js');
+const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
@@ -173,6 +183,18 @@ describe('Settings', () => {
 			expect(overlayBackdropEffects.getAttribute('aria-checked')).toBe('true');
 			await fireEvent.click(overlayBackdropEffects);
 			expect(onLocalToggle).toHaveBeenCalledWith('overlayBackdropEffects');
+			expect(screen.getByText('Task completion sound')).toBeTruthy();
+			const completionSoundMode = screen.getByRole('combobox', { name: 'Sound' });
+			expect((completionSoundMode as HTMLSelectElement).value).toBe('off');
+			expect(screen.getByRole('option', { name: 'Custom' }).hasAttribute('disabled')).toBe(true);
+			await fireEvent.change(completionSoundMode, { target: { value: 'default' } });
+			expect(onLocalSet).toHaveBeenCalledWith('completionSoundMode', 'default');
+			expect(completionSound.unlockCompletionSound).toHaveBeenCalledOnce();
+			await fireEvent.click(screen.getByRole('button', { name: 'Test sound' }));
+			expect(completionSound.playCompletionSound).toHaveBeenCalledWith(
+				expect.objectContaining({ mode: 'default', visibility: 'always' }),
+				{ force: true },
+			);
 			expect(screen.getByText('File opening')).toBeTruthy();
 			const textEditorPlacement = screen.getByRole('combobox', { name: 'Text editors' });
 			const imageViewerPlacement = screen.getByRole('combobox', { name: 'Image viewers' });

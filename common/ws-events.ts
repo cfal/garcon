@@ -107,6 +107,8 @@ export class ChatReloadedMessage {
   ) {}
 }
 
+export type AgentRunFinishedOutcome = 'finished' | 'interrupted';
+
 export class AgentRunFinishedMessage {
   readonly type = 'agent-run-finished' as const;
   constructor(
@@ -115,6 +117,7 @@ export class AgentRunFinishedMessage {
     public turnId?: string,
     public clientRequestId?: string,
     public upstreamRequestId?: string,
+    public outcome?: AgentRunFinishedOutcome,
   ) {}
 }
 
@@ -605,9 +608,11 @@ export function parseServerWsMessage(
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);
       const exitCode = data.exitCode;
+      const outcome = data.outcome;
       if (
         !chatId
         || (exitCode !== undefined && (typeof exitCode !== 'number' || !Number.isInteger(exitCode)))
+        || (outcome !== undefined && outcome !== 'finished' && outcome !== 'interrupted')
       ) return null;
       return new AgentRunFinishedMessage(
         chatId,
@@ -619,6 +624,7 @@ export function parseServerWsMessage(
         typeof data.upstreamRequestId === 'string'
           ? data.upstreamRequestId
           : undefined,
+        outcome,
       );
     }
     case 'agent-run-failed': {

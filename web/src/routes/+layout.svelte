@@ -20,6 +20,7 @@
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { installCompletionSoundUnlockListeners } from '$lib/notifications/completion-sound.js';
 	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
@@ -303,6 +304,9 @@
 
 	onMount(() => {
 		void auth.checkAuthStatus();
+		const removeCompletionSoundUnlockListeners = installCompletionSoundUnlockListeners(
+			() => localSettings.completionSoundMode !== 'off',
+		);
 		const handleOnline = () => {
 			if (auth.isUnavailable) void auth.checkAuthStatus();
 		};
@@ -319,6 +323,7 @@
 		window.addEventListener('online', handleOnline);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
+			removeCompletionSoundUnlockListeners();
 			window.clearInterval(retryInterval);
 			window.removeEventListener('online', handleOnline);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);

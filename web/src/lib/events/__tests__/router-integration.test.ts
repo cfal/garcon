@@ -174,6 +174,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		chatPresentations: {
 			clearDeletedChat: vi.fn(),
 		},
+		notifyCompletion: vi.fn(),
 		...overrides,
 	};
 }

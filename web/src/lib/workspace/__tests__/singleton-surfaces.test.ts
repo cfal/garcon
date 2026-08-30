@@ -215,14 +215,18 @@ describe('SingletonSurfaceRegistry', () => {
 			toRevision: 'HEAD',
 			mode: 'direct' as const,
 		};
-		comparisonPreferences.remember('chat-a', specification);
+		comparisonPreferences.rememberChat('chat-a', specification);
 		registry.gitCompare();
 
 		registry.disposeSurface('git-compare');
-		expect(comparisonPreferences.recall('chat-a')).toEqual(specification);
+		expect(comparisonPreferences.recall({ chatId: 'chat-a', projectPath: '/project-a' })).toEqual(
+			specification,
+		);
 
 		registry.destroy();
-		expect(comparisonPreferences.recall('chat-a')).toEqual(specification);
+		expect(comparisonPreferences.recall({ chatId: 'chat-a', projectPath: '/project-a' })).toEqual(
+			specification,
+		);
 	});
 
 	it('routes visibility for every singleton through one lifecycle owner', () => {

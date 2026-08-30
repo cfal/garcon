@@ -66,10 +66,11 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		agentState: new AgentState(),
 		lifecycle: new ConversationLifecycleState(),
 		conversationUi: new ConversationUiState(),
-			startupCoordinator: new StartupCoordinator(),
-			readReceiptOutbox: { enqueue: vi.fn() },
-			clearDeletedChat: vi.fn(),
-		};
+		startupCoordinator: new StartupCoordinator(),
+		readReceiptOutbox: { enqueue: vi.fn() },
+		notifyCompletion: vi.fn(),
+		clearDeletedChat: vi.fn(),
+	};
 }
 
 function entry(ordinal: number, content: string): TranscriptMessage {

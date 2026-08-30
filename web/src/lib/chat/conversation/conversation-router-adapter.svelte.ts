@@ -44,6 +44,7 @@ export interface ConversationRouterStoreDeps {
 	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
+	notifyCompletion: () => void;
 	transcriptCache?: ChatTranscriptCache;
 	backgroundTranscriptLoader?: Pick<BackgroundTranscriptLoader, 'queueLoad'>;
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
@@ -227,6 +228,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		chatPresentations: {
 			clearDeletedChat: deps.clearDeletedChat,
 		},
+		notifyCompletion: deps.notifyCompletion,
 	};
 }
 

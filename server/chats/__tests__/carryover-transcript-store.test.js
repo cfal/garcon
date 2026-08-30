@@ -156,6 +156,22 @@ describe('CarryOverTranscriptStore', () => {
     await expect(fs.stat(segmentDir(workspaceDir, FIRST))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('reclaims interrupted sweep trash during startup', async () => {
+    await commit(store, FIRST, [new UserMessage(TIME, 'one')]);
+    const trashPath = path.join(
+      workspaceDir,
+      'carryover-transcripts',
+      'trash',
+      `${FIRST}-interrupted`,
+    );
+    await fs.rename(segmentDir(workspaceDir, FIRST), trashPath);
+
+    const restarted = new CarryOverTranscriptStore({ workspaceDir });
+    await restarted.initialize();
+
+    await expect(fs.stat(trashPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('reuses an identical deterministic artifact and rejects a content collision', async () => {
     await commit(store, FIRST, [new UserMessage(TIME, 'same')]);
     const reused = await commit(store, FIRST, [new UserMessage(TIME, 'same')]);

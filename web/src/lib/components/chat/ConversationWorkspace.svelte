@@ -61,6 +61,7 @@
 		shouldReserveComposerCapSlot,
 	} from '$lib/chat/composer/composer-cap-layout.js';
 	import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
+	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -356,6 +357,13 @@
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
+		notifyCompletion: () => {
+			void playCompletionSound({
+				mode: localSettings.completionSoundMode,
+				volume: localSettings.completionSoundVolume,
+				visibility: localSettings.completionSoundVisibility,
+			});
+		},
 		transcriptCache,
 		backgroundTranscriptLoader,
 		chatDrafts,

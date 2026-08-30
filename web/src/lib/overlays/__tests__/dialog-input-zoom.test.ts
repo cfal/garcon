@@ -109,6 +109,7 @@ describe('dialog input zoom protection', () => {
 		const auditedControls = [
 			join(componentsRoot, 'ui/input/input.svelte'),
 			join(componentsRoot, 'ui/textarea/textarea.svelte'),
+			join(componentsRoot, 'settings/CompletionSoundSettings.svelte'),
 			join(componentsRoot, 'settings/ScheduledPromptField.svelte'),
 		];
 		const failures = auditedControls.flatMap((path) =>

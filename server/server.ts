@@ -894,6 +894,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
+      carryOverGarbageCollector.shutdown();
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
       handoffs.shutdown();

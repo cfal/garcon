@@ -46,10 +46,7 @@ import {
 	handlePermissionLifecycleFromBatch,
 	type PermissionLifecycleContext,
 } from './handlers/permissions';
-import {
-	handleExecutionControlUpdated,
-	type QueueContext,
-} from './handlers/queue';
+import { handleExecutionControlUpdated, type QueueContext } from './handlers/queue';
 import {
 	handleChatCreated,
 	handleChatAborted,
@@ -91,10 +88,7 @@ export interface EventRouterNavigation {
 
 export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
-	| 'getCursor'
-	| 'appendLocalNotice'
-	| 'appendServerNotice'
-	| 'loadMessages'
+	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
 > & {
 	applyChatMessages: (
 		chatId: string,
@@ -166,6 +160,7 @@ export interface EventRouterStores {
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 	chatPresentations: EventRouterChatPresentations;
+	notifyCompletion: () => void;
 }
 
 function extractFirstLine(text: string): string {
@@ -292,6 +287,7 @@ function buildDispatch(
 		getPendingChatId,
 		clearPendingChatId,
 		markChatTranscriptValidated: stores.chatState.markChatTranscriptValidated,
+		notifyCompletion: stores.notifyCompletion,
 	};
 
 	const chatEventCtx: ChatEventContext = {
@@ -332,7 +328,9 @@ function buildDispatch(
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
 		patchLastReadAt: (chatId, lastReadAt) => stores.sessions.patchLastReadAt(chatId, lastReadAt),
-		refreshChats: () => { void stores.sessions.quietRefreshChats(); },
+		refreshChats: () => {
+			void stores.sessions.quietRefreshChats();
+		},
 		removeChatTranscript: stores.chatState.removeChatTranscript,
 		clearChatPresentations: stores.chatPresentations.clearDeletedChat,
 	};
@@ -342,7 +340,8 @@ function buildDispatch(
 		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
 		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
 		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
-		const previousTranscriptViewId = stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
+		const previousTranscriptViewId =
+			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
 				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
@@ -351,9 +350,10 @@ function buildDispatch(
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
 				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
 				if (
-					(previousTranscriptViewId && previousTranscriptViewId !== snapshotTranscriptViewId)
-					|| requestedTranscriptViewId !== snapshotTranscriptViewId
-				) handleViewTransition(chatId, snapshotTranscriptViewId);
+					(previousTranscriptViewId && previousTranscriptViewId !== snapshotTranscriptViewId) ||
+					requestedTranscriptViewId !== snapshotTranscriptViewId
+				)
+					handleViewTransition(chatId, snapshotTranscriptViewId);
 			})
 			.catch(() => undefined);
 	};

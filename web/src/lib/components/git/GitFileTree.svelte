@@ -1,20 +1,15 @@
 <script lang="ts">
-	// File tree panel for the git workbench. Renders a collapsible directory
-	// hierarchy with change-kind badges and selection highlighting.
-
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import FileIcon from '@lucide/svelte/icons/file';
-	import FolderIcon from '@lucide/svelte/icons/folder';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import { onDestroy } from 'svelte';
 	import Search from '@lucide/svelte/icons/search';
-	import Plus from '@lucide/svelte/icons/plus';
-	import Minus from '@lucide/svelte/icons/minus';
-	import Undo2 from '@lucide/svelte/icons/undo-2';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import type { GitTreeNode, GitChangeKind, GitFileReviewCategory } from '$lib/api/git.js';
-	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	import type { GitTreeNode } from '$lib/api/git.js';
+	import {
+		flattenGitWorkbenchTree,
+		type GitWorkbenchTreeRow,
+	} from '$lib/git/workbench/git-workbench-tree-rows.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
+	import GitFileTreeRow from './GitFileTreeRow.svelte';
+	import { GitFileTreeVirtualController } from './GitFileTreeVirtualController.svelte.js';
 
 	interface GitFileTreeProps {
 		tree: GitTreeNode[];
@@ -41,7 +36,6 @@
 		visibleChangedFiles?: number;
 		onHideGeneratedChange?: (value: boolean) => void;
 		onHideOtherTabFilesChange?: (value: boolean) => void;
-		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
 	}
 
@@ -73,8 +67,14 @@
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
+	const treeId = $props.id();
+	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
+	let viewportElement = $state<HTMLDivElement | null>(null);
+	let rows = $derived(flattenGitWorkbenchTree(tree, collapsedDirs));
 	const actionVisibility = $derived(
-		alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+		alwaysShowActions
+			? 'opacity-100'
+			: 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
 	);
 	const fileCountLabel = $derived(
 		visibleChangedFiles !== undefined
@@ -84,84 +84,82 @@
 				})
 			: m.git_file_tree_files_count({ count: totalChangedFiles }),
 	);
-	const treeGuideIndentPx = 12;
-	const treeGuideStartPx = 8;
-	const treeGuideToggleCenterOffsetPx = 10;
-	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
-	function treeGuideColumnLeft(depthIndex: number): number {
-		return treeGuideStartPx + depthIndex * treeGuideIndentPx + treeGuideToggleCenterOffsetPx;
+	const controller = new GitFileTreeVirtualController({
+		get rows() {
+			return rows;
+		},
+		get collapsedDirs() {
+			return collapsedDirs;
+		},
+		get selectedFile() {
+			return selectedFile;
+		},
+		get viewportElement() {
+			return viewportElement;
+		},
+		get onSelectFile() {
+			return onSelectFile;
+		},
+		get onToggleDir() {
+			return onToggleDir;
+		},
+	});
+	let virtualSnapshot = $derived(controller.snapshot);
+	let renderedItems = $derived(controller.renderedItems(virtualSnapshot));
+	let totalHeight = $derived(virtualSnapshot.sizerSize);
+	let activeFocusKey = $derived(controller.activeFocusKey);
+	let activeRowIndex = $derived(controller.activeRowIndex);
+	let activeDescendantId = $derived(
+		activeRowIndex >= 0 && renderedItems.some((item) => item.index === activeRowIndex)
+			? rowElementId(activeRowIndex)
+			: undefined,
+	);
+
+	function rowElementId(index: number): string {
+		return `${treeId}-row-${index}`;
 	}
 
-	function changeKindColor(kind?: GitChangeKind): string {
-		switch (kind) {
-			case 'modified':
-				return 'text-git-modified';
-			case 'added':
-				return 'text-git-added';
-			case 'deleted':
-				return 'text-git-deleted';
-			case 'untracked':
-				return 'text-git-untracked';
-			case 'renamed':
-				return 'text-git-renamed';
-			default:
-				return 'text-muted-foreground';
-		}
+	function isDirectory(row: GitWorkbenchTreeRow): boolean {
+		return row.node.kind === 'directory';
 	}
 
-	function changeKindBadge(kind?: GitChangeKind): string {
-		switch (kind) {
-			case 'modified':
-				return 'M';
-			case 'added':
-				return 'A';
-			case 'deleted':
-				return 'D';
-			case 'untracked':
-				return 'U';
-			case 'renamed':
-				return 'R';
-			default:
-				return '';
-		}
+	function rowIsCollapsed(row: GitWorkbenchTreeRow): boolean {
+		return isDirectory(row) && collapsedDirs.has(row.node.path);
 	}
 
-	function categoryBadge(category?: GitFileReviewCategory): string {
-		if (category === 'generated') return 'GEN';
-		if (category === 'lockfile') return 'LOCK';
-		if (category === 'binary') return 'BIN';
-		if (category === 'large') return 'LARGE';
-		return '';
+	function rowIsSelected(row: GitWorkbenchTreeRow): boolean {
+		return !isDirectory(row) && selectedFile === row.node.path;
 	}
 
-	function handleKeyDown(e: KeyboardEvent, path: string, isDir: boolean): void {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			if (isDir) onToggleDir(path);
-			else onSelectFile(path);
-		}
+	function stageIsPending(row: GitWorkbenchTreeRow): boolean {
+		if (isDirectory(row)) return isStageDirPending?.(row.node.path) ?? false;
+		return isStageFilePending?.(row.node.path) ?? false;
 	}
+
+	function unstageIsPending(row: GitWorkbenchTreeRow): boolean {
+		if (isDirectory(row)) return isUnstageDirPending?.(row.node.path) ?? false;
+		return isUnstageFilePending?.(row.node.path) ?? false;
+	}
+
+	onDestroy(() => controller.destroy());
 </script>
 
-<div class="flex flex-col h-full bg-background">
-	<!-- Header with count and search -->
-	<div class="px-3 py-2 border-b border-border">
-		<div class="flex items-center justify-between gap-2 mb-2">
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
+<div class="flex h-full flex-col bg-background">
+	<div class="border-b border-border px-3 py-2">
+		<div class="mb-2 flex items-center justify-between gap-2">
+			<span class="truncate text-xs font-medium uppercase tracking-wider text-muted-foreground">
 				{fileCountLabel}
 			</span>
 		</div>
-
-		<!-- Search -->
 		<div class="relative">
-			<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+			<Search class="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 			<input
 				type="text"
 				placeholder={m.git_filter_files_placeholder()}
 				value={treeSearchQuery}
-				oninput={(e) => onSearchChange(e.currentTarget.value)}
-				class="w-full pl-7 pr-2 py-1 text-xs bg-muted border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				oninput={(event) => onSearchChange(event.currentTarget.value)}
+				class="w-full rounded border border-border bg-muted py-1 pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			/>
 		</div>
 		<div class="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -169,7 +167,7 @@
 				<input
 					type="checkbox"
 					checked={hideOtherTabFiles}
-					onchange={(e) => onHideOtherTabFilesChange?.(e.currentTarget.checked)}
+					onchange={(event) => onHideOtherTabFilesChange?.(event.currentTarget.checked)}
 					class="size-3 accent-current"
 				/>
 				<span>{hideOtherTabFilesLabel}</span>
@@ -178,7 +176,7 @@
 				<input
 					type="checkbox"
 					checked={hideGenerated}
-					onchange={(e) => onHideGeneratedChange?.(e.currentTarget.checked)}
+					onchange={(event) => onHideGeneratedChange?.(event.currentTarget.checked)}
 					class="size-3 accent-current"
 				/>
 				<span>{m.git_file_tree_hide_generated()}</span>
@@ -186,224 +184,90 @@
 		</div>
 	</div>
 
-	<!-- Tree content -->
-	<div class="flex-1 overflow-y-auto py-1" {@attach contextualScrollRegion}>
-		{#if tree.length === 0}
-			<div class="px-3 py-4 text-xs text-muted-foreground text-center">
+	<div
+		bind:this={viewportElement}
+		{@attach controller.viewport}
+		{@attach contextualScrollRegion}
+		class="min-h-0 flex-1 overflow-y-auto py-1 focus-visible:outline-none"
+		style:overflow-anchor="none"
+		role="tree"
+		tabindex="0"
+		aria-label={m.git_diff_document_files()}
+		aria-activedescendant={activeDescendantId}
+		data-git-workbench-file-tree
+		onkeydown={(event) => controller.handleTreeKeydown(event)}
+	>
+		{#if rows.length === 0}
+			<div class="px-3 py-4 text-center text-xs text-muted-foreground">
 				{m.git_file_tree_no_changed_files()}
 			</div>
 		{:else}
-			{#each tree as node}
-				{@render treeNode(node, 0)}
-			{/each}
+			<div
+				class="relative w-full"
+				style:height={`${totalHeight}px`}
+				role="none"
+				data-git-workbench-file-tree-sizer
+				{@attach controller.sizer}
+			>
+				{#each renderedItems as virtualItem (virtualItem.key)}
+					{@const row = rows[virtualItem.index]}
+					{#if row}
+						<div
+							id={rowElementId(virtualItem.index)}
+							role="treeitem"
+							aria-label={row.node.name}
+							aria-level={row.depth + 1}
+							aria-expanded={isDirectory(row) ? !rowIsCollapsed(row) : undefined}
+							aria-selected={rowIsSelected(row)}
+							aria-posinset={row.positionInSet}
+							aria-setsize={row.setSize}
+							tabindex="-1"
+							class="group absolute left-0 top-0 w-full overflow-hidden focus-visible:outline-none"
+							style:height={`${virtualItem.size}px`}
+							style:transform={`translateY(${virtualItem.start}px)`}
+							title={row.node.path}
+							data-git-workbench-file-tree-row
+							data-git-tree-row-key={row.key}
+							data-git-tree-row-active={activeFocusKey === row.key ? '' : undefined}
+							data-git-file-tree-directory={isDirectory(row) ? '' : undefined}
+							data-git-file-tree-file={!isDirectory(row) ? '' : undefined}
+						>
+							<svelte:boundary>
+								<GitFileTreeRow
+									{row}
+									selected={rowIsSelected(row)}
+									collapsed={rowIsCollapsed(row)}
+									{actionVisibility}
+									stagePending={stageIsPending(row)}
+									unstagePending={unstageIsPending(row)}
+									onFocusRow={() => controller.setFocusedRow(row.key)}
+									{onSelectFile}
+									{onSelectDirectory}
+									{onToggleDir}
+									{onStageFile}
+									{onUnstageFile}
+									{onStageDir}
+									{onUnstageDir}
+									{onDiscardFile}
+								/>
+
+								{#snippet failed()}
+									<div class="flex h-full items-center px-3 text-xs text-status-error-foreground">
+										{m.git_diff_document_file_row_failed()}
+									</div>
+								{/snippet}
+							</svelte:boundary>
+						</div>
+					{/if}
+				{/each}
+			</div>
 		{/if}
 	</div>
 </div>
 
-{#snippet treeNode(node: GitTreeNode, depth: number)}
-	{#if node.kind === 'directory'}
-		{@const isCollapsed = collapsedDirs.has(node.path)}
-		{@const stageDirPending = isStageDirPending?.(node.path) ?? false}
-		{@const unstageDirPending = isUnstageDirPending?.(node.path) ?? false}
-		<div
-			class="relative flex items-center w-full px-2 py-1 text-xs hover:bg-muted/50 transition-colors group"
-			style="padding-left: {depth * 12 + 8}px"
-		>
-			{#if depth > 0}
-				<div class="absolute inset-y-0 left-0 pointer-events-none" aria-hidden="true">
-					{#each Array(depth) as _, depthIndex}
-						<span
-							class="absolute inset-y-0 w-px bg-border/70"
-							style="left: {treeGuideColumnLeft(depthIndex)}px"
-						></span>
-					{/each}
-				</div>
-			{/if}
-			<button
-				type="button"
-				onclick={() => onToggleDir(node.path)}
-				onkeydown={(e) => handleKeyDown(e, node.path, true)}
-				class="w-5 h-5 flex items-center justify-center rounded hover:bg-muted shrink-0"
-				aria-label={isCollapsed ? m.editor_actions_expand() : m.editor_actions_collapse()}
-			>
-				{#if isCollapsed}
-					<ChevronRight class="w-3.5 h-3.5 text-muted-foreground" />
-				{:else}
-					<ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
-				{/if}
-			</button>
-			<button
-				type="button"
-				onclick={() => onSelectDirectory?.(node.path)}
-				class="flex items-center flex-1 min-w-0 ml-0.5"
-			>
-				<span class="w-4 h-4 flex items-center justify-center mr-1 text-muted-foreground">
-					{#if isCollapsed}
-						<FolderIcon class="w-3.5 h-3.5" />
-					{:else}
-						<FolderOpen class="w-3.5 h-3.5" />
-					{/if}
-				</span>
-				<span class="truncate text-foreground">{node.name}</span>
-			</button>
-			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
-				<button
-					type="button"
-					disabled={stageDirPending}
-					onclick={(e) => {
-						e.stopPropagation();
-						onStageDir(node.path);
-					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
-					title={m.git_action_stage_directory()}
-				>
-					{#if stageDirPending}
-						<LoaderCircle class="w-3 h-3 text-git-added animate-spin" />
-					{:else}
-						<Plus class="w-3 h-3 text-git-added" />
-					{/if}
-				</button>
-			{/if}
-			{#if node.staged && onUnstageDir}
-				<button
-					type="button"
-					disabled={unstageDirPending}
-					onclick={(e) => {
-						e.stopPropagation();
-						onUnstageDir(node.path);
-					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
-					title={m.git_action_unstage_directory()}
-				>
-					{#if unstageDirPending}
-						<LoaderCircle class="w-3 h-3 text-git-deleted animate-spin" />
-					{:else}
-						<Minus class="w-3 h-3 text-git-deleted" />
-					{/if}
-				</button>
-			{/if}
-		</div>
-
-		{#if !isCollapsed && node.children}
-			{#each node.children as child}
-				{@render treeNode(child, depth + 1)}
-			{/each}
-		{/if}
-	{:else}
-		{@const isSelected = selectedFile === node.path}
-		{@const stageFilePending = isStageFilePending?.(node.path) ?? false}
-		{@const unstageFilePending = isUnstageFilePending?.(node.path) ?? false}
-		{@const badge = categoryBadge(node.category)}
-		<div
-			class="relative flex items-center w-full px-2 py-1 text-xs transition-colors group
-				{isSelected
-				? 'bg-interactive-accent/10 text-interactive-accent'
-				: 'hover:bg-muted/50 text-foreground'}"
-			style="padding-left: {depth * 12 + 8}px"
-		>
-			{#if depth > 0}
-				<div class="absolute inset-y-0 left-0 pointer-events-none" aria-hidden="true">
-					{#each Array(depth) as _, depthIndex}
-						<span
-							class="absolute inset-y-0 w-px bg-border/70"
-							style="left: {treeGuideColumnLeft(depthIndex)}px"
-						></span>
-					{/each}
-				</div>
-			{/if}
-			<button
-				type="button"
-				onclick={() => onSelectFile(node.path)}
-				onkeydown={(e) => handleKeyDown(e, node.path, false)}
-				class="flex items-center flex-1 min-w-0"
-			>
-				<span class="w-4 h-4 flex items-center justify-center mr-1">
-					<!-- Spacer to align with directory chevrons -->
-				</span>
-				<span class="w-4 h-4 flex items-center justify-center mr-1.5 text-muted-foreground">
-					<FileIcon class="w-3.5 h-3.5" />
-				</span>
-				<span class="truncate flex-1 text-left">{node.name}</span>
-			</button>
-			{#if node.additions || node.deletions}
-				<span class="ml-1 flex gap-1 text-[10px] shrink-0">
-					{#if node.additions}
-						<span class="text-git-added">+{node.additions}</span>
-					{/if}
-					{#if node.deletions}
-						<span class="text-git-deleted">-{node.deletions}</span>
-					{/if}
-				</span>
-			{/if}
-			{#if node.changeKind}
-				<span class="ml-1.5 text-[10px] font-bold shrink-0 {changeKindColor(node.changeKind)}">
-					{changeKindBadge(node.changeKind)}
-				</span>
-			{/if}
-			{#if badge}
-				<span
-					class="ml-1 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground shrink-0"
-				>
-					{badge}
-				</span>
-			{/if}
-			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
-				{#if onDiscardFile}
-					<button
-						type="button"
-						onclick={(e) => {
-							e.stopPropagation();
-							onDiscardFile(node.path);
-						}}
-						class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-status-error/20 transition-opacity shrink-0"
-						title={node.changeKind === 'untracked'
-							? m.git_file_item_delete_untracked()
-							: m.git_file_item_discard_changes()}
-					>
-						<Undo2 class="w-3 h-3 text-muted-foreground hover:text-status-error-foreground" />
-					</button>
-				{/if}
-				<button
-					type="button"
-					disabled={stageFilePending}
-					onclick={(e) => {
-						e.stopPropagation();
-						onStageFile(node.path);
-					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
-					title={m.git_action_stage_file()}
-				>
-					{#if stageFilePending}
-						<LoaderCircle class="w-3 h-3 text-git-added animate-spin" />
-					{:else}
-						<Plus class="w-3 h-3 text-git-added" />
-					{/if}
-				</button>
-			{/if}
-			{#if node.staged && onUnstageFile}
-				<button
-					type="button"
-					disabled={unstageFilePending}
-					onclick={(e) => {
-						e.stopPropagation();
-						onUnstageFile(node.path);
-					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
-					title={m.git_action_unstage_file()}
-				>
-					{#if unstageFilePending}
-						<LoaderCircle class="w-3 h-3 text-git-deleted animate-spin" />
-					{:else}
-						<Minus class="w-3 h-3 text-git-deleted" />
-					{/if}
-				</button>
-			{/if}
-			{#if node.staged}
-				<span
-					class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0"
-					title={m.git_action_staged()}
-				></span>
-			{/if}
-		</div>
-	{/if}
-{/snippet}
+<style>
+	[data-git-workbench-file-tree]:focus-visible [data-git-tree-row-active] {
+		outline: 1px solid var(--color-interactive-accent);
+		outline-offset: -1px;
+	}
+</style>

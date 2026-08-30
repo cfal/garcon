@@ -22,6 +22,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
 		markChatTranscriptValidated: vi.fn(),
+		notifyCompletion: vi.fn(),
 		...overrides,
 	};
 }
@@ -33,10 +34,45 @@ describe('handleAgentComplete', () => {
 		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('does not mark validated when exitCode is 1', () => {
+	it('notifies on successful completion', () => {
+		const ctx = createCtx();
+		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
+		expect(ctx.notifyCompletion).toHaveBeenCalledOnce();
+	});
+
+	it('does not notify or mark validated when exitCode is 1', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 1), ctx);
 		expect(ctx.markChatTranscriptValidated).not.toHaveBeenCalled();
+		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
+	});
+
+	it.each([2, 127, undefined])(
+		'preserves existing completion handling without notifying when exitCode is %s',
+		(exitCode) => {
+			const ctx = createCtx();
+			handleAgentComplete(new AgentRunFinishedMessage('chat-1', exitCode), ctx);
+			expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
+			expect(ctx.notifyCompletion).not.toHaveBeenCalled();
+		},
+	);
+
+	it('does not notify when the turn was interrupted', () => {
+		const ctx = createCtx();
+		handleAgentComplete(
+			new AgentRunFinishedMessage(
+				'chat-1',
+				0,
+				undefined,
+				undefined,
+				undefined,
+				'interrupted',
+			),
+			ctx,
+		);
+
+		expect(ctx.markChatTranscriptValidated).toHaveBeenCalledWith('chat-1');
+		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
 	it('clears selected-turn metadata', () => {
@@ -52,6 +88,7 @@ describe('handleAgentComplete', () => {
 
 		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
 		expect(ctx.conversationUi.clearTurnPermissionRequests).not.toHaveBeenCalled();
+		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
 	it('navigates to pending chat on success', () => {

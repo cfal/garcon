@@ -69,7 +69,8 @@ export class AgentOwnershipJournal {
   readonly #ledger: Pick<TranscriptLedgerService, 'deleteChat'>;
   readonly #releaseTimeoutMs: number;
   #journal: AgentOwnershipJournalFileV5 = emptyOwnershipJournalV5();
-  #cleanupPromise: Promise<void> = Promise.resolve();
+  #deletePromise: Promise<void> = Promise.resolve();
+  #providerCleanupPromise: Promise<void> = Promise.resolve();
   #mutationPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -233,7 +234,7 @@ export class AgentOwnershipJournal {
   }
 
   delete(chatId: string): Promise<void> {
-    return this.#scheduleCleanupWork(() => this.#deleteNow(chatId));
+    return this.#scheduleDeleteWork(() => this.#deleteNow(chatId));
   }
 
   async #deleteNow(chatId: string): Promise<void> {
@@ -270,7 +271,15 @@ export class AgentOwnershipJournal {
     await this.#registry.flush();
     const removed = { ...intent, phase: 'registry-removed' as const };
     await this.#replaceIntent(removed);
-    await this.#finishDelete(removed);
+    // The provider-neutral ledger must be removed before delete resolves. Only
+    // provider/native release is detached, so same-id recreation is safe.
+    this.#ledger.deleteChat(chatId);
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
+      logger.warn('Delete cleanup scheduling failed', {
+        chatId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   async #recoverDelete(intent: DeleteIntentV2): Promise<void> {
@@ -284,7 +293,8 @@ export class AgentOwnershipJournal {
     }
     const removed = { ...intent, phase: 'registry-removed' as const };
     await this.#replaceIntent(removed);
-    void this.#scheduleCleanupWork(() => this.#finishDelete(removed)).catch((error) => {
+    this.#ledger.deleteChat(intent.chatId);
+    void this.#scheduleProviderCleanup(() => this.#finishDelete(removed)).catch((error) => {
       logger.warn('Recovered delete cleanup failed', {
         chatId: intent.chatId,
         reason: error instanceof Error ? error.message : String(error),
@@ -293,7 +303,6 @@ export class AgentOwnershipJournal {
   }
 
   async #finishDelete(intent: DeleteIntentV2): Promise<void> {
-    this.#ledger.deleteChat(intent.chatId);
     let remaining = [...intent.releaseReferences];
     for (const reference of [...remaining]) {
       const integration = this.#integrations.get(reference.agentId);
@@ -345,9 +354,15 @@ export class AgentOwnershipJournal {
     }));
   }
 
-  #scheduleCleanupWork<T>(work: () => Promise<T>): Promise<T> {
-    const operation = this.#cleanupPromise.catch(() => undefined).then(work);
-    this.#cleanupPromise = operation.then(() => undefined, () => undefined);
+  #scheduleDeleteWork<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.#deletePromise.catch(() => undefined).then(work);
+    this.#deletePromise = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  #scheduleProviderCleanup<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.#providerCleanupPromise.catch(() => undefined).then(work);
+    this.#providerCleanupPromise = operation.then(() => undefined, () => undefined);
     return operation;
   }
 
