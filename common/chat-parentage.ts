@@ -30,16 +30,17 @@ export function parseParentChatRef(value: unknown): ParentChatRef | null {
     return null;
   }
 
-  if (!isChatParentRelation(value.relation)) return null;
-  if (typeof value.transcriptViewId !== 'string' || value.transcriptViewId.length === 0) {
+  const { relation, transcriptViewId, ordinal } = value;
+  if (!isChatParentRelation(relation)) return null;
+  if (typeof transcriptViewId !== 'string' || transcriptViewId.length === 0) {
     return null;
   }
-  if (!Number.isSafeInteger(value.ordinal) || Number(value.ordinal) < 0) return null;
+  if (typeof ordinal !== 'number' || !Number.isSafeInteger(ordinal) || ordinal < 0) return null;
 
   return Object.freeze({
     chatId,
-    relation: value.relation,
-    transcriptViewId: value.transcriptViewId,
-    ordinal: Number(value.ordinal),
+    relation,
+    transcriptViewId,
+    ordinal,
   });
 }
