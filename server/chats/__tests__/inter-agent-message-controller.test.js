@@ -90,7 +90,7 @@ describe('InterAgentMessageController', () => {
     expect(fixture.adoption.ensure).not.toHaveBeenCalled();
     expect(fixture.execution.deliverInterAgentControlInput).not.toHaveBeenCalled();
     expect(sourceNotices(fixture)[0][2]).toMatchObject({
-      content: `Failed: ${TARGET_CHAT_ID} (agent messaging is disabled)\nFailed: ${SECOND_TARGET_CHAT_ID} (agent messaging is disabled)\n\nmessage body`,
+      content: 'message body',
       detail: {
         results: [
           { chatId: TARGET_CHAT_ID, status: 'failed', reason: 'disabled' },
@@ -136,7 +136,7 @@ describe('InterAgentMessageController', () => {
         'source-view',
         {
           title: 'Inter-agent message',
-          content: `Delivered: ${TARGET_CHAT_ID}\n\nmessage body`,
+          content: 'message body',
           detail: {
             type: 'inter-agent-message-outcome',
             results: [{ chatId: TARGET_CHAT_ID, status: 'delivered' }],
@@ -167,7 +167,7 @@ describe('InterAgentMessageController', () => {
     });
     expect(fixture.notices.appendNotice).toHaveBeenCalledTimes(1);
     expect(sourceNotices(fixture)[0][2]).toMatchObject({
-      content: `Queued: ${TARGET_CHAT_ID} (pending delivery is not retained across server restart)\n\nmessage body`,
+      content: 'message body',
       detail: {
         results: [{ chatId: TARGET_CHAT_ID, status: 'queued' }],
       },

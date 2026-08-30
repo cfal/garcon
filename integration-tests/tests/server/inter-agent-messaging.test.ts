@@ -62,7 +62,7 @@ describe('inter-agent messaging', () => {
       expect(messagesOfType(source.messages, 'transcript-notice')).toContainEqual(
         expect.objectContaining({
           title: 'Inter-agent message',
-          content: `Queued: ${targetChatId} (pending delivery is not retained across server restart)\n\n${body}`,
+          content: body,
           detail: {
             type: 'inter-agent-message-outcome',
             results: [{ chatId: targetChatId, status: 'queued' }],
@@ -165,7 +165,7 @@ describe('inter-agent messaging', () => {
       ).filter((message) => message.detail?.type === 'inter-agent-message-outcome');
       expect(sourceOutcomes).toEqual([
         expect.objectContaining({
-          content: `Queued: ${targetChatId} (pending delivery is not retained across server restart)\n\n${body}`,
+          content: body,
           detail: {
             type: 'inter-agent-message-outcome',
             results: [{ chatId: targetChatId, status: 'queued' }],
