@@ -125,31 +125,37 @@ class TestMediaQueryList {
 function installContext(): AppShellBreakpointWorkspace {
 	const workspace = new AppShellBreakpointWorkspace();
 	const noOpSubscription = () => () => undefined;
+	let selectedChatId: string | null = null;
+	const sessions = {
+		orderedChats: [],
+		get selectedChatId() {
+			return selectedChatId;
+		},
+		selectedChat: null,
+		lastSelectedChatId: null,
+		isLoadingChats: false,
+		order: [],
+		byId: {},
+		setSelectedChatId: vi.fn((chatId: string | null) => {
+			selectedChatId = chatId;
+		}),
+		rememberSelectedChat: vi.fn(),
+		refreshChats: vi.fn(async () => undefined),
+		quietRefreshChats: vi.fn(async () => undefined),
+		upsertServerChat: vi.fn(),
+		hasChat: vi.fn((chatId: string) => chatId === 'chat-test'),
+		removeChat: vi.fn(),
+		deleteRemoteChat: vi.fn(async () => undefined),
+		renameChat: vi.fn(async () => undefined),
+		patchChat: vi.fn(),
+	};
 	testContext.current = {
 		workspace,
 		navigation: {
 			onNavigateChatAboveRequested: noOpSubscription,
 			onNavigateChatBelowRequested: noOpSubscription,
 		},
-		sessions: {
-			orderedChats: [],
-			selectedChatId: null,
-			selectedChat: null,
-			lastSelectedChatId: null,
-			isLoadingChats: false,
-			order: [],
-			byId: {},
-			setSelectedChatId: vi.fn(),
-			rememberSelectedChat: vi.fn(),
-			refreshChats: vi.fn(async () => undefined),
-			quietRefreshChats: vi.fn(async () => undefined),
-			upsertServerChat: vi.fn(),
-			hasChat: vi.fn((chatId: string) => chatId === 'chat-test'),
-			removeChat: vi.fn(),
-			deleteRemoteChat: vi.fn(async () => undefined),
-			renameChat: vi.fn(async () => undefined),
-			patchChat: vi.fn(),
-		},
+		sessions,
 		appShell: {
 			sidebarOpen: false,
 			keyboardHeight: 0,
@@ -309,6 +315,7 @@ describe('AppShell responsive workspace binding', () => {
 		expect(chatNavigation.gotoChat).toHaveBeenCalledWith('chat-test');
 		expect(workspace.showChatCalls).toBe(1);
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
+		expect(chatNavigation.gotoChat).toHaveBeenCalledOnce();
 	});
 
 	it.each(['git', 'git-history', 'git-compare'] as const)(
