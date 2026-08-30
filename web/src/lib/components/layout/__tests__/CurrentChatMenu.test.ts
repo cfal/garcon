@@ -7,6 +7,7 @@ import CurrentChatMenu from '../CurrentChatMenu.svelte';
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
 		projectIdentityState: 'available',

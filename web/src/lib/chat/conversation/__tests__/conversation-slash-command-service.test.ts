@@ -70,6 +70,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		status: 'running',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -77,6 +78,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 function createServerEntry(id: string) {
 	return {
 		id,
+		parentChat: null,
 		agentId: 'claude',
 		agentOwnershipEpoch: 'epoch-1',
 		model: 'sonnet',

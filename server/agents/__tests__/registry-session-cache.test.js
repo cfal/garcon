@@ -34,6 +34,7 @@ describe('AgentRegistry session cache', () => {
       agentSettingsById: {
         test: { ownerId: 'test', schemaVersion: 1, values: {} },
       },
+      parentChat: null,
     });
     ledger = new TranscriptLedgerService(
       new TranscriptLedgerStore(path.join(root, 'transcript-ledgers')),

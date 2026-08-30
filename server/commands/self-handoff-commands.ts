@@ -173,7 +173,7 @@ export class SelfHandoffCommands {
     onRegistered: () => void,
   ): Promise<void> {
     signal.throwIfAborted();
-    this.deps.handoffs.seedContinuationLedger({
+    const watermark = this.deps.handoffs.seedContinuationLedger({
       sourceChatId: input.sourceChatId,
       targetChatId: input.chatId,
     });
@@ -199,6 +199,12 @@ export class SelfHandoffCommands {
         carryOverSegments: [],
         nativeSeedReceipt: null,
         carryOverMigrationQuarantine: null,
+        parentChat: {
+          chatId: input.sourceChatId,
+          relation: 'handoff',
+          transcriptViewId: watermark.viewId,
+          ordinal: watermark.ordinal,
+        },
       });
       if (!added) {
         throw new CommandValidationError(

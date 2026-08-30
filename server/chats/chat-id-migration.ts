@@ -289,7 +289,25 @@ async function migrateChatIdFileNames(
 
 function migrateRegistry(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
   if (!isRecord(value) || !isRecord(value.sessions)) return { value, changed: false };
-  const sessions = migrateRecordKeys(value.sessions, migrated, 'chats.json');
+  const sessions = migrateRecordKeys(
+    value.sessions,
+    migrated,
+    'chats.json',
+    (entry) => {
+      if (!isRecord(entry) || !isRecord(entry.parentChat)) {
+        return { value: entry, changed: false };
+      }
+      const chatId = migratedChatId(entry.parentChat.chatId, migrated);
+      if (chatId === entry.parentChat.chatId) return { value: entry, changed: false };
+      return {
+        value: {
+          ...entry,
+          parentChat: { ...entry.parentChat, chatId },
+        },
+        changed: true,
+      };
+    },
+  );
   return sessions.changed
     ? { value: { ...value, sessions: sessions.value }, changed: true }
     : { value, changed: false };

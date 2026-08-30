@@ -19,6 +19,10 @@ import {
 import type { JsonObject, JsonValue } from '../../common/json.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { parseChatId } from '../../common/chat-id.js';
+import {
+  parseParentChatRef,
+  type ParentChatRef,
+} from '../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
@@ -95,6 +99,7 @@ export interface ChatRegistryEntry {
   carryOverSegments: readonly CarryOverSegmentRef[];
   nativeSeedReceipt: NativeSeedReceipt | null;
   carryOverMigrationQuarantine: CarryOverMigrationQuarantine | null;
+  readonly parentChat: ParentChatRef | null;
 }
 
 export interface ChatRegistrySnapshot {
@@ -121,6 +126,7 @@ export interface NewChatRegistryEntry {
   carryOverSegments?: readonly CarryOverSegmentRef[];
   nativeSeedReceipt?: NativeSeedReceipt | null;
   carryOverMigrationQuarantine?: CarryOverMigrationQuarantine | null;
+  parentChat: ParentChatRef | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -225,7 +231,10 @@ function normalizeAgentId(rawEntry: Record<string, unknown>): AgentName {
   return typeof value === 'string' ? value as AgentName : '';
 }
 
-function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegistryEntry {
+function normalizeChatRegistryEntry(
+  rawEntry: Record<string, unknown>,
+  chatId: string,
+): ChatRegistryEntry {
   const agentId = normalizeAgentId(rawEntry);
   const nativeSession = normalizeNativeSession(rawEntry.nativeSession, agentId);
   const agentSettingsById = parseAgentSettingsById(rawEntry.agentSettingsById);
@@ -257,7 +266,23 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
     carryOverSegments,
     nativeSeedReceipt,
     carryOverMigrationQuarantine: normalizeMigrationQuarantine(rawEntry.carryOverMigrationQuarantine),
+    parentChat: readParentChat(rawEntry.parentChat, chatId),
   };
+}
+
+function readParentChat(value: unknown, chatId: string): ParentChatRef | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseParentChatRef(value);
+  if (!parsed) logger.warn(`sessions: ignoring invalid parentChat for ${chatId}`);
+  return parsed;
+}
+
+function requireNewParentChat(value: unknown, chatId: string): ParentChatRef | null {
+  if (value === null) return null;
+  const parsed = parseParentChatRef(value);
+  if (!parsed) throw new Error(`Invalid parent chat for ${chatId}`);
+  if (parsed.chatId === chatId) throw new Error(`Chat ${chatId} cannot be its own parent`);
+  return parsed;
 }
 
 export function parseCarryOverSegmentRefs(value: unknown): readonly CarryOverSegmentRef[] {
@@ -448,7 +473,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         if (!isObjectRecord(rawEntry)) {
           throw new Error(`Invalid chat registry entry for ${chatId}`);
         }
-        sessions[chatId] = normalizeChatRegistryEntry(rawEntry);
+        sessions[chatId] = normalizeChatRegistryEntry(rawEntry, chatId);
       }
       this.#registry = {
         version: CHAT_REGISTRY_VERSION,
@@ -547,6 +572,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     carryOverSegments = [],
     nativeSeedReceipt = null,
     carryOverMigrationQuarantine = null,
+    parentChat,
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
@@ -563,6 +589,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const normalizedSegments = parseCarryOverSegmentRefs(carryOverSegments);
     const normalizedReceipt = normalizeNativeSeedReceipt(nativeSeedReceipt);
     const normalizedQuarantine = normalizeMigrationQuarantine(carryOverMigrationQuarantine);
+    const normalizedParentChat = requireNewParentChat(parentChat, chatId);
     assertSeedReceiptBinding({
       agentSessionId,
       nativeSeedReceipt: normalizedReceipt,
@@ -584,6 +611,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       carryOverSegments: normalizedSegments,
       nativeSeedReceipt: normalizedReceipt,
       carryOverMigrationQuarantine: normalizedQuarantine,
+      parentChat: normalizedParentChat,
     };
     this.#setAgentSessionIdIndex(chatId, agentSessionId);
     this.#emitChatAdded(chatId);

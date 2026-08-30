@@ -9,6 +9,7 @@ function chat(
 ): ChatSessionRecord {
 	return {
 		id,
+		parentChat: null,
 		projectPath: '/repo',
 		effectiveProjectKey: '/repo',
 		projectIdentityState: 'available',

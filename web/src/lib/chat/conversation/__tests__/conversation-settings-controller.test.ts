@@ -24,6 +24,7 @@ function deferred<T>() {
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/repo',
 		effectiveProjectKey: '/repo',
 		projectIdentityState: 'available',

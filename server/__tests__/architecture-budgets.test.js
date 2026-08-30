@@ -10,8 +10,9 @@ const MAX_LINES = 1000;
 // Keeps command and execution orchestration from regrowing persistence or
 // provider concerns now owned by the ledger and integration boundary. The
 // provider-neutral control routes include one-shot discovery delivery and one
-// bounded private lane sharing the existing queue drainer.
-const EXECUTION_FOOTPRINT_BUDGET = 8250;
+// bounded private lane sharing the existing queue drainer. Immutable chat
+// parentage adds only the source watermark threading at child creation.
+const EXECUTION_FOOTPRINT_BUDGET = 8266;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

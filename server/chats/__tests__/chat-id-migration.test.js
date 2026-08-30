@@ -13,6 +13,7 @@ const SECONDS_CANONICAL_ID = '1772710502000000';
 const MILLISECONDS_ID = '1774634779935';
 const MILLISECONDS_CANONICAL_ID = '1774634779935000';
 const EXISTING_CANONICAL_ID = '1783725900000000';
+const DANGLING_CANONICAL_ID = '1783725900000001';
 
 const createdDirs = [];
 
@@ -46,8 +47,24 @@ describe('workspace chat ID migration', () => {
       version: 2,
       sessions: {
         [SECONDS_ID]: chatEntry(),
-        [MILLISECONDS_ID]: chatEntry('sonnet'),
-        [EXISTING_CANONICAL_ID]: chatEntry('haiku'),
+        [MILLISECONDS_ID]: {
+          ...chatEntry('sonnet'),
+          parentChat: {
+            chatId: SECONDS_ID,
+            relation: 'fork',
+            transcriptViewId: 'view-a',
+            ordinal: 4,
+          },
+        },
+        [EXISTING_CANONICAL_ID]: {
+          ...chatEntry('haiku'),
+          parentChat: {
+            chatId: DANGLING_CANONICAL_ID,
+            relation: 'handoff',
+            transcriptViewId: 'view-deleted',
+            ordinal: 9,
+          },
+        },
       },
     });
     await writeJson(workspaceDir, 'project-settings.json', {
@@ -113,6 +130,19 @@ describe('workspace chat ID migration', () => {
       MILLISECONDS_CANONICAL_ID,
       EXISTING_CANONICAL_ID,
     ].sort());
+    expect(chats.sessions[MILLISECONDS_CANONICAL_ID].parentChat).toEqual({
+      chatId: SECONDS_CANONICAL_ID,
+      relation: 'fork',
+      transcriptViewId: 'view-a',
+      ordinal: 4,
+    });
+    expect(chats.sessions[EXISTING_CANONICAL_ID].parentChat).toEqual({
+      chatId: DANGLING_CANONICAL_ID,
+      relation: 'handoff',
+      transcriptViewId: 'view-deleted',
+      ordinal: 9,
+    });
+    expect(result.changedFiles.filter((file) => file === 'chats.json')).toHaveLength(1);
 
     const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
     expect(settings.pinnedChatIds).toEqual([SECONDS_CANONICAL_ID]);
