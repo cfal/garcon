@@ -1,5 +1,6 @@
 import { parseChatId, type ChatId } from './chat-id.js';
 import { AssistantMessage, type ChatMessage } from './chat-types.js';
+import { normalizeGarconCommandBody } from './garcon-command-text.js';
 import {
   GARCON_START_AGENT_CLOSE,
   GARCON_START_AGENT_PREFIX,
@@ -86,7 +87,6 @@ type ParsedEdge =
       readonly candidateStart: number;
       readonly command: GarconCommandIssue['command'];
     };
-
 
 export function extractGarconCommands(
   message: ChatMessage,
@@ -177,7 +177,7 @@ export function parseGarconMessage(content: string): GarconReceivedMessage | nul
   }
 
   const rawBody = value.slice(openerEnd + 1, -GARCON_MESSAGE_CLOSE.length);
-  const body = normalizeBody(rawBody);
+  const body = normalizeGarconCommandBody(rawBody);
   if (!isValidBody(body)) return null;
   return { fromChatId, body };
 }
@@ -428,7 +428,7 @@ function parseSendMessage(opener: string, rawBody: string): GarconEdgeCommand | 
 
   const recipients = parseRecipients(match[1]);
   if (!recipients) return null;
-  const body = normalizeBody(rawBody);
+  const body = normalizeGarconCommandBody(rawBody);
   if (!isValidBody(body)) return null;
   return {
     type: 'send-message',
@@ -456,16 +456,6 @@ function parseRecipients(value: string): readonly ChatId[] | null {
     if (recipients.length > MAX_GARCON_MESSAGE_RECIPIENTS) return null;
   }
   return recipients.length > 0 ? recipients : null;
-}
-
-function normalizeBody(value: string): string {
-  let start = 0;
-  let end = value.length;
-  if (value.startsWith('\r\n')) start = 2;
-  else if (value.startsWith('\n')) start = 1;
-  if (value.slice(start, end).endsWith('\r\n')) end -= 2;
-  else if (value.slice(start, end).endsWith('\n')) end -= 1;
-  return value.slice(start, end);
 }
 
 function isValidBody(value: string): boolean {

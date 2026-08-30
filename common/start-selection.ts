@@ -224,6 +224,14 @@ export function resolveModelSelection(
   requested: RequestedModelSelection,
 ): ResolvedModelSelection {
   const agent = requireCatalogAgent(catalog, agentId);
+  return resolveModelSelectionForAgent(catalog, agent, requested);
+}
+
+function resolveModelSelectionForAgent(
+  catalog: ModelCatalogResponse,
+  agent: AgentCatalogEntry,
+  requested: RequestedModelSelection,
+): ResolvedModelSelection {
   assertProviderAndEndpoint(catalog, agent, requested);
   const matches = matchingModels(requireCatalogModels(agent), requested);
   if (matches.length > 1) {
@@ -236,7 +244,7 @@ export function resolveModelSelection(
   const selected = matches[0];
   if (!selected) {
     if (requested.providerId || requested.endpointId || agent.requiresStrictModelDiscovery) {
-      fail('UNKNOWN_MODEL', `model ${requested.model} is not available for agent ${agentId}`);
+      fail('UNKNOWN_MODEL', `model ${requested.model} is not available for agent ${agent.id}`);
     }
     return {
       model: requested.model,
@@ -322,7 +330,7 @@ export function resolveStartSelection(
     agent.defaultSettings,
   );
   return {
-    ...resolveModelSelection(catalog, requested.agentId, requested),
+    ...resolveModelSelectionForAgent(catalog, agent, requested),
     permissionMode,
     thinkingMode,
     agentSettings,

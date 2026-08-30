@@ -488,7 +488,7 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
   const transcriptSearch = asRecord(raw?.transcriptSearch);
   const agentCommands = asRecord(raw?.agentCommands);
   const legacyChatIdDiscovery = asRecord(raw?.chatIdDiscovery);
-  const chatIdDiscovery = agentCommands
+  const chatIdDiscoveryEnabled = agentCommands
     ? agentCommands.chatIdDiscovery
     : legacyChatIdDiscovery?.enabled;
   return {
@@ -501,7 +501,9 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
       enabled: typeof agentCommands?.enabled === 'boolean'
         ? agentCommands.enabled
         : true,
-      chatIdDiscovery: typeof chatIdDiscovery === 'boolean' ? chatIdDiscovery : true,
+      chatIdDiscovery: typeof chatIdDiscoveryEnabled === 'boolean'
+        ? chatIdDiscoveryEnabled
+        : true,
       sendMessage: typeof agentCommands?.sendMessage === 'boolean'
         ? agentCommands.sendMessage
         : true,

@@ -1,4 +1,5 @@
 import { parseChatId, type ChatId } from './chat-id.js';
+import { normalizeGarconCommandBody } from './garcon-command-text.js';
 
 export const GARCON_START_AGENT_PREFIX = '<garcon-start-agent';
 export const GARCON_START_AGENT_OPEN = '<garcon-start-agent>';
@@ -90,6 +91,11 @@ interface ContentLine {
   readonly hasLineBreak: boolean;
 }
 
+interface ParsedCreateChatParamsBlock {
+  readonly params: readonly GarconCreateChatParams[];
+  readonly end: number;
+}
+
 export function parseGarconStartAgent(
   content: string,
   start: number,
@@ -133,36 +139,17 @@ export function parseGarconStartAgent(
     return null;
   }
 
-  const prompt = normalizeBody(content.slice(promptOpen.end, promptClose.start));
+  const prompt = normalizeGarconCommandBody(
+    content.slice(promptOpen.end, promptClose.start),
+  );
   if (!isValidStartPrompt(prompt)) return null;
 
-  const params: GarconCreateChatParams[] = [];
-  const refs = new Set<string>();
-  cursor = promptClose.nextStart;
-  while (cursor < end) {
-    const line = contentLine(content, cursor, end);
-    if (lineEquals(content, line, GARCON_START_AGENT_CLOSE)) {
-      if (params.length === 0) return null;
-      return {
-        command: { type: 'start-agent', prompt, params },
-        end: line.end,
-      };
-    }
-
-    const parsedParams = parseCreateChatParams(content.slice(line.start, line.end));
-    if (
-      !parsedParams
-      || refs.has(parsedParams.ref)
-      || params.length === MAX_GARCON_CREATE_CHAT_PARAMS
-      || !line.hasLineBreak
-    ) {
-      return null;
-    }
-    refs.add(parsedParams.ref);
-    params.push(parsedParams);
-    cursor = line.nextStart;
-  }
-  return null;
+  const parsedParams = parseCreateChatParamsBlock(content, promptClose.nextStart, end);
+  if (!parsedParams) return null;
+  return {
+    command: { type: 'start-agent', prompt, params: parsedParams.params },
+    end: parsedParams.end,
+  };
 }
 
 export function garconCreateChatResultsContent(
@@ -181,7 +168,7 @@ export function parseGarconCreateChatResults(
   content: string,
 ): readonly GarconCreateChatResult[] | null {
   const lines = content.split('\n');
-  if (lines.length < 1 || lines.length > MAX_GARCON_CREATE_CHAT_PARAMS) return null;
+  if (lines.length > MAX_GARCON_CREATE_CHAT_PARAMS) return null;
 
   const results: GarconCreateChatResult[] = [];
   const refs = new Set<string>();
@@ -210,8 +197,7 @@ export function isGarconCreateChatResult(
     }
   }
   return candidate.error === true
-    && typeof candidate.msg === 'string'
-    && createChatFailureMessages.has(candidate.msg)
+    && isGarconCreateChatFailureMessage(candidate.msg)
     && candidate.chatId === undefined;
 }
 
@@ -221,31 +207,42 @@ function completesNestedStartAgent(
   promptClose: ContentLine,
   end: number,
 ): boolean {
-  const prompt = normalizeBody(content.slice(promptOpen.end, promptClose.start));
+  const prompt = normalizeGarconCommandBody(
+    content.slice(promptOpen.end, promptClose.start),
+  );
   if (!isValidStartPrompt(prompt)) return false;
 
-  let paramsCount = 0;
+  return parseCreateChatParamsBlock(content, promptClose.nextStart, end) !== null;
+}
+
+function parseCreateChatParamsBlock(
+  content: string,
+  start: number,
+  end: number,
+): ParsedCreateChatParamsBlock | null {
+  const params: GarconCreateChatParams[] = [];
   const refs = new Set<string>();
-  let cursor = promptClose.nextStart;
+  let cursor = start;
   while (cursor < end) {
     const line = contentLine(content, cursor, end);
     if (lineEquals(content, line, GARCON_START_AGENT_CLOSE)) {
-      return paramsCount > 0;
+      if (params.length === 0) return null;
+      return { params, end: line.end };
     }
-    const params = parseCreateChatParams(content.slice(line.start, line.end));
+    const parsedParams = parseCreateChatParams(content.slice(line.start, line.end));
     if (
-      !params
-      || refs.has(params.ref)
-      || paramsCount === MAX_GARCON_CREATE_CHAT_PARAMS
+      !parsedParams
+      || refs.has(parsedParams.ref)
+      || params.length === MAX_GARCON_CREATE_CHAT_PARAMS
       || !line.hasLineBreak
     ) {
-      return false;
+      return null;
     }
-    refs.add(params.ref);
-    paramsCount += 1;
+    refs.add(parsedParams.ref);
+    params.push(parsedParams);
     cursor = line.nextStart;
   }
-  return false;
+  return null;
 }
 
 function parseCreateChatParams(line: string): GarconCreateChatParams | null {
@@ -290,18 +287,25 @@ function parseCreateChatResultLine(line: string): GarconCreateChatResult | null 
   }
 
   const failure = CREATE_CHAT_RESULT_FAILURE.exec(line);
+  const message = failure?.[2];
   if (
     !failure
     || !CANONICAL_UUID.test(failure[1])
-    || !createChatFailureMessages.has(failure[2])
+    || !isGarconCreateChatFailureMessage(message)
   ) {
     return null;
   }
   return {
     ref: failure[1],
     error: true,
-    msg: failure[2] as GarconCreateChatFailureMessage,
+    msg: message,
   };
+}
+
+function isGarconCreateChatFailureMessage(
+  value: unknown,
+): value is GarconCreateChatFailureMessage {
+  return typeof value === 'string' && createChatFailureMessages.has(value);
 }
 
 function assertCreateChatResultBatch(results: readonly GarconCreateChatResult[]): void {
@@ -331,8 +335,9 @@ function isValidStartPrompt(value: string): boolean {
 }
 
 function isValidCreateChatModel(value: string): boolean {
-  return value.trim().length > 0
-    && value.trim() === value
+  const trimmed = value.trim();
+  return trimmed.length > 0
+    && trimmed === value
     && value.isWellFormed()
     && !/["<>&\r\n]/.test(value)
     && utf8Encoder.encode(value).byteLength <= GARCON_CREATE_CHAT_MODEL_MAX_BYTES;
@@ -357,14 +362,4 @@ function contentLine(content: string, start: number, end: number): ContentLine {
 function lineEquals(content: string, line: ContentLine, expected: string): boolean {
   return line.end - line.start === expected.length
     && content.startsWith(expected, line.start);
-}
-
-function normalizeBody(value: string): string {
-  let start = 0;
-  let end = value.length;
-  if (value.startsWith('\r\n')) start = 2;
-  else if (value.startsWith('\n')) start = 1;
-  if (value.slice(start, end).endsWith('\r\n')) end -= 2;
-  else if (value.slice(start, end).endsWith('\n')) end -= 1;
-  return value.slice(start, end);
 }
