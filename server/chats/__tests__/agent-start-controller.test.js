@@ -116,7 +116,7 @@ function createFixture(overrides = {}) {
     ...overrides.notices,
   };
   const errors = [];
-  const dispositions = [];
+  const events = [];
   const defaults = overrides.defaults ?? executionDefaults();
   const controller = new AgentStartController({
     registry,
@@ -130,7 +130,7 @@ function createFixture(overrides = {}) {
     getExecutionDefaults: overrides.getExecutionDefaults ?? (() => defaults),
     isEnabled: () => enabled,
     createId: () => `generated-${++nextId}`,
-    onDisposition: (event) => dispositions.push(event),
+    onDiagnostic: (event) => events.push(event),
     onError: (error, context) => errors.push({ error, context }),
   });
   return {
@@ -144,7 +144,7 @@ function createFixture(overrides = {}) {
     chats,
     views,
     errors,
-    dispositions,
+    events,
     setEnabled(value) { enabled = value; },
   };
 }
@@ -209,6 +209,44 @@ describe('AgentStartController', () => {
     });
     expect(delivery[2]).toBe('source-run');
     expect(sourceNotices(fixture)[0][2].detail.deliveryStatus).toBe('delivered');
+    expect(fixture.events.map((event) => event.event)).toEqual([
+      'batch-admission',
+      'selection',
+      'start',
+      'selection',
+      'start',
+      'result-delivery',
+    ]);
+    expect(fixture.events[0]).toEqual({
+      event: 'batch-admission',
+      status: 'admitted',
+      sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'source-view',
+      requestRunId: 'source-run',
+      itemCount: 2,
+    });
+    expect(fixture.events.filter((event) => event.event === 'start')).toEqual([
+      expect.objectContaining({
+        status: 'created',
+        ref: REF,
+        targetChatId: CREATED_CHAT_ID,
+        itemIndex: 1,
+        itemCount: 2,
+        attempt: 1,
+        elapsedMs: expect.any(Number),
+      }),
+      expect.objectContaining({
+        status: 'created',
+        ref: SECOND_REF,
+        targetChatId: SECOND_CREATED_CHAT_ID,
+        itemIndex: 2,
+        itemCount: 2,
+        attempt: 1,
+        elapsedMs: expect.any(Number),
+      }),
+    ]);
+    expect(JSON.stringify(fixture.events)).not.toContain('Investigate the failure.');
+    expect(JSON.stringify(fixture.events)).not.toContain('claude-sonnet');
   });
 
   it('isolates semantic and typed start failures while preserving result order', async () => {
@@ -249,7 +287,11 @@ describe('AgentStartController', () => {
       error: { code: 'INVALID_CATALOG' },
       context: {
         sourceChatId: SOURCE_CHAT_ID,
+        sourceViewId: 'source-view',
+        requestRunId: 'source-run',
         ref: REF,
+        itemIndex: 1,
+        itemCount: 1,
         phase: 'selection',
       },
     }]);
@@ -279,6 +321,30 @@ describe('AgentStartController', () => {
     ]);
     expect(fixture.execution.deliverAgentCommandResult.mock.calls[0][1].content)
       .toContain('error="true" msg="chat-id-collision"');
+    expect(fixture.events.filter((event) => event.event === 'collision-retry')).toEqual([
+      expect.objectContaining({
+        status: 'retrying',
+        ref: REF,
+        targetChatId: CREATED_CHAT_ID,
+        itemIndex: 1,
+        itemCount: 1,
+        attempt: 1,
+      }),
+      expect.objectContaining({
+        status: 'retrying',
+        ref: REF,
+        targetChatId: SECOND_CREATED_CHAT_ID,
+        itemIndex: 1,
+        itemCount: 1,
+        attempt: 2,
+      }),
+    ]);
+    expect(fixture.events.findLast((event) => event.event === 'start')).toMatchObject({
+      ref: REF,
+      targetChatId: '1787974832309302',
+      attempt: 3,
+      status: 'chat-id-collision',
+    });
   });
 
   it('records an initially disabled batch without creating or delivering agent input', async () => {
@@ -299,6 +365,11 @@ describe('AgentStartController', () => {
         ],
       },
     });
+    expect(fixture.events.map((event) => event.event)).toEqual([
+      'batch-admission',
+      'batch-stop',
+      'result-delivery',
+    ]);
   });
 
   it('stops unstarted refs after a mid-batch disable and still returns prior results', async () => {
@@ -319,6 +390,11 @@ describe('AgentStartController', () => {
         { ref: REF, error: false, msg: 'created', chatId: CREATED_CHAT_ID },
         { ref: SECOND_REF, error: true, msg: 'disabled' },
       ]);
+    expect(fixture.events.find((event) => event.event === 'batch-stop')).toMatchObject({
+      status: 'disabled',
+      itemIndex: 2,
+      itemCount: 2,
+    });
   });
 
   it('captures the source project path and execution defaults at admission', async () => {
@@ -358,6 +434,33 @@ describe('AgentStartController', () => {
     expect(fixture.commands.submitAgentCommandStart).toHaveBeenCalledTimes(1);
     expect(fixture.execution.deliverAgentCommandResult).not.toHaveBeenCalled();
     expect(sourceNotices(fixture)).toEqual([]);
+    expect(fixture.events.find((event) => event.event === 'source-abort')).toEqual({
+      event: 'source-abort',
+      status: 'aborted',
+      sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'source-view',
+      requestRunId: 'source-run',
+      completedCount: 0,
+      itemCount: 2,
+    });
+  });
+
+  it('records a shutdown admission rejection without starting work', async () => {
+    const fixture = createFixture();
+    fixture.controller.beginShutdown();
+    fixture.controller.request(request());
+    await fixture.controller.waitForIdle();
+
+    expect(fixture.selection.resolve).not.toHaveBeenCalled();
+    expect(fixture.commands.submitAgentCommandStart).not.toHaveBeenCalled();
+    expect(fixture.events).toEqual([{
+      event: 'batch-admission',
+      status: 'server-shutting-down',
+      sourceChatId: SOURCE_CHAT_ID,
+      sourceViewId: 'source-view',
+      requestRunId: 'source-run',
+      itemCount: 1,
+    }]);
   });
 
   it('records queued, ambiguous, and failed result-delivery dispositions without retrying', async () => {

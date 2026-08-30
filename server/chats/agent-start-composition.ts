@@ -12,7 +12,7 @@ const logger = createLogger('agent-starts');
 
 type AgentStartCompositionOptions = Omit<
   AgentStartControllerOptions,
-  'selection' | 'batchLock' | 'onDisposition' | 'onError'
+  'selection' | 'batchLock' | 'onDiagnostic' | 'onError'
 > & {
   readonly selection: ConstructorParameters<typeof AgentStartSelectionService>[0];
 };
@@ -42,8 +42,8 @@ export class AgentStartComposition implements AgentStartRequestSink {
     this.#controller = new AgentStartController({
       ...options,
       selection: new AgentStartSelectionService(options.selection),
-      onDisposition(event) {
-        logger.debug('Agent start batch disposition', event);
+      onDiagnostic(event) {
+        logger.debug('Agent start event', event);
       },
       onError(error, context) {
         logger.warn('Agent start batch failed', {

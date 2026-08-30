@@ -6,6 +6,7 @@ import {
   type GarconCreateChatFailureMessage,
   type GarconCreateChatParams,
   type GarconCreateChatResult,
+  type GarconCreateChatResultMessage,
 } from '../../common/garcon-start-agent.js';
 import type { RemoteExecutionDefaults } from '../../common/settings.js';
 import {
@@ -38,18 +39,59 @@ interface AgentStartAttempt {
   readonly abortController: AbortController;
   readonly projectPath: string;
   readonly executionDefaults: RemoteExecutionDefaults;
+  readonly sourceViewId: TranscriptViewId;
+  readonly requestRunId: string | null;
+  readonly itemCount: number;
+  completedCount: number;
 }
 
 export interface AgentStartErrorContext {
   readonly sourceChatId: string;
+  readonly sourceViewId: TranscriptViewId;
+  readonly requestRunId: string | null;
   readonly ref?: string;
+  readonly targetChatId?: ChatId;
+  readonly itemIndex?: number;
+  readonly itemCount?: number;
+  readonly attempt?: number;
   readonly phase: 'admission' | 'selection' | 'start' | 'result-delivery';
 }
 
-export interface AgentStartDispositionEvent {
+export interface AgentStartDiagnosticEvent {
+  readonly event:
+    | 'batch-admission'
+    | 'selection'
+    | 'collision-retry'
+    | 'start'
+    | 'source-abort'
+    | 'batch-stop'
+    | 'result-delivery';
   readonly sourceChatId: string;
-  readonly deliveryStatus: SubAgentResultDeliveryStatus;
-  readonly resultCount: number;
+  readonly sourceViewId: TranscriptViewId;
+  readonly requestRunId: string | null;
+  readonly status:
+    | 'admitted'
+    | 'source-not-found'
+    | 'settings-unavailable'
+    | 'resolved'
+    | 'retrying'
+    | 'aborted'
+    | 'server-shutting-down'
+    | GarconCreateChatResultMessage
+    | SubAgentResultDeliveryStatus;
+  readonly itemCount: number;
+  readonly ref?: string;
+  readonly targetChatId?: ChatId | null;
+  readonly itemIndex?: number;
+  readonly completedCount?: number;
+  readonly attempt?: number;
+  readonly elapsedMs?: number;
+}
+
+interface AgentStartDiagnosticContext {
+  readonly sourceChatId: string;
+  readonly sourceViewId: TranscriptViewId;
+  readonly requestRunId: string | null;
 }
 
 export interface AgentStartControllerOptions {
@@ -72,7 +114,7 @@ export interface AgentStartControllerOptions {
   readonly getExecutionDefaults: () => RemoteExecutionDefaults;
   readonly isEnabled: () => boolean;
   readonly createId?: () => string;
-  readonly onDisposition?: (event: AgentStartDispositionEvent) => void;
+  readonly onDiagnostic?: (event: AgentStartDiagnosticEvent) => void;
   readonly onError?: (error: unknown, context: AgentStartErrorContext) => void;
 }
 
@@ -89,13 +131,24 @@ export class AgentStartController {
   }
 
   request(input: AgentStartRequest): void {
-    if (this.#shuttingDown) return;
+    if (this.#shuttingDown) {
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'batch-admission',
+        status: 'server-shutting-down',
+        itemCount: input.params.length,
+      });
+      return;
+    }
     const source = this.options.registry.getChat(input.sourceChatId);
     if (!source) {
-      this.#reportError(new Error('Source chat not found'), {
-        sourceChatId: input.sourceChatId,
-        phase: 'admission',
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'batch-admission',
+        status: 'source-not-found',
+        itemCount: input.params.length,
       });
+      this.#reportError(new Error('Source chat not found'), errorContext(input, 'admission'));
       return;
     }
 
@@ -103,7 +156,13 @@ export class AgentStartController {
     try {
       executionDefaults = structuredClone(this.options.getExecutionDefaults());
     } catch (error) {
-      this.#reportError(error, { sourceChatId: input.sourceChatId, phase: 'admission' });
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'batch-admission',
+        status: 'settings-unavailable',
+        itemCount: input.params.length,
+      });
+      this.#reportError(error, errorContext(input, 'admission'));
       return;
     }
 
@@ -111,16 +170,23 @@ export class AgentStartController {
       abortController: new AbortController(),
       projectPath: source.projectPath,
       executionDefaults,
+      sourceViewId: input.sourceViewId,
+      requestRunId: input.requestRunId,
+      itemCount: input.params.length,
+      completedCount: 0,
     };
     this.#registerAttempt(input.sourceChatId, attempt);
+    this.#emitDiagnostic({
+      ...diagnosticContext(input),
+      event: 'batch-admission',
+      status: 'admitted',
+      itemCount: input.params.length,
+    });
     const task = this.#batchLock
       .runExclusive(`agent-start:${input.sourceChatId}`, () => this.#run(input, attempt))
       .catch((error) => {
         if (!attempt.abortController.signal.aborted) {
-          this.#reportError(error, {
-            sourceChatId: input.sourceChatId,
-            phase: 'result-delivery',
-          });
+          this.#reportError(error, errorContext(input, 'result-delivery'));
         }
       })
       .finally(() => {
@@ -132,6 +198,15 @@ export class AgentStartController {
 
   discardSource(chatId: string): void {
     for (const attempt of this.#attempts.get(chatId) ?? []) {
+      this.#emitDiagnostic({
+        sourceChatId: chatId,
+        sourceViewId: attempt.sourceViewId,
+        requestRunId: attempt.requestRunId,
+        event: 'source-abort',
+        status: 'aborted',
+        completedCount: attempt.completedCount,
+        itemCount: attempt.itemCount,
+      });
       attempt.abortController.abort();
     }
     this.#attempts.delete(chatId);
@@ -152,6 +227,13 @@ export class AgentStartController {
     signal.throwIfAborted();
 
     if (!this.options.isEnabled()) {
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'batch-stop',
+        status: 'disabled',
+        itemIndex: 1,
+        itemCount: input.params.length,
+      });
       const results = input.params.map((params) => failureResult(params.ref, 'disabled'));
       await this.#withCurrentSourceView(input, signal, () => {
         this.#appendOutcome(input, results, 'disabled');
@@ -164,14 +246,31 @@ export class AgentStartController {
       signal.throwIfAborted();
       const params = input.params[index]!;
       if (this.#shuttingDown) {
+        this.#emitDiagnostic({
+          ...diagnosticContext(input),
+          event: 'batch-stop',
+          status: 'server-shutting-down',
+          itemIndex: index + 1,
+          itemCount: input.params.length,
+        });
         appendRemainingFailures(results, input.params, index, 'server-shutting-down');
+        attempt.completedCount = results.length;
         break;
       }
       if (!this.options.isEnabled()) {
+        this.#emitDiagnostic({
+          ...diagnosticContext(input),
+          event: 'batch-stop',
+          status: 'disabled',
+          itemIndex: index + 1,
+          itemCount: input.params.length,
+        });
         appendRemainingFailures(results, input.params, index, 'disabled');
+        attempt.completedCount = results.length;
         break;
       }
-      results.push(await this.#startOne(input, params, attempt));
+      results.push(await this.#startOne(input, params, index + 1, attempt));
+      attempt.completedCount = results.length;
     }
 
     signal.throwIfAborted();
@@ -181,28 +280,65 @@ export class AgentStartController {
   async #startOne(
     input: AgentStartRequest,
     params: GarconCreateChatParams,
+    itemIndex: number,
     attempt: AgentStartAttempt,
   ): Promise<GarconCreateChatResult> {
+    const startedAt = performance.now();
+    let attemptCount = 0;
+    let targetChatId: ChatId | null = null;
+    const finish = (result: GarconCreateChatResult): GarconCreateChatResult => {
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'start',
+        status: result.msg,
+        ref: params.ref,
+        targetChatId,
+        itemIndex,
+        itemCount: input.params.length,
+        attempt: attemptCount,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      });
+      return result;
+    };
+
     let resolved: Awaited<ReturnType<AgentStartSelectionService['resolve']>>;
     try {
       resolved = await this.options.selection.resolve(params, attempt.executionDefaults);
     } catch (error) {
-      this.#reportError(error, {
-        sourceChatId: input.sourceChatId,
+      this.#emitDiagnostic({
+        ...diagnosticContext(input),
+        event: 'selection',
+        status: 'start-failed',
         ref: params.ref,
-        phase: 'selection',
+        itemIndex,
+        itemCount: input.params.length,
       });
-      return failureResult(params.ref, 'start-failed');
+      this.#reportError(error, {
+        ...errorContext(input, 'selection'),
+        ref: params.ref,
+        itemIndex,
+        itemCount: input.params.length,
+      });
+      return finish(failureResult(params.ref, 'start-failed'));
     }
+    this.#emitDiagnostic({
+      ...diagnosticContext(input),
+      event: 'selection',
+      status: resolved.ok ? 'resolved' : resolved.message,
+      ref: params.ref,
+      itemIndex,
+      itemCount: input.params.length,
+    });
     if (!resolved.ok) {
       if (resolved.message === 'start-failed') {
         this.#reportError({ code: 'INVALID_CATALOG' }, {
-          sourceChatId: input.sourceChatId,
+          ...errorContext(input, 'selection'),
           ref: params.ref,
-          phase: 'selection',
+          itemIndex,
+          itemCount: input.params.length,
         });
       }
-      return failureResult(params.ref, resolved.message);
+      return finish(failureResult(params.ref, resolved.message));
     }
 
     for (
@@ -211,23 +347,25 @@ export class AgentStartController {
       allocationAttempt += 1
     ) {
       attempt.abortController.signal.throwIfAborted();
-      if (this.#shuttingDown) return failureResult(params.ref, 'server-shutting-down');
+      if (this.#shuttingDown) return finish(failureResult(params.ref, 'server-shutting-down'));
+      attemptCount = allocationAttempt + 1;
 
-      let chatId: ChatId;
       try {
-        chatId = this.options.chatIds.allocate();
+        targetChatId = this.options.chatIds.allocate();
       } catch (error) {
         this.#reportError(error, {
-          sourceChatId: input.sourceChatId,
+          ...errorContext(input, 'start'),
           ref: params.ref,
-          phase: 'start',
+          itemIndex,
+          itemCount: input.params.length,
+          attempt: attemptCount,
         });
-        return failureResult(params.ref, 'start-failed');
+        return finish(failureResult(params.ref, 'start-failed'));
       }
 
       try {
         await this.options.commands.submitAgentCommandStart({
-          chatId,
+          chatId: targetChatId,
           clientRequestId: this.#createId(),
           clientMessageId: this.#createId(),
           agentId: params.agentId,
@@ -242,28 +380,45 @@ export class AgentStartController {
           agentSettings: resolved.selection.agentSettings,
           tags: ['sub-agent'],
         });
-        return {
+        return finish({
           ref: params.ref,
           error: false,
           msg: 'created',
-          chatId,
-        };
+          chatId: targetChatId,
+        });
       } catch (error) {
         const code = structuredErrorCode(error);
-        if (code === 'CHAT_ID_COLLISION') continue;
-        if (code === 'SESSION_LIMIT') return failureResult(params.ref, 'session-limit');
+        if (code === 'CHAT_ID_COLLISION') {
+          if (attemptCount < CHAT_ID_ALLOCATION_ATTEMPTS) {
+            this.#emitDiagnostic({
+              ...diagnosticContext(input),
+              event: 'collision-retry',
+              status: 'retrying',
+              ref: params.ref,
+              targetChatId,
+              itemIndex,
+              itemCount: input.params.length,
+              attempt: attemptCount,
+            });
+          }
+          continue;
+        }
+        if (code === 'SESSION_LIMIT') return finish(failureResult(params.ref, 'session-limit'));
         if (code === 'SERVER_SHUTTING_DOWN') {
-          return failureResult(params.ref, 'server-shutting-down');
+          return finish(failureResult(params.ref, 'server-shutting-down'));
         }
         this.#reportError(error, {
-          sourceChatId: input.sourceChatId,
+          ...errorContext(input, 'start'),
           ref: params.ref,
-          phase: 'start',
+          targetChatId,
+          itemIndex,
+          itemCount: input.params.length,
+          attempt: attemptCount,
         });
-        return failureResult(params.ref, 'start-failed');
+        return finish(failureResult(params.ref, 'start-failed'));
       }
     }
-    return failureResult(params.ref, 'chat-id-collision');
+    return finish(failureResult(params.ref, 'chat-id-collision'));
   }
 
   async #deliverResults(
@@ -300,10 +455,7 @@ export class AgentStartController {
         deliveryStatus = structuredErrorCode(error) === 'STEER_OUTCOME_UNKNOWN'
           ? 'delivery-unknown'
           : 'delivery-failed';
-        this.#reportError(error, {
-          sourceChatId: input.sourceChatId,
-          phase: 'result-delivery',
-        });
+        this.#reportError(error, errorContext(input, 'result-delivery'));
       }
       if (deliveryStatus !== 'queued') {
         this.#appendOutcome(input, results, deliveryStatus);
@@ -337,12 +489,17 @@ export class AgentStartController {
       detail: outcomeDetail(deliveryStatus, results),
       at: input.requestAt,
     });
+    this.#emitDiagnostic({
+      ...diagnosticContext(input),
+      event: 'result-delivery',
+      status: deliveryStatus,
+      itemCount: results.length,
+    });
+  }
+
+  #emitDiagnostic(event: AgentStartDiagnosticEvent): void {
     try {
-      this.options.onDisposition?.({
-        sourceChatId: input.sourceChatId,
-        deliveryStatus,
-        resultCount: results.length,
-      });
+      this.options.onDiagnostic?.(event);
     } catch {
       // Observability must not change command execution.
     }
@@ -373,6 +530,21 @@ export class AgentStartController {
       // Diagnostics must not change command execution.
     }
   }
+}
+
+function diagnosticContext(input: AgentStartRequest): AgentStartDiagnosticContext {
+  return {
+    sourceChatId: input.sourceChatId,
+    sourceViewId: input.sourceViewId,
+    requestRunId: input.requestRunId,
+  };
+}
+
+function errorContext(
+  input: AgentStartRequest,
+  phase: AgentStartErrorContext['phase'],
+): AgentStartErrorContext {
+  return { ...diagnosticContext(input), phase };
 }
 
 function failureResult(
