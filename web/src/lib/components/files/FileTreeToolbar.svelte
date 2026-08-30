@@ -1,5 +1,6 @@
 <script lang="ts">
-	import FolderRoot from '@lucide/svelte/icons/folder-root';
+	import FolderCode from '@lucide/svelte/icons/folder-code';
+	import House from '@lucide/svelte/icons/house';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
@@ -43,7 +44,15 @@
 			onclick: toggleFilter,
 			disabled: store.navigation.kind !== 'ready',
 			priority: 0,
-			showLabel: true,
+		},
+		{
+			id: 'home',
+			label: m.filetree_home(),
+			title: store.isAtHome ? m.filetree_already_at_home() : m.filetree_home(),
+			icon: House,
+			onclick: () => void store.goToHome(),
+			disabled: !store.fileRootPath || store.isAtHome || store.isNavigationLoading,
+			priority: 1,
 		},
 		{
 			id: 'chat-project',
@@ -51,11 +60,10 @@
 			title: store.isAtChatProject
 				? m.filetree_already_at_chat_project()
 				: m.filetree_go_to_chat_project(),
-			icon: FolderRoot,
+			icon: FolderCode,
 			onclick: () => void store.goToChatProject(),
 			disabled: store.isAtChatProject || store.isNavigationLoading,
-			priority: 1,
-			showLabel: true,
+			priority: 2,
 		},
 		{
 			id: 'refresh-files',
@@ -64,7 +72,7 @@
 			onclick: () => void store.refresh(),
 			disabled: store.isNavigationLoading || !store.readyResponse,
 			busy: store.isRefreshing,
-			priority: 2,
+			priority: 3,
 			iconClass: store.isRefreshing ? 'animate-spin' : undefined,
 		},
 	]);

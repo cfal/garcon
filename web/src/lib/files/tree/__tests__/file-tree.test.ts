@@ -369,6 +369,55 @@ describe('FileTreeStore', () => {
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 	});
 
+	it('navigates to Home and no-ops once it reaches the file root', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		expect(store.isAtHome).toBe(false);
+		const navigation = store.goToHome();
+		expect(store.navigation).toMatchObject({
+			kind: 'loading',
+			target: {
+				path: '/workspace',
+				label: 'workspace',
+				breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
+				reason: 'home',
+			},
+		});
+		await navigation;
+
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.isAtHome).toBe(true);
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+		const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
+		await store.goToHome();
+		expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
+	});
+
+	it('navigates Home from an error using the retained file root', async () => {
+		const src = entry('src', 'directory');
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [src]))
+			.mockRejectedValueOnce(new Error('Directory unavailable'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		await store.enterDirectory(src);
+		expect(store.navigation.kind).toBe('error');
+		expect(store.fileRootPath).toBe('/workspace');
+
+		await store.goToHome();
+
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.isAtHome).toBe(true);
+	});
+
 	it('restores row focus after breadcrumb navigation', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project/src'))
