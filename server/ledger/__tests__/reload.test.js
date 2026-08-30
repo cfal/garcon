@@ -85,6 +85,55 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('preserves the current view while native history is absent and imports only what each retry can read', async () => {
+    await withReload(async ({ ledger, reload, integration, oldViewId }) => {
+      const command = [
+        '<garcon-send-message to="1787974832309199" hide-sender="false">',
+        'message body',
+        '</garcon-send-message>',
+      ].join('\n');
+      let attempt = 0;
+      integration.nativeHistoryImport.load = async function* load() {
+        attempt += 1;
+        if (attempt === 1) {
+          throw Object.assign(new Error('native history is not present yet'), { code: 'ENOENT' });
+        }
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+        if (attempt === 3) {
+          yield [{ message: new AssistantMessage(TS, command) }];
+        }
+      };
+
+      await expect(reload.reload('chat-1')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(ledger.currentView('chat-1')?.viewId).toBe(oldViewId);
+
+      await reload.reload('chat-1');
+      expect(ledger.currentView('chat-1')?.viewId).not.toBe(oldViewId);
+      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+        'frozen prompt',
+        'frozen answer',
+        'native prompt',
+      ]);
+      expect(ledger.currentRows('chat-1').filter(
+        (row) => row.kind === 'notice' && row.detail.type === 'inter-agent-send-request',
+      )).toEqual([]);
+
+      await reload.reload('chat-1');
+      expect(ledger.currentRows('chat-1').filter(
+        (row) => row.kind === 'notice' && row.detail.type === 'inter-agent-send-request',
+      )).toEqual([
+        expect.objectContaining({
+          detail: {
+            type: 'inter-agent-send-request',
+            recipients: ['1787974832309199'],
+            hideSender: false,
+            body: 'message body',
+          },
+        }),
+      ]);
+    });
+  });
+
   it('[TLV5-ADOPT.08-RELOAD-CORE-UNIT-02] cuts over when the selected native session is validly empty', async () => {
     await withReload(async ({ ledger, reload, integration, oldViewId }) => {
       integration.nativeHistoryImport.load = async function* load() {

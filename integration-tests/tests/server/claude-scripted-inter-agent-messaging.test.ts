@@ -9,7 +9,6 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import {
   expectFinished,
   LIVE_TURN_TIMEOUT_MS,
-  reloadFromNativeHistory,
   reloadUntilNativeContains,
 } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
@@ -41,6 +40,7 @@ describe('scripted Claude inter-agent messaging', () => {
         const sourceChatId = fixture.newChatId();
         const targetPrompt = marker('TARGET_PROMPT');
         const sourcePrompt = marker('SOURCE_PROMPT');
+        const sourceReply = marker('SOURCE_REPLY');
         const body = marker('MESSAGE_BODY');
         const envelope = `<garcon-message from="${sourceChatId}">\n${body}\n</garcon-message>`;
         const command = `<garcon-send-message to="${targetChatId}" hide-sender="false">\n${body}\n</garcon-send-message>`;
@@ -53,7 +53,8 @@ describe('scripted Claude inter-agent messaging', () => {
             command: `touch "${startedPath}"; while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
           }),
         ]);
-        testEnvironment.model.scriptTurn([claudeText(command)]);
+        // Keeps a trailing visible block as the persistence witness for the preceding command.
+        testEnvironment.model.scriptTurn([claudeText(command), claudeText(sourceReply)]);
         continuation = testEnvironment.model.scriptHeldTurn([
           claudeText('Target received the message.'),
         ]);
@@ -126,7 +127,7 @@ describe('scripted Claude inter-agent messaging', () => {
           }),
         );
 
-        await reloadFromNativeHistory(fixture, sourceChatId);
+        await reloadUntilNativeContains(fixture, sourceChatId, sourceReply);
         const reloadedSource = await fixture.client.getMessages(sourceChatId);
         expect(messagesOfType(reloadedSource.messages, 'transcript-notice').filter(
           (message) => message.detail?.type === 'inter-agent-message-outcome',
