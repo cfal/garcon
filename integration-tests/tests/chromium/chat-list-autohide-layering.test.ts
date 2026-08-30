@@ -132,9 +132,22 @@ async function waitForPanelHidden(page: Page, hidden: boolean): Promise<void> {
 
 async function pointBelongsToChatList(page: Page, x: number, y: number): Promise<boolean> {
   return page.evaluate(
-    ({ pointX, pointY, selector }) =>
-      document.elementFromPoint(pointX, pointY)?.closest(selector) !== null,
+    ({ pointX, pointY, selector }) => {
+      const element = document.elementFromPoint(pointX, pointY);
+      return element !== null && element.closest(selector) !== null;
+    },
     { pointX: x, pointY: y, selector: CHAT_LIST_SELECTOR },
+  );
+}
+
+async function waitForPointToBelongToChatList(page: Page, x: number, y: number): Promise<void> {
+  await page.waitForFunction(
+    ({ pointX, pointY, selector }) => {
+      const element = document.elementFromPoint(pointX, pointY);
+      return element !== null && element.closest(selector) !== null;
+    },
+    { pointX: x, pointY: y, selector: CHAT_LIST_SELECTOR },
+    { timeout: 2_000 },
   );
 }
 
@@ -182,7 +195,8 @@ async function verifyEdgeReveal(
   if (!viewport) throw new Error('Chromium viewport is unavailable.');
   const edgeX = dock === 'left' ? 4 : viewport.width - 4;
   const edgeY = 200;
-  expect(await pointBelongsToChatList(page, edgeX, edgeY)).toBe(true);
+  // Modal-menu teardown briefly suspends body hit testing after moving a workspace view.
+  await waitForPointToBelongToChatList(page, edgeX, edgeY);
 
   await page.mouse.move(edgeX, edgeY);
   await waitForPanelHidden(page, false);
