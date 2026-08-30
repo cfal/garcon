@@ -1001,7 +1001,7 @@ describe('NewChatForm', () => {
 
 		expect(screen.getByRole('button', { name: 'Remove attachment pasted.png' })).toBeTruthy();
 		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
-		expect(expansionOptions?.signal.aborted).toBe(true);
+		expect(expansionOptions?.signal?.aborted).toBe(true);
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',

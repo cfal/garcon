@@ -1298,7 +1298,7 @@ describe('PromptComposer focus', () => {
 
 		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
 		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
-		expect(expansionOptions?.signal.aborted).toBe(true);
+		expect(expansionOptions?.signal?.aborted).toBe(true);
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
