@@ -58,6 +58,7 @@ describe('ChatListAutohideState', () => {
 		const { autohide } = createState();
 		const container = document.createElement('div');
 		const trigger = document.createElement('button');
+		trigger.setAttribute('aria-haspopup', 'menu');
 		trigger.setAttribute('aria-expanded', 'true');
 		container.append(trigger);
 		document.body.append(container);
@@ -68,6 +69,20 @@ describe('ChatListAutohideState', () => {
 
 		trigger.setAttribute('aria-expanded', 'false');
 		autohide.collapseUnlessEngaged(container);
+		expect(autohide.collapsed).toBe(true);
+	});
+
+	it('collapses when an expanded control is not a popup trigger', () => {
+		const { autohide } = createState();
+		const container = document.createElement('div');
+		const groupHeader = document.createElement('button');
+		groupHeader.setAttribute('aria-expanded', 'true');
+		container.append(groupHeader);
+		document.body.append(container);
+		autohide.reveal();
+
+		autohide.collapseUnlessEngaged(container);
+
 		expect(autohide.collapsed).toBe(true);
 	});
 });

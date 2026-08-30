@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -533,15 +533,29 @@
 		chatListRevealTrigger?.focus();
 	}
 
-	function collapseAutohiddenChatListOnPointerEnter(node: HTMLElement): { destroy(): void } {
+	async function revealChatListFromTrigger(): Promise<void> {
+		chatListAutohide.reveal();
+		await tick();
+		if (chatListAutohide.revealed) desktopChatListPanelElement?.focus();
+	}
+
+	function collapseAutohiddenChatListOnWorkspaceInteraction(node: HTMLElement): {
+		destroy(): void;
+	} {
 		function handlePointerEnter(): void {
 			chatListAutohide.collapseUnlessEngaged(desktopChatListPanelElement);
 		}
 
+		function handlePointerDown(): void {
+			if (chatListAutohide.active) chatListAutohide.collapse();
+		}
+
 		node.addEventListener('pointerenter', handlePointerEnter);
+		node.addEventListener('pointerdown', handlePointerDown);
 		return {
 			destroy() {
 				node.removeEventListener('pointerenter', handlePointerEnter);
+				node.removeEventListener('pointerdown', handlePointerDown);
 			},
 		};
 	}
@@ -603,7 +617,7 @@
 				class="absolute inset-y-0 z-30 w-2.5 bg-transparent outline-none hover:bg-accent/30 focus-visible:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 				class:start-0={dock === 'left'}
 				class:end-0={dock === 'right'}
-				onclick={() => chatListAutohide.reveal()}
+				onclick={() => void revealChatListFromTrigger()}
 				aria-controls="desktop-chat-list-panel"
 				aria-expanded={chatListAutohide.revealed}
 				aria-label={m.layout_show_chat_list()}
@@ -614,7 +628,7 @@
 			id="desktop-chat-list-panel"
 			data-workspace-chat-list-panel
 			class={[
-				'h-full border-border bg-card',
+				'h-full border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
 				chatListAutohide.active && 'absolute inset-y-0 z-40 shadow-2xl',
 				chatListAutohide.active &&
 					!localSettings.reduceMotion &&
@@ -627,6 +641,7 @@
 			class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
 			class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
+			tabindex="-1"
 			aria-hidden={panelHidden}
 			inert={panelHidden}
 		>
@@ -675,7 +690,7 @@
 		<div
 			data-workspace-content
 			class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-			use:collapseAutohiddenChatListOnPointerEnter
+			use:collapseAutohiddenChatListOnWorkspaceInteraction
 		>
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<WorkspaceRoot

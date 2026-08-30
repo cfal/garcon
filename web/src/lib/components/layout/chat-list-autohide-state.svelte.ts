@@ -2,6 +2,8 @@ interface ChatListAutohideOptions {
 	readonly active: boolean;
 }
 
+const OPEN_POPUP_TRIGGER_SELECTOR = '[aria-haspopup][aria-expanded="true"]';
+
 export class ChatListAutohideState {
 	#revealed = $state(false);
 	readonly #options: ChatListAutohideOptions;
@@ -33,7 +35,7 @@ export class ChatListAutohideState {
 	collapseUnlessEngaged(container: HTMLElement | null): void {
 		if (!this.active) return;
 		if (container?.contains(document.activeElement)) return;
-		if (container?.querySelector('[aria-expanded="true"]')) return;
+		if (container?.querySelector(OPEN_POPUP_TRIGGER_SELECTOR)) return;
 		this.collapse();
 	}
 }

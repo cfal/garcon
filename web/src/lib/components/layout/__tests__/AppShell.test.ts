@@ -400,16 +400,15 @@ describe('AppShell responsive workspace binding', () => {
 		sidebarButton.focus();
 		await fireEvent.pointerEnter(workspaceContent as HTMLElement);
 		expect(panel?.getAttribute('aria-hidden')).toBe('false');
-
-		await fireEvent.keyDown(sidebarButton, { key: 'Escape' });
+		await fireEvent.pointerDown(workspaceContent as HTMLElement);
 		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('true'));
-		expect(document.activeElement).toBe(revealTrigger);
 
 		await fireEvent.click(revealTrigger);
 		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('false'));
-		revealTrigger.blur();
-		await fireEvent.pointerEnter(workspaceContent as HTMLElement);
+		expect(document.activeElement).toBe(panel);
+		await fireEvent.keyDown(panel as HTMLElement, { key: 'Escape' });
 		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('true'));
+		expect(document.activeElement).toBe(revealTrigger);
 
 		hoverMediaQuery.setMatches(false);
 		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('false'));
