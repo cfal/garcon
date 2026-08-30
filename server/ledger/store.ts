@@ -71,7 +71,8 @@ interface ConnectionEntry {
   readonly db: Database;
   current: TranscriptView | null;
   nextOrdinal: number;
-  fenced: Error | null;
+  readFailure: Error | null;
+  writeFailure: Error | null;
 }
 
 interface ConnectionCloseAttempt {
@@ -640,28 +641,46 @@ export class TranscriptLedgerStore {
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
-    const openFailure = this.#openFailures.get(chatId);
-    if (openFailure) throw new LedgerFencedError(chatId, { cause: openFailure });
-    let entry: ConnectionEntry;
-    try {
-      entry = this.#connection(chatId);
-    } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
-      this.#openFailures.set(chatId, failure);
-      throw new LedgerFencedError(chatId, { cause: failure });
-    }
-    if (entry.fenced) throw new LedgerFencedError(chatId, { cause: entry.fenced });
+    const entry = this.#availableConnection(chatId);
+    if (entry.readFailure) throw new LedgerFencedError(chatId, { cause: entry.readFailure });
     try {
       return work(entry);
     } catch (error) {
       if (isDomainError(error)) throw error;
-      entry.fenced = error instanceof Error ? error : new Error(String(error));
-      throw new LedgerFencedError(chatId, { cause: entry.fenced });
+      entry.readFailure = asError(error);
+      throw new LedgerFencedError(chatId, { cause: entry.readFailure });
     }
   }
 
   #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
-    return this.#read(chatId, work);
+    const entry = this.#availableConnection(chatId);
+    if (entry.readFailure) throw new LedgerFencedError(chatId, { cause: entry.readFailure });
+    if (entry.writeFailure) throw new LedgerFencedError(chatId, { cause: entry.writeFailure });
+    try {
+      return work(entry);
+    } catch (error) {
+      if (isDomainError(error)) throw error;
+      const failure = asError(error);
+      entry.writeFailure = failure;
+      try {
+        rehydrateConnection(entry);
+      } catch (rehydrationError) {
+        entry.readFailure = asError(rehydrationError);
+      }
+      throw new LedgerFencedError(chatId, { cause: failure });
+    }
+  }
+
+  #availableConnection(chatId: string): ConnectionEntry {
+    const openFailure = this.#openFailures.get(chatId);
+    if (openFailure) throw new LedgerFencedError(chatId, { cause: openFailure });
+    try {
+      return this.#connection(chatId);
+    } catch (error) {
+      const failure = asError(error);
+      this.#openFailures.set(chatId, failure);
+      throw new LedgerFencedError(chatId, { cause: failure });
+    }
   }
 
   #connection(chatId: string): ConnectionEntry {
@@ -816,7 +835,8 @@ function openConnection(
       db,
       current,
       nextOrdinal: current ? nextOrdinal(db, current.viewId) : 1,
-      fenced: null,
+      readFailure: null,
+      writeFailure: null,
     };
   } catch (error) {
     db.close();
@@ -879,18 +899,34 @@ function validateSchema(db: Database): void {
 }
 
 function loadAndCleanViews(db: Database): TranscriptView | null {
-  const views = db.query<ViewRecord, []>(`
+  const views = loadViews(db);
+  const current = validatedCurrentView(views);
+  if (views.some((view) => view.status === 'staging')) {
+    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
+  }
+  return current;
+}
+
+function loadViews(db: Database): readonly ViewRecord[] {
+  return db.query<ViewRecord, []>(`
     SELECT view_id, status, created_at, content_start_ordinal
     FROM transcript_views
   `).all();
+}
+
+function validatedCurrentView(views: readonly ViewRecord[]): TranscriptView | null {
   const current = views.filter((view) => view.status === 'current');
   if (current.length !== 1 && views.length > 0) {
     throw new LedgerSchemaError('Established transcript ledger must have exactly one current view');
   }
-  if (views.some((view) => view.status === 'staging')) {
-    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
-  }
   return current[0] ? toView(current[0]) : null;
+}
+
+function rehydrateConnection(entry: ConnectionEntry): void {
+  const current = validatedCurrentView(loadViews(entry.db));
+  const ordinal = current ? nextOrdinal(entry.db, current.viewId) : 1;
+  entry.current = current;
+  entry.nextOrdinal = ordinal;
 }
 
 function viewRecord(
@@ -927,8 +963,18 @@ function runTransaction<T>(db: Database, work: () => T): T {
     db.exec('COMMIT');
     return result;
   } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
+    const failure = asError(error);
+    if (db.inTransaction) {
+      try {
+        db.exec('ROLLBACK');
+      } catch (rollbackError) {
+        Object.defineProperty(failure, 'rollbackFailure', {
+          configurable: true,
+          value: asError(rollbackError),
+        });
+      }
+    }
+    throw failure;
   }
 }
 

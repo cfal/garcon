@@ -358,6 +358,7 @@ routine local testing.
 | TLV5-L11.02 | No failed ledger silently rebuilds from native or private history.                      | Static, server black-box                  |
 | TLV5-L11.03 | Search, handoff, replay, and provider-stream failure for one chat cannot block another. | Unit, server black-box, provider scripted |
 | TLV5-L11.04 | LRU close failure is attributed to the evicted chat and its handle is retried safely.   | Unit                                      |
+| TLV5-L11.05 | A write-fenced ledger rehydrates durable state for reads while later writes remain fenced. | Unit, server black-box                  |
 
 ### L12 Provider Neutrality
 
@@ -815,6 +816,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L02.01-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `commits atomic batches with dense view-local ordinals`                                                          | L02.01                      |
 | TLV5-L08.02-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `atomically deletes the replaced view when promoting staging`                                                    | L08.02                      |
 | TLV5-L11.04-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `attributes an eviction close failure and retries that handle on shutdown`                                       | L11.04                      |
+| TLV5-L11.05-SERVER-01          | `integration-tests/tests/server/transcript-write-fence-isolation.test.ts`: `keeps durable history readable after a write failure`                         | L11.05                      |
 | TLV5-L09.03-CORE-STATIC-01     | `server/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling has exactly one activation-history call site and no runtime pre-resume hook | L09.03 |
 | TLV5-L09.03-CORE-UNIT-01       | `server/ledger/__tests__/native-activity-page-reader.test.js`: newest history returns before its advisory probe is scheduled | L09.03 |
 | TLV5-L09.03-CORE-UNIT-02       | `server/ledger/__tests__/native-activity-page-reader.test.js`: earlier, background, and failed history reads schedule nothing | L09.03 |

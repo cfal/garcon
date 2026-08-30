@@ -175,7 +175,7 @@ describe('TranscriptLedgerStore', () => {
 
   });
 
-  it('rolls back a failed commit and fences only that chat', () => {
+  it('rolls back a failed commit while preserving reads and fencing later writes', () => {
     const failedView = store.initializeCurrentView('failed-chat', {
       viewId: transcriptViewId('failed-view'),
       contentStartOrdinal: 1,
@@ -193,17 +193,24 @@ describe('TranscriptLedgerStore', () => {
       }
       return exec.call(this, sql);
     };
+    let failure;
     try {
-      expect(() => store.append('failed-chat', failedView.viewId, [
+      store.append('failed-chat', failedView.viewId, [
         provider('must roll back one'),
         provider('must roll back two'),
-      ])).toThrow(LedgerFencedError);
+      ]);
+    } catch (error) {
+      failure = error;
     } finally {
       Database.prototype.exec = exec;
     }
 
     expect(commitFailed).toBe(true);
-    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({ message: 'injected transcript commit failure' });
+    expect(store.currentRows('failed-chat')).toEqual([]);
+    expect(() => store.append('failed-chat', failedView.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
     expect(store.append('healthy-chat', healthyView.viewId, [provider('still writable')])
       .map(renderedContent)).toEqual(['still writable']);
 
@@ -211,6 +218,68 @@ describe('TranscriptLedgerStore', () => {
     store = new TranscriptLedgerStore(root);
     expect(store.currentRows('failed-chat')).toEqual([]);
     expect(store.currentRows('healthy-chat').map(renderedContent)).toEqual(['still writable']);
+  });
+
+  it('preserves the primary write failure when SQLite already ended the transaction', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        exec.call(this, 'ROLLBACK');
+        throw Object.assign(new Error('injected primary SQLite failure'), { code: 'SQLITE_FULL' });
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must not commit')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected primary SQLite failure',
+      code: 'SQLITE_FULL',
+    });
+    expect(store.currentRows('failed-chat')).toEqual([]);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('keeps a ledger query failure fenced for both reads and writes', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('FROM transcript_rows WHERE view_id = ? ORDER BY ordinal')) {
+        queryFailed = true;
+        throw new Error('injected transcript query failure');
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
   });
 
   it('deduplicates a committed submission without redispatching it', () => {
@@ -812,7 +881,7 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2]);
   });
 
-  it('reopens the complete old view when cutover fails before commit', () => {
+  it('rehydrates the complete old view when cutover fails before commit', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
@@ -840,7 +909,10 @@ describe('TranscriptLedgerStore', () => {
     }
 
     expect(commitFailed).toBe(true);
-    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(store.currentView('chat-one').viewId).toBe(current.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['old one', 'old two']);
+    expect(() => store.append('chat-one', current.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
 
     store.close();
     store = new TranscriptLedgerStore(root);
@@ -849,7 +921,7 @@ describe('TranscriptLedgerStore', () => {
     expect(currentViewCount(root, 'chat-one')).toBe(1);
   });
 
-  it('reopens the complete new view when cutover commit outcome is ambiguous', () => {
+  it('rehydrates the complete new view when cutover commit outcome is ambiguous', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
@@ -878,7 +950,10 @@ describe('TranscriptLedgerStore', () => {
     }
 
     expect(commitBecameAmbiguous).toBe(true);
-    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(store.currentView('chat-one').viewId).toBe(staged.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['new one', 'new two']);
+    expect(() => store.append('chat-one', staged.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
 
     store.close();
     store = new TranscriptLedgerStore(root);
