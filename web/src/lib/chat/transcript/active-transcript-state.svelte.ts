@@ -6,13 +6,17 @@ import {
 	type TranscriptPage,
 } from '$shared/chat-view';
 import type { ChatMessage } from '$shared/chat-types';
-import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
+import {
+	ChatTranscriptCache,
+	type ChatTranscriptApplyResult,
+} from './chat-transcript-cache.svelte';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
 import { TranscriptOptimisticInputs } from './transcript-optimistic-inputs.svelte.js';
 import { TranscriptResendCandidates } from './transcript-resend-candidates.svelte.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
 import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
+import type { ConversationTranscriptOverlayMutation } from './conversation-transcript-overlay-store.svelte.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -72,6 +76,18 @@ export const INITIAL_VISIBLE_MESSAGES = 100;
 type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCandidate[] };
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
+
+export interface SharedTranscriptCommit {
+	readonly chatId: string;
+	readonly transcriptViewId: string;
+	readonly messages: TranscriptMessage[];
+	readonly firstOrdinal: number;
+	readonly lastOrdinal: number;
+	readonly resendCandidates: ResendCandidate[];
+	readonly noticeRevision: number;
+	readonly outcome: Extract<ChatTranscriptApplyResult, { status: 'applied' }>;
+	readonly overlayMutation: ConversationTranscriptOverlayMutation;
+}
 
 function retainedWindow(
 	messages: TranscriptMessage[],
@@ -309,7 +325,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			this.transcriptCache.markStale(chatId);
 			return 'gap-detected';
 		}
-		const appliedFrontierOrdinal = Math.min(this.loadedThroughOrdinal, this.lastOrdinal);
 		const append = { firstOrdinal, lastOrdinal, messages };
 		const bufferedBatch = { transcriptViewId, ...append, noticeRevision, resendCandidates };
 		if (this.#snapshotBuffer) {
@@ -326,6 +341,75 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			return 'view-changed';
 		}
 		const result = this.transcriptCache.applyMessages(chatId, transcriptViewId, append);
+		return this.#applyCommittedAppend(
+			chatId,
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+			resendCandidates,
+			noticeRevision,
+			result,
+		);
+	}
+
+	applySharedCommit(commit: SharedTranscriptCommit): MessageApplyResult {
+		const {
+			chatId,
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+			resendCandidates,
+			noticeRevision,
+			outcome,
+		} = commit;
+		if (this.historyState.kind !== 'complete') return 'gap-detected';
+		const bufferedBatch = {
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+			noticeRevision,
+			resendCandidates,
+		};
+		if (this.#snapshotBuffer) {
+			this.#snapshotBuffer.push(bufferedBatch);
+			return 'applied';
+		}
+		if (this.#reconnectReplay.buffer(chatId, bufferedBatch)) return 'applied';
+		if (this.transcriptViewId && transcriptViewId !== this.transcriptViewId) {
+			this.#invalidatePageLoad();
+			return 'view-changed';
+		}
+		return this.#applyCommittedAppend(
+			chatId,
+			transcriptViewId,
+			messages,
+			firstOrdinal,
+			lastOrdinal,
+			resendCandidates,
+			noticeRevision,
+			outcome,
+		);
+	}
+
+	applySharedOverlayMutation(mutation: ConversationTranscriptOverlayMutation): void {
+		if (!mutation.feedStructureChanged) return;
+		this.#growExpandedVisibleWindow();
+		this.#feedMutations.record('presentation-structure');
+	}
+
+	#applyCommittedAppend(
+		chatId: string,
+		transcriptViewId: string,
+		messages: TranscriptMessage[],
+		firstOrdinal: number,
+		lastOrdinal: number,
+		resendCandidates: ResendCandidate[],
+		noticeRevision: number,
+		result: ChatTranscriptApplyResult,
+	): MessageApplyResult {
 		if (result.status === 'view-changed') {
 			this.#invalidatePageLoad();
 			this.transcriptCache.markStale(chatId);
@@ -341,6 +425,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			);
 			return 'gap-detected';
 		}
+		const appliedFrontierOrdinal = Math.min(this.loadedThroughOrdinal, this.lastOrdinal);
+		const append = { firstOrdinal, lastOrdinal, messages };
 		const responseMessageTypes = responseMessageTypesAfter(messages, appliedFrontierOrdinal);
 		const observedHeadAdvanced = result.lastOrdinal > this.lastOrdinal;
 		this.lastOrdinal = Math.max(this.lastOrdinal, result.lastOrdinal);

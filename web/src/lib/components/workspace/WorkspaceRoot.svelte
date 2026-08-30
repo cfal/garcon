@@ -20,6 +20,7 @@
 		getWorkspaceCoordinator,
 		setConversationUi,
 		setConversationLifecycles,
+		setConversationPanels,
 		type WorkspaceChatActions,
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
@@ -33,6 +34,8 @@
 	import { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
+	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import {
 		chatViewSurfaceId,
 		type ChatViewSurfaceDescriptor,
@@ -87,6 +90,13 @@
 		conversationUi,
 	});
 	setConversationLifecycles(conversationLifecycles);
+	const conversationTranscriptOverlays = new ConversationTranscriptOverlayStore();
+	const conversationPanels = new ConversationPanelRegistry({
+		cache: chatTranscriptCache,
+		lifecycle: conversationLifecycles,
+		overlays: conversationTranscriptOverlays,
+	});
+	setConversationPanels(conversationPanels);
 	conversationUi.mountExecutionControlPruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
@@ -187,10 +197,14 @@
 
 	$effect(() => {
 		const activeChatIds = new Set(Object.keys(sessions.byId));
-		untrack(() => conversationLifecycles.prune(activeChatIds));
+		untrack(() => {
+			conversationLifecycles.prune(activeChatIds);
+			conversationTranscriptOverlays.prune(activeChatIds);
+		});
 	});
 
 	onDestroy(() => {
+		conversationPanels.destroy();
 		conversationLifecycles.destroy();
 		rootState.destroy();
 	});

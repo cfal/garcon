@@ -4,6 +4,7 @@ import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import {
 	nextRetainedSingletonPresentationKeys,
 	renderedPortablePresentations,
+	visibleChatPresentations,
 	visiblePresentationMap,
 	visiblePortablePresentations,
 } from '../visible-presentations';
@@ -23,6 +24,60 @@ function twoWindowLayout(): WorkspaceLayoutSnapshot {
 }
 
 describe('visiblePortablePresentations', () => {
+	it('returns every visible chat surface with currentness and excludes hidden panels', () => {
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-1' },
+			{
+				type: 'open-chat-in-new-window',
+				chatId: 'chat-2',
+				targetWindowId: 'window-main',
+				edge: 'right',
+				newWindowId: 'window-2',
+				partitionId: 'partition-1',
+			},
+		]);
+
+		expect(visibleChatPresentations(snapshot, 'desktop', 'chat-view:window-2')).toEqual([
+			{
+				surfaceId: 'chat-view:window-main',
+				chatId: 'chat-1',
+				presentation: 'window-main',
+				windowId: 'window-main',
+				isCurrent: false,
+			},
+			{
+				surfaceId: 'chat-view:window-2',
+				chatId: 'chat-2',
+				presentation: 'window-2',
+				windowId: 'window-2',
+				isCurrent: true,
+			},
+		]);
+
+		const fullscreen = reduceWorkspaceLayout(snapshot, [
+			{ type: 'set-fullscreen-window', windowId: 'window-2' },
+		]);
+		expect(visibleChatPresentations(fullscreen, 'desktop', 'chat-view:window-2')).toHaveLength(1);
+	});
+
+	it('returns at most the active mobile chat and omits empty chat descriptors', () => {
+		const empty = canonicalWorkspaceSnapshot();
+		expect(visibleChatPresentations(empty, 'mobile', null)).toEqual([]);
+
+		const populated = reduceWorkspaceLayout(empty, [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-1' },
+		]);
+		expect(visibleChatPresentations(populated, 'mobile', 'chat-view:window-main')).toEqual([
+			{
+				surfaceId: 'chat-view:window-main',
+				chatId: 'chat-1',
+				presentation: 'mobile',
+				windowId: null,
+				isCurrent: true,
+			},
+		]);
+	});
+
 	it('returns the active surface of every presented window on desktop', () => {
 		const snapshot = twoWindowLayout();
 

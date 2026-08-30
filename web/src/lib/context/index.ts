@@ -16,6 +16,7 @@ import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationLifecyclePort } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
+import type { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { ReadReceiptOutboxStore } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
@@ -117,3 +118,5 @@ export const [getConversationLifecycle, setConversationLifecycle] =
 export const [getConversationUi, setConversationUi] = createContext<ConversationUiPort>();
 export const [getConversationLifecycles, setConversationLifecycles] =
 	createContext<ConversationLifecyclePort>();
+export const [getConversationPanels, setConversationPanels] =
+	createContext<ConversationPanelRegistry>();
