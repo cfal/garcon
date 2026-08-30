@@ -235,7 +235,6 @@
 	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
-
 	// Resets ephemeral UI state when switching chats without remounting the composer.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
