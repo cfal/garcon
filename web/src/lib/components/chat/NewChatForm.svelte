@@ -8,6 +8,7 @@
 	import {
 		chatAttachmentAccept,
 		isImageAttachment,
+		isSupportedChatAttachment,
 		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
@@ -287,7 +288,7 @@
 		for (const item of items) {
 			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
-			if (file) pastedImages.push(file);
+			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
 		}
 		if (pastedImages.length > 0) {
 			snippetExpansion.cancel();

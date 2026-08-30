@@ -7,6 +7,7 @@ import {
 interface PromptComposerAttachmentOptions {
 	composer: Pick<ComposerState, 'addImages' | 'isDragActive'>;
 	get attachmentInputBlocked(): boolean;
+	get attachmentPickerBlocked(): boolean;
 	get attachmentSupport(): ChatAttachmentSupport;
 	onAttachmentInput(): void;
 }
@@ -17,15 +18,19 @@ export class PromptComposerAttachmentController {
 	constructor(private readonly options: PromptComposerAttachmentOptions) {}
 
 	pick(): void {
-		if (!this.options.attachmentInputBlocked) this.fileInput?.click();
+		if (!this.options.attachmentPickerBlocked) this.fileInput?.click();
 	}
 
 	handleFileChange(event: Event): void {
 		const input = event.target as HTMLInputElement;
 		if (!input.files) return;
-		if (!this.options.attachmentInputBlocked) {
-			this.options.onAttachmentInput();
-			this.options.composer.addImages(Array.from(input.files), this.options.attachmentSupport);
+		if (!this.options.attachmentPickerBlocked) {
+			const attachments = Array.from(input.files).filter((file) =>
+				isSupportedChatAttachment(file, this.options.attachmentSupport),
+			);
+			if (attachments.length > 0) {
+				this.options.composer.addImages(attachments, this.options.attachmentSupport);
+			}
 		}
 		input.value = '';
 	}
@@ -61,7 +66,9 @@ export class PromptComposerAttachmentController {
 		for (const item of items) {
 			if (!item.type.startsWith('image/')) continue;
 			const file = item.getAsFile();
-			if (file) images.push(file);
+			if (file && isSupportedChatAttachment(file, this.options.attachmentSupport)) {
+				images.push(file);
+			}
 		}
 		if (images.length > 0) {
 			this.options.onAttachmentInput();

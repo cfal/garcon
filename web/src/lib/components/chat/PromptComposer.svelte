@@ -228,6 +228,9 @@
 		get attachmentInputBlocked() {
 			return promptRefinement.pending;
 		},
+		get attachmentPickerBlocked() {
+			return promptTransformPending;
+		},
 		get attachmentSupport() {
 			return attachmentSupport;
 		},
@@ -246,8 +249,7 @@
 		requestComposerFocusForChat(chatId);
 	});
 
-	// Cancels path-bound server expansion when the selected chat keeps its ID
-	// but moves to another project.
+	// Cancels path-bound expansion when a selected chat moves to another project.
 	$effect(() => {
 		const projectPath = sessions.selectedChat?.projectPath ?? null;
 		if (projectPath === previousSnippetProjectPath) return;
@@ -255,8 +257,7 @@
 		snippetExpansion.cancel();
 	});
 
-	// Shell focus requests can happen while navigation is changing ownership.
-	// The request ID makes them durable until this mounted composer can consume them.
+	// Keeps shell focus requests durable while navigation changes ownership.
 	$effect(() => {
 		const requestId = appShell.composerFocusRequestId;
 		if (requestId === 0 || requestId === handledAppShellFocusRequestId) return;
@@ -264,8 +265,7 @@
 		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Focus remains pending until it lands because a newly presented composer
-	// can still inherit visibility:hidden for a frame while its window moves.
+	// Keeps focus pending through transient visibility during window moves.
 	$effect(() =>
 		focusDelivery.deliver({
 			selectedChatId: sessions.selectedChatId,
