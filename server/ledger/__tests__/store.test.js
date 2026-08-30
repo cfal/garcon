@@ -380,6 +380,38 @@ describe('TranscriptLedgerStore', () => {
       .toThrow(LedgerFencedError);
   });
 
+  it('[TLV5-L11.01-STORE-UNIT-02] read-fences a query failure raised inside a write workflow', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('WHERE view_id = ? AND client_message_id = ?')) {
+        queryFailed = true;
+        throw Object.assign(new Error('injected transcript query failure'), {
+          code: 'SQLITE_IOERR',
+        });
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.appendInputAndCompose('failed-chat', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('failed-message', 'must not append'),
+      })).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
   it('deduplicates a committed submission without redispatching it', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
@@ -1182,6 +1214,75 @@ describe('TranscriptLedgerStore', () => {
 
     expect(await fs.stat(path.join(root, 'chat-one')).catch(() => null)).toBeNull();
     expect(store.currentView('chat-two').viewId).toBe('view-two');
+  });
+
+  it('[TLV5-L11.05-STORE-UNIT-02] preserves a write fence across LRU eviction', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitBecameAmbiguous = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitBecameAmbiguous && sql === 'COMMIT') {
+        commitBecameAmbiguous = true;
+        exec.call(this, sql);
+        throw new Error('injected ambiguous transcript commit');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.append('failed-chat', view.viewId, [provider('durable unknown outcome')]))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitBecameAmbiguous).toBe(true);
+    expect(store.currentRows('failed-chat').map(renderedContent)).toEqual(['durable unknown outcome']);
+    store.initializeCurrentView('evicting-chat', {
+      viewId: transcriptViewId('evicting-view'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('[TLV5-L11.01-STORE-UNIT-03] preserves a read fence across LRU eviction', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('FROM transcript_rows WHERE view_id = ? ORDER BY ordinal')) {
+        queryFailed = true;
+        throw Object.assign(new Error('injected transcript query corruption'), {
+          code: 'SQLITE_CORRUPT',
+        });
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    store.initializeCurrentView('evicting-chat', {
+      viewId: transcriptViewId('evicting-view'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
   });
 
   it('attributes an eviction checkpoint failure to the evicted chat', () => {

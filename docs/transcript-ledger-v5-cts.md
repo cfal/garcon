@@ -817,6 +817,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L08.02-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `atomically deletes the replaced view when promoting staging`                                                    | L08.02                      |
 | TLV5-L11.04-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `attributes an eviction close failure and retries that handle on shutdown`                                       | L11.04                      |
 | TLV5-L11.05-SERVER-01          | `integration-tests/tests/server/transcript-write-fence-isolation.test.ts`: `keeps durable history readable after a write failure`                         | L11.05                      |
+| TLV5-L11.05-STORE-UNIT-02      | `server/ledger/__tests__/store.test.js`: `preserves a write fence across LRU eviction`                                                                     | L11.05                      |
 | TLV5-L09.03-CORE-STATIC-01     | `server/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling has exactly one activation-history call site and no runtime pre-resume hook | L09.03 |
 | TLV5-L09.03-CORE-UNIT-01       | `server/ledger/__tests__/native-activity-page-reader.test.js`: newest history returns before its advisory probe is scheduled | L09.03 |
 | TLV5-L09.03-CORE-UNIT-02       | `server/ledger/__tests__/native-activity-page-reader.test.js`: earlier, background, and failed history reads schedule nothing | L09.03 |
@@ -935,6 +936,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: a valid zero-searchable-row view is indexed at its frontier and later same-view content remains searchable | SEARCH.05, L01.02 |
 | TLV5-HANDOFF.05-SERVER-01      | `integration-tests/tests/server/repeated-agent-handoff.test.ts`: `recovers one pending handoff while another chat remains fenced`                         | R8, L11.03                  |
 | TLV5-L11.01-SERVER-01          | `integration-tests/tests/server/transcript-corruption-isolation.test.ts`: `fences only the chat whose SQLite ledger is corrupt`                           | L11.01                      |
+| TLV5-L11.01-STORE-UNIT-02      | `server/ledger/__tests__/store.test.js`: `read-fences a query failure raised inside a write workflow`                                                      | L11.01                      |
+| TLV5-L11.01-STORE-UNIT-03      | `server/ledger/__tests__/store.test.js`: `preserves a read fence across LRU eviction`                                                                       | L11.01                      |
 | TLV5-L11.01-VIEW-READER-UNIT-01 | `server/ledger/__tests__/view-reader.test.js`: paging, replay, and rendering snapshots translate a ledger fence to one fixed non-retryable degraded-history error | L11.01 |
 | TLV5-L11.01-WS-CONTRACT-01     | `server/ws/__tests__/chat-contracts.test.js`: replay serializes a fixed non-retryable fence response without the underlying cause | L11.01 |
 | TLV5-L11.01-SHARE-ROUTE-UNIT-01 | `server/routes/__tests__/shares.test.js`: share capture returns a fixed safe domain response when rendering-snapshot access is fenced | L11.01 |
