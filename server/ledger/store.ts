@@ -53,6 +53,7 @@ import {
 } from './errors.js';
 import { statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
+import { asError, nextOrdinal, runTransaction } from './sqlite-operations.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -949,35 +950,6 @@ function toView(record: ViewRecord): TranscriptView {
   };
 }
 
-function nextOrdinal(db: Database, viewId: TranscriptViewId): number {
-  const row = db.query<{ maximum: number | null }, [string]>(`
-    SELECT max(ordinal) AS maximum FROM transcript_rows WHERE view_id = ?
-  `).get(viewId);
-  return (row?.maximum ?? 0) + 1;
-}
-
-function runTransaction<T>(db: Database, work: () => T): T {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = work();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    const failure = asError(error);
-    if (db.inTransaction) {
-      try {
-        db.exec('ROLLBACK');
-      } catch (rollbackError) {
-        Object.defineProperty(failure, 'rollbackFailure', {
-          configurable: true,
-          value: asError(rollbackError),
-        });
-      }
-    }
-    throw failure;
-  }
-}
-
 function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
   let checkpointFailure: Error | null = null;
   try {
@@ -991,10 +963,6 @@ function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
     return { closed: false, failure: asError(error) };
   }
   return { closed: true, failure: checkpointFailure };
-}
-
-function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }
 
 function validateChatDirectoryName(chatId: string): void {
