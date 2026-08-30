@@ -48,12 +48,14 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: {
-				enabled: true,
-				chatIdDiscovery: true,
-				sendMessage: true,
-				subAgents: true,
-			},
+				agentCommands: {
+					enabled: true,
+					chatIdDiscovery: true,
+					sendMessage: true,
+					subAgents: true,
+					allowCustomSubAgentProjectPath: false,
+					allowCustomSubAgentPermissionLevel: false,
+				},
 		},
 		ui: {},
 		uiEffective: {},
@@ -210,7 +212,7 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('persists agent command children while the parent hides and restores them', async () => {
+	it('persists nested agent command settings while ancestors hide and restore them', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot());
 		setTestRemoteSettingsStore(store);
@@ -225,6 +227,44 @@ describe('RemoteSettingsSection', () => {
 		);
 		expect(screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' })).toBeTruthy();
 		expect(screen.getByRole('switch', { name: 'Enable sub-agents' })).toBeTruthy();
+		const projectPathOverride = screen.getByRole('switch', {
+			name: 'Allow custom sub-agent project path',
+		});
+		const permissionOverride = screen.getByRole('switch', {
+			name: 'Allow custom sub-agent permission level',
+		});
+		expect(projectPathOverride.getAttribute('aria-checked')).toBe('false');
+		expect(permissionOverride.getAttribute('aria-checked')).toBe('false');
+		expect(screen.getByText(
+			"This will allow the agent to start a sub-agent at an arbitrary project path with the agent's permission level.",
+		)).toBeTruthy();
+		expect(screen.getByText(
+			'this will allow the agent to start a sub-agent with an arbitrary permission level.',
+		)).toBeTruthy();
+
+		await fireEvent.click(projectPathOverride);
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				features: { agentCommands: { allowCustomSubAgentProjectPath: true } },
+			});
+			expect(store.snapshot?.features.agentCommands.allowCustomSubAgentProjectPath).toBe(true);
+		});
+
+		const subAgents = screen.getByRole('switch', { name: 'Enable sub-agents' });
+		await fireEvent.click(subAgents);
+		await waitFor(() => {
+			expect(screen.queryByRole('switch', {
+				name: 'Allow custom sub-agent project path',
+			})).toBeNull();
+		});
+		expect(store.snapshot?.features.agentCommands.allowCustomSubAgentProjectPath).toBe(true);
+
+		await fireEvent.click(subAgents);
+		await waitFor(() => {
+			expect(screen.getByRole('switch', {
+				name: 'Allow custom sub-agent project path',
+			}).getAttribute('aria-checked')).toBe('true');
+		});
 
 		await fireEvent.click(screen.getByRole('switch', { name: 'Enable send message' }));
 
