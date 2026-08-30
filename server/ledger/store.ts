@@ -44,19 +44,17 @@ import {
 } from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
-  LedgerError,
   LedgerFencedError,
   LedgerSchemaError,
   StaleTranscriptViewError,
   SubmissionConflictError,
   TranscriptViewNotInitializedError,
 } from './errors.js';
+import { LedgerFailureFences } from './failure-fences.js';
 import { statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
 import {
   asError,
-  getTransactionRollbackFailure,
-  isQueryFailure,
   nextOrdinal,
   runQuery,
   runTransaction,
@@ -119,8 +117,7 @@ export class TranscriptLedgerStore {
   readonly #connections = new Map<string, ConnectionEntry>();
   readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
-  readonly #readFailures = new Map<string, Error>();
-  readonly #writeFailures = new Map<string, Error>();
+  readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = rootDirectory;
@@ -142,7 +139,7 @@ export class TranscriptLedgerStore {
     validateChatDirectoryName(chatId);
     if (this.#connections.has(chatId)
         || this.#openFailures.has(chatId)
-        || this.#readFailures.has(chatId)) {
+        || this.#failureFences.hasReadFailure(chatId)) {
       return this.#read(chatId, (entry) => entry.current);
     }
     const databasePath = path.join(this.#rootDirectory, chatId, 'ledger.sqlite');
@@ -573,8 +570,7 @@ export class TranscriptLedgerStore {
     validateChatDirectoryName(chatId);
     this.closeChat(chatId);
     this.#openFailures.delete(chatId);
-    this.#readFailures.delete(chatId);
-    this.#writeFailures.delete(chatId);
+    this.#failureFences.delete(chatId);
     rmSync(path.join(this.#rootDirectory, chatId), { recursive: true, force: true });
   }
 
@@ -587,8 +583,7 @@ export class TranscriptLedgerStore {
       if (!statSync(directory).isDirectory()) continue;
       this.closeChat(name);
       this.#openFailures.delete(name);
-      this.#readFailures.delete(name);
-      this.#writeFailures.delete(name);
+      this.#failureFences.delete(name);
       rmSync(directory, { recursive: true, force: true });
       removed.push(name);
     }
@@ -606,8 +601,7 @@ export class TranscriptLedgerStore {
     }
     if (this.#failedCloseEntries.size === 0) {
       this.#openFailures.clear();
-      this.#readFailures.clear();
-      this.#writeFailures.clear();
+      this.#failureFences.clear();
     }
     if (firstFailure) throw firstFailure;
   }
@@ -663,44 +657,15 @@ export class TranscriptLedgerStore {
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
-    const readFailure = this.#readFailures.get(chatId);
-    if (readFailure) throw new LedgerFencedError(chatId, { cause: readFailure });
-    const entry = this.#availableConnection(chatId);
-    try {
-      return work(entry);
-    } catch (error) {
-      if (isDomainError(error) && !isQueryFailure(error)) throw error;
-      const failure = asError(error);
-      this.#readFailures.set(chatId, failure);
-      throw new LedgerFencedError(chatId, { cause: failure });
-    }
+    return this.#failureFences.read(chatId, () => this.#availableConnection(chatId), work);
   }
   #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
-    const readFailure = this.#readFailures.get(chatId);
-    if (readFailure) throw new LedgerFencedError(chatId, { cause: readFailure });
-    const writeFailure = this.#writeFailures.get(chatId);
-    if (writeFailure) throw new LedgerFencedError(chatId, { cause: writeFailure });
-    const entry = this.#availableConnection(chatId);
-    try {
-      return work(entry);
-    } catch (error) {
-      const failure = asError(error);
-      const readUnsafe = isQueryFailure(failure) || isSqliteCorruptionFailure(failure);
-      if (isDomainError(error)
-          && !readUnsafe
-          && !getTransactionRollbackFailure(failure)
-          && !entry.db.inTransaction) throw error;
-      this.#writeFailures.set(chatId, failure);
-      if (readUnsafe || entry.db.inTransaction) this.#readFailures.set(chatId, failure);
-      else {
-        try {
-          rehydrateConnection(entry);
-        } catch (rehydrationError) {
-          this.#readFailures.set(chatId, asError(rehydrationError));
-        }
-      }
-      throw new LedgerFencedError(chatId, { cause: failure });
-    }
+    return this.#failureFences.write(
+      chatId,
+      () => this.#availableConnection(chatId),
+      work,
+      rehydrateConnection,
+    );
   }
 
   #availableConnection(chatId: string): ConnectionEntry {
@@ -974,12 +939,6 @@ function viewRecord(
   ));
 }
 
-function isSqliteCorruptionFailure(error: Error): boolean {
-  const code = (error as Error & { readonly code?: unknown }).code;
-  return typeof code === 'string'
-    && (code === 'SQLITE_CORRUPT' || code.startsWith('SQLITE_CORRUPT_'));
-}
-
 function toView(record: ViewRecord): TranscriptView {
   return {
     viewId: transcriptViewId(record.view_id),
@@ -1030,8 +989,4 @@ function normalizeLimit(limit: number): number {
     throw new TypeError('Transcript page limit must be between 1 and 1000');
   }
   return limit;
-}
-
-function isDomainError(error: unknown): error is LedgerError | TypeError {
-  return error instanceof LedgerError || error instanceof TypeError;
 }
