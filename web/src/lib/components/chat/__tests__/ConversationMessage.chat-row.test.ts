@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	CliRowMessage,
@@ -10,6 +10,9 @@ import ConversationMessageHost from './ConversationMessageHost.svelte';
 import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
+const SOURCE_CHAT_ID = '1788090107980900';
+const TARGET_CHAT_ID = '1788090107980901';
+const SECOND_TARGET_CHAT_ID = '1788090107980902';
 
 function handoffNotice(): TranscriptNoticeMessage {
 	return new TranscriptNoticeMessage(
@@ -120,6 +123,113 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
 			'true',
 		);
+	});
+
+	it('renders received inter-agent messages as compact neutral Markdown bubbles', async () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				'Review the **typed contract**.\n\n- Keep the IDs\n- Resolve the title',
+				{ type: 'inter-agent-message-received', fromChatId: SOURCE_CHAT_ID },
+				`Message from chat ${SOURCE_CHAT_ID}`,
+			),
+			chatTitles: { [SOURCE_CHAT_ID]: 'Protocol review' },
+		});
+
+		const row = container.querySelector('[data-inter-agent-message-direction="received"]');
+		const card = row?.querySelector('article');
+		expect(screen.getByText('Message from Protocol review')).toBeTruthy();
+		expect(screen.getByText('typed contract').tagName).toBe('STRONG');
+		expect(card?.className).toContain('border-status-neutral-border');
+		expect(card?.className).not.toContain('border-status-info-border');
+		expect(card?.parentElement?.className).toContain('sm:max-w-[85%]');
+		const disclosure = screen.getByRole('button', { name: 'Show more' });
+		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(disclosure);
+		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+	});
+
+	it('renders sent inter-agent messages with titles and no queue audit text', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				'Please apply the `focused fix`.',
+				{
+					type: 'inter-agent-message-outcome',
+					results: [{ chatId: TARGET_CHAT_ID, status: 'queued' }],
+				},
+				'Inter-agent message',
+			),
+			chatTitles: { [TARGET_CHAT_ID]: 'Parser cleanup' },
+		});
+
+		expect(screen.getByText('Sent message to Parser cleanup')).toBeTruthy();
+		expect(screen.getByText('focused fix').tagName).toBe('CODE');
+		expect(container.querySelector('.markdown-body')).toBeTruthy();
+		expect(container.textContent).not.toContain('Queued:');
+		expect(container.textContent).not.toContain('pending delivery');
+		expect(container.querySelector('article')?.className).toContain('border-status-neutral-border');
+		expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
+	});
+
+	it('falls back to IDs, protects hidden senders, and distinguishes failed outcomes', () => {
+		const mixed = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Mixed delivery body.', {
+				type: 'inter-agent-message-outcome',
+				results: [
+					{ chatId: TARGET_CHAT_ID, status: 'delivered' },
+					{ chatId: SECOND_TARGET_CHAT_ID, status: 'failed', reason: 'target-not-found' },
+				],
+			}),
+		});
+
+		expect(
+			screen.getByText(
+				`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`,
+			),
+		).toBeTruthy();
+		expect(screen.getByText('chat not found')).toBeTruthy();
+		expect(
+			screen
+				.getByText(`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`)
+				.getAttribute('title'),
+		).toBe(`Sent message to ${TARGET_CHAT_ID}; failed to send to ${SECOND_TARGET_CHAT_ID}`);
+		mixed.unmount();
+
+		const failed = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Failed delivery body.', {
+				type: 'inter-agent-message-outcome',
+				results: [{ chatId: TARGET_CHAT_ID, status: 'failed', reason: 'disabled' }],
+			}),
+		});
+		expect(screen.getByText(`Failed to send message to ${TARGET_CHAT_ID}`)).toBeTruthy();
+		expect(screen.getByText('agent messaging is disabled')).toBeTruthy();
+		failed.unmount();
+
+		render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Anonymous **message**.', {
+				type: 'inter-agent-message-received',
+				fromChatId: null,
+			}),
+		});
+		expect(screen.getByText('Inter-agent message')).toBeTruthy();
+		expect(screen.queryByText(/Message from/)).toBeNull();
+		expect(screen.getByText('message').tagName).toBe('STRONG');
+	});
+
+	it('reactively updates an inter-agent title when the chat title changes', async () => {
+		render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(AT, 'Reactive title body.', {
+				type: 'inter-agent-message-received',
+				fromChatId: SOURCE_CHAT_ID,
+			}),
+			chatTitles: { [SOURCE_CHAT_ID]: 'Original title' },
+			chatTitleUpdate: { chatId: SOURCE_CHAT_ID, title: 'Renamed title' },
+		});
+
+		expect(screen.getByText('Message from Original title')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Update chat title' }));
+		await waitFor(() => expect(screen.getByText('Message from Renamed title')).toBeTruthy());
 	});
 
 	it('keeps provider errors on the generic error path', () => {

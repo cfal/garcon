@@ -259,6 +259,46 @@ describe('SharedChatPage', () => {
 		expect(container.querySelector('strong')?.textContent).toBe('typed provenance');
 	});
 
+	it('renders shared inter-agent messages as compact neutral Markdown with ID fallbacks', async () => {
+		const sourceChatId = '1788090107980900';
+		const targetChatId = '1788090107980901';
+		const shared = response([], 0, 2, { nextBefore: null });
+		shared.snapshot.messages = [
+			{
+				type: 'transcript-notice',
+				timestamp: '2025-01-02T03:05:00.000Z',
+				content: 'Sent **Markdown** body.',
+				detail: {
+					type: 'inter-agent-message-outcome',
+					results: [{ chatId: targetChatId, status: 'delivered' }],
+				},
+			},
+			{
+				type: 'transcript-notice',
+				timestamp: '2025-01-02T03:05:01.000Z',
+				content: 'Received `Markdown` body.',
+				detail: { type: 'inter-agent-message-received', fromChatId: sourceChatId },
+			},
+		];
+		shared.page.end = 2;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(shared);
+
+		const { container } = render(SharedChatPageTestHost);
+
+		await screen.findByText(`Sent message to ${targetChatId}`);
+		expect(screen.getByText(`Message from ${sourceChatId}`)).toBeTruthy();
+		expect(screen.getByText('Markdown', { selector: 'strong' })).toBeTruthy();
+		expect(screen.getByText('Markdown', { selector: 'code' })).toBeTruthy();
+		const cards = container.querySelectorAll('article.inter-agent-message-card');
+		expect(cards).toHaveLength(2);
+		for (const card of cards) {
+			expect(card.className).toContain('border-status-neutral-border');
+			expect(card.className).not.toContain('border-status-info-border');
+			expect(card.parentElement?.className).toContain('sm:max-w-[85%]');
+		}
+		expect(screen.getAllByRole('button', { name: 'Show more' })).toHaveLength(2);
+	});
+
 	it('styles the complete shared CLI user message surface', async () => {
 		const shared = response([], 0, 1, { nextBefore: null });
 		shared.snapshot.messages = [{

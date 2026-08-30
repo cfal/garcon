@@ -130,6 +130,9 @@
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
+	function resolveChatTitle(chatId: string): string | undefined {
+		return sessions.byId[chatId]?.title?.trim() || undefined;
+	}
 
 	const projectBasePath = $derived(appShell.projectBasePath);
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -738,6 +741,7 @@
 							onLinkNavigate={handleLinkNavigate}
 							{acquireTransientActivity}
 							{disclosureState}
+							{resolveChatTitle}
 						/>
 					{:else if asError}
 						<ChatEventCard variant="error">
