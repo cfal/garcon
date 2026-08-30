@@ -7,14 +7,14 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '$lib/workspace/canonical-layout';
-import { windowNodeById } from '$lib/workspace/window-tree';
-import type { ActiveSurfaceKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 
 export class AppShellLocalSettingsState {
-	hideChatListWhenGitFocused = $state(false);
+	chatListAutohide = $state(false);
 	chatListDock = $state<ChatListDock>('left');
 	sidebarWidth = $state(320);
+	reduceMotion = $state(false);
 	sidebarGroupByProject = $state(false);
 	sidebarGroupNestedProjectPaths = $state(false);
 
@@ -44,17 +44,6 @@ export class AppShellBreakpointWorkspace {
 	async exitMobilePresentation(): Promise<void> {
 		this.exitCalls += 1;
 		this.isMobile = false;
-	}
-
-	get focusedWindowActiveKind(): ActiveSurfaceKind | null {
-		const workspaceWindow = windowNodeById(
-			this.layout.snapshot.desktopRoot,
-			'window-main' as WorkspaceWindowId,
-		);
-		const activeId = workspaceWindow?.tabs.activeId;
-		const surface = activeId ? this.layout.snapshot.surfaces[activeId] : null;
-		if (!surface) return null;
-		return surface.type === 'singleton' ? surface.kind : surface.type;
 	}
 
 	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {

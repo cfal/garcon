@@ -11,6 +11,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatListDock).toBe('left');
+		expect(store.chatListAutohide).toBe(false);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
@@ -103,6 +104,32 @@ describe('LocalSettingsStore', () => {
 
 		store.destroy();
 		restored.destroy();
+	});
+
+	it('persists and restores chat list autohide', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('chatListAutohide');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ chatListAutohide: true });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.chatListAutohide).toBe(true);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('defaults malformed chat list autohide values to disabled', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ chatListAutohide: 'enabled' }),
+		);
+
+		const store = createLocalSettingsStore();
+		expect(store.chatListAutohide).toBe(false);
+		store.destroy();
 	});
 
 	it('persists and sanitizes global shortcut overrides', () => {
@@ -460,6 +487,7 @@ describe('LocalSettingsStore', () => {
 				showQuickCommitTray: false,
 				allowDirectChats: true,
 				steerWithCtrlEnter: false,
+				chatListAutohide: true,
 				chatListDock: 'right',
 				textEditorOpenPlacement: 'same-window',
 				imageViewerOpenPlacement: 'new-window',
@@ -481,6 +509,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.showQuickCommitTray).toBe(false);
 		expect(secondStore.allowDirectChats).toBe(true);
 		expect(secondStore.steerWithCtrlEnter).toBe(false);
+		expect(secondStore.chatListAutohide).toBe(true);
 		expect(secondStore.chatListDock).toBe('right');
 		expect(secondStore.textEditorOpenPlacement).toBe('same-window');
 		expect(secondStore.imageViewerOpenPlacement).toBe('new-window');

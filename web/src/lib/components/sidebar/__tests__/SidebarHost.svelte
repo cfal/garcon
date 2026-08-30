@@ -17,6 +17,7 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 
 	interface SidebarHostProps {
@@ -29,6 +30,9 @@
 		sidebarGroupByProject?: boolean;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: SidebarChatItemLayout;
+		chatListAutohide?: boolean;
+		chatListAutohideAvailable?: boolean;
+		chatListDock?: ChatListDock;
 		reduceMotion?: boolean;
 		collapsedProjectKeys?: Set<string>;
 	}
@@ -43,6 +47,9 @@
 		sidebarGroupByProject = true,
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'default',
+		chatListAutohide = false,
+		chatListAutohideAvailable = false,
+		chatListDock = 'left',
 		reduceMotion = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();
@@ -99,6 +106,12 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get chatListAutohide() {
+			return chatListAutohide;
+		},
+		get chatListDock() {
+			return chatListDock;
+		},
 		get reduceMotion() {
 			return reduceMotion;
 		},
@@ -109,10 +122,16 @@
 			}
 			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
-		set(key: 'sidebarChatItemLayout' | 'sidebarSortMode', value: string) {
+		set(
+			key: 'sidebarChatItemLayout' | 'sidebarSortMode' | 'chatListAutohide' | 'chatListDock',
+			value: string | boolean,
+		) {
 			if (key === 'sidebarChatItemLayout') {
 				sidebarChatItemLayout = value as SidebarChatItemLayout;
+				return;
 			}
+			if (key === 'chatListAutohide') chatListAutohide = value as boolean;
+			if (key === 'chatListDock') chatListDock = value as ChatListDock;
 		},
 	} as never);
 
@@ -194,6 +213,7 @@
 	onForkChat={() => {}}
 	onShareChat={() => {}}
 	onManageTags={() => {}}
+	{chatListAutohideAvailable}
 	onShowScheduledPrompts={() => {}}
 	onShowSettings={() => {}}
 	newWindowBlocked={false}

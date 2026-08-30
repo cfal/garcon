@@ -14,21 +14,15 @@ describe('Lightpanda chat-list docking', () => {
 
       await waitForDock(fixture.page, 'left');
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Settings');
-      await app.clickMenuItem('Settings');
-      await app.waitForButton('Local Settings');
-      await app.clickButton('Local Settings');
-      await fixture.page.$eval('#local-chat-list-dock', (element) => {
-        const select = element as HTMLSelectElement;
-        select.value = 'right';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+			await clickCheckboxMenuItem(fixture.page, 'Dock sidebar on the right');
       await waitForDock(fixture.page, 'right');
       expect(await persistedDock(fixture.page)).toBe('right');
 
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
-      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await fixture.waitForSpaWebSocket({
+        afterConnectionCount: beforeReloadConnections,
+      });
       await waitForDock(fixture.page, 'right');
       expect(await persistedDock(fixture.page)).toBe('right');
       fixture.assertNoBrowserErrors();
@@ -45,12 +39,38 @@ async function waitForDock(page: Page, expected: 'left' | 'right'): Promise<void
         return false;
       }
       return side === 'left'
-        ? chatList.classList.contains('order-first') && chatList.classList.contains('border-e')
-        : chatList.classList.contains('order-last') && chatList.classList.contains('border-s');
+        ? chatList.classList.contains('order-first') &&
+            chatList
+              .querySelector('[data-workspace-chat-list-panel]')
+              ?.classList.contains('border-e')
+        : chatList.classList.contains('order-last') &&
+            chatList
+              .querySelector('[data-workspace-chat-list-panel]')
+              ?.classList.contains('border-s');
     },
     { timeout: 20_000 },
     expected,
   );
+}
+
+async function clickCheckboxMenuItem(page: Page, name: string): Promise<void> {
+  await page.waitForFunction(
+    (expected) =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].some(
+        (element) =>
+          (element.getAttribute('aria-label') || element.textContent?.trim()) === expected &&
+          element.getAttribute('aria-disabled') !== 'true',
+      ),
+    { timeout: 20_000 },
+    name,
+  );
+  await page.evaluate((expected) => {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(
+      (element) => (element.getAttribute('aria-label') || element.textContent?.trim()) === expected,
+    );
+    if (!item) throw new Error(`Missing checkbox menu item: ${expected}`);
+    item.click();
+  }, name);
 }
 
 async function persistedDock(page: Page): Promise<unknown> {

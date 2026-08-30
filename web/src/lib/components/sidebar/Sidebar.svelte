@@ -65,6 +65,8 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onManageTags: (chat: ChatSessionRecord) => void;
 		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		chatListAutohideAvailable?: boolean;
+		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
 		newWindowBlocked: boolean;
@@ -88,6 +90,8 @@
 		onShareChat,
 		onManageTags,
 		onOpenChatInNewWindow,
+		chatListAutohideAvailable = false,
+		onChatListAutohideChange,
 		onShowScheduledPrompts,
 		onShowSettings,
 		newWindowBlocked,
@@ -395,6 +399,17 @@
 		);
 	}
 
+	function handleToggleChatListAutohide(): void {
+		if (!chatListAutohideAvailable) return;
+		const enabled = !localSettings.chatListAutohide;
+		localSettings.set('chatListAutohide', enabled);
+		onChatListAutohideChange?.(enabled);
+	}
+
+	function handleSetDockOnRight(enabled: boolean): void {
+		localSettings.set('chatListDock', enabled ? 'right' : 'left');
+	}
+
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
@@ -448,6 +463,9 @@
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			chatItemLayout={displayOptions.chatItemLayout}
 			sortByRecent={displayOptions.sortMode === 'recent'}
+			chatListAutohide={localSettings.chatListAutohide}
+			{chatListAutohideAvailable}
+			dockOnRight={localSettings.chatListDock === 'right'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
@@ -460,6 +478,8 @@
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onSetChatItemLayout={handleSetChatItemLayout}
 			onToggleSortByRecent={handleToggleSortByRecent}
+			onToggleChatListAutohide={handleToggleChatListAutohide}
+			onSetDockOnRight={handleSetDockOnRight}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}

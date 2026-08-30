@@ -9,7 +9,6 @@ import {
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	workspaceChatViewCount,
-	type ActiveSurfaceKind,
 	type ChatViewSurfaceId,
 	type DesktopPlacement,
 	type FocusOwner,
@@ -232,14 +231,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	isSurfacePresented(surfaceId: string): boolean {
 		return this.#presentation.isSurfacePresented(surfaceId);
-	}
-
-	get focusedWindowActiveKind(): ActiveSurfaceKind | null {
-		const snapshot = this.layout.snapshot;
-		const activeId = windowNodeById(snapshot.desktopRoot, this.lastFocusedWindowId)?.tabs.activeId;
-		const surface = activeId ? snapshot.surfaces[activeId] : null;
-		if (!surface) return null;
-		return surface.type === 'singleton' ? surface.kind : surface.type;
 	}
 
 	frameVersion(surfaceId: string): number {
