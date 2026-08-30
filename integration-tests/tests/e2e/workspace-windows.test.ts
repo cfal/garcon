@@ -133,10 +133,8 @@ describe('Lightpanda workspace windows', () => {
       if (!chatA || !chatB) throw new Error('Missing Chat replacement fixtures.');
       const originalWindowId = await app.currentWorkspaceWindowId();
 
-      await app.openSidebarChatInNewWindow('workspace-chat-a');
-      await app.waitForWorkspaceWindowCount(2);
+      const secondWindowId = await app.openSidebarChatInNewWindow('workspace-chat-a');
       await app.waitForSelectedChat(chatA.id);
-      const secondWindowId = await app.currentWorkspaceWindowId();
       expect(secondWindowId).not.toBe(originalWindowId);
       expect(
         await fixture.page.$(
@@ -201,9 +199,9 @@ describe('Lightpanda workspace windows', () => {
       if (!chatA) throw new Error('Missing source Chat fixture.');
       const originalWindowId = await app.currentWorkspaceWindowId();
 
-      await app.openSidebarChatInNewWindow('workspace-chat-move-a');
-      await app.waitForWorkspaceWindowCount(2);
-      const secondChatWindowId = await app.currentWorkspaceWindowId();
+      const secondChatWindowId = await app.openSidebarChatInNewWindow(
+        'workspace-chat-move-a',
+      );
       expect(secondChatWindowId).not.toBe(originalWindowId);
       await waitForPersistedChatWindows(fixture.page, {
         [originalWindowId]: chatA.id,

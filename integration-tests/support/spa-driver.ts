@@ -651,6 +651,7 @@ export class SpaDriver {
 
   async selectWorkspaceWindowSurfaceById(surfaceId: string, windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.workspaceWindowIdForSurface(surfaceId));
+    await this.focusWorkspaceWindow(targetWindowId);
     const result = await this.#page.evaluate(
       ({ expectedSurfaceId, expectedWindowId }) => {
         const workspaceWindow = [
@@ -1008,7 +1009,8 @@ export class SpaDriver {
     }, text);
   }
 
-  async openSidebarChatInNewWindow(text: string): Promise<void> {
+  async openSidebarChatInNewWindow(text: string): Promise<string> {
+    const existingWindowIds = new Set(await this.workspaceWindowIds());
     await this.#page.evaluate((expected) => {
       const summary = [
         ...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]'),
@@ -1024,6 +1026,13 @@ export class SpaDriver {
     await this.clickMenuItem('Open in new window');
     await this.waitForMenuItemEnabled('Open new window right');
     await this.clickMenuItem('Open new window right');
+    await this.waitForWorkspaceWindowCount(existingWindowIds.size + 1);
+    const openedWindowId = (await this.workspaceWindowIds()).find(
+      (windowId) => !existingWindowIds.has(windowId),
+    );
+    if (!openedWindowId) throw new Error(`New workspace window did not open for ${text}.`);
+    await this.focusWorkspaceWindow(openedWindowId);
+    return openedWindowId;
   }
 
   async waitForSidebarPreview(chatText: string, previewText: string): Promise<void> {

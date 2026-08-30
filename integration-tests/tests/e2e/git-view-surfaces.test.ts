@@ -377,7 +377,7 @@ describe('Lightpanda standalone Git views', () => {
       );
       await app.waitForText('second revision');
 
-      await app.openNewWorkspaceWindow('Open Compare');
+      await app.openNewWorkspaceWindow('Open Git Compare');
       const compareWindowId = await app.workspaceWindowIdForSurface('singleton:git-compare');
       await fixture.page.waitForSelector(
         `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"][aria-hidden="false"]`,
@@ -477,7 +477,7 @@ describe('Lightpanda standalone Git views', () => {
         () => !document.querySelector('[data-workspace-surface-id="singleton:git-compare"]'),
         { timeout: 20_000 },
       );
-      await app.openNewWorkspaceWindow('Open Compare');
+      await app.openNewWorkspaceWindow('Open Git Compare');
       expect(await app.workspaceWindowIdForSurface('singleton:git-compare')).not.toBe(
         compareWindowId,
       );
@@ -626,7 +626,7 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-compare-target-seed');
       await app.waitForText('echo:git-view-compare-target-seed');
 
-      await app.openNewWorkspaceWindow('Open Compare');
+      await app.openNewWorkspaceWindow('Open Git Compare');
       await fixture.page.waitForSelector(
         '[role="tabpanel"][data-workspace-surface-id="singleton:git-compare"]' +
           '[aria-hidden="false"]',
