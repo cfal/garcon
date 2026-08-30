@@ -8,6 +8,7 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import PromptComposer from './PromptComposer.svelte';
+	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
@@ -852,6 +853,22 @@
 			/>
 		</div>
 	</div>
+	<ConversationPanelStatusDock
+		chatMaxWidth={localSettings.chatMaxWidth}
+		isProcessing={selectedIsProcessing}
+		status={lifecycle.loadingStatus}
+		agentId={selectedAgentId}
+		spinnerSelectionKey={sessions.selectedChatId ?? ''}
+		quickCommitEnabled={localSettings.showQuickCommitTray}
+		quickCommitTrayVisible={quickGitTrayVisible}
+		quickCommitSummary={quickGitSummaryForProject}
+		quickCommitRefreshing={quickGitRefreshingForProject}
+		quickCommitError={quickGitErrorForProject}
+		quickCommitBranchSelector={quickGitBranchSelectorControls}
+		isMobile={appShell.isMobile}
+		onAbort={() => void controller.handleAbort()}
+		onQuickCommit={openCommit}
+	/>
 
 	<PromptComposer
 		{isVisible}
@@ -865,13 +882,8 @@
 		onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 		onAgentSettingChange={(descriptor, value) =>
 			controller.handleAgentSettingChange(descriptor, value)}
-		onAbort={() => controller.handleAbort()}
-		quickCommitTrayVisible={quickGitTrayVisible}
-		quickCommitSummary={quickGitSummaryForProject}
-		quickCommitRefreshing={quickGitRefreshingForProject}
-		quickCommitError={quickGitErrorForProject}
-		quickCommitBranchSelector={quickGitBranchSelectorControls}
-		onQuickCommit={openCommit}
+		resendCandidates={chatState.resendCandidates}
+		onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
 	/>
 
 	{#if userMessageNavigator.open}
