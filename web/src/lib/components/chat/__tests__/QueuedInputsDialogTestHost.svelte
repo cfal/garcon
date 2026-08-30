@@ -4,7 +4,7 @@
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte';
 	import { setNotifications, setTransientLayers } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
@@ -40,7 +40,7 @@
 			return queue;
 		},
 	});
-	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	const notifications = createNotificationsStore();
 	setTransientLayers(transientLayers);
 	setNotifications(notifications);

@@ -234,7 +234,8 @@ describe('Lightpanda Git comparison', () => {
         projectPath: project,
       });
       await app.waitForText('echo:git-comparison-root-default');
-      await app.selectMainWorkspaceSurface('Open Git Compare');
+      const compareWindowId = await app.currentWorkspaceWindowId();
+      await app.selectWorkspaceWindowSurface('Open Git Compare', compareWindowId);
       await fixture.page.waitForSelector(COMPARE_PANEL);
       await waitForComparisonMarkers(
         fixture.page,
@@ -283,7 +284,7 @@ describe('Lightpanda Git comparison', () => {
         (chat) => chat.preview.firstMessage === 'git-comparison-worktree-inherited',
       );
       if (!worktreeChat) throw new Error('The linked-worktree comparison chat must be listed.');
-      await app.selectMainWorkspaceSurface('Compare');
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
       await waitForComparisonMarkers(
         fixture.page,
         ['inherited head marker'],
@@ -296,8 +297,10 @@ describe('Lightpanda Git comparison', () => {
         afterConnectionCount: beforeReloadConnections,
       });
       await app.waitForSelectedChat(worktreeChat.id);
-      await fixture.page.waitForSelector('[id="main-panel-singleton:git-compare"]');
-      await app.selectMainWorkspaceSurface('Compare');
+      await fixture.page.waitForSelector(
+        `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"]`,
+      );
+      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
       await waitForComparisonMarkers(
         fixture.page,
         ['inherited head marker'],
