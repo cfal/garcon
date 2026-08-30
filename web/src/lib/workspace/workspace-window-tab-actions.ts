@@ -28,8 +28,8 @@ export function resolveWorkspaceWindowTabActions(
 	const surface = snapshot.surfaces[surfaceId] ?? null;
 	const index = tabs.order.indexOf(surfaceId);
 	const canReorder = surface !== null && surface.type !== 'terminal-launcher' && index >= 0;
-	const hasMovableChat = surface?.type !== 'chat' || Boolean(surface.chatId);
-	const canMoveBetweenWindows = canReorder && hasMovableChat;
+	const hasRequiredChatId = surface?.type !== 'chat' || Boolean(surface.chatId);
+	const canMoveBetweenWindows = canReorder && hasRequiredChatId;
 	const windows = collectWindowNodes(snapshot.desktopRoot);
 	const canCreateWindow = windows.length < MAX_WORKSPACE_WINDOWS;
 	return {

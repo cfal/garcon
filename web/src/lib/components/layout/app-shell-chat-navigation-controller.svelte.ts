@@ -112,13 +112,10 @@ export class AppShellChatNavigationController {
 	}
 
 	#beginDeletion(chatId: string, wasSelected: boolean): number {
-		const targetsDeletedChat = this.pendingChatTarget === chatId;
-		if (targetsDeletedChat || (wasSelected && this.pendingChatTarget === null)) {
+		const pendingTargetsDeletedChat = this.pendingChatTarget === chatId;
+		if (pendingTargetsDeletedChat || (wasSelected && this.pendingChatTarget === null)) {
 			this.#generation += 1;
-			if (targetsDeletedChat) {
-				this.pendingChatTarget = null;
-				this.pendingWindowId = null;
-			}
+			if (pendingTargetsDeletedChat) this.#clearPendingTarget();
 		}
 		return this.#generation;
 	}
@@ -137,12 +134,15 @@ export class AppShellChatNavigationController {
 
 	#complete(generation: number): void {
 		if (!this.#isCurrent(generation)) return;
-		this.pendingChatTarget = null;
-		this.pendingWindowId = null;
+		this.#clearPendingTarget();
 	}
 
 	#cancelPendingNavigation(): void {
 		this.#generation += 1;
+		this.#clearPendingTarget();
+	}
+
+	#clearPendingTarget(): void {
 		this.pendingChatTarget = null;
 		this.pendingWindowId = null;
 	}

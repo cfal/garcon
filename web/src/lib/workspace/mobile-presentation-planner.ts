@@ -55,6 +55,8 @@ export class MobilePresentationPlanner {
 		const routeIdentity = this.deps.getRouteIdentity();
 		const isExcluded = (surfaceId: string): boolean =>
 			typeof excluding === 'string' ? surfaceId === excluding : excluding.has(surfaceId);
+		const isAvailable = (surfaceId: string): boolean =>
+			!isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]);
 		for (let index = snapshot.mobileReturnStack.length - 1; index >= 0; index -= 1) {
 			const target = snapshot.mobileReturnStack[index];
 			if (
@@ -70,23 +72,19 @@ export class MobilePresentationPlanner {
 				};
 			}
 		}
-		const recent = this.#mostRecentSurfaceIds.find(
-			(surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]),
-		);
+		const recentSurfaceId = this.#mostRecentSurfaceIds.find(isAvailable);
 		const workspaceWindows = collectWindowNodes(snapshot.desktopRoot);
-		const activeWindowFallback = workspaceWindows
+		const activeWindowSurfaceId = workspaceWindows
 			.map((workspaceWindow) => workspaceWindow.tabs.activeId)
-			.find((surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]));
-		const inactiveWindowFallback = workspaceWindows
+			.find(isAvailable);
+		const recentWindowSurfaceId = workspaceWindows
 			.flatMap((workspaceWindow) => workspaceWindow.tabs.mru)
-			.find((surfaceId) => !isExcluded(surfaceId) && Boolean(snapshot.surfaces[surfaceId]));
-		const currentMobileFallback =
-			!isExcluded(snapshot.mobileActiveSurfaceId) &&
-			snapshot.surfaces[snapshot.mobileActiveSurfaceId]
-				? snapshot.mobileActiveSurfaceId
-				: null;
+			.find(isAvailable);
+		const currentMobileSurfaceId = isAvailable(snapshot.mobileActiveSurfaceId)
+			? snapshot.mobileActiveSurfaceId
+			: null;
 		const activeId =
-			recent ?? activeWindowFallback ?? inactiveWindowFallback ?? currentMobileFallback;
+			recentSurfaceId ?? activeWindowSurfaceId ?? recentWindowSurfaceId ?? currentMobileSurfaceId;
 		if (!activeId) throw new Error('No mobile return surface is available');
 		return {
 			activeId,
