@@ -4,12 +4,13 @@
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import {
-		getActiveTranscriptState,
-		getAgentState,
 		getLocalSettings,
 		getAppShell,
 		getModelCatalog,
 	} from '$lib/context';
+	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { SessionAgentId } from '$lib/types/app';
+	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		CHAT_FEED_CONTENT_BASE_CLASS,
@@ -47,6 +48,8 @@
 	const EMPTY_PENDING_PERMISSIONS: PendingPermissionRequest[] = [];
 
 	interface Props {
+		transcript: ActiveTranscriptState;
+		agentId: SessionAgentId;
 		scrollContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -65,14 +68,18 @@
 		onForkChat?: (upToSeq?: number) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		isVisible: boolean;
+		announcementsEnabled?: boolean;
 		pinnedToBottom: boolean;
 		surfaceIdentity: string;
 		onViewportPortChange?: (port: ConversationViewportPort | null) => void;
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
+		onPresentationPortChange?: (port: ConversationFeedPresentationPort | null) => void;
 		onInitialEndRestored?: () => void;
 	}
 
 	let {
+		transcript,
+		agentId,
 		scrollContainer = $bindable(null),
 		onscroll,
 		onUserScrollIntent,
@@ -88,20 +95,21 @@
 		onForkChat,
 		onGenerateTitleFromMessage,
 		isVisible,
+		announcementsEnabled = true,
 		pinnedToBottom,
 		surfaceIdentity,
 		onViewportPortChange,
 		onRegisterPrepareHide,
+		onPresentationPortChange,
 		onInitialEndRestored,
 	}: Props = $props();
 
-	const chatState = getActiveTranscriptState();
-	const agentState = getAgentState();
+	const chatState = $derived(transcript);
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 
-	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentState.agentId));
+	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
 	const canShowForkAtMessage = $derived(
 		canShowForkAtMessageAction({
 			supportsForkAtMessage,
@@ -110,7 +118,7 @@
 	const canUseForkAtMessage = $derived(
 		canUseForkAtMessageAction({
 			supportsForkAtMessage,
-			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentState.agentId),
+			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentId),
 			isProcessing,
 		}),
 	);
@@ -222,7 +230,7 @@
 			surfaceIdentity,
 			rows: chatState.visibleRows,
 			mutationClock: chatState.feedMutationClock,
-			visible: isVisible,
+			visible: isVisible && announcementsEnabled,
 			pinnedToBottom,
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
@@ -299,6 +307,20 @@
 		retention.closeAllTransients();
 		virtualController.prepareForHide();
 	}
+
+	function closeTransients(): void {
+		retention.closeAllTransients();
+	}
+
+	$effect(() => {
+		const port: ConversationFeedPresentationPort = {
+			captureRestoreTarget: () =>
+				virtualController.captureRestoreTarget(chatState.transcriptViewId, pinnedToBottom),
+			closeTransients,
+		};
+		onPresentationPortChange?.(port);
+		return () => onPresentationPortChange?.(null);
+	});
 
 	$effect(() => {
 		onRegisterPrepareHide?.(prepareForHide);
@@ -384,7 +406,7 @@
 						{retention}
 						{itemState}
 						renderModel={projection.renderModel}
-						agentId={agentState.agentId}
+						agentId={agentId}
 						showThinking={localSettings.showThinking}
 						{pendingPermissionRequests}
 						earlierPageState={chatState.pageStates.earlier}
@@ -465,7 +487,7 @@
 	<div
 		class="sr-only"
 		role="status"
-		aria-live="polite"
+		aria-live={announcementsEnabled ? 'polite' : 'off'}
 		aria-atomic="true"
 		data-chat-feed-announcement-sequence={announcement.sequence}
 	>

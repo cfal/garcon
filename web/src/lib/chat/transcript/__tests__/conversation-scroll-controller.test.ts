@@ -190,7 +190,7 @@ function controllerFixture(
 		getViewport: () => viewport,
 		getQueueContainer: () => queue,
 		chatState: state,
-		sessions,
+		getChatId: () => sessions.selectedChatId,
 	});
 	return { controller, viewport, state, scroller, sessions };
 }

@@ -397,7 +397,7 @@
 		getViewport: () => conversationViewport,
 		getQueueContainer: () => queueControlsContainer,
 		chatState,
-		sessions,
+		getChatId: () => sessions.selectedChatId,
 	});
 	function scrollToBottomAndFill(): void {
 		void scroll.scrollToLatestAndFill();
@@ -762,6 +762,8 @@
 	<div class="relative flex-1 min-h-0">
 		<svelte:boundary>
 			<ConversationFeed
+				transcript={chatState}
+				agentId={selectedAgentId}
 				bind:scrollContainer
 				onscroll={() => scroll.handleScroll()}
 				onUserScrollIntent={(direction) => scroll.noteUserScrollIntent(direction)}
@@ -784,6 +786,7 @@
 				reserveComposerTraySpace={composerCapSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}
+				announcementsEnabled={isVisible}
 				pinnedToBottom={scroll.isPinnedToBottom}
 				surfaceIdentity={conversationSurfaceIdentity}
 				onViewportPortChange={(port) => (conversationViewport = port)}

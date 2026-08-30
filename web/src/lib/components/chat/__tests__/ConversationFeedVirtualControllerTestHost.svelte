@@ -67,8 +67,9 @@
 			item: {
 				kind: 'message',
 				id: `row-${index}`,
-				message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
-				index,
+					message: new UserMessage('2026-08-03T00:00:00.000Z', `prompt ${index}`),
+					index,
+					ordinal: firstItemNumber + index + 1,
 			},
 			spacingAfter: 'none',
 		}));

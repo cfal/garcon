@@ -194,6 +194,24 @@ describe('ConversationFeedVirtualController', () => {
 		);
 	});
 
+	it('captures provider-neutral end and row restoration targets', async () => {
+		const { exposure } = await renderController();
+		expect(exposure.controller.captureRestoreTarget('view-1', true)).toEqual({ kind: 'end' });
+
+		await exposure.setPinned(false);
+		await settleController();
+		const target = exposure.controller.captureRestoreTarget('view-1', false);
+
+		expect(target).toEqual(
+			expect.objectContaining({
+				kind: 'row',
+				transcriptViewId: 'view-1',
+				ordinal: expect.any(Number),
+				viewportOffset: expect.any(Number),
+			}),
+		);
+	});
+
 	it('retries an initially rejected geometry publication', async () => {
 		const { exposure } = await renderController({ invalidInitialGeometry: true });
 

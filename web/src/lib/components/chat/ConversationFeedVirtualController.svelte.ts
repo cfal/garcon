@@ -39,6 +39,7 @@ import {
 	settleConversationEndRestore,
 	settleConversationTarget,
 } from './conversation-feed-virtual-runtime.js';
+import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
@@ -299,6 +300,32 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virt.suspend();
+	}
+
+	captureRestoreTarget(
+		transcriptViewId: string,
+		pinned: boolean,
+	): ConversationPanelRestoreTarget | null {
+		if (pinned) return { kind: 'end' };
+		const anchor = this.#captureVirtualAnchor(true);
+		if (!anchor) return null;
+		for (const key of [anchor.key, ...anchor.fallbackKeys]) {
+			const index = this.#configuredModel.indexByKey.get(key);
+			if (index === undefined) continue;
+			const virtualItem = this.#configuredModel.items[index];
+			if (
+				virtualItem?.kind !== 'transcript' ||
+				virtualItem.item.kind !== 'message' ||
+				virtualItem.item.ordinal === undefined
+			) continue;
+			return {
+				kind: 'row',
+				transcriptViewId,
+				ordinal: virtualItem.item.ordinal,
+				viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
+			};
+		}
+		return null;
 	}
 
 	finishScrollbarDrag(): void {
