@@ -4,6 +4,7 @@
 // persisted registry, and that the continuation actually receives the archived
 // history as its carried context.
 import { describe, expect, test } from 'bun:test';
+import type { ChatListEntry } from '../../../common/chat-list.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -24,9 +25,10 @@ describe('self handoff', () => {
       });
       expect((await client.waitForTurnTerminal(sourceChatId, started.turnId)).type)
         .toBe('agent-run-finished');
+      const sourceAnchor = await client.getMessages(sourceChatId);
 
       const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
-      const response = await client.post<{ chat: { id: string } }>(
+      const response = await client.post<{ chat: ChatListEntry }>(
         '/api/v1/chats/handoff-run',
         {
           clientRequestId: crypto.randomUUID(),
@@ -39,6 +41,12 @@ describe('self handoff', () => {
 
       // The response names the continuation, which is what the client navigates to.
       expect(response.chat.id).toBe(targetChatId);
+      expect(response.chat.parentChat).toEqual({
+        chatId: sourceChatId,
+        relation: 'handoff',
+        transcriptViewId: sourceAnchor.transcriptViewId,
+        ordinal: sourceAnchor.lastOrdinal,
+      });
 
       const request = await held.received;
       const carriedInput = expectedCarriedInput([
@@ -54,6 +62,7 @@ describe('self handoff', () => {
       const source = chats.find((chat) => chat.id === sourceChatId);
       const target = chats.find((chat) => chat.id === targetChatId);
       expect(target).toBeDefined();
+      expect(target?.parentChat).toEqual(response.chat.parentChat);
       // Same agent and model; a fresh chat, not a switch in place.
       expect(target?.agentId).toBe(source?.agentId);
       expect(target?.agentOwnershipEpoch).not.toBe(source?.agentOwnershipEpoch);

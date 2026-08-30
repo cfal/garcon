@@ -96,6 +96,7 @@ describe('fork-run lifecycle', () => {
         agent: fixture.directAgents.openAi,
       });
       await fixture.client.waitForTurnTerminal(sourceChatId, second.turnId);
+      const sourceAnchor = await fixture.client.getMessages(sourceChatId);
 
       const targetChatId = fixture.newChatId();
       const clientRequestId = crypto.randomUUID();
@@ -127,7 +128,15 @@ describe('fork-run lifecycle', () => {
         commandType: 'fork-run',
         clientRequestId,
         chatId: targetChatId,
-        chat: { id: targetChatId },
+        chat: {
+          id: targetChatId,
+          parentChat: {
+            chatId: sourceChatId,
+            relation: 'fork',
+            transcriptViewId: sourceAnchor.transcriptViewId,
+            ordinal: sourceAnchor.lastOrdinal,
+          },
+        },
       });
       expect(accepted.turnId).toBeString();
 
@@ -215,9 +224,12 @@ describe('fork-run lifecycle', () => {
         entry.lastUserText === targetInput)).toHaveLength(1);
 
       await fixture.restartGarcon();
-      expect((await fixture.client.listChats()).sessions.map((chat) => chat.id).sort()).toEqual(
+      const restartedChats = (await fixture.client.listChats()).sessions;
+      expect(restartedChats.map((chat) => chat.id).sort()).toEqual(
         [sourceChatId, targetChatId].sort(),
       );
+      expect(restartedChats.find((chat) => chat.id === targetChatId)?.parentChat)
+        .toEqual(accepted.chat.parentChat);
       expect(userContents((await fixture.client.getMessages(sourceChatId)).messages)).toEqual(
         ['fork-source-first', 'fork-source-second'],
       );

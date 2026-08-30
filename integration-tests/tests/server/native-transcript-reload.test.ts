@@ -3,6 +3,7 @@ import { appendFile, chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT } from '../../../common/chat-snapshot.js';
+import type { ForkRunCommandResponse } from '../../../common/chat-command-contracts.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type {
@@ -65,6 +66,25 @@ describe('native transcript reload', () => {
         command: 'native-reload-baseline',
       });
       await fixture.client.waitForTurnTerminal(chatId, initial.turnId);
+      const parentAnchor = await fixture.client.getMessages(chatId);
+      const childChatId = fixture.newChatId();
+      const child = await fixture.client.post<ForkRunCommandResponse>(
+        '/api/v1/chats/handoff-run',
+        {
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          sourceChatId: chatId,
+          chatId: childChatId,
+          command: 'native-reload-lineage-child',
+        },
+      );
+      await fixture.client.waitForTurnTerminal(childChatId, child.turnId);
+      expect(child.chat.parentChat).toEqual({
+        chatId,
+        relation: 'handoff',
+        transcriptViewId: parentAnchor.transcriptViewId,
+        ordinal: parentAnchor.lastOrdinal,
+      });
 
       const held = await fixture.client.runChat({
         clientRequestId: crypto.randomUUID(),
@@ -206,6 +226,12 @@ describe('native transcript reload', () => {
         externalContent,
       ]);
       expect(messagesOfType(reloaded.messages, 'transcript-notice')).toEqual([]);
+      const childAfterReload = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === childChatId,
+      );
+      expect(childAfterReload?.parentChat).toEqual(child.chat.parentChat);
+      expect(childAfterReload?.parentChat?.transcriptViewId)
+        .not.toBe(reloaded.transcriptViewId);
 
       await reloadFromNativeHistory(fixture, chatId);
       const reloadedAgain = await fixture.client.getMessages(chatId);
@@ -220,6 +246,9 @@ describe('native transcript reload', () => {
         `echo:${HELD_PROMPT}`,
         externalContent,
       ]);
+      expect((await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === childChatId,
+      )?.parentChat).toEqual(child.chat.parentChat);
       const sharedAfterReload = await fixture.client.get<GetSharedChatResponse>(
         `/api/v1/shared?token=${encodeURIComponent(share.shareToken)}&limit=100`,
       );
