@@ -411,6 +411,8 @@ describe('transcript ledger read-fold matrix', () => {
             endpointId: null,
             model: 'gpt-5.4',
             reasoningEffort: null,
+            projectPath: '/projects/alpha',
+            permissionMode: 'bypassPermissions',
           }],
         }),
         {

@@ -11,6 +11,8 @@ const PARAMS = {
   endpointId: null,
   model: 'gpt-5.4',
   reasoningEffort: null,
+  projectPath: null,
+  permissionMode: null,
 };
 
 const EXECUTION_DEFAULTS = {
@@ -63,7 +65,7 @@ describe('AgentStartSelectionService', () => {
   it('resolves a start selection from the requested agent and captured defaults', async () => {
     const fixture = createFixture();
 
-    await expect(fixture.service.resolve(PARAMS, EXECUTION_DEFAULTS)).resolves.toEqual({
+    await expect(fixture.service.resolve(PARAMS, EXECUTION_DEFAULTS, 'acceptEdits')).resolves.toEqual({
       ok: true,
       selection: {
         model: 'gpt-5.4',
@@ -87,7 +89,8 @@ describe('AgentStartSelectionService', () => {
     const getAgentCatalogEntry = mock(async (_agentId, query) => query?.strict ? strict : initial);
     const fixture = createFixture({ agents: { getAgentCatalogEntry } });
 
-    await expect(fixture.service.resolve(PARAMS, EXECUTION_DEFAULTS)).resolves.toMatchObject({ ok: true });
+    await expect(fixture.service.resolve(PARAMS, EXECUTION_DEFAULTS, 'acceptEdits'))
+      .resolves.toMatchObject({ ok: true });
     expect(getAgentCatalogEntry.mock.calls).toEqual([
       ['codex'],
       ['codex', { strict: true }],
@@ -96,7 +99,7 @@ describe('AgentStartSelectionService', () => {
 
   it('maps semantic selection failures to fixed result tokens', async () => {
     const missing = createFixture({ agents: { getAgentCatalogEntry: mock(async () => null) } });
-    await expect(missing.service.resolve(PARAMS, EXECUTION_DEFAULTS)).resolves.toEqual({
+    await expect(missing.service.resolve(PARAMS, EXECUTION_DEFAULTS, 'acceptEdits')).resolves.toEqual({
       ok: false,
       message: 'unknown-agent',
     });
@@ -105,7 +108,7 @@ describe('AgentStartSelectionService', () => {
     await expect(unsupportedEffort.service.resolve({
       ...PARAMS,
       reasoningEffort: 'ultra',
-    }, EXECUTION_DEFAULTS)).resolves.toEqual({
+    }, EXECUTION_DEFAULTS, 'acceptEdits')).resolves.toEqual({
       ok: false,
       message: 'unsupported-reasoning-effort',
     });
@@ -114,9 +117,15 @@ describe('AgentStartSelectionService', () => {
     await expect(bypass.service.resolve(PARAMS, {
       ...EXECUTION_DEFAULTS,
       global: { ...EXECUTION_DEFAULTS.global, permissionMode: 'bypassPermissions' },
-    })).resolves.toEqual({
+    }, 'bypassPermissions')).resolves.toMatchObject({
+      ok: true,
+      selection: { permissionMode: 'bypassPermissions' },
+    });
+
+    const unsupported = createFixture();
+    await expect(unsupported.service.resolve(PARAMS, EXECUTION_DEFAULTS, 'plan')).resolves.toEqual({
       ok: false,
-      message: 'permission-override-required',
+      message: 'unsupported-permission-mode',
     });
   });
 
@@ -142,7 +151,7 @@ describe('AgentStartSelectionService', () => {
       'incompatible-endpoint',
       'ambiguous-model',
       'unknown-model',
-      'start-failed',
+      'unsupported-permission-mode',
       'unsupported-reasoning-effort',
       'permission-override-required',
     ]);

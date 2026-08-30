@@ -145,7 +145,7 @@ describe('imported transcript drafts', () => {
           AT,
           'Retained answer.\n'
             + '<garcon-start-agent>\n'
-            + `{"prompt":"Investigate the failure.","params":[{"ref":"${ref}","agent":"codex","model":"gpt-5.4"}]}\n`
+            + `{"prompt":"Investigate the failure.","params":[{"ref":"${ref}","agent":"codex","model":"gpt-5.4","projectPath":"/projects/alpha","permissions":"plan"}]}\n`
             + '</garcon-start-agent>',
         ),
         providerMeta: { nativeIdentity: { id: 'assistant-start' } },
@@ -178,6 +178,8 @@ describe('imported transcript drafts', () => {
             endpointId: null,
             model: 'gpt-5.4',
             reasoningEffort: null,
+            projectPath: '/projects/alpha',
+            permissionMode: 'plan',
           }],
         },
         providerMeta: null,

@@ -210,7 +210,14 @@ export default function createWorkspaceRoutes(
 
     const patch: Partial<AgentCommandsFeatureSettings> = {};
     const setting = raw as Record<string, unknown>;
-    for (const key of ['enabled', 'chatIdDiscovery', 'sendMessage', 'subAgents'] as const) {
+    for (const key of [
+      'enabled',
+      'chatIdDiscovery',
+      'sendMessage',
+      'subAgents',
+      'allowCustomSubAgentProjectPath',
+      'allowCustomSubAgentPermissionLevel',
+    ] as const) {
       if (!(key in setting)) continue;
       if (typeof setting[key] !== 'boolean') {
         return `features.agentCommands.${key} must be a boolean`;

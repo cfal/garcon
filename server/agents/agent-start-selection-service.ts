@@ -1,4 +1,5 @@
 import type { GarconCreateChatFailureMessage, GarconCreateChatParams } from '../../common/garcon-start-agent.js';
+import type { PermissionMode } from '../../common/chat-modes.js';
 import type { RemoteExecutionDefaults } from '../../common/settings.js';
 import {
   resolveStartSelection,
@@ -27,6 +28,7 @@ export class AgentStartSelectionService {
   async resolve(
     params: GarconCreateChatParams,
     executionDefaults: RemoteExecutionDefaults,
+    permissionMode: PermissionMode,
   ): Promise<AgentStartSelectionResult> {
     const initialEntry = await this.deps.agents.getAgentCatalogEntry(params.agentId);
     const requiresStrictDiscovery = this.deps.agents.requiresStrictModelDiscovery(params.agentId)
@@ -49,6 +51,7 @@ export class AgentStartSelectionService {
           model: params.model,
           ...(params.providerId === null ? {} : { providerId: params.providerId }),
           ...(params.endpointId === null ? {} : { endpointId: params.endpointId }),
+          permissionMode,
           ...(params.reasoningEffort === null ? {} : { thinkingMode: params.reasoningEffort }),
         },
       );
@@ -83,7 +86,8 @@ export function resultMessageForSelectionError(
     case 'PERMISSION_OVERRIDE_REQUIRED':
       return 'permission-override-required';
     case 'INVALID_CATALOG':
-    case 'UNSUPPORTED_PERMISSION_MODE':
       return 'start-failed';
+    case 'UNSUPPORTED_PERMISSION_MODE':
+      return 'unsupported-permission-mode';
   }
 }
