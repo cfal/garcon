@@ -19,7 +19,7 @@ import type {
   AgentAuthLoginStatus,
 } from '../../common/agent-auth.js';
 import type { IChatRegistry } from '../chats/store.js';
-import type { CarryOverCompactionResult } from '../chats/carryover-compaction.js';
+import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { IntegrationRegistry } from './integration-registry.js';
@@ -177,7 +177,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     integrations: IntegrationRegistry;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
-    createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverCompactionResult>;
+    createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;

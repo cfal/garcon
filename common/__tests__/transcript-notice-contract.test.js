@@ -2,10 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import {
   CliRowMessage,
   ErrorMessage,
+  parseChatMessage,
+  TranscriptNoticeMessage,
+} from '../chat-types.ts';
+import {
   isChatIdDiscoveryFailureNoticeDetail,
   isHandoffSummaryNoticeDetail,
-  parseChatMessage,
-} from '../chat-types.ts';
+  parseTranscriptNoticeDetail,
+} from '../transcript-notice-details.ts';
 
 const AT = '2026-08-16T00:00:00.000Z';
 
@@ -51,9 +55,9 @@ describe('transcript notice contracts', () => {
 
   it('round-trips typed chat ID discovery notices', () => {
     for (const detail of [
-      { type: 'chat-id-request' },
       { type: 'chat-id-disclosure' },
-      { type: 'chat-id-discovery-failure', reason: 'unsupported' },
+      { type: 'chat-id-discovery-failure', reason: 'disabled' },
+      { type: 'chat-id-discovery-failure', reason: 'delivery-failed' },
     ]) {
       const message = {
         type: 'transcript-notice',
@@ -67,39 +71,88 @@ describe('transcript notice contracts', () => {
     expect(isChatIdDiscoveryFailureNoticeDetail({
       type: 'chat-id-discovery-failure',
       reason: 'unsupported',
-    })).toBe(true);
+    })).toBe(false);
     expect(isChatIdDiscoveryFailureNoticeDetail({
       type: 'chat-id-discovery-failure',
       reason: 'invalid',
     })).toBe(false);
   });
 
-  it('upgrades legacy CLI provenance into explicit row messages', () => {
-    for (const [type, style] of [
-      ['transcript-notice', 'notice'],
-      ['error', 'error'],
-    ]) {
-      const parsed = parseChatMessage({
-        type,
-        timestamp: AT,
-        content: 'Synthetic CLI row.',
-        title: 'Deployment',
-        detail: {
-          type: 'cli-row',
-        },
-      });
+  it('round-trips title-only notices without inventing semantic detail', () => {
+    const message = {
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Earlier chat history was small enough to carry over as context.',
+      title: 'History carried without compaction',
+    };
 
-      expect(parsed).toBeInstanceOf(CliRowMessage);
-      expect(JSON.parse(JSON.stringify(parsed))).toEqual({
-        type: 'cli-row',
-        timestamp: AT,
-        content: 'Synthetic CLI row.',
-        presentation: { style },
-        format: 'plain',
-        disclosure: 'expanded',
-        title: 'Deployment',
-      });
-    }
+    expect(JSON.parse(JSON.stringify(parseChatMessage(message)))).toEqual(message);
+  });
+
+  it('centralizes semantic detail parsing and rejects unknown details', () => {
+    expect(parseTranscriptNoticeDetail({
+      type: 'carryover-migration-quarantine',
+      artifactId: 'artifact-1',
+      errorCode: 'CARRYOVER_PARSE_FAILED',
+      ignored: 'not projected',
+    })).toEqual({
+      type: 'carryover-migration-quarantine',
+      artifactId: 'artifact-1',
+      errorCode: 'CARRYOVER_PARSE_FAILED',
+    });
+    expect(parseTranscriptNoticeDetail({
+      type: 'chat-id-disclosure',
+      delivery: 'queued',
+    })).toEqual({ type: 'chat-id-disclosure' });
+    expect(parseTranscriptNoticeDetail({
+      type: 'chat-id-discovery-failure',
+      reason: 'invalid',
+    })).toBeNull();
+    expect(parseTranscriptNoticeDetail({ type: 'ordinary-notice' })).toBeNull();
+  });
+
+  it('does not reinterpret other message kinds as CLI rows', () => {
+    const formerCliNotice = parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Former CLI notice shape.',
+      detail: { type: 'cli-row' },
+    });
+    expect(formerCliNotice).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Former CLI notice shape.',
+    ));
+    expect(formerCliNotice).not.toBeInstanceOf(CliRowMessage);
+
+    const error = parseChatMessage({
+      type: 'error',
+      timestamp: AT,
+      content: 'Former CLI error shape.',
+      title: 'Ignored title',
+      detail: { type: 'cli-row' },
+    });
+    expect(error).toBeInstanceOf(ErrorMessage);
+    expect(error).not.toBeInstanceOf(CliRowMessage);
+    expect(JSON.parse(JSON.stringify(error))).toEqual({
+      type: 'error',
+      timestamp: AT,
+      content: 'Former CLI error shape.',
+    });
+  });
+
+  it('renders unknown semantic detail as a plain transcript notice', () => {
+    expect(parseChatMessage({
+      type: 'transcript-notice',
+      timestamp: AT,
+      content: 'Future notice shape.',
+      detail: { type: 'not-yet-known' },
+      title: 'Future notice',
+    })).toEqual(new TranscriptNoticeMessage(
+      AT,
+      'Future notice shape.',
+      undefined,
+      'Future notice',
+    ));
   });
 
   it('round-trips explicit preset and custom CLI rows', () => {
@@ -125,23 +178,7 @@ describe('transcript notice contracts', () => {
     }
   });
 
-  it('restores legacy defaults and safely normalizes malformed durable presentation', () => {
-    expect(parseChatMessage({
-      type: 'error',
-      timestamp: AT,
-      content: 'Untitled error.',
-      detail: { type: 'cli-row' },
-    })?.presentation).toEqual({ style: 'error' });
-
-    const strayDetailTitle = parseChatMessage({
-      type: 'transcript-notice',
-      timestamp: AT,
-      content: 'Stray detail title.',
-      detail: { type: 'cli-row', title: 'Deployment' },
-    });
-    expect(strayDetailTitle?.presentation).toEqual({ style: 'notice' });
-    expect(strayDetailTitle?.title).toBeUndefined();
-
+  it('safely normalizes malformed explicit CLI presentation', () => {
     expect(parseChatMessage({
       type: 'cli-row',
       timestamp: AT,

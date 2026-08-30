@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
-import { UserMessage, type ChatMessage } from '$shared/chat-types';
+import { TranscriptNoticeMessage, UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 
 const INDEX_KEY = 'chat_snapshot_index_v3';
@@ -50,6 +50,20 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(restored!.stale).toBe(false);
 	});
 
+	it('restores the durable uncompacted carryover notice after browser refresh', () => {
+		const notice = new TranscriptNoticeMessage(
+			TS,
+			'Earlier chat history was small enough to carry over as context.',
+			undefined,
+			'History carried without compaction',
+		);
+		storage.persist('chat-1', [{ ordinal: 1, message: notice }], cursor(1));
+
+		const restored = new LocalChatTranscriptStorage().restore('chat-1');
+
+		expect(restored?.entries).toEqual([{ ordinal: 1, message: notice }]);
+	});
+
 	it('persists and restores only the requested trailing window', () => {
 		storage.persist('chat-1', [entry(1, 'a'), entry(2, 'b'), entry(3, 'c')], cursor(3), {
 			limit: 2,
@@ -80,7 +94,7 @@ describe('LocalChatTranscriptStorage', () => {
 		localStorage.setItem(
 			snapshotKey('chat-1'),
 			JSON.stringify({
-				version: 2,
+				version: 5,
 				chatId: 'chat-1',
 				savedAt: TS,
 				logId: 'log-1',

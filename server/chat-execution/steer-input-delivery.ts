@@ -104,7 +104,7 @@ export class SteerInputDelivery {
         if (!deliveryPrepared) {
           throw new SteerDeliveryError(
             new Error('Agent accepted steering without preparing delivery'),
-            'not-sent',
+            'unknown',
           );
         }
         return;

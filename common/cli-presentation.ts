@@ -72,10 +72,7 @@ export function coerceDurableCliBodyDisclosure(value: unknown): CliBodyDisclosur
   return isCliBodyDisclosure(value) ? value : 'expanded';
 }
 
-export function coerceDurableCliPresentation(
-  value: unknown,
-  fallbackStyle: CliPresentationStyle = 'notice',
-): CliPresentation {
+export function coerceDurableCliPresentation(value: unknown): CliPresentation {
   if (isCliPresentation(value)) return value;
   if (isCliPresentationStyle(value)) {
     return value === 'custom' ? { style: 'notice' } : { style: value };
@@ -87,7 +84,7 @@ export function coerceDurableCliPresentation(
     };
     if (isCliPresentation(candidate)) return candidate;
   }
-  return fallbackStyle === 'custom' ? { style: 'notice' } : { style: fallbackStyle };
+  return { style: 'notice' };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

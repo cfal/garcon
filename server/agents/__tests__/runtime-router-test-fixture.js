@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 export function createRuntimeTranscriptFixture(options = {}) {
   const view = {
     viewId: 'view-1',
@@ -42,6 +44,22 @@ export function createRuntimeTranscriptFixture(options = {}) {
       get closed() { return closed; },
       close() { closed = true; activeRunId = null; },
     };
+  };
+  const appendNotice = (chatId, viewId, input) => {
+    if (viewId !== currentView()?.viewId) throw new Error('stale view');
+    options.appendNotice?.(chatId, viewId, input);
+    const row = {
+      kind: 'notice',
+      viewId,
+      ordinal: (options.rows?.length ?? 0) + notices.length + 1,
+      at: '2026-08-12T00:00:00.000Z',
+      message: input.content,
+      detail: { ...(input.detail ?? {}), title: input.title },
+      providerMeta: null,
+    };
+    notices.push(row);
+    emit({ type: 'rows', chatId, viewId, rows: [row] });
+    return row;
   };
   const ledger = {
     subscribe(listener) {
@@ -93,21 +111,19 @@ export function createRuntimeTranscriptFixture(options = {}) {
     takePreparedInput: (...args) => typeof options.composition === 'function'
       ? options.composition(...args)
       : options.composition ?? null,
-    appendHandoffSummary: (chatId, viewId, content) => {
-      if (viewId !== currentView()?.viewId) throw new Error('stale view');
-      options.appendHandoffSummary?.(chatId, viewId, content);
-      const row = {
-        kind: 'notice',
-        viewId,
-        ordinal: (options.rows?.length ?? 0) + notices.length + 1,
-        at: '2026-08-12T00:00:00.000Z',
-        message: content,
-        detail: { type: 'handoff-summary', title: 'Handoff summary' },
-        providerMeta: null,
-      };
-      notices.push(row);
-      emit({ type: 'rows', chatId, viewId, rows: [row] });
-      return row;
+    appendNotice,
+    appendCarryoverNotice: (chatId, viewId, input) => {
+      const view = currentView();
+      const detail = { ...(input.detail ?? {}), title: input.title };
+      const existing = viewId === view.viewId
+        ? [...(options.rows ?? []), ...notices].find((row) => (
+            row.kind === 'notice'
+            && row.ordinal >= view.contentStartOrdinal
+            && row.message === input.content
+            && isDeepStrictEqual(row.detail, detail)
+          ))
+        : undefined;
+      return existing ?? appendNotice(chatId, viewId, input);
     },
     conversationMessages: (chatId, excludedOrdinals) => options.conversationMessages
       ? options.conversationMessages(chatId, excludedOrdinals)

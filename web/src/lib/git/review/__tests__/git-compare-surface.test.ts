@@ -5,6 +5,7 @@ import type { GitTargetCandidate } from '$lib/api/git.js';
 import type { GitComparisonSpecification } from '$lib/git/review/git-comparison.svelte.js';
 import {
 	LocalGitComparisonPreferences,
+	type GitComparisonPreferences,
 	type GitComparisonPreferencePersistence,
 } from '$lib/git/review/git-comparison-preferences.js';
 
@@ -69,6 +70,14 @@ function createComparisonPersistence() {
 	return persistence;
 }
 
+function recallPreference(
+	preferences: GitComparisonPreferences,
+	chatId: string,
+	projectPath = '/project',
+): GitComparisonSpecification | null {
+	return preferences.recall({ chatId, projectPath });
+}
+
 const revisionComparison: GitComparisonSpecification = {
 	fromRevision: 'origin/main',
 	toKind: 'revision',
@@ -124,8 +133,8 @@ describe('GitCompareSurfaceController', () => {
 			toKind: 'working-tree',
 			mode: 'direct',
 		};
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
-		deps.comparisonPreferences.remember('chat-b', workingTreeComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-b', workingTreeComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 
@@ -151,7 +160,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('restores merge-base mode with revision endpoints', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', mergeBaseComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', mergeBaseComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 
@@ -166,6 +175,53 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.mode).toBe('merge-base');
 	});
 
+	it('inherits the nearest project default without pinning it to a new worktree chat', async () => {
+		const worktreePath = '/repo/.worktrees/abc';
+		api.getGitTargetCandidates.mockResolvedValue({
+			targets: [
+				candidate(worktreePath, {
+					repoRoot: '/repo',
+					worktreePath,
+					label: 'abc',
+					branch: 'feature',
+				}),
+			],
+		});
+		const deps = createGitSurfaceTestDeps();
+		deps.comparisonPreferences.rememberUserSelection(
+			{ chatId: 'seed-root', projectPath: '/repo' },
+			revisionComparison,
+		);
+		const rememberUserSelection = vi.spyOn(deps.comparisonPreferences, 'rememberUserSelection');
+		const controller = new GitCompareSurfaceController(deps);
+		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
+
+		setProject(controller, 'chat-a', worktreePath, '/canonical/repo');
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
+		expect(controller.comparison.fromRevision).toBe('origin/main');
+		expect(controller.comparison.toKind).toBe('revision');
+		expect(rememberUserSelection).not.toHaveBeenCalled();
+
+		const updatedDefault: GitComparisonSpecification = {
+			fromRevision: 'release',
+			toKind: 'working-tree',
+			mode: 'direct',
+		};
+		deps.comparisonPreferences.rememberUserSelection(
+			{ chatId: 'seed-updated', projectPath: '/repo' },
+			updatedDefault,
+		);
+		rememberUserSelection.mockClear();
+		setProject(controller, 'chat-b', worktreePath, '/canonical/repo');
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
+
+		expect(controller.comparison.fromRevision).toBe('release');
+		expect(controller.comparison.toKind).toBe('working-tree');
+		expect(rememberUserSelection).not.toHaveBeenCalled();
+	});
+
 	it('reuses the chat range across selected targets', async () => {
 		const projectTarget = candidate();
 		const otherTarget = candidate('/other', {
@@ -177,7 +233,7 @@ describe('GitCompareSurfaceController', () => {
 		});
 		api.getGitTargetCandidates.mockResolvedValue({ targets: [projectTarget, otherTarget] });
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		setProject(controller, 'chat-a');
@@ -225,7 +281,7 @@ describe('GitCompareSurfaceController', () => {
 		await controller.target.selectTarget(otherTarget);
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
 
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 		expect(controller.comparison.fromRevision).toBe('origin/main');
 		expect(controller.comparison.toKind).toBe('revision');
 	});
@@ -242,15 +298,19 @@ describe('GitCompareSurfaceController', () => {
 			revisionComparison,
 		);
 		controller.comparison.setSpecification(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'new-chat', '/project/child')).toBeNull();
 
 		expect(await controller.compareCurrentSpecification()).toBe(true);
 
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'new-chat', '/project/child')).toEqual(
+			revisionComparison,
+		);
 	});
 
 	it('does not replace remembered success after a failed user comparison', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		setProject(controller, 'chat-a');
@@ -269,12 +329,13 @@ describe('GitCompareSurfaceController', () => {
 		compare.mockResolvedValueOnce(false);
 
 		expect(await controller.compareCurrentSpecification()).toBe(false);
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'new-chat', '/project')).toBeNull();
 	});
 
 	it('does not remember unsubmitted dialog fields', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		setProject(controller, 'chat-a');
@@ -289,7 +350,7 @@ describe('GitCompareSurfaceController', () => {
 		setProject(controller, 'chat-b');
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
 
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 	});
 
 	it('restores a range after controller and preference service recreation', async () => {
@@ -319,7 +380,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('keeps separate browser storage areas isolated', async () => {
 		const firstClient = createGitSurfaceTestDeps();
-		firstClient.comparisonPreferences.remember('chat-a', revisionComparison);
+		firstClient.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const secondClient = createGitSurfaceTestDeps();
 		const controller = new GitCompareSurfaceController(secondClient);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
@@ -335,7 +396,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('defers restoration while the project identity is resolving', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		controller.setProjectState({
@@ -360,7 +421,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('does not load a restored chat while Compare is hidden', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-b', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-b', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		setProject(controller, 'chat-a');
@@ -382,7 +443,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('retries a failed automatic restore without deleting remembered intent', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi
 			.spyOn(controller.comparison, 'compare')
@@ -392,7 +453,7 @@ describe('GitCompareSurfaceController', () => {
 		controller.setPresentationVisible(true);
 		await controller.target.activate();
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 
 		controller.setPresentationVisible(false);
 		controller.setPresentationVisible(true);
@@ -403,7 +464,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('does not retry a failed restore or discard a repair on project-state republish', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(false);
 		setProject(controller, 'chat-a');
@@ -450,6 +511,46 @@ describe('GitCompareSurfaceController', () => {
 		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(3));
 	});
 
+	it('does not persist a late explicit comparison after switching sessions', async () => {
+		api.getGitTargetCandidates.mockImplementation((projectPath: string) =>
+			Promise.resolve({
+				targets: [
+					candidate(projectPath, {
+						repoRoot: projectPath,
+						worktreePath: projectPath,
+					}),
+				],
+			}),
+		);
+		const deps = createGitSurfaceTestDeps();
+		const rememberUserSelection = vi.spyOn(deps.comparisonPreferences, 'rememberUserSelection');
+		const controller = new GitCompareSurfaceController(deps);
+		const pendingSubmission = deferred<boolean>();
+		const compare = vi
+			.spyOn(controller.comparison, 'compare')
+			.mockResolvedValueOnce(true)
+			.mockReturnValueOnce(pendingSubmission.promise)
+			.mockResolvedValueOnce(true);
+		vi.spyOn(controller.comparison, 'confirmedSpecification', 'get').mockReturnValue(
+			revisionComparison,
+		);
+		setProject(controller, 'chat-a', '/project-a', '/canonical/a');
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
+
+		const submission = controller.compareCurrentSpecification();
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
+		setProject(controller, 'chat-b', '/project-b', '/canonical/b');
+		await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(3));
+		pendingSubmission.resolve(true);
+
+		expect(await submission).toBe(false);
+		expect(rememberUserSelection).not.toHaveBeenCalled();
+		expect(recallPreference(deps.comparisonPreferences, 'new-a', '/project-a')).toBeNull();
+		expect(recallPreference(deps.comparisonPreferences, 'new-b', '/project-b')).toBeNull();
+	});
+
 	it('ignores a late comparison result after switching chats', async () => {
 		const deps = createGitSurfaceTestDeps();
 		const chatBComparison: GitComparisonSpecification = {
@@ -457,8 +558,8 @@ describe('GitCompareSurfaceController', () => {
 			toKind: 'working-tree',
 			mode: 'direct',
 		};
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
-		deps.comparisonPreferences.remember('chat-b', chatBComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-b', chatBComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const first = deferred<boolean>();
 		const second = deferred<boolean>();
@@ -482,7 +583,7 @@ describe('GitCompareSurfaceController', () => {
 		await first.promise;
 		await Promise.resolve();
 
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 		second.resolve(true);
 		await second.promise;
 	});
@@ -499,8 +600,8 @@ describe('GitCompareSurfaceController', () => {
 			toKind: 'working-tree',
 			mode: 'direct',
 		};
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
-		deps.comparisonPreferences.remember('chat-b', chatBComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-b', chatBComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const firstA = deferred<boolean>();
 		const pendingB = deferred<boolean>();
@@ -527,7 +628,7 @@ describe('GitCompareSurfaceController', () => {
 		firstA.resolve(true);
 		await firstA.promise;
 		await Promise.resolve();
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 
 		confirmed = revisionComparison;
 		finalA.resolve(true);
@@ -608,7 +709,7 @@ describe('GitCompareSurfaceController', () => {
 
 	it('restores the same symbolic range after branch checkout', async () => {
 		const deps = createGitSurfaceTestDeps();
-		deps.comparisonPreferences.remember('chat-a', revisionComparison);
+		deps.comparisonPreferences.rememberChat('chat-a', revisionComparison);
 		const controller = new GitCompareSurfaceController(deps);
 		const compare = vi.spyOn(controller.comparison, 'compare').mockResolvedValue(true);
 		setProject(controller, 'chat-a');
@@ -622,7 +723,7 @@ describe('GitCompareSurfaceController', () => {
 		expect(controller.comparison.fromRevision).toBe('origin/main');
 		expect(controller.comparison.toKind).toBe('revision');
 		expect(controller.comparison.toRevision).toBe('HEAD');
-		expect(deps.comparisonPreferences.recall('chat-a')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat-a')).toEqual(revisionComparison);
 	});
 
 	it('disposal remembers confirmed state and cancels future activation', async () => {
@@ -640,6 +741,6 @@ describe('GitCompareSurfaceController', () => {
 		controller.setPresentationVisible(true);
 		await controller.target.activate();
 		expect(compare).toHaveBeenCalledOnce();
-		expect(deps.comparisonPreferences.recall('chat')).toEqual(revisionComparison);
+		expect(recallPreference(deps.comparisonPreferences, 'chat')).toEqual(revisionComparison);
 	});
 });

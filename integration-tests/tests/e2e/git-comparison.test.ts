@@ -91,6 +91,14 @@ describe('Lightpanda Git comparison', () => {
       await app.clickSidebarChatContaining('git-comparison-chat-b');
       await app.waitForSelectedChat(chatB.id);
       await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['head comparison marker'], [
+        'working tree marker',
+      ]);
+      await app.clickEditComparison({ within: COMPARE_PANEL });
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      await app.fill('#git-comparison-from', 'HEAD');
+      await app.clickDialogButton('Working Tree');
+      await app.clickDialogButton('Compare');
       await waitForComparisonMarkers(fixture.page, ['working tree marker'], [
         'head comparison marker',
       ]);
@@ -130,7 +138,7 @@ describe('Lightpanda Git comparison', () => {
               version?: unknown;
               entries?: Array<{ chatId?: unknown }>;
             };
-            return parsed.version === 1
+            return parsed.version === 2
               && parsed.entries?.some((entry) => entry.chatId === chatId) === true;
           } catch {
             return false;
@@ -159,6 +167,91 @@ describe('Lightpanda Git comparison', () => {
         (element) => (element as HTMLInputElement).value,
       )).toBe('HEAD');
       await app.clickDialogButton('Cancel');
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('inherits a persisted project range in a new linked-worktree chat', async () => {
+    await withE2eFixture('git-comparison-project-default', async (fixture) => {
+      const project = fixture.integration.dirs.project;
+      const worktree = join(project, '.worktrees', 'abc');
+      await runGit(project, ['init', '-b', 'main']);
+      await runGit(project, ['config', 'user.email', 'test@example.com']);
+      await runGit(project, ['config', 'user.name', 'E2E Test']);
+      await writeFile(join(project, '.gitignore'), '.worktrees/\n', 'utf8');
+      await writeFile(join(project, 'base.txt'), 'base marker\n', 'utf8');
+      await runGit(project, ['add', '.']);
+      await runGit(project, ['commit', '-m', 'base']);
+      await runGit(project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      await writeFile(join(project, 'head-only.txt'), 'inherited head marker\n', 'utf8');
+      await runGit(project, ['add', 'head-only.txt']);
+      await runGit(project, ['commit', '-m', 'head change']);
+      await runGit(project, ['worktree', 'add', '-b', 'feature', worktree, 'HEAD']);
+      await writeFile(join(project, 'root-working.txt'), 'root working marker\n', 'utf8');
+
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('git-comparison-root-default', { projectPath: project });
+      await app.waitForText('echo:git-comparison-root-default');
+      await app.selectMainWorkspaceSurface('Open Git Compare');
+      await fixture.page.waitForSelector(COMPARE_PANEL);
+      await waitForComparisonMarkers(fixture.page, ['root working marker'], [
+        'inherited head marker',
+      ]);
+      await app.clickEditComparison({ within: COMPARE_PANEL });
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');
+      await app.fill('#git-comparison-from', 'origin/main');
+      await app.clickDialogButton('Revision');
+      await app.fill('#git-comparison-to', 'HEAD');
+      await app.clickDialogButton('Compare');
+      await waitForComparisonMarkers(fixture.page, ['inherited head marker'], [
+        'root working marker',
+      ]);
+
+      await fixture.page.waitForFunction(
+        (projectPath) => {
+          const raw = localStorage.getItem('pref_git_comparison_ranges_v1');
+          if (!raw) return false;
+          try {
+            const parsed = JSON.parse(raw) as {
+              version?: unknown;
+              projectEntries?: Array<{ projectPath?: unknown }>;
+            };
+            return parsed.version === 2
+              && parsed.projectEntries?.some((entry) => entry.projectPath === projectPath) === true;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 20_000 },
+        project,
+      );
+
+      await app.startOpenAiDirectChat('git-comparison-worktree-inherited', {
+        projectPath: worktree,
+      });
+      await app.waitForText('echo:git-comparison-worktree-inherited');
+      const chats = (await fixture.integration.client.listChats()).sessions;
+      const worktreeChat = chats.find(
+        (chat) => chat.preview.firstMessage === 'git-comparison-worktree-inherited',
+      );
+      if (!worktreeChat) throw new Error('The linked-worktree comparison chat must be listed.');
+      await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['inherited head marker'], [
+        'root working marker',
+      ]);
+
+      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
+      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await app.waitForSelectedChat(worktreeChat.id);
+      await fixture.page.waitForSelector('[id="main-panel-singleton:git-compare"]');
+      await app.selectMainWorkspaceSurface('Compare');
+      await waitForComparisonMarkers(fixture.page, ['inherited head marker'], [
+        'root working marker',
+      ]);
       fixture.assertNoBrowserErrors();
     });
   });

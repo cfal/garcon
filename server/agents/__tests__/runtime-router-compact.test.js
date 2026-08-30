@@ -54,7 +54,7 @@ function makeRouter(compaction, options = {}) {
     events: { trackTurn: mock(() => undefined), clearTurn: mock(() => undefined) },
     projection: { open: mock(async () => ({ kind: 'ready', value: {} })) },
     getCarryOverRevision: () => 'carry-1',
-    createCarriedContext: async () => ({ context: null, summary: null }),
+    createCarriedContext: async () => ({ kind: 'no-history' }),
     getCarryOverMessageCount: async () => 0,
     ledger: transcript.ledger,
     hasPendingOwnershipTransfer: () => false,

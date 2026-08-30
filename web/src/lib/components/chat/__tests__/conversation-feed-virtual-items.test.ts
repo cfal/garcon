@@ -177,7 +177,12 @@ describe('conversation virtual feed model', () => {
 	});
 
 	it('bounds collapsed handoff notices while plain notices stay compact', () => {
-		const plain = new TranscriptNoticeMessage('2026-08-03T00:00:00.000Z', 'Plain notice.');
+		const plain = new TranscriptNoticeMessage(
+			'2026-08-03T00:00:00.000Z',
+			'Earlier chat history was small enough to carry over as context.',
+			undefined,
+			'History carried without compaction',
+		);
 		const handoff = new TranscriptNoticeMessage(
 			'2026-08-03T00:00:00.000Z',
 			'# Summary\n\nCarried context.',

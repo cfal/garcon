@@ -157,18 +157,4 @@ describe('AgentEventBus', () => {
 
     expect(created).toHaveBeenCalledWith('chat-1');
   });
-
-  it('clears active and settled correlation when a chat is removed', async () => {
-    const bus = new AgentEventBus();
-    const finished = mock(() => undefined);
-    bus.onFinished(finished);
-    bus.trackTurn('chat-1', operation('turn-1'));
-    bus.settleTurn('chat-1', operation('turn-1'));
-    bus.clearTurn('chat-1');
-
-    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('finished'));
-
-    expect(bus.getActiveTurn('chat-1')).toBeUndefined();
-    expect(finished).not.toHaveBeenCalled();
-  });
 });

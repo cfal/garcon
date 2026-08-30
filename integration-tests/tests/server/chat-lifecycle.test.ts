@@ -8,6 +8,7 @@ import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
   countUserContent,
+  messagesOfType,
   userContents,
   userMessages,
 } from '../../support/chat-assertions.js';
@@ -129,6 +130,46 @@ describe('chat lifecycle', () => {
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
     });
   });
+
+  test('[TLV5-CHAT-ID-DISCOVERY.04-DIRECT-SERVER-01] falls back to one direct control turn', async () => {
+    await withIntegrationFixture('direct-chat-id-discovery-fallback', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const initialPrompt = 'Discover this chat ID.';
+      const disclosure = `<garcon-chat-id>${chatId}</garcon-chat-id>`;
+      const first = fixture.fakeProviders.openAi.holdNext({ lastUserText: initialPrompt });
+      const hidden = fixture.fakeProviders.openAi.holdNext({ lastUserText: disclosure });
+
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: initialPrompt,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await first.received;
+      first.releaseText('<garcon-get-chat-id />');
+
+      const hiddenRequest = await hidden.received;
+      expect(hiddenRequest.lastUserText).toBe(disclosure);
+      const duringFallback = await fixture.client.getMessages(chatId);
+      expect(userContents(duringFallback.messages)).toEqual([initialPrompt]);
+      expect(messagesOfType(duringFallback.messages, 'transcript-notice'))
+        .toEqual([expect.objectContaining({
+          title: 'Chat ID auto-discovery',
+          content: `Sent chat ID ${chatId} to agent.`,
+          detail: { type: 'chat-id-disclosure' },
+        })]);
+
+      const finishCursor = fixture.client.markEvents();
+      hidden.releaseText('Chat ID received.');
+      await fixture.client.waitForProcessing(chatId, false, { afterIndex: finishCursor });
+      const completed = await fixture.client.getMessages(chatId);
+      expect(userContents(completed.messages)).toEqual([initialPrompt]);
+      expect(assistantContents(completed.messages)).toEqual(['Chat ID received.']);
+      expect(fixture.fakeProviders.openAi.requests().map((request) => request.lastUserText))
+        .toEqual([initialPrompt, disclosure]);
+      expect(accepted.turnId).toBeTruthy();
+    });
+  }, 120_000);
 
   test('preserves provider context across direct turns', async () => {
     await withIntegrationFixture('direct-chat-context', async (fixture) => {

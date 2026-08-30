@@ -1,12 +1,12 @@
 import type { TranscriptViewId } from '../ledger/contracts.js';
-import type { CarryOverCompactionResult } from './carryover-compaction.js';
+import type { CarryOverOutcome } from './carryover-outcome.js';
 
 export interface PreparedCarryover {
   readonly chatId: string;
   readonly transcriptViewId: TranscriptViewId;
   readonly targetAgentId: string;
   readonly clientRequestId: string;
-  readonly result: CarryOverCompactionResult;
+  readonly result: CarryOverOutcome;
 }
 
 export class PreparedCarryoverStore {
@@ -21,7 +21,7 @@ export class PreparedCarryoverStore {
     readonly transcriptViewId: TranscriptViewId;
     readonly targetAgentId: string;
     readonly clientRequestId: string | null;
-  }): CarryOverCompactionResult | null {
+  }): CarryOverOutcome | null {
     const value = this.#byChat.get(input.chatId);
     this.#byChat.delete(input.chatId);
     if (

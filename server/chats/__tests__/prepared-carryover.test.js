@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { PreparedCarryoverStore } from '../prepared-carryover.ts';
 
-const RESULT = { context: { prefix: 'prepared' }, summary: 'summary' };
+const RESULT = { kind: 'compacted', context: { prefix: 'prepared' }, summary: 'summary' };
 
 function prepared(overrides = {}) {
   return {
@@ -48,7 +48,7 @@ describe('PreparedCarryoverStore', () => {
 
   it('replaces an older result and discards idempotently', () => {
     const store = new PreparedCarryoverStore();
-    const replacement = { context: { prefix: 'replacement' }, summary: null };
+    const replacement = { kind: 'complete', context: { prefix: 'replacement' } };
     store.deposit(prepared());
     store.deposit(prepared({ result: replacement }));
 

@@ -1,6 +1,7 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
 import type {
 	SidebarChatOrderMap,
 	SidebarRowModel,
@@ -77,22 +78,6 @@ function exactProjectGroup(projectPath: string): SidebarProjectGroup {
 	};
 }
 
-function normalizeProjectPathForGrouping(projectPath: string): string {
-	const trimmed = projectPath.trim().replace(/\\/g, '/');
-	if (!trimmed) return '';
-	const collapsed = trimmed.replace(/\/+/g, '/');
-	if (collapsed === '/') return '/';
-	const withoutTrailingSlash = collapsed.replace(/\/+$/g, '');
-	return withoutTrailingSlash.replace(/^([A-Za-z]:)/, (drive) => drive.toLowerCase());
-}
-
-function isProjectPathAncestor(ancestorPath: string, descendantPath: string): boolean {
-	if (!ancestorPath || !descendantPath) return false;
-	if (ancestorPath === descendantPath) return true;
-	const prefix = ancestorPath.endsWith('/') ? ancestorPath : `${ancestorPath}/`;
-	return descendantPath.startsWith(prefix);
-}
-
 function createExactProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
 	const distinctProjectPathsByKey = new Map<string, Set<string>>();
 	for (const chat of chats) {
@@ -113,7 +98,7 @@ function createExactProjectGroupingContext(chats: ChatSessionRecord[]): ProjectG
 function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
 	const projectsByNormalizedPath = new Map<string, NormalizedProjectPath>();
 	for (const chat of chats) {
-		const normalizedPath = normalizeProjectPathForGrouping(chat.projectPath);
+		const normalizedPath = normalizeProjectPath(chat.projectPath);
 		if (projectsByNormalizedPath.has(normalizedPath)) continue;
 		projectsByNormalizedPath.set(normalizedPath, {
 			originalPath: chat.projectPath,
@@ -147,7 +132,7 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 
 	return {
 		groupForProjectPath(projectPath) {
-			const normalizedPath = normalizeProjectPathForGrouping(projectPath);
+			const normalizedPath = normalizeProjectPath(projectPath);
 			const groupPath = groupPathByNormalizedPath.get(normalizedPath) ?? projectPath;
 			return exactProjectGroup(groupPath);
 		},

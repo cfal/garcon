@@ -3,10 +3,10 @@ import {
   type ChatHandoffArtifactExclusionCategory,
 } from '../../../common/chat-handoff-artifact-contracts.js';
 import {
-  isHandoffSummaryNoticeDetail,
   isToolUseMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
+import { isHandoffSummaryNoticeDetail } from '../../../common/transcript-notice-details.js';
 import {
   projectionPriorityLevel,
   selectPrioritizedProjection,

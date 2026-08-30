@@ -37,7 +37,7 @@ describe('TranscriptLedgerService', () => {
           rows: [{
             message: new AssistantMessage(
               TS,
-              '<get-garcon-chat-id />\nContinuing the response.',
+              '<garcon-get-chat-id />\nContinuing the response.',
             ),
           }],
         });
@@ -50,18 +50,19 @@ describe('TranscriptLedgerService', () => {
           },
           {
             kind: 'notice',
+            at: TS,
             message: 'Agent requested chat ID',
-            detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
+            detail: { type: 'chat-id-request' },
           },
         ]);
         await tick();
         expect(notifications).toHaveLength(1);
       }, {
-        chatIdRequests: { enabled: () => true, request: requests },
+        chatIdRequests: { request: requests },
       });
     });
 
-    it('[TLV5-CHAT-ID-DISCOVERY.06-CORE-UNIT-01] records a disabled failure without dispatching', async () => {
+    it('commits a hidden row before dispatching a marker-only request', async () => {
       const requests = mock(() => undefined);
       await withService(async ({ ledger }) => {
         ledger.initializeChat('chat-1');
@@ -69,21 +70,26 @@ describe('TranscriptLedgerService', () => {
 
         lease.sink.publish({
           type: 'rows',
-          rows: [{ message: new AssistantMessage(TS, '<get-garcon-chat-id />') }],
+          rows: [{ message: new AssistantMessage(TS, '<garcon-get-chat-id />') }],
         });
 
-        expect(requests).not.toHaveBeenCalled();
+        expect(requests).toHaveBeenCalledWith({
+          chatId: 'chat-1',
+          viewId: expect.any(String),
+          runId: null,
+          at: TS,
+        });
         expect(ledger.currentRows('chat-1')).toMatchObject([{
+          ordinal: 1,
           kind: 'notice',
-          message: 'Chat ID auto-discovery is disabled.',
-          detail: {
-            type: 'chat-id-discovery-failure',
-            reason: 'disabled',
-            title: 'Request: Garcon Chat ID',
-          },
+          at: TS,
+          message: 'Agent requested chat ID',
+          detail: { type: 'chat-id-request' },
+          providerMeta: null,
         }]);
+        expect(ledger.conversationMessages('chat-1')).toEqual([]);
       }, {
-        chatIdRequests: { enabled: () => false, request: requests },
+        chatIdRequests: { request: requests },
       });
     });
   });
@@ -208,34 +214,44 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('commits a typed handoff summary through its dedicated path', async () => {
+  it('preserves typed detail on an internal notice', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
-      const notifications = [];
-      ledger.subscribe((event) => notifications.push(event));
-
-      const row = ledger.appendHandoffSummary(
-        'chat-1',
-        view.viewId,
-        'Objective\n\n  Preserve formatting.',
-      );
-
-      expect(row).toMatchObject({
+      expect(ledger.appendNotice('chat-1', view.viewId, {
+        title: 'Response: Garcon Chat ID',
+        content: 'Sent chat ID 1787836573296800 to agent',
+        detail: { type: 'chat-id-disclosure' },
+      })).toMatchObject({
         kind: 'notice',
-        at: TS,
-        message: 'Objective\n\n  Preserve formatting.',
-        detail: { type: 'handoff-summary', title: 'Handoff summary' },
-        providerMeta: null,
+        detail: {
+          type: 'chat-id-disclosure',
+          title: 'Response: Garcon Chat ID',
+        },
       });
-      expect(ledger.conversationMessages('chat-1')).toEqual([]);
-      expect(notifications).toEqual([]);
-      await tick();
-      expect(notifications).toEqual([expect.objectContaining({
-        type: 'rows',
-        chatId: 'chat-1',
-        viewId: view.viewId,
-        rows: [row],
-      })]);
+    });
+  });
+
+  it('deduplicates only identical carryover notices in the current binding', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const summary = {
+        title: 'Handoff summary',
+        content: 'Original summary',
+        detail: { type: 'handoff-summary' },
+      };
+
+      const first = ledger.appendCarryoverNotice('chat-1', view.viewId, summary);
+      expect(ledger.appendCarryoverNotice('chat-1', view.viewId, summary)).toEqual(first);
+      const changed = ledger.appendCarryoverNotice('chat-1', view.viewId, {
+        ...summary,
+        content: 'Updated summary',
+      });
+
+      expect(changed.ordinal).toBe(first.ordinal + 1);
+      ledger.advanceContentStart('chat-1', view.viewId, changed.ordinal + 1);
+      const nextBinding = ledger.appendCarryoverNotice('chat-1', view.viewId, summary);
+      expect(nextBinding.ordinal).toBe(changed.ordinal + 1);
+      expect(ledger.currentRows('chat-1')).toEqual([first, changed, nextBinding]);
     });
   });
 

@@ -91,6 +91,7 @@ describe('multi-agent transcript search', () => {
       const anthropicResult = await fixture.client.waitForChatSearch(
         { query: anthropicOnly, chatIds, limit: 20 },
         (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length
           && response.results.map((result) => result.chatId).join(',') === anthropicChatId,
       );
       expect(anthropicResult.results.map((result) => result.chatId)).toEqual([anthropicChatId]);
@@ -99,13 +100,16 @@ describe('multi-agent transcript search', () => {
       const openAiResult = await fixture.client.waitForChatSearch(
         { query: openAiOnly, chatIds, limit: 20 },
         (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length
           && response.results.map((result) => result.chatId).join(',') === openAiChatId,
       );
       expect(openAiResult.results.map((result) => result.chatId)).toEqual([openAiChatId]);
 
       const sharedResult = await fixture.client.waitForChatSearch(
         { query: shared, chatIds, limit: 20 },
-        (response) => response.index.pendingChatCount === 0 && response.results.length === 2,
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length
+          && response.results.length === 2,
       );
       expect(sharedResult.results.map((result) => result.chatId).sort()).toEqual([
         anthropicChatId,
@@ -145,6 +149,7 @@ describe('multi-agent transcript search', () => {
       await fixture.client.waitForChatSearch(
         { query: anthropicOnly, chatIds },
         (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length
           && response.results.some((result) => result.chatId === anthropicChatId),
       );
       const openAiRequestCount = fixture.fakeProviders.openAi.requests().length;
@@ -153,11 +158,13 @@ describe('multi-agent transcript search', () => {
       await fixture.restartGarcon();
       const afterRestartAnthropic = await fixture.client.waitForChatSearch(
         { query: anthropicOnly, chatIds },
-        (response) => response.index.pendingChatCount === 0,
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length,
       );
       const afterRestartOpenAi = await fixture.client.waitForChatSearch(
         { query: openAiOnly, chatIds },
-        (response) => response.index.pendingChatCount === 0,
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length,
       );
       expect(afterRestartAnthropic.results.map((result) => result.chatId)).toEqual([
         anthropicChatId,
@@ -170,13 +177,15 @@ describe('multi-agent transcript search', () => {
       const pruned = await fixture.client.waitForChatSearch(
         { query: anthropicOnly, chatIds },
         (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length - 1
           && response.results.every((result) => result.chatId !== anthropicChatId),
       );
       expect(pruned.results).toEqual([]);
       expect(pruned.index.indexedChatCount).toBe(1);
       const retained = await fixture.client.waitForChatSearch(
         { query: openAiOnly, chatIds },
-        (response) => response.index.pendingChatCount === 0,
+        (response) => response.index.pendingChatCount === 0
+          && response.index.indexedChatCount === chatIds.length - 1,
       );
       expect(retained.results.map((result) => result.chatId)).toEqual([openAiChatId]);
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(openAiRequestCount);

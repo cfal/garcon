@@ -5,12 +5,10 @@ import {
 } from './chat-types.js';
 import type { ChatIdDiscoveryFailureReason } from './transcript-notice-details.js';
 
-export const CHAT_ID_DISCOVERY_REQUEST_MARKER = '<get-garcon-chat-id />';
+export const CHAT_ID_DISCOVERY_REQUEST_MARKER = '<garcon-get-chat-id />';
 export const CHAT_ID_DISCLOSURE_OPEN = '<garcon-chat-id>';
 export const CHAT_ID_DISCLOSURE_CLOSE = '</garcon-chat-id>';
-export const CHAT_ID_REQUEST_NOTICE_TITLE = 'Request: Garcon Chat ID';
-export const CHAT_ID_REQUEST_NOTICE_CONTENT = 'Agent requested chat ID';
-export const CHAT_ID_DISCLOSURE_NOTICE_TITLE = 'Response: Garcon Chat ID';
+export const CHAT_ID_DISCOVERY_NOTICE_TITLE = 'Chat ID auto-discovery';
 
 export interface ChatIdRequestTransform {
   readonly message: AssistantMessage | null;
@@ -54,17 +52,13 @@ export function parseChatIdDisclosure(content: string): ChatId | null {
 }
 
 export function chatIdDisclosureNoticeContent(chatId: ChatId): string {
-  return `Sent chat ID ${chatId} to agent`;
+  return `Sent chat ID ${chatId} to agent.`;
 }
 
 export function chatIdDiscoveryFailureContent(reason: ChatIdDiscoveryFailureReason): string {
   switch (reason) {
     case 'disabled':
       return 'Chat ID auto-discovery is disabled.';
-    case 'unsupported':
-      return 'This agent does not support chat ID auto-discovery steering.';
-    case 'turn-unavailable':
-      return 'The active turn ended before Garcon could send the chat ID.';
     case 'delivery-failed':
       return 'Garcon could not send the chat ID to the agent.';
   }

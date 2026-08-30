@@ -16,7 +16,7 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 
-const REQUEST_MARKER = '<get-garcon-chat-id />';
+const REQUEST_MARKER = '<garcon-get-chat-id />';
 
 describe('scripted Claude chat ID discovery', () => {
   let environment: ScriptedClaudeTestEnvironment | undefined;
@@ -84,18 +84,11 @@ describe('scripted Claude chat ID discovery', () => {
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))
-          .toEqual([
-            expect.objectContaining({
-              title: 'Request: Garcon Chat ID',
-              content: 'Agent requested chat ID',
-              detail: { type: 'chat-id-request' },
-            }),
-            expect.objectContaining({
-              title: 'Response: Garcon Chat ID',
-              content: `Sent chat ID ${chatId} to agent`,
-              detail: { type: 'chat-id-disclosure' },
-            }),
-          ]);
+          .toEqual([expect.objectContaining({
+            title: 'Chat ID auto-discovery',
+            content: `Sent chat ID ${chatId} to agent.`,
+            detail: { type: 'chat-id-disclosure' },
+          })]);
 
         await reloadUntilNativeContains(fixture, chatId, 'Chat ID received.');
         const reloaded = await fixture.client.getMessages(chatId);
@@ -142,6 +135,7 @@ describe('scripted Claude chat ID discovery', () => {
           expect(messagesOfType(page.messages, 'transcript-notice')
             .filter((message) => message.detail?.type.startsWith('chat-id-')))
             .toEqual([expect.objectContaining({
+              title: 'Chat ID auto-discovery',
               content: 'Chat ID auto-discovery is disabled.',
               detail: { type: 'chat-id-discovery-failure', reason: 'disabled' },
             })]);

@@ -94,7 +94,11 @@ describe('AgentHandoffService', () => {
     const ledger = ledgerState(calls);
     const planFor = mock(async () => {
       calls.push('plan');
-      return { context: { prefix: 'prepared context' }, summary: 'prepared summary' };
+      return {
+        kind: 'compacted',
+        context: { prefix: 'prepared context' },
+        summary: 'prepared summary',
+      };
     });
     const deposit = mock(() => calls.push('deposit'));
     const service = createService({
@@ -272,7 +276,7 @@ describe('AgentHandoffService', () => {
     const state = handoffState(current, calls);
     state.setIntent(persistedIntent());
     const ledger = ledgerState(calls);
-    const planFor = mock(async () => ({ context: null, summary: null }));
+    const planFor = mock(async () => ({ kind: 'no-history' }));
     const deposit = mock(() => {});
     const service = createService({
       registry: { getChat: () => current },
@@ -732,7 +736,7 @@ function createService(overrides = {}) {
     ownership: overrides.ownership ?? handoffState(sourceChat(), []).ownership,
     ledger: overrides.ledger ?? ledgerState([]),
     carryover: overrides.carryover ?? {
-      planFor: mock(async () => ({ context: null, summary: null })),
+      planFor: mock(async () => ({ kind: 'no-history' })),
     },
     preparedCarryover: overrides.preparedCarryover ?? {
       deposit: mock(() => {}),

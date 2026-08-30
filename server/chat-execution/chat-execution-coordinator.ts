@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { EventEmitter } from 'events';
 import type { QueueEntryPlacement } from '../../common/chat-command-contracts.ts';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../common/queue-state.ts';
@@ -66,6 +67,7 @@ import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
 import type { AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { GoalControlDelivery } from './goal-control-delivery.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
+import { ControlInputDelivery } from './control-input-delivery.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -97,6 +99,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #acceptedInputTranscript: AcceptedInputTranscript;
   #goalControlDelivery: GoalControlDelivery;
   #steerInputDelivery: SteerInputDelivery;
+  #controlInputDelivery: ControlInputDelivery;
 
   constructor(
     _workspaceDir: string,
@@ -147,6 +150,15 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#steerInputDelivery = new SteerInputDelivery({
       ...inputDeliveryOptions,
       isShuttingDown: () => this.#shuttingDown,
+    });
+    this.#controlInputDelivery = new ControlInputDelivery({
+      captureTarget: (chatId) => this.#steerInputDelivery.captureTarget(chatId),
+      deliverSteer: (chatId, content, viewId, target) => (
+        this.#steerInputDelivery.deliverControl(chatId, content, viewId, target)
+      ),
+      scheduleRun: (chatId, content, viewId, onReserved) => (
+        this.#scheduleControlRun(chatId, content, viewId, onReserved)
+      ),
     });
     this.#acceptedInputHandler = new AcceptedInputHandler({
       controls: this.#controlOperations,
@@ -380,10 +392,22 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#steerInputDelivery.captureTarget(chatId);
   }
 
-  async deliverControlSteer(
-    chatId: string, content: string, transcriptViewId: string, target: CapturedSteerTarget,
+  async deliverControlInput(
+    chatId: string,
+    content: string,
+    transcriptViewId: string,
+    emittingRunId: string | null,
+    signal: AbortSignal,
+    onControlRun: (turnId: string) => void,
   ): Promise<void> {
-    return this.#steerInputDelivery.deliverControl(chatId, content, transcriptViewId, target);
+    return this.#controlInputDelivery.deliver(
+      chatId,
+      content,
+      transcriptViewId,
+      emittingRunId,
+      signal,
+      onControlRun,
+    );
   }
 
   async deliverGoalControlInput(
@@ -668,6 +692,61 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     }
   }
 
+  // Uses direct ownership without AcceptedInputHandler because server control
+  // has no user-input admission or command-ledger settlement.
+  async #scheduleControlRun(
+    chatId: string,
+    content: string,
+    transcriptViewId: string,
+    onReserved: (turnId: string) => void,
+  ): Promise<void> {
+    const clientRequestId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const reservation = this.#reserveDirect(chatId, { clientRequestId, turnId });
+    let options: RunAgentTurnOptions;
+    try {
+      this.#checkpointDirect(reservation);
+      if (this.#isDrainSuppressed(chatId) || !this.#chatExists(chatId)) {
+        throw controlInputBlockedError();
+      }
+      reservation.executionAdmission.signal.throwIfAborted();
+      const control = await this.#controlOperations.read(chatId);
+      this.#checkpointDirect(reservation);
+      reservation.executionAdmission.signal.throwIfAborted();
+      if (control.entries.length > 0 || control.pause) {
+        throw controlInputBlockedError();
+      }
+      options = {
+        ...this.#getDrainOptions(chatId),
+        clientRequestId,
+        clientMessageId: crypto.randomUUID(),
+        transcriptViewId,
+        turnId,
+        commandType: 'agent-run',
+      };
+      onReserved(turnId);
+    } catch (error) {
+      try {
+        await this.#finishDirect(reservation, 'released');
+      } catch (releaseError) {
+        throw new AggregateError(
+          [error, releaseError],
+          `Failed to release control turn for ${chatId}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+
+    const task = this.#runDirect(reservation, content, options).catch((error) => {
+      logger.error(
+        'queue: Server control turn failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+    this.#trackDispatch(task);
+  }
+
   #retireAttempt(chatId: string, attempt: QueueExecutionAttempt, reason?: Error): void {
     if (!this.#ownership.retireAttempt(chatId, attempt, reason)) return;
     this.emit('turn-settled', chatId, attempt.identity());
@@ -785,4 +864,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#ownership.clearDeletionSuppression(chatId);
     this.#requestDrain(chatId, 'deletion rollback');
   }
+}
+
+function controlInputBlockedError(): DomainError {
+  return new DomainError(
+    'SESSION_BUSY',
+    'Server control input is currently blocked',
+    409,
+    true,
+  );
 }

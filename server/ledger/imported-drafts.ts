@@ -1,17 +1,16 @@
 import {
-  isCarryoverMigrationQuarantineNoticeDetail,
   isToolUseMessage,
   type ChatMessage,
 } from '../../common/chat-types.js';
+import { isCarryoverMigrationQuarantineNoticeDetail } from '../../common/transcript-notice-details.js';
 import {
   chatIdDisclosureNoticeContent,
-  CHAT_ID_DISCLOSURE_NOTICE_TITLE,
-  CHAT_ID_REQUEST_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_TITLE,
+  CHAT_ID_DISCOVERY_NOTICE_TITLE,
   parseChatIdDisclosure,
   transformChatIdRequest,
 } from '../../common/chat-id-discovery.js';
 import type { JsonObject } from '../../common/json.js';
+import { chatIdRequestNoticeDraft } from './chat-id-request.js';
 import type { LedgerRowDraft } from './contracts.js';
 
 export interface ImportedRow {
@@ -51,13 +50,7 @@ function importedDraftFor(
       ...(request.message
         ? [{ kind: 'provider-row' as const, at, message: request.message, providerMeta }]
         : []),
-      {
-        kind: 'notice',
-        at,
-        message: CHAT_ID_REQUEST_NOTICE_CONTENT,
-        detail: { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE },
-        providerMeta: null,
-      },
+      chatIdRequestNoticeDraft(at),
     ];
   }
   if (original.type === 'user-message') {
@@ -67,7 +60,7 @@ function importedDraftFor(
         kind: 'notice',
         at: original.timestamp || now(),
         message: chatIdDisclosureNoticeContent(disclosedChatId),
-        detail: { type: 'chat-id-disclosure', title: CHAT_ID_DISCLOSURE_NOTICE_TITLE },
+        detail: { type: 'chat-id-disclosure', title: CHAT_ID_DISCOVERY_NOTICE_TITLE },
         providerMeta: null,
       }];
     }

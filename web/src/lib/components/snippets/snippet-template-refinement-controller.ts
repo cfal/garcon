@@ -7,12 +7,12 @@ import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.
 import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
 import type { SnippetFormState } from './snippet-form-state.svelte.js';
-import type { SnippetTemplateEditorState } from './snippet-template-editor-state.svelte.js';
 
 interface SnippetTemplateRefinementOptions {
 	form: SnippetFormState;
-	editor: SnippetTemplateEditorState;
+	editor: PromptEditorDialogState;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
 	transientLayers: TransientLayerRegistry;
 	get textarea(): HTMLTextAreaElement | null;

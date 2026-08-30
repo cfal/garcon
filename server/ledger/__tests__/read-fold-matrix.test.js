@@ -11,6 +11,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.ts';
 import { TranscriptSearchController } from '../../chats/search/controller.ts';
+import { chatIdRequestNoticeDraft } from '../chat-id-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
 import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
@@ -70,7 +71,9 @@ describe('transcript ledger read-fold matrix', () => {
           ordinal: 3,
           message: new TranscriptNoticeMessage(
             AT,
-            'Ordinary durable notice.',
+            'Earlier chat history was small enough to carry over as context.',
+            undefined,
+            'History carried without compaction',
           ),
         },
         {
@@ -226,19 +229,19 @@ describe('transcript ledger read-fold matrix', () => {
           },
         },
         {
-          kind: 'notice',
-          at: AT,
-          providerMeta: null,
-          message: 'Agent requested chat ID',
-          detail: { type: 'chat-id-request', title: 'Request: Garcon Chat ID' },
-        },
-        {
           kind: 'provider-row',
           at: DISCOVERY_PROVIDER_AT,
           providerMeta: null,
           message: new AssistantMessage(DISCOVERY_PROVIDER_AT, 'waiting for the ID'),
         },
       ])];
+      expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
+        ordinal: 2,
+        at: DISCOVERY_PROVIDER_AT,
+      });
+      rows.push(...store.append(CHAT_ID, VIEW_ID, [
+        chatIdRequestNoticeDraft(DISCOVERY_PROVIDER_AT),
+      ]));
       expect(ledger.nativeActivityState(CHAT_ID).providerWatermark).toEqual({
         ordinal: 3,
         at: DISCOVERY_PROVIDER_AT,
@@ -259,8 +262,8 @@ describe('transcript ledger read-fold matrix', () => {
         at: DISCOVERY_PROVIDER_AT,
       });
       const disclosure = ledger.appendNotice(CHAT_ID, VIEW_ID, {
-        title: 'Response: Garcon Chat ID',
-        content: 'Sent chat ID 1787836573296800 to agent',
+        title: 'Chat ID auto-discovery',
+        content: 'Sent chat ID 1787836573296800 to agent.',
         detail: { type: 'chat-id-disclosure' },
         at: AT,
       });
@@ -274,13 +277,12 @@ describe('transcript ledger read-fold matrix', () => {
         detail: {
           type: 'chat-id-discovery-failure',
           reason: 'delivery-failed',
-          title: 'Response: Garcon Chat ID',
+          title: 'Chat ID auto-discovery',
         },
       }]));
 
       expect(ledgerRowsToTranscriptMessages(rows).map((entry) => entry.message.type)).toEqual([
         'user-message',
-        'transcript-notice',
         'assistant-message',
         'user-message',
         'transcript-notice',
@@ -289,6 +291,9 @@ describe('transcript ledger read-fold matrix', () => {
       expect(ledger.conversationMessages(CHAT_ID).map(conversationalText)).toEqual([
         'discover the chat ID',
         'waiting for the ID',
+        'client-clock input',
+      ]);
+      expect(ledger.resendCandidates(CHAT_ID).map(({ content }) => content)).toEqual([
         'client-clock input',
       ]);
       expect(frozenConversationDrafts(rows).map((row) => frozenDraftText(row))).toEqual([
@@ -303,8 +308,7 @@ describe('transcript ledger read-fold matrix', () => {
       ]);
       expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
         [1, 'conversation'],
-        [2, 'diagnostics'],
-        [3, 'conversation'],
+        [2, 'conversation'],
         [4, 'conversation'],
         [5, 'diagnostics'],
         [6, 'diagnostics'],
@@ -487,8 +491,8 @@ function allRowKindDrafts() {
       kind: 'notice',
       at: AT,
       providerMeta: null,
-      message: 'Ordinary durable notice.',
-      detail: { type: 'ordinary-notice' },
+      message: 'Earlier chat history was small enough to carry over as context.',
+      detail: { title: 'History carried without compaction' },
     },
     {
       kind: 'notice',

@@ -29,8 +29,8 @@ describe('chat ID discovery protocol', () => {
     for (const content of [
       `Explanation ${CHAT_ID_DISCOVERY_REQUEST_MARKER}`,
       ` ${CHAT_ID_DISCOVERY_REQUEST_MARKER}`,
-      '<get-garcon-chat-id/>',
-      '<GET-GARCON-CHAT-ID />',
+      '<garcon-get-chat-id/>',
+      '<GARCON-GET-CHAT-ID />',
     ]) {
       expect(transformChatIdRequest(new AssistantMessage(AT, content))).toBeNull();
     }

@@ -8,18 +8,12 @@ export interface HandoffSummaryNoticeDetail {
   readonly type: 'handoff-summary';
 }
 
-export interface ChatIdRequestNoticeDetail {
-  readonly type: 'chat-id-request';
-}
-
 export interface ChatIdDisclosureNoticeDetail {
   readonly type: 'chat-id-disclosure';
 }
 
 export type ChatIdDiscoveryFailureReason =
   | 'disabled'
-  | 'unsupported'
-  | 'turn-unavailable'
   | 'delivery-failed';
 
 export interface ChatIdDiscoveryFailureNoticeDetail {
@@ -30,7 +24,6 @@ export interface ChatIdDiscoveryFailureNoticeDetail {
 export type TranscriptNoticeDetail =
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
-  | ChatIdRequestNoticeDetail
   | ChatIdDisclosureNoticeDetail
   | ChatIdDiscoveryFailureNoticeDetail;
 
@@ -52,12 +45,6 @@ export function isHandoffSummaryNoticeDetail(
   return hasType(value, 'handoff-summary');
 }
 
-export function isChatIdRequestNoticeDetail(
-  value: unknown,
-): value is ChatIdRequestNoticeDetail {
-  return hasType(value, 'chat-id-request');
-}
-
 export function isChatIdDisclosureNoticeDetail(
   value: unknown,
 ): value is ChatIdDisclosureNoticeDetail {
@@ -70,8 +57,6 @@ export function isChatIdDiscoveryFailureNoticeDetail(
   if (!hasType(value, 'chat-id-discovery-failure')) return false;
   const reason = (value as Record<string, unknown>).reason;
   return reason === 'disabled'
-    || reason === 'unsupported'
-    || reason === 'turn-unavailable'
     || reason === 'delivery-failed';
 }
 
@@ -80,4 +65,20 @@ function hasType(value: unknown, type: string): boolean {
     && typeof value === 'object'
     && !Array.isArray(value)
     && (value as Record<string, unknown>).type === type;
+}
+
+export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (isCarryoverMigrationQuarantineNoticeDetail(value)) {
+    return {
+      type: value.type,
+      artifactId: value.artifactId,
+      errorCode: value.errorCode,
+    };
+  }
+  if (isHandoffSummaryNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDisclosureNoticeDetail(value)) return { type: value.type };
+  if (isChatIdDiscoveryFailureNoticeDetail(value)) {
+    return { type: value.type, reason: value.reason };
+  }
+  return null;
 }

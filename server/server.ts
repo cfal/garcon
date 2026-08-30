@@ -297,20 +297,26 @@ export async function startServer(): Promise<void> {
         logger.warn('Transcript commit listener failed:', errorMessage(error));
       },
       chatIdRequests: {
-        enabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
         request: (input) => chatIdDiscovery.request(input),
       },
     });
     const chatIdDiscovery = new ChatIdDiscoveryController({
       execution: {
-        captureSteerTarget: (chatId) => requireExecutionQueue().captureSteerTarget(chatId),
-        deliverControlSteer: (chatId, content, viewId, target) => (
-          requireExecutionQueue().deliverControlSteer(chatId, content, viewId, target)
+        deliverControlInput: (chatId, content, viewId, runId, signal, onControlRun) => (
+          requireExecutionQueue().deliverControlInput(
+            chatId,
+            content,
+            viewId,
+            runId,
+            signal,
+            onControlRun,
+          )
         ),
       },
       notices: transcriptLedger,
+      isEnabled: () => settings.getFeatureSettings().chatIdDiscovery.enabled,
       onError(error, chatId) {
-        logger.warn('Chat ID auto-discovery steering failed', {
+        logger.warn('Chat ID auto-discovery delivery failed', {
           chatId,
           reason: errorMessage(error),
         });
@@ -417,7 +423,6 @@ export async function startServer(): Promise<void> {
           clientRequestId: input.clientRequestId,
         });
         if (prepared) return prepared;
-        if (input.messages.length === 0) return { context: null, summary: null };
         if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
         return carryOverCompaction.planFor({
           operation: 'fresh-start',

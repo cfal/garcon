@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentPermissionLifecycle,
   AgentPermissionResponseCapability,
@@ -7,12 +8,7 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../common/agent-execution.js';
-import {
-  CHAT_ID_REQUEST_NOTICE_CONTENT,
-  CHAT_ID_REQUEST_NOTICE_TITLE,
-  chatIdDiscoveryFailureContent,
-  transformChatIdRequest,
-} from '../../common/chat-id-discovery.js';
+import { transformChatIdRequest } from '../../common/chat-id-discovery.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
@@ -41,6 +37,7 @@ import type {
   TranscriptWatermark,
 } from './contracts.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
+import { chatIdRequestNoticeDraft } from './chat-id-request.js';
 import { PermissionNotActionableError } from './errors.js';
 import { TranscriptLedgerStore } from './store.js';
 
@@ -102,7 +99,6 @@ export interface TranscriptLedgerServiceOptions {
 }
 
 export interface ChatIdRequestSink {
-  enabled(): boolean;
   request(input: {
     readonly chatId: string;
     readonly viewId: TranscriptViewId;
@@ -112,7 +108,6 @@ export interface ChatIdRequestSink {
 }
 
 const DISABLED_CHAT_ID_REQUEST_SINK: ChatIdRequestSink = Object.freeze({
-  enabled: () => false,
   request: () => undefined,
 });
 
@@ -130,6 +125,19 @@ interface ActivePermission {
   readonly permissionOccurrenceId: string;
   readonly decision: AgentPermissionResponseCapability;
   readonly claimId: string | null;
+}
+
+interface TranscriptNoticeInput {
+  readonly title: string;
+  readonly content: string;
+  readonly detail?: TranscriptNoticeDetail;
+  readonly at?: string;
+}
+
+interface NormalizedTranscriptNotice {
+  readonly content: string;
+  readonly detail: JsonObject;
+  readonly at?: string;
 }
 
 export class TranscriptLedgerService {
@@ -432,45 +440,38 @@ export class TranscriptLedgerService {
   appendNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    input: {
-      readonly title: string;
-      readonly content: string;
-      readonly detail?: TranscriptNoticeDetail;
-      readonly at?: string;
-    },
+    input: TranscriptNoticeInput,
   ): LedgerNoticeRow {
-    return this.#appendInternalNotice(chatId, viewId, {
-      title: input.title,
-      content: input.content,
-      detail: input.detail ? { ...input.detail } : {},
-      at: input.at,
-    });
+    return this.#appendInternalNotice(chatId, viewId, normalizeNotice(input));
   }
 
-  appendHandoffSummary(
+  appendCarryoverNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    content: string,
+    input: TranscriptNoticeInput,
   ): LedgerNoticeRow {
-    return this.#appendInternalNotice(chatId, viewId, {
-      title: 'Handoff summary',
-      content,
-      detail: { type: 'handoff-summary' },
-    });
+    const notice = normalizeNotice(input);
+    const current = this.#store.currentView(chatId);
+    if (current?.viewId === viewId) {
+      const existing = this.#store.rowsAfter(
+        chatId,
+        viewId,
+        current.contentStartOrdinal - 1,
+      ).find((row): row is LedgerNoticeRow => (
+        row.kind === 'notice'
+        && row.message === notice.content
+        && isDeepStrictEqual(row.detail, notice.detail)
+      ));
+      if (existing) return existing;
+    }
+    return this.#appendInternalNotice(chatId, viewId, notice);
   }
 
   #appendInternalNotice(
     chatId: string,
     viewId: TranscriptViewId,
-    input: {
-      readonly title: string;
-      readonly content: string;
-      readonly detail: JsonObject;
-      readonly at?: string;
-    },
+    input: NormalizedTranscriptNotice,
   ): LedgerNoticeRow {
-    const title = parseChatRowTitle(input.title);
-    if (!title) throw new TypeError('Notice title is required');
     const at = input.at === undefined
       ? this.#now()
       : timestampAtOrAfter(
@@ -480,8 +481,8 @@ export class TranscriptLedgerService {
     const [row] = this.#store.append(chatId, viewId, [{
       kind: 'notice',
       at,
-      message: parseChatRowContent(input.content),
-      detail: { ...input.detail, title },
+      message: input.content,
+      detail: input.detail,
       providerMeta: null,
     }]);
     const notice = row as LedgerNoticeRow;
@@ -670,7 +671,6 @@ export class TranscriptLedgerService {
     switch (event.type) {
       case 'rows': {
         const drafts: LedgerRowDraft[] = [];
-        let discoveryEnabled: boolean | undefined;
         let discoveryRequestAt: string | undefined;
         for (const row of event.rows) {
           const request = transformChatIdRequest(row.message);
@@ -684,33 +684,19 @@ export class TranscriptLedgerService {
             });
           }
           if (!request) continue;
-          discoveryEnabled ??= this.#chatIdRequests.enabled();
           discoveryRequestAt ??= row.message.timestamp;
-          drafts.push({
-            kind: 'notice',
-            at: row.message.timestamp,
-            message: discoveryEnabled
-              ? CHAT_ID_REQUEST_NOTICE_CONTENT
-              : chatIdDiscoveryFailureContent('disabled'),
-            detail: discoveryEnabled
-              ? { type: 'chat-id-request', title: CHAT_ID_REQUEST_NOTICE_TITLE }
-              : {
-                  type: 'chat-id-discovery-failure',
-                  reason: 'disabled',
-                  title: CHAT_ID_REQUEST_NOTICE_TITLE,
-                },
-            providerMeta: null,
-          });
+          drafts.push(chatIdRequestNoticeDraft(row.message.timestamp));
         }
-        if (drafts.length === 0) return;
-        const rows = this.#store.append(chatId, viewId, drafts);
-        this.#notify({ type: 'rows', chatId, viewId, rows });
-        if (discoveryEnabled === true) {
+        if (drafts.length > 0) {
+          const rows = this.#store.append(chatId, viewId, drafts);
+          this.#notify({ type: 'rows', chatId, viewId, rows });
+        }
+        if (discoveryRequestAt !== undefined) {
           this.#chatIdRequests.request({
             chatId,
             viewId,
             runId: this.#activeRuns.get(chatId) ?? null,
-            at: discoveryRequestAt!,
+            at: discoveryRequestAt,
           });
         }
         return;
@@ -894,6 +880,16 @@ export class TranscriptLedgerService {
       }
     });
   }
+}
+
+function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNotice {
+  const title = parseChatRowTitle(input.title);
+  if (!title) throw new TypeError('Notice title is required');
+  return {
+    content: parseChatRowContent(input.content),
+    detail: { ...(input.detail ?? {}), title },
+    at: input.at,
+  };
 }
 
 function inputKey(chatId: string, clientMessageId: string): string {

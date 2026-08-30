@@ -2,11 +2,11 @@
 	// Renders a durable transcript notice. Handoff summaries collapse by default
 	// behind the shared clamp so very long summaries stay bounded, while the
 	// server-supplied title remains visible for orientation.
+	import { TranscriptNoticeMessage } from '$shared/chat-types';
 	import {
 		isChatIdDiscoveryFailureNoticeDetail,
 		isHandoffSummaryNoticeDetail,
-		TranscriptNoticeMessage,
-	} from '$shared/chat-types';
+	} from '$shared/transcript-notice-details';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import Markdown from '../Markdown.svelte';
