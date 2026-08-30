@@ -434,8 +434,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     input: ServerControlInput,
     requestRunId: string | null,
     signal: AbortSignal,
+    onQueued: () => void,
   ): Promise<ServerControlDisposition> {
-    return this.#deliverServerControlInput(chatId, input, signal, requestRunId);
+    return this.#deliverServerControlInput(chatId, input, signal, requestRunId, onQueued);
   }
 
   async #deliverServerControlInput(
@@ -443,6 +444,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     input: ServerControlInput,
     signal: AbortSignal,
     expectedRunId?: string | null,
+    onQueued?: () => void,
   ): Promise<ServerControlDisposition> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
@@ -451,7 +453,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const control = await this.#controlOperations.read(chatId);
     signal.throwIfAborted();
     if (control.pause || control.controlEntries.length > 0) {
-      return this.#enqueueServerControlInput(chatId, input, signal);
+      return this.#enqueueServerControlInput(chatId, input, signal, onQueued);
     }
 
     let target = this.#steerInputDelivery.captureTarget(chatId);
@@ -467,7 +469,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (outcome === 'delivered') return 'delivered';
     }
 
-    return this.#enqueueServerControlInput(chatId, input, signal);
+    return this.#enqueueServerControlInput(chatId, input, signal, onQueued);
   }
 
   async deliverGoalControlInput(
@@ -813,11 +815,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
+    onQueued?: () => void,
   ): Promise<'queued'> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
     await this.#controlOperations.enqueueControl(chatId, input);
+    onQueued?.();
     this.#requestDrain(chatId, 'server control input');
     return 'queued';
   }

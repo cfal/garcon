@@ -63,6 +63,7 @@ export interface AgentStartControllerOptions {
       input: ServerControlInput,
       requestRunId: string | null,
       signal: AbortSignal,
+      onQueued: () => void,
     ): Promise<ServerControlDisposition>;
   };
   readonly notices: Pick<TranscriptLedgerService, 'appendNotice' | 'currentView'>;
@@ -281,6 +282,9 @@ export class AgentStartController {
           controlInput,
           input.requestRunId,
           signal,
+          () => {
+            this.#appendOutcome(input, results, 'queued');
+          },
         );
       } catch (error) {
         signal.throwIfAborted();
@@ -292,7 +296,9 @@ export class AgentStartController {
           phase: 'result-delivery',
         });
       }
-      this.#appendOutcome(input, results, deliveryStatus);
+      if (deliveryStatus !== 'queued') {
+        this.#appendOutcome(input, results, deliveryStatus);
+      }
     });
   }
 

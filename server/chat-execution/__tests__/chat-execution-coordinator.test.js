@@ -372,6 +372,7 @@ describe('ChatExecutionCoordinator', () => {
 
   it('steers agent-command results only to the publication-time source run', async () => {
     const providerTarget = { providerTurnId: 'provider-turn-1' };
+    const onQueued = mock(() => undefined);
     const fixture = createFixture({
       turnRunner: {
         captureSteerTarget: mock(() => providerTarget),
@@ -389,8 +390,10 @@ describe('ChatExecutionCoordinator', () => {
       agentCommandResultInput(),
       'source-turn',
       new AbortController().signal,
+      onQueued,
     )).resolves.toBe('delivered');
 
+    expect(onQueued).not.toHaveBeenCalled();
     expect(fixture.turnRunner.steerInput).toHaveBeenCalledTimes(1);
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
     await coordinator.releaseDirectTurn(reservation);
@@ -398,6 +401,7 @@ describe('ChatExecutionCoordinator', () => {
 
   it('queues agent-command results without steering a successor run', async () => {
     let providerRunning = false;
+    const onQueued = mock(() => undefined);
     const fixture = createFixture({
       turnRunner: {
         captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-2' })),
@@ -413,12 +417,44 @@ describe('ChatExecutionCoordinator', () => {
       agentCommandResultInput(),
       'source-turn',
       new AbortController().signal,
+      onQueued,
     )).resolves.toBe('queued');
 
+    expect(onQueued).toHaveBeenCalledTimes(1);
     expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries)
       .toEqual([expect.objectContaining({ content: agentCommandResultInput().content })]);
     await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it('records queued agent-command results before an idle source drains them', async () => {
+    const provider = deferred();
+    const events = [];
+    const fixture = createFixture({
+      appendControlReceipt: mock(() => { events.push('receipt'); }),
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          events.push('provider');
+          return provider.promise;
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+
+    await expect(coordinator.deliverAgentCommandResult(
+      'chat-1',
+      agentCommandResultInput(),
+      'completed-source-turn',
+      new AbortController().signal,
+      () => { events.push('queued'); },
+    )).resolves.toBe('queued');
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    expect(events).toEqual(['queued', 'receipt', 'provider']);
+    const runOptions = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: runOptions.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
   });
 
   it('drains queued inter-agent control input with a receipt and no user admission', async () => {

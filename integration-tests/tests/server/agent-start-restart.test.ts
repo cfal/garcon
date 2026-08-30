@@ -1,13 +1,69 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { messagesOfType } from '../../support/chat-assertions.js';
+import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 
-describe('agent-created chat restart semantics', () => {
+describe('agent-created chat result delivery and restart semantics', () => {
+  test('records queue admission before immediate idle-source result delivery', async () => {
+    await withIntegrationFixture('agent-start-idle-result-delivery', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourcePrompt = 'Start one sub-agent after this source turn finishes.';
+      const childPrompt = 'Complete after the source chat becomes idle.';
+      const ref = '69b623a7-757e-49f6-93b8-4b7ea1bc569b';
+      const command = startAgentCommand(fixture.directAgents.openAi, childPrompt, [ref]);
+
+      const sourceTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: sourcePrompt });
+      const childTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: childPrompt });
+      const sourceCursor = fixture.client.markEvents();
+      const source = await fixture.client.startDirectChat({
+        chatId: sourceChatId,
+        content: sourcePrompt,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await sourceTurn.received;
+      sourceTurn.releaseText(command);
+
+      await childTurn.received;
+      expect((await fixture.client.waitForTurnTerminal(
+        sourceChatId,
+        source.turnId,
+        { afterIndex: sourceCursor },
+      )).type).toBe('agent-run-finished');
+
+      const resultTurn = fixture.fakeProviders.openAi.holdNext({});
+      const resultCursor = fixture.client.markEvents();
+      childTurn.releaseText('Created child completed.');
+      const resultRequest = await resultTurn.received;
+      const children = await subAgentChats(fixture);
+      expect(children).toHaveLength(1);
+      const resultContent = `<garcon-create-chat-result ref="${ref}" error="false" msg="created" chat-id="${children[0]!.id}" />`;
+      expect(resultRequest.lastUserText).toBe(resultContent);
+
+      const sourceTranscript = await fixture.client.getMessages(sourceChatId);
+      const outcomes = messagesOfType(sourceTranscript.messages, 'transcript-notice').filter(
+        (message) => message.detail?.type === 'sub-agent-start-outcome',
+      );
+      expect(outcomes.map((message) => (
+        message.detail?.type === 'sub-agent-start-outcome'
+          ? message.detail.deliveryStatus
+          : null
+      ))).toEqual(['queued', 'delivered']);
+      expect(userContents(sourceTranscript.messages)).toEqual([sourcePrompt]);
+
+      resultTurn.releaseText('Result delivery completed.');
+      expect((await fixture.client.waitForTurnTerminal(
+        sourceChatId,
+        undefined,
+        { afterIndex: resultCursor },
+      )).type).toBe('agent-run-finished');
+    });
+  }, 120_000);
+
   test('drops queued result input on restart while retaining the created chat and queued audit', async () => {
     await withIntegrationFixture('agent-start-result-restart-loss', async (fixture) => {
       const sourceChatId = fixture.newChatId();

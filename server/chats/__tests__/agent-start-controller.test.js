@@ -343,7 +343,12 @@ describe('AgentStartController', () => {
 
   it('records queued, ambiguous, and failed result-delivery dispositions without retrying', async () => {
     const queued = createFixture({
-      execution: { deliverAgentCommandResult: mock(async () => 'queued') },
+      execution: {
+        deliverAgentCommandResult: mock(async (_chatId, _input, _requestRunId, _signal, onQueued) => {
+          onQueued();
+          return 'queued';
+        }),
+      },
     });
     queued.controller.request(request());
     await queued.controller.waitForIdle();
