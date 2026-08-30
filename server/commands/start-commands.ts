@@ -281,11 +281,7 @@ export class StartCommands {
     try {
       await fs.access(resolvedPath);
     } catch {
-      throw new CommandValidationError(
-        'PROJECT_PATH_NOT_FOUND',
-        `Project path not found: ${resolvedPath}`,
-        404,
-      );
+      throw new CommandValidationError('PROJECT_PATH_NOT_FOUND', `Project path not found: ${resolvedPath}`, 404);
     }
 
     return resolvedPath;
