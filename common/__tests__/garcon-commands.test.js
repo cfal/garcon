@@ -350,14 +350,17 @@ describe('Garcon start-agent commands', () => {
     });
   });
 
-  it('peels stacked trailing blocks in document order', () => {
+  it('peels three stacked trailing blocks in document order', () => {
     const first = startAgent('first', [createParams()]);
     const second = startAgent('second', [createParams({ ref: SECOND_REF })]);
+    const third = startAgent('third', [createParams({
+      ref: '00000000-0000-0000-0000-000000000003',
+    })]);
     expect(extractGarconCommands(new AssistantMessage(
       AT,
-      `answer\n${first}\n${second}`,
+      `answer\n${first}\n${second}\n${third}`,
     ))?.commands.map((command) => command.type === 'start-agent' ? command.prompt : command.type))
-      .toEqual(['first', 'second']);
+      .toEqual(['first', 'second', 'third']);
   });
 
   it('peels a valid trailing block past an earlier malformed boundary candidate', () => {
@@ -375,6 +378,47 @@ describe('Garcon start-agent commands', () => {
       { command: 'start-agent', reason: 'malformed', edge: 'trailing' },
     ]);
   });
+
+  it('does not reroute a nested block through its malformed outer prompt', () => {
+    const malformedOuter = [
+      '<garcon-start-agent>',
+      '<garcon-prompt>',
+      'outer prompt',
+      startAgent('nested'),
+    ].join('\n');
+
+    expect(extractGarconCommands(new AssistantMessage(AT, malformedOuter))).toEqual({
+      message: new AssistantMessage(AT, malformedOuter),
+      commands: [],
+      issues: [{ command: 'start-agent', reason: 'malformed', edge: 'leading' }],
+    });
+
+    const trailing = `answer\n${malformedOuter}`;
+    expect(extractGarconCommands(new AssistantMessage(AT, trailing))).toEqual({
+      message: new AssistantMessage(AT, trailing),
+      commands: [],
+      issues: [{ command: 'start-agent', reason: 'malformed', edge: 'trailing' }],
+    });
+  });
+
+  it('bounds recovery across repeated prompt-owned candidates', () => {
+    const promptOpeners = '<garcon-start-agent>\n<garcon-prompt>\n'.repeat(1_400);
+    const content = [
+      'answer',
+      '<garcon-start-agent>',
+      '<garcon-prompt>',
+      promptOpeners,
+      '</garcon-prompt>',
+      '</garcon-start-agent>',
+    ].join('\n');
+
+    expect(content.length).toBeLessThan(64 * 1024);
+    expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({
+      message: new AssistantMessage(AT, content),
+      commands: [],
+      issues: [{ command: 'start-agent', reason: 'malformed', edge: 'trailing' }],
+    });
+  }, 1_500);
 
   it('accepts 16 params and rejects zero, 17, and duplicate refs', () => {
     const params = Array.from({ length: 16 }, (_, index) => createParams({

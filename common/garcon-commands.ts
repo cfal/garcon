@@ -227,7 +227,7 @@ function parseLeadingCommand(content: string, start: number, end: number): Parse
 
 function parseLeadingStartAgent(content: string, start: number, end: number): ParsedEdge {
   const parsed = parseGarconStartAgent(content, start, end);
-  if (!parsed) {
+  if (parsed.kind === 'malformed') {
     return { kind: 'malformed', command: 'start-agent', candidateStart: start };
   }
   if (hasOnlyTrailingWhitespace(content, parsed.end, end)) return { kind: 'none' };
@@ -319,12 +319,13 @@ function parseTrailingStartAgent(content: string, start: number, end: number): P
   );
   while (candidateStart >= 0) {
     const parsed = parseGarconStartAgent(content, candidateStart, end);
-    if (!parsed) {
+    if (parsed.kind === 'malformed') {
       malformedCandidateStart ??= candidateStart;
+      if (parsed.nextCandidateStart >= end) break;
       candidateStart = findBoundaryPrefix(
         content,
         start,
-        candidateStart + GARCON_START_AGENT_PREFIX.length,
+        parsed.nextCandidateStart,
         end,
         GARCON_START_AGENT_PREFIX,
       );

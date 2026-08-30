@@ -78,10 +78,16 @@ export type GarconCreateChatResult =
       readonly msg: GarconCreateChatFailureMessage;
     };
 
-export interface ParsedGarconStartAgent {
-  readonly command: GarconStartAgentCommand;
-  readonly end: number;
-}
+export type GarconStartAgentParseResult =
+  | {
+      readonly kind: 'valid';
+      readonly command: GarconStartAgentCommand;
+      readonly end: number;
+    }
+  | {
+      readonly kind: 'malformed';
+      readonly nextCandidateStart: number;
+    };
 
 interface ContentLine {
   readonly start: number;
@@ -99,18 +105,21 @@ export function parseGarconStartAgent(
   content: string,
   start: number,
   end: number,
-): ParsedGarconStartAgent | null {
+): GarconStartAgentParseResult {
   const outerOpen = contentLine(content, start, end);
-  if (
-    !lineEquals(content, outerOpen, GARCON_START_AGENT_OPEN)
-    || !outerOpen.hasLineBreak
-  ) {
-    return null;
+  if (!lineEquals(content, outerOpen, GARCON_START_AGENT_OPEN)) {
+    return { kind: 'malformed', nextCandidateStart: outerOpen.nextStart };
+  }
+  if (!outerOpen.hasLineBreak) {
+    return { kind: 'malformed', nextCandidateStart: end };
   }
 
   const promptOpen = contentLine(content, outerOpen.nextStart, end);
-  if (!lineEquals(content, promptOpen, GARCON_PROMPT_OPEN) || !promptOpen.hasLineBreak) {
-    return null;
+  if (!lineEquals(content, promptOpen, GARCON_PROMPT_OPEN)) {
+    return { kind: 'malformed', nextCandidateStart: promptOpen.start };
+  }
+  if (!promptOpen.hasLineBreak) {
+    return { kind: 'malformed', nextCandidateStart: end };
   }
 
   let promptClose: ContentLine | null = null;
@@ -128,24 +137,31 @@ export function parseGarconStartAgent(
         nestedPromptOpeners.push(nextLine);
       }
     }
-    if (!line.hasLineBreak) return null;
+    if (!line.hasLineBreak) {
+      return { kind: 'malformed', nextCandidateStart: end };
+    }
     cursor = line.nextStart;
   }
-  if (!promptClose || !promptClose.hasLineBreak) return null;
-  if (nestedPromptOpeners.some((opener) => (
-    completesNestedStartAgent(content, opener, promptClose, end)
-  ))) {
-    return null;
+  if (!promptClose || !promptClose.hasLineBreak) {
+    return { kind: 'malformed', nextCandidateStart: end };
+  }
+  if (completesNestedStartAgent(content, nestedPromptOpeners, promptClose, end)) {
+    return { kind: 'malformed', nextCandidateStart: end };
   }
 
   const prompt = normalizeGarconCommandBody(
     content.slice(promptOpen.end, promptClose.start),
   );
-  if (!isValidStartPrompt(prompt)) return null;
+  if (!isValidStartPrompt(prompt)) {
+    return { kind: 'malformed', nextCandidateStart: end };
+  }
 
   const parsedParams = parseCreateChatParamsBlock(content, promptClose.nextStart, end);
-  if (!parsedParams) return null;
+  if (!parsedParams) {
+    return { kind: 'malformed', nextCandidateStart: end };
+  }
   return {
+    kind: 'valid',
     command: { type: 'start-agent', prompt, params: parsedParams.params },
     end: parsedParams.end,
   };
@@ -202,16 +218,20 @@ export function isGarconCreateChatResult(
 
 function completesNestedStartAgent(
   content: string,
-  promptOpen: ContentLine,
+  promptOpeners: readonly ContentLine[],
   promptClose: ContentLine,
   end: number,
 ): boolean {
-  const prompt = normalizeGarconCommandBody(
-    content.slice(promptOpen.end, promptClose.start),
-  );
-  if (!isValidStartPrompt(prompt)) return false;
+  if (promptOpeners.length === 0) return false;
+  if (!parseCreateChatParamsBlock(content, promptClose.nextStart, end)) return false;
 
-  return parseCreateChatParamsBlock(content, promptClose.nextStart, end) !== null;
+  for (let index = promptOpeners.length - 1; index >= 0; index -= 1) {
+    const prompt = normalizeGarconCommandBody(
+      content.slice(promptOpeners[index].end, promptClose.start),
+    );
+    if (isValidStartPrompt(prompt)) return true;
+  }
+  return false;
 }
 
 function parseCreateChatParamsBlock(
