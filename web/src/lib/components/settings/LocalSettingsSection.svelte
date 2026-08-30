@@ -198,11 +198,6 @@
 				() => ls.toggle('overlayBackdropEffects'),
 				{ description: m.settings_overlay_backdrop_effects_description() },
 			)}
-			{@render settingRow(
-				m.settings_workspace_hide_chat_list_for_git(),
-				ls.hideChatListWhenGitFocused,
-				() => ls.toggle('hideChatListWhenGitFocused'),
-			)}
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),
 			)}

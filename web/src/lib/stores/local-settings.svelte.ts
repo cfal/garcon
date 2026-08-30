@@ -110,7 +110,6 @@ export interface LocalSettingsSnapshot {
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
-	hideChatListWhenGitFocused: boolean;
 	chatListAutohide: boolean;
 	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
@@ -149,7 +148,6 @@ type BooleanLocalSettingKey =
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
 	| 'steerWithCtrlEnter'
-	| 'hideChatListWhenGitFocused'
 	| 'chatListAutohide'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
@@ -172,7 +170,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	hideChatListWhenGitFocused: false,
 	chatListAutohide: false,
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
@@ -305,10 +302,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		hideChatListWhenGitFocused: parseBoolean(
-			parsed.hideChatListWhenGitFocused,
-			DEFAULTS.hideChatListWhenGitFocused,
-		),
 		chatListAutohide: parseBoolean(parsed.chatListAutohide, DEFAULTS.chatListAutohide),
 		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
@@ -395,7 +388,6 @@ export class LocalSettingsStore {
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
-	hideChatListWhenGitFocused = $state(DEFAULTS.hideChatListWhenGitFocused);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
@@ -493,7 +485,6 @@ export class LocalSettingsStore {
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
-			hideChatListWhenGitFocused: this.hideChatListWhenGitFocused,
 			chatListAutohide: this.chatListAutohide,
 			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
@@ -536,7 +527,6 @@ export class LocalSettingsStore {
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
-		this.hideChatListWhenGitFocused = snap.hideChatListWhenGitFocused;
 		this.chatListAutohide = snap.chatListAutohide;
 		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;

@@ -330,38 +330,6 @@ describe('AppShell responsive workspace binding', () => {
 		expect(chatNavigation.gotoChat).toHaveBeenCalledOnce();
 	});
 
-	it.each(['git', 'git-history', 'git-compare'] as const)(
-		'hides the desktop chat list when %s is active and the Git setting is enabled',
-		async (kind) => {
-			const workspace = installContext();
-			(
-				testContext.current?.localSettings as { hideChatListWhenGitFocused: boolean }
-			).hideChatListWhenGitFocused = true;
-			const surfaceId = `singleton:${kind}`;
-			if (!workspace.layout.surface(surfaceId)) {
-				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
-					{
-						type: 'register-surface',
-						surface: portableSingletonDescriptor(kind),
-						windowId: 'window-main',
-					},
-				]);
-				workspace.layout.publish(workspace.layout.revision, registered);
-			}
-			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'activate-window-tab', windowId: 'window-main', surfaceId },
-			]);
-			workspace.layout.publish(workspace.layout.revision, focused);
-
-			render(AppShell);
-			await waitFor(() =>
-				expect(
-					document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
-				).toBe('true'),
-			);
-		},
-	);
-
 	it('reorders one mounted desktop chat list when its dock side changes', async () => {
 		installContext();
 		render(AppShell);
@@ -453,38 +421,6 @@ describe('AppShell responsive workspace binding', () => {
 			).toBe('false'),
 		);
 	});
-
-	it.each(['commit', 'files', 'pull-requests'] as const)(
-		'keeps the desktop chat list visible when %s is active',
-		async (kind) => {
-			const workspace = installContext();
-			(
-				testContext.current?.localSettings as { hideChatListWhenGitFocused: boolean }
-			).hideChatListWhenGitFocused = true;
-			const surfaceId = `singleton:${kind}`;
-			if (!workspace.layout.surface(surfaceId)) {
-				const registered = reduceWorkspaceLayout(workspace.layout.snapshot, [
-					{
-						type: 'register-surface',
-						surface: portableSingletonDescriptor(kind),
-						windowId: 'window-main',
-					},
-				]);
-				workspace.layout.publish(workspace.layout.revision, registered);
-			}
-			const focused = reduceWorkspaceLayout(workspace.layout.snapshot, [
-				{ type: 'activate-window-tab', windowId: 'window-main', surfaceId },
-			]);
-			workspace.layout.publish(workspace.layout.revision, focused);
-
-			render(AppShell);
-			await waitFor(() =>
-				expect(
-					document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
-				).toBe('false'),
-			);
-		},
-	);
 
 	it.each(['git-history', 'git-compare'] as const)(
 		'hides the mobile bottom bar for transient %s',

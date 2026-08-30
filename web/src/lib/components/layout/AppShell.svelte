@@ -106,15 +106,7 @@
 	const workspaceFullscreen = $derived(
 		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
-	const focusedWindowKind = $derived(workspace.focusedWindowActiveKind);
-	const hideLeftForGit = $derived(
-		!isMobile &&
-			localSettings.hideChatListWhenGitFocused &&
-			(focusedWindowKind === 'git' ||
-				focusedWindowKind === 'git-history' ||
-				focusedWindowKind === 'git-compare'),
-	);
-	const hideLeftSidebar = $derived(workspaceFullscreen || hideLeftForGit);
+	const hideLeftSidebar = $derived(workspaceFullscreen);
 	const chatListAutohideActive = $derived(
 		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
 	);
