@@ -21,6 +21,8 @@
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import Clock from '@lucide/svelte/icons/clock';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
+	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -32,6 +34,9 @@
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
+		chatListAutohide?: boolean;
+		chatListAutohideAvailable?: boolean;
+		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
@@ -41,6 +46,8 @@
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
+		onToggleChatListAutohide?: () => void;
+		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
@@ -54,6 +61,9 @@
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
 		sortByRecent = false,
+		chatListAutohide = false,
+		chatListAutohideAvailable = false,
+		dockOnRight = false,
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
@@ -63,6 +73,8 @@
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
 		onToggleSortByRecent,
+		onToggleChatListAutohide,
+		onSetDockOnRight,
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
 		onShowSettings,
@@ -197,6 +209,22 @@
 						</DropdownMenuRadioItem>
 					</DropdownMenuRadioGroup>
 				</DropdownMenuGroup>
+				<DropdownMenuSeparator />
+				<DropdownMenuCheckboxItem
+					checked={chatListAutohide}
+					disabled={!chatListAutohideAvailable}
+					onCheckedChange={() => onToggleChatListAutohide?.()}
+				>
+					<PanelLeftClose class="h-3.5 w-3.5" />
+					{m.sidebar_actions_autohide_sidebar()}
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuCheckboxItem
+					checked={dockOnRight}
+					onCheckedChange={(enabled) => onSetDockOnRight?.(enabled)}
+				>
+					<PanelRight class="h-3.5 w-3.5" />
+					{m.sidebar_actions_dock_sidebar_right()}
+				</DropdownMenuCheckboxItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onclick={onShowScheduledPrompts}>
 					<CalendarClock class="h-3.5 w-3.5" />

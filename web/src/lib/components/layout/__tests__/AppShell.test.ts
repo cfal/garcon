@@ -6,6 +6,7 @@ import {
 } from './AppShellBreakpointWorkspace.svelte.js';
 import { reduceWorkspaceLayout } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
+import { HOVER_CAPABLE_MEDIA_QUERY } from '$lib/layout/desktop-layout.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -77,10 +78,15 @@ vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
 const AppShell = (await import('../AppShell.svelte')).default;
 
 class TestMediaQueryList {
-	readonly media = '(max-width: 768px)';
+	readonly media: string;
 	onchange: ((this: MediaQueryList, ev: MediaQueryListEvent) => unknown) | null = null;
-	matches = false;
+	matches: boolean;
 	readonly listeners = new Set<(event: MediaQueryListEvent) => void>();
+
+	constructor(media: string, matches = false) {
+		this.media = media;
+		this.matches = matches;
+	}
 
 	addEventListener(
 		_type: 'change',
@@ -198,13 +204,19 @@ function installContext(): AppShellBreakpointWorkspace {
 }
 
 describe('AppShell responsive workspace binding', () => {
-	let mediaQuery: TestMediaQueryList;
+	let breakpointMediaQuery: TestMediaQueryList;
+	let hoverMediaQuery: TestMediaQueryList;
 
 	beforeEach(() => {
-		mediaQuery = new TestMediaQueryList();
+		breakpointMediaQuery = new TestMediaQueryList('(max-width: 768px)');
+		hoverMediaQuery = new TestMediaQueryList(HOVER_CAPABLE_MEDIA_QUERY, true);
 		vi.stubGlobal(
 			'matchMedia',
-			vi.fn(() => mediaQuery),
+			vi.fn((query: string) => {
+				if (query === breakpointMediaQuery.media) return breakpointMediaQuery;
+				if (query === hoverMediaQuery.media) return hoverMediaQuery;
+				throw new Error(`Unexpected media query: ${query}`);
+			}),
 		);
 	});
 
@@ -237,11 +249,11 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 
-		mediaQuery.setMatches(true);
+		breakpointMediaQuery.setMatches(true);
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('true');
 
-		mediaQuery.setMatches(false);
+		breakpointMediaQuery.setMatches(false);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 	});
@@ -251,11 +263,11 @@ describe('AppShell responsive workspace binding', () => {
 		render(AppShell);
 
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
-		mediaQuery.matches = true;
+		breakpointMediaQuery.matches = true;
 		window.dispatchEvent(new Event('resize'));
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
 
-		mediaQuery.matches = false;
+		breakpointMediaQuery.matches = false;
 		window.dispatchEvent(new Event('resize'));
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 	});
@@ -278,7 +290,7 @@ describe('AppShell responsive workspace binding', () => {
 			setSidebarOpen: ReturnType<typeof vi.fn>;
 		};
 		appShell.sidebarOpen = true;
-		mediaQuery.matches = true;
+		breakpointMediaQuery.matches = true;
 		render(AppShell);
 
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
@@ -365,6 +377,65 @@ describe('AppShell responsive workspace binding', () => {
 		expect(screen.getByRole('button', { name: 'Select test chat' })).toBe(sidebarButton);
 	});
 
+	it('reveals and collapses an autohidden chat sidebar without moving workspace content', async () => {
+		installContext();
+		const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+		localSettings.chatListAutohide = true;
+		render(AppShell);
+
+		const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+		const panel = document.querySelector<HTMLElement>('[data-workspace-chat-list-panel]');
+		const workspaceContent = document.querySelector<HTMLElement>('[data-workspace-content]');
+		const revealTrigger = screen.getByRole('button', { name: 'Show chat sidebar' });
+		expect(chatList?.style.width).toBe('0px');
+		expect(panel?.getAttribute('aria-hidden')).toBe('true');
+		expect(panel?.hasAttribute('inert')).toBe(true);
+
+		await fireEvent.pointerEnter(chatList as HTMLElement);
+		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('false'));
+		expect(panel?.hasAttribute('inert')).toBe(false);
+		expect(chatList?.style.width).toBe('0px');
+
+		const sidebarButton = screen.getByRole('button', { name: 'Select test chat' });
+		sidebarButton.focus();
+		await fireEvent.pointerEnter(workspaceContent as HTMLElement);
+		expect(panel?.getAttribute('aria-hidden')).toBe('false');
+
+		await fireEvent.keyDown(sidebarButton, { key: 'Escape' });
+		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('true'));
+		expect(document.activeElement).toBe(revealTrigger);
+
+		await fireEvent.click(revealTrigger);
+		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('false'));
+		revealTrigger.blur();
+		await fireEvent.pointerEnter(workspaceContent as HTMLElement);
+		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('true'));
+
+		hoverMediaQuery.setMatches(false);
+		await waitFor(() => expect(panel?.getAttribute('aria-hidden')).toBe('false'));
+		expect(screen.queryByRole('button', { name: 'Show chat sidebar' })).toBeNull();
+		expect(chatList?.style.width).toBe('320px');
+	});
+
+	it.each([
+		{ dock: 'left' as const, edgeClass: 'start-0', hiddenClass: '-translate-x-full' },
+		{ dock: 'right' as const, edgeClass: 'end-0', hiddenClass: 'translate-x-full' },
+	])(
+		'places the autohide trigger and hidden panel on the $dock edge',
+		({ dock, edgeClass, hiddenClass }) => {
+			installContext();
+			const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+			localSettings.chatListAutohide = true;
+			localSettings.chatListDock = dock;
+			render(AppShell);
+
+			const trigger = screen.getByRole('button', { name: 'Show chat sidebar' });
+			const panel = document.querySelector<HTMLElement>('[data-workspace-chat-list-panel]');
+			expect(trigger.classList.contains(edgeClass)).toBe(true);
+			expect(panel?.classList.contains(hiddenClass)).toBe(true);
+		},
+	);
+
 	it('hides and restores the desktop chat list for window fullscreen', async () => {
 		const workspace = installContext();
 		await workspace.enterWindowFullscreen('window-main');
@@ -434,7 +505,7 @@ describe('AppShell responsive workspace binding', () => {
 			]);
 			workspace.layout.publish(workspace.layout.revision, mobile);
 			workspace.isMobile = true;
-			mediaQuery.matches = true;
+			breakpointMediaQuery.matches = true;
 
 			render(AppShell);
 			expect(screen.queryByTestId('bottom-tab-bar-stub')).toBeNull();

@@ -2,6 +2,7 @@ export type ChatListDock = 'left' | 'right';
 export type DesktopLayoutEdge = 'start' | 'end';
 
 export const DEFAULT_CHAT_LIST_DOCK: ChatListDock = 'left';
+export const HOVER_CAPABLE_MEDIA_QUERY = '(hover: hover)';
 
 export function normalizeChatListDock(value: unknown): ChatListDock {
 	if (value === 'left' || value === 'right') return value;

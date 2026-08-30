@@ -13,6 +13,9 @@
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
+		chatListAutohide?: boolean;
+		chatListAutohideAvailable?: boolean;
+		dockOnRight?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
@@ -23,6 +26,8 @@
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
+		onToggleChatListAutohide?: () => void;
+		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
@@ -38,6 +43,9 @@
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
 		sortByRecent = false,
+		chatListAutohide = false,
+		chatListAutohideAvailable = false,
+		dockOnRight = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
 		activeQuery,
@@ -48,6 +56,8 @@
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
 		onToggleSortByRecent,
+		onToggleChatListAutohide,
+		onSetDockOnRight,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
@@ -70,6 +80,9 @@
 		{groupNestedProjectPaths}
 		{chatItemLayout}
 		{sortByRecent}
+		{chatListAutohide}
+		{chatListAutohideAvailable}
+		{dockOnRight}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasContentBelowControls}
 		{onOpenSearchDialog}
@@ -79,6 +92,8 @@
 		{onToggleGroupNestedProjectPaths}
 		{onSetChatItemLayout}
 		{onToggleSortByRecent}
+		{onToggleChatListAutohide}
+		{onSetDockOnRight}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
 		{onShowSettings}

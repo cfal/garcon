@@ -13,8 +13,10 @@ import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 
 export class AppShellLocalSettingsState {
 	hideChatListWhenGitFocused = $state(false);
+	chatListAutohide = $state(false);
 	chatListDock = $state<ChatListDock>('left');
 	sidebarWidth = $state(320);
+	reduceMotion = $state(false);
 	sidebarGroupByProject = $state(false);
 	sidebarGroupNestedProjectPaths = $state(false);
 

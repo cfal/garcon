@@ -59,7 +59,6 @@
 		(key, value) => onLocalSet(key, value),
 		(key) => onLocalToggle(key),
 	);
-	localSettings.chatListDock = 'left';
 	localSettings.chatMaxWidth = 'none';
 	localSettings.hiddenToolTypes = [];
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];

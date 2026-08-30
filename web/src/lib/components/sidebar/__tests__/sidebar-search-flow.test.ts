@@ -173,6 +173,43 @@ describe('sidebar search dialog flow', () => {
 		expect(screen.getByTitle('/tmp/project/packages/app')).toBeTruthy();
 	});
 
+	it('updates chat sidebar autohide and docking from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			autoLoadSavedSearches: false,
+			chatListAutohideAvailable: true,
+		});
+
+		let [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		let autohideItem = await screen.findByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
+		});
+		expect(autohideItem.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(autohideItem);
+
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		autohideItem = await screen.findByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
+		});
+		expect(autohideItem.getAttribute('aria-checked')).toBe('true');
+
+		const dockItem = screen.getByRole('menuitemcheckbox', {
+			name: 'Dock sidebar on the right',
+		});
+		expect(dockItem.getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(dockItem);
+
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		expect(
+			(
+				await screen.findByRole('menuitemcheckbox', { name: 'Dock sidebar on the right' })
+			).getAttribute('aria-checked'),
+		).toBe('true');
+	});
+
 	it('switches chat item layout from the sidebar actions menu', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],

@@ -137,15 +137,7 @@ describe('Settings', () => {
 			await fireEvent.click(screen.getByRole('tab', { name: 'Local Settings' }));
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
-			const chatListPosition = screen.getByRole('combobox', { name: 'Chat list position' });
-			expect((chatListPosition as HTMLSelectElement).value).toBe('left');
-			expect(chatListPosition.className).toContain('text-base');
-			expect(chatListPosition.className).toContain('sm:pointer-fine:text-sm');
-			expect(screen.getByRole('option', { name: 'Left' })).toBeTruthy();
-			expect(screen.getByRole('option', { name: 'Right' })).toBeTruthy();
-			await fireEvent.change(chatListPosition, { target: { value: 'right' } });
-			expect(onLocalSet).toHaveBeenCalledWith('chatListDock', 'right');
-			expect((chatListPosition as HTMLSelectElement).value).toBe('right');
+			expect(screen.queryByRole('combobox', { name: 'Chat list position' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
 			const alwaysExpandCliMessages = screen.getByRole('switch', {
 				name: 'Always expand CLI messages',

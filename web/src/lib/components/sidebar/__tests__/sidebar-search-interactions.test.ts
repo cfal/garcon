@@ -445,9 +445,11 @@ describe('sidebar search interactions', () => {
 		expect(items[7]?.textContent).toContain('Compact chat items');
 		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
 		expect(items[8]?.textContent).toContain('Single-line chat items');
-		expect(items[9]?.textContent).toContain('Scheduled prompts');
-		expect(items[10]?.textContent).toContain('Settings');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
+		expect(items[9]?.textContent).toContain('Autohide sidebar');
+		expect(items[10]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[11]?.textContent).toContain('Scheduled prompts');
+		expect(items[12]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
 		expect(onShowScheduledPrompts).toHaveBeenCalledOnce();
@@ -465,6 +467,9 @@ describe('sidebar search interactions', () => {
 			groupNestedProjectPaths: true,
 			chatItemLayout: 'compact',
 			sortByRecent: false,
+			chatListAutohide: true,
+			chatListAutohideAvailable: true,
+			dockOnRight: true,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
@@ -512,10 +517,20 @@ describe('sidebar search interactions', () => {
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
 		expect(items[6]?.textContent).toContain('Single-line chat items');
-		expect(items[7]?.textContent).toContain('Scheduled prompts');
-		expect(items[8]?.textContent).toContain('Settings');
+		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
+		});
+		expect(chatListAutohide.getAttribute('aria-checked')).toBe('true');
+		expect(items[7]?.textContent).toContain('Autohide sidebar');
+		const dockOnRight = screen.getByRole('menuitemcheckbox', {
+			name: 'Dock sidebar on the right',
+		});
+		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
+		expect(items[8]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[9]?.textContent).toContain('Scheduled prompts');
+		expect(items[10]?.textContent).toContain('Settings');
 		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
 		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(groupByProject.className).toContain('pe-8');
 		expect(groupByProject.className).not.toContain('ps-8');
@@ -584,6 +599,69 @@ describe('sidebar search interactions', () => {
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
 	});
 
+	it('disables autohide when the client cannot hover', async () => {
+		const onToggleChatListAutohide = vi.fn();
+		render(SidebarControlsRow, {
+			isLoading: false,
+			chatListAutohide: false,
+			chatListAutohideAvailable: false,
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onToggleChatListAutohide,
+			onShowScheduledPrompts: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+		const autohide = await screen.findByRole('menuitemcheckbox', {
+			name: 'Autohide sidebar',
+		});
+
+		expect(autohide.getAttribute('data-disabled')).toBe('');
+		await fireEvent.click(autohide);
+		expect(onToggleChatListAutohide).not.toHaveBeenCalled();
+	});
+
+	it('toggles autohide and right docking from the sidebar menu', async () => {
+		const onToggleChatListAutohide = vi.fn();
+		const onSetDockOnRight = vi.fn();
+		const view = render(SidebarControlsRow, {
+			isLoading: false,
+			chatListAutohide: false,
+			chatListAutohideAvailable: true,
+			dockOnRight: false,
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onToggleChatListAutohide,
+			onSetDockOnRight,
+			onShowScheduledPrompts: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		let [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Autohide sidebar' }),
+		);
+		expect(onToggleChatListAutohide).toHaveBeenCalledOnce();
+
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Dock sidebar on the right' }),
+		);
+		expect(onSetDockOnRight).toHaveBeenCalledExactlyOnceWith(true);
+
+		await view.rerender({ dockOnRight: true });
+		menuTrigger = screen.getAllByRole('button', { name: 'More actions' })[0];
+		await fireEvent.click(menuTrigger);
+		await fireEvent.click(
+			await screen.findByRole('menuitemcheckbox', { name: 'Dock sidebar on the right' }),
+		);
+		expect(onSetDockOnRight).toHaveBeenLastCalledWith(false);
+	});
+
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
@@ -621,7 +699,7 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
 	});
 
 	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {

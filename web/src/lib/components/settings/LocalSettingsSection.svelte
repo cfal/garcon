@@ -15,7 +15,6 @@
 		type FileOpenPlacementPreference,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
-	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import {
 		SNIPPET_TRIGGER_MAX_LENGTH,
 		snippetTriggerValidationError,
@@ -52,11 +51,6 @@
 		'new-window': m.settings_file_open_placement_new_window,
 		dialog: m.settings_file_open_placement_dialog,
 	};
-	const chatListDockLabels: Record<ChatListDock, () => string> = {
-		left: m.settings_chat_list_dock_left,
-		right: m.settings_chat_list_dock_right,
-	};
-
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
 	}
@@ -69,10 +63,6 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
-	}
-
-	function setChatListDock(value: string): void {
-		if (value === 'left' || value === 'right') ls.set('chatListDock', value);
 	}
 
 	let snippetTriggerDraft = $state(ls.snippetTrigger);
@@ -187,21 +177,6 @@
 
 		<div class="px-4">
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
-				<label class="min-w-0 text-sm font-medium text-foreground" for="local-chat-list-dock">
-					{m.settings_chat_list_dock()}
-				</label>
-				<select
-					id="local-chat-list-dock"
-					class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
-					value={ls.chatListDock}
-					onchange={(event) => setChatListDock((event.currentTarget as HTMLSelectElement).value)}
-				>
-					{#each ['left', 'right'] as const as dock (dock)}
-						<option value={dock}>{chatListDockLabels[dock]()}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="flex items-center justify-between gap-4 py-2">
 				<div class="text-sm font-medium text-foreground">{m.settings_chat_max_width()}</div>
 				<select
 					class="rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
