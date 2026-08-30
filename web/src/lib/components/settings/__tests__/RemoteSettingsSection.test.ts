@@ -52,9 +52,6 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 				enabled: true,
 				chatIdDiscovery: true,
 				sendMessage: true,
-				subAgents: true,
-				allowCustomSubAgentProjectPath: false,
-				allowCustomSubAgentPermissionLevel: false,
 			},
 		},
 		ui: {},
@@ -212,7 +209,7 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('persists nested agent command settings while ancestors hide and restore them', async () => {
+	it('persists agent command settings while the parent hides and restores them', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot());
 		setTestRemoteSettingsStore(store);
@@ -226,45 +223,7 @@ describe('RemoteSettingsSection', () => {
 			'https://github.com/cfal/garcon-skills',
 		);
 		expect(screen.getByRole('switch', { name: 'Enable chat ID auto-discovery' })).toBeTruthy();
-		expect(screen.getByRole('switch', { name: 'Enable sub-agents' })).toBeTruthy();
-		const projectPathOverride = screen.getByRole('switch', {
-			name: 'Allow custom sub-agent project path',
-		});
-		const permissionOverride = screen.getByRole('switch', {
-			name: 'Allow custom sub-agent permission level',
-		});
-		expect(projectPathOverride.getAttribute('aria-checked')).toBe('false');
-		expect(permissionOverride.getAttribute('aria-checked')).toBe('false');
-		expect(screen.getByText(
-			"This will allow the agent to start a sub-agent at an arbitrary project path with the agent's permission level.",
-		)).toBeTruthy();
-		expect(screen.getByText(
-			'this will allow the agent to start a sub-agent with an arbitrary permission level.',
-		)).toBeTruthy();
-
-		await fireEvent.click(projectPathOverride);
-		await waitFor(() => {
-			expect(updateRemoteSettings).toHaveBeenCalledWith({
-				features: { agentCommands: { allowCustomSubAgentProjectPath: true } },
-			});
-			expect(store.snapshot?.features.agentCommands.allowCustomSubAgentProjectPath).toBe(true);
-		});
-
-		const subAgents = screen.getByRole('switch', { name: 'Enable sub-agents' });
-		await fireEvent.click(subAgents);
-		await waitFor(() => {
-			expect(screen.queryByRole('switch', {
-				name: 'Allow custom sub-agent project path',
-			})).toBeNull();
-		});
-		expect(store.snapshot?.features.agentCommands.allowCustomSubAgentProjectPath).toBe(true);
-
-		await fireEvent.click(subAgents);
-		await waitFor(() => {
-			expect(screen.getByRole('switch', {
-				name: 'Allow custom sub-agent project path',
-			}).getAttribute('aria-checked')).toBe('true');
-		});
+		expect(screen.getByRole('switch', { name: 'Enable send message' })).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('switch', { name: 'Enable send message' }));
 
@@ -297,12 +256,12 @@ describe('RemoteSettingsSection', () => {
 		vi.mocked(updateRemoteSettings).mockRejectedValueOnce(new Error('Settings are unavailable.'));
 		render(RemoteSettingsSectionTestHost);
 
-		const toggle = screen.getByRole('switch', { name: 'Enable sub-agents' });
+		const toggle = screen.getByRole('switch', { name: 'Enable send message' });
 		await fireEvent.click(toggle);
 
 		expect((await screen.findByRole('alert')).textContent).toContain('Settings are unavailable.');
 		expect(toggle.getAttribute('aria-checked')).toBe('true');
-		expect(store.snapshot?.features.agentCommands.subAgents).toBe(true);
+		expect(store.snapshot?.features.agentCommands.sendMessage).toBe(true);
 	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {

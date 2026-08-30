@@ -14,6 +14,7 @@ import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
+  AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
@@ -210,14 +211,7 @@ export default function createWorkspaceRoutes(
 
     const patch: Partial<AgentCommandsFeatureSettings> = {};
     const setting = raw as Record<string, unknown>;
-    for (const key of [
-      'enabled',
-      'chatIdDiscovery',
-      'sendMessage',
-      'subAgents',
-      'allowCustomSubAgentProjectPath',
-      'allowCustomSubAgentPermissionLevel',
-    ] as const) {
+    for (const key of AGENT_COMMAND_SETTING_KEYS) {
       if (!(key in setting)) continue;
       if (typeof setting[key] !== 'boolean') {
         return `features.agentCommands.${key} must be a boolean`;

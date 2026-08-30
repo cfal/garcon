@@ -71,7 +71,7 @@ function makeSettingsSnapshot(
 		version: 2,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
 		},
 		ui: {},
 		uiEffective: {},
@@ -502,8 +502,6 @@ describe('parseServerWsMessage', () => {
 		const settingsSnapshot = makeSettingsSnapshot({
 			ui: { appIdentity: { title: 'Garcon - Work' } },
 		});
-		settingsSnapshot.features.agentCommands.allowCustomSubAgentProjectPath = true;
-		settingsSnapshot.features.agentCommands.allowCustomSubAgentPermissionLevel = true;
 		const settingsChanged = parseServerWsMessage({
 			type: 'settings-changed',
 			settings: settingsSnapshot,
@@ -514,9 +512,10 @@ describe('parseServerWsMessage', () => {
 		);
 		expect(
 			(settingsChanged as SettingsChangedMessage).settings.features.agentCommands,
-		).toMatchObject({
-			allowCustomSubAgentProjectPath: true,
-			allowCustomSubAgentPermissionLevel: true,
+		).toEqual({
+			enabled: true,
+			chatIdDiscovery: true,
+			sendMessage: true,
 		});
 		expect(
 			parseServerWsMessage({

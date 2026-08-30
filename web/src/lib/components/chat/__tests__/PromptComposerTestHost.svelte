@@ -144,7 +144,7 @@
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
+			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
 		},
 		ui: {},
 		uiEffective: {},

@@ -5,7 +5,7 @@ function projectSettings(overrides = {}) {
   return {
     features: {
       transcriptSearch: { enabled: false },
-      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
+      agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true },
     },
     ui: {},
     paths: {},

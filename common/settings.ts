@@ -126,14 +126,14 @@ export interface TranscriptSearchFeatureSettings {
   enabled: boolean;
 }
 
-export interface AgentCommandsFeatureSettings {
-  enabled: boolean;
-  chatIdDiscovery: boolean;
-  sendMessage: boolean;
-  subAgents: boolean;
-  allowCustomSubAgentProjectPath: boolean;
-  allowCustomSubAgentPermissionLevel: boolean;
-}
+export const AGENT_COMMAND_SETTING_KEYS = [
+  'enabled',
+  'chatIdDiscovery',
+  'sendMessage',
+] as const;
+
+export type AgentCommandSettingKey = typeof AGENT_COMMAND_SETTING_KEYS[number];
+export type AgentCommandsFeatureSettings = Record<AgentCommandSettingKey, boolean>;
 
 export interface RemoteFeatureSettings {
   transcriptSearch: TranscriptSearchFeatureSettings;
@@ -146,9 +146,6 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
     enabled: true,
     chatIdDiscovery: true,
     sendMessage: true,
-    subAgents: true,
-    allowCustomSubAgentProjectPath: false,
-    allowCustomSubAgentPermissionLevel: false,
   },
 };
 
@@ -511,17 +508,6 @@ export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSet
       sendMessage: typeof agentCommands?.sendMessage === 'boolean'
         ? agentCommands.sendMessage
         : true,
-      subAgents: typeof agentCommands?.subAgents === 'boolean'
-        ? agentCommands.subAgents
-        : true,
-      allowCustomSubAgentProjectPath:
-        typeof agentCommands?.allowCustomSubAgentProjectPath === 'boolean'
-          ? agentCommands.allowCustomSubAgentProjectPath
-          : false,
-      allowCustomSubAgentPermissionLevel:
-        typeof agentCommands?.allowCustomSubAgentPermissionLevel === 'boolean'
-          ? agentCommands.allowCustomSubAgentPermissionLevel
-          : false,
     },
   };
 }

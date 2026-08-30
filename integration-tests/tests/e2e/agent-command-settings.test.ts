@@ -37,7 +37,7 @@ async function setSwitch(
 }
 
 describe('Lightpanda agent command settings', () => {
-  test('defaults custom sub-agent grants off and preserves them through hidden ancestors', async () => {
+  test('persists command settings through a hidden parent and reload', async () => {
     await withE2eFixture('agent-command-settings', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
@@ -46,39 +46,19 @@ describe('Lightpanda agent command settings', () => {
 
       await fixture.page.waitForFunction(
         () => {
-          const projectPath = document.querySelector<HTMLButtonElement>(
-            '#sub-agent-project-path-enabled',
+          const parent = document.querySelector<HTMLButtonElement>('#agent-commands-enabled');
+          const discovery = document.querySelector<HTMLButtonElement>(
+            '#chat-id-discovery-enabled',
           );
-          const permission = document.querySelector<HTMLButtonElement>(
-            '#sub-agent-permission-level-enabled',
-          );
-          return projectPath?.getAttribute('aria-checked') === 'false'
-            && permission?.getAttribute('aria-checked') === 'false';
+          const send = document.querySelector<HTMLButtonElement>('#send-message-enabled');
+          return parent?.getAttribute('aria-checked') === 'true'
+            && discovery?.getAttribute('aria-checked') === 'true'
+            && send?.getAttribute('aria-checked') === 'true';
         },
         { timeout: 20_000 },
       );
-      expect(await fixture.page.$eval(
-        '#sub-agent-project-path-warning',
-        (element) => element.textContent?.trim(),
-      )).toBe(
-        "This will allow the agent to start a sub-agent at an arbitrary project path with the agent's permission level.",
-      );
-      expect(await fixture.page.$eval(
-        '#sub-agent-permission-level-warning',
-        (element) => element.textContent?.trim(),
-      )).toBe(
-        'this will allow the agent to start a sub-agent with an arbitrary permission level.',
-      );
 
       await setSwitch(fixture.page, '#send-message-enabled', false);
-      await setSwitch(fixture.page, '#sub-agent-project-path-enabled', true);
-      await setSwitch(fixture.page, '#sub-agent-permission-level-enabled', true);
-      await setSwitch(fixture.page, '#sub-agents-enabled', false);
-      await fixture.page.waitForFunction(
-        () => document.querySelector('#sub-agent-project-path-enabled') === null
-          && document.querySelector('#sub-agent-permission-level-enabled') === null,
-        { timeout: 20_000 },
-      );
       await setSwitch(fixture.page, '#agent-commands-enabled', false);
       await fixture.page.waitForFunction(
         () => document.querySelector('#send-message-enabled') === null,
@@ -105,26 +85,8 @@ describe('Lightpanda agent command settings', () => {
             '#chat-id-discovery-enabled',
           );
           const send = document.querySelector<HTMLButtonElement>('#send-message-enabled');
-          const subAgents = document.querySelector<HTMLButtonElement>('#sub-agents-enabled');
           return discovery?.getAttribute('aria-checked') === 'true'
-            && send?.getAttribute('aria-checked') === 'false'
-            && subAgents?.getAttribute('aria-checked') === 'false'
-            && document.querySelector('#sub-agent-project-path-enabled') === null
-            && document.querySelector('#sub-agent-permission-level-enabled') === null;
-        },
-        { timeout: 20_000 },
-      );
-      await setSwitch(fixture.page, '#sub-agents-enabled', true);
-      await fixture.page.waitForFunction(
-        () => {
-          const projectPath = document.querySelector<HTMLButtonElement>(
-            '#sub-agent-project-path-enabled',
-          );
-          const permission = document.querySelector<HTMLButtonElement>(
-            '#sub-agent-permission-level-enabled',
-          );
-          return projectPath?.getAttribute('aria-checked') === 'true'
-            && permission?.getAttribute('aria-checked') === 'true';
+            && send?.getAttribute('aria-checked') === 'false';
         },
         { timeout: 20_000 },
       );
@@ -136,9 +98,6 @@ describe('Lightpanda agent command settings', () => {
         enabled: true,
         chatIdDiscovery: true,
         sendMessage: false,
-        subAgents: true,
-        allowCustomSubAgentProjectPath: true,
-        allowCustomSubAgentPermissionLevel: true,
       });
       fixture.assertNoBrowserErrors();
     });
