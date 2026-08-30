@@ -106,8 +106,8 @@ describe('Lightpanda Git comparison', () => {
       await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
       await waitForComparisonMarkers(
         fixture.page,
-        ['working tree marker'],
         ['head comparison marker'],
+        ['working tree marker'],
       );
       await app.clickEditComparison({ within: COMPARE_PANEL });
       await fixture.page.waitForSelector('[role="dialog"][aria-label="Compare revisions"]');

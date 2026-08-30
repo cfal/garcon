@@ -370,7 +370,7 @@ describe('Lightpanda standalone Git views', () => {
       await app.startOpenAiDirectChat('git-view-desktop-seed');
       await app.waitForText('echo:git-view-desktop-seed');
 
-      await app.openNewWorkspaceWindow('Open History');
+      await app.openNewWorkspaceWindow('Open Git History');
       const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
       await fixture.page.waitForSelector(
         `[data-workspace-window-id="${historyWindowId}"] [data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]`,
@@ -497,7 +497,7 @@ describe('Lightpanda standalone Git views', () => {
       await fixture.waitForSpaWebSocket();
       await app.startOpenAiDirectChat('git-view-virtual-history-seed');
       await app.waitForText('echo:git-view-virtual-history-seed');
-      await app.openNewWorkspaceWindow('Open History');
+      await app.openNewWorkspaceWindow('Open Git History');
       const historyWindowId = await app.workspaceWindowIdForSurface('singleton:git-history');
 
       await fixture.page.waitForSelector(
