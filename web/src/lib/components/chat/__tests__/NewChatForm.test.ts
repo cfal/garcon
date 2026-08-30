@@ -977,6 +977,46 @@ describe('NewChatForm', () => {
 		expect(messageInput.value).toBe('User edit wins');
 	});
 
+	it('accepts a pasted image and cancels a pending expansion', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'cancellable' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		const attachment = new File(['image'], 'pasted.png', { type: 'image/png' });
+		await fireEvent.paste(messageInput, {
+			clipboardData: {
+				items: [{ type: 'image/png', getAsFile: () => attachment }],
+			},
+		});
+
+		expect(screen.getByRole('button', { name: 'Remove attachment pasted.png' })).toBeTruthy();
+		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
+		expect(expansionOptions?.signal.aborted).toBe(true);
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('Keep this draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
 	it('lets another form control cancel a pending expansion with Escape', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();

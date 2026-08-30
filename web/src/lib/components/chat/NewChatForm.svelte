@@ -280,7 +280,7 @@
 	}
 
 	function handleMessagePaste(event: ClipboardEvent): void {
-		if (promptTransformPending) return;
+		if (promptRefinement.pending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const pastedImages: File[] = [];
@@ -289,7 +289,10 @@
 			const file = item.getAsFile();
 			if (file) pastedImages.push(file);
 		}
-		if (pastedImages.length > 0) form.addImages(pastedImages, attachmentSupport);
+		if (pastedImages.length > 0) {
+			snippetExpansion.cancel();
+			form.addImages(pastedImages, attachmentSupport);
+		}
 	}
 
 	function autoResizeTextarea(): void {

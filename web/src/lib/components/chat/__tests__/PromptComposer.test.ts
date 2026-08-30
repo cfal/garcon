@@ -1276,6 +1276,43 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('User edit wins');
 	});
 
+	it('accepts a dropped attachment and cancels a pending menu expansion', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-attachment-during-expansion',
+			selectedStatus: 'running',
+			snippetTemplate: 'Expanded review',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		const attachment = new File(['image'], 'dropped.png', { type: 'image/png' });
+		const dropTarget = textarea.closest('[role="region"]');
+		if (!dropTarget) throw new Error('Missing composer drop target');
+		await fireEvent.drop(dropTarget, { dataTransfer: { files: [attachment] } });
+
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
+		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
+		expect(expansionOptions?.signal.aborted).toBe(true);
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(textarea.value).toBe('Original draft');
+	});
+
 	it('opens from an inline trigger and replaces only the captured span', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,

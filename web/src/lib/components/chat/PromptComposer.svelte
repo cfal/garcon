@@ -225,12 +225,13 @@
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
-		get promptTransformPending() {
-			return promptTransformPending;
+		get attachmentInputBlocked() {
+			return promptRefinement.pending;
 		},
 		get attachmentSupport() {
 			return attachmentSupport;
 		},
+		onAttachmentInput: () => snippetExpansion.cancel(),
 	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
