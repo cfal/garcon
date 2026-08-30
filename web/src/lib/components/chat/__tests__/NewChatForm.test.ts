@@ -54,7 +54,14 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, subAgents: true, allowCustomSubAgentProjectPath: false, allowCustomSubAgentPermissionLevel: false },
+			agentCommands: {
+				enabled: true,
+				chatIdDiscovery: true,
+				sendMessage: true,
+				subAgents: true,
+				allowCustomSubAgentProjectPath: false,
+				allowCustomSubAgentPermissionLevel: false,
+			},
 		},
 		ui: {},
 		uiEffective: {},
@@ -545,7 +552,9 @@ describe('NewChatForm', () => {
 		const messageInput = await renderSubmittableForm(onStartChat);
 		await fireEvent.input(messageInput, { target: { value: '/snippet review the API' } });
 
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		const start = screen.getByRole('button', { name: 'Start session' });
+		start.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(document.activeElement).toBe(messageInput);
 
 		await waitFor(() => expect(messageInput.value).toBe('Review the API in /workspace/project'));
 		expect(onStartChat).not.toHaveBeenCalled();
@@ -926,7 +935,7 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
-	it('lets Escape cancel a pending expansion without changing the draft', async () => {
+	it('keeps the composer editable and cancels a pending expansion when the user types', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
@@ -941,9 +950,17 @@ describe('NewChatForm', () => {
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 		expect(document.activeElement).toBe(messageInput);
+		expect(messageInput.readOnly).toBe(false);
+		const pendingEnter = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			bubbles: true,
+			cancelable: true,
+		});
+		messageInput.dispatchEvent(pendingEnter);
+		expect(pendingEnter.defaultPrevented).toBe(true);
 
-		await fireEvent.keyDown(messageInput, { key: 'Escape' });
-		expect(messageInput.value).toBe('Keep this draft');
+		await fireEvent.input(messageInput, { target: { value: 'User edit wins' } });
+		expect(messageInput.value).toBe('User edit wins');
 		expect(messageInput.readOnly).toBe(false);
 		expect(onStartChat).not.toHaveBeenCalled();
 		pending.resolve({
@@ -957,7 +974,7 @@ describe('NewChatForm', () => {
 
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(messageInput.value).toBe('Keep this draft');
+		expect(messageInput.value).toBe('User edit wins');
 	});
 
 	it('lets another form control cancel a pending expansion with Escape', async () => {

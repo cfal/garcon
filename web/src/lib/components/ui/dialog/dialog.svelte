@@ -37,6 +37,7 @@
 
 	setDialogLayerControl({
 		close: () => updateOpen(false),
+		isOpen: () => open,
 		focusReturnTarget: () => focusReturnTarget,
 	});
 

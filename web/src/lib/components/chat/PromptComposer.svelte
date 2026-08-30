@@ -167,7 +167,7 @@
 			snippetExpansion.cancel();
 			return true;
 		},
-		restoreFocus: () => void restoreComposerFocus(),
+		restoreFocus: returnComposerFocus,
 	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
@@ -427,17 +427,16 @@
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	async function restoreComposerFocus(caret?: number): Promise<void> {
+	function returnComposerFocus(): void {
+		if (destroyed || !isVisible) return;
+		textarea?.focus({ preventScroll: true });
+	}
+
+	async function settleComposerAfterSnippet(caret?: number): Promise<void> {
 		await tick();
 		if (destroyed || !isVisible) return;
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
 		autoResize();
-		textarea?.focus({ preventScroll: true });
-	}
-
-	async function focusPendingSnippetExpansion(): Promise<void> {
-		await tick();
-		if (snippetExpansion.pending) textarea?.focus();
 	}
 
 	async function insertSnippet(
@@ -452,7 +451,7 @@
 		const context = snippetContext();
 		if (!context) {
 			notifications.error(m.chat_new_chat_errors_project_path_required());
-			await restoreComposerFocus();
+			await settleComposerAfterSnippet();
 			return 'cancelled';
 		}
 		const chatId = sessions.selectedChatId;
@@ -461,14 +460,11 @@
 		const start = range?.start ?? textarea.selectionStart;
 		const end = range?.end ?? textarea.selectionEnd;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: snippet.shortName,
-					arguments: { type: 'value', value: argumentsText },
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: snippet.shortName,
+				arguments: { type: 'value', value: argumentsText },
+				context,
+			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (
 				result.response.snippetId !== snippet.id ||
@@ -476,7 +472,7 @@
 			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
-				await restoreComposerFocus();
+				await settleComposerAfterSnippet();
 				return 'cancelled';
 			}
 			if (
@@ -494,12 +490,12 @@
 					};
 			composerState.inputText = replacement.text;
 			queueCurrentDraft(replacement.text);
-			await restoreComposerFocus(replacement.caret);
+			await settleComposerAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreComposerFocus();
+			await settleComposerAfterSnippet();
 			return 'failed';
 		}
 	}
@@ -519,14 +515,11 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const [result] = await Promise.all([
-				snippetExpansion.run({
-					shortName: command.shortName,
-					arguments: command.arguments,
-					context,
-				}),
-				focusPendingSnippetExpansion(),
-			]);
+			const result = await snippetExpansion.run({
+				shortName: command.shortName,
+				arguments: command.arguments,
+				context,
+			});
 			if (result.kind !== 'expanded') return;
 			if (
 				sessions.selectedChatId !== chatId ||
@@ -538,11 +531,11 @@
 			composerState.inputText = result.response.expandedText;
 			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
-			await restoreComposerFocus(result.response.expandedText.length);
+			await settleComposerAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await restoreComposerFocus();
+			await settleComposerAfterSnippet();
 		}
 	}
 
@@ -559,15 +552,24 @@
 		return true;
 	}
 
-	function handleKeyDown(event: KeyboardEvent) {
-		if (promptTransformPending) return;
-		if (handleCompletionKeyDown(event)) return;
-		if (event.key !== 'Enter') return;
-		const action = resolveComposerKeydownAction(event, {
+	function resolveKeydownAction(event: KeyboardEvent): ComposerEnterAction {
+		return resolveComposerKeydownAction(event, {
 			sendByShiftEnter: localSettings.sendByShiftEnter,
 			steerWithCtrlEnter: localSettings.steerWithCtrlEnter,
 			isMobile: appShell.isMobile,
 		});
+	}
+
+	function handleKeyDown(event: KeyboardEvent) {
+		if (promptTransformPending) {
+			if (event.key === 'Enter' && resolveKeydownAction(event) !== 'newline') {
+				event.preventDefault();
+			}
+			return;
+		}
+		if (handleCompletionKeyDown(event)) return;
+		if (event.key !== 'Enter') return;
+		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
 
 		event.preventDefault();
@@ -586,6 +588,7 @@
 			return;
 		}
 		if (command.kind === 'valid') {
+			returnComposerFocus();
 			void expandSnippetInvocation(command);
 			return;
 		}
@@ -595,10 +598,11 @@
 
 	function handleInput(event: Event) {
 		const target = event.currentTarget as HTMLTextAreaElement;
-		if (isDisabled || promptTransformPending) {
+		if (isDisabled || promptRefinement.pending) {
 			target.value = composerState.inputText;
 			return;
 		}
+		if (snippetExpansion.pending) snippetExpansion.cancel();
 		const value = target.value;
 		composerState.inputText = value;
 		autoResize();
@@ -747,8 +751,9 @@
 			onCancelled={() => {
 				const caret = ui.snippetPalette.trigger?.end;
 				ui.snippetPalette.dismiss();
-				void restoreComposerFocus(caret);
+				void settleComposerAfterSnippet(caret);
 			}}
+			onReturnFocus={returnComposerFocus}
 			onEditSnippets={() => {
 				ui.snippetPalette.dismiss();
 				editSnippets();
@@ -852,7 +857,7 @@
 						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
-						readonly={promptTransformPending}
+						readonly={promptRefinement.pending}
 						aria-busy={promptTransformPending}
 						class={textareaClass}
 						style:height={`${composerHeight.renderedHeight}px`}></textarea>

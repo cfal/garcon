@@ -1115,7 +1115,7 @@ describe('PromptComposer focus', () => {
 		);
 	});
 
-	it('locks the prompt during expansion and Escape preserves the invocation', async () => {
+	it('keeps submission controls gated during expansion and Escape preserves the invocation', async () => {
 		const pending = deferredSnippetExpansion();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
 		const onsubmit = vi.fn();
@@ -1126,15 +1126,24 @@ describe('PromptComposer focus', () => {
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		const send = screen.getByRole('button', { name: 'Send message' });
+		send.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(document.activeElement).toBe(textarea);
 
 		const pendingSend = await screen.findByRole('button', { name: 'Expanding snippet' });
-		expect(textarea.readOnly).toBe(true);
+		expect(textarea.readOnly).toBe(false);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');
 		expect((pendingSend as HTMLButtonElement).disabled).toBe(true);
 		expect(
 			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
 		).toBe(true);
+		const pendingEnter = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			bubbles: true,
+			cancelable: true,
+		});
+		textarea.dispatchEvent(pendingEnter);
+		expect(pendingEnter.defaultPrevented).toBe(true);
 
 		await fireEvent.keyDown(textarea, { key: 'Escape' });
 		expect(textarea.value).toBe('/snippet review cancellable');
@@ -1167,7 +1176,6 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		await screen.findByRole('button', { name: 'Expanding snippet' });
-		expect(document.activeElement).toBe(textarea);
 
 		const permissionButton = screen.getAllByTitle('Default')[0];
 		expect(permissionButton).toBeTruthy();
@@ -1231,6 +1239,41 @@ describe('PromptComposer focus', () => {
 			},
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
+	});
+
+	it('keeps focus and accepts user edits while a menu expansion is pending', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-edit-during-expansion',
+			selectedStatus: 'running',
+			snippetTemplate: 'Expanded review',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
+		textarea.focus();
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		const option = await screen.findByRole('option', { name: /^review/ });
+
+		option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(document.activeElement).toBe(textarea);
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(textarea.readOnly).toBe(false);
+
+		await fireEvent.input(textarea, { target: { value: 'User edit wins' } });
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(textarea.value).toBe('User edit wins');
 	});
 
 	it('opens from an inline trigger and replaces only the captured span', async () => {

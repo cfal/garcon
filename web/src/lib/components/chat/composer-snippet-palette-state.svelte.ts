@@ -1,4 +1,4 @@
-import { tick } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import type {
 	SnippetInsertionHandler,
 	SnippetInsertionResult,
@@ -12,6 +12,7 @@ interface ComposerSnippetPaletteStateOptions {
 	onOpenChange(open: boolean): void;
 	onInsert: SnippetInsertionHandler;
 	onCancelled?: () => void;
+	onReturnFocus(): void;
 	onEditSnippets(): void;
 }
 
@@ -134,7 +135,7 @@ export class ComposerSnippetPaletteState {
 	selectSnippet(snippet: Snippet): void {
 		if (!this.contextAvailable) return;
 		this.#suppressCancelOnClose = true;
-		this.#options.onOpenChange(false);
+		flushSync(() => this.#options.onOpenChange(false));
 		if (snippetTemplateUsesArguments(snippet.template)) {
 			queueMicrotask(() => {
 				this.argumentsSnippet = snippet;
@@ -163,6 +164,7 @@ export class ComposerSnippetPaletteState {
 
 	handlePaletteCloseAutoFocus(event: Event): void {
 		event.preventDefault();
+		this.#options.onReturnFocus();
 		if (this.#suppressCancelOnClose) {
 			this.#suppressCancelOnClose = false;
 			return;

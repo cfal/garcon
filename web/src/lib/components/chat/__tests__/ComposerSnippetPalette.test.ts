@@ -201,17 +201,26 @@ describe('ComposerSnippetPalette', () => {
 			firstTemplate: 'Review {{arguments}}',
 			firstDefaultArguments: 'staged changes',
 		});
-		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+		const composer = screen.getByRole('textbox', { name: 'Composer prompt' });
+		const option = await screen.findByRole('option', { name: /item-0/ });
+		expect(screen.getByTestId('main-inert').textContent).toBe('true');
+		option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(document.activeElement).toBe(composer);
 
 		const input = (await screen.findByRole('textbox', {
 			name: 'Arguments',
 		})) as HTMLTextAreaElement;
 		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(screen.getByTestId('main-inert').textContent).toBe('true');
 		expect(input.value).toBe('staged changes');
 		expect(input.selectionStart).toBe(input.value.length);
 		expect(input.selectionEnd).toBe(input.value.length);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+		const insert = screen.getByRole('button', { name: 'Insert snippet' });
+		insert.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(document.activeElement).toBe(composer);
 		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0'));
 		expect(screen.getByTestId('selected-arguments').textContent).toBe('staged changes');
 	});
@@ -339,12 +348,17 @@ describe('ComposerSnippetPalette', () => {
 		const dialog = await screen.findByRole('dialog', {
 			name: 'Arguments for /snippet item-0',
 		});
-		await fireEvent.keyDown(dialog, { key: 'Escape' });
+		expect(screen.getByTestId('main-inert').textContent).toBe('true');
+		dialog.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+		);
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(document.activeElement).toBe(composer);
 
 		await waitFor(() => expect(screen.getByTestId('cancel-count').textContent).toBe('1'));
 		expect(screen.queryByRole('dialog', { name: 'Arguments for /snippet item-0' })).toBeNull();
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
-		await waitFor(() => expect(document.activeElement).toBe(composer));
+		expect(document.activeElement).toBe(composer);
 	});
 
 	it('reports a cancel when dismissed without a selection', async () => {
@@ -362,8 +376,13 @@ describe('ComposerSnippetPalette', () => {
 
 	it('does not report a cancel after a selection', async () => {
 		render(ComposerSnippetPaletteTestHost);
+		const composer = screen.getByRole('textbox', { name: 'Composer prompt' });
+		const option = await screen.findByRole('option', { name: /^item-3\b/ });
+		expect(screen.getByTestId('main-inert').textContent).toBe('true');
 
-		await fireEvent.click(await screen.findByRole('option', { name: /^item-3\b/ }));
+		option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(document.activeElement).toBe(composer);
 
 		await waitFor(() => expect(screen.getByTestId('selected-snippet').textContent).toBe('item-3'));
 		expect(screen.getByTestId('cancel-count').textContent).toBe('0');

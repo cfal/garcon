@@ -227,6 +227,7 @@ describe('createWorkspaceServices', () => {
 				id: 'test-dialog',
 				kind: 'application-dialog',
 				modality: 'main-inert',
+				isOpen: () => true,
 				element: () => element,
 				onEscape: () => true,
 				restoreFocus: () => undefined,

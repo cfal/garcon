@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { flushSync, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -15,7 +15,8 @@
 		initialArguments?: string;
 		onClose: () => void;
 		onSubmit: (snippet: Snippet, argumentsText: string) => void;
-		onRequestComposerFocus: () => void;
+		onCancelled: () => void;
+		onReturnFocus: () => void;
 	}
 
 	let {
@@ -24,13 +25,13 @@
 		initialArguments = '',
 		onClose,
 		onSubmit,
-		onRequestComposerFocus,
+		onCancelled,
+		onReturnFocus,
 	}: Props = $props();
 	let argumentsText = $state('');
 	let argumentsRef: HTMLTextAreaElement | null = null;
-	let restoreComposerFocus = true;
+	let cancelOnClose = true;
 	let wasOpen = false;
-	let focusFrame: number | null = null;
 	const uid = $props.id();
 	const argumentsId = `${uid}-arguments`;
 	const argumentsErrorId = `${uid}-arguments-error`;
@@ -40,23 +41,21 @@
 		const nextOpen = open;
 		if (nextOpen && !wasOpen) {
 			argumentsText = initialArguments;
-			restoreComposerFocus = true;
+			cancelOnClose = true;
 		}
 		wasOpen = nextOpen;
 	});
 
-	$effect(() => {
-		return () => {
-			if (focusFrame !== null) cancelAnimationFrame(focusFrame);
-		};
-	});
+	function closeDialog(): void {
+		flushSync(onClose);
+	}
 
 	function submit(): void {
 		if (!snippet || argumentsTooLong) return;
 		const selectedSnippet = snippet;
 		const selectedArguments = argumentsText;
-		restoreComposerFocus = false;
-		onClose();
+		cancelOnClose = false;
+		closeDialog();
 		queueMicrotask(() => onSubmit(selectedSnippet, selectedArguments));
 	}
 
@@ -77,14 +76,16 @@
 
 	function handleOpenAutoFocus(event: Event): void {
 		event.preventDefault();
-		if (focusFrame !== null) cancelAnimationFrame(focusFrame);
-		focusFrame = requestAnimationFrame(() => {
-			focusFrame = null;
-			if (!open || !argumentsRef) return;
-			argumentsRef.focus({ preventScroll: true });
-			const end = argumentsRef.value.length;
-			argumentsRef.setSelectionRange(end, end);
-		});
+		if (focusArguments()) return;
+		queueMicrotask(focusArguments);
+	}
+
+	function focusArguments(): boolean {
+		if (!open || !argumentsRef) return false;
+		argumentsRef.focus({ preventScroll: true });
+		const end = argumentsRef.value.length;
+		argumentsRef.setSelectionRange(end, end);
+		return true;
 	}
 
 	function clearArguments(): void {
@@ -97,12 +98,13 @@
 
 	function handleCloseAutoFocus(event: Event): void {
 		event.preventDefault();
-		if (restoreComposerFocus) queueMicrotask(onRequestComposerFocus);
-		restoreComposerFocus = true;
+		if (cancelOnClose) onCancelled();
+		cancelOnClose = true;
+		onReturnFocus();
 	}
 </script>
 
-<Dialog.Root {open} requestClose={onClose}>
+<Dialog.Root {open} requestClose={closeDialog}>
 	<Dialog.Content
 		class="top-[var(--app-viewport-center-y)] flex h-[min(30rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:pointer-fine:top-[50%] sm:pointer-fine:h-auto sm:pointer-fine:max-h-[min(36rem,calc(var(--app-height)-2rem))]"
 		onOpenAutoFocus={handleOpenAutoFocus}
@@ -150,7 +152,7 @@
 			</div>
 
 			<Dialog.Footer class="shrink-0 border-t border-border px-5 py-3 sm:px-6">
-				<Button variant="secondary" onclick={onClose}>{m.snippets_cancel()}</Button>
+				<Button variant="secondary" onclick={closeDialog}>{m.snippets_cancel()}</Button>
 				<Button type="submit" disabled={argumentsTooLong}>
 					{m.snippets_arguments_insert()}
 				</Button>

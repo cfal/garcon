@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import TransientLayerRegistrationHost from './TransientLayerRegistrationHost.svelte';
@@ -24,6 +24,18 @@ describe('TransientLayerRegistry', () => {
 		expect(onRun).toHaveBeenCalledOnce();
 	});
 
+	it('stops making the workspace inert as soon as a mounted layer closes', async () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		const onRun = vi.fn();
+		render(TransientLayerRegistrationHost, { layers, onRun });
+		await waitFor(() => expect(screen.getByTestId('main-inert').textContent).toBe('true'));
+
+		await fireEvent.click(screen.getByTestId('close-layer'));
+
+		expect(screen.getByTestId('main-inert').textContent).toBe('false');
+		expect(onRun).toHaveBeenCalledOnce();
+	});
+
 	it('cancels application drag before the workspace becomes inert', () => {
 		vi.useFakeTimers();
 		const gate = new WorkspaceInteractionGate();
@@ -45,6 +57,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => element,
 			onEscape: () => true,
 			restoreFocus: () => undefined,
@@ -79,6 +92,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -87,6 +101,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'menu',
 			kind: 'menu',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => menu,
 			onEscape: closeMenu,
 			restoreFocus: restoreMenu,
@@ -112,6 +127,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -140,6 +156,7 @@ describe('TransientLayerRegistry', () => {
 				id,
 				kind,
 				modality,
+				isOpen: () => true,
 				element: () => element,
 				onEscape,
 				restoreFocus: () => undefined,
@@ -166,6 +183,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'dialog',
 			kind: 'application-dialog',
 			modality: 'main-inert',
+			isOpen: () => true,
 			element: () => dialog,
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
@@ -174,6 +192,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'transform',
 			kind: 'prompt-transform',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => transform,
 			onEscape: cancelTransform,
 			restoreFocus: () => undefined,
@@ -182,6 +201,7 @@ describe('TransientLayerRegistry', () => {
 			id: 'menu',
 			kind: 'menu',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => menu,
 			onEscape: closeMenu,
 			restoreFocus: () => undefined,
@@ -219,6 +239,7 @@ describe('TransientLayerRegistry', () => {
 				id,
 				kind,
 				modality,
+				isOpen: () => true,
 				element: () => element,
 				onEscape: () => true,
 				restoreFocus: () => undefined,

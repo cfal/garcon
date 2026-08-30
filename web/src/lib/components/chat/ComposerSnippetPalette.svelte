@@ -19,6 +19,7 @@
 	} from '$shared/snippets';
 	import ComposerSnippetArgumentsDialog from './ComposerSnippetArgumentsDialog.svelte';
 	import { ComposerSnippetPaletteState } from './composer-snippet-palette-state.svelte.js';
+	import { flushSync } from 'svelte';
 
 	interface Props {
 		open: boolean;
@@ -28,6 +29,7 @@
 		contextHint?: string | null;
 		onInsert: SnippetInsertionHandler;
 		onCancelled?: () => void;
+		onReturnFocus: () => void;
 		onEditSnippets: () => void;
 	}
 
@@ -39,6 +41,7 @@
 		contextHint = null,
 		onInsert,
 		onCancelled,
+		onReturnFocus,
 		onEditSnippets,
 	}: Props = $props();
 
@@ -61,6 +64,7 @@
 		onOpenChange: (nextOpen) => onOpenChange(nextOpen),
 		onInsert: (snippet, argumentsText) => onInsert(snippet, argumentsText),
 		onCancelled: () => onCancelled?.(),
+		onReturnFocus: () => onReturnFocus(),
 		onEditSnippets: () => onEditSnippets(),
 	});
 	const triggerHint = $derived(normalizeSnippetTrigger(localSettings.snippetTrigger));
@@ -81,9 +85,14 @@
 	function retryLoad(): void {
 		void snippets.refresh({ initial: true }).catch(() => undefined);
 	}
+
+	function handleOpenChange(nextOpen: boolean): void {
+		if (nextOpen) onOpenChange(true);
+		else flushSync(() => onOpenChange(false));
+	}
 </script>
 
-<Dialog.Root {open} {onOpenChange}>
+<Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		class="top-[var(--app-viewport-center-y)] flex h-[min(42rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] max-w-lg flex-col gap-0 overflow-hidden p-0"
 		showCloseButton={true}
@@ -211,8 +220,8 @@
 					role="region"
 					tabindex="0"
 					aria-label={m.snippets_template_preview_label()}
-					class="h-28 overflow-y-auto font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground sm:h-40"
-				>{palette.highlightedSnippet.template}</pre>
+					class="h-28 overflow-y-auto font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground sm:h-40">{palette
+						.highlightedSnippet.template}</pre>
 			</div>
 		{/if}
 
@@ -244,7 +253,8 @@
 	initialArguments={palette.argumentsDraft}
 	onClose={() => palette.closeArguments()}
 	onSubmit={(snippet, argumentsText) => palette.submitArguments(snippet, argumentsText)}
-	onRequestComposerFocus={() => palette.settleArgumentsCancel()}
+	onCancelled={() => palette.settleArgumentsCancel()}
+	{onReturnFocus}
 />
 
 <style>

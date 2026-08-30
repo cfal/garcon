@@ -40,6 +40,7 @@
 			id: recordingLayerId,
 			kind: 'popover',
 			modality: 'nonmodal',
+			isOpen: () => true,
 			element: () => sectionElement,
 			onEscape: () => {
 				recordingId = null;
