@@ -501,6 +501,7 @@ export class TranscriptLedgerStore {
       this.#assertCurrent(entry, expectedCurrentViewId);
       const staging = viewRecord(entry.db, stagingViewId, 'staging');
       if (!staging) throw new LedgerSchemaError('Transcript staging view is missing');
+      const stagingNextOrdinal = nextOrdinal(entry.db, stagingViewId);
       runTransaction(entry.db, () => {
         entry.db.query("DELETE FROM transcript_views WHERE status = 'current' AND view_id = ?")
           .run(expectedCurrentViewId);
@@ -511,7 +512,7 @@ export class TranscriptLedgerStore {
       });
       const current = toView({ ...staging, status: 'current' });
       entry.current = current;
-      entry.nextOrdinal = nextOrdinal(entry.db, current.viewId);
+      entry.nextOrdinal = stagingNextOrdinal;
       return current;
     });
   }
