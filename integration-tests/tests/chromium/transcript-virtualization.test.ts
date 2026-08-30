@@ -143,7 +143,6 @@ interface TranscriptLayoutSnapshot {
     top: number;
     height: number;
     declaredHeight: string;
-    scale: string | undefined;
   };
   workspace: {
     top: number;
@@ -1400,7 +1399,6 @@ async function anchorByKey(
             userScrolledUp: feed.dataset.chatUserScrolledUp === 'true',
             modelCount: Number(sizer?.dataset.chatVirtualModelCount ?? 0),
             dataRevision: Number(sizer?.dataset.chatVirtualDataRevision ?? 0),
-            scale: sizer?.dataset.chatTranscriptScale,
           };
         },
         { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR },
@@ -1469,7 +1467,6 @@ async function transcriptLayoutSnapshot(
           top: sizerRect.top,
           height: sizerRect.height,
           declaredHeight: sizer.style.height,
-          scale: sizer.dataset.chatTranscriptScale,
         },
         workspace: workspaceRect
           ? {
@@ -1667,9 +1664,9 @@ async function openNewWorkspaceWindow(page: Page, name: string): Promise<string>
 }
 
 async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void> {
-  await page
-    .locator(`[data-workspace-window-id="${windowId}"]`)
-    .dispatchEvent('pointerdown', { bubbles: true });
+  const workspaceWindow = page.locator(`[data-workspace-window-id="${windowId}"]`);
+  if ((await workspaceWindow.getAttribute('data-workspace-window-current')) === 'true') return;
+  await page.locator(`[data-workspace-window-activation-shield="${windowId}"]`).click();
   await page.waitForFunction(
     (expectedWindowId) =>
       document
@@ -1707,15 +1704,21 @@ async function selectWorkspaceWindowSurface(
   );
 }
 
-async function waitForTranscriptScale(page: Page, scale: number): Promise<void> {
-  await page
-    .locator(`${SIZER_SELECTOR}[data-chat-transcript-scale="${scale}"]`)
-    .waitFor({ state: 'visible' });
-  await page.locator(FEED_SELECTOR).evaluate(async () => {
+async function expectFixedTranscriptTypography(page: Page): Promise<void> {
+  await page.locator(SIZER_SELECTOR).waitFor({ state: 'visible' });
+  const presentation = await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
     for (let frame = 0; frame < 4; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
+    const feed = feedElement as HTMLElement;
+    return {
+      scaleMarkerCount: feed.querySelectorAll('[data-chat-transcript-scale]').length,
+      inlineZoomCount: [...feed.querySelectorAll<HTMLElement>('*')].filter(
+        (element) => element.style.zoom !== '',
+      ).length,
+    };
   });
+  expect(presentation).toEqual({ scaleMarkerCount: 0, inlineZoomCount: 0 });
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
@@ -4216,31 +4219,39 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
   fixture.assertNoBrowserErrors();
 }
 
-async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: string): Promise<void> {
+async function verifyWindowCountGeometryStability(
+  fixture: ChromiumFixture,
+  chatId: string,
+): Promise<void> {
   await synchronizeNativeTranscriptGeneration(fixture, chatId);
   const { initialModelCount } = await prepareTranscript(fixture, chatId);
   await revealEarlierTranscript(fixture.page, initialModelCount);
   await scrollToPosition(fixture.page, 'middle');
   const chatIdentity = await currentWorkspaceIdentity(fixture.page);
-  const detachedAnchor = await readingAnchor(fixture.page);
-  const detachedLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
+  await expectFixedTranscriptTypography(fixture.page);
+  const singleWindowAnchor = await readingAnchor(fixture.page);
+  const singleWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
 
   const terminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
-  await waitForTranscriptScale(fixture.page, 0.85);
-  const twoWindowAnchor = await anchorByKey(fixture.page, detachedAnchor.key);
-  const twoWindowLayout = await transcriptLayoutSnapshot(fixture.page, detachedAnchor.key);
+  await expectFixedTranscriptTypography(fixture.page);
+  const twoWindowAnchor = await anchorByKey(fixture.page, singleWindowAnchor.key);
+  const twoWindowLayout = await transcriptLayoutSnapshot(fixture.page, singleWindowAnchor.key);
   expect(
-    Math.abs(twoWindowAnchor.offset - detachedAnchor.offset),
-    JSON.stringify({ detachedAnchor, twoWindowAnchor, detachedLayout, twoWindowLayout }, null, 2),
+    Math.abs(twoWindowAnchor.offset - singleWindowAnchor.offset),
+    JSON.stringify(
+      { singleWindowAnchor, twoWindowAnchor, singleWindowLayout, twoWindowLayout },
+      null,
+      2,
+    ),
   ).toBeLessThanOrEqual(1);
 
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
-  await waitForTranscriptScale(fixture.page, 0.7);
+  await expectFixedTranscriptTypography(fixture.page);
   await scrollToPosition(fixture.page, 'middle');
   const fourWindowAnchor = await readingAnchor(fixture.page);
   const fourWindowLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
@@ -4251,7 +4262,7 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   await closeWorkspaceWindow(fixture.page, filesWindowId);
   await closeWorkspaceWindow(fixture.page, secondTerminalWindowId);
   await closeWorkspaceWindow(fixture.page, terminalWindowId);
-  await waitForTranscriptScale(fixture.page, 1);
+  await expectFixedTranscriptTypography(fixture.page);
   const restoredAnchor = await anchorByKey(fixture.page, fourWindowAnchor.key);
   const restoredLayout = await transcriptLayoutSnapshot(fixture.page, fourWindowAnchor.key);
   expect(
@@ -4263,32 +4274,32 @@ async function verifyTextScaleTransitions(fixture: ChromiumFixture, chatId: stri
   expect(restoredGeometry.horizontalOverflow).toEqual([]);
 
   await scrollToPosition(fixture.page, 'end');
-  const visibleScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
+  const visibleResizeWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
-  await waitForTranscriptScale(fixture.page, 0.85);
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-enter');
-  await closeWorkspaceWindow(fixture.page, visibleScaleWindowId);
-  await waitForTranscriptScale(fixture.page, 1);
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-scale-exit');
+  await expectFixedTranscriptTypography(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-window-enter');
+  await closeWorkspaceWindow(fixture.page, visibleResizeWindowId);
+  await expectFixedTranscriptTypography(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'visible-window-exit');
 
-  const hiddenScaleWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  const backgroundWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
-  await waitForTranscriptScale(fixture.page, 0.85);
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-enter');
-  await focusWorkspaceWindow(fixture.page, hiddenScaleWindowId);
+  await expectFixedTranscriptTypography(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-enter');
+  await focusWorkspaceWindow(fixture.page, backgroundWindowId);
   await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
-  const hiddenAppendMarker = 'chromium-hidden-scaled-append';
+  const hiddenAppendMarker = 'chromium-hidden-window-append';
   await appendTurn(fixture.integration, chatId, hiddenAppendMarker);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
-  await waitForTranscriptScale(fixture.page, 0.85);
+  await expectFixedTranscriptTypography(fixture.page);
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText(`echo:${hiddenAppendMarker}`, { exact: true })
     .waitFor();
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-show');
-  await closeWorkspaceWindow(fixture.page, hiddenScaleWindowId);
-  await waitForTranscriptScale(fixture.page, 1);
-  await waitForStablePinnedTranscriptLayout(fixture.page, 'hidden-scale-exit');
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-show');
+  await closeWorkspaceWindow(fixture.page, backgroundWindowId);
+  await expectFixedTranscriptTypography(fixture.page);
+  await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-exit');
   fixture.assertNoBrowserErrors();
 }
 
@@ -5271,7 +5282,7 @@ describe('Chromium transcript virtualization', () => {
     }
   });
 
-  test('[TLV5-UX.01-CHROMIUM-01] preserves virtual transcript geometry across paging, appends, and scale', async () => {
+  test('[TLV5-UX.01-CHROMIUM-01] preserves virtual transcript geometry across paging, appends, and workspace resizing', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     await withChromiumFixture(
@@ -5287,8 +5298,8 @@ describe('Chromium transcript virtualization', () => {
         await verifyAppendGeometry(fixture, chatId);
         markPhase('verifying chat-switch end restoration');
         await verifyChatSwitchBottomRestore(fixture, chatId, testEnvironment);
-        markPhase('verifying detached and pinned text-scale transitions');
-        await verifyTextScaleTransitions(fixture, chatId);
+        markPhase('verifying window-count geometry with fixed transcript typography');
+        await verifyWindowCountGeometryStability(fixture, chatId);
       },
       diagnostics,
       { serverEnvironment: testEnvironment.serverEnvironment },

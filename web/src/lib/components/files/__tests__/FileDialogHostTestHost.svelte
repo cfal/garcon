@@ -9,7 +9,7 @@
 		setWorkspaceCoordinator,
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
-	import { fileSurfaceId } from '$lib/workspace/surface-types';
+	import { fileSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -23,12 +23,14 @@
 		onResolve = () => undefined,
 		isMobile = false,
 		moveError,
+		onMove = () => undefined,
 		notifications = createNotificationsStore(),
 	}: {
 		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'open-files';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 		moveError?: Error;
+		onMove?: (windowId: WorkspaceWindowId) => void;
 		notifications?: NotificationsStore;
 	} = $props();
 
@@ -88,7 +90,8 @@
 		},
 		attachmentErrors: {},
 		closeSurface: async () => true,
-		moveDialogFileToWindow: async () => {
+		moveDialogFileToWindow: async (windowId: WorkspaceWindowId) => {
+			onMove(windowId);
 			if (moveError) throw moveError;
 		},
 		lastFocusedWindowId: 'window-main',

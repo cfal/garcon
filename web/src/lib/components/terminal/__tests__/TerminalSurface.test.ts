@@ -19,6 +19,13 @@ describe('TerminalSurface', () => {
 		expect(screen.getByText('Started in /workspace/project')).toBeTruthy();
 	});
 
+	it('labels placed sessions with their workspace window number', () => {
+		render(TerminalSurfaceTestHost, { host: 'window-main' });
+
+		expect(screen.getByRole('option', { name: 'Terminal 1 - running - Window 1' })).toBeTruthy();
+		expect(screen.getByRole('option', { name: 'Terminal 2 - running' })).toBeTruthy();
+	});
+
 	it('shows input helpers on a coarse-pointer desktop', () => {
 		const originalMatchMedia = window.matchMedia;
 		Object.defineProperty(window, 'matchMedia', {

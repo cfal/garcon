@@ -6,12 +6,16 @@ import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
 	it('offers one move-to-window control for the dialog file', async () => {
-		render(FileDialogHostTestHost, { request: 'file' });
+		const onMove = vi.fn();
+		render(FileDialogHostTestHost, { request: 'file', onMove });
 		const moveButtons = await screen.findAllByRole('button', {
 			name: m.file_session_move_to_window(),
 		});
 		expect(moveButtons).toHaveLength(1);
 		expect(moveButtons[0].querySelector('.lucide-panel-left')).toBeTruthy();
+
+		await fireEvent.click(moveButtons[0]);
+		expect(onMove).toHaveBeenCalledWith('window-main');
 	});
 
 	it('reports a failed move to the destination window', async () => {

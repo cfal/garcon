@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
@@ -117,6 +117,49 @@ async function openWindowTab(page: Page, windowId: string, label: string): Promi
   await page.getByRole('menuitem', { name: label, exact: true }).click();
 }
 
+interface ChatTranscriptPresentation {
+  backgroundColor: string;
+  contentLeft: number;
+  contentRight: number;
+  firstRowTop: number;
+  fontFamily: string;
+  fontSize: string;
+  letterSpacing: string;
+  lineHeight: string;
+  rowGap: number;
+}
+
+async function chatTranscriptPresentation(root: Locator): Promise<ChatTranscriptPresentation> {
+  await root.locator('[data-chat-message-type="assistant-message"]').waitFor({ state: 'visible' });
+  return root.evaluate((rootElement) => {
+    const root = rootElement as HTMLElement;
+    const viewport = root.querySelector<HTMLElement>('[data-chat-scroll-viewport], [role="log"]');
+    const firstRow = root.querySelector<HTMLElement>('[data-chat-message-type="user-message"]');
+    const secondRow = root.querySelector<HTMLElement>(
+      '[data-chat-message-type="assistant-message"]',
+    );
+    if (!viewport || !firstRow || !secondRow) {
+      throw new Error('Chat transcript presentation is incomplete.');
+    }
+    const viewportRect = viewport.getBoundingClientRect();
+    const firstRect = firstRow.getBoundingClientRect();
+    const secondRect = secondRow.getBoundingClientRect();
+    const styles = getComputedStyle(secondRow);
+    const round = (value: number): number => Math.round(value * 10) / 10;
+    return {
+      backgroundColor: getComputedStyle(root).backgroundColor,
+      contentLeft: round(secondRect.left - viewportRect.left),
+      contentRight: round(viewportRect.right - secondRect.right),
+      firstRowTop: round(firstRect.top - viewportRect.top),
+      fontFamily: styles.fontFamily,
+      fontSize: styles.fontSize,
+      letterSpacing: styles.letterSpacing,
+      lineHeight: styles.lineHeight,
+      rowGap: round(secondRect.top - firstRect.bottom),
+    };
+  });
+}
+
 async function waitForTabLabelMode(
   page: Page,
   windowId: string,
@@ -173,6 +216,7 @@ async function openChatTabBelow(
   page: Page,
   windowId: string,
   expectedTranscriptText: string,
+  expectedSourceSurfaceId = 'singleton:git-compare',
 ): Promise<string> {
   const previousCount = await page.locator(WINDOW_SELECTOR).count();
   await page.locator(`[id="${windowId}-tab-chat-view:${windowId}"]`).click({ button: 'right' });
@@ -219,7 +263,7 @@ async function openChatTabBelow(
     await page
       .locator(`[data-workspace-window-id="${windowId}"]`)
       .getAttribute('data-workspace-window-active-surface'),
-  ).toBe('singleton:git-compare');
+  ).toBe(expectedSourceSurfaceId);
   await page.locator(`[data-workspace-window-menu-trigger="${openedWindowId}"]`).click();
   expect(
     await page
@@ -766,6 +810,12 @@ describe('Chromium workspace windows', () => {
             ?.getAttribute('data-workspace-window-current') === 'true',
         movedChatWindowId,
       );
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const composer = document.querySelector<HTMLTextAreaElement>(
+          `[data-workspace-live-chat-body][data-workspace-surface-id="chat-view:${expectedWindowId}"] textarea[placeholder="Reply..."]`,
+        );
+        return composer !== null && document.activeElement === composer;
+      }, movedChatWindowId);
       const focusedChatGeometry = await fixture.page.evaluate((expectedWindowId) => {
         const titleBar = document.querySelector<HTMLElement>(
           `[data-workspace-window-titlebar="${expectedWindowId}"]`,
@@ -935,14 +985,337 @@ describe('Chromium workspace windows', () => {
       });
       expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(4);
       expect(await fixture.page.locator('[data-workspace-new-window-menu]').count()).toBe(0);
+
       fixture.assertNoBrowserErrors();
     });
+  });
+
+  test('truncates long move destinations in both window menus', async () => {
+    await withChromiumFixture('workspace-window-long-move-label', async (fixture, markPhase) => {
+      const content = 'workspace-window-chat-with-a-deliberately-long-move-destination-title';
+      const chatId = await createChat(fixture, content);
+      await openChat(fixture, chatId);
+      const sourceWindowId = await fixture.page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!sourceWindowId) throw new Error('Missing source workspace window.');
+
+      markPhase('creating a long Chat destination');
+      const chatSurfaceId = `chat-view:${sourceWindowId}`;
+      await openWindowTab(fixture.page, sourceWindowId, 'New Terminal');
+      await fixture.page.waitForFunction(
+        ({ expectedWindowId, previousSurfaceId }) => {
+          const activeSurfaceId = document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface');
+          return Boolean(activeSurfaceId && activeSurfaceId !== previousSurfaceId);
+        },
+        {
+          expectedWindowId: sourceWindowId,
+          previousSurfaceId: chatSurfaceId,
+        },
+      );
+      const terminalSurfaceId = await fixture.page
+        .locator(`[data-workspace-window-id="${sourceWindowId}"]`)
+        .getAttribute('data-workspace-window-active-surface');
+      if (!terminalSurfaceId) throw new Error('Terminal surface is missing.');
+      const destinationWindowId = await openChatTabBelow(
+        fixture.page,
+        sourceWindowId,
+        `echo:${content}`,
+        terminalSurfaceId,
+      );
+      const destinationTitle = await fixture.page
+        .locator(`[data-workspace-window-tabs="${destinationWindowId}"] [role="tab"]`)
+        .getAttribute('title');
+      if (!destinationTitle) throw new Error('Long Chat destination title is missing.');
+      const moveDestinationLabel = `Move to ${destinationTitle}`;
+
+      const expectTruncatedDestination = async (): Promise<void> => {
+        const item = fixture.page.getByRole('menuitem', {
+          name: moveDestinationLabel,
+          exact: true,
+        });
+        const metrics = await item.evaluate((menuItem) => {
+          const label = menuItem.querySelector<HTMLElement>('span');
+          if (!label) throw new Error('Move destination label is missing.');
+          const styles = getComputedStyle(label);
+          return {
+            fullTitle: menuItem.getAttribute('title'),
+            overflowX: styles.overflowX,
+            textOverflow: styles.textOverflow,
+            whiteSpace: styles.whiteSpace,
+            isTruncated: label.scrollWidth > label.clientWidth,
+          };
+        });
+        expect(metrics).toEqual({
+          fullTitle: moveDestinationLabel,
+          overflowX: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          isTruncated: true,
+        });
+      };
+
+      markPhase('checking the active-tab actions menu');
+      await fixture.page
+        .locator(`[data-workspace-window-menu-trigger="${sourceWindowId}"]`)
+        .click();
+      await expectTruncatedDestination();
+      await fixture.page.keyboard.press('Escape');
+      await fixture.page
+        .getByRole('menuitem', { name: moveDestinationLabel, exact: true })
+        .waitFor({ state: 'detached' });
+
+      markPhase('checking the tab context menu');
+      await fixture.page.locator(`[id="${sourceWindowId}-tab-${terminalSurfaceId}"]`).click({
+        button: 'right',
+      });
+      await expectTruncatedDestination();
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('keeps inactive and live Chat transcript presentation aligned', async () => {
+    await withChromiumFixture('workspace-window-chat-presentation', async (fixture, markPhase) => {
+      const content = 'workspace-window-shared-chat-presentation';
+      const filePath = join(fixture.integration.dirs.project, 'focus-handoff.txt');
+      await writeFile(filePath, 'focus handoff\n', 'utf8');
+      const chatId = await createChat(fixture, content);
+      await openChat(fixture, chatId);
+      const chatWindowId = await fixture.page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!chatWindowId) throw new Error('Missing Chat workspace window.');
+
+      markPhase('opening a Files window and selecting a file row');
+      const portableWindowId = await openNewWindow(fixture.page, 'Open Files');
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface') === 'singleton:files',
+        portableWindowId,
+      );
+
+      const fileRow = fixture.page
+        .locator(`[data-file-tree-row] [role="rowheader"][title="${filePath}"]`)
+        .locator('..');
+      const fileRowBounds = await fileRow.boundingBox();
+      if (!fileRowBounds) throw new Error('File row is not visible.');
+
+      markPhase('verifying the first inactive-content click only activates its window');
+      await fixture.page.locator(`[id="${chatWindowId}-tab-chat-view:${chatWindowId}"]`).click();
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector('[data-workspace-window-current="true"]')
+            ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+        chatWindowId,
+      );
+      await fixture.page.mouse.move(
+        fileRowBounds.x + fileRowBounds.width / 2,
+        fileRowBounds.y + fileRowBounds.height / 2,
+      );
+      expect(await fileRow.evaluate((element) => element.matches(':hover'))).toBe(false);
+      await fixture.page.mouse.click(
+        fileRowBounds.x + fileRowBounds.width / 2,
+        fileRowBounds.y + fileRowBounds.height / 2,
+      );
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector('[data-workspace-window-current="true"]')
+            ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+        portableWindowId,
+      );
+      expect(
+        await fixture.page
+          .locator(`[data-workspace-window-id="${portableWindowId}"]`)
+          .getAttribute('data-workspace-window-active-surface'),
+      ).toBe('singleton:files');
+
+      markPhase('selecting the file row after its window is active');
+      await fileRow.click();
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-active-surface')
+            ?.startsWith('file:'),
+        portableWindowId,
+      );
+
+      markPhase('measuring the inactive Chat preview');
+      const preview = fixture.page.locator(
+        `[data-workspace-window-id="${chatWindowId}"] [data-chat-window-preview="${chatId}"]`,
+      );
+      await preview.getByText(`echo:${content}`, { exact: true }).waitFor();
+      const inactivePresentation = await chatTranscriptPresentation(preview);
+      expect(await preview.locator('[style*="zoom"]').count()).toBe(0);
+
+      markPhase('measuring the live Chat feed after focus');
+      const previewMessageBounds = await preview
+        .getByText(`echo:${content}`, { exact: true })
+        .boundingBox();
+      if (!previewMessageBounds) throw new Error('Inactive Chat message is not visible.');
+      await fixture.page.mouse.click(
+        previewMessageBounds.x + previewMessageBounds.width / 2,
+        previewMessageBounds.y + previewMessageBounds.height / 2,
+      );
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector('[data-workspace-window-current="true"]')
+            ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+        chatWindowId,
+      );
+      await fixture.page.waitForFunction((expectedWindowId) => {
+        const composer = document.querySelector<HTMLTextAreaElement>(
+          `[data-workspace-live-chat-body][data-workspace-surface-id="chat-view:${expectedWindowId}"] textarea[placeholder="Reply..."]`,
+        );
+        return composer !== null && document.activeElement === composer;
+      }, chatWindowId);
+      const live = fixture.page.locator(
+        `[data-workspace-live-chat-body][data-workspace-surface-id="chat-view:${chatWindowId}"]`,
+      );
+      await live.getByText(`echo:${content}`, { exact: true }).waitFor();
+      const livePresentation = await chatTranscriptPresentation(live);
+      expect(await live.locator('[style*="zoom"]').count()).toBe(0);
+
+      expect(livePresentation).toEqual(inactivePresentation);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('keeps a bottom-pinned Chat at the end across window activation', async () => {
+    await withChromiumFixture(
+      'workspace-window-chat-bottom-activation',
+      async (fixture, markPhase) => {
+        const filePath = join(fixture.integration.dirs.project, 'bottom-anchor-handoff.txt');
+        await writeFile(filePath, 'bottom anchor handoff\n', 'utf8');
+        const turnContent = (index: number) =>
+          `window-activation-turn-${index} ${Array.from(
+            { length: 60 },
+            (_, wordIndex) => `wrapping-word-${wordIndex + 1}`,
+          ).join(' ')}`;
+        const chatId = await createChat(fixture, turnContent(0));
+        for (let index = 1; index < 24; index += 1) {
+          const accepted = await fixture.integration.client.runDirectChat({
+            chatId,
+            content: turnContent(index),
+            agent: fixture.integration.directAgents.openAi,
+          });
+          await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
+        }
+        await openChat(fixture, chatId);
+        const chatWindowId = await fixture.page
+          .locator('[data-workspace-window-current="true"]')
+          .getAttribute('data-workspace-window-id');
+        if (!chatWindowId) throw new Error('Missing Chat workspace window.');
+
+        const viewport = fixture.page.locator(
+          '[data-workspace-live-chat-body] [data-chat-scroll-viewport]',
+        );
+        await viewport.waitFor({ state: 'visible' });
+
+        markPhase('pinning the long transcript to the bottom');
+        await viewport.evaluate(async (element) => {
+          const scrollViewport = element as HTMLElement;
+          scrollViewport.scrollTop = 0;
+          scrollViewport.dispatchEvent(new Event('scroll'));
+          while (
+            scrollViewport.scrollTop + scrollViewport.clientHeight <
+            scrollViewport.scrollHeight
+          ) {
+            scrollViewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 400 }));
+            scrollViewport.scrollTop += Math.max(200, scrollViewport.clientHeight * 0.75);
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+          }
+        });
+        await fixture.page.waitForFunction(() => {
+          const scrollViewport = document.querySelector<HTMLElement>(
+            '[data-workspace-live-chat-body] [data-chat-scroll-viewport]',
+          );
+          return (
+            scrollViewport !== null &&
+            scrollViewport.scrollHeight > scrollViewport.clientHeight &&
+            scrollViewport.scrollHeight - scrollViewport.clientHeight - scrollViewport.scrollTop <=
+              1
+          );
+        });
+        const tailText = `echo:${turnContent(23)}`;
+        const beforeTailBounds = await viewport.getByText(tailText, { exact: true }).boundingBox();
+        if (!beforeTailBounds)
+          throw new Error('Missing the bottom transcript row before the split.');
+        const beforeSplit = await viewport.evaluate((element) => {
+          const scrollViewport = element as HTMLElement;
+          return { clientWidth: scrollViewport.clientWidth };
+        });
+
+        markPhase('opening and activating a Files window');
+        const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+        await fixture.page
+          .locator(`[data-file-tree-row] [role="rowheader"][title="${filePath}"]`)
+          .locator('..')
+          .click();
+        await fixture.page.waitForFunction(
+          (expectedWindowId) =>
+            document
+              .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+              ?.getAttribute('data-workspace-window-active-surface')
+              ?.startsWith('file:'),
+          filesWindowId,
+        );
+        await fixture.page
+          .locator(`[data-workspace-window-activation-shield="${chatWindowId}"]`)
+          .click();
+        await fixture.page.waitForFunction(
+          (expectedWindowId) =>
+            document
+              .querySelector('[data-workspace-window-current="true"]')
+              ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+          chatWindowId,
+        );
+        await fixture.page.waitForFunction((expectedWindowId) => {
+          const composer = document.querySelector<HTMLTextAreaElement>(
+            `[data-workspace-live-chat-body][data-workspace-surface-id="chat-view:${expectedWindowId}"] textarea[placeholder="Reply..."]`,
+          );
+          return composer !== null && document.activeElement === composer;
+        }, chatWindowId);
+
+        markPhase('verifying the restored live viewport remains bottom-pinned');
+        await fixture.page.waitForFunction(() => {
+          const scrollViewport = document.querySelector<HTMLElement>(
+            '[data-workspace-live-chat-body] [data-chat-scroll-viewport]',
+          );
+          return (
+            scrollViewport !== null &&
+            scrollViewport.scrollHeight - scrollViewport.clientHeight - scrollViewport.scrollTop <=
+              1
+          );
+        });
+        const afterActivation = await viewport.evaluate((element) => {
+          const scrollViewport = element as HTMLElement;
+          return { clientWidth: scrollViewport.clientWidth };
+        });
+        const afterTailBounds = await viewport.getByText(tailText, { exact: true }).boundingBox();
+        if (!afterTailBounds)
+          throw new Error('Missing the bottom transcript row after activation.');
+        expect(afterActivation.clientWidth).toBeLessThan(beforeSplit.clientWidth);
+        expect(afterTailBounds.height).toBeGreaterThan(beforeTailBounds.height);
+        fixture.assertNoBrowserErrors();
+      },
+    );
   });
 
   test('replaces an inactive Chat tab icon while the Chat is processing', async () => {
     await withChromiumFixture(
       'workspace-window-processing-indicator',
       async (fixture, markPhase) => {
+        await createGitFixture(fixture.integration.dirs.project);
         const content = 'workspace-window-processing';
         const held = fixture.integration.fakeProviders.openAi.holdNext({
           lastUserText: content,
