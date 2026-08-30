@@ -170,7 +170,7 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('To')).toBeTruthy();
 		expect(screen.getByText('Parser cleanup')).toBeTruthy();
 		expect(screen.getByText(`(${TARGET_CHAT_ID})`)).toBeTruthy();
-		expect(screen.getByLabelText('Sent')).toBeTruthy();
+		expect(screen.getByRole('img', { name: 'Sent' })).toBeTruthy();
 		expect(screen.getByText('focused fix').tagName).toBe('CODE');
 		expect(container.querySelector('.markdown-body')).toBeTruthy();
 		expect(container.textContent).not.toContain('Queued:');
@@ -199,10 +199,10 @@ describe('ConversationMessage chat rows', () => {
 		const deliveredRecipient = screen.getByText('Build verification').closest('li');
 		const failedRecipient = screen.getByText('Release coordinator').closest('li');
 		expect(deliveredRecipient?.textContent).toContain(`(${TARGET_CHAT_ID})`);
-		expect(deliveredRecipient?.querySelector('[aria-label="Sent"]')).toBeTruthy();
+		expect(deliveredRecipient?.querySelector('[role="img"][aria-label="Sent"]')).toBeTruthy();
 		expect(deliveredRecipient?.querySelector('[aria-label="Send failed"]')).toBeNull();
 		expect(failedRecipient?.textContent).toContain(`(${SECOND_TARGET_CHAT_ID})`);
-		expect(failedRecipient?.querySelector('[aria-label="Send failed"]')).toBeTruthy();
+		expect(failedRecipient?.querySelector('[role="img"][aria-label="Send failed"]')).toBeTruthy();
 		expect(failedRecipient?.querySelector('[aria-label="Sent"]')).toBeNull();
 		mixed.unmount();
 
@@ -228,6 +228,22 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('From')).toBeTruthy();
 		expect(screen.getByText('Hidden sender')).toBeTruthy();
 		expect(screen.getByText('message').tagName).toBe('STRONG');
+	});
+
+	it('hides the server-authored audit prefix on durable legacy outcomes', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new TranscriptNoticeMessage(
+				AT,
+				`Queued: ${TARGET_CHAT_ID} (pending delivery is not retained across server restart)\n\nLegacy **body**.`,
+				{
+					type: 'inter-agent-message-outcome',
+					results: [{ chatId: TARGET_CHAT_ID, status: 'queued' }],
+				},
+			),
+		});
+
+		expect(container.textContent).not.toContain('pending delivery');
+		expect(screen.getByText('body').tagName).toBe('STRONG');
 	});
 
 	it('reactively updates an inter-agent title when the chat title changes', async () => {

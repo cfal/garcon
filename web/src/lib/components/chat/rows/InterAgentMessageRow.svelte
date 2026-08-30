@@ -8,6 +8,7 @@
 	import MessageSquareReply from '@lucide/svelte/icons/message-square-reply';
 	import Send from '@lucide/svelte/icons/send';
 	import X from '@lucide/svelte/icons/x';
+	import { stripLegacyInterAgentOutcomePrefix } from '$lib/chat/transcript/inter-agent-message-presentation';
 	import * as m from '$lib/paraglide/messages.js';
 	import Markdown from '../Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
@@ -44,6 +45,11 @@
 	);
 	const participantLabel = $derived(
 		isOutcome ? m.chat_message_inter_agent_to() : m.chat_message_inter_agent_from(),
+	);
+	const messageBody = $derived(
+		detail.type === 'inter-agent-message-outcome'
+			? stripLegacyInterAgentOutcomePrefix(message.content, detail.results)
+			: message.content,
 	);
 
 	function chatParticipant(chatId: string) {
@@ -108,6 +114,7 @@
 								{#if participant.status === 'failed'}
 									<span
 										class="inline-flex shrink-0 text-status-error-foreground"
+										role="img"
 										aria-label={m.chat_message_inter_agent_send_failed()}
 										title={m.chat_message_inter_agent_send_failed()}
 									>
@@ -116,6 +123,7 @@
 								{:else if participant.status === 'sent'}
 									<span
 										class="inline-flex shrink-0 text-status-success-foreground"
+										role="img"
 										aria-label={m.chat_message_inter_agent_send_succeeded()}
 										title={m.chat_message_inter_agent_send_succeeded()}
 									>
@@ -137,7 +145,7 @@
 					{#snippet children()}
 						<div class="pt-2 text-sm">
 							<Markdown
-								source={message.content}
+								source={messageBody}
 								variant="presented"
 								fileLinkBasePath={isOutcome ? (fileLinkBasePath ?? undefined) : undefined}
 								onLinkNavigate={isOutcome ? onLinkNavigate : undefined}
