@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { TranscriptReloadService } from '../reload.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
+import { LedgerFencedError } from '../errors.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 
@@ -154,6 +156,55 @@ describe('TranscriptReloadService', () => {
         'frozen answer',
       ]);
       expect(() => ledger.rowsAfter('chat-1', oldViewId, 0)).toThrow();
+    });
+  });
+
+  it('[TLV5-L11.05-RELOAD-CORE-UNIT-01] reconciles an ambiguously committed cutover', async () => {
+    await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
+      const events = [];
+      ledger.subscribe((event) => events.push(event));
+      const query = Database.prototype.query;
+      const exec = Database.prototype.exec;
+      let cutoverStarted = false;
+      let commitBecameAmbiguous = false;
+      Database.prototype.query = function (sql) {
+        if (sql.includes("UPDATE transcript_views SET status = 'current'")) {
+          cutoverStarted = true;
+        }
+        return query.call(this, sql);
+      };
+      Database.prototype.exec = function (sql) {
+        const result = exec.call(this, sql);
+        if (cutoverStarted && !commitBecameAmbiguous && sql === 'COMMIT') {
+          commitBecameAmbiguous = true;
+          throw new Error('injected ambiguous cutover commit');
+        }
+        return result;
+      };
+      let replacement;
+      try {
+        replacement = await reload.reload('chat-1');
+      } finally {
+        Database.prototype.query = query;
+        Database.prototype.exec = exec;
+      }
+      await Promise.resolve();
+
+      expect(commitBecameAmbiguous).toBe(true);
+      expect(replacement.viewId).not.toBe(oldViewId);
+      expect(ledger.currentView('chat-1')?.viewId).toBe(replacement.viewId);
+      expect(events.filter((event) => event.type === 'view-replaced')).toEqual([{
+        type: 'view-replaced',
+        chatId: 'chat-1',
+        previousViewId: oldViewId,
+        view: replacement,
+      }]);
+      expect(lease.closed).toBe(true);
+      expect(replacementLease.current?.closed).toBe(false);
+      expect(() => replacementLease.current.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'must stay fenced') }],
+      })).toThrow(LedgerFencedError);
     });
   });
 

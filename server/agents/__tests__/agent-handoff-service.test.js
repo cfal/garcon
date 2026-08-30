@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import crypto from 'node:crypto';
 import { AgentHandoffService } from '../agent-handoff-service.ts';
+import { LedgerFencedError } from '../../ledger/errors.ts';
 
 function envelope(ownerId) {
   return { ownerId, schemaVersion: 1, values: {} };
@@ -164,12 +165,14 @@ describe('AgentHandoffService', () => {
     });
   });
 
-  it('leaves the source authoritative when checkpoint verification fails', async () => {
+  it('[TLV5-L11.05-HANDOFF-CORE-UNIT-01] does not persist an ownership decision when the ledger is write-fenced', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);
     const ledger = ledgerState(calls);
-    ledger.checkpointForHandoff = mock(() => { throw new Error('checkpoint busy'); });
+    ledger.checkpointForHandoff = mock(() => {
+      throw new LedgerFencedError('chat', { cause: new Error('injected write fence') });
+    });
     const service = createService({
       registry: { getChat: () => current },
       ownership: state.ownership,
@@ -184,7 +187,7 @@ describe('AgentHandoffService', () => {
       source: current,
       target: target(),
       command: 'continue',
-    }).prepare(context())).rejects.toThrow('checkpoint busy');
+    }).prepare(context())).rejects.toThrow(LedgerFencedError);
 
     expect(state.ownership.decideHandoff).not.toHaveBeenCalled();
     expect(calls).toEqual(['close', 'watermark', 'reopen']);

@@ -1145,6 +1145,59 @@ describe('TranscriptLedgerStore', () => {
     expect(checkpoint.logFrames).toBe(checkpoint.checkpointedFrames);
   });
 
+  it('[TLV5-L11.05-STORE-UNIT-03] rejects a handoff checkpoint after a write failure', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected transcript commit failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.append('chat-one', view.viewId, [provider('must roll back')]))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(store.currentRows('chat-one')).toEqual([]);
+    expect(() => store.checkpointForHandoff('chat-one')).toThrow(LedgerFencedError);
+  });
+
+  it('read-fences a handoff checkpoint query failure', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let checkpointFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!checkpointFailed && sql === 'PRAGMA wal_checkpoint(FULL)') {
+        checkpointFailed = true;
+        throw new Error('injected checkpoint query failure');
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.checkpointForHandoff('chat-one')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(checkpointFailed).toBe(true);
+    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(() => store.append('chat-one', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
   it('rejects an incomplete handoff checkpoint without fencing the ledger', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

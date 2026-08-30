@@ -538,13 +538,13 @@ export class TranscriptLedgerStore {
   }
 
   checkpointForHandoff(chatId: string): LedgerCheckpoint {
-    return this.#read(chatId, (entry) => {
+    return this.#write(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      const result = entry.db.query<{
+      const result = runQuery(() => entry.db.query<{
         busy: number;
         log: number;
         checkpointed: number;
-      }, []>('PRAGMA wal_checkpoint(FULL)').get();
+      }, []>('PRAGMA wal_checkpoint(FULL)').get());
       if (!result) throw new LedgerSchemaError('Transcript checkpoint returned no result');
       if (result.busy !== 0 || result.log !== result.checkpointed) {
         throw new IncompleteLedgerCheckpointError(result.busy, result.log, result.checkpointed);
