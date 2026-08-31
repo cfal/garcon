@@ -227,6 +227,33 @@ describe('ConversationScrollController', () => {
 		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
 	});
 
+	it('expires an unscrolled press before layout movement', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
+		const fixture = controllerFixture({ viewport });
+		fixture.controller.noteUserScrollIntent();
+		fixture.controller.finishDirectionlessUserScrollIntent();
+		fixture.scroller.scrollTop = 100;
+
+		fixture.controller.handleScroll();
+
+		expect(fixture.controller.isPinnedToBottom).toBe(true);
+		expect(fixture.state.isUserScrolledUp).toBe(false);
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+	});
+
+	it('retains directional intent after a press ends', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
+		const fixture = controllerFixture({ viewport });
+		fixture.controller.noteUserScrollIntent();
+		fixture.scroller.scrollTop = 100;
+		fixture.controller.handleScroll();
+		fixture.controller.finishDirectionlessUserScrollIntent();
+
+		expect(fixture.controller.isPinnedToBottom).toBe(false);
+		expect(fixture.state.isUserScrolledUp).toBe(true);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+	});
+
 	it('requires fresh downward intent to repin inside the later threshold', () => {
 		let atEnd = true;
 		const viewport = fakeViewport({ isAtEnd: vi.fn(() => atEnd) });

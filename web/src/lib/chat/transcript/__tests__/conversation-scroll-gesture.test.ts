@@ -13,21 +13,17 @@ function dispatchTouch(
 
 function dispatchPointer(
 	node: HTMLElement,
-	type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+	type: 'pointerdown' | 'pointerup' | 'pointercancel',
 	input: {
 		pointerId: number;
-		clientY: number;
 		button?: number;
-		buttons?: number;
 		pointerType?: string;
 	},
 ): void {
 	const event = new Event(type, { bubbles: true });
 	Object.defineProperties(event, {
 		pointerId: { value: input.pointerId },
-		clientY: { value: input.clientY },
 		button: { value: input.button ?? 0 },
-		buttons: { value: input.buttons ?? 0 },
 		pointerType: { value: input.pointerType ?? 'mouse' },
 	});
 	node.dispatchEvent(event);
@@ -52,9 +48,9 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchmove', [{ identifier: 2, clientY: 280 }]);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: 'later', touch: 'move' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: 'later', touch: 'move', contact: null }],
 		]);
 		cleanup();
 		node.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
@@ -71,9 +67,9 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchend', []);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: null, touch: 'end' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: null, touch: 'end', contact: 'end' }],
 		]);
 		cleanup();
 	});
@@ -88,39 +84,39 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchcancel', []);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: null, touch: 'end' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: null, touch: 'end', contact: 'end' }],
 		]);
 		cleanup();
 	});
 
-	it('does not classify an ordinary pointer click as scroll intent', () => {
+	it('delimits an ordinary pointer press without assigning a direction', () => {
 		const node = document.createElement('div');
 		const report = vi.fn();
 		const cleanup = observeConversationViewportScrollGestures(node, report);
 
-		dispatchPointer(node, 'pointerdown', { pointerId: 1, clientY: 120, buttons: 1 });
-		dispatchPointer(node, 'pointermove', { pointerId: 1, clientY: 122, buttons: 1 });
-		dispatchPointer(node, 'pointerup', { pointerId: 1, clientY: 120 });
+		dispatchPointer(node, 'pointerdown', { pointerId: 1 });
+		dispatchPointer(node, 'pointerup', { pointerId: 1 });
 
-		expect(report).not.toHaveBeenCalled();
+		expect(report.mock.calls).toEqual([
+			[{ direction: null, touch: null, contact: 'start' }],
+			[{ direction: null, touch: null, contact: 'end' }],
+		]);
 		cleanup();
 	});
 
-	it('reports direction after a primary pointer drag begins', () => {
+	it('delivers pointer cancellation as a terminal contact', () => {
 		const node = document.createElement('div');
 		const report = vi.fn();
 		const cleanup = observeConversationViewportScrollGestures(node, report);
 
-		dispatchPointer(node, 'pointerdown', { pointerId: 1, clientY: 120, buttons: 1 });
-		dispatchPointer(node, 'pointermove', { pointerId: 1, clientY: 100, buttons: 1 });
-		dispatchPointer(node, 'pointermove', { pointerId: 1, clientY: 130, buttons: 1 });
-		dispatchPointer(node, 'pointerup', { pointerId: 1, clientY: 130 });
+		dispatchPointer(node, 'pointerdown', { pointerId: 1 });
+		dispatchPointer(node, 'pointercancel', { pointerId: 1 });
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: 'earlier', touch: null }],
-			[{ direction: 'later', touch: null }],
+			[{ direction: null, touch: null, contact: 'start' }],
+			[{ direction: null, touch: null, contact: 'end' }],
 		]);
 		cleanup();
 	});

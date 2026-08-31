@@ -211,6 +211,12 @@ export class ConversationScrollController {
 		this.#nativeScrollSettlement.noteTouch(phase);
 	}
 
+	finishDirectionlessUserScrollIntent(): void {
+		if (this.#userScrollIntent.direction !== null) return;
+		this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+		this.#nativeScrollHandoff = null;
+	}
+
 	cancelNativeScroll(viewport = this.deps.getViewport()): void {
 		this.#nativeScrollSettlement.cancel();
 		viewport?.setNativeScrollActivity('idle');

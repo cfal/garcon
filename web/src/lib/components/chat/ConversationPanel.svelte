@@ -189,7 +189,9 @@
 		if (!node || !isVisible) return;
 		const stop = observeConversationViewportScrollGestures(node, (intent) => {
 			if (intent.touch !== null) panel.scroll.noteNativeTouchLifecycle(intent.touch);
-			if (intent.direction !== null) {
+			if (intent.contact === 'end') {
+				panel.scroll.finishDirectionlessUserScrollIntent();
+			} else {
 				panel.scroll.noteUserScrollIntent(
 					intent.direction,
 					intent.touch === null ? 'other' : 'native-touch',
@@ -198,6 +200,7 @@
 		});
 		return () => {
 			stop();
+			panel.scroll.finishDirectionlessUserScrollIntent();
 			panel.scroll.cancelNativeScroll(viewport);
 		};
 	});
