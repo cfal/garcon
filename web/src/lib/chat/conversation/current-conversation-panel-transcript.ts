@@ -20,7 +20,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	constructor(
 		private readonly options: {
 			panels: ConversationPanelRegistry;
-			getComposerAnchorSurfaceId: () => string | null;
 			getSelectedChatId: () => string | null;
 		},
 	) {
@@ -136,41 +135,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 	}
 
-	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
-		return this.#transcriptForChat(chatId).beginReconnectReplay(chatId, transcriptViewId);
-	}
-
-	applyReconnectReplayPage(
-		token: number,
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-		resendCandidates: ResendCandidate[],
-	): 'applied' | 'view-changed' | 'gap-detected' | 'stale' {
-		return this.#transcriptForChat(chatId).applyReconnectReplayPage(
-			token,
-			chatId,
-			transcriptViewId,
-			messages,
-			firstOrdinal,
-			lastOrdinal,
-			resendCandidates,
-		);
-	}
-
-	finishReconnectReplay(
-		token: number,
-		chatId: string,
-	): 'applied' | 'view-changed' | 'gap-detected' | 'stale' {
-		return this.#transcriptForChat(chatId).finishReconnectReplay(token, chatId);
-	}
-
-	abortReconnectReplay(token: number): void {
-		this.#transcript().abortReconnectReplay(token);
-	}
-
 	setResendCandidates(candidates: readonly ResendCandidate[]): void {
 		const chatId = this.options.getSelectedChatId();
 		if (chatId) this.options.panels.replaceResendCandidates(chatId, candidates);
@@ -258,19 +222,13 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	#current() {
-		const panel = this.options.panels.currentPanel(this.options.getComposerAnchorSurfaceId());
-		const selectedChatId = this.options.getSelectedChatId();
-		return panel?.chatId === selectedChatId ? panel : null;
+		return this.options.panels.composerPanel;
 	}
 
 	#panelForChat(chatId: string) {
 		const current = this.#current();
 		if (current?.chatId === chatId) return current;
 		return this.options.panels.panelsForChat(chatId)[0] ?? null;
-	}
-
-	#transcriptForChat(chatId: string): ActiveTranscriptState {
-		return this.#panelForChat(chatId)?.transcript ?? this.#fallback;
 	}
 
 	#transcript(): ActiveTranscriptState {

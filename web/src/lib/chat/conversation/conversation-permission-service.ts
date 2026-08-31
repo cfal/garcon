@@ -14,12 +14,7 @@ import type { ConversationExecutionSelection } from './conversation-execution-dr
 export interface ConversationPermissionServiceOptions {
 	readonly deps: Pick<
 		SessionControllerDeps,
-		| 'sessions'
-		| 'chatState'
-		| 'agentState'
-		| 'lifecycleForChat'
-		| 'conversationUi'
-		| 'appShell'
+		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell'
 	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
@@ -38,11 +33,9 @@ export class ConversationPermissionService {
 	): void {
 		const { deps } = this.options;
 		if (!deps.sessions.byId[chatId]) return;
-		const request = deps.conversationUi.pendingPermissionsFor(chatId).find(
-			(entry) => (
-				entry.permissionOccurrenceId === permissionOccurrenceId
-			),
-		);
+		const request = deps.conversationUi
+			.pendingPermissionsFor(chatId)
+			.find((entry) => entry.permissionOccurrenceId === permissionOccurrenceId);
 		if (!request?.control) {
 			deps.chatState.appendLocalNoticeForChat(
 				chatId,
@@ -64,9 +57,9 @@ export class ConversationPermissionService {
 				if (!deps.sessions.byId[chatId]) return;
 				deps.conversationUi.updatePendingPermissionsForChat(
 					chatId,
-					deps.conversationUi.pendingPermissionsFor(chatId).filter(
-						(request) => request.permissionOccurrenceId !== permissionOccurrenceId,
-					),
+					deps.conversationUi
+						.pendingPermissionsFor(chatId)
+						.filter((request) => request.permissionOccurrenceId !== permissionOccurrenceId),
 				);
 			})
 			.catch((error) => {
@@ -88,18 +81,14 @@ export class ConversationPermissionService {
 		const { deps } = this.options;
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return;
-		const permissionControl = deps.conversationUi.pendingPermissionsFor(chatId).find(
-			(request) => (
-				request.permissionOccurrenceId === permissionOccurrenceId
-			),
-		)?.control;
+		const permissionControl = deps.conversationUi
+			.pendingPermissionsFor(chatId)
+			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId)?.control;
 		deps.conversationUi.updatePendingPermissionsForChat(
 			chatId,
-			deps.conversationUi.pendingPermissionsFor(chatId).filter(
-				(request) => (
-					request.permissionOccurrenceId !== permissionOccurrenceId
-				),
-			),
+			deps.conversationUi
+				.pendingPermissionsFor(chatId)
+				.filter((request) => request.permissionOccurrenceId !== permissionOccurrenceId),
 		);
 
 		const path = chat.projectPath;

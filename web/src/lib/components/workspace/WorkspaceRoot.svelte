@@ -103,6 +103,8 @@
 		cache: chatTranscriptCache,
 		lifecycle: conversationLifecycles,
 		overlays: conversationTranscriptOverlays,
+		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
+		getSelectedChatId: () => sessions.selectedChatId,
 	});
 	setConversationPanels(conversationPanels);
 	const unregisterChatSurfaceTransfers =
@@ -204,12 +206,9 @@
 				: null;
 		},
 	);
+	const composerPanel = $derived(conversationPanels.composerPanel);
 	const composerBound = $derived(
-		Boolean(
-			composerPlacement?.surface.chatId &&
-			composerPlacement.surface.chatId === sessions.selectedChatId &&
-			conversationPanels.panel(composerPlacement.surface.id),
-		),
+		Boolean(composerPlacement && composerPanel?.surfaceId === composerPlacement.surface.id),
 	);
 	const liveLayerRectStyle = $derived(
 		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
@@ -239,8 +238,7 @@
 	const mobileChatIsComposerAnchor = $derived(
 		Boolean(
 			mobileChatSurface?.chatId &&
-			workspace.composerAnchorSurfaceId === mobileChatSurface.id &&
-			mobileChatSurface.chatId === sessions.selectedChatId,
+			conversationPanels.isComposerTarget(mobileChatSurface.id, mobileChatSurface.chatId),
 		),
 	);
 
@@ -460,7 +458,7 @@
 					panel={mobilePanel}
 					isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
 						workspace.focusOwner.surfaceId === mobileChatSurface.id}
-					ownsComposer={composerBound && workspace.composerAnchorSurfaceId === mobileChatSurface.id}
+					ownsComposer={composerBound && mobilePanel === composerPanel}
 					isVisible={true}
 					actions={conversationPanelActions}
 					composerInsetPx={composerBound ? composerInsetPx : 0}

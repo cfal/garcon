@@ -25,7 +25,7 @@ export type PendingPermissionRequestUpdate =
 	| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]);
 
 export interface ExecutionControlPruningOptions {
-	getActiveChatIds: () => Set<string>;
+	getActiveChatIds: () => ReadonlySet<string>;
 }
 
 export interface ConversationUiPort {
@@ -39,10 +39,7 @@ export interface ConversationUiPort {
 	clearPendingPermissionRequests(): void;
 	clearTurnPermissionRequests(): void;
 	pendingPermissionsFor(chatId: string): readonly PendingPermissionRequest[];
-	updatePendingPermissionsForChat(
-		chatId: string,
-		update: PendingPermissionRequestUpdate,
-	): void;
+	updatePendingPermissionsForChat(chatId: string, update: PendingPermissionRequestUpdate): void;
 	clearPendingPermissionsForChat(chatId: string): void;
 	clearTurnPermissionRequestsForChat(chatId: string): void;
 	setPendingViewChat(chat: PendingViewChat | null): void;
@@ -57,7 +54,7 @@ export interface ConversationUiPort {
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
 	removeExecutionControl(chatId: string): void;
-	pruneExecutionControls(activeChatIds: Set<string>): void;
+	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
 	activateTransientFeed(chatId: string | null): void;
 	getTransientFeed(chatId: string): ChatTransientFeedSnapshot | null;
 	setTransientFeedFromSnapshot(snapshot: ChatTransientFeedSnapshot): TransientFeedApplyResult;
@@ -69,8 +66,9 @@ export class ConversationUiState implements ConversationUiPort {
 	pendingViewChat = $state<PendingViewChat | null>(null);
 	private executionControlByChatId = $state<Record<string, ChatExecutionControlState>>({});
 	private transientFeedByChatId = $state.raw<Record<string, ChatTransientFeedSnapshot>>({});
-	private pendingPermissionRequestsByChatId =
-		$state.raw<Record<string, PendingPermissionRequest[]>>({});
+	private pendingPermissionRequestsByChatId = $state.raw<
+		Record<string, PendingPermissionRequest[]>
+	>({});
 	private unassignedPendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
 	private previousPermissionModeByChatId = $state.raw<Record<string, PermissionMode>>({});
 	private unassignedPreviousPermissionMode = $state<PermissionMode | null>(null);
@@ -86,9 +84,7 @@ export class ConversationUiState implements ConversationUiPort {
 
 	get previousPermissionMode(): PermissionMode | null {
 		const chatId = this.activeTransientChatId;
-		return chatId
-			? this.previousPermissionModeFor(chatId)
-			: this.unassignedPreviousPermissionMode;
+		return chatId ? this.previousPermissionModeFor(chatId) : this.unassignedPreviousPermissionMode;
 	}
 
 	get executionControlChatIds(): string[] {
@@ -110,9 +106,7 @@ export class ConversationUiState implements ConversationUiPort {
 			return;
 		}
 		this.unassignedPendingPermissionRequests =
-			typeof update === 'function'
-				? update(this.unassignedPendingPermissionRequests)
-				: update;
+			typeof update === 'function' ? update(this.unassignedPendingPermissionRequests) : update;
 	}
 
 	clearPendingPermissionRequests(): void {
@@ -130,8 +124,7 @@ export class ConversationUiState implements ConversationUiPort {
 			this.clearTurnPermissionRequestsForChat(chatId);
 			return;
 		}
-		this.unassignedPendingPermissionRequests =
-			this.unassignedPendingPermissionRequests.filter(
+		this.unassignedPendingPermissionRequests = this.unassignedPendingPermissionRequests.filter(
 			(request) => request.requestedTool.type === 'exit-plan-mode-tool-use',
 		);
 	}
@@ -140,10 +133,7 @@ export class ConversationUiState implements ConversationUiPort {
 		return this.pendingPermissionRequestsByChatId[chatId] ?? [];
 	}
 
-	updatePendingPermissionsForChat(
-		chatId: string,
-		update: PendingPermissionRequestUpdate,
-	): void {
+	updatePendingPermissionsForChat(chatId: string, update: PendingPermissionRequestUpdate): void {
 		const previous = this.pendingPermissionRequestsByChatId[chatId] ?? [];
 		const next = typeof update === 'function' ? update(previous) : update;
 		if (next === previous) return;
@@ -278,7 +268,7 @@ export class ConversationUiState implements ConversationUiPort {
 		this.executionControlByChatId = nextControlByChatId;
 	}
 
-	pruneExecutionControls(activeChatIds: Set<string>): void {
+	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void {
 		const staleIds = Object.keys(this.executionControlByChatId).filter(
 			(chatId) => !activeChatIds.has(chatId),
 		);
@@ -341,7 +331,8 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	#acceptTransientInstance(serverInstanceId: string): boolean {
-		const decision = this.executionControlAuthority.classifyNonAuthoritativeInstance(serverInstanceId);
+		const decision =
+			this.executionControlAuthority.classifyNonAuthoritativeInstance(serverInstanceId);
 		if (decision.kind === 'reject') return false;
 		if (decision.kind === 'replace') {
 			this.executionControlByChatId = {};
@@ -399,9 +390,7 @@ export class ConversationUiState implements ConversationUiPort {
 		first: readonly PendingPermissionRequest[],
 		second: readonly PendingPermissionRequest[],
 	): PendingPermissionRequest[] {
-		const byOccurrence = new Map(
-			first.map((request) => [request.permissionOccurrenceId, request]),
-		);
+		const byOccurrence = new Map(first.map((request) => [request.permissionOccurrenceId, request]));
 		for (const request of second) byOccurrence.set(request.permissionOccurrenceId, request);
 		return [...byOccurrence.values()];
 	}

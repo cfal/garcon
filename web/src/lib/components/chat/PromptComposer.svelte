@@ -745,10 +745,10 @@
 			}}
 			class="relative"
 		>
-				{#if !selectedIsProcessing}
-					<ResendCandidateChips
-						candidates={resendCandidates}
-						onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
+			{#if !selectedIsProcessing}
+				<ResendCandidateChips
+					candidates={resendCandidates}
+					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
 			{/if}
 			{#if composerState.isDragActive}

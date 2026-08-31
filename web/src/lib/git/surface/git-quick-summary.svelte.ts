@@ -270,11 +270,7 @@ export class GitQuickSummaryStore {
 		this.scheduleRefreshFor(this.projectPath, reason, delayMs);
 	}
 
-	scheduleRefreshFor(
-		projectPath: string,
-		reason: GitQuickRefreshReason,
-		delayMs = 300,
-	): void {
+	scheduleRefreshFor(projectPath: string, reason: GitQuickRefreshReason, delayMs = 300): void {
 		if (!this.isEnabled || !this.#hasVisibleProject(projectPath)) return;
 		this.pendingRefreshByProject.set(projectPath, reason);
 		this.#clearProjectDebounce(projectPath);
@@ -342,14 +338,11 @@ export class GitQuickSummaryStore {
 				) {
 					continue;
 				}
-				void this.refreshFor(
-					project.projectPath,
-					reason === 'visibility'
-						? reason
-						: project.isProcessing
-							? 'agent-processing-poll'
-							: 'idle-poll',
-				);
+				let refreshReason: GitQuickRefreshReason;
+				if (reason === 'visibility') refreshReason = reason;
+				else if (project.isProcessing) refreshReason = 'agent-processing-poll';
+				else refreshReason = 'idle-poll';
+				void this.refreshFor(project.projectPath, refreshReason);
 			}
 		};
 		const intervalId = setIntervalFn(() => tick('idle-poll'), intervalMs);
@@ -366,9 +359,8 @@ export class GitQuickSummaryStore {
 	}
 
 	reconcilePolling(options: QuickSummaryPollingOptions = {}): void {
-		const nextKey = this.isEnabled && this.visibleProjects.length > 0
-			? JSON.stringify(this.visibleProjects)
-			: '';
+		const nextKey =
+			this.isEnabled && this.visibleProjects.length > 0 ? JSON.stringify(this.visibleProjects) : '';
 		if (nextKey === this.#ownedPollingKey) return;
 		this.#stopOwnedPolling?.();
 		this.#stopOwnedPolling = null;
@@ -492,9 +484,7 @@ export class GitQuickSummaryStore {
 			.sort((left, right) => right.lastAccessedAt - left.lastAccessedAt);
 		const bounded = [...protectedEntries, ...retained].slice(0, QUICK_GIT_CACHE_MAX_ENTRIES);
 
-		this.entries = Object.fromEntries(
-			bounded.map((entry) => [entry.projectPath, entry]),
-		);
+		this.entries = Object.fromEntries(bounded.map((entry) => [entry.projectPath, entry]));
 	}
 
 	#hasVisibleProject(projectPath: string): boolean {

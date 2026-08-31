@@ -98,7 +98,6 @@ interface ActivePanelReconnectReplay {
 }
 
 class PanelRegistration implements ConversationPanelRegistration {
-	#surfaceId: ChatViewSurfaceId;
 	#presentation: ConversationPanelPresentationPort | null = null;
 	#lastTarget: ConversationPanelRestoreTarget = { kind: 'end' };
 	#restoreEpoch = 0;
@@ -112,14 +111,13 @@ class PanelRegistration implements ConversationPanelRegistration {
 	readonly scroll: ConversationScrollController;
 
 	constructor(
-		surfaceId: ChatViewSurfaceId,
+		readonly surfaceId: ChatViewSurfaceId,
 		readonly chatId: string,
 		cache: ChatTranscriptCache,
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
 		overlays: ConversationTranscriptOverlayStore,
 		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
 	) {
-		this.#surfaceId = surfaceId;
 		this.transcript = new ActiveTranscriptState(cache, overlays.forChat(chatId), {
 			onSnapshotResendCandidates,
 		});
@@ -134,20 +132,15 @@ class PanelRegistration implements ConversationPanelRegistration {
 		});
 	}
 
-	get surfaceId(): ChatViewSurfaceId {
-		return this.#surfaceId;
-	}
-
 	attachPresentation(port: ConversationPanelPresentationPort): () => void {
 		if (this.#destroyed) return () => {};
 		this.#presentation = port;
 		this.scroll.setViewportVisible(true);
 		this.resumePendingRestore();
-		const binding = port;
 		return () => {
-			if (this.#presentation !== binding) return;
-			this.#lastTarget = binding.captureRestoreTarget() ?? this.#lastTarget;
-			binding.closeTransients();
+			if (this.#presentation !== port) return;
+			this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
+			port.closeTransients();
 			this.#presentation = null;
 		};
 	}
@@ -191,9 +184,9 @@ class PanelRegistration implements ConversationPanelRegistration {
 		this.#lastTarget = target ?? { kind: 'end' };
 		const restored = this.transcript.activateChat(this.chatId);
 		if (!restored || restored.stale) {
-			const options = { minimumLimit: restored?.count ?? 0 };
-			if (loadSnapshot) await loadSnapshot(options);
-			else await this.transcript.loadMessages(this.chatId, options);
+			const loadOptions = { minimumLimit: restored?.count ?? 0 };
+			if (loadSnapshot) await loadSnapshot(loadOptions);
+			else await this.transcript.loadMessages(this.chatId, loadOptions);
 		}
 		if (this.#destroyed || restoreEpoch !== this.#restoreEpoch) return;
 		this.#readyRestoreEpoch = restoreEpoch;
@@ -210,16 +203,12 @@ class PanelRegistration implements ConversationPanelRegistration {
 		)
 			return;
 		if (this.#lastTarget.kind === 'end') {
-			this.#readyRestoreEpoch = null;
-			this.scroll.setPinnedToBottom(true);
-			this.scroll.prepareInitialBottomRestore(this.chatId);
+			this.#prepareInitialBottomRestore();
 			return;
 		}
 		if (this.#lastTarget.transcriptViewId !== this.transcript.transcriptViewId) {
-			this.#readyRestoreEpoch = null;
 			this.#lastTarget = { kind: 'end' };
-			this.scroll.setPinnedToBottom(true);
-			this.scroll.prepareInitialBottomRestore(this.chatId);
+			this.#prepareInitialBottomRestore();
 			return;
 		}
 		if (!this.#presentation) return;
@@ -249,6 +238,12 @@ class PanelRegistration implements ConversationPanelRegistration {
 		}
 	}
 
+	#prepareInitialBottomRestore(): void {
+		this.#readyRestoreEpoch = null;
+		this.scroll.setPinnedToBottom(true);
+		this.scroll.prepareInitialBottomRestore(this.chatId);
+	}
+
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.prepareForHide();
@@ -266,6 +261,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#snapshotLoads = new Map<string, SnapshotLoad>();
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
+	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly VisibleChatPresentation[]>([]);
 
 	constructor(
@@ -273,6 +269,8 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			cache: ChatTranscriptCache;
 			lifecycle: Pick<ConversationLifecycleRegistry, 'forChat' | 'remove'>;
 			overlays: ConversationTranscriptOverlayStore;
+			getComposerAnchorSurfaceId(): ChatViewSurfaceId | null;
+			getSelectedChatId(): string | null;
 			loadTranscriptSnapshot?: (
 				transcript: ActiveTranscriptState,
 				chatId: string,
@@ -280,10 +278,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			) => Promise<void>;
 		},
 	) {}
-
-	get visiblePresentations(): readonly VisibleChatPresentation[] {
-		return this.#visible;
-	}
 
 	get transcriptCache(): ChatTranscriptCache {
 		return this.options.cache;
@@ -398,6 +392,21 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return this.#panels.get(surfaceId) ?? null;
 	}
 
+	get composerPanel(): ConversationPanelRegistration | null {
+		const surfaceId = this.options.getComposerAnchorSurfaceId();
+		const selectedChatId = this.options.getSelectedChatId();
+		if (!surfaceId || !selectedChatId) return null;
+		const panel = this.panel(surfaceId);
+		return panel?.chatId === selectedChatId ? panel : null;
+	}
+
+	isComposerTarget(surfaceId: ChatViewSurfaceId, chatId: string): boolean {
+		return (
+			this.options.getComposerAnchorSurfaceId() === surfaceId &&
+			this.options.getSelectedChatId() === chatId
+		);
+	}
+
 	panelsForChat(chatId: string): readonly ConversationPanelRegistration[] {
 		void this.#visible;
 		return [...this.#panels.values()].filter((panel) => panel.chatId === chatId);
@@ -441,12 +450,6 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			if (panel !== loader) panel.transcript.installCachedSnapshot(chatId);
 		}
 		return true;
-	}
-
-	currentPanel(surfaceId: string | null): ConversationPanelRegistration | null {
-		void this.#visible;
-		if (!surfaceId) return null;
-		return this.#panels.get(surfaceId as ChatViewSurfaceId) ?? null;
 	}
 
 	visibleChatIds(): readonly string[] {

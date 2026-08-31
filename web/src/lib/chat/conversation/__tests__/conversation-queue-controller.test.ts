@@ -110,7 +110,6 @@ function createHarness() {
 			},
 		),
 	};
-	const lifecycle = { currentChatId: 'chat-1' as string | null };
 	const conversationUi = {
 		setExecutionControlFromLiveUpdate: vi.fn(() => true),
 		setExecutionControlFromRefresh: vi.fn(() => true),
@@ -144,9 +143,6 @@ function createHarness() {
 		get composerState() {
 			return composerState;
 		},
-		get lifecycle() {
-			return lifecycle;
-		},
 		get conversationUi() {
 			return conversationUi;
 		},
@@ -159,7 +155,6 @@ function createHarness() {
 		sessions,
 		chatState,
 		composerState,
-		lifecycle,
 		conversationUi,
 		acceptedInputs,
 		scrollToBottom,
@@ -179,9 +174,6 @@ function controllerWithConversationUi(
 		},
 		get composerState() {
 			return harness.composerState;
-		},
-		get lifecycle() {
-			return harness.lifecycle;
 		},
 		get conversationUi() {
 			return conversationUi;

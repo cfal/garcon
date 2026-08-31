@@ -64,7 +64,6 @@ export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
 	drainHandle: DrainHandle;
 }
 
-// Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRouterStores {
 	const transcriptCache = deps.panels.transcriptCache;
 	return {

@@ -73,6 +73,8 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			forChat: lifecycleForChat,
 			remove: (chatId) => lifecycleByChatId.delete(chatId),
 		},
+		getComposerAnchorSurfaceId: () => null,
+		getSelectedChatId: () => selectedChat?.id ?? null,
 	});
 	return {
 		sessions: {

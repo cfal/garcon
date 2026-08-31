@@ -10,6 +10,7 @@ import {
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 
 function message(ordinal: number): TranscriptMessage {
@@ -38,6 +39,8 @@ function fixture(
 			chatId: string,
 			options: ChatLoadMessagesOptions,
 		) => Promise<void>;
+		getComposerAnchorSurfaceId?: () => ChatViewSurfaceId | null;
+		getSelectedChatId?: () => string | null;
 	} = {},
 ) {
 	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
@@ -60,6 +63,8 @@ function fixture(
 		cache,
 		overlays,
 		lifecycle,
+		getComposerAnchorSurfaceId: options.getComposerAnchorSurfaceId ?? (() => null),
+		getSelectedChatId: options.getSelectedChatId ?? (() => null),
 		loadTranscriptSnapshot: options.loadTranscriptSnapshot,
 	});
 	return { cache, overlays, lifecycles, registry };
@@ -202,6 +207,36 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('binds the composer only when anchor, selection, and rendered panel agree', () => {
+		let anchorSurfaceId: ChatViewSurfaceId | null = 'chat-view:window-left';
+		let selectedChatId: string | null = 'chat-1';
+		const { cache, registry } = fixture({
+			getComposerAnchorSurfaceId: () => anchorSurfaceId,
+			getSelectedChatId: () => selectedChatId,
+		});
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-2'),
+		]);
+
+		expect(registry.composerPanel?.surfaceId).toBe('chat-view:window-left');
+		expect(registry.isComposerTarget('chat-view:window-left', 'chat-1')).toBe(true);
+
+		selectedChatId = 'chat-2';
+		expect(registry.composerPanel).toBeNull();
+		expect(registry.isComposerTarget('chat-view:window-left', 'chat-1')).toBe(false);
+
+		anchorSurfaceId = 'chat-view:window-right';
+		expect(registry.composerPanel?.surfaceId).toBe('chat-view:window-right');
+
+		anchorSurfaceId = 'chat-view:window-missing';
+		expect(registry.composerPanel).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('loads one snapshot and hydrates every current duplicate-chat surface', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
@@ -232,7 +267,11 @@ describe('ConversationPanelRegistry', () => {
 			transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
 			transcript.installCachedSnapshot(chatId);
 		});
-		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		const { cache, registry } = fixture({
+			loadTranscriptSnapshot,
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+			getSelectedChatId: () => 'chat-1',
+		});
 
 		registry.reconcile([
 			presentation('chat-view:window-left', 'chat-1'),
@@ -311,7 +350,6 @@ describe('ConversationPanelRegistry', () => {
 		]);
 		const selected = new CurrentConversationPanelTranscript({
 			panels: registry,
-			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 			getSelectedChatId: () => 'chat-1',
 		});
 		const selectedLoad = selected.loadMessages('chat-1', {
@@ -415,7 +453,10 @@ describe('ConversationPanelRegistry', () => {
 	});
 
 	it('projects selection onto a mounted surface without resetting either duplicate transcript', () => {
-		const { cache, registry } = fixture();
+		const { cache, registry } = fixture({
+			getComposerAnchorSurfaceId: () => 'chat-view:window-right',
+			getSelectedChatId: () => 'chat-1',
+		});
 		seed(cache);
 		registry.reconcile([
 			presentation('chat-view:window-left', 'chat-1'),
@@ -436,7 +477,6 @@ describe('ConversationPanelRegistry', () => {
 		const preservedRightEntries = right.transcript.entries;
 		const selected = new CurrentConversationPanelTranscript({
 			panels: registry,
-			getComposerAnchorSurfaceId: () => 'chat-view:window-right',
 			getSelectedChatId: () => 'chat-1',
 		});
 
@@ -453,7 +493,10 @@ describe('ConversationPanelRegistry', () => {
 	});
 
 	it('recognizes a rendered target during the pointerdown-to-anchor mismatch', () => {
-		const { cache, registry } = fixture();
+		const { cache, registry } = fixture({
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+			getSelectedChatId: () => 'chat-2',
+		});
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		registry.reconcile([
@@ -462,7 +505,6 @@ describe('ConversationPanelRegistry', () => {
 		]);
 		const selected = new CurrentConversationPanelTranscript({
 			panels: registry,
-			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 			getSelectedChatId: () => 'chat-2',
 		});
 
@@ -501,7 +543,6 @@ describe('ConversationPanelRegistry', () => {
 		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const selected = new CurrentConversationPanelTranscript({
 			panels: registry,
-			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
 			getSelectedChatId: () => 'chat-1',
 		});
 		selected.upsertOptimisticUserInput({

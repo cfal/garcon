@@ -160,13 +160,14 @@
 		}
 
 		if (queue?.pause) {
+			const pauseId = queue.pause.id;
 			actions.push({
 				id: 'resume-queue',
 				label: m.chat_queue_resume(),
 				title: m.chat_queue_resume_queue(),
 				icon: dispatchMutation?.kind === 'resuming' ? Loader2 : Play,
 				iconClass: dispatchMutation?.kind === 'resuming' ? 'animate-spin' : undefined,
-				onclick: () => void mutateDispatch('resuming', () => onResume(queue.pause!.id)),
+				onclick: () => void mutateDispatch('resuming', () => onResume(pauseId)),
 				disabled: queueMutationsBlocked,
 				busy: dispatchMutation?.kind === 'resuming',
 				priority: 2,
@@ -240,8 +241,8 @@
 	}
 </script>
 
-{#if previewEntry}
-	<QueueStatusSummary queue={queue!} entry={previewEntry} position={previewIndex + 1}>
+{#if queue && previewEntry}
+	<QueueStatusSummary {queue} entry={previewEntry} position={previewIndex + 1}>
 		{#snippet entryActions()}
 			<div class="flex shrink-0 items-center gap-0.5">
 				<button
@@ -278,36 +279,36 @@
 					aria-label={m.chat_queue_browse_messages()}
 					class="flex shrink-0 items-center"
 				>
-						<button
-							type="button"
-							onclick={() => selectPreview(previewIndex - 1)}
-							disabled={!canBrowsePrevious || queueMutationsBlocked}
-							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
-							title={m.chat_queue_previous_message()}
-							aria-label={m.chat_queue_previous_message()}
-						>
-							<ChevronLeft class="h-4 w-4" />
-						</button>
-						<span
-							class="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground"
-							aria-live={announcementsEnabled ? 'polite' : 'off'}
-							aria-atomic="true"
-						>
-							{m.chat_queue_message_position({
-								current: previewIndex + 1,
-								total: queuedEntryCount,
-							})}
-						</span>
-						<button
-							type="button"
-							onclick={() => selectPreview(previewIndex + 1)}
-							disabled={!canBrowseNext || queueMutationsBlocked}
-							class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
-							title={m.chat_queue_next_message()}
-							aria-label={m.chat_queue_next_message()}
-						>
-							<ChevronRight class="h-4 w-4" />
-						</button>
+					<button
+						type="button"
+						onclick={() => selectPreview(previewIndex - 1)}
+						disabled={!canBrowsePrevious || queueMutationsBlocked}
+						class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+						title={m.chat_queue_previous_message()}
+						aria-label={m.chat_queue_previous_message()}
+					>
+						<ChevronLeft class="h-4 w-4" />
+					</button>
+					<span
+						class="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground"
+						aria-live={announcementsEnabled ? 'polite' : 'off'}
+						aria-atomic="true"
+					>
+						{m.chat_queue_message_position({
+							current: previewIndex + 1,
+							total: queuedEntryCount,
+						})}
+					</span>
+					<button
+						type="button"
+						onclick={() => selectPreview(previewIndex + 1)}
+						disabled={!canBrowseNext || queueMutationsBlocked}
+						class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+						title={m.chat_queue_next_message()}
+						aria-label={m.chat_queue_next_message()}
+					>
+						<ChevronRight class="h-4 w-4" />
+					</button>
 				</div>
 			{:else}
 				<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>

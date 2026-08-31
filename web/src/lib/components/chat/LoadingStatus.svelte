@@ -1,6 +1,4 @@
 <script lang="ts">
-	// Renders a conversation panel's status tray while an agent is running.
-
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';

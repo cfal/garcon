@@ -86,9 +86,7 @@
 	const quickGitError = $derived(quickGit.lastErrorFor(projectPath) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(projectPath));
 	const quickGitTrayVisible = $derived(
-		!isProcessing &&
-			localSettings.showQuickCommitTray &&
-			quickGit.canShowTrayFor(projectPath),
+		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({
@@ -113,6 +111,7 @@
 	const isPreparingInitialScroll = $derived(
 		panel.scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
 	);
+	const announcementsEnabled = $derived(ownsComposer && isVisible);
 	const branchSelector = $derived.by<GitQuickBranchSelectorControls | null>(() => {
 		if (!projectPath || !quickGitSummary) return null;
 		const exposesCurrentBranchState =
@@ -154,8 +153,7 @@
 			getScrollContainer: () => scrollContainer,
 			getViewport: () => conversationViewport,
 			getQueueContainer: () => queueControlsContainer,
-			captureRestoreTarget: () =>
-				feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
+			captureRestoreTarget: () => feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
 			closeTransients: () => feedPresentation?.closeTransients(),
 		});
 	});
@@ -175,14 +173,14 @@
 	});
 
 	$effect(() => {
-		const _chatId = chatId;
-		const _loadStatus = panel.transcript.loadStatus;
-		const _displayMessageCount = panel.transcript.displayMessageCount;
-		const _feedDataRevision = panel.transcript.feedMutationClock.dataRevision;
-		const _viewport = conversationViewport;
-		const _autoScroll = localSettings.autoScrollToBottom;
+		void chatId;
+		void panel.transcript.loadStatus;
+		void panel.transcript.displayMessageCount;
+		void panel.transcript.feedMutationClock.dataRevision;
+		void conversationViewport;
+		const autoScrollToBottom = localSettings.autoScrollToBottom;
 		panel.scroll.reconcilePinnedProjection();
-		panel.scroll.reconcileInitialBottomRestore(_autoScroll);
+		panel.scroll.reconcileInitialBottomRestore(autoScrollToBottom);
 	});
 
 	$effect(() => {
@@ -224,7 +222,6 @@
 			panel.scroll.scrollFeedHalfPage(direction),
 		);
 	});
-
 </script>
 
 <div
@@ -245,20 +242,9 @@
 				onLoadEarlier={() => void panel.scroll.requestPage('earlier', 'button')}
 				onLoadLater={() => void panel.scroll.requestPage('later', 'button')}
 				onPermissionDecision={(permissionOccurrenceId, decision) =>
-					actions?.decidePermission(
-						surfaceId,
-						chatId,
-						permissionOccurrenceId,
-						decision,
-					)}
+					actions?.decidePermission(surfaceId, chatId, permissionOccurrenceId, decision)}
 				onExitPlanMode={(permissionOccurrenceId, choice, plan) =>
-					actions?.exitPlanMode(
-						surfaceId,
-						chatId,
-						permissionOccurrenceId,
-						choice,
-						plan,
-					)}
+					actions?.exitPlanMode(surfaceId, chatId, permissionOccurrenceId, choice, plan)}
 				pendingPermissionRequests={pendingPermissions}
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
@@ -267,7 +253,7 @@
 				reserveComposerTraySpace={capSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}
-				announcementsEnabled={ownsComposer && isVisible}
+				{announcementsEnabled}
 				pinnedToBottom={panel.scroll.isPinnedToBottom}
 				{surfaceIdentity}
 				onViewportPortChange={(port) => (conversationViewport = port)}
@@ -289,7 +275,7 @@
 				{queue}
 				{canInterrupt}
 				{canSteer}
-				announcementsEnabled={ownsComposer && isVisible}
+				{announcementsEnabled}
 				onInterrupt={() => actions?.interruptQueue(surfaceId, chatId)}
 				onSteer={(entry, revision) => actions?.steerQueue(surfaceId, chatId, entry, revision)}
 				onPause={() => actions?.pauseQueue(surfaceId, chatId) ?? Promise.resolve()}
@@ -318,7 +304,7 @@
 		quickCommitError={quickGitError}
 		quickCommitBranchSelector={branchSelector}
 		isMobile={appShell.isMobile}
-		announcementsEnabled={ownsComposer && isVisible}
+		{announcementsEnabled}
 		onAbort={() => void actions?.stop(surfaceId, chatId)}
 		onQuickCommit={() => actions?.openCommit(surfaceId, chatId)}
 	/>

@@ -33,19 +33,15 @@ interface FailedQueueSubmission {
 }
 
 export interface ConversationQueueControllerOptions {
-	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId' | 'byId'>;
+	get sessions(): Pick<SessionControllerDeps['sessions'], 'byId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		| 'loadMessages'
-		| 'clearLocalNoticesForChat'
-		| 'appendLocalNoticeForChat'
-		| 'getCursorForChat'
+		'loadMessages' | 'clearLocalNoticesForChat' | 'appendLocalNoticeForChat' | 'getCursorForChat'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
 		'draftRevision' | 'isDraftEmpty' | 'restoreDraftIfRevision'
 	>;
-	get lifecycle(): Pick<SessionControllerDeps['lifecycle'], 'currentChatId'>;
 	get conversationUi(): Pick<
 		SessionControllerDeps['conversationUi'],
 		| 'setExecutionControlFromLiveUpdate'
@@ -142,23 +138,6 @@ export class ConversationQueueController {
 		}
 	}
 
-	handlePause(): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.pauseForChat(chatId);
-	}
-
-	handleResume(pauseId: string): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.resumeForChat(chatId, pauseId);
-	}
-
-	handleControlError(action: 'pause' | 'resume', error: unknown): void {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (chatId) this.handleControlErrorForChat(chatId, action, error);
-	}
-
 	handleControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
 		if (!this.#hasChat(chatId)) return;
 		this.options.chatState.appendLocalNoticeForChat(
@@ -245,6 +224,19 @@ export class ConversationQueueController {
 		}
 	}
 
+	async deleteFromPanelForChat(chatId: string, entryId: string): Promise<void> {
+		try {
+			await this.deleteForChat(chatId, entryId);
+		} catch (error) {
+			if (isDepartedQueueEntryError(error) || !this.#hasChat(chatId)) return;
+			this.options.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
+			);
+		}
+	}
+
 	async moveForChat(
 		chatId: string,
 		source: QueueEntry,
@@ -317,7 +309,7 @@ export class ConversationQueueController {
 				failure.serverInstanceId !== null &&
 				this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
 					failure.serverInstanceId,
-					);
+				);
 			if (!instanceConfirmed) await this.#reconcileSteerTranscript(chatId);
 			if (!this.#hasChat(chatId)) throw error;
 			this.options.chatState.appendLocalNoticeForChat(
@@ -335,22 +327,6 @@ export class ConversationQueueController {
 		const transcriptViewId = this.options.chatState.getCursorForChat(chatId).transcriptViewId;
 		if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
 		return transcriptViewId;
-	}
-
-	async handleDelete(entryId: string): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return;
-		try {
-			await this.deleteForChat(chatId, entryId);
-		} catch (error) {
-			if (isDepartedQueueEntryError(error)) return;
-			if (!this.#hasChat(chatId)) return;
-			this.options.chatState.appendLocalNoticeForChat(
-				chatId,
-				'error',
-				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
-			);
-		}
 	}
 
 	async #reconcileSteerTranscript(chatId: string): Promise<void> {

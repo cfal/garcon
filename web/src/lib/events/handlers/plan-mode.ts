@@ -36,9 +36,8 @@ export function handlePlanModeMessages(
 		if (chatMsg.type === 'exit-plan-mode-tool-use') {
 			const permissionOccurrenceId = `plan-exit-${chatMsg.toolId}`;
 			ctx.conversationUi.updatePendingPermissionsForChat(chatId, (prev) => {
-				if (prev.some((request) => (
-					request.permissionOccurrenceId === permissionOccurrenceId
-				))) return prev;
+				if (prev.some((request) => request.permissionOccurrenceId === permissionOccurrenceId))
+					return prev;
 				return [
 					...prev,
 					{

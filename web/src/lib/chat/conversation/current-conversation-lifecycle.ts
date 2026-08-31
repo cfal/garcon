@@ -20,7 +20,8 @@ export class CurrentConversationLifecycle {
 
 	get loadingStatus(): LoadingStatus | null {
 		const chatId = this.currentChatId;
-		return chatId ? this.options.lifecycles.get(chatId)?.loadingStatus ?? null : null;
+		if (!chatId) return null;
+		return this.options.lifecycles.get(chatId)?.loadingStatus ?? null;
 	}
 
 	beginTurn(chatId: string): void {
@@ -35,11 +36,7 @@ export class CurrentConversationLifecycle {
 		this.options.lifecycles.clearTurnStatus(chatId);
 	}
 
-	restoreStopping(
-		chatId: string,
-		requestId: string,
-		snapshot: StoppingSnapshot | null,
-	): void {
+	restoreStopping(chatId: string, requestId: string, snapshot: StoppingSnapshot | null): void {
 		this.options.lifecycles.restoreStopping(chatId, requestId, snapshot);
 	}
 

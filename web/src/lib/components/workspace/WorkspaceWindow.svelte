@@ -70,7 +70,7 @@
 	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
 	const activeSurfaceIsCommandOwner = $derived(
 		workspace.focusOwner.kind !== 'chat-list' &&
-		workspace.focusOwner.surfaceId === activeSurface?.id,
+			workspace.focusOwner.surfaceId === activeSurface?.id,
 	);
 	const activeChat = $derived(
 		activeSurface?.type === 'chat' && activeSurface.chatId
@@ -80,12 +80,13 @@
 	const activePanel = $derived(
 		activeSurface?.type === 'chat' ? conversationPanels.panel(activeSurface.id) : null,
 	);
+	const composerPanel = $derived(conversationPanels.composerPanel);
 	const activeChatIsComposerAnchor = $derived(
 		activeSurface?.type === 'chat' &&
-		workspace.composerAnchorSurfaceId === activeSurface.id &&
-		activeSurface.chatId === sessions.selectedChatId,
+			activeSurface.chatId !== null &&
+			conversationPanels.isComposerTarget(activeSurface.id, activeSurface.chatId),
 	);
-	const activeChatOwnsComposer = $derived(activeChatIsComposerAnchor && Boolean(activePanel));
+	const activeChatOwnsComposer = $derived(activePanel !== null && activePanel === composerPanel);
 	const activeChatPresentation = $derived(
 		resolveChatSurfacePresentation(activeChat, sessions.isLoadingChats),
 	);
@@ -277,12 +278,11 @@
 			>
 				{#if isVisible && chatIsActive && activeChat && activePanel}
 					{#key activePanel}
+						<!-- Keeps the admitted chat stable while panel registration publication catches up. -->
 						{const panel = activePanel}
 						{const surfaceId = chatSurface.id}
 						{const initialChat = activeChat}
-						{const panelChat = $derived(
-							activeChat?.id === panel.chatId ? activeChat : initialChat,
-						)}
+						{const panelChat = $derived(activeChat?.id === panel.chatId ? activeChat : initialChat)}
 						<ConversationPanel
 							{surfaceId}
 							chat={panelChat}
@@ -294,9 +294,7 @@
 							composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
 						/>
 					{/key}
-				{:else if isVisible && chatIsActive && (
-					activeChatPresentation === 'loading' || (activeChat && !activePanel)
-				)}
+				{:else if isVisible && chatIsActive && (activeChatPresentation === 'loading' || (activeChat && !activePanel))}
 					<ChatLoadingState announcementsEnabled={activeChatIsComposerAnchor} />
 				{:else if isVisible && chatIsActive}
 					<div class="grid h-full place-items-center text-sm text-muted-foreground">

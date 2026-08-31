@@ -1300,7 +1300,7 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		await controller.handleInterruptAndSend();
+		await controller.handleInterruptAndSendForChat('chat-1');
 
 		expect(mockInterruptAndSendChat).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -1392,7 +1392,7 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		await controller.handleInterruptAndSend();
+		await controller.handleInterruptAndSendForChat('chat-1');
 
 		expect(deps.lifecycle.restoreStopping).not.toHaveBeenCalled();
 		expect(deps.chatState.localNotices).toEqual([]);
@@ -3117,13 +3117,27 @@ describe('ConversationSessionController', () => {
 		);
 		const controller = new ConversationSessionController(deps);
 
-		await controller.handleDeleteQueuedInput('entry-1');
+		await controller.deleteQueueEntryFromPanelForChat('chat-1', 'entry-1');
 
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			latestControl,
 		);
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('reports an inline queue delete failure against the admitted chat', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		mockDeleteQueuedInput.mockRejectedValueOnce(new ApiError(500, 'Connection lost'));
+		const controller = new ConversationSessionController(deps);
+
+		await controller.deleteQueueEntryFromPanelForChat('chat-1', 'entry-1');
+
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			'Failed to remove queued message: Connection lost',
+		);
 	});
 
 	it('steers a rendered queue observation without touching composer turn state', async () => {
@@ -3150,7 +3164,7 @@ describe('ConversationSessionController', () => {
 			updatedAt: '2026-08-02T00:00:00.000Z',
 		};
 
-		await controller.handleSteerQueuedInput(queued, 7);
+		await controller.handleSteerQueuedInputForChat('chat-1', queued, 7);
 
 		expect(mockSteerQueuedEntry).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -3187,8 +3201,8 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		await controller.handleQueuePause();
-		await controller.handleQueueResume('pause-rendered');
+		await controller.pauseQueueForChat('chat-1');
+		await controller.resumeQueueForChat('chat-1', 'pause-rendered');
 
 		expect(mockPauseChatQueue).toHaveBeenCalledWith('chat-1');
 		expect(mockResumeChatQueue).toHaveBeenCalledWith('chat-1', 'pause-rendered');
@@ -3230,7 +3244,7 @@ describe('ConversationSessionController', () => {
 		mockResumeChatQueue.mockRejectedValueOnce(error);
 		const controller = new ConversationSessionController(deps);
 
-		await expect(controller.handleQueueResume('pause-stale')).rejects.toBe(error);
+		await expect(controller.resumeQueueForChat('chat-1', 'pause-stale')).rejects.toBe(error);
 
 		expect(deps.conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith(
 			'chat-1',

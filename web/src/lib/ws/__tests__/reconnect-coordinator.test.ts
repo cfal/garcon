@@ -4,15 +4,12 @@ import { render } from '@testing-library/svelte';
 import {
 	ChatReconnectCoordinator,
 	type ChatReconnectCoordinatorOptions,
-	type ReconnectTranscriptState,
+	type ReconnectPanelRegistryPort,
 } from '../reconnect-coordinator.svelte';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import ReconnectCoordinatorTestHost from './ReconnectCoordinatorTestHost.svelte';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { createChatMessagesAccumulator } from '$lib/events/router.svelte.js';
 import { AssistantMessage } from '$shared/chat-types';
-import { ChatMessagesMessage } from '$shared/ws-events';
 import type { WsMessageConsumer } from '../connection.svelte.js';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -217,7 +214,9 @@ function createReconnectDeps(
 	const chatState = {
 		getCursor: vi.fn(() => selectedCursor),
 		applyMessages,
-		beginReconnectReplay: vi.fn(() => ++reconnectReplayToken),
+		beginReconnectReplay: vi.fn(
+			(_chatId: string, _transcriptViewId: string) => ++reconnectReplayToken,
+		),
 		applyReconnectReplayPage: vi.fn(
 			(
 				_token: number,
@@ -229,14 +228,14 @@ function createReconnectDeps(
 				_resendCandidates: ResendCandidate[],
 			) => applyMessages(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal),
 		),
-		finishReconnectReplay: vi.fn(() => 'applied' as const),
-		abortReconnectReplay: vi.fn(),
-		loadMessages: vi.fn(async () => []),
+		finishReconnectReplay: vi.fn((_token: number, _chatId: string) => 'applied' as const),
+		abortReconnectReplay: vi.fn((_token: number) => undefined),
+		loadMessages: vi.fn(async (_chatId: string) => []),
 		transcriptCache: {
 			markStale: vi.fn(),
 			markValidated: vi.fn(),
 		},
-	} satisfies ReconnectTranscriptState;
+	};
 	const conversationUi = {
 		executionControlChatIds: options.controlChatIds ?? [],
 		removeExecutionControl: vi.fn(),
@@ -246,15 +245,88 @@ function createReconnectDeps(
 		setTransientFeedFromSnapshot: vi.fn(),
 	};
 	const addMessageConsumer = vi.fn<(consumer: WsMessageConsumer) => () => void>(() => vi.fn());
-
-	return {
-		ws: { isConnected: true as boolean, sendRequest, addMessageConsumer },
-		chatState,
-		conversationUi,
-		sessions: {
-			selectedChatId,
-			quietRefreshChats: vi.fn(async () => undefined),
+	const sessions = {
+		selectedChatId,
+		quietRefreshChats: vi.fn(async () => undefined),
+	};
+	const replayTokens = new Map<string, number>();
+	const panels = {
+		transcriptCache: {
+			readAppliedCursor: vi.fn((chatId: string) =>
+				chatId === sessions.selectedChatId ? { ...selectedCursor, stale: false } : null,
+			),
+			markValidated: chatState.transcriptCache.markValidated,
 		},
+		visibleChatIds: vi.fn(() => (sessions.selectedChatId ? [sessions.selectedChatId] : [])),
+		panelsForChat: vi.fn((chatId: string) => (chatId === sessions.selectedChatId ? [{}] : [])),
+		markChatStale: vi.fn((chatId: string) => chatState.transcriptCache.markStale(chatId)),
+		loadChatSnapshot: vi.fn(async (chatId: string) => {
+			await chatState.loadMessages(chatId);
+			return true;
+		}),
+		beginReconnectReplay: vi.fn((chatId: string, transcriptViewId: string) => {
+			const token = chatState.beginReconnectReplay(chatId, transcriptViewId);
+			replayTokens.set(chatId, token);
+			return token;
+		}),
+		applyReconnectReplayPage: vi.fn(
+			(
+				token: number,
+				chatId: string,
+				batch: Parameters<ReconnectPanelRegistryPort['applyReconnectReplayPage']>[2],
+			) =>
+				chatState.applyReconnectReplayPage(
+					token,
+					chatId,
+					batch.transcriptViewId,
+					batch.messages,
+					batch.firstOrdinal,
+					batch.lastOrdinal,
+					batch.resendCandidates,
+				),
+		),
+		finishReconnectReplay: vi.fn((token: number, chatId: string) => {
+			const result = chatState.finishReconnectReplay(token, chatId);
+			if (replayTokens.get(chatId) === token) replayTokens.delete(chatId);
+			return result;
+		}),
+		abortReconnectReplay: vi.fn((token: number, chatId: string) => {
+			chatState.abortReconnectReplay(token);
+			if (replayTokens.get(chatId) === token) replayTokens.delete(chatId);
+		}),
+		abortReconnectReplays: vi.fn(() => {
+			for (const token of replayTokens.values()) chatState.abortReconnectReplay(token);
+			replayTokens.clear();
+		}),
+		noticeRevisionFor: vi.fn(() => 0),
+		applyCommittedBatch: vi.fn(
+			(batch: Parameters<ReconnectPanelRegistryPort['applyCommittedBatch']>[0]) => {
+				const result = chatState.applyMessages(
+					batch.chatId,
+					batch.transcriptViewId,
+					batch.messages,
+					batch.firstOrdinal,
+					batch.lastOrdinal,
+				);
+				if (result === 'applied') {
+					return { kind: 'applied' as const, localRecoverySurfaceIds: [] };
+				}
+				return {
+					kind: 'chat-recovery-required' as const,
+					outcome:
+						result === 'view-changed'
+							? { status: 'view-changed' as const }
+							: { status: 'gap-detected' as const, expectedOrdinal: 0, receivedOrdinal: 0 },
+				};
+			},
+		),
+	} satisfies ReconnectPanelRegistryPort;
+
+	const deps = {
+		ws: { isConnected: true as boolean, sendRequest, addMessageConsumer },
+		panels,
+		conversationUi,
+		sessions,
 		getExecutionControl: vi.fn(
 			async (_chatId: string): Promise<{ control: ChatExecutionControlState }> => ({
 				control: controlState(false),
@@ -264,6 +336,7 @@ function createReconnectDeps(
 		markBackgroundStale: vi.fn(),
 		onBackgroundMessages: vi.fn(),
 	} satisfies ChatReconnectCoordinatorOptions;
+	return { ...deps, chatState };
 }
 
 function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): void {
@@ -278,6 +351,18 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.chatState.loadMessages,
 		deps.chatState.transcriptCache.markStale,
 		deps.chatState.transcriptCache.markValidated,
+		deps.panels.transcriptCache.readAppliedCursor,
+		deps.panels.visibleChatIds,
+		deps.panels.panelsForChat,
+		deps.panels.markChatStale,
+		deps.panels.loadChatSnapshot,
+		deps.panels.beginReconnectReplay,
+		deps.panels.applyReconnectReplayPage,
+		deps.panels.finishReconnectReplay,
+		deps.panels.abortReconnectReplay,
+		deps.panels.abortReconnectReplays,
+		deps.panels.noticeRevisionFor,
+		deps.panels.applyCommittedBatch,
 		deps.conversationUi.removeExecutionControl,
 		deps.conversationUi.setExecutionControlFromRefresh,
 		deps.conversationUi.markExecutionControlSocketDisconnected,
@@ -325,6 +410,8 @@ describe('ChatReconnectCoordinator', () => {
 				forChat: () => lifecycle,
 				remove: vi.fn(),
 			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
 		});
 		panels.reconcile([
 			{
@@ -356,7 +443,7 @@ describe('ChatReconnectCoordinator', () => {
 		cache.flush();
 	});
 
-	it('holds rendered live rows until a fixed reconnect replay completes', async () => {
+	it('[TLV5-REPLAY.05-WEB-UNIT-01] holds rendered live rows until a fixed reconnect replay completes', async () => {
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 		cache.replace(
 			'chat-1',
@@ -377,6 +464,8 @@ describe('ChatReconnectCoordinator', () => {
 				forChat: () => lifecycle,
 				remove: vi.fn(),
 			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
 		});
 		panels.reconcile([
 			{
@@ -494,6 +583,8 @@ describe('ChatReconnectCoordinator', () => {
 				forChat: () => lifecycle,
 				remove: vi.fn(),
 			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
 		});
 		panels.reconcile([
 			{
@@ -1090,9 +1181,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			purpose: 'activation',
-		});
+		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -1106,9 +1195,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			purpose: 'activation',
-		});
+		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -1127,7 +1214,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.panels.loadChatSnapshot).not.toHaveBeenCalled();
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -1199,7 +1286,7 @@ describe('ChatReconnectCoordinator', () => {
 			{ messages: [], firstOrdinal: 5, lastOrdinal: 6 },
 			{ messages: [7], firstOrdinal: 7, lastOrdinal: 7 },
 		]);
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.panels.loadChatSnapshot).not.toHaveBeenCalled();
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledOnce();
 	});
 
@@ -1243,135 +1330,43 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.applyMessages.mock.calls[0]?.[2]).toEqual([
 			expect.objectContaining({ ordinal: 3 }),
 		]);
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			purpose: 'activation',
-		});
+		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('[TLV5-REPLAY.05-WEB-UNIT-01] preserves live rows that arrive beyond the fixed watermark during selected replay', async () => {
-		const activeTranscript = new ActiveTranscriptState();
-		activeTranscript.replaceGeneration(
-			'chat-1',
-			'generation-selected',
-			[
-				{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
-				{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
-			],
-			{
-				lastOrdinal: 2,
-				pageOldestOrdinal: 1,
-				pageNewestOrdinal: 2,
-				nextBeforeOrdinal: null,
-				hasMore: false,
-			},
-		);
-		const heldContinuation = deferred<Record<string, unknown>>();
-		const baseDeps = createReconnectDeps();
-		let subscribeCount = 0;
-		baseDeps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
-			const request = rawRequest as Record<string, unknown>;
-			if (request.type === 'reconnect-state-query') {
-				return reconnectStateResponse([], ['chat-1']);
-			}
-			if (request.type !== 'chat-subscribe') {
-				throw new Error(`Unexpected request: ${String(request.type)}`);
-			}
-			subscribeCount += 1;
-			if (subscribeCount === 1) {
-				return boundedReplayResponse({
-					afterOrdinal: 2,
-					nextAfterOrdinal: 4,
-					throughOrdinal: 6,
-					hasMore: true,
-					messages: [messageJson(3, 'replay-three'), messageJson(4, 'equal-content')],
-				});
-			}
-			if (subscribeCount === 2) return heldContinuation.promise;
-			throw new Error('The coordinator requested beyond the fixed watermark.');
-		});
-		const loadMessages = vi.fn(async () => []);
-		const markValidated = vi.spyOn(activeTranscript.transcriptCache, 'markValidated');
-		const chatState = {
-			getCursor: () => activeTranscript.getCursor(),
-			applyMessages: activeTranscript.applyMessages.bind(activeTranscript),
-			beginReconnectReplay: activeTranscript.beginReconnectReplay.bind(activeTranscript),
-			applyReconnectReplayPage: activeTranscript.applyReconnectReplayPage.bind(activeTranscript),
-			finishReconnectReplay: activeTranscript.finishReconnectReplay.bind(activeTranscript),
-			abortReconnectReplay: activeTranscript.abortReconnectReplay.bind(activeTranscript),
-			loadMessages,
-			transcriptCache: activeTranscript.transcriptCache,
-		} satisfies ReconnectTranscriptState;
-		const deps = { ...baseDeps, chatState } satisfies ChatReconnectCoordinatorOptions;
-		const reloadChatTranscript = vi.fn();
-		const liveMessages = createChatMessagesAccumulator({
-			applyChatMessages: chatState.applyMessages,
-			reloadChatTranscript,
-		});
-		const coordinator = new ChatReconnectCoordinator(deps);
-
-		await coordinator.handleConnectionState(true);
-		await coordinator.handleConnectionState(false);
-		const reconnect = coordinator.handleConnectionState(true);
-		await flushUntil(() => subscribeCount === 2);
-
-		liveMessages.enqueue(
-			new ChatMessagesMessage(
-				'chat-1',
-				'generation-selected',
-				[{ ordinal: 7, message: new AssistantMessage(TS, 'live-seven') }],
-				7,
-				7,
-				[],
-			),
-		);
-		liveMessages.flush();
-		heldContinuation.resolve(
-			boundedReplayResponse({
-				afterOrdinal: 4,
-				nextAfterOrdinal: 6,
-				throughOrdinal: 6,
-				hasMore: false,
-				messages: [messageJson(5, 'replay-five'), messageJson(6, 'equal-content')],
-			}),
-		);
-		await reconnect;
-
-		expect(reloadChatTranscript).not.toHaveBeenCalled();
-		expect(loadMessages).not.toHaveBeenCalled();
-		expect(markValidated).toHaveBeenCalledOnce();
-		expect(
-			activeTranscript.entries.map((entry) => ({
-				ordinal: entry.ordinal,
-				content: 'content' in entry.message ? entry.message.content : entry.message.type,
-			})),
-		).toEqual([
-			{ ordinal: 1, content: 'initial-one' },
-			{ ordinal: 2, content: 'initial-two' },
-			{ ordinal: 3, content: 'replay-three' },
-			{ ordinal: 4, content: 'equal-content' },
-			{ ordinal: 5, content: 'replay-five' },
-			{ ordinal: 6, content: 'equal-content' },
-			{ ordinal: 7, content: 'live-seven' },
-		]);
-	});
-
-	it('[TLV5-REPLAY.07-WEB-UNIT-01] discards a partial selected replay when its transcript view is replaced', async () => {
-		const activeTranscript = new ActiveTranscriptState();
-		activeTranscript.replaceGeneration(
+	it('[TLV5-REPLAY.07-WEB-UNIT-01] discards a partial rendered replay when its transcript view is replaced', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+		cache.replace(
 			'chat-1',
 			'generation-selected',
 			[
 				{ ordinal: 1, message: new AssistantMessage(TS, 'old-one') },
 				{ ordinal: 2, message: new AssistantMessage(TS, 'old-two') },
 			],
-			{
-				lastOrdinal: 2,
-				pageOldestOrdinal: 1,
-				pageNewestOrdinal: 2,
-				nextBeforeOrdinal: null,
-				hasMore: false,
-			},
+			2,
+			null,
 		);
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.setCurrentChatId('chat-1');
+		const panels = new ConversationPanelRegistry({
+			cache,
+			overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: {
+				forChat: () => lifecycle,
+				remove: vi.fn(),
+			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
+		});
+		panels.reconcile([
+			{
+				surfaceId: 'chat-view:window-left',
+				chatId: 'chat-1',
+				presentation: 'window-left',
+				windowId: 'window-left',
+			},
+		]);
+		const activeTranscript = panels.panel('chat-view:window-left')?.transcript;
+		if (!activeTranscript) throw new Error('Expected a rendered conversation panel.');
 		const heldContinuation = deferred<Record<string, unknown>>();
 		const baseDeps = createReconnectDeps();
 		let subscribeCount = 0;
@@ -1396,24 +1391,9 @@ describe('ChatReconnectCoordinator', () => {
 			if (subscribeCount === 2) return heldContinuation.promise;
 			throw new Error('The coordinator requested beyond the replaced transcript view.');
 		});
-		const loadMessages = vi.fn(async () => activeTranscript.chatMessages);
-		const markValidated = vi.spyOn(activeTranscript.transcriptCache, 'markValidated');
-		const chatState = {
-			getCursor: () => activeTranscript.getCursor(),
-			applyMessages: activeTranscript.applyMessages.bind(activeTranscript),
-			beginReconnectReplay: activeTranscript.beginReconnectReplay.bind(activeTranscript),
-			applyReconnectReplayPage: activeTranscript.applyReconnectReplayPage.bind(activeTranscript),
-			finishReconnectReplay: activeTranscript.finishReconnectReplay.bind(activeTranscript),
-			abortReconnectReplay: activeTranscript.abortReconnectReplay.bind(activeTranscript),
-			loadMessages,
-			transcriptCache: activeTranscript.transcriptCache,
-		} satisfies ReconnectTranscriptState;
-		const deps = { ...baseDeps, chatState } satisfies ChatReconnectCoordinatorOptions;
-		const reloadChatTranscript = vi.fn();
-		const liveMessages = createChatMessagesAccumulator({
-			applyChatMessages: chatState.applyMessages,
-			reloadChatTranscript,
-		});
+		const loadChatSnapshot = vi.spyOn(panels, 'loadChatSnapshot').mockResolvedValue(true);
+		const markValidated = vi.spyOn(cache, 'markValidated');
+		const deps = { ...baseDeps, panels } satisfies ChatReconnectCoordinatorOptions;
 		const coordinator = new ChatReconnectCoordinator(deps);
 
 		await coordinator.handleConnectionState(true);
@@ -1433,17 +1413,17 @@ describe('ChatReconnectCoordinator', () => {
 				hasMore: false,
 			},
 		);
-		liveMessages.enqueue(
-			new ChatMessagesMessage(
-				'chat-1',
-				'generation-reloaded',
-				[{ ordinal: 2, message: new AssistantMessage(TS, 'reloaded-live-two') }],
-				2,
-				2,
-				[],
-			),
-		);
-		liveMessages.flush();
+		expect(
+			panels.applyCommittedBatch({
+				chatId: 'chat-1',
+				transcriptViewId: 'generation-reloaded',
+				messages: [{ ordinal: 2, message: new AssistantMessage(TS, 'reloaded-live-two') }],
+				firstOrdinal: 2,
+				lastOrdinal: 2,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 		baseDeps.conversationUi.setTransientFeedFromSnapshot.mockClear();
 		heldContinuation.resolve(
 			boundedReplayResponse({
@@ -1456,9 +1436,8 @@ describe('ChatReconnectCoordinator', () => {
 		);
 		await reconnect;
 
-		expect(reloadChatTranscript).not.toHaveBeenCalled();
-		expect(loadMessages).toHaveBeenCalledOnce();
-		expect(loadMessages).toHaveBeenCalledWith('chat-1', { purpose: 'activation' });
+		expect(loadChatSnapshot).toHaveBeenCalledOnce();
+		expect(loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 		expect(markValidated).toHaveBeenCalledOnce();
 		expect(baseDeps.conversationUi.setTransientFeedFromSnapshot).not.toHaveBeenCalled();
 		expect(
@@ -1474,6 +1453,8 @@ describe('ChatReconnectCoordinator', () => {
 			transcriptViewId: 'generation-reloaded',
 			lastOrdinal: 2,
 		});
+		panels.destroy();
+		cache.flush();
 	});
 
 	it('applies every bounded replay page to a cached background transcript', async () => {
@@ -1562,6 +1543,8 @@ describe('ChatReconnectCoordinator', () => {
 				forChat: () => lifecycle,
 				remove: vi.fn(),
 			},
+			getComposerAnchorSurfaceId: () => null,
+			getSelectedChatId: () => null,
 		});
 		const deps = createReconnectDeps({
 			selectedChatId: '',
@@ -1697,9 +1680,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			purpose: 'activation',
-		});
+		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
@@ -1713,9 +1694,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
-			purpose: 'activation',
-		});
+		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
@@ -1760,7 +1739,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.markBackgroundStale).toHaveBeenCalledWith('chat-2');
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.panels.loadChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('defers background snapshots when background delta apply reports a gap', async () => {
@@ -1777,7 +1756,7 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.markBackgroundStale).toHaveBeenCalledWith('chat-2');
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.panels.loadChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('marks twenty non-resumable background cursors stale without loading snapshots', async () => {
@@ -1807,7 +1786,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.markBackgroundStale.mock.calls.map(([chatId]) => chatId)).toEqual(
 			backgroundCursors.map((cursor) => cursor.chatId),
 		);
-		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.panels.loadChatSnapshot).not.toHaveBeenCalled();
 	});
 
 	it('discards stale reconnect responses when a newer reconnect begins', async () => {

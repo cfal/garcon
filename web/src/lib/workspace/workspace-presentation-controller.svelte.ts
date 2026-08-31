@@ -87,7 +87,6 @@ export class WorkspacePresentationController {
 	#focusIntentGeneration = 0;
 	#pointerInteraction: {
 		readonly windowId: WorkspaceWindowId;
-		readonly surfaceId: string;
 		readonly pointerId: number;
 	} | null = null;
 	#pointerInteractionRelease: ReturnType<typeof setTimeout> | null = null;
@@ -245,7 +244,7 @@ export class WorkspacePresentationController {
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
-		this.#pointerInteraction = { windowId, surfaceId, pointerId };
+		this.#pointerInteraction = { windowId, pointerId };
 	}
 
 	commitWindowPointerInteraction(windowId: WorkspaceWindowId): void {

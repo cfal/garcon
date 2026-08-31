@@ -299,9 +299,6 @@ export class ConversationSessionController {
 			get composerState() {
 				return deps.composerState;
 			},
-			get lifecycle() {
-				return deps.lifecycle;
-			},
 			get conversationUi() {
 				return deps.conversationUi;
 			},
@@ -857,11 +854,6 @@ export class ConversationSessionController {
 		});
 	}
 
-	handleInterruptAndSend(): Promise<void> {
-		const chatId = this.deps.sessions.selectedChatId || this.deps.lifecycle.currentChatId;
-		return chatId ? this.handleInterruptAndSendForChat(chatId) : Promise.resolve();
-	}
-
 	handleInterruptAndSendForChat(chatId: string): Promise<void> {
 		const { conversationUi } = this.deps;
 		return this.#requestTurnStop(chatId, interruptAndSendChat, (targetChatId, result) => {
@@ -925,18 +917,6 @@ export class ConversationSessionController {
 		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
-	handleQueuePause(): Promise<void> {
-		return this.#queue.handlePause();
-	}
-
-	handleQueueResume(pauseId: string): Promise<void> {
-		return this.#queue.handleResume(pauseId);
-	}
-
-	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
-		this.#queue.handleControlError(action, error);
-	}
-
 	handleQueueControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
 		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
@@ -966,6 +946,10 @@ export class ConversationSessionController {
 		await this.#queue.deleteForChat(chatId, entryId);
 	}
 
+	async deleteQueueEntryFromPanelForChat(chatId: string, entryId: string): Promise<void> {
+		await this.#queue.deleteFromPanelForChat(chatId, entryId);
+	}
+
 	async moveQueueEntryForChat(
 		chatId: string,
 		source: QueueEntry,
@@ -976,22 +960,12 @@ export class ConversationSessionController {
 		await this.#queue.moveForChat(chatId, source, target, placement, reorderRevision);
 	}
 
-	async handleSteerQueuedInput(entry: QueueEntry, reorderRevision: number): Promise<void> {
-		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId) return;
-		await this.handleSteerQueuedInputForChat(chatId, entry, reorderRevision);
-	}
-
 	async handleSteerQueuedInputForChat(
 		chatId: string,
 		entry: QueueEntry,
 		reorderRevision: number,
 	): Promise<void> {
 		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
-	}
-
-	async handleDeleteQueuedInput(entryId: string): Promise<void> {
-		await this.#queue.handleDelete(entryId);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {

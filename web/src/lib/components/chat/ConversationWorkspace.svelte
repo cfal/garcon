@@ -122,7 +122,7 @@
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
-	const chatSurfaceId = $derived(workspace.composerAnchorSurfaceId);
+	const composerAnchorSurfaceId = $derived(workspace.composerAnchorSurfaceId);
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const chatDrafts = getChatDrafts();
 	const conversationPanels = getConversationPanels();
@@ -131,7 +131,6 @@
 	const transcriptCache = getInitialTranscriptCache();
 	const chatState = new CurrentConversationPanelTranscript({
 		panels: conversationPanels,
-		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
 	});
 	const composerState = new ComposerState(chatDrafts, {
@@ -163,7 +162,6 @@
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
-		chatState,
 		panels: conversationPanels,
 		conversationUi,
 		sessions,
@@ -196,7 +194,6 @@
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
-	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		reloadRequest?.complete();
@@ -235,24 +232,20 @@
 	});
 	reconnectCoordinator.mount();
 
-	// Scroll controller.
 	function currentPanel() {
-		const panel = conversationPanels.currentPanel(workspace.composerAnchorSurfaceId);
-		return panel?.chatId === sessions.selectedChatId ? panel : null;
+		return conversationPanels.composerPanel;
 	}
 
 	function panelForChat(chatId: string) {
 		const current = currentPanel();
-		return current?.chatId === chatId
-			? current
-			: (conversationPanels.panelsForChat(chatId)[0] ?? null);
+		if (current?.chatId === chatId) return current;
+		return conversationPanels.panelsForChat(chatId)[0] ?? null;
 	}
 
 	function scrollToBottomAndFill(): void {
 		void currentPanel()?.scroll.scrollToLatestAndFill();
 	}
 
-	// Session controller.
 	const controller = new ConversationSessionController({
 		sessions,
 		chatState,
@@ -362,7 +355,7 @@
 		},
 		deleteQueue(surfaceId, chatId, entryId) {
 			assertRenderedPanel(surfaceId, chatId);
-			return controller.deleteQueueEntryForChat(chatId, entryId);
+			return controller.deleteQueueEntryFromPanelForChat(chatId, entryId);
 		},
 		stop(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -370,7 +363,7 @@
 		},
 		openCommit(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			openCommit(surfaceId, chatId);
+			openCommitForPanel(surfaceId, chatId);
 		},
 		toggleBranch(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -438,7 +431,6 @@
 			Promise.resolve('unavailable'),
 	});
 
-	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
 		onRegisterAppendToDraft?.(appendToActiveDraft);
@@ -461,11 +453,10 @@
 		};
 	});
 
-	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		// The selected record may hydrate after the route-selected ID.
-		const _selectedChat = sessions.selectedChat;
+		void sessions.selectedChat;
 		if (queuedInputsDialogOpen && queuedInputsDialogChatId !== chatId) {
 			closeQueuedInputsDialog();
 		}
@@ -485,7 +476,7 @@
 			event.target instanceof Element &&
 			Boolean(
 				event.target.closest(
-					`[data-prompt-editor-dialog][data-workspace-surface-id="${chatSurfaceId}"]`,
+					`[data-prompt-editor-dialog][data-workspace-surface-id="${composerAnchorSurfaceId}"]`,
 				),
 			);
 		if (
@@ -514,7 +505,7 @@
 	}
 
 	$effect(() => {
-		const surfaceId = chatSurfaceId;
+		const surfaceId = composerAnchorSurfaceId;
 		if (!surfaceId) return;
 		return workspaceShortcuts.registerSurface(surfaceId, handleWorkspaceShortcut);
 	});
@@ -600,7 +591,7 @@
 			const panel = panelForChat(request.chatId);
 			if (!panel) throw new Error(m.sidebar_chats_reload_failed());
 			await reloadChatFromNative(ws, panel.transcript, request.chatId);
-			if (request.chatId === sessions.selectedChatId && panel?.scroll.isPinnedToBottom) {
+			if (request.chatId === sessions.selectedChatId && panel.scroll.isPinnedToBottom) {
 				panel.scroll.prepareInitialBottomRestore(request.chatId);
 			}
 			reloadRequest = null;
@@ -613,15 +604,16 @@
 		}
 	}
 
-	function openCommit(surfaceId: ChatViewSurfaceId, chatId: string): void {
+	function openCommitForPanel(surfaceId: ChatViewSurfaceId, chatId: string): void {
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath || !quickGit.summaryFor(projectPath)) return;
 		const targetWindowId = workspace.windowOf(surfaceId);
-		const opening = appShell.isMobile
-			? workspace.focusMobileSingleton('commit')
-			: targetWindowId
-				? workspace.openSingletonAsTab('commit', targetWindowId)
-				: null;
+		let opening: Promise<void> | null = null;
+		if (appShell.isMobile) {
+			opening = workspace.focusMobileSingleton('commit');
+		} else if (targetWindowId) {
+			opening = workspace.openSingletonAsTab('commit', targetWindowId);
+		}
 		if (!opening) return;
 		void opening.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
@@ -682,7 +674,7 @@
 	<div
 		bind:this={composerHost}
 		class="pointer-events-auto"
-		data-conversation-composer-host={chatSurfaceId}
+		data-conversation-composer-host={composerAnchorSurfaceId}
 		data-reserve-mobile-toolbar={reserveMobileToolbar}
 	>
 		<PromptComposer

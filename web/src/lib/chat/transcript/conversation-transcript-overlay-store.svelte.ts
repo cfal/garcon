@@ -13,7 +13,6 @@ type OverlayNotice = LocalNoticeRow & {
 };
 
 export interface ConversationTranscriptOverlayMutation {
-	readonly revision: number;
 	readonly feedStructureChanged: boolean;
 }
 
@@ -25,7 +24,6 @@ export interface ConversationTranscriptOverlayView {
 	readonly resendCandidates: readonly ResendCandidate[];
 	readonly includedResendCandidates: readonly ResendCandidate[];
 	readonly excludedResendOrdinals: readonly number[];
-	readonly revision: number;
 }
 
 export interface CommittedOverlayBatch {
@@ -35,6 +33,10 @@ export interface CommittedOverlayBatch {
 	readonly noticeRevision: number;
 }
 
+function feedMutation(feedStructureChanged: boolean): ConversationTranscriptOverlayMutation {
+	return { feedStructureChanged };
+}
+
 class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverlayView {
 	#notices = $state<OverlayNotice[]>([]);
 	#noticeRevision = $state(0);
@@ -42,7 +44,6 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
 	#resendCandidates = $state<ResendCandidate[]>([]);
 	#excludedResendOrdinals = $state<number[]>([]);
-	#revision = $state(0);
 
 	get notices(): readonly (LocalNoticeRow & { readonly revision: number })[] {
 		return this.#notices;
@@ -73,10 +74,6 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return this.#excludedResendOrdinals;
 	}
 
-	get revision(): number {
-		return this.#revision;
-	}
-
 	appendNotice(
 		source: OverlayNotice['source'],
 		noticeType: LocalNoticeType,
@@ -101,14 +98,14 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			}
 		}
 		this.#notices = notices;
-		return this.#changed(true);
+		return feedMutation(true);
 	}
 
 	clearNoticesThrough(revision = this.#noticeRevision): ConversationTranscriptOverlayMutation {
 		const next = this.#notices.filter((notice) => notice.revision > revision);
-		if (next.length === this.#notices.length) return this.#unchanged();
+		if (next.length === this.#notices.length) return feedMutation(false);
 		this.#notices = next;
-		return this.#changed(true);
+		return feedMutation(true);
 	}
 
 	upsertOptimisticInput(
@@ -126,7 +123,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		);
 		this.#optimisticInputs =
 			index === -1 ? [...this.#optimisticInputs, input] : this.#optimisticInputs.with(index, input);
-		return this.#changed(true);
+		return feedMutation(true);
 	}
 
 	markOptimisticInputDelivered(clientMessageId: string): ConversationTranscriptOverlayMutation {
@@ -134,55 +131,48 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			(input) => input.clientMessageId === clientMessageId,
 		);
 		const input = this.#optimisticInputs[index];
-		if (!input || input.delivery === 'delivered') return this.#unchanged();
+		if (!input || input.delivery === 'delivered') return feedMutation(false);
 		this.#optimisticInputs = this.#optimisticInputs.with(index, {
 			...input,
 			delivery: 'delivered',
 		});
-		return this.#changed(true);
+		return feedMutation(true);
 	}
 
 	clearOptimisticInput(clientMessageId: string): ConversationTranscriptOverlayMutation {
 		const next = this.#optimisticInputs.filter(
 			(input) => input.clientMessageId !== clientMessageId,
 		);
-		if (next.length === this.#optimisticInputs.length) return this.#unchanged();
+		if (next.length === this.#optimisticInputs.length) return feedMutation(false);
 		const ordinals = new Map(this.#optimisticAfterOrdinals);
 		ordinals.delete(clientMessageId);
 		this.#optimisticAfterOrdinals = ordinals;
 		this.#optimisticInputs = next;
-		return this.#changed(true);
+		return feedMutation(true);
 	}
 
 	replaceResendCandidates(
 		candidates: readonly ResendCandidate[],
 	): ConversationTranscriptOverlayMutation {
-		this.#resendCandidates = candidates.map((candidate) => ({
-			...candidate,
-			attachmentNames: [...candidate.attachmentNames],
-		}));
-		const available = new Set(candidates.map((candidate) => candidate.ordinal));
-		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
-			available.has(ordinal),
-		);
-		return this.#changed(false);
+		this.#installResendCandidates(candidates);
+		return feedMutation(false);
 	}
 
 	excludeResendCandidate(ordinal: number): ConversationTranscriptOverlayMutation {
 		if (!this.#resendCandidates.some((candidate) => candidate.ordinal === ordinal)) {
-			return this.#unchanged();
+			return feedMutation(false);
 		}
-		if (this.#excludedResendOrdinals.includes(ordinal)) return this.#unchanged();
+		if (this.#excludedResendOrdinals.includes(ordinal)) return feedMutation(false);
 		this.#excludedResendOrdinals = [...this.#excludedResendOrdinals, ordinal].sort(
 			(left, right) => left - right,
 		);
-		return this.#changed(false);
+		return feedMutation(false);
 	}
 
 	clearResendExclusions(): ConversationTranscriptOverlayMutation {
-		if (this.#excludedResendOrdinals.length === 0) return this.#unchanged();
+		if (this.#excludedResendOrdinals.length === 0) return feedMutation(false);
 		this.#excludedResendOrdinals = [];
-		return this.#changed(false);
+		return feedMutation(false);
 	}
 
 	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
@@ -220,15 +210,19 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			}
 		}
 
-		this.#resendCandidates = batch.resendCandidates.map((candidate) => ({
+		this.#installResendCandidates(batch.resendCandidates);
+		return feedMutation(feedStructureChanged);
+	}
+
+	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
+		this.#resendCandidates = candidates.map((candidate) => ({
 			...candidate,
 			attachmentNames: [...candidate.attachmentNames],
 		}));
-		const available = new Set(batch.resendCandidates.map((candidate) => candidate.ordinal));
+		const available = new Set(candidates.map((candidate) => candidate.ordinal));
 		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
 			available.has(ordinal),
 		);
-		return this.#changed(feedStructureChanged);
 	}
 
 	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {
@@ -239,16 +233,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		this.#optimisticAfterOrdinals = new Map();
 		this.#resendCandidates = [];
 		this.#excludedResendOrdinals = [];
-		return this.#changed(feedStructureChanged);
-	}
-
-	#changed(feedStructureChanged: boolean): ConversationTranscriptOverlayMutation {
-		this.#revision += 1;
-		return { revision: this.#revision, feedStructureChanged };
-	}
-
-	#unchanged(): ConversationTranscriptOverlayMutation {
-		return { revision: this.#revision, feedStructureChanged: false };
+		return feedMutation(feedStructureChanged);
 	}
 }
 

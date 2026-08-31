@@ -308,23 +308,24 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		pinned: boolean,
 	): ConversationPanelRestoreTarget | null {
 		if (pinned) return { kind: 'end' };
-		const messageKeys = new Set(
-			this.#configuredModel.items.flatMap((item) =>
-				item.kind === 'transcript' &&
-				item.item.kind === 'message' &&
-				item.item.ordinal !== undefined
-					? [item.key]
-					: [],
-			),
-		);
+		const messageKeys = new Set<string>();
+		for (const item of this.#configuredModel.items) {
+			if (
+				item.kind !== 'transcript' ||
+				item.item.kind !== 'message' ||
+				item.item.ordinal === undefined
+			)
+				continue;
+			messageKeys.add(item.key);
+		}
 		const viewport = this.options.viewport;
 		const visibleAnchor = viewport
-				? this.#mountedItems.visibleAnchor({
-						viewport,
-						configuredKeys: this.#configuredGeometry.keys,
-						eligibleKeys: messageKeys,
-					})
-				: null;
+			? this.#mountedItems.visibleAnchor({
+					viewport,
+					configuredKeys: this.#configuredGeometry.keys,
+					eligibleKeys: messageKeys,
+				})
+			: null;
 		const virtualAnchor = this.#captureVirtualAnchor(true);
 		const anchor = visibleAnchor ?? virtualAnchor;
 		if (!anchor) return null;
@@ -336,7 +337,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				virtualItem?.kind !== 'transcript' ||
 				virtualItem.item.kind !== 'message' ||
 				virtualItem.item.ordinal === undefined
-			) continue;
+			)
+				continue;
 			return {
 				kind: 'row',
 				transcriptViewId,

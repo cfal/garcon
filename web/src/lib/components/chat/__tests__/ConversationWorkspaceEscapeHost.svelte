@@ -219,6 +219,8 @@
 		cache: new ChatTranscriptCache({ limit: 100 }),
 		lifecycle: conversationLifecycles,
 		overlays: new ConversationTranscriptOverlayStore(),
+		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
+		getSelectedChatId: () => sessions.selectedChatId,
 	});
 	conversationPanels.reconcile([
 		{
