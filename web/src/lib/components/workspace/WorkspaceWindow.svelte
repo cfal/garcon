@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, type Snippet } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
 	import ConversationPanel from '$lib/components/chat/ConversationPanel.svelte';
@@ -25,6 +25,7 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindowTitleBar from './WorkspaceWindowTitleBar.svelte';
+	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -38,7 +39,7 @@
 		panelActions,
 		composerInsetPx,
 		subagentToolbar,
-		activeSurfaceMenuItems,
+		surfaceMenuItems,
 		frameBridge,
 		surfaceStyle,
 		onSendToChat,
@@ -53,7 +54,7 @@
 		panelActions: ConversationPanelActions | null;
 		composerInsetPx: number;
 		subagentToolbar: SubagentToolbarState;
-		activeSurfaceMenuItems?: Snippet<[string]>;
+		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
 		onSendToChat(message: string): Promise<boolean>;
@@ -240,15 +241,7 @@
 	ondragleave={(event) => dnd.handleWindowDragLeave(event)}
 	ondrop={(event) => void handleDrop(event)}
 >
-	<WorkspaceWindowTitleBar
-		{workspaceWindow}
-		{labelFor}
-		{dnd}
-		{isCurrent}
-		menuItems={activeSurface?.type === 'chat' || activeSurface?.type === 'terminal'
-			? activeSurfaceMenuItems
-			: undefined}
-	>
+	<WorkspaceWindowTitleBar {workspaceWindow} {labelFor} {dnd} {isCurrent} {surfaceMenuItems}>
 		{#snippet auxiliaryActions()}
 			{#if activeChatIsLive && subagentToolbar.model}
 				<SubagentManagementControl

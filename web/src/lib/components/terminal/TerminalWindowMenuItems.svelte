@@ -5,14 +5,9 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import Square from '@lucide/svelte/icons/square';
 	import {
-		DropdownMenuItem,
-		DropdownMenuRadioGroup,
-		DropdownMenuRadioItem,
-		DropdownMenuSeparator,
-		DropdownMenuSub,
-		DropdownMenuSubContent,
-		DropdownMenuSubTrigger,
-	} from '$lib/components/ui/dropdown-menu';
+		dropdownMenuPrimitives,
+		type MenuPrimitives,
+	} from '$lib/components/ui/menu-primitives.js';
 	import {
 		getLocalSettings,
 		getNotifications,
@@ -23,7 +18,15 @@
 	import { terminalSurfaceId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { terminalId, onRename }: { terminalId: string; onRename: () => void } = $props();
+	let {
+		menu = dropdownMenuPrimitives,
+		terminalId,
+		onRename,
+	}: {
+		menu?: MenuPrimitives;
+		terminalId: string;
+		onRename: () => void;
+	} = $props();
 
 	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
@@ -63,43 +66,43 @@
 </script>
 
 {#if canReattach}
-	<DropdownMenuItem onSelect={() => terminals.reattach(terminalId)}>
+	<menu.Item onSelect={() => terminals.reattach(terminalId)}>
 		<RefreshCw />
 		{m.terminal_reattach()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuItem disabled={!session} onSelect={onRename}>
+<menu.Item disabled={!session} onSelect={onRename}>
 	<Pencil />
 	{m.terminal_rename()}
-</DropdownMenuItem>
-<DropdownMenuItem disabled={!session} onSelect={() => void paste()}>
+</menu.Item>
+<menu.Item disabled={!session} onSelect={() => void paste()}>
 	<Clipboard />
 	{m.terminal_paste()}
-</DropdownMenuItem>
-<DropdownMenuSub>
-	<DropdownMenuSubTrigger>
+</menu.Item>
+<menu.Sub>
+	<menu.SubTrigger>
 		<Settings />
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
 			<span>{m.terminal_font_size()}</span>
 			<span class="text-xs text-muted-foreground">{localSettings.terminalFontSize}px</span>
 		</span>
-	</DropdownMenuSubTrigger>
-	<DropdownMenuSubContent class="w-36">
-		<DropdownMenuRadioGroup value={localSettings.terminalFontSize} onValueChange={setFontSize}>
+	</menu.SubTrigger>
+	<menu.SubContent class="w-36">
+		<menu.RadioGroup value={localSettings.terminalFontSize} onValueChange={setFontSize}>
 			{#each FONT_SIZE_OPTIONS as size (size)}
-				<DropdownMenuRadioItem value={size} closeOnSelect={false}>
+				<menu.RadioItem value={size} closeOnSelect={false}>
 					{size}px
-				</DropdownMenuRadioItem>
+				</menu.RadioItem>
 			{/each}
-		</DropdownMenuRadioGroup>
-	</DropdownMenuSubContent>
-</DropdownMenuSub>
-<DropdownMenuSeparator />
-<DropdownMenuItem
+		</menu.RadioGroup>
+	</menu.SubContent>
+</menu.Sub>
+<menu.Separator />
+<menu.Item
 	variant="destructive"
 	disabled={!session || workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId))}
 	onSelect={terminate}
 >
 	<Square />
 	{m.terminal_terminate()}
-</DropdownMenuItem>
+</menu.Item>

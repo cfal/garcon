@@ -4,10 +4,12 @@
 	let {
 		subagentToolbar,
 		reserveMobileToolbar,
+		isVisible,
 		onRegisterPrepareHide,
 	}: {
 		subagentToolbar: SubagentToolbarState;
 		reserveMobileToolbar: boolean;
+		isVisible: boolean;
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 	} = $props();
 
@@ -24,5 +26,6 @@
 	data-testid="conversation-workspace-stub"
 	data-has-subagent-toolbar={Boolean(subagentToolbar)}
 	data-reserve-mobile-toolbar={reserveMobileToolbar}
+	data-visible={isVisible}
 	data-prepare-hide-count={prepareHideCount}
 ></div>

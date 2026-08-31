@@ -462,7 +462,22 @@ describe('WorkspaceRoot', () => {
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
 	});
 
-	it('adds active terminal actions to the window menu', async () => {
+	it('adds Chat actions to the tab context menu', async () => {
+		installContext();
+		renderRoot();
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+
+		const share = await screen.findByRole('menuitem', { name: m.share_button() });
+		expect(share.getAttribute('data-slot')).toBe('context-menu-item');
+		expect(screen.getByRole('menuitem', { name: m.sidebar_chats_details() })).toBeTruthy();
+		expect(
+			screen.getByRole('menuitem', { name: m.sidebar_tooltips_edit_chat_name() }),
+		).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeTruthy();
+	});
+
+	it('adds terminal actions to both tab menus', async () => {
 		const { layout, workspace, terminals } = installContext();
 		const terminalId = 'terminal-1';
 		const surfaceId = terminalSurfaceId(terminalId);
@@ -507,7 +522,19 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByRole('menuitem', { name: m.terminal_rename() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: /Font size 13px/ })).toBeTruthy();
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.terminal_rename() }));
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() =>
+			expect(screen.queryByRole('menuitem', { name: m.terminal_rename() })).toBeNull(),
+		);
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Dev server' }));
+		const rename = await screen.findByRole('menuitem', { name: m.terminal_rename() });
+		expect(rename.getAttribute('data-slot')).toBe('context-menu-item');
+		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: /Font size 13px/ }).getAttribute('data-slot')).toBe(
+			'context-menu-sub-trigger',
+		);
+		await fireEvent.click(rename);
 		const renameInput = await screen.findByRole('textbox', { name: m.terminal_name() });
 		expect((renameInput as HTMLInputElement).value).toBe('Dev server');
 		await fireEvent.input(renameInput, { target: { value: 'Build logs' } });
