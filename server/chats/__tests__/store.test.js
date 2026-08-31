@@ -120,6 +120,20 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
   });
 
+  it('persists and freezes watermark-free delegation parentage', async () => {
+    const parentChat = { chatId: CHAT_ID, relation: 'delegation' };
+    registry.addChat(newChat({ id: SECOND_CHAT_ID, parentChat }));
+
+    const child = registry.getChat(SECOND_CHAT_ID);
+    expect(child.parentChat).toEqual(parentChat);
+    expect(Object.isFrozen(child.parentChat)).toBeTrue();
+
+    await registry.flush();
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
+  });
+
   it('rejects malformed and self-referential new parentage', () => {
     expect(() => registry.addChat(newChat({ parentChat: undefined }))).toThrow(
       'Invalid parent chat',
@@ -131,6 +145,9 @@ describe('ChatRegistry', () => {
         transcriptViewId: 'view-a',
         ordinal: 1,
       },
+    }))).toThrow('cannot be its own parent');
+    expect(() => registry.addChat(newChat({
+      parentChat: { chatId: CHAT_ID, relation: 'delegation' },
     }))).toThrow('cannot be its own parent');
     expect(registry.listAllChats()).toEqual({});
   });

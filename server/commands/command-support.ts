@@ -210,6 +210,7 @@ export interface ScheduledChatStartInput {
 export interface NormalizedChatStart {
   origin: ChatStartOrigin;
   chatId: ChatId;
+  parentChatId: ChatId | null;
   clientRequestId: string;
   clientMessageId: string;
   agentId: string;

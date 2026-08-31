@@ -70,6 +70,14 @@ export function requiredChatId(body: Record<string, unknown>, field: string): st
   }
 }
 
+export function optionalChatId(
+  body: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  if (body[field] === undefined || body[field] === null) return undefined;
+  return requiredChatId(body, field);
+}
+
 export function requiredContent(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || !value.trim()) {

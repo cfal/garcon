@@ -55,12 +55,7 @@ describe('chat command request parsers', () => {
       agentSettings: agentSettings(),
       command: ' hello ',
       tags: ['Review Needed', 'review-needed', ' QA ', 42],
-      parentChat: {
-        chatId: SOURCE_CHAT_ID,
-        relation: 'fork',
-        transcriptViewId: TRANSCRIPT_VIEW_ID,
-        ordinal: 1,
-      },
+      parentChatId: SOURCE_CHAT_ID,
     });
 
     expect(parsed).toMatchObject({
@@ -73,8 +68,40 @@ describe('chat command request parsers', () => {
       command: 'hello',
       tags: ['qa', 'review-needed'],
       origin: 'interactive',
+      parentChatId: SOURCE_CHAT_ID,
     });
-    expect(parsed).not.toHaveProperty('parentChat');
+  });
+
+  it('rejects storage-shaped parentage on start requests', () => {
+    expect(() => parseStartChatCommandRequest({
+      origin: 'cli',
+      clientRequestId: 'request-parent',
+      clientMessageId: 'message-parent',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+      projectPath: '/repo',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: agentSettings(),
+      command: 'hello',
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
+    })).toThrow('parentChat is not supported; use parentChatId');
+
+    expect(() => parseStartChatCommandRequest({
+      origin: 'cli',
+      clientRequestId: 'request-parent-id',
+      clientMessageId: 'message-parent-id',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+      projectPath: '/repo',
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: agentSettings(),
+      command: 'hello',
+      parentChatId: 'invalid',
+    })).toThrow('parentChatId must be a valid 16-digit Unix-microsecond timestamp');
   });
 
   it('accepts only public chat start origins', () => {

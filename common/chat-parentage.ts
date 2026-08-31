@@ -4,16 +4,26 @@ import { isRecord } from './json.js';
 export const CHAT_PARENT_RELATIONS = [
   'fork',
   'handoff',
+  'delegation',
 ] as const;
 
 export type ChatParentRelation = (typeof CHAT_PARENT_RELATIONS)[number];
 
-export interface ParentChatRef {
+interface ParentChatRefBase {
   readonly chatId: string;
-  readonly relation: ChatParentRelation;
+}
+
+export interface TranscriptParentChatRef extends ParentChatRefBase {
+  readonly relation: 'fork' | 'handoff';
   readonly transcriptViewId: string;
   readonly ordinal: number;
 }
+
+export interface DelegationParentChatRef extends ParentChatRefBase {
+  readonly relation: 'delegation';
+}
+
+export type ParentChatRef = TranscriptParentChatRef | DelegationParentChatRef;
 
 export function isChatParentRelation(value: unknown): value is ChatParentRelation {
   return typeof value === 'string'
@@ -30,8 +40,13 @@ export function parseParentChatRef(value: unknown): ParentChatRef | null {
     return null;
   }
 
-  const { relation, transcriptViewId, ordinal } = value;
+  const { relation } = value;
   if (!isChatParentRelation(relation)) return null;
+  if (relation === 'delegation') {
+    return Object.freeze({ chatId, relation });
+  }
+
+  const { transcriptViewId, ordinal } = value;
   if (typeof transcriptViewId !== 'string' || transcriptViewId.length === 0) {
     return null;
   }

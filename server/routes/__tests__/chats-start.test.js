@@ -238,6 +238,68 @@ describe('POST /api/v1/chats/start', () => {
     expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
   });
 
+  it('accepts a scalar parent ID and records server-authored delegation parentage', async () => {
+    const parentChatId = '1783725900000099';
+    const childChatId = '1783725900000110';
+    const projectPath = path.join(testBasePath, 'delegated-project');
+    await fs.mkdir(projectPath, { recursive: true });
+    testChats.set(parentChatId, { id: parentChatId, projectPath });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'cli',
+      clientRequestId: 'req-start-delegated',
+      clientMessageId: 'msg-start-delegated',
+      chatId: childChatId,
+      parentChatId,
+      agentId: 'claude',
+      projectPath,
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      command: 'review the parent',
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(registry.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      id: childChatId,
+      parentChat: { chatId: parentChatId, relation: 'delegation' },
+    }));
+    expect(body.chat.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+  });
+
+  it('rejects a nonexistent parent before creating the child', async () => {
+    const projectPath = path.join(testBasePath, 'missing-parent-project');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'cli',
+      clientRequestId: 'req-start-missing-parent',
+      clientMessageId: 'msg-start-missing-parent',
+      chatId: '1783725900000111',
+      parentChatId: '1783725900000098',
+      agentId: 'claude',
+      projectPath,
+      model: 'opus',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      command: 'review missing work',
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body).toMatchObject({
+      error: 'Parent chat not found: 1783725900000098',
+      errorCode: 'SESSION_NOT_FOUND',
+    });
+    expect(registry.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
   it('keeps the attempted defaults even when agent startup fails', async () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });

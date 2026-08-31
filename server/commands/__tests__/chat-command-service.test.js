@@ -970,6 +970,75 @@ describe('ChatCommandService', () => {
     expect(record.payload.tags).toEqual(['qa', 'review-needed']);
   });
 
+  it('stores CLI-declared delegation parentage and binds it to start idempotency', async () => {
+    const { service, chats, ledger, queue } = makeService();
+    const input = {
+      origin: 'cli',
+      chatId: TARGET_CHAT_ID,
+      parentChatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'review the parent work',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-delegation',
+      clientMessageId: 'msg-start-delegation',
+    };
+
+    const first = await service.submitStart(input);
+
+    expect(chats.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      id: TARGET_CHAT_ID,
+      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
+    }));
+    const record = await readLedgerRecord(
+      ledger,
+      'chat-start',
+      'req-start-delegation',
+      TARGET_CHAT_ID,
+    );
+    expect(record.payload.parentChatId).toBe(SOURCE_CHAT_ID);
+
+    await expect(service.submitStart(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      turnId: first.turnId,
+    });
+    await expect(service.submitStart({
+      ...input,
+      parentChatId: SCHEDULED_CHAT_ID,
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a missing declared parent before creating a chat', async () => {
+    const { service, chats, ledger, queue } = makeService();
+
+    await expect(service.submitStart({
+      origin: 'cli',
+      chatId: TARGET_CHAT_ID,
+      parentChatId: SCHEDULED_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'review missing work',
+      model: 'opus',
+      agentSettings: agentSettings(),
+      clientRequestId: 'req-start-missing-parent',
+      clientMessageId: 'msg-start-missing-parent',
+    })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+      message: `Parent chat not found: ${SCHEDULED_CHAT_ID}`,
+    });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(queue.runInitialInput).not.toHaveBeenCalled();
+    expect(await ledger.getRecord(commandLedgerKey(
+      'chat-start',
+      TARGET_CHAT_ID,
+      'req-start-missing-parent',
+    ))).toBeNull();
+  });
+
   it('persists new chat registration before admitting its transcript input', async () => {
     const events = [];
     const { service, chats, queue } = makeService();

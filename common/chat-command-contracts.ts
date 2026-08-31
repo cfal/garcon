@@ -23,6 +23,7 @@ import {
 } from './chat-types.js';
 import {
   CommandRequestValidationError,
+  optionalChatId,
   optionalNonEmptyString,
   optionalNullableString,
   optionalRecord,
@@ -167,6 +168,7 @@ export interface StartChatCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
   chatId: string;
+  parentChatId?: string;
   agentId: string;
   projectPath: string;
   model: string;
@@ -470,10 +472,14 @@ export interface RunningChatsResponse {
 export function parseStartChatCommandRequest(value: unknown): StartChatCommandRequest {
   const body = requestRecord(value);
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
+  if ('parentChat' in body) {
+    throw new CommandRequestValidationError('parentChat is not supported; use parentChatId');
+  }
   const origin = clientChatStartOrigin(body.origin);
   const clientRequestId = requiredCommandCorrelationId(body, 'clientRequestId');
   const clientMessageId = requiredCommandCorrelationId(body, 'clientMessageId');
   const chatId = requiredChatId(body, 'chatId');
+  const parentChatId = optionalChatId(body, 'parentChatId');
   const agentId = requiredString(body, 'agentId');
   const images = optionalImages(body.images);
   const command = contentOrImages(body, 'command', images).trim();
@@ -487,6 +493,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     clientRequestId,
     clientMessageId,
     chatId,
+    ...(parentChatId === undefined ? {} : { parentChatId }),
     agentId,
     projectPath: requiredString(body, 'projectPath'),
     model: requiredString(body, 'model'),

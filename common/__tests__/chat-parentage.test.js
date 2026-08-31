@@ -9,8 +9,8 @@ import {
 const CHAT_ID = '1783725900000200';
 
 describe('chat parentage', () => {
-  it('parses and freezes every parent relation', () => {
-    for (const relation of CHAT_PARENT_RELATIONS) {
+  it('parses and freezes transcript-sourced parent relations', () => {
+    for (const relation of ['fork', 'handoff']) {
       const parsed = parseParentChatRef({
         chatId: CHAT_ID,
         relation,
@@ -29,6 +29,20 @@ describe('chat parentage', () => {
     }
   });
 
+  it('parses delegation without a transcript watermark', () => {
+    const parsed = parseParentChatRef({
+      chatId: CHAT_ID,
+      relation: 'delegation',
+      transcriptViewId: 'ignored-view',
+      ordinal: 42,
+    });
+
+    expect(parsed).toEqual({ chatId: CHAT_ID, relation: 'delegation' });
+    expect(Object.isFrozen(parsed)).toBeTrue();
+    expect(CHAT_PARENT_RELATIONS).toContain('delegation');
+    expect(isChatParentRelation('delegation')).toBeTrue();
+  });
+
   it('rejects malformed parent references', () => {
     const valid = {
       chatId: CHAT_ID,
@@ -45,6 +59,8 @@ describe('chat parentage', () => {
       { ...valid, chatId: 'invalid' },
       { ...valid, relation: 'sub-agent' },
       { ...valid, relation: 'merge' },
+      { chatId: CHAT_ID, relation: 'fork' },
+      { chatId: CHAT_ID, relation: 'handoff' },
       { ...valid, transcriptViewId: '' },
       { ...valid, transcriptViewId: null },
       { ...valid, ordinal: -1 },

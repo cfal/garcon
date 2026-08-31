@@ -14,6 +14,7 @@ const MILLISECONDS_ID = '1774634779935';
 const MILLISECONDS_CANONICAL_ID = '1774634779935000';
 const EXISTING_CANONICAL_ID = '1783725900000000';
 const DANGLING_CANONICAL_ID = '1783725900000001';
+const EXISTING_DELEGATION_ID = '1783725900000002';
 
 const createdDirs = [];
 
@@ -63,6 +64,13 @@ describe('workspace chat ID migration', () => {
             relation: 'handoff',
             transcriptViewId: 'view-deleted',
             ordinal: 9,
+          },
+        },
+        [EXISTING_DELEGATION_ID]: {
+          ...chatEntry('opus'),
+          parentChat: {
+            chatId: SECONDS_ID,
+            relation: 'delegation',
           },
         },
       },
@@ -129,6 +137,7 @@ describe('workspace chat ID migration', () => {
       SECONDS_CANONICAL_ID,
       MILLISECONDS_CANONICAL_ID,
       EXISTING_CANONICAL_ID,
+      EXISTING_DELEGATION_ID,
     ].sort());
     expect(chats.sessions[MILLISECONDS_CANONICAL_ID].parentChat).toEqual({
       chatId: SECONDS_CANONICAL_ID,
@@ -141,6 +150,10 @@ describe('workspace chat ID migration', () => {
       relation: 'handoff',
       transcriptViewId: 'view-deleted',
       ordinal: 9,
+    });
+    expect(chats.sessions[EXISTING_DELEGATION_ID].parentChat).toEqual({
+      chatId: SECONDS_CANONICAL_ID,
+      relation: 'delegation',
     });
     expect(result.changedFiles.filter((file) => file === 'chats.json')).toHaveLength(1);
 

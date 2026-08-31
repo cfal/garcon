@@ -63,6 +63,16 @@ export class StartCommands {
     if (!this.deps.agents.hasAgent(input.agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    const parentChatId = input.parentChatId === undefined
+      ? null
+      : this.support.requireChatId(input.parentChatId, 'parentChatId');
+    if (parentChatId !== null && !this.deps.chats.getChat(parentChatId)) {
+      throw new CommandValidationError(
+        'SESSION_NOT_FOUND',
+        `Parent chat not found: ${parentChatId}`,
+        404,
+      );
+    }
     this.support.assertContent(input.command, images);
     await this.support.assertAttachmentsSupported({
       agentId: input.agentId,
@@ -79,6 +89,7 @@ export class StartCommands {
     return {
       origin: input.origin,
       chatId,
+      parentChatId,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
       agentId: input.agentId,
@@ -153,7 +164,9 @@ export class StartCommands {
             permissionMode: input.permissionMode,
             thinkingMode: input.thinkingMode,
             agentSettingsById: { [input.agentId]: input.agentSettings },
-            parentChat: null,
+            parentChat: input.parentChatId === null
+              ? null
+              : { chatId: input.parentChatId, relation: 'delegation' },
           });
           this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
           if (recordsStartupPreferences(input.origin)) {
@@ -284,6 +297,7 @@ function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
     origin: input.origin,
     chatId: input.chatId,
+    parentChatId: input.parentChatId,
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
     projectPath: input.idempotencyProjectPath,
@@ -308,6 +322,7 @@ function startReplayPayload(
   return {
     origin: input.origin,
     chatId,
+    parentChatId: input.parentChatId ?? null,
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
     projectPath: String(input.projectPath || '').trim(),
