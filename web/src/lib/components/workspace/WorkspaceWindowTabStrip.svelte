@@ -1,29 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import ArrowRight from '@lucide/svelte/icons/arrow-right';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import PanelRight from '@lucide/svelte/icons/panel-right';
-	import PanelTop from '@lucide/svelte/icons/panel-top';
-	import X from '@lucide/svelte/icons/x';
-	import {
-		ContextMenu,
-		ContextMenuContent,
-		ContextMenuItem,
-		ContextMenuSeparator,
-		ContextMenuTrigger,
-	} from '$lib/components/ui/context-menu';
+	import { ContextMenu, ContextMenuTrigger } from '$lib/components/ui/context-menu';
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import type {
 		ActiveSurfaceKind,
-		WorkspaceWindowEdge,
 		WorkspaceWindowId,
 		WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
-	import {
-		moveWorkspaceTabToNewWindow,
-		resolveWorkspaceWindowTabActions,
-	} from '$lib/workspace/workspace-window-tab-actions.js';
 	import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import { cn } from '$lib/utils/cn';
 	import {
@@ -32,6 +15,9 @@
 		type WindowTabLabelMode,
 		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
+	import WorkspaceWindowTabMenu from './WorkspaceWindowTabMenu.svelte';
+	import { contextMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
+	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -39,6 +25,7 @@
 	let {
 		windowId,
 		tabs,
+		hiddenSurfaceIds,
 		labelFor,
 		onSelect,
 		onFocus,
@@ -46,9 +33,11 @@
 		isCurrent,
 		isChatProcessing = () => false,
 		onVisibleChange,
+		surfaceMenuItems,
 	}: {
 		windowId: WorkspaceWindowId;
 		tabs: WorkspaceWindowTabState;
+		hiddenSurfaceIds: readonly string[];
 		labelFor: (surfaceId: string) => string;
 		onSelect: (surfaceId: string) => void;
 		onFocus?: (surfaceId: string) => void;
@@ -56,6 +45,7 @@
 		isCurrent: boolean;
 		isChatProcessing?: (surfaceId: string) => boolean;
 		onVisibleChange?: (ids: readonly string[]) => void;
+		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -118,18 +108,6 @@
 		return Boolean(surface && surface.type !== 'terminal-launcher');
 	}
 
-	function canMoveBetweenWindows(surfaceId: string): boolean {
-		return tabActions(surfaceId).canMoveBetweenWindows;
-	}
-
-	function canMoveToNewWindow(surfaceId: string): boolean {
-		return tabActions(surfaceId).canMoveToNewWindow;
-	}
-
-	function tabActions(surfaceId: string) {
-		return resolveWorkspaceWindowTabActions(workspace.layout.snapshot, windowId, tabs, surfaceId);
-	}
-
 	function recomputeVisibleTabs(): void {
 		if (!tabViewport || !measurementRail) return;
 		const widths = new Map<string, number>();
@@ -158,28 +136,6 @@
 
 	function notifyFailure(error: unknown): void {
 		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-	}
-
-	function moveTab(
-		surfaceId: string,
-		destinationWindowId: WorkspaceWindowId,
-		index?: number,
-	): void {
-		void workspace.moveTabToWindow(surfaceId, destinationWindowId, index).catch(notifyFailure);
-	}
-
-	function moveTabLeft(surfaceId: string): void {
-		const { index } = tabActions(surfaceId);
-		if (index > 0) moveTab(surfaceId, windowId, index - 1);
-	}
-
-	function moveTabRight(surfaceId: string): void {
-		const { index } = tabActions(surfaceId);
-		if (index >= 0 && index < tabs.order.length - 1) moveTab(surfaceId, windowId, index + 1);
-	}
-
-	function moveToNewWindow(surfaceId: string, edge: WorkspaceWindowEdge): void {
-		void moveWorkspaceTabToNewWindow(workspace, surfaceId, windowId, edge).catch(notifyFailure);
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
@@ -308,78 +264,16 @@
 					{@render tabButton(surfaceId, false, props)}
 				{/snippet}
 			</ContextMenuTrigger>
-			<ContextMenuContent class="w-64">
-				{@const actionState = tabActions(surfaceId)}
-				{@const index = actionState.index}
-				<ContextMenuItem disabled={index <= 0} onclick={() => moveTabLeft(surfaceId)}>
-					<ArrowLeft />
-					{m.workspace_move_tab_left()}
-				</ContextMenuItem>
-				<ContextMenuItem
-					disabled={index < 0 || index >= tabs.order.length - 1}
-					onclick={() => moveTabRight(surfaceId)}
-				>
-					<ArrowRight />
-					{m.workspace_move_tab_right()}
-				</ContextMenuItem>
-				{#if canMoveBetweenWindows(surfaceId)}
-					{#each actionState.otherWindows as destination (destination.id)}
-						{@const moveLabel = m.workspace_move_to_window({
-							window: labelFor(destination.tabs.activeId),
-						})}
-						<ContextMenuItem
-							class="min-w-0"
-							title={moveLabel}
-							onclick={() => moveTab(surfaceId, destination.id)}
-						>
-							<PanelRight />
-							<span class="min-w-0 flex-1 truncate">{moveLabel}</span>
-						</ContextMenuItem>
-					{/each}
-				{/if}
-				<ContextMenuItem
-					disabled={!canMoveToNewWindow(surfaceId)}
-					onclick={() => moveToNewWindow(surfaceId, 'left')}
-				>
-					<PanelRight class="rotate-180" />
-					{m.workspace_move_tab_to_new_window_left()}
-				</ContextMenuItem>
-				<ContextMenuItem
-					disabled={!canMoveToNewWindow(surfaceId)}
-					onclick={() => moveToNewWindow(surfaceId, 'right')}
-				>
-					<PanelRight />
-					{m.workspace_move_tab_to_new_window_right()}
-				</ContextMenuItem>
-				<ContextMenuItem
-					disabled={!canMoveToNewWindow(surfaceId)}
-					onclick={() => moveToNewWindow(surfaceId, 'top')}
-				>
-					<PanelTop />
-					{m.workspace_move_tab_to_new_window_above()}
-				</ContextMenuItem>
-				<ContextMenuItem
-					disabled={!canMoveToNewWindow(surfaceId)}
-					onclick={() => moveToNewWindow(surfaceId, 'bottom')}
-				>
-					<PanelTop class="rotate-180" />
-					{m.workspace_move_tab_to_new_window_below()}
-				</ContextMenuItem>
-				<ContextMenuItem
-					disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
-					onclick={() => void workspace.closeSurface(surfaceId)}
-				>
-					<X />
-					{m.workspace_close_tab()}
-				</ContextMenuItem>
-				{#if workspace.layout.surface(surfaceId)?.type === 'file'}
-					<ContextMenuSeparator />
-					<ContextMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
-						<Maximize2 />
-						{m.workspace_pop_out()}
-					</ContextMenuItem>
-				{/if}
-			</ContextMenuContent>
+			<WorkspaceWindowTabMenu
+				menu={contextMenuPrimitives}
+				{windowId}
+				{tabs}
+				{surfaceId}
+				{hiddenSurfaceIds}
+				{labelFor}
+				{onSelect}
+				{surfaceMenuItems}
+			/>
 		</ContextMenu>
 	{/if}
 {/snippet}

@@ -1,13 +1,24 @@
 <script lang="ts">
 	import Copy from '@lucide/svelte/icons/copy';
 	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
-	import { DropdownMenuItem } from '$lib/components/ui/dropdown-menu';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import {
+		dropdownMenuPrimitives,
+		type MenuPrimitives,
+	} from '$lib/components/ui/menu-primitives.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	type MetadataField = 'project-path' | 'chat-id';
 
-	let { projectPath, chatId }: { projectPath: string; chatId: string } = $props();
+	let {
+		menu = dropdownMenuPrimitives,
+		projectPath,
+		chatId,
+	}: {
+		menu?: MenuPrimitives;
+		projectPath: string;
+		chatId: string;
+	} = $props();
 	let displayProjectPath = $derived(formatCompactProjectPath(projectPath));
 </script>
 
@@ -17,7 +28,7 @@
 	value: string,
 	displayValue: string,
 )}
-	<DropdownMenuItem
+	<menu.Item
 		class="group items-start"
 		textValue={actionLabel}
 		aria-label={`${actionLabel}: ${value}`}
@@ -35,7 +46,7 @@
 				{displayValue}
 			</div>
 		</div>
-	</DropdownMenuItem>
+	</menu.Item>
 {/snippet}
 
 {@render metadataField(
@@ -44,9 +55,4 @@
 	projectPath,
 	displayProjectPath,
 )}
-{@render metadataField(
-	'chat-id',
-	m.workspace_chat_metadata_copy_chat_id(),
-	chatId,
-	chatId,
-)}
+{@render metadataField('chat-id', m.workspace_chat_metadata_copy_chat_id(), chatId, chatId)}

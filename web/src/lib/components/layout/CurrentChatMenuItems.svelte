@@ -9,11 +9,15 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import { DropdownMenuItem, DropdownMenuSeparator } from '$lib/components/ui/dropdown-menu';
+	import {
+		dropdownMenuPrimitives,
+		type MenuPrimitives,
+	} from '$lib/components/ui/menu-primitives.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
+		menu = dropdownMenuPrimitives,
 		selectedChat,
 		canReload,
 		canUpdateProjectPath,
@@ -30,6 +34,7 @@
 		onFork,
 		onDelete,
 	}: {
+		menu?: MenuPrimitives;
 		selectedChat: ChatSessionRecord;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
@@ -50,64 +55,64 @@
 
 {#if onOpenGitHistory || onOpenGitCompare}
 	{#if onOpenGitHistory}
-		<DropdownMenuItem onclick={onOpenGitHistory}>
+		<menu.Item onSelect={onOpenGitHistory}>
 			<History />
 			{m.workspace_open_git_history()}
-		</DropdownMenuItem>
+		</menu.Item>
 	{/if}
 	{#if onOpenGitCompare}
-		<DropdownMenuItem onclick={onOpenGitCompare}>
+		<menu.Item onSelect={onOpenGitCompare}>
 			<GitCompareArrows />
 			{m.workspace_open_git_compare()}
-		</DropdownMenuItem>
+		</menu.Item>
 	{/if}
-	<DropdownMenuSeparator />
+	<menu.Separator />
 {/if}
 
 {#if onOpenUserMessageNavigator}
-	<DropdownMenuItem onclick={onOpenUserMessageNavigator}>
+	<menu.Item onSelect={onOpenUserMessageNavigator}>
 		<ListIcon />
 		{m.chat_user_message_navigator_menu()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuItem onclick={onShare}>
+<menu.Item onSelect={onShare}>
 	<Share2 />
 	{m.share_button()}
-</DropdownMenuItem>
-<DropdownMenuItem onclick={onDetails}>
+</menu.Item>
+<menu.Item onSelect={onDetails}>
 	<Info />
 	{m.sidebar_chats_details()}
-</DropdownMenuItem>
+</menu.Item>
 {#if canFork}
-	<DropdownMenuItem disabled={!canForkNow} onclick={() => canForkNow && onFork()}>
+	<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
 		<GitFork />
 		{m.sidebar_chats_fork()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuItem onclick={onRename}>
+<menu.Item onSelect={onRename}>
 	<Edit2 />
 	{m.sidebar_tooltips_edit_chat_name()}
-</DropdownMenuItem>
+</menu.Item>
 {#if canUpdateProjectPath}
-	<DropdownMenuItem
+	<menu.Item
 		disabled={selectedChat.isProcessing}
-		onclick={() => !selectedChat.isProcessing && onProjectPath()}
+		onSelect={() => !selectedChat.isProcessing && onProjectPath()}
 	>
 		<FolderOpen />
 		{m.sidebar_project_path_menu_item()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
 {#if canReload}
-	<DropdownMenuItem
+	<menu.Item
 		disabled={selectedChat.isProcessing}
-		onclick={() => !selectedChat.isProcessing && onReload()}
+		onSelect={() => !selectedChat.isProcessing && onReload()}
 	>
 		<RefreshCw />
 		{m.sidebar_chats_reload()}
-	</DropdownMenuItem>
+	</menu.Item>
 {/if}
-<DropdownMenuSeparator />
-<DropdownMenuItem variant="destructive" onclick={onDelete}>
+<menu.Separator />
+<menu.Item variant="destructive" onSelect={onDelete}>
 	<Trash2 />
 	{m.sidebar_tooltips_delete_chat()}
-</DropdownMenuItem>
+</menu.Item>
