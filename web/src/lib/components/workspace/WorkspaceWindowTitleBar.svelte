@@ -12,6 +12,7 @@
 	import WorkspaceWindowAddMenu from './WorkspaceWindowAddMenu.svelte';
 	import WorkspaceWindowMenu from './WorkspaceWindowMenu.svelte';
 	import WorkspaceWindowTabStrip from './WorkspaceWindowTabStrip.svelte';
+	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -21,14 +22,14 @@
 		dnd,
 		isCurrent,
 		auxiliaryActions,
-		menuItems,
+		surfaceMenuItems,
 	}: {
 		workspaceWindow: WorkspaceWindowNode;
 		labelFor: (surfaceId: string) => string;
 		dnd: WorkspaceWindowDndController;
 		isCurrent: boolean;
 		auxiliaryActions?: Snippet;
-		menuItems?: Snippet<[string]>;
+		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -104,6 +105,7 @@
 		<WorkspaceWindowTabStrip
 			windowId={workspaceWindow.id}
 			tabs={workspaceWindow.tabs}
+			{hiddenSurfaceIds}
 			{labelFor}
 			onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
 			onFocus={(surfaceId) => workspace.noteWindowChromeFocus(workspaceWindow.id, surfaceId)}
@@ -111,6 +113,7 @@
 			{isCurrent}
 			isChatProcessing={isSurfaceChatProcessing}
 			onVisibleChange={(ids) => (visibleSurfaceIds = ids)}
+			{surfaceMenuItems}
 		/>
 	</div>
 	<div class="flex min-w-0 shrink-0 items-center gap-0.5">
@@ -122,7 +125,7 @@
 			{hiddenSurfaceIds}
 			{labelFor}
 			onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-			{menuItems}
+			{surfaceMenuItems}
 		/>
 		<button
 			type="button"

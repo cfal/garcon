@@ -10,6 +10,7 @@
 	import TerminalWindowMenuItems from '$lib/components/terminal/TerminalWindowMenuItems.svelte';
 	import TerminalRenameDialog from '$lib/components/terminal/TerminalRenameDialog.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
+	import type { MenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
 	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
@@ -349,12 +350,13 @@
 	}
 </script>
 
-{#snippet activeSurfaceMenuItems(surfaceId: string)}
+{#snippet surfaceMenuItems(surfaceId: string, menu: MenuPrimitives)}
 	{@const surface = snapshot.surfaces[surfaceId]}
 	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
 	{#if chat}
 		{@const supportsFork = modelCatalog.supportsFork(chat.agentId)}
 		<CurrentChatMenuItems
+			{menu}
 			selectedChat={chat}
 			canReload={chat.canReloadFromNativeHistory ?? false}
 			canUpdateProjectPath={modelCatalog.supportsUpdateProjectPath?.(chat.agentId) ?? false}
@@ -377,6 +379,7 @@
 		/>
 	{:else if surface?.type === 'terminal'}
 		<TerminalWindowMenuItems
+			{menu}
 			terminalId={surface.terminalId}
 			onRename={() => (renamingTerminalId = surface.terminalId)}
 		/>
@@ -427,7 +430,7 @@
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
 				{subagentToolbar}
-				{activeSurfaceMenuItems}
+				{surfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}
