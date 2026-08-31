@@ -15,10 +15,39 @@ permissions:
   contents: read
 
 jobs:
-  server-integration:
-    name: Server protocol integration
+  server-integration-lane:
+    name: Server protocol integration / ${{ matrix.lane }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: server 1/4
+            path: tests/server
+            shard: "1/4"
+            test_timeout: 30000
+            artifact_suffix: server-1-of-4
+          - lane: server 2/4
+            path: tests/server
+            shard: "2/4"
+            test_timeout: 30000
+            artifact_suffix: server-2-of-4
+          - lane: server 3/4
+            path: tests/server
+            shard: "3/4"
+            test_timeout: 30000
+            artifact_suffix: server-3-of-4
+          - lane: server 4/4
+            path: tests/server
+            shard: "4/4"
+            test_timeout: 30000
+            artifact_suffix: server-4-of-4
+          - lane: SACS
+            path: tests/sacs
+            shard: "1/1"
+            test_timeout: 120000
+            artifact_suffix: sacs
 
     steps:
       - name: Check out repository
@@ -42,16 +71,38 @@ jobs:
         run: bun run typecheck
 
       - name: Run server integration tests
-        run: bun run test:integration:server
+        working-directory: integration-tests
+        env:
+          TEST_PATH: ${{ matrix.path }}
+          TEST_SHARD: ${{ matrix.shard }}
+          TEST_TIMEOUT: ${{ matrix.test_timeout }}
+        run: bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
 
       - name: Upload server integration diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: server-integration-diagnostics
+          name: server-integration-diagnostics-${{ matrix.artifact_suffix }}
           path: integration-tests/artifacts/server/
           if-no-files-found: ignore
           retention-days: 7
+
+  server-integration:
+    name: Server protocol integration
+    needs: server-integration-lane
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Verify server protocol integration lanes
+        env:
+          LANES_RESULT: ${{ needs.server-integration-lane.result }}
+        run: |
+          if [ "$LANES_RESULT" != "success" ]; then
+            echo "::error::Server protocol integration lanes finished with result: $LANES_RESULT"
+            exit 1
+          fi
 
   claude-live:
     name: Live Claude conformance
