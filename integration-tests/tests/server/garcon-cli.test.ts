@@ -267,6 +267,45 @@ describe('garcon-cli', () => {
     }, { namedWorkspace: WORKSPACE });
   });
 
+  test('starts a delegated child with durable parentage', async () => {
+    await withIntegrationFixture('garcon-cli-delegated-parent', async (fixture) => {
+      const parent = await runCli(startArguments(fixture, 'parent-implementation'));
+      expect(parent).toMatchObject({ exitCode: 0, stderr: '' });
+      const parentChatId = parent.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      expect(parentChatId).toBeString();
+
+      const childArguments = startArguments(fixture, 'review-parent-implementation');
+      childArguments.splice(-1, 0, '--parent', parentChatId!, '--title', 'Delegated review');
+      const child = await runCli(childArguments);
+      expect(child).toMatchObject({ exitCode: 0, stderr: '' });
+      const childChatId = child.stdout.match(/^chat id: (\d{16})$/m)?.[1];
+      expect(childChatId).toBeString();
+
+      const childEntry = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === childChatId,
+      );
+      expect(childEntry).toMatchObject({
+        title: 'Delegated review',
+        parentChat: { chatId: parentChatId, relation: 'delegation' },
+      });
+      expect(childEntry?.parentChat).not.toHaveProperty('transcriptViewId');
+      expect(childEntry?.parentChat).not.toHaveProperty('ordinal');
+
+      await fixture.restartGarcon();
+      expect((await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === childChatId,
+      )?.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+
+      const missingParentId = '1785337200999999';
+      const missingArguments = startArguments(fixture, 'review-missing-parent');
+      missingArguments.splice(-1, 0, '--parent', missingParentId);
+      const missing = await runCli(missingArguments);
+      expect(missing.exitCode).toBe(2);
+      expect(missing.stderr).toContain(`Parent chat not found: ${missingParentId}`);
+      expect((await fixture.client.listChats()).sessions).toHaveLength(2);
+    }, { namedWorkspace: WORKSPACE });
+  });
+
   test('resumes through A to B to A as visible fenced handoffs', async () => {
     await withIntegrationFixture('garcon-cli-agent-handoff', async (fixture) => {
       const source = fixture.directAgents.openAi;
