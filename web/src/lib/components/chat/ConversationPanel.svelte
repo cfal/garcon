@@ -25,8 +25,8 @@
 	} from '$lib/context';
 	import {
 		CHAT_DOCK_SHELL_BASE_CLASS,
-		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
+		chatDockFrameClass,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import {
 		composerCapReservation,
@@ -104,9 +104,7 @@
 			capSpace.queue ? 'pb-14' : 'pb-2',
 		);
 	});
-	const queueFrameClass = $derived(
-		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
-	);
+	const queueFrameClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const surfaceIdentity = $derived(`${surfaceId}:${panel.transcript.transcriptViewId}`);
 	const isPreparingInitialScroll = $derived(
 		panel.scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
@@ -307,6 +305,7 @@
 		quickCommitError={quickGitError}
 		quickCommitBranchSelector={branchSelector}
 		isMobile={appShell.isMobile}
+		reduceMotion={localSettings.reduceMotion}
 		{announcementsEnabled}
 		onAbort={() => void actions?.stop(surfaceId, chatId)}
 		onQuickCommit={() => actions?.openCommit(surfaceId, chatId)}

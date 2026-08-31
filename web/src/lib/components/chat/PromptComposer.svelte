@@ -49,8 +49,8 @@
 		CHAT_DOCK_SHELL_BASE_CLASS,
 		CHAT_DOCK_SURFACE_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS,
-		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
+		chatDockFrameClass,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
 	import {
@@ -675,9 +675,7 @@
 			CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS[localSettings.chatMaxWidth],
 		),
 	);
-	const composerFrameWrapperClass = $derived(
-		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
-	);
+	const composerFrameWrapperClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const composerSurfaceClass = cn('relative z-20', CHAT_DOCK_SURFACE_CLASS, 'shadow-none');
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
@@ -897,7 +895,7 @@
 {/snippet}
 
 {#snippet composerFrame()}
-	<!-- The processing classes keep the composer and loading tray borders synchronized. -->
+	<!-- The detached composer and panel status dock apply the same processing treatment independently. -->
 	<div
 		class="relative"
 		class:composer-thinking-active={selectedIsProcessing}
@@ -936,7 +934,7 @@
 	</div>
 {/snippet}
 
-<div class={composerShellClass}>
+<div class={composerShellClass} data-composer-shell>
 	<div class={composerFrameWrapperClass}>
 		{@render composerFrame()}
 	</div>

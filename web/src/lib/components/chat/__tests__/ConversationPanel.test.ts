@@ -19,6 +19,7 @@ import { UserMessage } from '$shared/chat-types';
 const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
 	processing: true,
+	reduceMotion: false,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,
 }));
@@ -47,6 +48,7 @@ vi.mock('$lib/context', () => ({
 	getLocalSettings: () => ({
 		autoScrollToBottom: runtime.autoScrollToBottom,
 		chatMaxWidth: 'default',
+		reduceMotion: runtime.reduceMotion,
 		showQuickCommitTray: true,
 	}),
 	getModelCatalog: () => ({ supportsSteering: () => true }),
@@ -202,6 +204,7 @@ describe('ConversationPanel', () => {
 		cleanup();
 		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
+		runtime.reduceMotion = false;
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
@@ -288,6 +291,32 @@ describe('ConversationPanel', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
 		expect(actions.pauseQueue).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
+	});
+
+	it('restores reduced-motion processing decoration on the detached status dock', () => {
+		runtime.reduceMotion = true;
+		const { panel } = makePanel();
+		const { container } = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+			composerInsetPx: 96,
+		});
+
+		const anchor = container.querySelector('[data-conversation-panel-status-anchor]');
+		const spacer = container.querySelector('[data-conversation-panel-composer-spacer]');
+
+		expect(anchor?.className).toContain('composer-thinking-active');
+		expect(anchor?.className).toContain('composer-reduce-motion');
+		expect(spacer?.getAttribute('style')).toContain('height: 96px');
+		expect(
+			container
+				.querySelector('[data-slot="chat-processing-status"]')
+				?.closest('.composer-thinking-active'),
+		).toBe(anchor);
 	});
 
 	it('separates command ownership from composer inset and announcement ownership', async () => {

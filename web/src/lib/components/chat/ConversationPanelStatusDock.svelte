@@ -7,8 +7,8 @@
 	import type { ChatMaxWidth } from '$lib/stores/local-settings.svelte.js';
 	import {
 		CHAT_DOCK_SHELL_BASE_CLASS,
-		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
+		chatDockFrameClass,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
 
@@ -25,6 +25,7 @@
 		quickCommitError: string | null;
 		quickCommitBranchSelector: GitQuickBranchSelectorControls | null;
 		isMobile: boolean;
+		reduceMotion: boolean;
 		onAbort: () => void;
 		onQuickCommit: () => void;
 		announcementsEnabled?: boolean;
@@ -43,6 +44,7 @@
 		quickCommitError,
 		quickCommitBranchSelector,
 		isMobile,
+		reduceMotion,
 		onAbort,
 		onQuickCommit,
 		announcementsEnabled = true,
@@ -51,9 +53,7 @@
 	const shellClass = $derived(
 		cn(CHAT_DOCK_SHELL_BASE_CLASS, CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[chatMaxWidth]),
 	);
-	const frameClass = $derived(
-		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[chatMaxWidth]),
-	);
+	const frameClass = $derived(chatDockFrameClass(chatMaxWidth));
 	const runningQuickCommitVisible = $derived(
 		quickCommitEnabled && Boolean(quickCommitSummary && quickCommitSummary.changedFiles > 0),
 	);
@@ -61,7 +61,15 @@
 
 <div class={shellClass} data-conversation-panel-status-dock>
 	<div class={frameClass}>
-		<div class="relative h-0 shrink-0" data-conversation-panel-status-anchor>
+		<!-- The detached composer and panel dock establish matching processing variables separately. -->
+		<div
+			class={cn(
+				'relative h-0 shrink-0',
+				isProcessing && 'composer-thinking-active',
+				isProcessing && reduceMotion && 'composer-reduce-motion',
+			)}
+			data-conversation-panel-status-anchor
+		>
 			{#if isProcessing}
 				<LoadingStatus
 					isVisible={true}
@@ -69,9 +77,9 @@
 					{agentId}
 					{spinnerSelectionKey}
 					quickCommitVisible={runningQuickCommitVisible}
-					quickCommitSummary={quickCommitSummary}
-					onQuickCommit={onQuickCommit}
-					onAbort={onAbort}
+					{quickCommitSummary}
+					{onQuickCommit}
+					{onAbort}
 					{announcementsEnabled}
 				/>
 			{:else}

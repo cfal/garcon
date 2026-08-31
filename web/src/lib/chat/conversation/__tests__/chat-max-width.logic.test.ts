@@ -7,6 +7,7 @@ import {
 	CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
 	CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
 	CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
+	chatDockFrameClass,
 } from '$lib/chat/conversation/chat-max-width.js';
 
 // Maps Tailwind px utilities to pixel values so the feed-vs-composer inset
@@ -47,6 +48,10 @@ describe('chat max width classes', () => {
 		expect(CHAT_FEED_CONTENT_BASE_CLASS).not.toContain('px-');
 	});
 
+	it('keeps the elevated composer shell transparent', () => {
+		expect(CHAT_DOCK_SHELL_BASE_CLASS).not.toContain('bg-');
+	});
+
 	it('reduces the none transcript inset below the previous values', () => {
 		// Mobile reduced from 29px (px-[29px]) to 16px (px-4).
 		expect(extractPx(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.none, '')).toBe(16);
@@ -83,6 +88,8 @@ describe('chat max width classes', () => {
 			medium: 'lg:mx-auto lg:max-w-4xl',
 			small: 'lg:mx-auto lg:max-w-3xl',
 		});
+		expect(chatDockFrameClass('none')).toBe('w-full');
+		expect(chatDockFrameClass('large')).toBe('w-full lg:mx-auto lg:max-w-5xl');
 		expect(CHAT_DOCK_SURFACE_CLASS).toContain('rounded-2xl');
 		expect(CHAT_DOCK_SURFACE_CLASS).toContain('border-border');
 		expect(CHAT_DOCK_SURFACE_CLASS).toContain('bg-card');
