@@ -11,6 +11,11 @@ import { ConversationScrollController } from '$lib/chat/transcript/conversation-
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
+	TranscriptReconnectReplayState,
+	type TranscriptBufferedBatch,
+	type TranscriptReplayApplyResult,
+} from '$lib/chat/transcript/transcript-reconnect-replay.js';
+import {
 	ConversationTranscriptOverlayStore,
 	type ConversationTranscriptOverlayMutation,
 } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
@@ -81,6 +86,12 @@ interface SnapshotLoad {
 	readonly minimumLimit: number;
 	readonly purpose: ChatLoadMessagesOptions['purpose'];
 	readonly promise: Promise<boolean>;
+}
+
+interface ActivePanelReconnectReplay {
+	readonly token: number;
+	readonly replayToken: number;
+	readonly replay: TranscriptReconnectReplayState;
 }
 
 class PanelRegistration implements ConversationPanelRegistration {
@@ -195,6 +206,8 @@ export class ConversationPanelRegistry {
 	#panels = new Map<ChatViewSurfaceId, PanelRegistration>();
 	#restoreTargets = new Map<ChatViewSurfaceId, StoredRestoreTarget>();
 	#snapshotLoads = new Map<string, SnapshotLoad>();
+	#reconnectReplayEpoch = 0;
+	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	#visible = $state.raw<readonly VisibleChatPresentation[]>([]);
 
 	constructor(
@@ -361,7 +374,61 @@ export class ConversationPanelRegistry {
 		return [...new Set(this.#visible.map((item) => item.chatId))];
 	}
 
+	beginReconnectReplay(chatId: string, transcriptViewId: string): number {
+		const previous = this.#reconnectReplays.get(chatId);
+		if (previous) previous.replay.abort(previous.replayToken);
+
+		const token = ++this.#reconnectReplayEpoch;
+		const replay = new TranscriptReconnectReplayState((replayChatId, batch) =>
+			this.#applyReconnectReplayBatch(replayChatId, batch),
+		);
+		const replayToken = replay.begin(chatId, transcriptViewId);
+		this.#reconnectReplays.set(chatId, { token, replayToken, replay });
+		return token;
+	}
+
+	applyReconnectReplayPage(
+		token: number,
+		chatId: string,
+		batch: TranscriptBufferedBatch,
+	): TranscriptReplayApplyResult | 'stale' {
+		const active = this.#reconnectReplays.get(chatId);
+		if (!active || active.token !== token) return 'stale';
+		return active.replay.applyPage(active.replayToken, chatId, batch);
+	}
+
+	finishReconnectReplay(
+		token: number,
+		chatId: string,
+	): TranscriptReplayApplyResult | 'stale' {
+		const active = this.#reconnectReplays.get(chatId);
+		if (!active || active.token !== token) return 'stale';
+		const result = active.replay.finish(active.replayToken, chatId);
+		if (this.#reconnectReplays.get(chatId) === active) {
+			this.#reconnectReplays.delete(chatId);
+		}
+		return result;
+	}
+
+	abortReconnectReplay(token: number, chatId: string): void {
+		const active = this.#reconnectReplays.get(chatId);
+		if (!active || active.token !== token) return;
+		active.replay.abort(active.replayToken);
+		this.#reconnectReplays.delete(chatId);
+	}
+
+	abortReconnectReplays(): void {
+		for (const active of this.#reconnectReplays.values()) {
+			active.replay.abort(active.replayToken);
+		}
+		this.#reconnectReplays.clear();
+	}
+
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {
+		const replay = this.#reconnectReplays.get(batch.chatId);
+		if (replay?.replay.buffer(batch.chatId, batch)) {
+			return { kind: 'applied', localRecoverySurfaceIds: [] };
+		}
 		const outcome = this.options.cache.applyMessages(batch.chatId, batch.transcriptViewId, {
 			firstOrdinal: batch.firstOrdinal,
 			lastOrdinal: batch.lastOrdinal,
@@ -482,6 +549,7 @@ export class ConversationPanelRegistry {
 	}
 
 	destroy(): void {
+		this.abortReconnectReplays();
 		for (const panel of this.#panels.values()) panel.destroy();
 		this.#panels.clear();
 		this.#restoreTargets.clear();
@@ -494,6 +562,17 @@ export class ConversationPanelRegistry {
 		for (const panel of this.#panels.values()) {
 			if (panel.chatId === chatId) panel.transcript.applySharedOverlayMutation(mutation);
 		}
+	}
+
+	#applyReconnectReplayBatch(
+		chatId: string,
+		batch: TranscriptBufferedBatch,
+	): TranscriptReplayApplyResult {
+		const result = this.applyCommittedBatch({ chatId, ...batch });
+		if (result.kind === 'applied') {
+			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
+		}
+		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 	}
 }
 

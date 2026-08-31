@@ -113,6 +113,56 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('holds live shared commits behind a fixed reconnect replay watermark', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const applyMessages = vi.spyOn(cache, 'applyMessages');
+		const replayToken = registry.beginReconnectReplay('chat-1', 'view-1');
+
+		expect(registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+			transcriptViewId: 'view-1',
+			messages: [message(2)],
+			firstOrdinal: 2,
+			lastOrdinal: 2,
+			resendCandidates: [],
+			noticeRevision: 0,
+		})).toBe('applied');
+		expect(registry.applyCommittedBatch({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			messages: [message(4)],
+			firstOrdinal: 4,
+			lastOrdinal: 4,
+			resendCandidates: [],
+			noticeRevision: 0,
+		})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(2);
+		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
+			.toEqual([1, 2]);
+		expect(registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+			transcriptViewId: 'view-1',
+			messages: [message(3)],
+			firstOrdinal: 3,
+			lastOrdinal: 3,
+			resendCandidates: [],
+			noticeRevision: 0,
+		})).toBe('applied');
+		expect(registry.finishReconnectReplay(replayToken, 'chat-1')).toBe('applied');
+
+		expect(applyMessages).toHaveBeenCalledTimes(3);
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(4);
+		for (const surfaceId of ['chat-view:window-left', 'chat-view:window-right'] as const) {
+			expect(registry.panel(surfaceId)?.transcript.entries.map((entry) => entry.ordinal))
+				.toEqual([1, 2, 3, 4]);
+		}
+		cache.flush();
+	});
+
 	it('keeps duplicate surfaces independent while sharing lifecycle identity', () => {
 		const { cache, registry } = fixture();
 		seed(cache);

@@ -92,6 +92,7 @@ export class ChatReconnectCoordinator {
 	#hasConnectedBefore = false;
 	#reconnectEpoch = 0;
 	#selectedTranscriptReplay: SelectedTranscriptReplay | null = null;
+	#renderedTranscriptReplays = new Map<string, number>();
 
 	constructor(private readonly options: ChatReconnectCoordinatorOptions) {}
 
@@ -118,6 +119,7 @@ export class ChatReconnectCoordinator {
 			this.#wasConnected = false;
 			this.#reconnectEpoch += 1;
 			this.#abortSelectedTranscriptReplay();
+			this.#abortRenderedTranscriptReplays();
 			this.options.conversationUi.markExecutionControlSocketDisconnected();
 			return;
 		}
@@ -185,6 +187,8 @@ export class ChatReconnectCoordinator {
 			await this.#loadRenderedSnapshot(chatId, epoch);
 			return;
 		}
+		const replayToken = panels.beginReconnectReplay(chatId, cursor.transcriptViewId);
+		this.#renderedTranscriptReplays.set(chatId, replayToken);
 		try {
 			const message = await this.#replayTranscript({
 				chatId,
@@ -192,20 +196,26 @@ export class ChatReconnectCoordinator {
 				afterOrdinal: cursor.lastOrdinal,
 				isCurrent: () =>
 					epoch === this.#reconnectEpoch && panels.panelsForChat(chatId).length > 0,
-				apply: (page) => {
-					const result = panels.applyCommittedBatch({
-						chatId,
+				apply: (page) => panels.applyReconnectReplayPage(
+					replayToken,
+					chatId,
+					{
 						transcriptViewId: page.transcriptViewId,
 						messages: page.messages,
 						firstOrdinal: page.firstOrdinal,
 						lastOrdinal: page.lastOrdinal,
 						resendCandidates: page.resendCandidates,
 						noticeRevision: panels.noticeRevisionFor(chatId),
-					});
-					return result.kind === 'applied' && result.localRecoverySurfaceIds.length === 0;
-				},
+					},
+				) === 'applied',
 			});
 			if (!message) return;
+			const replayResult = panels.finishReconnectReplay(replayToken, chatId);
+			if (replayResult === 'stale') return;
+			if (replayResult !== 'applied') {
+				await this.#loadRenderedSnapshot(chatId, epoch);
+				return;
+			}
 			const applied = panels.transcriptCache.readAppliedCursor(chatId);
 			if (
 				!applied ||
@@ -217,7 +227,13 @@ export class ChatReconnectCoordinator {
 			}
 			panels.transcriptCache.markValidated(chatId);
 		} catch {
+			panels.abortReconnectReplay(replayToken, chatId);
 			if (epoch === this.#reconnectEpoch) await this.#loadRenderedSnapshot(chatId, epoch);
+		} finally {
+			panels.abortReconnectReplay(replayToken, chatId);
+			if (this.#renderedTranscriptReplays.get(chatId) === replayToken) {
+				this.#renderedTranscriptReplays.delete(chatId);
+			}
 		}
 	}
 
@@ -393,6 +409,13 @@ export class ChatReconnectCoordinator {
 		if (!replay) return;
 		this.#selectedTranscriptReplay = null;
 		this.options.chatState.abortReconnectReplay(replay.token);
+	}
+
+	#abortRenderedTranscriptReplays(): void {
+		const panels = this.options.panels;
+		if (!panels) return;
+		panels.abortReconnectReplays();
+		this.#renderedTranscriptReplays.clear();
 	}
 
 	async #loadSelectedSnapshot(chatId: string, epoch: number): Promise<void> {

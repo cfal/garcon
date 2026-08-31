@@ -358,6 +358,116 @@ describe('ChatReconnectCoordinator', () => {
 		cache.flush();
 	});
 
+	it('holds rendered live rows until a fixed reconnect replay completes', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+		cache.replace(
+			'chat-1',
+			'generation-selected',
+			[
+				{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
+				{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
+			],
+			2,
+			null,
+		);
+		const lifecycle = new ConversationLifecycleState();
+		lifecycle.setCurrentChatId('chat-1');
+		const panels = new ConversationPanelRegistry({
+			cache,
+			overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: {
+				forChat: () => lifecycle,
+				remove: vi.fn(),
+			},
+		});
+		panels.reconcile([
+			{
+				surfaceId: 'chat-view:window-left',
+				chatId: 'chat-1',
+				presentation: 'window-left',
+				windowId: 'window-left',
+				isCurrent: true,
+			},
+			{
+				surfaceId: 'chat-view:window-right',
+				chatId: 'chat-1',
+				presentation: 'window-right',
+				windowId: 'window-right',
+				isCurrent: false,
+			},
+		]);
+
+		const heldContinuation = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps();
+		let subscribeCount = 0;
+		deps.ws.sendRequest.mockImplementation(async (rawRequest: object) => {
+			const request = rawRequest as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') {
+				return reconnectStateResponse([], ['chat-1']);
+			}
+			if (request.type !== 'chat-subscribe') {
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			}
+			subscribeCount += 1;
+			if (subscribeCount === 1) {
+				return boundedReplayResponse({
+					afterOrdinal: 2,
+					nextAfterOrdinal: 4,
+					throughOrdinal: 6,
+					hasMore: true,
+					messages: [messageJson(3, 'replay-three'), messageJson(4, 'replay-four')],
+				});
+			}
+			if (subscribeCount === 2) return heldContinuation.promise;
+			throw new Error('The coordinator requested beyond the fixed watermark.');
+		});
+		const loadChatSnapshot = vi.spyOn(panels, 'loadChatSnapshot');
+		const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
+
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 2);
+
+		expect(panels.applyCommittedBatch({
+			chatId: 'chat-1',
+			transcriptViewId: 'generation-selected',
+			messages: [{ ordinal: 7, message: new AssistantMessage(TS, 'live-seven') }],
+			firstOrdinal: 7,
+			lastOrdinal: 7,
+			resendCandidates: [],
+			noticeRevision: 0,
+		})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(4);
+
+		heldContinuation.resolve(boundedReplayResponse({
+			afterOrdinal: 4,
+			nextAfterOrdinal: 6,
+			throughOrdinal: 6,
+			hasMore: false,
+			messages: [messageJson(5, 'replay-five'), messageJson(6, 'replay-six')],
+		}));
+		await reconnect;
+
+		expect(loadChatSnapshot).not.toHaveBeenCalled();
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(7);
+		for (const surfaceId of ['chat-view:window-left', 'chat-view:window-right'] as const) {
+			expect(panels.panel(surfaceId)?.transcript.entries.map((entry) => (
+				'content' in entry.message ? entry.message.content : entry.message.type
+			))).toEqual([
+				'initial-one',
+				'initial-two',
+				'replay-three',
+				'replay-four',
+				'replay-five',
+				'replay-six',
+				'live-seven',
+			]);
+		}
+		panels.destroy();
+		cache.flush();
+	});
+
 	it('keeps reconnect reconciliation resolved when a rendered snapshot load fails', async () => {
 		const deps = createReconnectDeps();
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
