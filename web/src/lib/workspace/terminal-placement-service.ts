@@ -339,11 +339,7 @@ export class TerminalPlacementService {
 			) {
 				return false;
 			}
-			if (!this.#pendingTerminatedTerminalIds.has(terminalId)) {
-				await this.#requestTermination(terminalId);
-			}
-			this.#terminalTerminateRequestIds.delete(terminalId);
-			this.deps.terminals.disposeTerminatedSession(terminalId);
+			await this.#requestAndDisposeTermination(terminalId);
 			terminationAccepted = true;
 			return true;
 		} finally {
@@ -402,6 +398,23 @@ export class TerminalPlacementService {
 	async afterPlacementReleased(terminalId: string): Promise<void> {
 		if (this.#pendingTerminatedTerminalIds.delete(terminalId)) {
 			await this.handleTerminated(terminalId);
+			return;
+		}
+		const surfaceId = terminalSurfaceId(terminalId);
+		if (this.deps.layout.surface(surfaceId) || this.deps.reservations.has(surfaceId)) return;
+		const session = this.deps.terminals.sessions[terminalId];
+		if (session?.metadata.processStatus !== 'exited') return;
+		this.deps.reservations.add(surfaceId);
+		let terminationAccepted = false;
+		try {
+			await this.#requestAndDisposeTermination(terminalId);
+			terminationAccepted = true;
+		} finally {
+			this.deps.reservations.delete(surfaceId);
+			const terminatedRemotely = this.#pendingTerminatedTerminalIds.delete(terminalId);
+			if (terminationAccepted || terminatedRemotely) {
+				await this.handleTerminated(terminalId);
+			}
 		}
 	}
 
@@ -598,6 +611,14 @@ export class TerminalPlacementService {
 			this.#terminalTerminateRequestIds.set(terminalId, requestId);
 		}
 		await this.deps.terminals.requestTermination(terminalId, requestId);
+	}
+
+	async #requestAndDisposeTermination(terminalId: string): Promise<void> {
+		if (!this.#pendingTerminatedTerminalIds.has(terminalId)) {
+			await this.#requestTermination(terminalId);
+		}
+		this.#terminalTerminateRequestIds.delete(terminalId);
+		this.deps.terminals.disposeTerminatedSession(terminalId);
 	}
 
 	async #rollbackUnplaced(terminalId: string, placementError: unknown): Promise<never> {

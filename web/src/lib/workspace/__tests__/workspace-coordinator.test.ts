@@ -15,6 +15,7 @@ import {
 import { CANONICAL_CHAT_SURFACE_ID } from '../canonical-layout';
 import { windowIdOfSurface, windowNodeById, collectWindowNodes } from '../window-tree';
 import type { TerminalMetadata } from '$shared/terminal';
+import type { TerminalAttachmentState } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
@@ -123,7 +124,7 @@ function createHarness(
 			string,
 			{
 				metadata: TerminalMetadata;
-				attachmentState: 'attached';
+				attachmentState: TerminalAttachmentState;
 			}
 		>,
 		requestTermination: options.terminate ?? vi.fn(async () => undefined),
@@ -717,7 +718,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('dialog-stale-window'));
 	});
 
-	it('closes a terminal tab without terminating its session and can reopen it', async () => {
+	it('closes a running terminal tab without terminating its session and can reopen it', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const terminalId = 'terminal-unplaced';
 		terminals.sessions[terminalId] = {
@@ -747,6 +748,128 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openTerminalSession(terminalId, historyWindowId);
 		expect(windowTabs(layout.snapshot, historyWindowId).order).toContain(surfaceId);
 		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('deletes an exited terminal when its tab closes', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const terminalId = 'terminal-exited';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited', exitCode: 0 },
+			attachmentState: 'detached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(terminals.requestTermination).toHaveBeenCalledWith(terminalId, expect.any(String));
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('keeps an exited terminal unplaced and reuses its cleanup request after a network failure', async () => {
+		const requestIds: string[] = [];
+		const terminate = vi
+			.fn()
+			.mockImplementationOnce(async (_terminalId: string, requestId: string) => {
+				requestIds.push(requestId);
+				throw new TypeError('network lost');
+			})
+			.mockImplementationOnce(async (_terminalId: string, requestId: string) => {
+				requestIds.push(requestId);
+			});
+		const { coordinator, layout, terminals } = createHarness({ terminate });
+		const terminalId = 'terminal-cleanup-retry';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited', exitCode: 1 },
+			attachmentState: 'detached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		await expect(coordinator.closeSurface(surfaceId)).rejects.toThrow('network lost');
+
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		expect(terminals.disposeTerminatedSession).not.toHaveBeenCalled();
+
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(requestIds[1]).toBe(requestIds[0]);
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('does not delete an exited terminal when its tab fails to close', async () => {
+		const { coordinator, layout, terminals } = createHarness({ failLayoutPublishAt: 2 });
+		const terminalId = 'terminal-close-failed';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited', exitCode: 1 },
+			attachmentState: 'detached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		await expect(coordinator.closeSurface(surfaceId)).rejects.toThrow('layout publication failed');
+
+		expect(layout.surface(surfaceId)).not.toBeNull();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(terminals.disposeTerminatedSession).not.toHaveBeenCalled();
+	});
+
+	it('joins remote deletion while cleaning up an exited terminal tab', async () => {
+		const deletion = deferred<void>();
+		const terminate = vi.fn(() => deletion.promise);
+		const { coordinator, layout, terminals } = createHarness({ terminate });
+		const terminalId = 'terminal-cleanup-remote-race';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited', exitCode: 0 },
+			attachmentState: 'detached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'window-main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		const closing = coordinator.closeSurface(surfaceId);
+		await vi.waitFor(() => expect(terminate).toHaveBeenCalledOnce());
+		await coordinator.handleTerminalSessionTerminated(terminalId);
+		deletion.resolve();
+		await expect(closing).resolves.toBe(true);
+
+		expect(terminate).toHaveBeenCalledOnce();
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('deletes only exited terminals when their whole window closes', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		const windowId = windowIdOfSurface(layout.snapshot.desktopRoot, 'singleton:git-history')!;
+		const runningTerminalId = 'terminal-window-running';
+		const exitedTerminalId = 'terminal-window-exited';
+		terminals.sessions[runningTerminalId] = {
+			metadata: terminalMetadata(runningTerminalId),
+			attachmentState: 'attached',
+		};
+		terminals.sessions[exitedTerminalId] = {
+			metadata: {
+				...terminalMetadata(exitedTerminalId),
+				processStatus: 'exited',
+				exitCode: 2,
+			},
+			attachmentState: 'detached',
+		};
+		await coordinator.openTerminalSession(runningTerminalId, windowId);
+		await coordinator.openTerminalSession(exitedTerminalId, windowId);
+
+		await expect(coordinator.closeWindow(windowId)).resolves.toBe(true);
+
+		expect(terminals.requestTermination).toHaveBeenCalledOnce();
+		expect(terminals.requestTermination).toHaveBeenCalledWith(exitedTerminalId, expect.any(String));
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(exitedTerminalId);
+		expect(terminals.disposeTerminatedSession).not.toHaveBeenCalledWith(runningTerminalId);
+		expect(layout.snapshot.unplacedTerminalIds).toContain(runningTerminalId);
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(exitedTerminalId);
 	});
 
 	it('rejects tab moves while explicit terminal termination owns the destructive reservation', async () => {

@@ -201,6 +201,15 @@
 		}
 	}
 
+	async function closeTerminal(): Promise<void> {
+		actionError = null;
+		try {
+			await workspace.closeSurface(terminalSurfaceId(terminalId));
+		} catch (error) {
+			actionError = error instanceof Error ? error.message : m.terminal_unavailable();
+		}
+	}
+
 	function toggleInputModifier(modifier: 'ctrl' | 'alt'): void {
 		runtime?.inputControls.toggleModifier(modifier);
 	}
@@ -259,7 +268,7 @@
 			<button
 				type="button"
 				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={() => void workspace.closeSurface(terminalSurfaceId(terminalId))}
+				onclick={() => void closeTerminal()}
 				disabled={workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId))}
 				aria-label={m.terminal_close_tab()}
 				title={m.terminal_close_tab()}

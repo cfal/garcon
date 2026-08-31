@@ -28,6 +28,7 @@
 		onFontSize?: (fontSize: number) => void;
 		focusRequestToken?: number;
 		createError?: Error | null;
+		closeError?: Error | null;
 	}
 
 	let {
@@ -42,6 +43,7 @@
 		onFontSize = () => undefined,
 		focusRequestToken = 0,
 		createError = null,
+		closeError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
 	const localSettings = createLocalSettingsStore();
@@ -118,6 +120,7 @@
 		},
 		closeSurface: async (surfaceId: string) => {
 			onClose(surfaceId);
+			if (closeError) throw closeError;
 			return true;
 		},
 		isSurfaceCloseBlocked: () => false,

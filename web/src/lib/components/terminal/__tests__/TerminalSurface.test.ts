@@ -85,6 +85,17 @@ describe('TerminalSurface', () => {
 		expect(onClose).toHaveBeenCalledWith('terminal:terminal-1');
 	});
 
+	it('shows an exited-terminal cleanup failure from mobile Close', async () => {
+		render(TerminalSurfaceTestHost, {
+			host: 'mobile',
+			closeError: new Error('Terminal cleanup failed'),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Close terminal tab' }));
+
+		expect(await screen.findByText('Terminal cleanup failed')).toBeTruthy();
+	});
+
 	it('adds the mobile renderer inset only in mobile presentation', async () => {
 		const { container, rerender } = render(TerminalSurfaceTestHost, { host: 'window-main' });
 		const terminalHost = container.querySelector<HTMLElement>('[data-terminal-host]');
