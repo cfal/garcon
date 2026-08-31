@@ -19,6 +19,7 @@ function makeSession(overrides = {}) {
     thinkingMode: 'none',
     carryOverSegments: [],
     carryOverMigrationQuarantine: null,
+    parentChat: null,
     ...overrides,
   };
 }
@@ -91,6 +92,7 @@ describe('ChatListProjector', () => {
     expect(one).toEqual(many.get(CHAT_ID));
     expect(one).toMatchObject({
       id: CHAT_ID,
+      parentChat: null,
       effectiveProjectKey: '/real/project',
       orderGroup: 'normal',
       isPinned: false,
@@ -101,6 +103,27 @@ describe('ChatListProjector', () => {
       canReloadFromNativeHistory: true,
       title: 'First line',
     });
+  });
+
+  it('projects immutable child parentage without changing the summary', async () => {
+    const parentChat = Object.freeze({
+      chatId: '1783725900000800',
+      relation: 'fork',
+      transcriptViewId: 'view-a',
+      ordinal: 4,
+    });
+    const { deps, session } = makeDeps();
+    session.parentChat = parentChat;
+
+    const projector = new ChatListProjector(deps);
+    const many = await projector.buildMany(
+      [[CHAT_ID, session]],
+      new Map([['/alias', { available: true, effectiveProjectKey: '/real/project' }]]),
+    );
+
+    expect((await projector.buildOne(CHAT_ID))?.parentChat).toBe(parentChat);
+    expect(many.get(CHAT_ID)?.parentChat).toBe(parentChat);
+    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('parentChat');
   });
 
   it('builds a path-independent normalized summary', () => {

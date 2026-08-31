@@ -21,6 +21,14 @@ describe('files API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
 	const treePayload = {
 		fileRootPath: '/workspace',
+		homeDirectory: {
+			path: '/workspace/users/me',
+			breadcrumbs: [
+				{ name: 'workspace', path: '/workspace' },
+				{ name: 'users', path: '/workspace/users' },
+				{ name: 'me', path: '/workspace/users/me' },
+			],
+		},
 		directory: {
 			path: '/workspace/project',
 			relativePath: 'project',
@@ -78,6 +86,41 @@ describe('files API contract', () => {
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toContain('path=%2Fworkspace%2Fproject%2Fsrc');
 		expect(options.signal).toBeInstanceOf(AbortSignal);
+	});
+
+	it('getTree accepts an explicitly unavailable Home directory', async () => {
+		const payload = { ...treePayload, homeDirectory: null };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(getTree()).resolves.toEqual(payload);
+	});
+
+	it('getTree rejects a missing Home directory field', async () => {
+		const payload = structuredClone(treePayload);
+		Reflect.deleteProperty(payload, 'homeDirectory');
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(getTree()).rejects.toThrow('Invalid file tree response');
+	});
+
+	it('getTree rejects inconsistent Home breadcrumbs', async () => {
+		for (const homeDirectory of [
+			{
+				...treePayload.homeDirectory,
+				breadcrumbs: [{ name: 'users', path: '/workspace/users' }],
+			},
+			{
+				...treePayload.homeDirectory,
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'users', path: '/workspace/users' },
+				],
+			},
+		]) {
+			fetchMock.mockResolvedValueOnce(jsonResponse({ ...treePayload, homeDirectory }));
+
+			await expect(getTree()).rejects.toThrow('Invalid file tree response');
+		}
 	});
 
 	it('getTree rejects malformed response fields', async () => {

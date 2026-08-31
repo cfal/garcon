@@ -598,7 +598,14 @@ export class TranscriptLedgerService {
     stagingViewId: TranscriptViewId,
   ): TranscriptView {
     this.closeProducer(chatId);
-    const view = this.#store.replaceCurrentView(chatId, expectedViewId, stagingViewId);
+    let view: TranscriptView;
+    try {
+      view = this.#store.replaceCurrentView(chatId, expectedViewId, stagingViewId);
+    } catch (error) {
+      const current = this.#store.currentView(chatId);
+      if (current?.viewId !== stagingViewId) throw error;
+      view = current;
+    }
     this.#clearChatPermissions(chatId);
     this.#deletePreparedInputs(chatId);
     this.#notify({

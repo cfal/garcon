@@ -40,6 +40,7 @@ function response(
 ): FileTreeResponse {
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: directoryPath,
 			relativePath: directoryPath === '/workspace' ? '' : 'project',
@@ -61,6 +62,7 @@ function responseAt(directoryPath: string, entries: FileTreeEntry[]): FileTreeRe
 	let breadcrumbPath = '/workspace';
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: directoryPath,
 			relativePath: segments.join('/'),

@@ -104,6 +104,7 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 	}
 	return {
 		id: session.id,
+		parentChat: session.parentChat,
 		projectPath: session.projectPath,
 		effectiveProjectKey: session.effectiveProjectKey,
 		projectIdentityState: 'available',
@@ -140,9 +141,24 @@ function arraysEqual(a: string[], b: string[]): boolean {
 	return true;
 }
 
+function sameParentChat(
+	left: ChatSessionRecord['parentChat'],
+	right: ChatSessionRecord['parentChat'],
+): boolean {
+	if (left === right) return true;
+	if (left === null || right === null) return false;
+	return (
+		left.chatId === right.chatId &&
+		left.relation === right.relation &&
+		left.transcriptViewId === right.transcriptViewId &&
+		left.ordinal === right.ordinal
+	);
+}
+
 function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
+		sameParentChat(a.parentChat, b.parentChat) &&
 		a.projectPath === b.projectPath &&
 		a.effectiveProjectKey === b.effectiveProjectKey &&
 		a.projectIdentityState === b.projectIdentityState &&
@@ -555,6 +571,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		const draft: ChatSessionRecord = {
 			id,
+			parentChat: null,
 			projectPath,
 			effectiveProjectKey: null,
 			projectIdentityState: 'pending',

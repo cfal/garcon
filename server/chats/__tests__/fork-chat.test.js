@@ -24,6 +24,7 @@ function sourceSession(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    parentChat: null,
     ...overrides,
   };
 }
@@ -139,6 +140,12 @@ describe('forkChatFileCopy', () => {
     expect(deps.sessions.get('target-chat')).toMatchObject({
       agentSessionId: null,
       carryOverSegments: [],
+      parentChat: {
+        chatId: 'source-chat',
+        relation: 'fork',
+        transcriptViewId: 'source-view',
+        ordinal: 3,
+      },
     });
   });
 
@@ -158,6 +165,12 @@ describe('forkChatFileCopy', () => {
       ordinal: 2,
     });
     expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+    expect(deps.sessions.get('target-chat').parentChat).toEqual({
+      chatId: 'source-chat',
+      relation: 'fork',
+      transcriptViewId: 'source-view',
+      ordinal: 2,
+    });
   });
 
   it('does not fork the current native session for a point in the frozen prefix', async () => {
@@ -320,6 +333,31 @@ describe('forkChatFileCopy', () => {
       expect.objectContaining({ kind: 'provider-row' }),
       expect.objectContaining({ kind: 'user-input' }),
     ]);
+    expect(deps.sessions.get('target-chat').parentChat).toMatchObject({ relation: 'fork' });
+  });
+
+  it('records the immediate source when forking a fork', async () => {
+    const deps = makeDeps({
+      source: sourceSession({
+        agentSessionId: null,
+        nativeSession: null,
+        parentChat: {
+          chatId: 'root-chat',
+          relation: 'fork',
+          transcriptViewId: 'root-view',
+          ordinal: 2,
+        },
+      }),
+    });
+
+    await forkChatFileCopy({
+      sourceSession: deps.sessions.get('source-chat'),
+      sourceChatId: 'source-chat',
+      targetChatId: 'target-chat',
+      ...deps,
+    });
+
+    expect(deps.sessions.get('target-chat').parentChat.chatId).toBe('source-chat');
   });
 
   it('retries an unmaterialized fork as native when the provider later materializes it', async () => {

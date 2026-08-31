@@ -44,15 +44,21 @@ import {
 } from './contracts.js';
 import {
   IncompleteLedgerCheckpointError,
-  LedgerError,
   LedgerFencedError,
   LedgerSchemaError,
   StaleTranscriptViewError,
   SubmissionConflictError,
   TranscriptViewNotInitializedError,
 } from './errors.js';
+import { LedgerFailureFences } from './failure-fences.js';
 import { statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
+import {
+  asError,
+  nextOrdinal,
+  runQuery,
+  runTransaction,
+} from './sqlite-operations.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -71,7 +77,6 @@ interface ConnectionEntry {
   readonly db: Database;
   current: TranscriptView | null;
   nextOrdinal: number;
-  fenced: Error | null;
 }
 
 interface ConnectionCloseAttempt {
@@ -112,6 +117,7 @@ export class TranscriptLedgerStore {
   readonly #connections = new Map<string, ConnectionEntry>();
   readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
+  readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = rootDirectory;
@@ -131,7 +137,9 @@ export class TranscriptLedgerStore {
   }
   existingCurrentView(chatId: string): TranscriptView | null {
     validateChatDirectoryName(chatId);
-    if (this.#connections.has(chatId) || this.#openFailures.has(chatId)) {
+    if (this.#connections.has(chatId)
+        || this.#openFailures.has(chatId)
+        || this.#failureFences.hasReadFailure(chatId)) {
       return this.#read(chatId, (entry) => entry.current);
     }
     const databasePath = path.join(this.#rootDirectory, chatId, 'ledger.sqlite');
@@ -493,6 +501,7 @@ export class TranscriptLedgerStore {
       this.#assertCurrent(entry, expectedCurrentViewId);
       const staging = viewRecord(entry.db, stagingViewId, 'staging');
       if (!staging) throw new LedgerSchemaError('Transcript staging view is missing');
+      const stagingNextOrdinal = nextOrdinal(entry.db, stagingViewId);
       runTransaction(entry.db, () => {
         entry.db.query("DELETE FROM transcript_views WHERE status = 'current' AND view_id = ?")
           .run(expectedCurrentViewId);
@@ -503,7 +512,7 @@ export class TranscriptLedgerStore {
       });
       const current = toView({ ...staging, status: 'current' });
       entry.current = current;
-      entry.nextOrdinal = nextOrdinal(entry.db, current.viewId);
+      entry.nextOrdinal = stagingNextOrdinal;
       return current;
     });
   }
@@ -530,13 +539,13 @@ export class TranscriptLedgerStore {
   }
 
   checkpointForHandoff(chatId: string): LedgerCheckpoint {
-    return this.#read(chatId, (entry) => {
+    return this.#write(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      const result = entry.db.query<{
+      const result = runQuery(() => entry.db.query<{
         busy: number;
         log: number;
         checkpointed: number;
-      }, []>('PRAGMA wal_checkpoint(FULL)').get();
+      }, []>('PRAGMA wal_checkpoint(FULL)').get());
       if (!result) throw new LedgerSchemaError('Transcript checkpoint returned no result');
       if (result.busy !== 0 || result.log !== result.checkpointed) {
         throw new IncompleteLedgerCheckpointError(result.busy, result.log, result.checkpointed);
@@ -562,6 +571,7 @@ export class TranscriptLedgerStore {
     validateChatDirectoryName(chatId);
     this.closeChat(chatId);
     this.#openFailures.delete(chatId);
+    this.#failureFences.delete(chatId);
     rmSync(path.join(this.#rootDirectory, chatId), { recursive: true, force: true });
   }
 
@@ -574,6 +584,7 @@ export class TranscriptLedgerStore {
       if (!statSync(directory).isDirectory()) continue;
       this.closeChat(name);
       this.#openFailures.delete(name);
+      this.#failureFences.delete(name);
       rmSync(directory, { recursive: true, force: true });
       removed.push(name);
     }
@@ -589,7 +600,10 @@ export class TranscriptLedgerStore {
       const failure = this.#closeConnectionEntry(entry);
       if (!firstFailure && failure) firstFailure = failure;
     }
-    if (this.#failedCloseEntries.size === 0) this.#openFailures.clear();
+    if (this.#failedCloseEntries.size === 0) {
+      this.#openFailures.clear();
+      this.#failureFences.clear();
+    }
     if (firstFailure) throw firstFailure;
   }
 
@@ -599,21 +613,23 @@ export class TranscriptLedgerStore {
     current: LedgerUserInputRow,
     excludedOrdinals: ReadonlySet<number> | undefined,
   ): readonly LedgerUserInputRow[] {
-    const statement = entry.db.query<StoredLedgerRow, [string, number]>(`
-      SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-      FROM transcript_rows
-      WHERE view_id = ? AND ordinal < ?
-      ORDER BY ordinal DESC
-    `);
-    try {
-      const preceding = collectResendCandidates(
-        statement.iterate(viewId, current.ordinal),
-        excludedOrdinals,
-      );
-      return [...preceding, current];
-    } finally {
-      statement.finalize();
-    }
+    return runQuery(() => {
+      const statement = entry.db.query<StoredLedgerRow, [string, number]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal < ?
+        ORDER BY ordinal DESC
+      `);
+      try {
+        const preceding = collectResendCandidates(
+          statement.iterate(viewId, current.ordinal),
+          excludedOrdinals,
+        );
+        return [...preceding, current];
+      } finally {
+        statement.finalize();
+      }
+    });
   }
 
   #currentSession(entry: ConnectionEntry, current: TranscriptView): LedgerSessionRow | null {
@@ -631,37 +647,38 @@ export class TranscriptLedgerStore {
     viewId: TranscriptViewId,
     clientMessageId: string,
   ): LedgerRow | null {
-    const stored = entry.db.query<StoredLedgerRow, [string, string]>(`
-      SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-      FROM transcript_rows
-      WHERE view_id = ? AND client_message_id = ?
-    `).get(viewId, clientMessageId);
-    return stored ? decodeStoredRow(stored) : null;
+    return runQuery(() => {
+      const stored = entry.db.query<StoredLedgerRow, [string, string]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND client_message_id = ?
+      `).get(viewId, clientMessageId);
+      return stored ? decodeStoredRow(stored) : null;
+    });
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
+    return this.#failureFences.read(chatId, () => this.#availableConnection(chatId), work);
+  }
+  #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
+    return this.#failureFences.write(
+      chatId,
+      () => this.#availableConnection(chatId),
+      work,
+      rehydrateConnection,
+    );
+  }
+
+  #availableConnection(chatId: string): ConnectionEntry {
     const openFailure = this.#openFailures.get(chatId);
     if (openFailure) throw new LedgerFencedError(chatId, { cause: openFailure });
-    let entry: ConnectionEntry;
     try {
-      entry = this.#connection(chatId);
+      return this.#connection(chatId);
     } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
+      const failure = asError(error);
       this.#openFailures.set(chatId, failure);
       throw new LedgerFencedError(chatId, { cause: failure });
     }
-    if (entry.fenced) throw new LedgerFencedError(chatId, { cause: entry.fenced });
-    try {
-      return work(entry);
-    } catch (error) {
-      if (isDomainError(error)) throw error;
-      entry.fenced = error instanceof Error ? error : new Error(String(error));
-      throw new LedgerFencedError(chatId, { cause: entry.fenced });
-    }
-  }
-
-  #write<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
-    return this.#read(chatId, work);
   }
 
   #connection(chatId: string): ConnectionEntry {
@@ -816,7 +833,6 @@ function openConnection(
       db,
       current,
       nextOrdinal: current ? nextOrdinal(db, current.viewId) : 1,
-      fenced: null,
     };
   } catch (error) {
     db.close();
@@ -879,18 +895,36 @@ function validateSchema(db: Database): void {
 }
 
 function loadAndCleanViews(db: Database): TranscriptView | null {
-  const views = db.query<ViewRecord, []>(`
-    SELECT view_id, status, created_at, content_start_ordinal
-    FROM transcript_views
-  `).all();
+  const views = loadViews(db);
+  const current = validatedCurrentView(views);
+  if (views.some((view) => view.status === 'staging')) {
+    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
+  }
+  return current;
+}
+
+function loadViews(db: Database): readonly ViewRecord[] {
+  return runQuery(() => (
+    db.query<ViewRecord, []>(`
+      SELECT view_id, status, created_at, content_start_ordinal
+      FROM transcript_views
+    `).all()
+  ));
+}
+
+function validatedCurrentView(views: readonly ViewRecord[]): TranscriptView | null {
   const current = views.filter((view) => view.status === 'current');
   if (current.length !== 1 && views.length > 0) {
     throw new LedgerSchemaError('Established transcript ledger must have exactly one current view');
   }
-  if (views.some((view) => view.status === 'staging')) {
-    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
-  }
   return current[0] ? toView(current[0]) : null;
+}
+
+function rehydrateConnection(entry: ConnectionEntry): void {
+  const current = validatedCurrentView(loadViews(entry.db));
+  const ordinal = current ? nextOrdinal(entry.db, current.viewId) : 1;
+  entry.current = current;
+  entry.nextOrdinal = ordinal;
 }
 
 function viewRecord(
@@ -898,10 +932,12 @@ function viewRecord(
   viewId: TranscriptViewId,
   status: 'current' | 'staging',
 ): ViewRecord | null {
-  return db.query<ViewRecord, [string, string]>(`
-    SELECT view_id, status, created_at, content_start_ordinal
-    FROM transcript_views WHERE view_id = ? AND status = ?
-  `).get(viewId, status) ?? null;
+  return runQuery(() => (
+    db.query<ViewRecord, [string, string]>(`
+      SELECT view_id, status, created_at, content_start_ordinal
+      FROM transcript_views WHERE view_id = ? AND status = ?
+    `).get(viewId, status) ?? null
+  ));
 }
 
 function toView(record: ViewRecord): TranscriptView {
@@ -911,25 +947,6 @@ function toView(record: ViewRecord): TranscriptView {
     createdAt: record.created_at,
     contentStartOrdinal: record.content_start_ordinal,
   };
-}
-
-function nextOrdinal(db: Database, viewId: TranscriptViewId): number {
-  const row = db.query<{ maximum: number | null }, [string]>(`
-    SELECT max(ordinal) AS maximum FROM transcript_rows WHERE view_id = ?
-  `).get(viewId);
-  return (row?.maximum ?? 0) + 1;
-}
-
-function runTransaction<T>(db: Database, work: () => T): T {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = work();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
 }
 
 function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
@@ -945,10 +962,6 @@ function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
     return { closed: false, failure: asError(error) };
   }
   return { closed: true, failure: checkpointFailure };
-}
-
-function asError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }
 
 function validateChatDirectoryName(chatId: string): void {
@@ -977,8 +990,4 @@ function normalizeLimit(limit: number): number {
     throw new TypeError('Transcript page limit must be between 1 and 1000');
   }
   return limit;
-}
-
-function isDomainError(error: unknown): error is LedgerError | TypeError {
-  return error instanceof LedgerError || error instanceof TypeError;
 }

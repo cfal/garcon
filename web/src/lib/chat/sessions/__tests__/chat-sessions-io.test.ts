@@ -66,6 +66,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }

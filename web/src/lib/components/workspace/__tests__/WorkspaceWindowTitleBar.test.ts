@@ -540,40 +540,63 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_git_history() })).toBeNull();
 	});
 
-	it('shows persistent copyable metadata before actions for the active Chat', async () => {
+	it('shows standard copy rows below the active Chat tab actions', async () => {
+		const fullProjectPath = '/workspace/clients/acme/products/garcon/project-a';
+		const displayProjectPath = '…/acme/products/garcon/project-a';
+		runtime.chatSessions = { 'chat-a': { projectPath: fullProjectPath } };
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
 		const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
 		await fireEvent.click(trigger);
 
-		const menu = document.querySelector<HTMLElement>(
-			'[data-workspace-window-menu="window-main"]',
-		)!;
-		const projectPath = within(menu).getByRole('menuitem', {
-			name: `${m.workspace_chat_metadata_copy({ field: 'Project path' })}: /workspace/project-a`,
+		const menu = document.querySelector<HTMLElement>('[data-workspace-window-menu="window-main"]')!;
+		const projectPathItem = within(menu).getByRole('menuitem', {
+			name: `${m.workspace_chat_metadata_copy_project_path()}: ${fullProjectPath}`,
 		});
 		const chatId = within(menu).getByRole('menuitem', {
-			name: `${m.workspace_chat_metadata_copy({ field: 'Chat ID' })}: chat-a`,
+			name: `${m.workspace_chat_metadata_copy_chat_id()}: chat-a`,
 		});
-		const metadata = menu.querySelector('[data-workspace-chat-metadata]');
+		const lastMovementAction = menu.querySelector(
+			'[data-workspace-window-tab-action="move-new-bottom"]',
+		);
 		const metadataSeparator = menu.querySelector('[data-workspace-chat-metadata-separator]');
-		const firstAction = menu.querySelector('[data-workspace-window-tab-action="move-left"]');
+		const closeAction = menu.querySelector('[data-workspace-window-tab-action="close-tab"]');
+		const tabActionsSeparator = menu.querySelector('[data-workspace-window-tab-actions-separator]');
+		const projectPathValue = within(projectPathItem).getByText(displayProjectPath);
+		const chatIdValue = within(chatId).getByText('chat-a');
 
-		expect(projectPath.textContent).toContain('Project path');
-		expect(projectPath.textContent).toContain('/workspace/project-a');
-		expect(chatId.textContent).toContain('Chat ID');
+		expect(projectPathItem.textContent).toContain(m.workspace_chat_metadata_copy_project_path());
+		expect(projectPathItem.textContent).toContain(displayProjectPath);
+		expect(projectPathItem.textContent).not.toContain(fullProjectPath);
+		expect(chatId.textContent).toContain(m.workspace_chat_metadata_copy_chat_id());
 		expect(chatId.textContent).toContain('chat-a');
-		expect(menu.firstElementChild).toBe(metadata);
-		expect(projectPath.parentElement).toBe(metadata);
-		expect(projectPath.nextElementSibling).toBe(chatId);
-		expect(metadata?.nextElementSibling).toBe(metadataSeparator);
-		expect(metadataSeparator?.nextElementSibling).toBe(firstAction);
+		expect(menu.querySelector('[data-workspace-chat-metadata]')).toBeNull();
+		expect(projectPathItem.parentElement).toBe(menu);
+		expect(lastMovementAction?.nextElementSibling).toBe(closeAction);
+		expect(closeAction?.nextElementSibling).toBe(tabActionsSeparator);
+		expect(tabActionsSeparator?.nextElementSibling).toBe(projectPathItem);
+		expect(projectPathItem.nextElementSibling).toBe(chatId);
+		expect(chatId.nextElementSibling).toBe(metadataSeparator);
+		expect(projectPathValue.getAttribute('title')).toBe(fullProjectPath);
+		expect(chatIdValue.getAttribute('title')).toBe('chat-a');
+		expect(projectPathValue.classList).toContain('text-muted-foreground');
+		expect(projectPathValue.classList).not.toContain('font-mono');
+		expect(chatIdValue.classList).not.toContain('font-mono');
 
-		await fireEvent.click(projectPath);
-		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('/workspace/project-a'));
+		await fireEvent.click(projectPathItem);
+		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(fullProjectPath));
 		expect(trigger.getAttribute('aria-expanded')).toBe('true');
 		await waitFor(() =>
-			expect(projectPath.getAttribute('title')).toBe(
+			expect(projectPathItem.getAttribute('title')).toBe(
 				m.workspace_chat_metadata_copied({ field: 'Project path' }),
+			),
+		);
+
+		await fireEvent.click(chatId);
+		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('chat-a'));
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		await waitFor(() =>
+			expect(chatId.getAttribute('title')).toBe(
+				m.workspace_chat_metadata_copied({ field: 'Chat ID' }),
 			),
 		);
 	});

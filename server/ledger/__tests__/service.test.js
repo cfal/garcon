@@ -393,7 +393,7 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('fences an ambiguous commit without broadcasting it', async () => {
+  it('fences writes after an ambiguous commit without hiding durable rows or broadcasting', async () => {
     await withService(async ({ ledger }) => {
       ledger.initializeChat('failed-chat');
       ledger.initializeChat('healthy-chat');
@@ -421,7 +421,14 @@ describe('TranscriptLedgerService', () => {
       }
 
       expect(commitBecameAmbiguous).toBe(true);
-      expect(() => ledger.currentRows('failed-chat')).toThrow(LedgerFencedError);
+      expect(ledger.currentRows('failed-chat')).toMatchObject([{
+        kind: 'provider-row',
+        message: { content: 'ambiguous answer' },
+      }]);
+      expect(() => failed.sink.publish({
+        type: 'rows',
+        rows: [{ message: new AssistantMessage(TS, 'must stay fenced') }],
+      })).toThrow(LedgerFencedError);
       await tick();
       expect(notifications).toEqual([]);
 

@@ -10,6 +10,7 @@ import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { TranscriptAdoptionService } from './adoption.js';
+import { LedgerFencedError } from './errors.js';
 import { TranscriptLedgerService } from './service.js';
 import { frozenConversationDrafts } from './projection.js';
 import { importNativeHistoryDrafts } from './native-history-seed.js';
@@ -128,9 +129,15 @@ export class TranscriptReloadService {
         staging.viewId,
       );
     } catch (error) {
-      if (staging) this.options.ledger.discardStagingView(chatId, staging.viewId);
-      this.options.reopenProducer(chatId);
-      throw error;
+      let failure = error;
+      try {
+        if (staging) this.options.ledger.discardStagingView(chatId, staging.viewId);
+      } catch (cleanupError) {
+        if (!(cleanupError instanceof LedgerFencedError)) failure = cleanupError;
+      } finally {
+        this.options.reopenProducer(chatId);
+      }
+      throw failure;
     }
     this.options.reopenProducer(chatId);
     return replacement;

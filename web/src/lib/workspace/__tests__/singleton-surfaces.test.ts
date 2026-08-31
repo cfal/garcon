@@ -17,6 +17,7 @@ afterEach(() => {
 function fileTreeResponse(directoryPath: string, fileName: string): FileTreeResponse {
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: directoryPath,
 			relativePath: directoryPath.slice('/workspace/'.length),

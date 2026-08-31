@@ -175,7 +175,7 @@ describe('TranscriptLedgerStore', () => {
 
   });
 
-  it('rolls back a failed commit and fences only that chat', () => {
+  it('rolls back a failed commit while preserving reads and fencing later writes', () => {
     const failedView = store.initializeCurrentView('failed-chat', {
       viewId: transcriptViewId('failed-view'),
       contentStartOrdinal: 1,
@@ -193,17 +193,24 @@ describe('TranscriptLedgerStore', () => {
       }
       return exec.call(this, sql);
     };
+    let failure;
     try {
-      expect(() => store.append('failed-chat', failedView.viewId, [
+      store.append('failed-chat', failedView.viewId, [
         provider('must roll back one'),
         provider('must roll back two'),
-      ])).toThrow(LedgerFencedError);
+      ]);
+    } catch (error) {
+      failure = error;
     } finally {
       Database.prototype.exec = exec;
     }
 
     expect(commitFailed).toBe(true);
-    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({ message: 'injected transcript commit failure' });
+    expect(store.currentRows('failed-chat')).toEqual([]);
+    expect(() => store.append('failed-chat', failedView.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
     expect(store.append('healthy-chat', healthyView.viewId, [provider('still writable')])
       .map(renderedContent)).toEqual(['still writable']);
 
@@ -211,6 +218,243 @@ describe('TranscriptLedgerStore', () => {
     store = new TranscriptLedgerStore(root);
     expect(store.currentRows('failed-chat')).toEqual([]);
     expect(store.currentRows('healthy-chat').map(renderedContent)).toEqual(['still writable']);
+  });
+
+  it('preserves the primary write failure when SQLite already ended the transaction', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        exec.call(this, 'ROLLBACK');
+        throw Object.assign(new Error('injected primary SQLite failure'), { code: 'SQLITE_FULL' });
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must not commit')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected primary SQLite failure',
+      code: 'SQLITE_FULL',
+    });
+    expect(store.currentRows('failed-chat')).toEqual([]);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('fences reads when rollback fails and leaves a failed write transaction active', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    let rollbackFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected transcript commit failure');
+      }
+      if (sql === 'ROLLBACK') {
+        rollbackFailed = true;
+        throw new Error('injected transcript rollback failure');
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must stay unreadable')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(rollbackFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected transcript commit failure',
+      rollbackFailure: { message: 'injected transcript rollback failure' },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+    closeStoreAfterInjectedRollbackFailure();
+  });
+
+  it('fences reads when a completed rollback reports SQLite corruption', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    let rollbackReportedCorruption = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw Object.assign(new Error('injected primary SQLite failure'), { code: 'SQLITE_FULL' });
+      }
+      if (sql === 'ROLLBACK') {
+        rollbackReportedCorruption = true;
+        exec.call(this, sql);
+        throw Object.assign(new Error('injected rollback corruption'), { code: 'SQLITE_CORRUPT' });
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must stay unreadable')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(rollbackReportedCorruption).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected primary SQLite failure',
+      code: 'SQLITE_FULL',
+      rollbackFailure: {
+        message: 'injected rollback corruption',
+        code: 'SQLITE_CORRUPT',
+      },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('fences domain write failures when rollback fails and leaves the transaction active', () => {
+    const current = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('old-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('old')],
+    });
+    const staged = store.stageView('failed-chat', {
+      viewId: transcriptViewId('new-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('new')],
+    });
+    const exec = Database.prototype.exec;
+    const query = Database.prototype.query;
+    let promotionFailed = false;
+    let rollbackFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (sql === 'ROLLBACK') {
+        rollbackFailed = true;
+        throw new Error('injected cutover rollback failure');
+      }
+      return exec.call(this, sql);
+    };
+    Database.prototype.query = function (sql) {
+      if (!promotionFailed && sql.includes("UPDATE transcript_views SET status = 'current'")) {
+        return {
+          run() {
+            promotionFailed = true;
+            return { changes: 0 };
+          },
+        };
+      }
+      return query.call(this, sql);
+    };
+    let failure;
+    try {
+      store.replaceCurrentView('failed-chat', current.viewId, staged.viewId);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+      Database.prototype.query = query;
+    }
+
+    expect(promotionFailed).toBe(true);
+    expect(rollbackFailed).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      name: 'LedgerSchemaError',
+      message: 'Transcript staging promotion failed',
+      rollbackFailure: { message: 'injected cutover rollback failure' },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', current.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+    closeStoreAfterInjectedRollbackFailure();
+  });
+
+  it('keeps a ledger query failure fenced for both reads and writes', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('FROM transcript_rows WHERE view_id = ? ORDER BY ordinal')) {
+        queryFailed = true;
+        throw new Error('injected transcript query failure');
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('[TLV5-L11.01-STORE-UNIT-02] read-fences a query failure raised inside a write workflow', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('WHERE view_id = ? AND client_message_id = ?')) {
+        queryFailed = true;
+        throw Object.assign(new Error('injected transcript query failure'), {
+          code: 'SQLITE_IOERR',
+        });
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.appendInputAndCompose('failed-chat', {
+        viewId: view.viewId,
+        at,
+        detail: inputDetail('failed-message', 'must not append'),
+      })).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
   });
 
   it('deduplicates a committed submission without redispatching it', () => {
@@ -812,7 +1056,7 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2]);
   });
 
-  it('reopens the complete old view when cutover fails before commit', () => {
+  it('rehydrates the complete old view when cutover fails before commit', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
@@ -840,7 +1084,10 @@ describe('TranscriptLedgerStore', () => {
     }
 
     expect(commitFailed).toBe(true);
-    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(store.currentView('chat-one').viewId).toBe(current.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['old one', 'old two']);
+    expect(() => store.append('chat-one', current.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
 
     store.close();
     store = new TranscriptLedgerStore(root);
@@ -849,7 +1096,7 @@ describe('TranscriptLedgerStore', () => {
     expect(currentViewCount(root, 'chat-one')).toBe(1);
   });
 
-  it('reopens the complete new view when cutover commit outcome is ambiguous', () => {
+  it('rehydrates the complete new view when cutover commit outcome is ambiguous', () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
@@ -878,7 +1125,10 @@ describe('TranscriptLedgerStore', () => {
     }
 
     expect(commitBecameAmbiguous).toBe(true);
-    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(store.currentView('chat-one').viewId).toBe(staged.viewId);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual(['new one', 'new two']);
+    expect(() => store.append('chat-one', staged.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
 
     store.close();
     store = new TranscriptLedgerStore(root);
@@ -938,6 +1188,59 @@ describe('TranscriptLedgerStore', () => {
     expect(checkpoint.viewId).toBe(view.viewId);
     expect(checkpoint.ordinal).toBe(1);
     expect(checkpoint.logFrames).toBe(checkpoint.checkpointedFrames);
+  });
+
+  it('[TLV5-L11.05-STORE-UNIT-03] rejects a handoff checkpoint after a write failure', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw new Error('injected transcript commit failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.append('chat-one', view.viewId, [provider('must roll back')]))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(store.currentRows('chat-one')).toEqual([]);
+    expect(() => store.checkpointForHandoff('chat-one')).toThrow(LedgerFencedError);
+  });
+
+  it('read-fences a handoff checkpoint query failure', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let checkpointFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!checkpointFailed && sql === 'PRAGMA wal_checkpoint(FULL)') {
+        checkpointFailed = true;
+        throw new Error('injected checkpoint query failure');
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.checkpointForHandoff('chat-one')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(checkpointFailed).toBe(true);
+    expect(() => store.currentRows('chat-one')).toThrow(LedgerFencedError);
+    expect(() => store.append('chat-one', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
   });
 
   it('rejects an incomplete handoff checkpoint without fencing the ledger', () => {
@@ -1009,6 +1312,75 @@ describe('TranscriptLedgerStore', () => {
 
     expect(await fs.stat(path.join(root, 'chat-one')).catch(() => null)).toBeNull();
     expect(store.currentView('chat-two').viewId).toBe('view-two');
+  });
+
+  it('[TLV5-L11.05-STORE-UNIT-02] preserves a write fence across LRU eviction', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitBecameAmbiguous = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitBecameAmbiguous && sql === 'COMMIT') {
+        commitBecameAmbiguous = true;
+        exec.call(this, sql);
+        throw new Error('injected ambiguous transcript commit');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      expect(() => store.append('failed-chat', view.viewId, [provider('durable unknown outcome')]))
+        .toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitBecameAmbiguous).toBe(true);
+    expect(store.currentRows('failed-chat').map(renderedContent)).toEqual(['durable unknown outcome']);
+    store.initializeCurrentView('evicting-chat', {
+      viewId: transcriptViewId('evicting-view'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
+  it('[TLV5-L11.01-STORE-UNIT-03] preserves a read fence across LRU eviction', () => {
+    store.close();
+    store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
+    store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+      rows: [provider('durable row')],
+    });
+    const query = Database.prototype.query;
+    let queryFailed = false;
+    Database.prototype.query = function (sql) {
+      if (!queryFailed && sql.includes('FROM transcript_rows WHERE view_id = ? ORDER BY ordinal')) {
+        queryFailed = true;
+        throw Object.assign(new Error('injected transcript query corruption'), {
+          code: 'SQLITE_CORRUPT',
+        });
+      }
+      return query.call(this, sql);
+    };
+    try {
+      expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    } finally {
+      Database.prototype.query = query;
+    }
+
+    expect(queryFailed).toBe(true);
+    store.initializeCurrentView('evicting-chat', {
+      viewId: transcriptViewId('evicting-view'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
   });
 
   it('attributes an eviction checkpoint failure to the evicted chat', () => {
@@ -1249,5 +1621,21 @@ function currentViewCount(ledgerRoot, chatId) {
       .get().count;
   } finally {
     db.close();
+  }
+}
+
+function closeStoreAfterInjectedRollbackFailure() {
+  const exec = Database.prototype.exec;
+  Database.prototype.exec = function (sql) {
+    if (sql === 'PRAGMA wal_checkpoint(PASSIVE)' && this.inTransaction) {
+      exec.call(this, 'ROLLBACK');
+    }
+    return exec.call(this, sql);
+  };
+  try {
+    store.close();
+  } finally {
+    Database.prototype.exec = exec;
+    store = null;
   }
 }

@@ -6,7 +6,7 @@
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
-	import { formatSidebarProjectPath } from './sidebar-project-path-display';
+	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
@@ -55,7 +55,7 @@
 		),
 	);
 
-	let displayProjectPath = $derived(formatSidebarProjectPath(projectPath));
+	let displayProjectPath = $derived(formatCompactProjectPath(projectPath));
 </script>
 
 <div class="relative w-full min-w-0" data-slot="sidebar-chat-summary">
