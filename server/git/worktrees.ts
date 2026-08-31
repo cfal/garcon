@@ -8,14 +8,33 @@ import type {
   TargetCandidate,
   WorktreeInfo,
 } from "./types.js";
-import { assertGitRepository, readOnlyGitOptions, runGit } from "./run.js";
+import {
+  assertGitRepository,
+  readOnlyGitOptions,
+  runGit,
+  runGitTraced,
+} from "./run.js";
 import {
   assertExistingCommitRef,
   assertSafeBranchName,
 } from "./ref-validation.js";
 import { mapWithConcurrency } from "../lib/concurrency.js";
+import { createLogger } from "../lib/log.js";
+import { probeWorktreeLayout } from "./worktree-layout.js";
+import { readAdminWorktreeRecords } from "./worktree-admin.js";
+import { readPorcelainWorktreeRecords } from "./worktree-porcelain.js";
+import {
+  compareWorktreePaths,
+  type WorktreeRecord,
+} from "./worktree-record.js";
 
 const WORKTREE_STAT_CONCURRENCY = 32;
+const logger = createLogger("git:worktrees");
+
+interface WorktreeOperationOptions {
+  // Forces the Git-backed source for differential parity tests.
+  source?: "auto" | "git";
+}
 
 export function serializeWorktreeMtime(mtime: Date): string | null {
   return Number.isFinite(mtime.getTime()) ? mtime.toISOString() : null;
@@ -36,7 +55,73 @@ async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   }
 }
 
-export function createWorktreeOperations() {
+function normalizeWorktreeRecords(
+  records: readonly WorktreeRecord[],
+  projectPath: string,
+): WorktreeInfo[] {
+  const resolvedProject = path.resolve(projectPath);
+  // Garcon owns byte ordering so both sources agree regardless of core.ignorecase.
+  const orderedRecords = records.length < 2
+    ? records
+    : [records[0], ...records.slice(1).sort(compareWorktreePaths)];
+  return orderedRecords.map((record, index) => ({
+    path: record.path,
+    branch: record.branch,
+    name: record.name || path.basename(record.path),
+    isCurrent: path.resolve(record.path) === resolvedProject,
+    isMain: index === 0 || record.isMain,
+    isPathMissing: false,
+    lastModifiedAt: null,
+  }));
+}
+
+async function collectWorktrees(
+  { projectPath, trace }: ProjectOptions,
+  source: "auto" | "git",
+): Promise<{
+  currentWorktreePath: string;
+  worktrees: WorktreeInfo[];
+}> {
+  const layout = source === "auto"
+    ? await probeWorktreeLayout(projectPath, trace)
+    : null;
+  let currentWorktreePath: string;
+  let records: WorktreeRecord[] | null = null;
+
+  if (layout) {
+    currentWorktreePath = layout.worktreeRoot;
+    if (layout.refFormat === "files") {
+      try {
+        records = await readAdminWorktreeRecords(layout);
+      } catch (error) {
+        logger.debug("Direct worktree metadata read failed; using Git.", error);
+      }
+    }
+  } else {
+    await assertGitRepository(projectPath);
+    const { stdout } = await runGitTraced(
+      projectPath,
+      ["rev-parse", "--show-toplevel"],
+      trace,
+      readOnlyGitOptions(),
+    );
+    currentWorktreePath = stdout.trim();
+  }
+
+  records ??= await readPorcelainWorktreeRecords(projectPath, trace);
+  const worktrees = normalizeWorktreeRecords(records, projectPath);
+  await mapWithConcurrency(
+    worktrees,
+    WORKTREE_STAT_CONCURRENCY,
+    enrichWorktreeMetadata,
+  );
+
+  return { currentWorktreePath, worktrees };
+}
+
+export function createWorktreeOperations(
+  { source = "auto" }: WorktreeOperationOptions = {},
+) {
   // Lightweight git capability probe. Reports whether a path is inside a
   // git repository and, if so, the repository root and current worktree path.
   async function getRepoInfo({
@@ -70,71 +155,23 @@ export function createWorktreeOperations() {
 
   async function getWorktrees({
     projectPath,
+    trace,
   }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
-    await assertGitRepository(projectPath);
-
-    const { stdout } = await runGit(
-      projectPath,
-      ["worktree", "list", "--porcelain"],
-      readOnlyGitOptions(),
-    );
-    const worktrees: WorktreeInfo[] = [];
-    let current: WorktreeInfo | null = null;
-
-    for (const line of stdout.split("\n")) {
-      if (line.startsWith("worktree ")) {
-        if (current) worktrees.push(current);
-        current = {
-          path: line.substring(9),
-          branch: "",
-          name: "",
-          isCurrent: false,
-          isMain: false,
-          isPathMissing: false,
-          lastModifiedAt: null,
-        };
-      } else if (line.startsWith("HEAD ") && current) {
-        // HEAD hash, skip
-      } else if (line.startsWith("branch ") && current) {
-        const ref = line.substring(7);
-        current.branch = ref.replace("refs/heads/", "");
-        current.name = current.branch;
-      } else if (line === "bare" && current) {
-        current.isMain = true;
-        current.name = current.name || path.basename(current.path);
-      } else if (line === "detached" && current) {
-        current.branch = "(detached)";
-        current.name = current.name || path.basename(current.path);
-      }
-    }
-    if (current) worktrees.push(current);
-
-    const resolvedProject = path.resolve(projectPath);
-    for (const wt of worktrees) {
-      const resolvedWt = path.resolve(wt.path);
-      if (resolvedWt === resolvedProject) wt.isCurrent = true;
-      if (!wt.name) wt.name = path.basename(wt.path);
-    }
-    if (worktrees.length > 0) worktrees[0].isMain = true;
-
-    await mapWithConcurrency(
-      worktrees,
-      WORKTREE_STAT_CONCURRENCY,
-      enrichWorktreeMetadata,
-    );
-
+    const { worktrees } = await collectWorktrees({ projectPath, trace }, source);
     return { worktrees };
   }
 
   async function getTargetCandidates({
     projectPath,
+    trace,
   }: ProjectOptions): Promise<{ targets: TargetCandidate[] }> {
-    await assertGitRepository(projectPath);
-
-    const repoInfo = await getRepoInfo({ projectPath });
-    const { worktrees } = await getWorktrees({ projectPath });
+    const { currentWorktreePath, worktrees } = await collectWorktrees(
+      { projectPath, trace },
+      source,
+    );
     const targets: TargetCandidate[] = [];
     const seen = new Set<string>();
+    const repoRoot = currentWorktreePath || projectPath;
 
     function addTarget(target: TargetCandidate): void {
       if (!target.worktreePath || seen.has(target.worktreePath)) return;
@@ -146,19 +183,19 @@ export function createWorktreeOperations() {
     // dedup below drops the matching worktree entry. Carry its branch onto
     // the chat-project candidate so the toolbar shows the branch on first
     // paint without a separate status request.
-    const chatProjectWorktreePath = repoInfo.currentWorktreePath || projectPath;
+    const chatProjectWorktreePath = repoRoot;
     const resolvedChatProjectWorktreePath = path.resolve(
       chatProjectWorktreePath,
     );
     const currentWorktree =
-      worktrees.find((wt) => wt.isCurrent) ??
-      worktrees.find(
-        (wt) => path.resolve(wt.path) === resolvedChatProjectWorktreePath,
+      worktrees.find((worktree) => worktree.isCurrent) ??
+      worktrees.find((worktree) =>
+        path.resolve(worktree.path) === resolvedChatProjectWorktreePath
       );
 
     addTarget({
       projectPath,
-      repoRoot: repoInfo.repoRoot || projectPath,
+      repoRoot,
       worktreePath: chatProjectWorktreePath,
       label: path.basename(projectPath) || projectPath,
       branch: currentWorktree?.branch ?? "",
@@ -167,16 +204,18 @@ export function createWorktreeOperations() {
       isMissing: false,
     });
 
-    for (const wt of worktrees) {
+    for (const worktree of worktrees) {
+      const name = worktree.name || path.basename(worktree.path);
+      const branchLabel = worktree.branch ? ` (${worktree.branch})` : "";
       addTarget({
-        projectPath: wt.path,
-        repoRoot: repoInfo.repoRoot || projectPath,
-        worktreePath: wt.path,
-        label: `${wt.name || path.basename(wt.path)}${wt.branch ? ` (${wt.branch})` : ""}`,
-        branch: wt.branch,
+        projectPath: worktree.path,
+        repoRoot,
+        worktreePath: worktree.path,
+        label: `${name}${branchLabel}`,
+        branch: worktree.branch,
         source: "worktree",
-        isCurrent: wt.isCurrent,
-        isMissing: wt.isPathMissing,
+        isCurrent: worktree.isCurrent,
+        isMissing: worktree.isPathMissing,
       });
     }
 

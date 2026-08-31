@@ -1,9 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
 import { createGitService as createProductionGitService } from "../git-service.js";
 import { generateCommitMessage } from "../commit-message.js";
@@ -16,7 +16,10 @@ import {
 } from "../comparison-errors.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
 import { parseUnifiedPatchToRenderedRows } from "../rendered-diff.js";
-import { serializeWorktreeMtime } from "../worktrees.js";
+import {
+  createWorktreeOperations,
+  serializeWorktreeMtime,
+} from "../worktrees.js";
 
 // Minimal classifier stub for toHttpError tests
 function mockClassifyGitError(error) {
@@ -138,6 +141,28 @@ async function runGitCommand(cwd, args, options = {}) {
   });
 }
 
+function detectReftableSupport() {
+  const probePath = mkdtempSync(path.join(os.tmpdir(), "garcon-reftable-probe-"));
+  try {
+    const result = spawnSync(
+      "git",
+      ["init", "--ref-format=reftable", probePath],
+      { encoding: "utf8" },
+    );
+    if (result.status === 0) return true;
+
+    const output = `${result.stderr || ""}${result.stdout || ""}`;
+    if (/unknown option|unknown ref storage format|unsupported/i.test(output)) {
+      return false;
+    }
+    throw new Error(`Git reftable capability probe failed: ${output}`);
+  } finally {
+    rmSync(probePath, { recursive: true, force: true });
+  }
+}
+
+const supportsReftable = detectReftableSupport();
+
 function mutateDuringComparisonValidations(filePath, contents) {
   const trace = [];
   let statusCount = 0;
@@ -168,6 +193,17 @@ async function initRepoWithCommit(projectPath) {
   await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
   await runGitCommand(projectPath, ["add", "a.txt"]);
   await runGitCommand(projectPath, ["commit", "-m", "initial"]);
+}
+
+async function initRepoWithLinkedFeature(projectPath, linkedPath) {
+  await initRepoWithCommit(projectPath);
+  await runGitCommand(projectPath, [
+    "worktree",
+    "add",
+    "-b",
+    "feature",
+    linkedPath,
+  ]);
 }
 
 async function commitFileAt(projectPath, file, contents, message, timestamp) {
@@ -2237,8 +2273,8 @@ describe("worktree listing metadata", () => {
     const projectPath = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-times-")),
     );
-    const linkedPath = `${projectPath}-feature`;
-    const missingPath = `${projectPath}-missing`;
+    const linkedPath = `${projectPath}-Zed`;
+    const missingPath = `${projectPath}-apple`;
     const git = createGitService({
       agents: mockAgents,
       classifyGitError: mockClassifyGitError,
@@ -2246,6 +2282,7 @@ describe("worktree listing metadata", () => {
 
     try {
       await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "core.ignorecase", "true"]);
       await runGitCommand(projectPath, [
         "worktree",
         "add",
@@ -2265,7 +2302,16 @@ describe("worktree listing metadata", () => {
       await fs.utimes(linkedPath, modifiedAt, modifiedAt);
       await fs.rm(missingPath, { recursive: true, force: true });
 
-      const { worktrees } = await git.getWorktrees({ projectPath });
+      const trace = [];
+      const { worktrees } = await git.getWorktrees({ projectPath, trace });
+      const gitTrace = [];
+      const gitSourceOperations = createWorktreeOperations({ source: "git" });
+      const gitResult = await gitSourceOperations.getWorktrees({
+        projectPath,
+        trace: gitTrace,
+      });
+      // Source parity complements the absolute assertions below and the HTTP contract test.
+      expect(gitResult).toEqual({ worktrees });
       expect(worktrees.map((worktree) => worktree.path)).toEqual([
         projectPath,
         linkedPath,
@@ -2287,6 +2333,21 @@ describe("worktree listing metadata", () => {
         isPathMissing: true,
         lastModifiedAt: null,
       });
+      const automaticUsedGit = trace.some((entry) =>
+        entry.args.includes("worktree"),
+      );
+      const { stdout: refFormat } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "--show-ref-format",
+      ]);
+      expect(automaticUsedGit).toBe(refFormat.trim() !== "files");
+      if (!automaticUsedGit) {
+        expect(trace).toHaveLength(1);
+        expect(trace[0].args).toContain("--show-ref-format");
+      }
+      expect(gitTrace.some((entry) => entry.args.includes("worktree"))).toBe(
+        true,
+      );
 
       await fs.rm(linkedPath, { recursive: true, force: true });
       await fs.writeFile(linkedPath, "not a directory");
@@ -2300,7 +2361,23 @@ describe("worktree listing metadata", () => {
         lastModifiedAt: null,
       });
 
-      const { targets } = await git.getTargetCandidates({ projectPath });
+      const targetTrace = [];
+      const { targets } = await git.getTargetCandidates({
+        projectPath,
+        trace: targetTrace,
+      });
+      const gitSourceTargetTrace = [];
+      const gitSourceTargets = await gitSourceOperations.getTargetCandidates({
+        projectPath,
+        trace: gitSourceTargetTrace,
+      });
+      expect(gitSourceTargets).toEqual({ targets });
+      expect(targetTrace.some((entry) => entry.args.includes("worktree"))).toBe(
+        automaticUsedGit,
+      );
+      expect(
+        gitSourceTargetTrace.some((entry) => entry.args.includes("worktree")),
+      ).toBe(true);
       expect(
         targets.find((target) => target.worktreePath === missingPath),
       ).toMatchObject({
@@ -2317,6 +2394,164 @@ describe("worktree listing metadata", () => {
   it("returns null when an mtime cannot be represented as ISO-8601", () => {
     expect(serializeWorktreeMtime(new Date(Number.NaN))).toBeNull();
   });
+
+  it("uses porcelain for a separate Git directory", async () => {
+    const fixtureRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-worktree-separate-git-dir-"),
+    );
+    const projectPath = path.join(fixtureRoot, "project");
+    const gitDir = path.join(fixtureRoot, "repository.git");
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await fs.mkdir(projectPath);
+      await runGitCommand(projectPath, [
+        "init",
+        "--separate-git-dir",
+        gitDir,
+      ]);
+      const trace = [];
+      const { worktrees } = await git.getWorktrees({ projectPath, trace });
+
+      expect(worktrees).toHaveLength(1);
+      expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+    } finally {
+      await fs.rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses porcelain when worktree admin metadata is unreadable", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-worktree-invalid-admin-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, ".git", "worktrees"), "invalid");
+      const trace = [];
+      const { worktrees } = await git.getWorktrees({ projectPath, trace });
+
+      expect(worktrees).toHaveLength(1);
+      expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses porcelain for linked symlink-based HEAD refs", async () => {
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-symlink-head-")),
+    );
+    const linkedPath = `${projectPath}-linked`;
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithLinkedFeature(projectPath, linkedPath);
+      const { stdout } = await runGitCommand(linkedPath, [
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        "HEAD",
+      ]);
+      const linkedHeadPath = stdout.trim();
+      await fs.rm(linkedHeadPath);
+      await fs.symlink("refs/heads/feature", linkedHeadPath);
+
+      const trace = [];
+      const { worktrees } = await git.getWorktrees({
+        projectPath: linkedPath,
+        trace,
+      });
+
+      expect(
+        worktrees.find((worktree) => worktree.path === linkedPath),
+      ).toMatchObject({ branch: "feature", name: "feature" });
+      expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+    } finally {
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses porcelain when the main repository is configured as bare", async () => {
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-bare-main-")),
+    );
+    const linkedPath = `${projectPath}-linked`;
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithLinkedFeature(projectPath, linkedPath);
+      await runGitCommand(projectPath, ["config", "core.bare", "true"]);
+
+      const trace = [];
+      const { worktrees } = await git.getWorktrees({
+        projectPath: linkedPath,
+        trace,
+      });
+
+      expect(worktrees[0]).toMatchObject({
+        path: projectPath,
+        branch: "",
+        name: path.basename(projectPath),
+      });
+      expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+    } finally {
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!supportsReftable)(
+    "uses porcelain when Git reports a non-files ref backend",
+    async () => {
+      const projectPath = await fs.mkdtemp(
+        path.join(os.tmpdir(), "garcon-worktree-reftable-"),
+      );
+      const git = createGitService({
+        agents: mockAgents,
+        classifyGitError: mockClassifyGitError,
+      });
+
+      try {
+        await runGitCommand(projectPath, ["init", "--ref-format=reftable"]);
+        await runGitCommand(projectPath, [
+          "config",
+          "user.email",
+          "test@example.com",
+        ]);
+        await runGitCommand(projectPath, [
+          "config",
+          "user.name",
+          "Test User",
+        ]);
+        await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
+        await runGitCommand(projectPath, ["add", "a.txt"]);
+        await runGitCommand(projectPath, ["commit", "-m", "initial"]);
+
+        const trace = [];
+        const { worktrees } = await git.getWorktrees({ projectPath, trace });
+
+        expect(worktrees[0].branch).not.toBe(".invalid");
+        expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+      } finally {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("worktree creation", () => {
