@@ -68,6 +68,13 @@ type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCand
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
+interface ActiveTranscriptStateOptions {
+	onSnapshotResendCandidates?: (
+		chatId: string,
+		candidates: readonly ResendCandidate[],
+	) => void;
+}
+
 export interface SharedTranscriptCommit {
 	readonly chatId: string;
 	readonly transcriptViewId: string;
@@ -115,6 +122,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	constructor(
 		transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES }),
 		sharedOverlay: ConversationTranscriptOverlayView | null = null,
+		private readonly options: ActiveTranscriptStateOptions = {},
 	) {
 		super(sharedOverlay);
 		this.transcriptCache = transcriptCache;
@@ -444,7 +452,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = pageNewestOrdinal < options.lastOrdinal;
 		if (!this.usesSharedOverlay) this.optimisticInputs.clearAll();
-		this.setResendCandidates(options.resendCandidates ?? []);
+		this.#replaceSnapshotResendCandidates(chatId, options.resendCandidates ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		if (!this.usesSharedOverlay) this.notices.reset();
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
@@ -514,7 +522,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		if (installMode === 'merge') this.#mergeSnapshot(chatId, page);
 		else if (installMode === 'preserve-window') this.#preserveWindowFromSnapshot(chatId, page);
 		else this.#replaceFromSnapshot(chatId, page);
-		this.setResendCandidates(page.resendCandidates ?? []);
+		if (page.resendCandidates !== undefined) {
+			this.#replaceSnapshotResendCandidates(chatId, page.resendCandidates);
+		}
 		if (!this.usesSharedOverlay) this.clearLocalNotices(this.notices.revisionAtLoadStart);
 		this.loadStatus = this.entries.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
@@ -532,6 +542,17 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			if (result !== 'applied') return result;
 		}
 		return 'applied';
+	}
+
+	#replaceSnapshotResendCandidates(
+		chatId: string,
+		candidates: readonly ResendCandidate[],
+	): void {
+		if (this.options.onSnapshotResendCandidates) {
+			this.options.onSnapshotResendCandidates(chatId, candidates);
+			return;
+		}
+		this.setResendCandidates(candidates);
 	}
 
 	#mergeSnapshot(chatId: string, page: ActiveTranscriptSnapshot): void {

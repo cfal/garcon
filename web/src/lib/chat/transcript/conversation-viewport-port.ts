@@ -38,6 +38,6 @@ export interface ConversationViewportPort {
 	setNativeScrollActivity(activity: ConversationNativeScrollActivity): void;
 	scrollToTarget(
 		target: ConversationViewportTarget,
-		options?: { align?: 'center' | 'start' | 'end' },
+		options?: { align?: 'center' | 'start' | 'end'; viewportOffset?: number },
 	): Promise<ConversationViewportTargetResult>;
 }

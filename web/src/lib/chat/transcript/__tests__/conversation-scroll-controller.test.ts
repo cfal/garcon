@@ -1053,9 +1053,24 @@ describe('ConversationScrollController', () => {
 			{ kind: 'row', id: 'generation-1:7' },
 			{ align: 'center' },
 		);
-		expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		expect(
+			await controller.jumpToMessageRow(
+				{
+					chatId: 'chat-1',
+					transcriptViewId: 'generation-1',
+					rowId: 'generation-1:7',
+				},
+				{ viewportOffset: -3 },
+			),
+		).toBe('completed');
 		expect(viewport.scrollToTarget).toHaveBeenNthCalledWith(
 			2,
+			{ kind: 'row', id: 'generation-1:7' },
+			{ viewportOffset: -3 },
+		);
+		expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		expect(viewport.scrollToTarget).toHaveBeenNthCalledWith(
+			3,
 			{ kind: 'dom-anchor', id: 'tool-input-9' },
 			{ align: 'center' },
 		);

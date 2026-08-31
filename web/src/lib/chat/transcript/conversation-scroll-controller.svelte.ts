@@ -497,6 +497,7 @@ export class ConversationScrollController {
 
 	async jumpToMessageRow(
 		target: UserMessageNavigatorTarget,
+		options: { viewportOffset?: number } = {},
 	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
 			this.deps.getChatId() !== target.chatId ||
@@ -522,7 +523,9 @@ export class ConversationScrollController {
 			this.#preserveHistoryBrowsing();
 			const result = await viewport.scrollToTarget(
 				{ kind: 'row', id: target.rowId },
-				{ align: 'center' },
+				options.viewportOffset === undefined
+					? { align: 'center' }
+					: { viewportOffset: options.viewportOffset },
 			);
 			if (!this.#isCurrentViewportOperation(target.chatId, operationEpoch)) return 'cancelled';
 			if (result === 'cancelled') return 'cancelled';

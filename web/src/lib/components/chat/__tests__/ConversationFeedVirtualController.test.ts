@@ -1,5 +1,5 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
@@ -151,6 +151,34 @@ describe('ConversationFeed virtual policy', () => {
 		current.remove();
 		expect(mounted.transcriptKeys(['a', 'b'], new Set(['a', 'b']))).toEqual(new Set());
 		stale.remove();
+	});
+
+	it('captures the first actually painted row instead of an overscan estimate', () => {
+		const mounted = new ConversationMountedVirtualItems();
+		const viewport = document.createElement('div');
+		const overscan = document.createElement('div');
+		const visible = document.createElement('div');
+		overscan.dataset.index = '0';
+		overscan.dataset.chatVirtualItem = 'overscan';
+		visible.dataset.index = '1';
+		visible.dataset.chatVirtualItem = 'visible';
+		document.body.append(viewport, overscan, visible);
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+		vi.spyOn(overscan, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, -40, 100, 20));
+		vi.spyOn(visible, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, -3, 100, 20));
+		mounted.add(overscan);
+		mounted.add(visible);
+
+		expect(
+			mounted.visibleAnchor({
+				viewport,
+				configuredKeys: ['overscan', 'visible'],
+				eligibleKeys: new Set(['overscan', 'visible']),
+			}),
+		).toEqual({ key: 'visible', viewportOffset: -3, fallbackKeys: ['overscan'] });
+		viewport.remove();
+		overscan.remove();
+		visible.remove();
 	});
 
 	it('waits for explicitly pending target content', () => {

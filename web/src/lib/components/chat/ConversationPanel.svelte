@@ -8,6 +8,7 @@
 	import type { ConversationPanelActions } from './conversation-panel-actions.js';
 	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
+	import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { observeConversationViewportScrollGestures } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 	import { registerManagedWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
@@ -135,7 +136,17 @@
 	let conversationViewport = $state<ConversationViewportPort | null>(null);
 	let queueControlsContainer = $state<HTMLDivElement>();
 	let feedPresentation = $state<ConversationFeedPresentationPort | null>(null);
-	let initializedScrollContainer = false;
+	let detachedRestoreTarget: ConversationPanelRestoreTarget | null = null;
+
+	function setFeedPresentation(port: ConversationFeedPresentationPort | null): void {
+		if (port) {
+			feedPresentation = port;
+			detachedRestoreTarget = null;
+			return;
+		}
+		detachedRestoreTarget = feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget;
+		feedPresentation = null;
+	}
 
 	$effect(() => {
 		const registration = panel;
@@ -143,9 +154,15 @@
 			getScrollContainer: () => scrollContainer,
 			getViewport: () => conversationViewport,
 			getQueueContainer: () => queueControlsContainer,
-			captureRestoreTarget: () => feedPresentation?.captureRestoreTarget() ?? null,
+			captureRestoreTarget: () =>
+				feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
 			closeTransients: () => feedPresentation?.closeTransients(),
 		});
+	});
+
+	$effect(() => {
+		const viewport = conversationViewport;
+		if (viewport) panel.resumePendingRestore();
 	});
 
 	$effect(() => {
@@ -185,18 +202,6 @@
 			stop();
 			panel.scroll.cancelNativeScroll(viewport);
 		};
-	});
-
-	$effect(() => {
-		const container = scrollContainer;
-		if (!container) return;
-		untrack(() => {
-			if (initializedScrollContainer) return;
-			initializedScrollContainer = true;
-			if (panel.transcript.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
-				void panel.scroll.scrollToLatestAndFill();
-			}
-		});
 	});
 
 	$effect(() => {
@@ -266,7 +271,7 @@
 				pinnedToBottom={panel.scroll.isPinnedToBottom}
 				{surfaceIdentity}
 				onViewportPortChange={(port) => (conversationViewport = port)}
-				onPresentationPortChange={(port) => (feedPresentation = port)}
+				onPresentationPortChange={setFeedPresentation}
 				onInitialEndRestored={() => panel.scroll.completeInitialBottomRestore()}
 				{isProcessing}
 			/>

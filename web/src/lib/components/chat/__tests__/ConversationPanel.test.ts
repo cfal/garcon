@@ -8,13 +8,16 @@ import type {
 	ConversationPanelPresentationPort,
 	ConversationPanelRegistration,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 import type { ChatQueueState } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
+import { UserMessage } from '$shared/chat-types';
 
 const runtime = vi.hoisted(() => ({
+	autoScrollToBottom: false,
 	processing: true,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,
@@ -42,7 +45,7 @@ vi.mock('$lib/context', () => ({
 		canShowTrayFor: () => true,
 	}),
 	getLocalSettings: () => ({
-		autoScrollToBottom: false,
+		autoScrollToBottom: runtime.autoScrollToBottom,
 		chatMaxWidth: 'default',
 		showQuickCommitTray: true,
 	}),
@@ -127,6 +130,7 @@ function makePanel() {
 	const lifecycle = new ConversationLifecycleState();
 	lifecycle.beginTurn('chat-1');
 	let presentation: ConversationPanelPresentationPort | null = null;
+	let lastRestoreTarget: ConversationPanelRestoreTarget = { kind: 'end' };
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => presentation?.getScrollContainer() ?? null,
 		getViewport: () => presentation?.getViewport() ?? null,
@@ -144,11 +148,17 @@ function makePanel() {
 		attachPresentation: (port) => {
 			presentation = port;
 			return () => {
-				if (presentation === port) presentation = null;
+				if (presentation !== port) return;
+				lastRestoreTarget = port.captureRestoreTarget() ?? lastRestoreTarget;
+				presentation = null;
 			};
 		},
+		resumePendingRestore: () => {},
 		prepareForInteractionLoss,
-		prepareForHide: () => ({ kind: 'end' }),
+		prepareForHide: () => {
+			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
+			return lastRestoreTarget;
+		},
 		restore: async () => {},
 		destroy: () => {},
 	};
@@ -185,10 +195,68 @@ function makeActions(): ConversationPanelActions {
 describe('ConversationPanel', () => {
 	afterEach(() => {
 		cleanup();
+		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
+	});
+
+	it('leaves remount scroll restoration to the panel registry', async () => {
+		runtime.autoScrollToBottom = true;
+		const { panel } = makePanel();
+		panel.transcript.replaceGeneration(
+			'chat-1',
+			'view-1',
+			[
+				{
+					ordinal: 1,
+					message: new UserMessage('2026-08-31T00:00:00.000Z', 'Existing message'),
+				},
+			],
+			{
+				lastOrdinal: 1,
+				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			},
+		);
+		const restoreLatest = vi.spyOn(panel.scroll, 'scrollToLatestAndFill');
+
+		render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+		await Promise.resolve();
+
+		expect(restoreLatest).not.toHaveBeenCalled();
+	});
+
+	it('retains the feed restore target when the child presentation detaches first', async () => {
+		const { panel } = makePanel();
+		const rendered = render(ConversationPanel, {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		});
+
+		const detach = rendered.container.querySelector<HTMLButtonElement>('[data-detach-feed]');
+		if (!detach) throw new Error('Expected feed detach control');
+		await fireEvent.click(detach);
+
+		expect(panel.prepareForHide()).toEqual({
+			kind: 'row',
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: 12,
+		});
 	});
 
 	it('composes the full feed, queue, status, paging, and fork controls without a composer', async () => {

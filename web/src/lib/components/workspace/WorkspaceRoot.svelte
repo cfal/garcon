@@ -44,6 +44,7 @@
 	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import {
 		chatViewSurfaceId,
+		type ChatViewSurfaceId,
 		type ChatViewSurfaceDescriptor,
 		type WorkspacePartitionNode,
 		type WorkspaceWindowId,
@@ -126,6 +127,12 @@
 			({ chatId }) =>
 				resolveChatSurfacePresentation(sessions.byId[chatId] ?? null, sessions.isLoadingChats) ===
 				'conversation',
+		),
+	);
+	const existingChatSurfaceIds = $derived.by(
+		() => new Set<ChatViewSurfaceId>(
+			Object.values(snapshot.surfaces).flatMap((surface) =>
+				surface.type === 'chat' ? [surface.id] : []),
 		),
 	);
 	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() =>
@@ -252,9 +259,18 @@
 		});
 	});
 
+	$effect.pre(() => {
+		const visible = chatPresentations;
+		untrack(() => conversationPanels.prepareForReconcile(visible));
+	});
+
 	$effect(() => {
 		const visible = chatPresentations;
-		untrack(() => conversationPanels.reconcile(visible));
+		const existingSurfaceIds = existingChatSurfaceIds;
+		untrack(() => {
+			conversationPanels.reconcile(visible);
+			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);
+		});
 	});
 
 	$effect(() => {

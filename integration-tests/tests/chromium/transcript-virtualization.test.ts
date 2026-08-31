@@ -753,6 +753,14 @@ async function waitForSurfaceIdentity(page: Page, expected: string): Promise<voi
   );
 }
 
+async function currentConversationSurfaceIdentity(
+  page: Page,
+  transcriptViewId: string,
+): Promise<string> {
+  const { surfaceId } = await currentWorkspaceIdentity(page);
+  return `${surfaceId}:${transcriptViewId}`;
+}
+
 async function synchronizeNativeTranscriptGeneration(
   fixture: ChromiumFixture,
   chatId: string,
@@ -761,7 +769,10 @@ async function synchronizeNativeTranscriptGeneration(
     limit: 200,
   });
   expect(transcript.hasMore).toBe(false);
-  await waitForSurfaceIdentity(fixture.page, `${chatId}:${transcript.transcriptViewId}`);
+  await waitForSurfaceIdentity(
+    fixture.page,
+    await currentConversationSurfaceIdentity(fixture.page, transcript.transcriptViewId),
+  );
   await waitForTranscriptReady(fixture.page);
 }
 
@@ -1724,36 +1735,42 @@ async function expectFixedTranscriptTypography(page: Page): Promise<void> {
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
-  const hasTarget = await page.evaluate(
-    (expected) =>
-      [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
-        (candidate) => candidate.textContent?.includes(expected),
-      ),
-    text,
-  );
-  if (!hasTarget) {
-    await page.locator('[data-user-message-navigator-list]').evaluate((listElement) => {
-      const list = listElement as HTMLElement;
-      list.scrollTop = list.scrollHeight;
-      list.dispatchEvent(new Event('scroll', { bubbles: true }));
+  await page.locator('[data-user-message-navigator-row]').first().waitFor({ state: 'visible' });
+  const list = page.locator('[data-user-message-navigator-list]');
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const rows = await page.evaluate((expected) => {
+      const candidates = [
+        ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
+      ];
+      return {
+        targetId: candidates.find((candidate) => candidate.textContent?.includes(expected))?.dataset
+          .userMessageNavigatorRow,
+        lastId: candidates.at(-1)?.dataset.userMessageNavigatorRow,
+      };
+    }, text);
+    if (rows.targetId) return rows.targetId;
+    if (!rows.lastId) break;
+
+    await list.evaluate((listElement) => {
+      const element = listElement as HTMLElement;
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
     await page.waitForFunction(
-      (expected) =>
-        [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
-          (candidate) => candidate.textContent?.includes(expected),
-        ),
-      text,
+      ({ expected, previousLastId }) => {
+        const candidates = [
+          ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
+        ];
+        return (
+          candidates.some((candidate) => candidate.textContent?.includes(expected)) ||
+          candidates.at(-1)?.dataset.userMessageNavigatorRow !== previousLastId
+        );
+      },
+      { expected: text, previousLastId: rows.lastId },
       { timeout: 20_000 },
     );
   }
-  return page.evaluate((expected) => {
-    const row = [
-      ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
-    ].find((candidate) => candidate.textContent?.includes(expected));
-    const rowId = row?.dataset.userMessageNavigatorRow;
-    if (!rowId) throw new Error(`Missing user-message navigator row containing: ${expected}`);
-    return rowId;
-  }, text);
+  throw new Error(`Missing user-message navigator row containing: ${text}`);
 }
 
 async function clickUserMessageNavigatorRowContaining(page: Page, text: string): Promise<void> {
@@ -3794,7 +3811,11 @@ async function verifyHeldEarlierPageChatSwitch(
       targetChatId,
       `held-page-switch-target-${viewport.width}-0`,
     );
-    await waitForSurfaceIdentity(fixture.page, `${targetChatId}:${targetPage.transcriptViewId}`);
+    const targetSurfaceIdentity = await currentConversationSurfaceIdentity(
+      fixture.page,
+      targetPage.transcriptViewId,
+    );
+    await waitForSurfaceIdentity(fixture.page, targetSurfaceIdentity);
     const targetRevision = await virtualDataRevision(fixture.page);
     const targetEntryCount = await transcriptEntryCount(fixture.page);
     releaseEarlierPage();
@@ -3807,9 +3828,7 @@ async function verifyHeldEarlierPageChatSwitch(
     expect(fixture.page.url()).toContain(`/chat/${targetChatId}`);
     expect(await transcriptEntryCount(fixture.page)).toBe(targetEntryCount);
     expect(await virtualDataRevision(fixture.page)).toBe(targetRevision);
-    expect(await surfaceIdentity(fixture.page)).toBe(
-      `${targetChatId}:${targetPage.transcriptViewId}`,
-    );
+    expect(await surfaceIdentity(fixture.page)).toBe(targetSurfaceIdentity);
     const targetScan = await scanLoadedTranscript(fixture.page);
     expect(targetScan.rows.map((row) => row.rowId)).toEqual(
       targetPage.messages.map((entry) => `${targetPage.transcriptViewId}:${entry.ordinal}`),
@@ -3887,7 +3906,9 @@ async function verifyDetachedNativeReload(
     userScrolledUp: true,
   });
   const oldSurfaceIdentity = await surfaceIdentity(fixture.page);
-  expect(oldSurfaceIdentity).toBe(`${chatId}:${beforeReload.transcriptViewId}`);
+  expect(oldSurfaceIdentity).toBe(
+    await currentConversationSurfaceIdentity(fixture.page, beforeReload.transcriptViewId),
+  );
 
   const native = await claudeNativeTranscript(fixture, chatId);
   const externalContent = `detached-native-reload-final-assistant-${viewport.width}`;
@@ -3909,7 +3930,10 @@ async function verifyDetachedNativeReload(
 
   const reloaded = await fixture.integration.client.reloadChat(chatId);
   expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
-  await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+  await waitForSurfaceIdentity(
+    fixture.page,
+    await currentConversationSurfaceIdentity(fixture.page, reloaded.transcriptViewId),
+  );
   await waitForTranscriptReady(fixture.page);
   expect(await surfaceIdentity(fixture.page)).not.toBe(oldSurfaceIdentity);
 
@@ -4060,7 +4084,11 @@ async function verifyHeldEarlierPageNativeReload(
 
     const reloaded = await fixture.integration.client.reloadChat(chatId);
     expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
-    await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+    const reloadedSurfaceIdentity = await currentConversationSurfaceIdentity(
+      fixture.page,
+      reloaded.transcriptViewId,
+    );
+    await waitForSurfaceIdentity(fixture.page, reloadedSurfaceIdentity);
     await waitForTranscriptReady(fixture.page);
     const replacementRevision = await virtualDataRevision(fixture.page);
     const replacementEntryCount = await transcriptEntryCount(fixture.page);
@@ -4073,7 +4101,7 @@ async function verifyHeldEarlierPageNativeReload(
     });
 
     expect(earlierRequestCount).toBe(1);
-    expect(await surfaceIdentity(fixture.page)).toBe(`${chatId}:${reloaded.transcriptViewId}`);
+    expect(await surfaceIdentity(fixture.page)).toBe(reloadedSurfaceIdentity);
     expect(await virtualDataRevision(fixture.page)).toBe(replacementRevision);
     expect(await transcriptEntryCount(fixture.page)).toBe(replacementEntryCount);
     const canonical = await fixture.integration.client.getMessages(chatId, {
