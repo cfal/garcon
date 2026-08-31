@@ -29,7 +29,7 @@
 		labelFor,
 		previewStore,
 		subagentToolbar,
-		chatMenuItems,
+		activeSurfaceMenuItems,
 		frameBridge,
 		surfaceStyle,
 		onSendToChat,
@@ -44,7 +44,7 @@
 		labelFor: (surfaceId: string) => string;
 		previewStore: ChatWindowPreviewStore;
 		subagentToolbar: SubagentToolbarState;
-		chatMenuItems?: Snippet<[string]>;
+		activeSurfaceMenuItems?: Snippet<[string]>;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
 		onSendToChat(message: string): Promise<boolean>;
@@ -190,7 +190,9 @@
 		{labelFor}
 		{dnd}
 		{isCurrent}
-		menuItems={activeSurface?.type === 'chat' ? chatMenuItems : undefined}
+		menuItems={activeSurface?.type === 'chat' || activeSurface?.type === 'terminal'
+			? activeSurfaceMenuItems
+			: undefined}
 	>
 		{#snippet auxiliaryActions()}
 			{#if activeChatIsLive && subagentToolbar.model}

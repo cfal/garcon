@@ -211,51 +211,51 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
-	<div
-		class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
-		style="container-name: surface-toolbar; container-type: inline-size;"
-	>
-		<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-			<select
-				bind:this={sessionPicker}
-				class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
-				value={terminalId}
-				onchange={(event) => selectTerminal(event.currentTarget.value)}
-				aria-label={m.terminal_session()}
-			>
-				{#each terminals.orderedSessions as item (item.metadata.terminalId)}
-					{@const placement = placementLabel(item.metadata.terminalId)}
-					<option value={item.metadata.terminalId}>
-						{m.terminal_session_status({
-							number: item.metadata.displaySequence,
-							status: item.metadata.processStatus,
-						})}{placement ? ` - ${placement}` : ''}
-					</option>
-				{/each}
-			</select>
-			{#if session}
-				<span
-					class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-					title={m.terminal_initial_working_directory({
-						path: session.metadata.initialWorkingDirectory,
-					})}
+	{#if host === 'mobile'}
+		<div
+			class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
+			style="container-name: surface-toolbar; container-type: inline-size;"
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+				<select
+					bind:this={sessionPicker}
+					class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
+					value={terminalId}
+					onchange={(event) => selectTerminal(event.currentTarget.value)}
+					aria-label={m.terminal_session()}
 				>
-					{m.terminal_initial_working_directory({
-						path: session.metadata.initialWorkingDirectory,
-					})}
-				</span>
-				<span class="shrink-0 text-[11px] text-muted-foreground"
-					>{attachmentLabel(session.attachmentState)}</span
-				>
-			{/if}
-		</div>
-		<ResponsiveSurfaceActions
-			actions={toolbarActions}
-			menuLabel={m.workspace_surface_actions()}
-			class="max-w-28"
-		/>
-		<TerminalSettingsMenu />
-		{#if host === 'mobile'}
+					{#each terminals.orderedSessions as item (item.metadata.terminalId)}
+						{@const placement = placementLabel(item.metadata.terminalId)}
+						<option value={item.metadata.terminalId}>
+							{m.terminal_session_status({
+								number: item.metadata.displaySequence,
+								status: item.metadata.processStatus,
+							})}{placement ? ` - ${placement}` : ''}
+						</option>
+					{/each}
+				</select>
+				{#if session}
+					<span
+						class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+						title={m.terminal_initial_working_directory({
+							path: session.metadata.initialWorkingDirectory,
+						})}
+					>
+						{m.terminal_initial_working_directory({
+							path: session.metadata.initialWorkingDirectory,
+						})}
+					</span>
+					<span class="shrink-0 text-[11px] text-muted-foreground"
+						>{attachmentLabel(session.attachmentState)}</span
+					>
+				{/if}
+			</div>
+			<ResponsiveSurfaceActions
+				actions={toolbarActions}
+				menuLabel={m.workspace_surface_actions()}
+				class="max-w-28"
+			/>
+			<TerminalSettingsMenu />
 			<button
 				type="button"
 				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
@@ -266,8 +266,8 @@
 			>
 				<X class="h-4 w-4" />
 			</button>
-		{/if}
-	</div>
+		</div>
+	{/if}
 	{#if actionError}
 		<div
 			class="border-b border-status-error-border bg-status-error px-3 py-1.5 text-xs text-status-error-foreground"

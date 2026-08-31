@@ -2,6 +2,7 @@
 	import { onDestroy, untrack } from 'svelte';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
+	import TerminalWindowMenuItems from '$lib/components/terminal/TerminalWindowMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
@@ -234,7 +235,7 @@
 	}
 </script>
 
-{#snippet chatMenuItems(surfaceId: string)}
+{#snippet activeSurfaceMenuItems(surfaceId: string)}
 	{@const surface = snapshot.surfaces[surfaceId]}
 	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
 	{#if chat}
@@ -260,6 +261,8 @@
 			onFork={() => chatActions.fork(chat)}
 			onDelete={() => chatActions.requestDelete(chat)}
 		/>
+	{:else if surface?.type === 'terminal'}
+		<TerminalWindowMenuItems terminalId={surface.terminalId} />
 	{/if}
 {/snippet}
 
@@ -307,7 +310,7 @@
 				labelFor={label}
 				previewStore={chatWindowPreviews}
 				{subagentToolbar}
-				{chatMenuItems}
+				{activeSurfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
 				onSendToChat={sendToChat}

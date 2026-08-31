@@ -11,6 +11,7 @@ import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svel
 import {
 	chatViewSurfaceId,
 	portableSingletonDescriptor,
+	terminalSurfaceId,
 	type PortableSingletonKind,
 	type WorkspaceLayoutMutation,
 	type WorkspaceWindowEdge,
@@ -18,6 +19,7 @@ import {
 } from '$lib/workspace/surface-types.js';
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
@@ -27,6 +29,7 @@ vi.mock('$lib/context', () => ({
 	getFileSessions: () => testContext.current?.fileSessions,
 	getGhCapability: () => testContext.current?.ghCapability,
 	getGitBranchActions: () => testContext.current?.gitBranchActions,
+	getLocalSettings: () => testContext.current?.localSettings,
 	getModelCatalog: () => testContext.current?.modelCatalog,
 	getNotifications: () => testContext.current?.notifications,
 	getSurfaceFrames: () => testContext.current?.surfaceFrames,
@@ -204,10 +207,25 @@ function installContext() {
 			);
 		}),
 		createTerminal: vi.fn(async () => 'terminal-created'),
+		terminateTerminalSession: vi.fn(async () => true),
 		openTerminalSession: vi.fn(async () => undefined),
 		retryPresentation: vi.fn(async () => undefined),
 		mobileBack: vi.fn(async () => undefined),
 		focusChat: vi.fn(async () => undefined),
+	};
+	const terminals = {
+		orderedSessions: [] as TerminalClientSession[],
+		sessions: {} as Record<string, TerminalClientSession>,
+		listStatus: 'ready' as const,
+		ensureRuntime: vi.fn(() => ({
+			clipboardMessage: '',
+			pasteFromClipboard: vi.fn(async () => true),
+		})),
+		reattach: vi.fn(),
+	};
+	const localSettings = {
+		terminalFontSize: '13',
+		set: vi.fn(),
 	};
 	const windowDnd = new WorkspaceWindowDndController(layout);
 	testContext.current = {
@@ -215,7 +233,8 @@ function installContext() {
 		windowDnd,
 		surfaceFrames: new SurfaceFrameRegistry(),
 		fileSessions: { get: () => null },
-		terminals: { orderedSessions: [], sessions: {}, listStatus: 'ready' },
+		terminals,
+		localSettings,
 		sessions: {
 			selectedChatId: 'chat-a',
 			selectedChat: chat('chat-a', 'Chat A'),
@@ -231,7 +250,7 @@ function installContext() {
 		ghCapability: { hasChecked: true, available: true },
 		notifications: { error: vi.fn() },
 	};
-	return { layout, runtime, workspace, windowDnd };
+	return { layout, runtime, workspace, windowDnd, terminals, localSettings };
 }
 
 const chatActions = {
@@ -284,6 +303,52 @@ describe('WorkspaceRoot', () => {
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
+	});
+
+	it('adds active terminal actions to the window menu', async () => {
+		const { layout, workspace, terminals } = installContext();
+		const terminalId = 'terminal-1';
+		const surfaceId = terminalSurfaceId(terminalId);
+		const terminal: TerminalClientSession = {
+			metadata: {
+				terminalId,
+				displaySequence: 1,
+				initialWorkingDirectory: '/workspace/project',
+				processStatus: 'running',
+				attachmentStatus: 'attached',
+				createdAt: '2026-08-31T00:00:00.000Z',
+				exitCode: null,
+				latestOutputSequence: 0,
+			},
+			attachmentState: 'attached',
+			lastReceivedSequence: 0,
+			replayTruncatedAt: null,
+		};
+		terminals.sessions[terminalId] = terminal;
+		terminals.orderedSessions = [terminal];
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'terminal', terminalId },
+					windowId: 'window-main',
+				},
+				{
+					type: 'activate-window-tab',
+					windowId: 'window-main',
+					surfaceId,
+				},
+			]),
+		);
+		renderRoot();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+
+		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: /Font size 13px/ })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.terminal_terminate() }));
+		expect(workspace.terminateTerminalSession).toHaveBeenCalledWith(terminalId);
 	});
 
 	it('labels an occupied Chat center drop as replacement', async () => {
