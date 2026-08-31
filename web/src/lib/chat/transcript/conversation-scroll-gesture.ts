@@ -1,5 +1,7 @@
 import type { TranscriptPageDirection } from './transcript-page-progress.js';
 
+const POINTER_SCROLL_DRAG_THRESHOLD_PX = 4;
+
 export interface ConversationTouchPoint {
 	identifier: number;
 	clientY: number;
@@ -83,6 +85,16 @@ export function observeConversationViewportScrollGestures(
 	report: ConversationScrollIntentReporter,
 ): () => void {
 	const touchGesture = new ConversationTouchScrollGesture();
+	let pointerId: number | null = null;
+	let pointerStartY: number | null = null;
+	let pointerClientY: number | null = null;
+	let pointerDragActive = false;
+	const resetPointer = () => {
+		pointerId = null;
+		pointerStartY = null;
+		pointerClientY = null;
+		pointerDragActive = false;
+	};
 	const touchPoints = (event: TouchEvent): ConversationTouchPoint[] =>
 		Array.from(event.touches, (touch) => ({
 			identifier: touch.identifier,
@@ -105,7 +117,39 @@ export function observeConversationViewportScrollGestures(
 		if (event.touches.length === 0) report({ direction: null, touch: 'end' });
 	};
 	const handlePointerDown = (event: PointerEvent) => {
-		if (event.button === 0 && event.pointerType !== 'touch') report({ direction: null, touch: null });
+		if (event.button !== 0 || event.pointerType === 'touch') return;
+		pointerId = event.pointerId;
+		pointerStartY = event.clientY;
+		pointerClientY = event.clientY;
+		pointerDragActive = false;
+	};
+	const handlePointerMove = (event: PointerEvent) => {
+		if (
+			event.pointerId !== pointerId ||
+			pointerStartY === null ||
+			pointerClientY === null
+		) {
+			return;
+		}
+		if ((event.buttons & 1) === 0) {
+			resetPointer();
+			return;
+		}
+		if (
+			!pointerDragActive &&
+			Math.abs(event.clientY - pointerStartY) < POINTER_SCROLL_DRAG_THRESHOLD_PX
+		) {
+			return;
+		}
+		const previousClientY = pointerDragActive ? pointerClientY : pointerStartY;
+		pointerDragActive = true;
+		pointerClientY = event.clientY;
+		const direction = conversationScrollbarScrollDirection(previousClientY, event.clientY);
+		if (direction) report({ direction, touch: null });
+	};
+	const handlePointerEnd = (event: PointerEvent) => {
+		if (event.pointerId !== pointerId) return;
+		resetPointer();
 	};
 	const handleKeydown = (event: KeyboardEvent) => {
 		if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
@@ -123,6 +167,9 @@ export function observeConversationViewportScrollGestures(
 	node.addEventListener('touchend', handleTouchEnd, { capture: true, passive: true });
 	node.addEventListener('touchcancel', handleTouchEnd, { capture: true, passive: true });
 	node.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: true });
+	node.addEventListener('pointermove', handlePointerMove, { capture: true, passive: true });
+	node.addEventListener('pointerup', handlePointerEnd, { capture: true, passive: true });
+	node.addEventListener('pointercancel', handlePointerEnd, { capture: true, passive: true });
 	node.addEventListener('keydown', handleKeydown, { capture: true });
 
 	return () => {
@@ -132,6 +179,9 @@ export function observeConversationViewportScrollGestures(
 		node.removeEventListener('touchend', handleTouchEnd, { capture: true });
 		node.removeEventListener('touchcancel', handleTouchEnd, { capture: true });
 		node.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+		node.removeEventListener('pointermove', handlePointerMove, { capture: true });
+		node.removeEventListener('pointerup', handlePointerEnd, { capture: true });
+		node.removeEventListener('pointercancel', handlePointerEnd, { capture: true });
 		node.removeEventListener('keydown', handleKeydown, { capture: true });
 	};
 }

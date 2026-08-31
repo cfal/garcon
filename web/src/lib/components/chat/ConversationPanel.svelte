@@ -189,7 +189,7 @@
 		if (!node || !isVisible) return;
 		const stop = observeConversationViewportScrollGestures(node, (intent) => {
 			if (intent.touch !== null) panel.scroll.noteNativeTouchLifecycle(intent.touch);
-			if (intent.touch !== 'end') {
+			if (intent.direction !== null) {
 				panel.scroll.noteUserScrollIntent(
 					intent.direction,
 					intent.touch === null ? 'other' : 'native-touch',

@@ -1311,6 +1311,143 @@ describe('Chromium workspace windows', () => {
     );
   });
 
+  test('keeps two bottom-pinned Chats at the end while the composer changes windows', async () => {
+    await withChromiumFixture(
+      'workspace-window-two-chat-bottom-handoff',
+      async (fixture, markPhase) => {
+        const turnContent = (chatLabel: string, index: number) =>
+          `${chatLabel}-turn-${index} ${Array.from(
+            { length: 60 },
+            (_, wordIndex) => `${chatLabel}-wrapping-word-${wordIndex + 1}`,
+          ).join(' ')}`;
+        const createScrollableChat = async (chatLabel: string): Promise<string> => {
+          const chatId = await createChat(fixture, turnContent(chatLabel, 0));
+          for (let index = 1; index < 8; index += 1) {
+            const accepted = await fixture.integration.client.runDirectChat({
+              chatId,
+              content: turnContent(chatLabel, index),
+              agent: fixture.integration.directAgents.openAi,
+            });
+            await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
+          }
+          return chatId;
+        };
+
+        markPhase('creating two scrollable Chat panels');
+        const firstChatId = await createScrollableChat('first-window');
+        const secondChatId = await createScrollableChat('second-window');
+        await openChat(fixture, firstChatId);
+        await fixture.page
+          .locator(`[data-sidebar-virtual-row="${secondChatId}"]`)
+          .waitFor({ state: 'visible' });
+        const firstWindowId = await fixture.page
+          .locator('[data-workspace-window-current="true"]')
+          .getAttribute('data-workspace-window-id');
+        if (!firstWindowId) throw new Error('Missing the first Chat window.');
+
+        const secondWindowId = await openNewWindow(fixture.page, 'Open Files');
+        await dragChatToWindow(fixture.page, {
+          chatId: secondChatId,
+          windowId: secondWindowId,
+          target: 'center',
+          expectedLabel: 'Add as tab',
+        });
+        await conversationPanel(fixture.page, secondWindowId)
+          .getByText(`echo:${turnContent('second-window', 7)}`, { exact: true })
+          .waitFor();
+
+        const surfaceIds = [`chat-view:${firstWindowId}`, `chat-view:${secondWindowId}`];
+        markPhase('pinning both Chat panels to their physical ends');
+        for (const surfaceId of surfaceIds) {
+          await fixture.page
+            .locator(`[data-conversation-panel="${surfaceId}"] [data-chat-scroll-viewport]`)
+            .evaluate((element) => {
+              const viewport = element as HTMLElement;
+              viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 1 }));
+              viewport.scrollTop = viewport.scrollHeight;
+              viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+            });
+        }
+        await fixture.page.waitForFunction((expectedSurfaceIds) => {
+          return expectedSurfaceIds.every((surfaceId) => {
+            const viewport = document.querySelector<HTMLElement>(
+              `[data-conversation-panel="${surfaceId}"] [data-chat-scroll-viewport]`,
+            );
+            return (
+              viewport !== null &&
+              viewport.scrollHeight > viewport.clientHeight &&
+              viewport.dataset.chatPinnedToBottom === 'true' &&
+              viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1
+            );
+          });
+        }, surfaceIds);
+
+        markPhase('alternating clicks at different transcript heights');
+        const switches = [
+          { windowId: firstWindowId, surfaceId: surfaceIds[0]!, yFraction: 0.2 },
+          { windowId: secondWindowId, surfaceId: surfaceIds[1]!, yFraction: 0.8 },
+          { windowId: firstWindowId, surfaceId: surfaceIds[0]!, yFraction: 0.5 },
+          { windowId: secondWindowId, surfaceId: surfaceIds[1]!, yFraction: 0.25 },
+          { windowId: firstWindowId, surfaceId: surfaceIds[0]!, yFraction: 0.75 },
+          { windowId: secondWindowId, surfaceId: surfaceIds[1]!, yFraction: 0.45 },
+        ];
+        for (const target of switches) {
+          const viewport = fixture.page.locator(
+            `[data-conversation-panel="${target.surfaceId}"] [data-chat-scroll-viewport]`,
+          );
+          const bounds = await viewport.boundingBox();
+          if (!bounds) throw new Error(`Missing viewport geometry for ${target.surfaceId}.`);
+          await viewport.click({
+            position: {
+              x: bounds.width / 2,
+              y: Math.max(8, Math.min(bounds.height - 8, bounds.height * target.yFraction)),
+            },
+          });
+          await fixture.page.waitForFunction(
+            ({ expectedWindowId, expectedSurfaceId }) => {
+              const currentWindowId = document
+                .querySelector('[data-workspace-window-current="true"]')
+                ?.getAttribute('data-workspace-window-id');
+              const panel = document.querySelector<HTMLElement>(
+                `[data-conversation-panel="${expectedSurfaceId}"]`,
+              );
+              return (
+                currentWindowId === expectedWindowId &&
+                panel?.dataset.conversationPanelComposerAnchor === 'true'
+              );
+            },
+            { expectedWindowId: target.windowId, expectedSurfaceId: target.surfaceId },
+          );
+          await fixture.page.evaluate(
+            () =>
+              new Promise<void>((resolve) => {
+                let remaining = 4;
+                const next = () => {
+                  remaining -= 1;
+                  if (remaining === 0) resolve();
+                  else requestAnimationFrame(next);
+                };
+                requestAnimationFrame(next);
+              }),
+          );
+
+          const distancesFromEnd = await fixture.page.evaluate((expectedSurfaceIds) => {
+            return expectedSurfaceIds.map((surfaceId) => {
+              const viewport = document.querySelector<HTMLElement>(
+                `[data-conversation-panel="${surfaceId}"] [data-chat-scroll-viewport]`,
+              );
+              if (!viewport) throw new Error(`Missing Chat viewport for ${surfaceId}.`);
+              return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+            });
+          }, surfaceIds);
+          expect(Math.max(...distancesFromEnd)).toBeLessThanOrEqual(1);
+        }
+
+        fixture.assertNoBrowserErrors();
+      },
+    );
+  });
+
   test('replaces an inactive Chat tab icon while the Chat is processing', async () => {
     await withChromiumFixture(
       'workspace-window-processing-indicator',

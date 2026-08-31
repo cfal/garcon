@@ -507,6 +507,17 @@ describe('ConversationScrollController', () => {
 		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
 	});
 
+	it('corrects physical end drift while the viewport remains logically pinned', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
+		const fixture = controllerFixture({ viewport });
+
+		fixture.controller.handleScroll();
+
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		expect(fixture.controller.isPinnedToBottom).toBe(true);
+		expect(fixture.state.isUserScrolledUp).toBe(false);
+	});
+
 	it('discards a preserved prepend handoff on opposite native movement', () => {
 		const cancelForUserIntent = vi
 			.fn<ConversationViewportPort['cancelForUserIntent']>()
