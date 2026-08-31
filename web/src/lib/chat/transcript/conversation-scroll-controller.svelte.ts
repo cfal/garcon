@@ -381,7 +381,7 @@ export class ConversationScrollController {
 				this.#preserveHistoryBrowsing();
 			}
 		} else if (!nearBottom && (this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp)) {
-			return void viewport?.scrollToEnd();
+			return void this.deps.getViewport()?.scrollToEnd();
 		}
 
 		this.#handleBoundaryProximity('earlier', this.#isNearPageBoundary('earlier', position));
