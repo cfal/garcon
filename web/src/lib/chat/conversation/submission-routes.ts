@@ -155,12 +155,11 @@ export async function submitSteerRoute(
 			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
 			restoreSteerComposer(deps, context, clearedComposerRevision);
 		}
-		if (deps.sessions.selectedChatId === context.chatId) {
-			deps.chatState.appendLocalNotice(
-				'error',
-				outcomeUnknown ? m.chat_notice_steer_outcome_unconfirmed() : steerFailureNotice(error),
-			);
-		}
+		deps.chatState.appendLocalNoticeForChat(
+			context.chatId,
+			'error',
+			outcomeUnknown ? m.chat_notice_steer_outcome_unconfirmed() : steerFailureNotice(error),
+		);
 		return outcomeUnknown ? 'unknown' : 'rejected';
 	}
 }
@@ -183,7 +182,11 @@ export function submitSteerPreferenceRoute(
 		handoffPending: input.handoffPending,
 	});
 	if (rejection) {
-		deps.chatState.appendLocalNotice('error', steerShortcutRejectionNotice(rejection));
+		deps.chatState.appendLocalNoticeForChat(
+			input.chatId,
+			'error',
+			steerShortcutRejectionNotice(rejection),
+		);
 		return Promise.resolve('rejected');
 	}
 

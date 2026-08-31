@@ -23,7 +23,7 @@ export interface LifecycleContext {
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiPort,
-		'clearPendingPermissionRequests' | 'clearTurnPermissionRequests'
+		'clearPendingPermissionsForChat' | 'clearTurnPermissionRequestsForChat'
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;
 	isChatProcessing: (chatId?: string | null) => boolean;
@@ -61,8 +61,8 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	if (agentRunSucceeded(msg) && !successorIsProcessing) ctx.notifyCompletion();
 
 	// Preserve plan-exit permission requests across turn boundaries
-	if (!successorIsProcessing) {
-		ctx.conversationUi.clearTurnPermissionRequests();
+	if (!successorIsProcessing && completedChatId) {
+		ctx.conversationUi.clearTurnPermissionRequestsForChat(completedChatId);
 	}
 }
 
@@ -73,5 +73,7 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 	if (!successorIsProcessing) ctx.clearTurnStatus(errorChatId);
 
 	ctx.appendServerNotice(msg.chatId, 'error', msg.error || m.chat_notice_agent_error());
-	if (!successorIsProcessing) ctx.conversationUi.clearPendingPermissionRequests();
+	if (!successorIsProcessing && errorChatId) {
+		ctx.conversationUi.clearPendingPermissionsForChat(errorChatId);
+	}
 }

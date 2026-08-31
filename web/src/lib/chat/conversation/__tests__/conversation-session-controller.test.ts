@@ -28,6 +28,7 @@ import {
 } from '../conversation-session-controller.svelte';
 import {
 	ActiveTranscriptState,
+	type ChatLoadMessagesOptions,
 	type ChatRestoreResult,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
@@ -606,12 +607,14 @@ function createDeps(chat = createRunningChat()) {
 		},
 		modelCatalog: {
 			isLocalModel: vi.fn(() => false),
-			selectionFor: vi.fn<SessionControllerDeps['modelCatalog']['selectionFor']>((_provider, model) => ({
-				model,
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			})),
+			selectionFor: vi.fn<SessionControllerDeps['modelCatalog']['selectionFor']>(
+				(_provider, model) => ({
+					model,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				}),
+			),
 			selectionValueFor: vi.fn((_provider, model) => model),
 			getAgentLabel: vi.fn((agentId: string) => agentId),
 			getDefaultAgentSettings: vi.fn((agentId: string) => ({
@@ -957,18 +960,26 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
 	});
 
-	it('retries the explicitly supplied panel transcript without using the selected projection', async () => {
+	it('retries a panel through its shared snapshot loader without using the selected projection', async () => {
 		const { deps } = createDeps();
 		deps.sessions.selectedChatId = 'chat-2';
 		const panelTranscript = new ActiveTranscriptState();
 		panelTranscript.activateChat('chat-1');
 		const panelLoad = vi.spyOn(panelTranscript, 'loadMessages').mockResolvedValue([]);
+		const loadPanelSnapshot = vi.fn(async (options: ChatLoadMessagesOptions) => {
+			await panelTranscript.loadMessages('chat-1', options);
+			return true;
+		});
 		const markValidated = vi.spyOn(panelTranscript.transcriptCache, 'markValidated');
 		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
 		const controller = new ConversationSessionController(deps);
 
-		await controller.loadPanelChat('chat-1', panelTranscript);
+		await controller.loadPanelChat('chat-1', panelTranscript, loadPanelSnapshot);
 
+		expect(loadPanelSnapshot).toHaveBeenCalledWith({
+			minimumLimit: 0,
+			purpose: 'activation',
+		});
 		expect(panelLoad).toHaveBeenCalledWith('chat-1', {
 			minimumLimit: 0,
 			purpose: 'activation',
@@ -2039,7 +2050,8 @@ describe('ConversationSessionController', () => {
 		expect(deps.sessions.byId['draft-1'].status).toBe('draft');
 		expect(deps.composerState.inputText).toBe('retry this request');
 		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'draft-1',
 			'error',
 			expect.stringContaining('startup unavailable'),
 		);
@@ -2172,14 +2184,14 @@ describe('ConversationSessionController', () => {
 		await flushPromises();
 
 		expect(mockRunChat).toHaveBeenCalledWith(
-				expect.objectContaining({
-					chatId: 'chat-1',
-					permissionMode: 'bypassPermissions',
-					model: 'resolved-model',
-					apiProviderId: 'provider-1',
-					modelEndpointId: 'endpoint-default',
-					modelProtocol: 'openai-compatible',
-					agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
+			expect.objectContaining({
+				chatId: 'chat-1',
+				permissionMode: 'bypassPermissions',
+				model: 'resolved-model',
+				apiProviderId: 'provider-1',
+				modelEndpointId: 'endpoint-default',
+				modelProtocol: 'openai-compatible',
+				agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
 			}),
 		);
 		expect(deps.lifecycleForChat).toHaveBeenCalledWith('chat-1');
@@ -2550,7 +2562,8 @@ describe('ConversationSessionController', () => {
 		).submitComposerWithSteerPreference('chat-1');
 
 		expect(unsupportedOutcome).toBe('rejected');
-		expect(unsupported.deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+		expect(unsupported.deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
 			'error',
 			'This agent does not support steering.',
 		);
@@ -2568,7 +2581,8 @@ describe('ConversationSessionController', () => {
 		).submitComposerWithSteerPreference('chat-1');
 
 		expect(attachmentOutcome).toBe('rejected');
-		expect(attached.deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+		expect(attached.deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
 			'error',
 			'Remove attachments before steering the active turn.',
 		);
@@ -2586,7 +2600,8 @@ describe('ConversationSessionController', () => {
 		const outcome = await controller.submitComposerWithSteerPreference('chat-1');
 
 		expect(outcome).toBe('rejected');
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
 			'error',
 			'Wait for the current work and queued messages to finish before handing this chat to another agent.',
 		);
@@ -2733,6 +2748,7 @@ describe('ConversationSessionController', () => {
 	it('explains that attachments are unsupported when an idle chat has queued input', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
+		deps.sessions.selectedChatId = 'chat-2';
 		deps.composerState.inputText = 'queue with attachment';
 		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
 		deps.conversationUi.getExecutionControl.mockReturnValue(
@@ -2759,10 +2775,11 @@ describe('ConversationSessionController', () => {
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(deps.chatState.localNotices[0]).toMatchObject({
+		expect(deps.chatState.localNoticesByChatId['chat-1']?.[0]).toMatchObject({
 			noticeType: 'error',
 			content: 'Attachments are not supported in queued messages.',
 		});
+		expect(deps.chatState.localNoticesByChatId['chat-2']).toBeUndefined();
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
@@ -2924,7 +2941,8 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.composerState.inputText).toBe('first queued message');
 		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
 			'error',
 			expect.stringContaining('first queued message'),
 		);
@@ -3608,7 +3626,8 @@ describe('ConversationSessionController', () => {
 
 			expect(mockRunChat).not.toHaveBeenCalled();
 			expect(deps.composerState.inputText).toBe('Wait and delegate');
-			expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				'chat-1',
 				'error',
 				expect.stringContaining('queued messages'),
 			);

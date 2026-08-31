@@ -55,11 +55,7 @@ export interface ChatReconnectCoordinatorOptions {
 	chatState: ReconnectTranscriptState;
 	panels?: ConversationPanelRegistry;
 	conversationUi: ReconnectConversationUiState;
-	sessions: Pick<
-		ChatSessionsPort,
-		| 'selectedChatId'
-		| 'quietRefreshChats'
-	>;
+	sessions: Pick<ChatSessionsPort, 'selectedChatId' | 'quietRefreshChats'>;
 	getExecutionControl?: (chatId: string) => Promise<{ control: ChatExecutionControlState }>;
 	getBackgroundCursors: () => ChatTranscriptCursor[];
 	markBackgroundStale: (chatId: string) => void;
@@ -194,20 +190,16 @@ export class ChatReconnectCoordinator {
 				chatId,
 				transcriptViewId: cursor.transcriptViewId,
 				afterOrdinal: cursor.lastOrdinal,
-				isCurrent: () =>
-					epoch === this.#reconnectEpoch && panels.panelsForChat(chatId).length > 0,
-				apply: (page) => panels.applyReconnectReplayPage(
-					replayToken,
-					chatId,
-					{
+				isCurrent: () => epoch === this.#reconnectEpoch && panels.panelsForChat(chatId).length > 0,
+				apply: (page) =>
+					panels.applyReconnectReplayPage(replayToken, chatId, {
 						transcriptViewId: page.transcriptViewId,
 						messages: page.messages,
 						firstOrdinal: page.firstOrdinal,
 						lastOrdinal: page.lastOrdinal,
 						resendCandidates: page.resendCandidates,
 						noticeRevision: panels.noticeRevisionFor(chatId),
-					},
-				) === 'applied',
+					}) === 'applied',
 			});
 			if (!message) return;
 			const replayResult = panels.finishReconnectReplay(replayToken, chatId);
@@ -247,11 +239,8 @@ export class ChatReconnectCoordinator {
 			if (epoch === this.#reconnectEpoch) panels.markChatStale(chatId);
 			return;
 		}
-		if (
-			!loaded
-			|| epoch !== this.#reconnectEpoch
-			|| panels.panelsForChat(chatId).length === 0
-		) return;
+		if (!loaded || epoch !== this.#reconnectEpoch || panels.panelsForChat(chatId).length === 0)
+			return;
 		panels.transcriptCache.markValidated(chatId);
 	}
 
@@ -358,18 +347,18 @@ export class ChatReconnectCoordinator {
 				chatId,
 				transcriptViewId: cursor.transcriptViewId,
 				afterOrdinal: cursor.lastOrdinal,
-				isCurrent: () => (
-					epoch === this.#reconnectEpoch && this.options.sessions.selectedChatId === chatId
-				),
-				apply: (page) => this.options.chatState.applyReconnectReplayPage(
-					replayToken,
-					chatId,
-					page.transcriptViewId,
-					page.messages,
-					page.firstOrdinal,
-					page.lastOrdinal,
-					page.resendCandidates,
-				) === 'applied',
+				isCurrent: () =>
+					epoch === this.#reconnectEpoch && this.options.sessions.selectedChatId === chatId,
+				apply: (page) =>
+					this.options.chatState.applyReconnectReplayPage(
+						replayToken,
+						chatId,
+						page.transcriptViewId,
+						page.messages,
+						page.firstOrdinal,
+						page.lastOrdinal,
+						page.resendCandidates,
+					) === 'applied',
 			});
 			if (!message) return;
 			const replayResult = this.options.chatState.finishReconnectReplay(replayToken, chatId);
@@ -381,8 +370,8 @@ export class ChatReconnectCoordinator {
 
 			const currentCursor = this.options.chatState.getCursor();
 			if (
-				currentCursor.transcriptViewId !== cursor.transcriptViewId
-				|| currentCursor.lastOrdinal < message.throughOrdinal
+				currentCursor.transcriptViewId !== cursor.transcriptViewId ||
+				currentCursor.lastOrdinal < message.throughOrdinal
 			) {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
@@ -441,13 +430,7 @@ export class ChatReconnectCoordinator {
 					transcriptViewId: cursor.transcriptViewId,
 					afterOrdinal: cursor.lastOrdinal,
 					isCurrent: () => epoch === this.#reconnectEpoch,
-					apply: (page) => this.options.onBackgroundMessages?.(
-						cursor.chatId,
-						page.transcriptViewId,
-						page.messages,
-						page.firstOrdinal,
-						page.lastOrdinal,
-					),
+					apply: (page) => this.#applyBackgroundReplayPage(cursor.chatId, page),
 				});
 				if (!message) return;
 				shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
@@ -461,6 +444,32 @@ export class ChatReconnectCoordinator {
 		if (epoch === this.#reconnectEpoch && shouldRefresh) {
 			await this.#refreshChatsQuietly();
 		}
+	}
+
+	#applyBackgroundReplayPage(
+		chatId: string,
+		page: ChatSubscribedMessage,
+	): Promise<boolean | void> | boolean | void {
+		const panels = this.options.panels;
+		if (panels && panels.panelsForChat(chatId).length > 0) {
+			const result = panels.applyCommittedBatch({
+				chatId,
+				transcriptViewId: page.transcriptViewId,
+				messages: page.messages,
+				firstOrdinal: page.firstOrdinal,
+				lastOrdinal: page.lastOrdinal,
+				resendCandidates: page.resendCandidates,
+				noticeRevision: panels.noticeRevisionFor(chatId),
+			});
+			return result.kind === 'applied' && result.localRecoverySurfaceIds.length === 0;
+		}
+		return this.options.onBackgroundMessages?.(
+			chatId,
+			page.transcriptViewId,
+			page.messages,
+			page.firstOrdinal,
+			page.lastOrdinal,
+		);
 	}
 
 	async #refreshChatsQuietly(): Promise<void> {
@@ -486,9 +495,9 @@ export class ChatReconnectCoordinator {
 		});
 		const message = parseServerWsMessage(raw);
 		if (
-			!(message instanceof ChatSubscribedMessage)
-			|| message.chatId !== chatId
-			|| message.transcriptViewId !== transcriptViewId
+			!(message instanceof ChatSubscribedMessage) ||
+			message.chatId !== chatId ||
+			message.transcriptViewId !== transcriptViewId
 		) {
 			throw new Error('Unexpected chat-subscribe response');
 		}
@@ -514,8 +523,8 @@ export class ChatReconnectCoordinator {
 			}
 			throughOrdinal ??= message.throughOrdinal;
 			if (
-				message.nextAfterOrdinal < afterOrdinal
-				|| (message.hasMore && message.nextAfterOrdinal === afterOrdinal)
+				message.nextAfterOrdinal < afterOrdinal ||
+				(message.hasMore && message.nextAfterOrdinal === afterOrdinal)
 			) {
 				throw new Error('Transcript replay page did not advance its requested cursor');
 			}

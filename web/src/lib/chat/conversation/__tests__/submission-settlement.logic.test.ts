@@ -14,7 +14,7 @@ function createDeps() {
 	);
 	const deps = {
 		chatState: {
-			appendLocalNotice: vi.fn(),
+			appendLocalNoticeForChat: vi.fn(),
 			clearOptimisticUserInput: vi.fn(),
 		},
 		composerState: {
@@ -88,7 +88,8 @@ describe('settleSubmissionFailure', () => {
 				const restores = ownsComposer && failure.outcome === 'rejected';
 				expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledTimes(restores ? 1 : 0);
 				expect(onRejected).toHaveBeenCalledTimes(failure.outcome === 'rejected' ? 1 : 0);
-				expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+				expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+					'chat-1',
 					'error',
 					failure.outcome === 'unknown' ? 'unknown notice' : 'rejected notice',
 				);

@@ -6,6 +6,7 @@ import { createClientCommandId } from '$lib/chat/conversation/client-command-id.
 import {
 	INITIAL_VISIBLE_MESSAGES,
 	type ActiveTranscriptPort,
+	type ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -96,6 +97,8 @@ type SessionTranscriptLoadTarget = Pick<
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
 };
+
+type PanelTranscriptSnapshotLoader = (options: ChatLoadMessagesOptions) => Promise<boolean>;
 
 type SessionComposerState = Pick<
 	ComposerState,
@@ -497,9 +500,14 @@ export class ConversationSessionController {
 			// Leaves restored messages visible until reconnect or a manual retry.
 		}
 	}
-	async loadPanelChat(chatId: string, transcript: SessionTranscriptLoadTarget): Promise<void> {
+
+	async loadPanelChat(
+		chatId: string,
+		transcript: SessionTranscriptLoadTarget,
+		loadPanelSnapshot: PanelTranscriptSnapshotLoader,
+	): Promise<void> {
 		try {
-			await this.#loadChat(chatId, { restoreBottom: false }, transcript);
+			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
 		} catch {
 			// Leaves the panel's load error visible for another explicit retry.
 		}
@@ -509,6 +517,7 @@ export class ConversationSessionController {
 		chatId: string,
 		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
 		transcript: SessionTranscriptLoadTarget = this.deps.chatState,
+		loadPanelSnapshot?: PanelTranscriptSnapshotLoader,
 	): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
@@ -527,10 +536,16 @@ export class ConversationSessionController {
 		}
 
 		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
-		await transcript.loadMessages(chatId, {
+		const loadOptions: ChatLoadMessagesOptions = {
 			minimumLimit: minimumMessageLimit,
 			purpose: 'activation',
-		});
+		};
+		if (loadPanelSnapshot) {
+			const loaded = await loadPanelSnapshot(loadOptions);
+			if (!loaded) return;
+		} else {
+			await transcript.loadMessages(chatId, loadOptions);
+		}
 		transcript.transcriptCache.markValidated(chatId);
 		if (deps.sessions.selectedChatId !== chatId) return;
 
@@ -635,7 +650,11 @@ export class ConversationSessionController {
 		});
 		if (slash.kind === 'handled') return slash.outcome;
 		if (handoffPending && slash.kind === 'goal-control') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_handoff_requires_idle(),
+			);
 			return 'rejected';
 		}
 
@@ -690,7 +709,11 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_queue_attachments_unavailable(),
+				);
 				return 'rejected';
 			}
 			if (route === 'handoff-requires-idle') {
@@ -700,7 +723,11 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_handoff_requires_idle(),
+				);
 				return 'rejected';
 			}
 			if (route !== 'direct' && directAdmission) {
@@ -721,7 +748,8 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice(
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
 					'error',
 					m.chat_notice_failed_prepare_attachments({
 						detail: errorDetail(error),
@@ -808,11 +836,11 @@ export class ConversationSessionController {
 		transcript?: SessionTranscriptLoadTarget & ConversationForkSource['transcript'],
 	): Promise<void> {
 		const source = transcript
-			? {
+			? ({
 					transcript,
 					refetchTranscript: () =>
 						this.#loadChat(sourceChatId, { restoreBottom: false }, transcript),
-				} satisfies ConversationForkSource
+				} satisfies ConversationForkSource)
 			: undefined;
 		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal, source);
 	}
@@ -909,11 +937,7 @@ export class ConversationSessionController {
 		this.#queue.handleControlError(action, error);
 	}
 
-	handleQueueControlErrorForChat(
-		chatId: string,
-		action: 'pause' | 'resume',
-		error: unknown,
-	): void {
+	handleQueueControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
 		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
 

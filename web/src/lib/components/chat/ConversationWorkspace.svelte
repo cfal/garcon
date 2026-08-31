@@ -312,7 +312,9 @@
 	const panelActions: ConversationPanelActions = {
 		reload(surfaceId, chatId) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
-			void controller.loadPanelChat(chatId, panel.transcript);
+			void controller.loadPanelChat(chatId, panel.transcript, (options) =>
+				conversationPanels.loadChatSnapshot(chatId, options),
+			);
 		},
 		decidePermission(surfaceId, chatId, permissionOccurrenceId, decision) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -382,11 +384,7 @@
 			assertRenderedPanel(surfaceId, chatId);
 			const chat = sessions.byId[chatId];
 			if (chat?.projectPath && chat.effectiveProjectKey) {
-				quickGitBranches.openNewBranchDialog(
-					chat.projectPath,
-					surfaceId,
-					chat.effectiveProjectKey,
-				);
+				quickGitBranches.openNewBranchDialog(chat.projectPath, surfaceId, chat.effectiveProjectKey);
 			}
 		},
 		switchBranch(surfaceId, chatId, branch) {
@@ -405,10 +403,7 @@
 		},
 		closeSwitchBranchDialog(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			if (
-				workspace.composerAnchorSurfaceId === surfaceId &&
-				sessions.selectedChatId === chatId
-			) {
+			if (workspace.composerAnchorSurfaceId === surfaceId && sessions.selectedChatId === chatId) {
 				appShell.requestComposerFocus();
 			}
 		},
