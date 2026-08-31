@@ -544,21 +544,21 @@ describe('sidebar search interactions', () => {
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
 	});
 
-	it('opens Work Map from the sidebar overflow menu', async () => {
-		const onShowWorkMap = vi.fn();
+	it('opens Chat Map from the sidebar overflow menu', async () => {
+		const onShowChatMap = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onShowScheduledPrompts: vi.fn(),
-			onShowWorkMap,
+			onShowChatMap,
 			onShowSettings: vi.fn(),
 		});
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open Work Map' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Open chat map' }));
 
-		expect(onShowWorkMap).toHaveBeenCalledOnce();
+		expect(onShowChatMap).toHaveBeenCalledOnce();
 	});
 
 	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {

@@ -1,9 +1,9 @@
 <script lang="ts">
 	let {
 		onChatSelect,
-		onShowWorkMap,
-	}: { onChatSelect: (chatId: string) => void; onShowWorkMap: () => void } = $props();
+		onShowChatMap,
+	}: { onChatSelect: (chatId: string) => void; onShowChatMap: () => void } = $props();
 </script>
 
 <button type="button" onclick={() => onChatSelect('chat-test')}>Select test chat</button>
-<button type="button" onclick={onShowWorkMap}>Open Work Map from sidebar</button>
+<button type="button" onclick={onShowChatMap}>Open chat map from sidebar</button>

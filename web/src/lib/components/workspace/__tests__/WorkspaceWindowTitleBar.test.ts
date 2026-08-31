@@ -498,7 +498,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'pull-requests',
 			'files',
 			'commit',
-			'work-map',
+			'chat-map',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
 			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
@@ -522,7 +522,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
-			m.workspace_open_surface({ surface: m.workspace_surface_work_map() }),
+			m.workspace_open_chat_map(),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });

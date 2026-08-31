@@ -8,7 +8,7 @@ import { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface
 import type { GitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
 import type { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
-import { WorkMapController } from '$lib/work-map/work-map-controller.svelte.js';
+import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
@@ -45,7 +45,7 @@ export interface SingletonControllerByKind {
 	'pull-requests': PullRequestsStore;
 	files: FilesSurfaceController;
 	commit: CommitController;
-	'work-map': WorkMapController;
+	'chat-map': ChatMapController;
 }
 
 type SingletonControllerFactories = {
@@ -72,7 +72,7 @@ export class SingletonSurfaceRegistry {
 		'pull-requests': false,
 		files: false,
 		commit: false,
-		'work-map': false,
+		'chat-map': false,
 	};
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
@@ -82,7 +82,7 @@ export class SingletonSurfaceRegistry {
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
 			files: () => new FilesSurfaceController(),
 			commit: () => this.deps.createCommit(),
-			'work-map': () => new WorkMapController(),
+			'chat-map': () => new ChatMapController(),
 			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
 				controller.setCapability(
@@ -110,8 +110,8 @@ export class SingletonSurfaceRegistry {
 		return this.#controller('files');
 	}
 
-	workMap(): WorkMapController {
-		return this.#controller('work-map');
+	chatMap(): ChatMapController {
+		return this.#controller('chat-map');
 	}
 
 	commit(): CommitController {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { WorkMapController } from '../work-map-controller.svelte';
+import { ChatMapController } from '../chat-map-controller.svelte';
 
-describe('WorkMapController', () => {
+describe('ChatMapController', () => {
 	it('updates query and replaces collapse sets immutably', () => {
-		const controller = new WorkMapController();
+		const controller = new ChatMapController();
 		const initial = controller.collapsedNodeKeys;
 
 		controller.setQuery('lineage');
@@ -20,7 +20,7 @@ describe('WorkMapController', () => {
 	});
 
 	it('collapses and expands the supplied full topology', () => {
-		const controller = new WorkMapController();
+		const controller = new ChatMapController();
 
 		controller.collapseAll(['chat:root', 'missing:parent', 'chat:root']);
 		expect(controller.collapsedNodeKeys).toEqual(new Set(['chat:root', 'missing:parent']));
@@ -30,7 +30,7 @@ describe('WorkMapController', () => {
 	});
 
 	it('prunes stale keys without replacing an unchanged set', () => {
-		const controller = new WorkMapController();
+		const controller = new ChatMapController();
 		controller.collapseAll(['chat:keep', 'chat:remove']);
 		const before = controller.collapsedNodeKeys;
 
@@ -43,7 +43,7 @@ describe('WorkMapController', () => {
 	});
 
 	it('ignores project and presentation changes and resets on disposal', () => {
-		const controller = new WorkMapController();
+		const controller = new ChatMapController();
 		controller.setQuery('query');
 		controller.toggleNode('chat:root');
 

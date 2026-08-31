@@ -4,29 +4,29 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
-	import type { WorkMapChatNode } from '$lib/work-map/work-map-model';
+	import type { ChatMapChatNode } from '$lib/chat-map/chat-map-model';
 
-	interface WorkMapChatCardProps {
-		node: WorkMapChatNode;
+	interface ChatMapChatCardProps {
+		node: ChatMapChatNode;
 		selectedChatId: string | null;
 		currentTime: Date;
 		searchActive: boolean;
 	}
 
-	function getRelationLabel(relation: WorkMapChatNode['relation']): string | null {
+	function getRelationLabel(relation: ChatMapChatNode['relation']): string | null {
 		switch (relation) {
 			case 'fork':
-				return m.work_map_relation_fork();
+				return m.chat_map_relation_fork();
 			case 'handoff':
-				return m.work_map_relation_handoff();
+				return m.chat_map_relation_handoff();
 			case 'delegation':
-				return m.work_map_relation_delegation();
+				return m.chat_map_relation_delegation();
 			case null:
 				return null;
 		}
 	}
 
-	let { node, selectedChatId, currentTime, searchActive }: WorkMapChatCardProps = $props();
+	let { node, selectedChatId, currentTime, searchActive }: ChatMapChatCardProps = $props();
 
 	const title = $derived(node.chat.title || m.sidebar_chats_unnamed());
 	const selected = $derived(selectedChatId === node.chat.id);
@@ -43,14 +43,14 @@
 		selected ? 'border-primary/50 bg-accent/30' : 'border-border hover:border-primary/30',
 		searchActive && !node.matchesQuery && 'opacity-70',
 	)}
-	data-work-map-chat-card={node.chat.id}
-	data-work-map-context={searchActive && !node.matchesQuery ? 'true' : undefined}
+	data-chat-map-chat-card={node.chat.id}
+	data-chat-map-context={searchActive && !node.matchesQuery ? 'true' : undefined}
 >
 	<a
 		href={`/chat/${node.chat.id}`}
 		class="block min-w-0 px-3 py-2.5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 		aria-current={selected ? 'page' : undefined}
-		data-work-map-chat-id={node.chat.id}
+		data-chat-map-chat-id={node.chat.id}
 	>
 		<div class="flex min-w-0 items-start gap-2">
 			<div class="min-w-0 flex-1">
@@ -67,11 +67,11 @@
 						<span
 							class="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
 						>
-							{m.work_map_status_current()}
+							{m.chat_map_status_current()}
 						</span>
 					{/if}
 					{#if searchActive && !node.matchesQuery}
-						<span class="sr-only">{m.work_map_context_only()}</span>
+						<span class="sr-only">{m.chat_map_context_only()}</span>
 					{/if}
 				</div>
 
@@ -106,7 +106,7 @@
 					class="mt-1 flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
 				>
 					<span class="size-2 rounded-full bg-status-processing" aria-hidden="true"></span>
-					<span class="sr-only">{m.work_map_status_processing()}</span>
+					<span class="sr-only">{m.chat_map_status_processing()}</span>
 				</span>
 			{/if}
 		</div>
@@ -115,21 +115,21 @@
 			<div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-medium">
 				{#if node.chat.isUnread}
 					<span class="rounded-full border border-primary/30 px-1.5 py-0.5 text-primary">
-						{m.work_map_status_unread()}
+						{m.chat_map_status_unread()}
 					</span>
 				{/if}
 				{#if node.chat.isArchived}
 					<span class="rounded-full border border-border px-1.5 py-0.5 text-muted-foreground">
-						{m.work_map_status_archived()}
+						{m.chat_map_status_archived()}
 					</span>
 				{/if}
 				{#if node.inCycle}
 					<span
 						class="inline-flex items-center gap-1 rounded-full border border-status-warning-border bg-status-warning/10 px-1.5 py-0.5 text-status-warning-muted-foreground"
-						title={node.cycleBreak ? m.work_map_cycle_break() : m.work_map_cycle_warning()}
+						title={node.cycleBreak ? m.chat_map_cycle_break() : m.chat_map_cycle_warning()}
 					>
 						<CircleAlert class="size-3" aria-hidden="true" />
-						{m.work_map_cycle_warning()}
+						{m.chat_map_cycle_warning()}
 					</span>
 				{/if}
 			</div>

@@ -51,7 +51,7 @@
 		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
-		onShowWorkMap?: () => void;
+		onShowChatMap?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -79,7 +79,7 @@
 		onSetDockOnRight,
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
-		onShowWorkMap,
+		onShowChatMap,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -229,10 +229,10 @@
 					{m.sidebar_actions_dock_sidebar_right()}
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuSeparator />
-				{#if onShowWorkMap}
-					<DropdownMenuItem onclick={onShowWorkMap}>
+				{#if onShowChatMap}
+					<DropdownMenuItem onclick={onShowChatMap}>
 						<Waypoints class="h-3.5 w-3.5" />
-						{m.workspace_open_surface({ surface: m.workspace_surface_work_map() })}
+						{m.workspace_open_chat_map()}
 					</DropdownMenuItem>
 				{/if}
 				<DropdownMenuItem onclick={onShowScheduledPrompts}>

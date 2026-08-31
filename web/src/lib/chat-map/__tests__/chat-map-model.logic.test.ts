@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
-import { buildWorkMapModel, type WorkMapChatNode, type WorkMapNode } from '../work-map-model';
+import { buildChatMapModel, type ChatMapChatNode, type ChatMapNode } from '../chat-map-model';
 
 function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentChatRef {
 	return relation === 'delegation'
@@ -39,8 +39,8 @@ function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessi
 	};
 }
 
-function flatten(roots: readonly WorkMapNode[]): WorkMapNode[] {
-	const result: WorkMapNode[] = [];
+function flatten(roots: readonly ChatMapNode[]): ChatMapNode[] {
+	const result: ChatMapNode[] = [];
 	const stack = [...roots].reverse();
 	while (stack.length > 0) {
 		const node = stack.pop();
@@ -53,15 +53,15 @@ function flatten(roots: readonly WorkMapNode[]): WorkMapNode[] {
 	return result;
 }
 
-function chatNode(nodes: readonly WorkMapNode[], id: string): WorkMapChatNode {
+function chatNode(nodes: readonly ChatMapNode[], id: string): ChatMapChatNode {
 	const node = nodes.find((candidate) => candidate.kind === 'chat' && candidate.chat.id === id);
 	if (!node || node.kind !== 'chat') throw new Error(`Missing chat node ${id}`);
 	return node;
 }
 
-describe('buildWorkMapModel', () => {
+describe('buildChatMapModel', () => {
 	it('builds immediate-parent chains and retains incoming relations', () => {
-		const model = buildWorkMapModel([
+		const model = buildChatMapModel([
 			chat('root'),
 			chat('fork', { parentChat: parent('root', 'fork') }),
 			chat('handoff', { parentChat: parent('fork', 'handoff') }),
@@ -80,7 +80,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('orders siblings by creation time and ID, then roots by newest subtree activity', () => {
-		const model = buildWorkMapModel([
+		const model = buildChatMapModel([
 			chat('older-root', {
 				createdAt: '2026-01-01T00:00:00.000Z',
 				lastActivityAt: '2026-01-01T00:00:00.000Z',
@@ -108,7 +108,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('shares one missing-parent root across dangling children', () => {
-		const model = buildWorkMapModel([
+		const model = buildChatMapModel([
 			chat('child-b', { parentChat: parent('gone', 'handoff') }),
 			chat('child-a', { parentChat: parent('gone', 'fork') }),
 		]);
@@ -125,8 +125,8 @@ describe('buildWorkMapModel', () => {
 
 	it('replaces a removed parent with a missing-parent root without dropping its child', () => {
 		const child = chat('child', { parentChat: parent('parent') });
-		const withParent = buildWorkMapModel([chat('parent'), child]);
-		const withoutParent = buildWorkMapModel([child]);
+		const withParent = buildChatMapModel([chat('parent'), child]);
+		const withoutParent = buildChatMapModel([child]);
 
 		expect(withParent.roots[0].key).toBe('chat:parent');
 		expect(withoutParent.roots[0].key).toBe('missing:parent');
@@ -137,7 +137,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('cuts a self-cycle and marks its chat', () => {
-		const model = buildWorkMapModel([chat('solo', { parentChat: parent('solo') })]);
+		const model = buildChatMapModel([chat('solo', { parentChat: parent('solo') })]);
 		const node = chatNode(flatten(model.roots), 'solo');
 
 		expect(model.cycleChatCount).toBe(1);
@@ -146,7 +146,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('cuts the lexicographically smallest member of a multi-chat cycle', () => {
-		const model = buildWorkMapModel([
+		const model = buildChatMapModel([
 			chat('charlie', { parentChat: parent('bravo') }),
 			chat('alpha', { parentChat: parent('charlie', 'handoff') }),
 			chat('bravo', { parentChat: parent('alpha') }),
@@ -162,7 +162,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('excludes drafts and retains archived chats', () => {
-		const model = buildWorkMapModel([
+		const model = buildChatMapModel([
 			chat('draft', { status: 'draft' }),
 			chat('archived', { isArchived: true }),
 		]);
@@ -179,7 +179,7 @@ describe('buildWorkMapModel', () => {
 		['model', 'opus-needle', chat('target', { model: 'opus-needle' })],
 		['tag', 'urgent-needle', chat('target', { tags: ['urgent-needle'] })],
 	])('matches query by %s', (_field, query, target) => {
-		const model = buildWorkMapModel([target, chat('unrelated', { agentId: 'codex' })], query);
+		const model = buildChatMapModel([target, chat('unrelated', { agentId: 'codex' })], query);
 
 		expect(model.matchCount).toBe(1);
 		expect(flatten(model.roots).map((node) => node.key)).toEqual([`chat:${target.id}`]);
@@ -187,7 +187,7 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('retains effective ancestors but omits unrelated descendants during search', () => {
-		const model = buildWorkMapModel(
+		const model = buildChatMapModel(
 			[
 				chat('root'),
 				chat('context', { parentChat: parent('root') }),
@@ -206,8 +206,8 @@ describe('buildWorkMapModel', () => {
 	});
 
 	it('returns stable empty and zero-result models', () => {
-		const empty = buildWorkMapModel([]);
-		const zeroResults = buildWorkMapModel([chat('chat')], 'absent');
+		const empty = buildChatMapModel([]);
+		const zeroResults = buildChatMapModel([chat('chat')], 'absent');
 
 		expect(empty).toMatchObject({ roots: [], chatCount: 0, rootCount: 0, matchCount: 0 });
 		expect(zeroResults.roots).toEqual([]);
@@ -226,7 +226,7 @@ describe('buildWorkMapModel', () => {
 			);
 		}
 
-		const model = buildWorkMapModel(sessions);
+		const model = buildChatMapModel(sessions);
 		const keys = flatten(model.roots).map((node) => node.key);
 		expect(keys).toHaveLength(600);
 		expect(new Set(keys).size).toBe(600);

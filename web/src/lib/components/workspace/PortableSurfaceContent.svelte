@@ -22,8 +22,8 @@
 		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
-	const workMapRenderer = lazyRenderer(
-		() => import('$lib/components/work-map/WorkMapPanel.svelte'),
+	const chatMapRenderer = lazyRenderer(
+		() => import('$lib/components/chat-map/ChatMapPanel.svelte'),
 	);
 </script>
 
@@ -185,10 +185,10 @@
 				<CommitSurface {controller} {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
-	{:else if surface.type === 'singleton' && surface.kind === 'work-map'}
-		{@const controller = singletonSurfaces.workMap()}
-		{#await workMapRenderer() then WorkMapPanel}
-			<WorkMapPanel
+	{:else if surface.type === 'singleton' && surface.kind === 'chat-map'}
+		{@const controller = singletonSurfaces.chatMap()}
+		{#await chatMapRenderer() then ChatMapPanel}
+			<ChatMapPanel
 				{controller}
 				chats={sessions.orderedChats}
 				selectedChatId={sessions.selectedChatId}

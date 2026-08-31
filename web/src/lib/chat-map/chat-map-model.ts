@@ -1,29 +1,29 @@
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatParentRelation } from '$shared/chat-parentage';
 
-export type WorkMapNode = WorkMapChatNode | WorkMapMissingParentNode;
+export type ChatMapNode = ChatMapChatNode | ChatMapMissingParentNode;
 
-export interface WorkMapChatNode {
+export interface ChatMapChatNode {
 	readonly key: `chat:${string}`;
 	readonly kind: 'chat';
 	readonly chat: ChatSessionRecord;
 	readonly relation: ChatParentRelation | null;
-	readonly children: readonly WorkMapNode[];
+	readonly children: readonly ChatMapNode[];
 	readonly matchesQuery: boolean;
 	readonly inCycle: boolean;
 	readonly cycleBreak: boolean;
 }
 
-export interface WorkMapMissingParentNode {
+export interface ChatMapMissingParentNode {
 	readonly key: `missing:${string}`;
 	readonly kind: 'missing-parent';
 	readonly chatId: string;
-	readonly children: readonly WorkMapNode[];
+	readonly children: readonly ChatMapNode[];
 	readonly matchesQuery: boolean;
 }
 
-export interface WorkMapModel {
-	readonly roots: readonly WorkMapNode[];
+export interface ChatMapModel {
+	readonly roots: readonly ChatMapNode[];
 	readonly allNodeKeys: ReadonlySet<string>;
 	readonly collapsibleNodeKeys: readonly string[];
 	readonly chatCount: number;
@@ -34,7 +34,7 @@ export interface WorkMapModel {
 	readonly queryActive: boolean;
 }
 
-type WorkMapNodeKey = WorkMapNode['key'];
+type ChatMapNodeKey = ChatMapNode['key'];
 
 interface TopologyChatNode {
 	readonly key: `chat:${string}`;
@@ -43,8 +43,8 @@ interface TopologyChatNode {
 	readonly relation: ChatParentRelation | null;
 	readonly inCycle: boolean;
 	readonly cycleBreak: boolean;
-	readonly parentKey: WorkMapNodeKey | null;
-	readonly childrenKeys: WorkMapNodeKey[];
+	readonly parentKey: ChatMapNodeKey | null;
+	readonly childrenKeys: ChatMapNodeKey[];
 }
 
 interface TopologyMissingParentNode {
@@ -52,7 +52,7 @@ interface TopologyMissingParentNode {
 	readonly kind: 'missing-parent';
 	readonly chatId: string;
 	readonly parentKey: null;
-	readonly childrenKeys: WorkMapNodeKey[];
+	readonly childrenKeys: ChatMapNodeKey[];
 }
 
 type TopologyNode = TopologyChatNode | TopologyMissingParentNode;
@@ -103,9 +103,9 @@ function findCycles(parentById: ReadonlyMap<string, string>): readonly string[][
 }
 
 function compareSiblingKeys(
-	leftKey: WorkMapNodeKey,
-	rightKey: WorkMapNodeKey,
-	topologyByKey: ReadonlyMap<WorkMapNodeKey, TopologyNode>,
+	leftKey: ChatMapNodeKey,
+	rightKey: ChatMapNodeKey,
+	topologyByKey: ReadonlyMap<ChatMapNodeKey, TopologyNode>,
 ): number {
 	const left = topologyByKey.get(leftKey);
 	const right = topologyByKey.get(rightKey);
@@ -117,11 +117,11 @@ function compareSiblingKeys(
 }
 
 function subtreeActivityByKey(
-	rootKeys: readonly WorkMapNodeKey[],
-	topologyByKey: ReadonlyMap<WorkMapNodeKey, TopologyNode>,
-): ReadonlyMap<WorkMapNodeKey, number> {
-	const activityByKey = new Map<WorkMapNodeKey, number>();
-	const stack: Array<{ key: WorkMapNodeKey; visited: boolean }> = [];
+	rootKeys: readonly ChatMapNodeKey[],
+	topologyByKey: ReadonlyMap<ChatMapNodeKey, TopologyNode>,
+): ReadonlyMap<ChatMapNodeKey, number> {
+	const activityByKey = new Map<ChatMapNodeKey, number>();
+	const stack: Array<{ key: ChatMapNodeKey; visited: boolean }> = [];
 	for (let index = rootKeys.length - 1; index >= 0; index -= 1) {
 		stack.push({ key: rootKeys[index], visited: false });
 	}
@@ -150,10 +150,10 @@ function subtreeActivityByKey(
 }
 
 function orderedTopologyKeys(
-	rootKeys: readonly WorkMapNodeKey[],
-	topologyByKey: ReadonlyMap<WorkMapNodeKey, TopologyNode>,
-): WorkMapNodeKey[] {
-	const ordered: WorkMapNodeKey[] = [];
+	rootKeys: readonly ChatMapNodeKey[],
+	topologyByKey: ReadonlyMap<ChatMapNodeKey, TopologyNode>,
+): ChatMapNodeKey[] {
+	const ordered: ChatMapNodeKey[] = [];
 	const stack = [...rootKeys].reverse();
 	while (stack.length > 0) {
 		const key = stack.pop();
@@ -174,10 +174,10 @@ function matchesChat(chat: ChatSessionRecord, query: string): boolean {
 		.includes(query);
 }
 
-export function buildWorkMapModel(
+export function buildChatMapModel(
 	sessions: readonly ChatSessionRecord[],
 	query = '',
-): WorkMapModel {
+): ChatMapModel {
 	const chatsById = new Map<string, ChatSessionRecord>();
 	for (const session of sessions) {
 		if (session.status !== 'draft') chatsById.set(session.id, session);
@@ -196,11 +196,11 @@ export function buildWorkMapModel(
 		cycleRootIds.add([...cycle].sort((left, right) => left.localeCompare(right))[0]);
 	}
 
-	const topologyByKey = new Map<WorkMapNodeKey, TopologyNode>();
+	const topologyByKey = new Map<ChatMapNodeKey, TopologyNode>();
 	for (const chat of chatsById.values()) {
 		const cycleBreak = cycleRootIds.has(chat.id);
 		const parentChat = chat.parentChat;
-		let parentKey: WorkMapNodeKey | null = null;
+		let parentKey: ChatMapNodeKey | null = null;
 		let relation: ChatParentRelation | null = null;
 		if (!cycleBreak && parentChat) {
 			parentKey = chatsById.has(parentChat.chatId)
@@ -235,7 +235,7 @@ export function buildWorkMapModel(
 		});
 	}
 
-	const rootKeys: WorkMapNodeKey[] = [];
+	const rootKeys: ChatMapNodeKey[] = [];
 	for (const node of topologyByKey.values()) {
 		if (node.parentKey) topologyByKey.get(node.parentKey)?.childrenKeys.push(node.key);
 		else rootKeys.push(node.key);
@@ -261,12 +261,12 @@ export function buildWorkMapModel(
 		if (!queryActive || matchesChat(chat, normalizedQuery)) matchingChatIds.add(chat.id);
 	}
 
-	const includedKeys = new Set<WorkMapNodeKey>();
+	const includedKeys = new Set<ChatMapNodeKey>();
 	if (!queryActive) {
 		for (const key of allOrderedKeys) includedKeys.add(key);
 	} else {
 		for (const chatId of matchingChatIds) {
-			let key: WorkMapNodeKey | null = chatKey(chatId);
+			let key: ChatMapNodeKey | null = chatKey(chatId);
 			while (key && !includedKeys.has(key)) {
 				includedKeys.add(key);
 				key = topologyByKey.get(key)?.parentKey ?? null;
@@ -274,13 +274,13 @@ export function buildWorkMapModel(
 		}
 	}
 
-	const renderedByKey = new Map<WorkMapNodeKey, WorkMapNode>();
+	const renderedByKey = new Map<ChatMapNodeKey, ChatMapNode>();
 	for (let index = allOrderedKeys.length - 1; index >= 0; index -= 1) {
 		const key = allOrderedKeys[index];
 		if (!includedKeys.has(key)) continue;
 		const source = topologyByKey.get(key);
 		if (!source) continue;
-		const children: WorkMapNode[] = [];
+		const children: ChatMapNode[] = [];
 		for (const childKey of source.childrenKeys) {
 			const child = renderedByKey.get(childKey);
 			if (child) children.push(child);

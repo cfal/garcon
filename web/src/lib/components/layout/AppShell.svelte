@@ -126,7 +126,7 @@
 		if (surface?.type === 'chat') return 'chat';
 		if (surface?.type === 'singleton') {
 			if (surface.kind === 'pull-requests') return 'pull-requests';
-			if (surface.kind === 'work-map') return 'work-map';
+			if (surface.kind === 'chat-map') return 'chat-map';
 			if (surface.kind === 'git' || surface.kind === 'files') {
 				return surface.kind;
 			}
@@ -423,13 +423,13 @@
 		appShell.setSidebarOpen(false);
 	}
 
-	function handleShowWorkMap(): void {
+	function handleShowChatMap(): void {
 		if (isMobile) {
 			closeMobileSidebar();
-			void workspace.focusMobileSingleton('work-map');
+			void workspace.focusMobileSingleton('chat-map');
 			return;
 		}
-		void workspace.openSingletonInNewWindow('work-map').catch((error) => {
+		void workspace.openSingletonInNewWindow('chat-map').catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		});
 	}
@@ -579,7 +579,7 @@
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-		onShowWorkMap={handleShowWorkMap}
+		onShowChatMap={handleShowChatMap}
 		onShowSettings={() => appShell.openSettings()}
 		newWindowBlocked={!workspace.canOpenNewWindow}
 	/>

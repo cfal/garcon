@@ -70,7 +70,7 @@ describe('CommandMenu', () => {
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
-		['Work Map', 'work-map'],
+		['Open chat map', 'chat-map'],
 	] as const)('opens standalone %s in a new desktop window', async (label, kind) => {
 		const { component } = render(CommandMenu);
 		component.toggle();
@@ -82,7 +82,7 @@ describe('CommandMenu', () => {
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
-		['Work Map', 'work-map'],
+		['Open chat map', 'chat-map'],
 	] as const)('focuses standalone %s on mobile', async (label, kind) => {
 		mocks.workspace.isMobile = true;
 		const { component } = render(CommandMenu);

@@ -448,16 +448,16 @@ describe('AppShell responsive workspace binding', () => {
 		},
 	);
 
-	it('keeps Work Map in the persistent mobile navigation and marks it active', async () => {
+	it('keeps Chat Map in the persistent mobile navigation and marks it active', async () => {
 		const workspace = installContext();
 		const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
 			{
 				type: 'register-surface',
-				surface: portableSingletonDescriptor('work-map'),
+				surface: portableSingletonDescriptor('chat-map'),
 			},
 			{
 				type: 'set-mobile-presentation',
-				activeId: 'singleton:work-map',
+				activeId: 'singleton:chat-map',
 				returnStack: [],
 			},
 		]);
@@ -467,16 +467,16 @@ describe('AppShell responsive workspace binding', () => {
 
 		render(AppShell);
 		const bottomBar = screen.getByTestId('bottom-tab-bar-stub');
-		expect(bottomBar.getAttribute('data-active-item')).toBe('work-map');
+		expect(bottomBar.getAttribute('data-active-item')).toBe('chat-map');
 		await fireEvent.click(screen.getByRole('button', { name: 'Select Map tab' }));
-		expect(workspace.focusedMobileSingletons).toContain('work-map');
+		expect(workspace.focusedMobileSingletons).toContain('chat-map');
 	});
 
-	it('opens Work Map in a new window from the desktop sidebar', async () => {
+	it('opens Chat Map in a new window from the desktop sidebar', async () => {
 		const workspace = installContext();
 		render(AppShell);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Open Work Map from sidebar' }));
-		expect(workspace.openedSingletons).toEqual(['work-map']);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open chat map from sidebar' }));
+		expect(workspace.openedSingletons).toEqual(['chat-map']);
 	});
 });

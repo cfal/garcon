@@ -1,7 +1,7 @@
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 
-export class WorkMapController implements PortableSingletonController {
+export class ChatMapController implements PortableSingletonController {
 	query = $state('');
 	#collapsedNodeKeys = $state<ReadonlySet<string>>(new Set());
 

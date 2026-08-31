@@ -3,22 +3,22 @@ import type { ChatSessionDeletedWsMessage } from "../../../common/ws-events.js";
 import { withE2eFixture } from "../../support/e2e-fixture.js";
 import { SpaDriver } from "../../support/spa-driver.js";
 
-describe("Lightpanda Work Map", () => {
+describe("Lightpanda Chat Map", () => {
   test("maps fork lineage, navigates chats, and preserves missing parents on mobile", async () => {
-    await withE2eFixture("work-map-lineage", async (fixture) => {
+    await withE2eFixture("chat-map-lineage", async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.startOpenAiDirectChat("work-map-source");
-      await app.waitForText("echo:work-map-source");
+      await app.startOpenAiDirectChat("chat-map-source");
+      await app.waitForText("echo:chat-map-source");
 
       const source = (
         await fixture.integration.client.listChats()
       ).sessions.find(
-        (entry) => entry.preview.firstMessage === "work-map-source",
+        (entry) => entry.preview.firstMessage === "chat-map-source",
       );
-      if (!source) throw new Error("Work Map source chat was not listed.");
+      if (!source) throw new Error("Chat Map source chat was not listed.");
 
       await app.clickButton("Chat actions");
       await app.waitForMenuItemEnabled("Fork");
@@ -32,31 +32,31 @@ describe("Lightpanda Work Map", () => {
         relation: "fork",
       });
 
-      await app.selectWorkspaceWindowSurface("Open Work Map");
-      await fixture.page.waitForSelector("[data-work-map-panel]");
+      await app.selectWorkspaceWindowSurface("Open chat map");
+      await fixture.page.waitForSelector("[data-chat-map-panel]");
       const initialMap = await fixture.page.evaluate(
         ({ sourceId, childId }) => {
           const sourceLink = document.querySelector<HTMLAnchorElement>(
-            `[data-work-map-chat-id="${sourceId}"]`,
+            `[data-chat-map-chat-id="${sourceId}"]`,
           );
           const childLink = document.querySelector<HTMLAnchorElement>(
-            `[data-work-map-chat-id="${childId}"]`,
+            `[data-chat-map-chat-id="${childId}"]`,
           );
           const sourceNode = sourceLink?.closest<HTMLElement>(
-            "[data-work-map-node]",
+            "[data-chat-map-node]",
           );
           const childNode = childLink?.closest<HTMLElement>(
-            "[data-work-map-node]",
+            "[data-chat-map-node]",
           );
           return {
             sourceHref: sourceLink?.getAttribute("href") ?? null,
             childHref: childLink?.getAttribute("href") ?? null,
             childParentKey:
               childNode?.parentElement?.closest<HTMLElement>(
-                "[data-work-map-node]",
-              )?.dataset.workMapNode ?? null,
+                "[data-chat-map-node]",
+              )?.dataset.chatMapNode ?? null,
             childText: childNode?.textContent ?? "",
-            sourceKey: sourceNode?.dataset.workMapNode ?? null,
+            sourceKey: sourceNode?.dataset.chatMapNode ?? null,
           };
         },
         { sourceId: source.id, childId: forkId },
@@ -71,38 +71,38 @@ describe("Lightpanda Work Map", () => {
 
       await fixture.page.evaluate((chatId) => {
         const link = document.querySelector<HTMLAnchorElement>(
-          `[data-work-map-chat-id="${chatId}"]`,
+          `[data-chat-map-chat-id="${chatId}"]`,
         );
-        if (!link) throw new Error(`Missing Work Map link for ${chatId}`);
+        if (!link) throw new Error(`Missing Chat Map link for ${chatId}`);
         link.click();
       }, source.id);
       await app.waitForSelectedChat(source.id);
 
-      await app.selectWorkspaceWindowSurface("Work Map");
-      await fixture.page.waitForSelector("[data-work-map-panel]");
+      await app.selectWorkspaceWindowSurface("Chat Map");
+      await fixture.page.waitForSelector("[data-chat-map-panel]");
       const deleteCursor = fixture.integration.client.markEvents();
       await fixture.integration.client.deleteChat(source.id);
       await fixture.integration.client.waitForEvent(
         (event): event is ChatSessionDeletedWsMessage =>
           event.type === "chat-session-deleted" && event.chatId === source.id,
-        "Work Map parent deletion",
+        "Chat Map parent deletion",
         { afterIndex: deleteCursor },
       );
       await fixture.page.waitForFunction(
         ({ parentId, childId }) => {
           const missing = document.querySelector<HTMLElement>(
-            `[data-work-map-missing-parent="${parentId}"]`,
+            `[data-chat-map-missing-parent="${parentId}"]`,
           );
           const missingNode = missing?.closest<HTMLElement>(
-            "[data-work-map-node]",
+            "[data-chat-map-node]",
           );
           const childNode = document
-            .querySelector(`[data-work-map-chat-id="${childId}"]`)
-            ?.closest<HTMLElement>("[data-work-map-node]");
+            .querySelector(`[data-chat-map-chat-id="${childId}"]`)
+            ?.closest<HTMLElement>("[data-chat-map-node]");
           return (
             missingNode !== null &&
             childNode?.parentElement?.closest<HTMLElement>(
-              "[data-work-map-node]",
+              "[data-chat-map-node]",
             ) === missingNode &&
             childNode?.textContent?.includes("Fork") === true
           );
@@ -160,7 +160,7 @@ describe("Lightpanda Work Map", () => {
           return (
             currentMap &&
             document.querySelector(
-              '[data-work-map-panel][data-presentation="mobile"]',
+              '[data-chat-map-panel][data-presentation="mobile"]',
             ) !== null
           );
         },

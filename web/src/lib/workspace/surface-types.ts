@@ -10,7 +10,7 @@ export const PORTABLE_SINGLETON_KINDS = [
 	'pull-requests',
 	'files',
 	'commit',
-	'work-map',
+	'chat-map',
 ] as const;
 export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
 

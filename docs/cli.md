@@ -64,7 +64,7 @@ New chats created through the CLI receive the `cli` tag. Add repeatable tags wit
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
 for example when one agent starts another for review. Garcon records an immutable
-`delegation` relationship and shows it in Work Map. The parent must exist in the
+`delegation` relationship and shows it in Chat Map. The parent must exist in the
 same workspace. Declaring it does not copy transcript content, inherit execution
 settings, or make either chat wait for the other. `--parent` is creation-only and
 cannot be used with `--resume`.

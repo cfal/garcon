@@ -24,6 +24,6 @@
 {:else if kind === 'pull-requests'}<GitPullRequest class={className} />
 {:else if kind === 'files'}<Files class={className} />
 {:else if kind === 'commit'}<GitCommitHorizontal class={className} />
-{:else if kind === 'work-map'}<Waypoints class={className} />
+{:else if kind === 'chat-map'}<Waypoints class={className} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal class={className} />
 {:else}<FileCode class={className} />{/if}

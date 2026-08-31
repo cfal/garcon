@@ -7,23 +7,23 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { PresentationHostId } from '$lib/workspace/surface-types';
-	import type { WorkMapController } from '$lib/work-map/work-map-controller.svelte';
-	import { buildWorkMapModel } from '$lib/work-map/work-map-model';
-	import WorkMapBranch from './WorkMapBranch.svelte';
+	import type { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte';
+	import { buildChatMapModel } from '$lib/chat-map/chat-map-model';
+	import ChatMapBranch from './ChatMapBranch.svelte';
 
-	interface WorkMapPanelProps {
-		controller: WorkMapController;
+	interface ChatMapPanelProps {
+		controller: ChatMapController;
 		chats: readonly ChatSessionRecord[];
 		selectedChatId: string | null;
 		visible: boolean;
 		presentation: PresentationHostId;
 	}
 
-	let { controller, chats, selectedChatId, visible, presentation }: WorkMapPanelProps = $props();
+	let { controller, chats, selectedChatId, visible, presentation }: ChatMapPanelProps = $props();
 
 	let currentTime = $state(new Date());
-	const model = $derived.by(() => buildWorkMapModel(chats, controller.query));
-	const titleId = $derived(`work-map-title-${presentation.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
+	const model = $derived.by(() => buildChatMapModel(chats, controller.query));
+	const titleId = $derived(`chat-map-title-${presentation.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
 
 	$effect(() => {
 		const validKeys = model.allNodeKeys;
@@ -43,7 +43,7 @@
 <section
 	class="flex h-full min-h-0 min-w-0 flex-col bg-background text-foreground"
 	aria-labelledby={titleId}
-	data-work-map-panel
+	data-chat-map-panel
 	data-presentation={presentation}
 >
 	<header class="shrink-0 border-b border-border bg-card px-3 py-3 sm:px-4">
@@ -54,39 +54,39 @@
 				</div>
 				<div class="min-w-0">
 					<h1 id={titleId} class="text-base font-semibold">
-						{m.workspace_surface_work_map()}
+						{m.workspace_surface_chat_map()}
 					</h1>
-					<p class="text-xs text-muted-foreground">{m.work_map_description()}</p>
+					<p class="text-xs text-muted-foreground">{m.chat_map_description()}</p>
 				</div>
 			</div>
 
 			<div class="flex items-center gap-1.5">
 				<button
 					type="button"
-					aria-label={m.work_map_expand_all()}
+					aria-label={m.chat_map_expand_all()}
 					class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 					disabled={model.collapsibleNodeKeys.length === 0}
 					onclick={() => controller.expandAll()}
 				>
 					<ChevronsUpDown class="size-3.5" aria-hidden="true" />
-					<span class="hidden sm:inline">{m.work_map_expand_all()}</span>
+					<span class="hidden sm:inline">{m.chat_map_expand_all()}</span>
 				</button>
 				<button
 					type="button"
-					aria-label={m.work_map_collapse_all()}
+					aria-label={m.chat_map_collapse_all()}
 					class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 					disabled={model.collapsibleNodeKeys.length === 0}
 					onclick={() => controller.collapseAll(model.collapsibleNodeKeys)}
 				>
 					<ChevronsDownUp class="size-3.5" aria-hidden="true" />
-					<span class="hidden sm:inline">{m.work_map_collapse_all()}</span>
+					<span class="hidden sm:inline">{m.chat_map_collapse_all()}</span>
 				</button>
 			</div>
 		</div>
 
 		<div class="mt-3 flex flex-wrap items-center gap-2">
 			<label class="relative min-w-52 flex-1 sm:max-w-md">
-				<span class="sr-only">{m.work_map_search_label()}</span>
+				<span class="sr-only">{m.chat_map_search_label()}</span>
 				<Search
 					class="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
 					aria-hidden="true"
@@ -94,7 +94,7 @@
 				<input
 					type="search"
 					class="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 sm:pointer-fine:text-sm"
-					placeholder={m.work_map_search_placeholder()}
+					placeholder={m.chat_map_search_placeholder()}
 					value={controller.query}
 					oninput={(event) => controller.setQuery(event.currentTarget.value)}
 				/>
@@ -103,52 +103,52 @@
 			<div class="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
 				<span class="rounded-full bg-muted px-2 py-1 text-foreground">
 					{model.queryActive
-						? m.work_map_result_count({ count: model.matchCount })
-						: m.work_map_chat_count({ count: model.chatCount })}
+						? m.chat_map_result_count({ count: model.matchCount })
+						: m.chat_map_chat_count({ count: model.chatCount })}
 				</span>
 				<span class="rounded-full bg-muted px-2 py-1 text-foreground">
-					{m.work_map_root_count({ count: model.rootCount })}
+					{m.chat_map_root_count({ count: model.rootCount })}
 				</span>
 				{#if model.missingParentCount > 0}
 					<span
 						class="rounded-full border border-status-warning-border bg-status-warning/10 px-2 py-1 text-status-warning-muted-foreground"
 					>
-						{m.work_map_missing_parent_count({ count: model.missingParentCount })}
+						{m.chat_map_missing_parent_count({ count: model.missingParentCount })}
 					</span>
 				{/if}
 				{#if model.cycleChatCount > 0}
 					<span
 						class="rounded-full border border-status-warning-border bg-status-warning/10 px-2 py-1 text-status-warning-muted-foreground"
 					>
-						{m.work_map_cycle_count({ count: model.cycleChatCount })}
+						{m.chat_map_cycle_count({ count: model.cycleChatCount })}
 					</span>
 				{/if}
 			</div>
 		</div>
 	</header>
 
-	<div class="min-h-0 flex-1 overflow-auto p-3 sm:p-4" data-work-map-scroll-region>
+	<div class="min-h-0 flex-1 overflow-auto p-3 sm:p-4" data-chat-map-scroll-region>
 		{#if model.chatCount === 0}
 			<div
 				class="mx-auto flex h-full max-w-sm flex-col items-center justify-center px-4 text-center"
 			>
 				<Waypoints class="size-8 text-muted-foreground" aria-hidden="true" />
-				<h2 class="mt-3 text-sm font-semibold">{m.work_map_empty_title()}</h2>
-				<p class="mt-1 text-xs text-muted-foreground">{m.work_map_empty_description()}</p>
+				<h2 class="mt-3 text-sm font-semibold">{m.chat_map_empty_title()}</h2>
+				<p class="mt-1 text-xs text-muted-foreground">{m.chat_map_empty_description()}</p>
 			</div>
 		{:else if model.roots.length === 0}
 			<div
 				class="mx-auto flex h-full max-w-sm flex-col items-center justify-center px-4 text-center"
 			>
 				<Search class="size-8 text-muted-foreground" aria-hidden="true" />
-				<h2 class="mt-3 text-sm font-semibold">{m.work_map_no_results_title()}</h2>
-				<p class="mt-1 text-xs text-muted-foreground">{m.work_map_no_results_description()}</p>
+				<h2 class="mt-3 text-sm font-semibold">{m.chat_map_no_results_title()}</h2>
+				<p class="mt-1 text-xs text-muted-foreground">{m.chat_map_no_results_description()}</p>
 			</div>
 		{:else}
-			<ul class="mx-auto max-w-4xl space-y-4" aria-label={m.workspace_surface_work_map()}>
+			<ul class="mx-auto max-w-4xl space-y-4" aria-label={m.workspace_surface_chat_map()}>
 				{#each model.roots as root (root.key)}
 					<svelte:boundary>
-						<WorkMapBranch
+						<ChatMapBranch
 							node={root}
 							{controller}
 							{selectedChatId}
@@ -160,7 +160,7 @@
 							<li
 								class="rounded-md border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
 							>
-								{m.work_map_node_render_failed()}
+								{m.chat_map_node_render_failed()}
 							</li>
 						{/snippet}
 					</svelte:boundary>

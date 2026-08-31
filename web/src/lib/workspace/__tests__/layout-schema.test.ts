@@ -139,7 +139,7 @@ describe('workspace layout V2 schema', () => {
 		expect(result.snapshot.unplacedTerminalIds).toEqual(['t2']);
 	});
 
-	it('round-trips and globally deduplicates the Work Map singleton', () => {
+	it('round-trips and globally deduplicates the Chat Map singleton', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
 				version: 2,
@@ -154,9 +154,9 @@ describe('workspace layout V2 schema', () => {
 							id: 'window-a',
 							order: [
 								{ type: 'chat', chatId: 'chat-a' },
-								{ type: 'singleton', kind: 'work-map' },
+								{ type: 'singleton', kind: 'chat-map' },
 							],
-							active: { type: 'singleton', kind: 'work-map' },
+							active: { type: 'singleton', kind: 'chat-map' },
 							mru: [],
 						},
 						{
@@ -164,7 +164,7 @@ describe('workspace layout V2 schema', () => {
 							id: 'window-b',
 							order: [
 								{ type: 'chat', chatId: 'chat-b' },
-								{ type: 'singleton', kind: 'work-map' },
+								{ type: 'singleton', kind: 'chat-map' },
 							],
 							active: { type: 'chat', chatId: 'chat-b' },
 							mru: [],
@@ -177,15 +177,15 @@ describe('workspace layout V2 schema', () => {
 
 		expect(result.source).toBe('valid');
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
-			'singleton:work-map',
+			'singleton:chat-map',
 		);
 		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
-			'singleton:work-map',
+			'singleton:chat-map',
 		);
 		expect(serializeWorkspaceLayout(result.snapshot).root).toMatchObject({
 			type: 'partition',
 		});
-		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('work-map');
+		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('chat-map');
 	});
 
 	it('repairs invalid active and MRU refs, clamps ratios, and collapses empty branches', () => {

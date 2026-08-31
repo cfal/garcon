@@ -193,7 +193,7 @@
 		onShareChat={() => {}}
 		onManageTags={() => {}}
 		onShowScheduledPrompts={() => {}}
-		onShowWorkMap={() => {}}
+		onShowChatMap={() => {}}
 		onShowSettings={() => {}}
 		newWindowBlocked={false}
 	/>
