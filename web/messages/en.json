@@ -890,7 +890,6 @@
 	"workspace_window_actions": "Window actions",
 	"workspace_chat_metadata_copy_project_path": "Copy project path",
 	"workspace_chat_metadata_copy_chat_id": "Copy chat ID",
-	"workspace_chat_metadata_copied": "{field} copied",
 	"workspace_surface_actions": "View actions",
 	"workspace_new_terminal": "New Terminal",
 	"workspace_open_git_history": "Open Git History",
