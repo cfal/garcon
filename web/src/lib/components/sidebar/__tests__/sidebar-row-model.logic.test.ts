@@ -39,6 +39,7 @@ function chat(
 		tags: [],
 		firstMessage: '',
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }

@@ -51,6 +51,7 @@ const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
 function chat(id: string, title: string): ChatSessionRecord {
 	return {
 		id,
+		parentChat: null,
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
 		projectIdentityState: 'available',

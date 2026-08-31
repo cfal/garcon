@@ -24,6 +24,7 @@ function newChat(overrides = {}) {
     model: 'model-a',
     projectPath: '/repo',
     agentSettingsById: { test: envelope('test') },
+    parentChat: null,
     ...overrides,
   };
 }
@@ -47,6 +48,7 @@ function persistedEntry(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    parentChat: null,
     ...overrides,
   };
 }
@@ -82,6 +84,7 @@ describe('ChatRegistry', () => {
       permissionMode: 'default',
       thinkingMode: 'none',
       nextForkOrdinal: 1,
+      parentChat: null,
     });
     expect(added).toHaveBeenCalledWith(CHAT_ID);
   });
@@ -93,6 +96,43 @@ describe('ChatRegistry', () => {
       id: SECOND_CHAT_ID,
       nativeSession: nativeSession('other'),
     }))).toThrow('Native session owner mismatch');
+  });
+
+  it('persists and freezes immutable parentage', async () => {
+    const parentChat = {
+      chatId: CHAT_ID,
+      relation: 'fork',
+      transcriptViewId: 'view-a',
+      ordinal: 0,
+    };
+    registry.addChat(newChat({
+      id: SECOND_CHAT_ID,
+      parentChat,
+    }));
+
+    const child = registry.getChat(SECOND_CHAT_ID);
+    expect(child.parentChat).toEqual(parentChat);
+    expect(Object.isFrozen(child.parentChat)).toBeTrue();
+
+    await registry.flush();
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
+  });
+
+  it('rejects malformed and self-referential new parentage', () => {
+    expect(() => registry.addChat(newChat({ parentChat: undefined }))).toThrow(
+      'Invalid parent chat',
+    );
+    expect(() => registry.addChat(newChat({
+      parentChat: {
+        chatId: CHAT_ID,
+        relation: 'fork',
+        transcriptViewId: 'view-a',
+        ordinal: 1,
+      },
+    }))).toThrow('cannot be its own parent');
+    expect(registry.listAllChats()).toEqual({});
   });
 
   it('patches only allowed fields and keeps the session ID index current', () => {
@@ -107,6 +147,21 @@ describe('ChatRegistry', () => {
     expect(updated).toMatchObject({ model: 'model-b', projectPath: '/repo' });
     expect(registry.getChatByAgentSessionId('native-1')).toBeNull();
     expect(registry.getChatByAgentSessionId('native-2')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('ignores untyped parentage patches', () => {
+    registry.addChat(newChat());
+
+    registry.updateChat(CHAT_ID, {
+      parentChat: {
+        chatId: SECOND_CHAT_ID,
+        relation: 'handoff',
+        transcriptViewId: 'view-b',
+        ordinal: 2,
+      },
+    });
+
+    expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
   });
 
   it('adds normalized tags without removing existing tags', () => {
@@ -256,6 +311,43 @@ describe('ChatRegistry', () => {
 
     expect(registry.getChat(CHAT_ID)).toEqual(persistedEntry());
     expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('normalizes absent and malformed persisted parentage to roots', async () => {
+    const { parentChat: _parentChat, ...legacyEntry } = persistedEntry();
+    const malformed = [
+      'invalid',
+      { chatId: 'invalid', relation: 'fork', transcriptViewId: 'view-a', ordinal: 1 },
+      { chatId: CHAT_ID, relation: 'merge', transcriptViewId: 'view-a', ordinal: 1 },
+      { chatId: CHAT_ID, relation: 'fork', transcriptViewId: '', ordinal: 1 },
+      { chatId: CHAT_ID, relation: 'fork', transcriptViewId: 'view-a', ordinal: -1 },
+    ];
+    const originalWarn = console.warn;
+    const warnings = [];
+    console.warn = mock((...args) => warnings.push(args));
+
+    try {
+      for (const entry of [legacyEntry, persistedEntry({ parentChat: null })]) {
+        await writeRegistry({ [CHAT_ID]: entry });
+        registry = new ChatRegistry(tempDir);
+        await registry.init();
+        expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
+      }
+      expect(warnings).toEqual([]);
+
+      for (const parentChat of malformed) {
+        const warningCount = warnings.length;
+        await writeRegistry({ [CHAT_ID]: { ...persistedEntry(), parentChat } });
+        registry = new ChatRegistry(tempDir);
+        await registry.init();
+        expect(registry.getChat(CHAT_ID)?.parentChat).toBeNull();
+        expect(warnings.slice(warningCount)).toEqual([
+          ['[chats:store]', `sessions: ignoring invalid parentChat for ${CHAT_ID}`],
+        ]);
+      }
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   it('strictly parses and freezes ordered carryover references', async () => {

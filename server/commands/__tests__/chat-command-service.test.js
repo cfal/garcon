@@ -1048,6 +1048,7 @@ describe('ChatCommandService', () => {
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(cliEntry).toEqual(interactive);
     expect(scheduledEntry).toEqual(interactive);
+    expect(interactive.parentChat).toBeNull();
     expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);
     expect(agents.startSession).toHaveBeenNthCalledWith(

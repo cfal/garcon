@@ -16,6 +16,7 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 function createChat(id: string, title: string): ChatSessionRecord {
 	return {
 		id,
+		parentChat: null,
 		projectPath: '/tmp/project',
 		effectiveProjectKey: '/tmp/project',
 		projectIdentityState: 'available',

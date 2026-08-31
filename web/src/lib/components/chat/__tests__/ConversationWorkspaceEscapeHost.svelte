@@ -37,6 +37,7 @@
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
 		projectIdentityState: 'available',

@@ -5,6 +5,7 @@ import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ChatOrderGroup } from '$shared/chat-list';
+import type { ParentChatRef } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type ChatStatus = 'draft' | 'running';
@@ -25,6 +26,7 @@ export interface ChatStartupConfig {
 
 export interface ChatSessionRecord {
 	id: string;
+	parentChat: ParentChatRef | null;
 	projectPath: string;
 	effectiveProjectKey: string | null;
 	projectIdentityState: 'pending' | 'available';

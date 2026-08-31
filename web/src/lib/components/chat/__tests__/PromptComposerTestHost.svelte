@@ -190,6 +190,7 @@
 
 	const selectedChat = $derived<ChatSessionRecord>({
 		id: selectedChatId,
+		parentChat: null,
 		projectPath,
 		effectiveProjectKey: projectPath,
 		projectIdentityState: 'available',

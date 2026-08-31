@@ -153,6 +153,7 @@ export class StartCommands {
             permissionMode: input.permissionMode,
             thinkingMode: input.thinkingMode,
             agentSettingsById: { [input.agentId]: input.agentSettings },
+            parentChat: null,
           });
           this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
           if (recordsStartupPreferences(input.origin)) {

@@ -35,6 +35,7 @@ vi.mock('$lib/components/chat/ConversationWorkspace.svelte', async () => ({
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/workspace/project',
 		effectiveProjectKey: '/workspace/project',
 		projectIdentityState: 'available',
