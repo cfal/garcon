@@ -73,7 +73,6 @@ export class AppShellChatNavigationController {
 		try {
 			this.#options.setSelectedChatId(chatId);
 			await this.#queueChatRoute(chatId, generation);
-			if (this.#isCurrent(generation)) this.#options.requestComposerFocus();
 		} catch (error) {
 			if (this.#isCurrent(generation)) this.#options.reportOpenError(error);
 		} finally {

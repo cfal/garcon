@@ -26,7 +26,10 @@ import {
 	ConversationSessionController,
 	type SessionControllerDeps,
 } from '../conversation-session-controller.svelte';
-import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import {
+	ActiveTranscriptState,
+	type ChatRestoreResult,
+} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import {
 	AssistantMessage,
 	BashToolUseMessage,
@@ -323,6 +326,7 @@ function createDeps(chat = createRunningChat()) {
 		entries: [] as TranscriptMessage[],
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as LocalNoticeRow[],
+		localNoticesByChatId: {} as Record<string, LocalNoticeRow[]>,
 		optimisticUserInputs: [] as OptimisticUserInput[],
 		excludedResendOrdinals: [] as number[],
 		clearResendExclusions: vi.fn(() => {
@@ -333,6 +337,11 @@ function createDeps(chat = createRunningChat()) {
 			transcriptViewId: 'generation-1',
 			lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
 		})),
+		getCursorForChat: vi.fn((_chatId: string) => ({
+			transcriptViewId: 'generation-1',
+			lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
+		})),
+		hasMountedPresentation: vi.fn(() => false),
 		clearMessages: vi.fn(),
 		resetForNewChat: vi.fn(() => {
 			chatState.chatMessages = [];
@@ -355,7 +364,30 @@ function createDeps(chat = createRunningChat()) {
 				},
 			];
 		}),
+		appendLocalNoticeForChat: vi.fn(
+			(chatId: string, noticeType: LocalNoticeType, content: string) => {
+				const notices = [
+					...(chatState.localNoticesByChatId[chatId] ?? []),
+					{
+						kind: 'local-notice' as const,
+						id: `local-${(chatState.localNoticesByChatId[chatId]?.length ?? 0) + 1}`,
+						noticeType,
+						content,
+						timestamp: new Date().toISOString(),
+					},
+				];
+				chatState.localNoticesByChatId = {
+					...chatState.localNoticesByChatId,
+					[chatId]: notices,
+				};
+				if (chatState.activeChatId === chatId) chatState.localNotices = notices;
+			},
+		),
 		clearLocalNotices: vi.fn(),
+		clearLocalNoticesForChat: vi.fn((chatId: string) => {
+			chatState.localNoticesByChatId = { ...chatState.localNoticesByChatId, [chatId]: [] };
+			if (chatState.activeChatId === chatId) chatState.localNotices = [];
+		}),
 		upsertOptimisticUserInput: vi.fn((input: OptimisticUserInput) => {
 			const index = chatState.optimisticUserInputs.findIndex(
 				(existing) => existing.clientMessageId === input.clientMessageId,
@@ -408,10 +440,46 @@ function createDeps(chat = createRunningChat()) {
 		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
 			conversationUi.previousPermissionMode = mode;
 		}),
+		pendingPermissionsFor: vi.fn((_chatId: string) => conversationUi.pendingPermissionRequests),
+		updatePendingPermissionsForChat: vi.fn(
+			(
+				_chatId: string,
+				update:
+					| PendingPermissionRequest[]
+					| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]),
+			) => {
+				conversationUi.pendingPermissionRequests =
+					typeof update === 'function' ? update(conversationUi.pendingPermissionRequests) : update;
+			},
+		),
+		beginPlanModeForChat: vi.fn((_chatId: string, mode: PermissionMode) => {
+			conversationUi.previousPermissionMode ??= mode;
+		}),
+		previousPermissionModeFor: vi.fn((_chatId: string) => conversationUi.previousPermissionMode),
+		finishPlanModeForChat: vi.fn((_chatId: string) => {
+			const previous = conversationUi.previousPermissionMode;
+			conversationUi.previousPermissionMode = null;
+			return previous;
+		}),
 		getExecutionControl: vi.fn((): ChatExecutionControlState | null => null),
 		setExecutionControlFromLiveUpdate: vi.fn(() => true),
 		setExecutionControlFromRefresh: vi.fn(() => true),
 		isExecutionControlSocketInstanceConfirmed: vi.fn(() => true),
+	};
+	const lifecycle = {
+		currentChatId: chat.id as string | null,
+		loadingStatus: null as LoadingStatus | null,
+		clearTurnStatus: vi.fn(),
+		beginStopping: vi.fn(() => ({
+			turnStatus: 'running' as const,
+			loadingStatusStack: [],
+		})),
+		restoreStopping: vi.fn(),
+		applyProcessingPhase: vi.fn(),
+		markTurnRunning: vi.fn(),
+		setCurrentChatId: vi.fn(),
+		setLoadingStatus: vi.fn(),
+		beginTurn: vi.fn(),
 	};
 	const deps = {
 		sessions: {
@@ -513,21 +581,8 @@ function createDeps(chat = createRunningChat()) {
 			thinkingMode: 'none',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		},
-		lifecycle: {
-			currentChatId: chat.id as string | null,
-			loadingStatus: null as LoadingStatus | null,
-			clearTurnStatus: vi.fn(),
-			beginStopping: vi.fn(() => ({
-				turnStatus: 'running' as const,
-				loadingStatusStack: [],
-			})),
-			restoreStopping: vi.fn(),
-			applyProcessingPhase: vi.fn(),
-			markTurnRunning: vi.fn(),
-			setCurrentChatId: vi.fn(),
-			setLoadingStatus: vi.fn(),
-			beginTurn: vi.fn(),
-		},
+		lifecycle,
+		lifecycleForChat: vi.fn<SessionControllerDeps['lifecycleForChat']>(() => lifecycle),
 		conversationUi,
 		startupCoordinator: {
 			beginLocalStartup: vi.fn(),
@@ -837,6 +892,7 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
 			minimumLimit: 0,
+			purpose: 'activation',
 		});
 	});
 
@@ -894,6 +950,27 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 		expect(deps.sessions.patchLastReadAt).not.toHaveBeenCalled();
+	});
+
+	it('retries the explicitly supplied panel transcript without using the selected projection', async () => {
+		const { deps } = createDeps();
+		deps.sessions.selectedChatId = 'chat-2';
+		const panelTranscript = new ActiveTranscriptState();
+		panelTranscript.activateChat('chat-1');
+		const panelLoad = vi.spyOn(panelTranscript, 'loadMessages').mockResolvedValue([]);
+		const markValidated = vi.spyOn(panelTranscript.transcriptCache, 'markValidated');
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([]);
+		const controller = new ConversationSessionController(deps);
+
+		await controller.loadPanelChat('chat-1', panelTranscript);
+
+		expect(panelLoad).toHaveBeenCalledWith('chat-1', {
+			minimumLimit: 0,
+			purpose: 'activation',
+		});
+		expect(markValidated).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+		expect(deps.scrollToBottom).not.toHaveBeenCalled();
 	});
 
 	it('restores a selected chat live permission capability with its initial snapshot', async () => {
@@ -1047,7 +1124,32 @@ describe('ConversationSessionController', () => {
 
 		controller.handleChatSwitch('chat-1');
 
-		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', { minimumLimit: 75 });
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
+			minimumLimit: 75,
+			purpose: 'activation',
+		});
+	});
+
+	it('preserves a mounted panel viewport while updating selected-chat runtime state', () => {
+		const { deps } = createDeps();
+		deps.chatState.hasMountedPresentation.mockReturnValue(true);
+		deps.chatState.chatMessages = [
+			new AssistantMessage('2026-05-14T00:00:00.000Z', 'mounted transcript'),
+		];
+		deps.chatState.loadMessages = vi.fn(() => new Promise<never>(() => {}));
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.chatState.activateChat).toHaveBeenCalledWith('chat-1');
+		expect(deps.setInitialBottomRestorePending).not.toHaveBeenCalled();
+		expect(deps.setIsViewportPinnedToBottom).not.toHaveBeenCalled();
+		expect(deps.scrollToBottom).not.toHaveBeenCalled();
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
+			minimumLimit: 0,
+			purpose: 'activation',
+		});
+		expect(deps.composerState.restoreDraft).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('marks initial bottom restoration before restoring a running chat transcript', () => {
@@ -1085,7 +1187,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.inputText).toBe('stale draft');
 		expect(deps.composerState.images).toHaveLength(1);
 		expect(deps.composerState.clearImages).not.toHaveBeenCalled();
-		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalled();
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith(null);
 		expect(deps.conversationUi.activateTransientFeed).toHaveBeenCalledWith(null);
 		expect(deps.setIsViewportPinnedToBottom).toHaveBeenCalledWith(true);
@@ -1214,6 +1316,7 @@ describe('ConversationSessionController', () => {
 		const lifecycle = new ConversationLifecycleState();
 		lifecycle.beginTurn('chat-1');
 		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		deps.lifecycleForChat.mockReturnValue(lifecycle);
 		mockStopChat.mockReturnValue(result.promise);
 		const controller = new ConversationSessionController(deps);
 
@@ -1304,6 +1407,7 @@ describe('ConversationSessionController', () => {
 		const lifecycle = new ConversationLifecycleState();
 		lifecycle.beginTurn('chat-1');
 		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		deps.lifecycleForChat.mockReturnValue(lifecycle);
 		mockStopChat.mockReturnValue(result.promise);
 		const controller = new ConversationSessionController(deps);
 
@@ -1330,16 +1434,19 @@ describe('ConversationSessionController', () => {
 	it('does not let a delayed failed Stop mutate the newly selected chat', async () => {
 		const result = deferred<Awaited<ReturnType<typeof stopChat>>>();
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
-		const lifecycle = new ConversationLifecycleState();
-		lifecycle.beginTurn('chat-1');
-		Object.defineProperty(deps, 'lifecycle', { value: lifecycle });
+		const targetLifecycle = new ConversationLifecycleState();
+		const selectedLifecycle = new ConversationLifecycleState();
+		targetLifecycle.beginTurn('chat-1');
+		selectedLifecycle.beginTurn('chat-2');
+		deps.lifecycleForChat.mockImplementation((chatId: string) =>
+			chatId === 'chat-1' ? targetLifecycle : selectedLifecycle,
+		);
 		mockStopChat.mockReturnValue(result.promise);
 		const controller = new ConversationSessionController(deps);
 
 		const stop = controller.handleAbort();
 		deps.sessions.selectedChatId = 'chat-2';
 		deps.chatState.activeChatId = 'chat-2';
-		lifecycle.beginTurn('chat-2');
 		result.resolve({
 			success: true,
 			commandType: 'agent-stop',
@@ -1351,10 +1458,19 @@ describe('ConversationSessionController', () => {
 		});
 		await stop;
 
-		expect(lifecycle.currentChatId).toBe('chat-2');
-		expect(lifecycle.turnStatus).toBe('running');
-		expect(lifecycle.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
+		expect(selectedLifecycle.currentChatId).toBe('chat-2');
+		expect(selectedLifecycle.turnStatus).toBe('running');
+		expect(selectedLifecycle.loadingStatus).toMatchObject({
+			text: 'Processing',
+			can_interrupt: true,
+		});
 		expect(deps.chatState.localNotices).toEqual([]);
+		expect(deps.chatState.localNoticesByChatId['chat-1']).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to stop chat: Stop request failed. The chat is still running.',
+			}),
+		]);
 	});
 
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
@@ -1496,6 +1612,41 @@ describe('ConversationSessionController', () => {
 			transcriptViewId: 'generation-1',
 		});
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
+	});
+
+	it('submits in-chat fork actions from the clicked panel transcript', async () => {
+		const chat = createRunningChat({ id: '123' });
+		const { deps } = createDeps(chat);
+		deps.chatState.entries = [
+			{
+				ordinal: 9,
+				message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Selected panel'),
+			},
+		];
+		const panelTranscript = new ActiveTranscriptState();
+		panelTranscript.activeChatId = '123';
+		panelTranscript.transcriptViewId = 'generation-panel';
+		panelTranscript.lastOrdinal = 4;
+		panelTranscript.entries = [
+			{
+				ordinal: 4,
+				message: new AssistantMessage('2026-07-17T00:00:00.000Z', 'Clicked panel'),
+			},
+		];
+		mockForkChat.mockResolvedValue({
+			success: true,
+			chat: createServerEntry('456'),
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.forkChat('123', 4, panelTranscript);
+
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: '123',
+			chatId: expect.stringMatching(/^\d+$/),
+			upToOrdinal: 4,
+			transcriptViewId: 'generation-panel',
+		});
 	});
 
 	it('keeps an optimistic user message until the committed ledger echo arrives', async () => {
@@ -1943,7 +2094,7 @@ describe('ConversationSessionController', () => {
 		}
 	});
 
-	it('resumes approved plans with the current integration settings', async () => {
+	it('resumes approved plans with the target chat settings', async () => {
 		mockRunChat.mockResolvedValueOnce({
 			success: true,
 			commandType: 'agent-run',
@@ -1953,16 +2104,29 @@ describe('ConversationSessionController', () => {
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 		});
-		const { deps } = createDeps();
+		const { deps } = createDeps(
+			createRunningChat({
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { thinkingMode: 'off' },
+				},
+			}),
+		);
 		deps.agentState.model = 'opus';
 		deps.agentState.agentSettings = {
 			ownerId: 'claude',
 			schemaVersion: 1,
-			values: { thinkingMode: 'off' },
+			values: { thinkingMode: 'auto' },
 		};
 		const controller = new ConversationSessionController(deps);
 
-		controller.handleExitPlanMode('plan-exit-1', 'bypass', 'Use the approved design.');
+		controller.handleExitPlanModeForChat(
+			'chat-1',
+			'plan-exit-1',
+			'bypass',
+			'Use the approved design.',
+		);
 		await flushPromises();
 
 		expect(mockRunChat).toHaveBeenCalledWith(
@@ -1972,6 +2136,8 @@ describe('ConversationSessionController', () => {
 				agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
 			}),
 		);
+		expect(deps.lifecycleForChat).toHaveBeenCalledWith('chat-1');
+		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('routes reused permission ids to their exact controls and removes only completed occurrences', async () => {
@@ -2007,8 +2173,8 @@ describe('ConversationSessionController', () => {
 		});
 		const controller = new ConversationSessionController(deps);
 
-		controller.handlePermissionDecision('incarnation-1', { allow: true });
-		controller.handlePermissionDecision('incarnation-2', { allow: false });
+		controller.handlePermissionDecisionForChat('chat-1', 'incarnation-1', { allow: true });
+		controller.handlePermissionDecisionForChat('chat-1', 'incarnation-2', { allow: false });
 
 		expect(mockSendPermissionDecision).toHaveBeenNthCalledWith(
 			1,
@@ -2039,6 +2205,62 @@ describe('ConversationSessionController', () => {
 		firstResponse.resolve(permissionDecisionAccepted('decision-1'));
 		await flushPromises();
 		expect(deps.conversationUi.pendingPermissionRequests).toEqual([]);
+	});
+
+	it('does not recreate permission state when a decision settles after chat deletion', async () => {
+		const response = deferred<CommandAcceptedResponse>();
+		const control = {
+			serverInstanceId: 'server-1',
+			chatId: 'chat-1',
+			runId: 'run-1',
+			permissionOccurrenceId: 'permission-1',
+		} satisfies ChatTransientControlAction;
+		const { deps } = createDeps();
+		deps.conversationUi.pendingPermissionRequests = [
+			{
+				permissionOccurrenceId: 'permission-1',
+				requestedTool: new BashToolUseMessage('', 'tool-1', 'printf hello'),
+				control,
+			},
+		];
+		mockSendPermissionDecision.mockReturnValue(response.promise);
+		const controller = new ConversationSessionController(deps);
+
+		controller.handlePermissionDecisionForChat('chat-1', 'permission-1', { allow: true });
+		delete deps.sessions.byId['chat-1'];
+		response.resolve(permissionDecisionAccepted('decision-1'));
+		await flushPromises();
+
+		expect(deps.conversationUi.updatePendingPermissionsForChat).not.toHaveBeenCalled();
+		expect(deps.lifecycleForChat).not.toHaveBeenCalled();
+	});
+
+	it('does not recreate lifecycle state when plan approval settles after chat deletion', async () => {
+		const response = deferred<Awaited<ReturnType<typeof runChat>>>();
+		mockRunChat.mockReturnValue(response.promise);
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleExitPlanModeForChat(
+			'chat-1',
+			'plan-exit-1',
+			'bypass',
+			'Use the approved design.',
+		);
+		delete deps.sessions.byId['chat-1'];
+		response.resolve({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		await flushPromises();
+
+		expect(deps.lifecycleForChat).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 	});
 
 	it('submits image attachments as native data URLs', async () => {
@@ -2205,7 +2427,7 @@ describe('ConversationSessionController', () => {
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
-		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
+		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1');
 		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
 			'chat-1',
 			expect.objectContaining({
@@ -2660,7 +2882,7 @@ describe('ConversationSessionController', () => {
 			'error',
 			expect.stringContaining('first queued message'),
 		);
-		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
+		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('retries queue creation with the same command identity', async () => {

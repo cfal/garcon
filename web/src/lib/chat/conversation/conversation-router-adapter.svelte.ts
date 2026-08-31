@@ -20,10 +20,13 @@ import type {
 } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
+import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
+import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
 
 export interface ConversationRouterStoreDeps {
 	sessions: Pick<
 		ChatSessionsPort,
+		| 'byId'
 		| 'selectedChat'
 		| 'selectedChatId'
 		| 'order'
@@ -40,7 +43,18 @@ export interface ConversationRouterStoreDeps {
 	>;
 	chatState: ActiveTranscriptPort;
 	agentState: AgentState;
-	lifecycle: ConversationLifecycleState;
+	lifecycle: Pick<
+		ConversationLifecycleState,
+		| 'currentChatId'
+		| 'setCurrentChatId'
+		| 'markTurnRunning'
+		| 'clearTurnStatus'
+		| 'setLoadingStatus'
+		| 'pushLoadingStatus'
+		| 'popLoadingStatus'
+		| 'setIsSystemChatChange'
+	>;
+	lifecycles: Pick<ConversationLifecyclePort, 'forChat' | 'get'>;
 	conversationUi: ConversationUiPort;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
@@ -48,19 +62,8 @@ export interface ConversationRouterStoreDeps {
 	transcriptCache?: ChatTranscriptCache;
 	backgroundTranscriptLoader?: Pick<BackgroundTranscriptLoader, 'queueLoad'>;
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
+	panels?: ConversationPanelRegistry;
 	clearDeletedChat: (chatId: string) => void;
-	visiblePreviews?: {
-		isVisible: (chatId: string) => boolean;
-		applyMessages: (
-			chatId: string,
-			transcriptViewId: string,
-			messages: TranscriptMessage[],
-			firstOrdinal: number,
-			lastOrdinal: number,
-		) => boolean | void;
-		loadSnapshot: (chatId: string) => Promise<void> | void;
-		markStale: (chatId: string) => void;
-	};
 }
 
 export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
@@ -112,13 +115,27 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 	};
 	return {
 		agentSettings: {
-			permissionMode: () => deps.agentState.permissionMode,
-			setPermissionMode: (mode) => {
-				deps.agentState.permissionMode = mode;
+			permissionMode: (chatId) => {
+				const chat = deps.sessions.byId[chatId];
+				if (!chat) return null;
+				return deps.sessions.selectedChatId === chatId
+					? deps.agentState.permissionMode
+					: chat.permissionMode;
+			},
+			setPermissionMode: (chatId, mode) => {
+				if (!deps.sessions.byId[chatId]) return;
+				deps.sessions.patchChat(chatId, { permissionMode: mode });
+				if (deps.sessions.selectedChatId === chatId) deps.agentState.permissionMode = mode;
 			},
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
+			getChatCursor: (chatId) => {
+				if (!deps.panels && deps.sessions.selectedChatId === chatId) {
+					return deps.chatState.getCursor();
+				}
+				return transcriptCache.readAppliedCursor(chatId);
+			},
 			applyChatMessages: (
 				chatId,
 				transcriptViewId,
@@ -127,6 +144,25 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				lastOrdinal,
 				resendCandidates: ResendCandidate[],
 			) => {
+				if (deps.panels) {
+					const result = deps.panels.applyCommittedBatch({
+						chatId,
+						transcriptViewId,
+						messages,
+						firstOrdinal,
+						lastOrdinal,
+						resendCandidates,
+						noticeRevision: deps.panels.noticeRevisionFor(chatId),
+					});
+					if (result.kind === 'applied') {
+						return result.localRecoverySurfaceIds.length === 0
+							? 'applied'
+							: 'gap-detected';
+					}
+					return result.outcome.status === 'view-changed'
+						? 'view-changed'
+						: 'gap-detected';
+				}
 				if (deps.sessions.selectedChatId !== chatId) {
 					return routerApplyStatus(
 						applyBackgroundTranscript(
@@ -148,38 +184,49 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				);
 			},
 			reloadChatTranscript: (chatId) => {
+				if (deps.panels) {
+					void deps.panels.loadChatSnapshot(chatId).catch(() => {});
+					return;
+				}
 				if (deps.sessions.selectedChatId !== chatId) return;
 				void deps.chatState.loadMessages(chatId).catch(() => {
 					// Leaves current visible state until a later retry succeeds.
 				});
 			},
-			warmBackgroundTranscript: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
-				applyBackgroundTranscript(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal)
-					.status === 'applied',
-			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
-			warmVisibleChatPreview: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
-				deps.visiblePreviews?.applyMessages(
-					chatId,
-					transcriptViewId,
-					messages,
-					firstOrdinal,
-					lastOrdinal,
-				) ?? undefined,
-			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
-			markVisibleChatPreviewStale: (chatId) => {
-				deps.visiblePreviews?.markStale(chatId);
+			isRenderedChat: (chatId) =>
+				(deps.panels?.panelsForChat(chatId).length ?? 0) > 0,
+			loadRenderedChat: async (chatId) => {
+				try {
+					await deps.panels?.loadChatSnapshot(chatId);
+				} catch {
+					// Leaves the stale cache flag set so a later activation retries.
+				}
 			},
-			appendLocalNotice: (noticeType, content) =>
-				deps.chatState.appendLocalNotice(noticeType, content),
+			markRenderedChatStale: (chatId) => {
+				deps.panels?.handleViewReplacement(chatId);
+			},
+			appendLocalNotice: (noticeType, content) => {
+				const chatId = deps.sessions.selectedChatId;
+				if (deps.panels && chatId) deps.panels.appendLocalNotice(chatId, noticeType, content);
+				else deps.chatState.appendLocalNotice(noticeType, content);
+			},
 			appendServerNotice: (chatId, noticeType, content) =>
-				deps.chatState.appendServerNotice(chatId, noticeType, content),
+				deps.panels
+					? deps.panels.appendServerNotice(chatId, noticeType, content)
+					: deps.chatState.appendServerNotice(chatId, noticeType, content),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatTranscript: (chatId) => {
-				transcriptCache.remove(chatId);
-				deps.chatState.discardServerNotices(chatId);
+				if (deps.panels) deps.panels.removeChat(chatId);
+				else {
+					transcriptCache.remove(chatId);
+					deps.chatState.discardServerNotices(chatId);
+				}
 				deps.chatDrafts?.discardChat(chatId);
 			},
-			markChatTranscriptStale: (chatId) => transcriptCache.markStale(chatId),
+			markChatTranscriptStale: (chatId) => {
+				if (deps.panels) deps.panels.markChatStale(chatId);
+				else transcriptCache.markStale(chatId);
+			},
 			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
@@ -188,8 +235,9 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
 			clearTurnStatus: (chatId) => deps.lifecycle.clearTurnStatus(chatId),
 			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
-			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
-			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
+			pushLoadingStatus: (chatId, entry) =>
+				deps.lifecycles.forChat(chatId).pushLoadingStatus(entry),
+			popLoadingStatus: (chatId, id) => deps.lifecycles.get(chatId)?.popLoadingStatus(id),
 			setIsSystemChatChange: (v) => deps.lifecycle.setIsSystemChatChange(v),
 		},
 		conversationUi: deps.conversationUi,

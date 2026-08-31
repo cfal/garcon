@@ -30,6 +30,16 @@ function echoed(clientMessageId: string, ordinal: number): TranscriptMessage {
 }
 
 describe('ConversationTranscriptOverlayStore', () => {
+	it('reads a missing chat without creating reactive state', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+
+		expect(overlays.viewFor('chat-1')).toBeNull();
+
+		overlays.appendLocalNotice('chat-1', 'progress', 'working');
+
+		expect(overlays.viewFor('chat-1')?.notices).toHaveLength(1);
+	});
+
 	it('returns one stable chat-qualified view', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		const first = overlays.forChat('chat-1');

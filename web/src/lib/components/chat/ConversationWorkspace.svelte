@@ -1,11 +1,8 @@
 <script lang="ts">
-	// Thin composition shell for the chat workspace. Wires extracted
-	// controllers (session, scroll, router) and renders the conversation
-	// feed, queue controls, and composer. All business logic lives in
-	// the controller modules.
+	// Owns the singleton conversation runtime, composer, and dialogs while
+	// rendered panels own transcript presentation and scrolling.
 
 	import { onDestroy, onMount } from 'svelte';
-	import ConversationPanel from './ConversationPanel.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
@@ -15,20 +12,12 @@
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
-	import type {
-		ConversationPanelPresentationPort,
-		ConversationPanelRegistration,
-	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
-	import {
-		ActiveTranscriptState,
-		INITIAL_VISIBLE_MESSAGES,
-	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ResendCandidate } from '$shared/chat-view';
 	import type { ChatProcessingPhase } from '$shared/chat-types';
 	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
-	import type { ChatWindowPreviewCursor } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
@@ -41,13 +30,12 @@
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
-	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
-	import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
+	import { CurrentConversationPanelTranscript } from '$lib/chat/conversation/current-conversation-panel-transcript.js';
+	import { CurrentConversationLifecycle } from '$lib/chat/conversation/current-conversation-lifecycle.js';
 	import {
 		UserMessageNavigatorController,
 		type UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
-	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { isAcceptedConversationSubmission } from '$lib/chat/conversation/conversation-submission-outcome.js';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import type { QueueEntry } from '$lib/types/chat';
@@ -59,10 +47,8 @@
 		getLocalSettings,
 		getAppShell,
 		getWs,
-		setActiveTranscriptState,
 		setComposerState,
 		setAgentState,
-		setConversationLifecycle,
 		getReadReceiptOutbox,
 		getModelCatalog,
 		getRemoteSettings,
@@ -71,9 +57,10 @@
 		getWorkspaceShortcuts,
 		getGitQuickSummary,
 		getGitBranchActions,
-		getChatProcessingReconciler,
 		getChatDrafts,
 		getConversationUi,
+		getConversationLifecycles,
+		getConversationPanels,
 	} from '$lib/context';
 	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -90,21 +77,10 @@
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
+		onComposerHeightChange?: (height: number) => void;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
 		reserveMobileToolbar?: boolean;
-		getVisibleChatIds?: () => string[];
-		isVisiblePreviewChat?: (chatId: string) => boolean;
-		getVisiblePreviewCursor?: (chatId: string) => ChatWindowPreviewCursor | null;
-		applyVisiblePreviewMessages?: (
-			chatId: string,
-			transcriptViewId: string,
-			messages: TranscriptMessage[],
-			firstOrdinal: number,
-			lastOrdinal: number,
-		) => boolean | void;
-		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
-		markVisiblePreviewStale?: (chatId: string) => void;
 		isVisible?: boolean;
 		isPresented?: boolean;
 	}
@@ -125,15 +101,10 @@
 		onRegisterUserMessageNavigator,
 		onRegisterPrepareHide,
 		onRegisterPanelActions,
+		onComposerHeightChange,
 		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
 		reserveMobileToolbar = false,
-		getVisibleChatIds,
-		isVisiblePreviewChat,
-		getVisiblePreviewCursor,
-		applyVisiblePreviewMessages,
-		loadVisiblePreviewSnapshot,
-		markVisiblePreviewStale,
 		isVisible = true,
 		isPresented: isPresentedOverride,
 	}: ConversationWorkspaceProps = $props();
@@ -152,12 +123,18 @@
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
-	const chatSurfaceId = $derived(workspace.currentChatSurfaceId);
+	const chatSurfaceId = $derived(workspace.composerAnchorSurfaceId);
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const chatDrafts = getChatDrafts();
+	const conversationPanels = getConversationPanels();
+	const conversationLifecycles = getConversationLifecycles();
 
 	const transcriptCache = getInitialTranscriptCache();
-	const chatState = new ActiveTranscriptState(transcriptCache);
+	const chatState = new CurrentConversationPanelTranscript({
+		panels: conversationPanels,
+		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
+		getSelectedChatId: () => sessions.selectedChatId,
+	});
 	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState(chatDrafts, {
 		get activeChatId() {
@@ -165,22 +142,11 @@
 		},
 	});
 	const agentState = new AgentState();
-	const lifecycle = new ConversationLifecycleState();
-	const conversationUi = getConversationUi();
-	const processingReconciler = getChatProcessingReconciler();
-	const removeProcessingPresentation = processingReconciler.addPresentation({
-		get currentChatId() {
-			return lifecycle.currentChatId;
-		},
-		applyProcessingPhase: (chatId, phase) => {
-			lifecycle.applyProcessingPhase(chatId, phase);
-		},
-		applyProcessingSnapshotPhase: (chatId, phase, sentAt) => {
-			lifecycle.applyProcessingSnapshotPhase(chatId, phase, sentAt);
-		},
-		clearTurnPermissionRequests: (chatId) =>
-			conversationUi.clearTurnPermissionRequestsForChat(chatId),
+	const lifecycle = new CurrentConversationLifecycle({
+		lifecycles: conversationLifecycles,
+		getSelectedChatId: () => sessions.selectedChatId,
 	});
+	const conversationUi = getConversationUi();
 
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
@@ -200,14 +166,10 @@
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
 		chatState,
+		panels: conversationPanels,
 		conversationUi,
 		sessions,
 		getBackgroundCursors: () => transcriptCache.listCursors(20),
-		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
-		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
-		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
-		onVisibleChatMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
-			applyVisiblePreviewMessages?.(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal),
 		markBackgroundStale: (chatId) => transcriptCache.markStale(chatId),
 		onBackgroundMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) => {
 			const applied = transcriptCache.applyMessages(chatId, transcriptViewId, {
@@ -222,15 +184,10 @@
 		},
 	});
 
-	setActiveTranscriptState(chatState);
 	setComposerState(composerState);
 	setAgentState(agentState);
-	setConversationLifecycle(lifecycle);
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
-	const effectiveProjectKey = $derived(sessions.selectedChat?.effectiveProjectKey ?? null);
-	const quickGitSummaryForProject = $derived(quickGit.summaryFor(projectPath));
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
@@ -241,14 +198,11 @@
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
-	let panelPresentation: ConversationPanelPresentationPort | null = null;
-
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		reloadRequest?.complete();
 		reloadRequest = null;
-		removeProcessingPresentation();
 		drainHandle.cleanup();
 		transcriptCache.flush();
 	});
@@ -260,6 +214,7 @@
 		chatState,
 		agentState,
 		lifecycle,
+		lifecycles: conversationLifecycles,
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
@@ -271,6 +226,7 @@
 			});
 		},
 		transcriptCache,
+		panels: conversationPanels,
 		backgroundTranscriptLoader,
 		chatDrafts,
 		clearDeletedChat: (chatId) => {
@@ -280,32 +236,24 @@
 				);
 			});
 		},
-		visiblePreviews: {
-			isVisible: (chatId) => isVisiblePreviewChat?.(chatId) ?? false,
-			applyMessages: (chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
-				applyVisiblePreviewMessages?.(
-					chatId,
-					transcriptViewId,
-					messages,
-					firstOrdinal,
-					lastOrdinal,
-				),
-			loadSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
-			markStale: (chatId) => markVisiblePreviewStale?.(chatId),
-		},
 	});
 	reconnectCoordinator.mount();
 
 	// Scroll controller.
-	const scroll = new ConversationScrollController({
-		getScrollContainer: () => panelPresentation?.getScrollContainer() ?? null,
-		getViewport: () => panelPresentation?.getViewport() ?? null,
-		getQueueContainer: () => panelPresentation?.getQueueContainer(),
-		chatState,
-		getChatId: () => sessions.selectedChatId,
-	});
+	function currentPanel() {
+		const panel = conversationPanels.currentPanel(workspace.composerAnchorSurfaceId);
+		return panel?.chatId === sessions.selectedChatId ? panel : null;
+	}
+
+	function panelForChat(chatId: string) {
+		const current = currentPanel();
+		return current?.chatId === chatId
+			? current
+			: (conversationPanels.panelsForChat(chatId)[0] ?? null);
+	}
+
 	function scrollToBottomAndFill(): void {
-		void scroll.scrollToLatestAndFill();
+		void currentPanel()?.scroll.scrollToLatestAndFill();
 	}
 
 	// Session controller.
@@ -315,6 +263,7 @@
 		composerState,
 		agentState,
 		lifecycle,
+		lifecycleForChat: (chatId) => conversationLifecycles.forChat(chatId),
 		conversationUi,
 		startupCoordinator,
 		modelCatalog,
@@ -346,149 +295,126 @@
 		},
 		requestProcessingSnapshot: (source) => ws.requestProcessingSnapshot(source),
 		setIsViewportPinnedToBottom: (v) => {
-			scroll.setPinnedToBottom(v);
+			currentPanel()?.scroll.setPinnedToBottom(v);
 		},
-		setInitialBottomRestorePending: (chatId) => scroll.prepareInitialBottomRestore(chatId),
+		setInitialBottomRestorePending: (chatId) => {
+			if (chatId) panelForChat(chatId)?.scroll.prepareInitialBottomRestore(chatId);
+		},
 		scrollToBottom: scrollToBottomAndFill,
 	});
 	const directAdmissionPending = $derived(
 		controller.isDirectAdmissionPending(sessions.selectedChatId),
 	);
-	let lastPanelRestoreTarget: ConversationPanelRestoreTarget = { kind: 'end' };
-	const livePanel = {
-		get surfaceId() {
-			return chatSurfaceId as ChatViewSurfaceId;
-		},
-		get chatId() {
-			return sessions.selectedChatId ?? '';
-		},
-		transcript: chatState,
-		lifecycle,
-		scroll,
-		attachPresentation(port: ConversationPanelPresentationPort) {
-			panelPresentation = port;
-			const binding = port;
-			onRegisterPrepareHide?.(() => {
-				lastPanelRestoreTarget = binding.captureRestoreTarget() ?? lastPanelRestoreTarget;
-				binding.closeTransients();
-			});
-			return () => {
-				if (panelPresentation !== binding) return;
-				lastPanelRestoreTarget = binding.captureRestoreTarget() ?? lastPanelRestoreTarget;
-				binding.closeTransients();
-				panelPresentation = null;
-				onRegisterPrepareHide?.(null);
-			};
-		},
-		prepareForInteractionLoss() {
-			panelPresentation?.closeTransients();
-		},
-		prepareForHide() {
-			lastPanelRestoreTarget =
-				panelPresentation?.captureRestoreTarget() ?? lastPanelRestoreTarget;
-			panelPresentation?.closeTransients();
-			return lastPanelRestoreTarget;
-		},
-		async restore() {},
-		destroy() {},
-	} satisfies ConversationPanelRegistration;
-
-	function assertCurrentSurface(surfaceId: ChatViewSurfaceId, chatId: string): void {
-		if (workspace.currentChatSurfaceId !== surfaceId || sessions.selectedChatId !== chatId) {
+	function assertRenderedPanel(surfaceId: ChatViewSurfaceId, chatId: string) {
+		const panel = conversationPanels.panel(surfaceId);
+		if (panel?.chatId !== chatId) {
 			throw new StaleConversationSurfaceError(surfaceId, chatId);
 		}
+		return panel;
 	}
 
 	const panelActions: ConversationPanelActions = {
 		reload(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			void controller.loadChat(chatId);
+			const panel = assertRenderedPanel(surfaceId, chatId);
+			void controller.loadPanelChat(chatId, panel.transcript);
 		},
 		decidePermission(surfaceId, chatId, permissionOccurrenceId, decision) {
-			assertCurrentSurface(surfaceId, chatId);
-			controller.handlePermissionDecision(permissionOccurrenceId, decision);
+			assertRenderedPanel(surfaceId, chatId);
+			controller.handlePermissionDecisionForChat(chatId, permissionOccurrenceId, decision);
 		},
 		exitPlanMode(surfaceId, chatId, permissionOccurrenceId, choice, plan) {
-			assertCurrentSurface(surfaceId, chatId);
-			controller.handleExitPlanMode(permissionOccurrenceId, choice, plan);
+			assertRenderedPanel(surfaceId, chatId);
+			controller.handleExitPlanModeForChat(chatId, permissionOccurrenceId, choice, plan);
 		},
 		fork(surfaceId, chatId, upToOrdinal) {
-			assertCurrentSurface(surfaceId, chatId);
-			void controller.forkChat(chatId, upToOrdinal);
+			const panel = assertRenderedPanel(surfaceId, chatId);
+			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
 		},
 		async generateTitle(surfaceId, chatId, message, ordinal) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
 			await sessions.generateChatTitleFromMessage(chatId, message, ordinal);
 		},
 		interruptQueue(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			return controller.handleInterruptAndSend();
+			assertRenderedPanel(surfaceId, chatId);
+			return controller.handleInterruptAndSendForChat(chatId);
 		},
 		steerQueue(surfaceId, chatId, entry, reorderRevision) {
-			assertCurrentSurface(surfaceId, chatId);
-			return controller.handleSteerQueuedInput(entry, reorderRevision);
+			assertRenderedPanel(surfaceId, chatId);
+			return controller.handleSteerQueuedInputForChat(chatId, entry, reorderRevision);
 		},
 		pauseQueue(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
 			return controller.pauseQueueForChat(chatId);
 		},
 		resumeQueue(surfaceId, chatId, pauseId) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
 			return controller.resumeQueueForChat(chatId, pauseId);
 		},
 		reportQueueControlError(surfaceId, chatId, action, error) {
-			assertCurrentSurface(surfaceId, chatId);
-			controller.handleQueueControlError(action, error);
+			assertRenderedPanel(surfaceId, chatId);
+			controller.handleQueueControlErrorForChat(chatId, action, error);
 		},
 		editQueue(surfaceId, chatId, entry) {
-			assertCurrentSurface(surfaceId, chatId);
-			editQueuedInput(entry);
+			assertRenderedPanel(surfaceId, chatId);
+			editQueuedInput(chatId, entry);
 		},
 		openQueue(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			openQueuedInputsManager();
+			assertRenderedPanel(surfaceId, chatId);
+			openQueuedInputsManager(chatId);
 		},
 		deleteQueue(surfaceId, chatId, entryId) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
 			return controller.deleteQueueEntryForChat(chatId, entryId);
 		},
 		stop(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			return controller.handleAbort();
+			assertRenderedPanel(surfaceId, chatId);
+			return controller.handleAbortForChat(chatId);
 		},
 		openCommit(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			openCommit();
+			assertRenderedPanel(surfaceId, chatId);
+			openCommit(surfaceId, chatId);
 		},
 		toggleBranch(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			toggleCommitBranchDropdown();
+			assertRenderedPanel(surfaceId, chatId);
+			toggleCommitBranchDropdown(chatId);
 		},
 		closeBranch(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
 			quickGitBranches.closeBranchDropdown();
 		},
 		createBranch(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			if (projectPath && effectiveProjectKey) {
-				quickGitBranches.openNewBranchDialog(projectPath, surfaceId, effectiveProjectKey);
+			assertRenderedPanel(surfaceId, chatId);
+			const chat = sessions.byId[chatId];
+			if (chat?.projectPath && chat.effectiveProjectKey) {
+				quickGitBranches.openNewBranchDialog(
+					chat.projectPath,
+					surfaceId,
+					chat.effectiveProjectKey,
+				);
 			}
 		},
 		switchBranch(surfaceId, chatId, branch) {
-			assertCurrentSurface(surfaceId, chatId);
-			return switchCommitBranch(branch);
+			assertRenderedPanel(surfaceId, chatId);
+			return switchCommitBranch(surfaceId, chatId, branch);
 		},
 		searchBranches(surfaceId, chatId, query) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
+			const projectPath = sessions.byId[chatId]?.projectPath;
 			if (projectPath) void quickGitBranches.searchBranchRefs(projectPath, query);
 		},
 		sortBranches(surfaceId, chatId, key, query) {
-			assertCurrentSurface(surfaceId, chatId);
+			assertRenderedPanel(surfaceId, chatId);
+			const projectPath = sessions.byId[chatId]?.projectPath;
 			if (projectPath) void quickGitBranches.toggleBranchSort(projectPath, key, query);
 		},
 		closeSwitchBranchDialog(surfaceId, chatId) {
-			assertCurrentSurface(surfaceId, chatId);
-			appShell.requestComposerFocus();
+			assertRenderedPanel(surfaceId, chatId);
+			if (
+				workspace.composerAnchorSurfaceId === surfaceId &&
+				sessions.selectedChatId === chatId
+			) {
+				appShell.requestComposerFocus();
+			}
 		},
 	};
 	// Consumes an epoch-validated search navigation exactly once, after the
@@ -500,7 +426,7 @@
 		if (chatState.transcriptViewId === '') return;
 		const ordinal = searchResultNavigation.take(chatId);
 		if (ordinal === null || ordinal > chatState.lastOrdinal) return;
-		void scroll.jumpToMessageRow({
+		void currentPanel()?.scroll.jumpToMessageRow({
 			chatId,
 			transcriptViewId: chatState.transcriptViewId,
 			rowId: `${chatState.transcriptViewId}:${ordinal}`,
@@ -511,9 +437,14 @@
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,
 		reloadTranscript: (chatId) => controller.loadChat(chatId),
-		restoreLatestTranscript: (chatId) => scroll.restoreLatestWindow(chatId),
-		loadOlderMessages: (chatId) => scroll.loadEarlierPageForNavigator(chatId),
-		jumpToRow: (target) => scroll.jumpToMessageRow(target),
+		restoreLatestTranscript: (chatId) =>
+			panelForChat(chatId)?.scroll.restoreLatestWindow(chatId) ?? Promise.resolve(false),
+		loadOlderMessages: (chatId) =>
+			panelForChat(chatId)?.scroll.loadEarlierPageForNavigator(chatId) ??
+			Promise.resolve('invalidated'),
+		jumpToRow: (target) =>
+			panelForChat(target.chatId)?.scroll.jumpToMessageRow(target) ??
+			Promise.resolve('unavailable'),
 	});
 
 	// Expose the submit function to sibling components (runs once on mount).
@@ -523,6 +454,7 @@
 		onRegisterReload?.(reloadSelectedChat);
 		onRegisterUserMessageNavigator?.(() => void userMessageNavigator.openForActiveChat());
 		onRegisterPanelActions?.(panelActions);
+		onRegisterPrepareHide?.(() => currentPanel()?.prepareForInteractionLoss());
 		const unregisterSubagentToolbar = subagentToolbar.register({
 			get model() {
 				return subagentModel;
@@ -534,6 +466,7 @@
 			unregisterSubagentToolbar();
 			onRegisterUserMessageNavigator?.(null);
 			onRegisterPanelActions?.(null);
+			onRegisterPrepareHide?.(null);
 		};
 	});
 
@@ -589,7 +522,11 @@
 		return false;
 	}
 
-	$effect(() => workspaceShortcuts.registerSurface(chatSurfaceId, handleWorkspaceShortcut));
+	$effect(() => {
+		const surfaceId = chatSurfaceId;
+		if (!surfaceId) return;
+		return workspaceShortcuts.registerSurface(surfaceId, handleWorkspaceShortcut);
+	});
 
 	function onSubmit(text?: string, images?: File[]) {
 		const chatId = sessions.selectedChatId;
@@ -603,17 +540,15 @@
 		void controller.submitComposerWithSteerPreference(chatId);
 	}
 
-	function openQueuedInputsManager(): void {
-		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
+	function openQueuedInputsManager(chatId = sessions.selectedChatId): void {
+		if (!chatId || !sessions.byId[chatId]) return;
 		queuedInputEditor.close();
 		queuedInputsDialogChatId = chatId;
 		queuedInputsDialogOpen = true;
 	}
 
-	function editQueuedInput(entry: QueueEntry): void {
-		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
+	function editQueuedInput(chatId: string, entry: QueueEntry): void {
+		if (!sessions.byId[chatId]) return;
 		queuedInputsDialogChatId = chatId;
 		queuedInputEditor.begin(entry);
 		queuedInputsDialogOpen = true;
@@ -626,7 +561,7 @@
 	}
 
 	function jumpToToolInput(anchorId: string): void {
-		void scroll.jumpToDomAnchor(anchorId);
+		void currentPanel()?.scroll.jumpToDomAnchor(anchorId);
 	}
 
 	// Exposes a chat submit function for sibling components (e.g. git review).
@@ -671,9 +606,11 @@
 		if (!request || reloadInProgress) return;
 		reloadInProgress = true;
 		try {
-			await reloadChatFromNative(ws, chatState, request.chatId);
-			if (request.chatId === sessions.selectedChatId && scroll.isPinnedToBottom) {
-				scroll.prepareInitialBottomRestore(request.chatId);
+			const panel = panelForChat(request.chatId);
+			if (!panel) throw new Error(m.sidebar_chats_reload_failed());
+			await reloadChatFromNative(ws, panel.transcript, request.chatId);
+			if (request.chatId === sessions.selectedChatId && panel?.scroll.isPinnedToBottom) {
+				panel.scroll.prepareInitialBottomRestore(request.chatId);
 			}
 			reloadRequest = null;
 			request.complete();
@@ -685,67 +622,94 @@
 		}
 	}
 
-	function openCommit(): void {
-		if (!projectPath || !quickGitSummaryForProject) return;
+	function openCommit(surfaceId: ChatViewSurfaceId, chatId: string): void {
+		const projectPath = sessions.byId[chatId]?.projectPath;
+		if (!projectPath || !quickGit.summaryFor(projectPath)) return;
+		const targetWindowId = workspace.windowOf(surfaceId);
 		const opening = appShell.isMobile
 			? workspace.focusMobileSingleton('commit')
-			: workspace.openSingletonAsTab('commit', workspace.currentWindowId);
+			: targetWindowId
+				? workspace.openSingletonAsTab('commit', targetWindowId)
+				: null;
+		if (!opening) return;
 		void opening.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		});
 	}
 
-	function toggleCommitBranchDropdown(): void {
+	function toggleCommitBranchDropdown(chatId: string): void {
+		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
-		if (quickGitBranches.showBranchDropdown) {
+		if (
+			quickGitBranches.currentProjectPath === projectPath &&
+			quickGitBranches.showBranchDropdown
+		) {
 			quickGitBranches.closeBranchDropdown();
 			return;
 		}
 		void quickGitBranches.openBranchDropdown(projectPath);
 	}
 
-	async function switchCommitBranch(branch: string): Promise<void> {
-		if (!projectPath || !effectiveProjectKey) return;
+	async function switchCommitBranch(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+		branch: string,
+	): Promise<void> {
+		const chat = sessions.byId[chatId];
+		if (!chat?.projectPath || !chat.effectiveProjectKey) return;
 		await quickGitBranches.switchBranch(
-			projectPath,
+			chat.projectPath,
 			branch,
 			undefined,
-			chatSurfaceId,
-			effectiveProjectKey,
+			surfaceId,
+			chat.effectiveProjectKey,
 		);
 	}
+
+	let composerHost = $state<HTMLDivElement | null>(null);
+
+	$effect(() => {
+		const host = composerHost;
+		const publish = onComposerHeightChange;
+		if (!host || !isVisible) {
+			publish?.(0);
+			return;
+		}
+		const publishHeight = () => publish?.(host.getBoundingClientRect().height);
+		publishHeight();
+		const observer = new ResizeObserver(publishHeight);
+		observer.observe(host);
+		return () => {
+			observer.disconnect();
+			publish?.(0);
+		};
+	});
 </script>
 
-<div class="flex h-full flex-col">
-	<div class="flex min-h-0 flex-1">
-		{#if sessions.selectedChat && chatSurfaceId}
-			<ConversationPanel
-				surfaceId={chatSurfaceId}
-				chat={sessions.selectedChat}
-				panel={livePanel}
-				isCurrent={true}
-				{isVisible}
-				actions={panelActions}
-				{reserveMobileToolbar}
-			/>
-		{/if}
+<div class="pointer-events-none flex h-full flex-col">
+	<div class="min-h-0 flex-1"></div>
+	<div
+		bind:this={composerHost}
+		class="pointer-events-auto"
+		data-conversation-composer-host={chatSurfaceId}
+		data-reserve-mobile-toolbar={reserveMobileToolbar}
+	>
+		<PromptComposer
+			{isVisible}
+			{isPresented}
+			{directAdmissionPending}
+			{composerEditorOpenRequestId}
+			onsubmit={onSubmit}
+			{onSteerPreferredSubmit}
+			onModelChange={(next) => controller.handleModelSelectionChange(next)}
+			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
+			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+			onAgentSettingChange={(descriptor, value) =>
+				controller.handleAgentSettingChange(descriptor, value)}
+			resendCandidates={chatState.resendCandidates}
+			onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
+		/>
 	</div>
-
-	<PromptComposer
-		{isVisible}
-		{isPresented}
-		{directAdmissionPending}
-		{composerEditorOpenRequestId}
-		onsubmit={onSubmit}
-		{onSteerPreferredSubmit}
-		onModelChange={(next) => controller.handleModelSelectionChange(next)}
-		onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
-		onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
-		onAgentSettingChange={(descriptor, value) =>
-			controller.handleAgentSettingChange(descriptor, value)}
-		resendCandidates={chatState.resendCandidates}
-		onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
-	/>
 
 	{#if userMessageNavigator.open}
 		<UserMessageNavigatorDialog controller={userMessageNavigator} />

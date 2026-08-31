@@ -441,8 +441,8 @@
 		<!-- Keeps automatic loading outside virtual geometry so prepends cannot move the reading anchor. -->
 		<div
 			class="pointer-events-none absolute left-1/2 top-2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-none"
-			role="status"
-			aria-live="polite"
+			role={announcementsEnabled ? 'status' : undefined}
+			aria-live={announcementsEnabled ? 'polite' : 'off'}
 			data-chat-earlier-loading-indicator
 		>
 			<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
@@ -486,7 +486,7 @@
 	<ScrollAreaPrimitive.Corner />
 	<div
 		class="sr-only"
-		role="status"
+		role={announcementsEnabled ? 'status' : undefined}
 		aria-live={announcementsEnabled ? 'polite' : 'off'}
 		aria-atomic="true"
 		data-chat-feed-announcement-sequence={announcement.sequence}

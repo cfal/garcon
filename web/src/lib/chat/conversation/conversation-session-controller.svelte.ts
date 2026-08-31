@@ -1,5 +1,4 @@
-// Owns chat lifecycle, submission, permission, queue, and mode transitions.
-// Delegates all viewport operations through the dependency interface.
+// Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
@@ -33,7 +32,10 @@ import {
 	ConversationAgentSwitchService,
 	type AgentSwitchSelection,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
-import { ConversationSlashCommandService } from '$lib/chat/conversation/conversation-slash-command-service.js';
+import {
+	ConversationSlashCommandService,
+	type ConversationForkSource,
+} from '$lib/chat/conversation/conversation-slash-command-service.js';
 import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
@@ -75,6 +77,21 @@ type SessionTranscriptState = Pick<
 	| 'upsertOptimisticUserInput'
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
+> & {
+	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
+	hasMountedPresentation(chatId: string): boolean;
+	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
+	appendLocalNoticeForChat(
+		chatId: string,
+		noticeType: Parameters<ActiveTranscriptPort['appendLocalNotice']>[0],
+		content: string,
+	): void;
+	clearLocalNoticesForChat(chatId: string): void;
+};
+
+type SessionTranscriptLoadTarget = Pick<
+	ActiveTranscriptPort,
+	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
 > & {
 	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
 };
@@ -135,6 +152,11 @@ type SessionConversationUiState = Pick<
 	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
+	| 'pendingPermissionsFor'
+	| 'updatePendingPermissionsForChat'
+	| 'beginPlanModeForChat'
+	| 'previousPermissionModeFor'
+	| 'finishPlanModeForChat'
 	| 'setTransientFeedFromSnapshot'
 >;
 
@@ -176,6 +198,7 @@ export interface SessionControllerDeps {
 	composerState: SessionComposerState;
 	agentState: SessionAgentState;
 	lifecycle: SessionLifecycleState;
+	lifecycleForChat(chatId: string): SessionLifecycleState;
 	conversationUi: SessionConversationUiState;
 	startupCoordinator: SessionStartupCoordinator;
 	modelCatalog: {
@@ -289,7 +312,8 @@ export class ConversationSessionController {
 			get queue() {
 				return queue;
 			},
-			executionModelSelection: () => this.#executionModelSelection(),
+			executionSelectionForChat: (chatId) =>
+				executionSelectionFromProjection(deps.sessions.byId[chatId]),
 		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() {
@@ -360,9 +384,7 @@ export class ConversationSessionController {
 
 	#resetSelectionState(): void {
 		const { deps } = this;
-		const currentChatId = deps.lifecycle.currentChatId;
 		deps.chatState.activateChat(null);
-		if (currentChatId) deps.lifecycle.clearTurnStatus(currentChatId);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.activateTransientFeed(null);
 		deps.setIsViewportPinnedToBottom(true);
@@ -396,18 +418,19 @@ export class ConversationSessionController {
 			return;
 		}
 
-		deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
+		const preservesMountedPresentation = deps.chatState.hasMountedPresentation(chatId);
+		if (!preservesMountedPresentation) {
+			deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
+		}
 
 		// Restores cached messages immediately while the server round-trip completes.
 		const restored = deps.chatState.activateChat(chatId);
-		if (restored) {
+		if (!preservesMountedPresentation && restored) {
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
-		const previousChatId = deps.lifecycle.currentChatId;
-		if (previousChatId) deps.lifecycle.clearTurnStatus(previousChatId);
 		deps.conversationUi.activateTransientFeed(chatId);
-		deps.setIsViewportPinnedToBottom(true);
+		if (!preservesMountedPresentation) deps.setIsViewportPinnedToBottom(true);
 
 		const activeSelection = this.#executionDraft.activate(chatId);
 		if (activeSelection) this.#applyExecutionSelection(activeSelection);
@@ -466,42 +489,60 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
 		}
 
-		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
+		this.loadChat(chatId, {
+			minimumMessageLimit: restored?.count ?? 0,
+			restoreBottom: !preservesMountedPresentation,
+		});
 	}
 
-	async loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
+	async loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+	): Promise<void> {
 		try {
 			await this.#loadChat(chatId, options);
 		} catch {
-			// Leaves restored messages visible until reconnect or manual retry reloads them.
+			// Leaves restored messages visible until reconnect or a manual retry.
+		}
+	}
+	async loadPanelChat(chatId: string, transcript: SessionTranscriptLoadTarget): Promise<void> {
+		try {
+			await this.#loadChat(chatId, { restoreBottom: false }, transcript);
+		} catch {
+			// Leaves the panel's load error visible for another explicit retry.
 		}
 	}
 
-	async #loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
+	async #loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+		transcript: SessionTranscriptLoadTarget = this.deps.chatState,
+	): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
-			Math.min(deps.chatState.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
+			Math.min(transcript.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
 
 		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
 		// The primary restore happens earlier in handleChatSwitch.
-		if (deps.chatState.chatMessages.length === 0) {
-			const restored = deps.chatState.activateChat(chatId);
+		if (transcript.chatMessages.length === 0) {
+			const restored = transcript.activateChat(chatId);
 			minimumMessageLimit = Math.max(minimumMessageLimit, restored?.count ?? 0);
 		}
 
-		if (deps.chatState.chatMessages.length > 0) {
+		if (options.restoreBottom !== false && transcript.chatMessages.length > 0) {
 			this.#requestBottomRestore(chatId);
 		}
 
 		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
-		await deps.chatState.loadMessages(chatId, {
+		await transcript.loadMessages(chatId, {
 			minimumLimit: minimumMessageLimit,
+			purpose: 'activation',
 		});
+		transcript.transcriptCache.markValidated(chatId);
 		if (deps.sessions.selectedChatId !== chatId) return;
 
-		deps.chatState.transcriptCache.markValidated(chatId);
-		this.#requestBottomRestore(chatId);
+		if (options.restoreBottom !== false) this.#requestBottomRestore(chatId);
 
 		const record = deps.sessions.byId[chatId];
 		if (
@@ -517,7 +558,7 @@ export class ConversationSessionController {
 			deps.sessions.selectedChatId === chatId &&
 			initialSnapshot?.chat.id === chatId &&
 			initialSnapshot.transcript.availability === 'available' &&
-			initialSnapshot.transcript.transcriptViewId === deps.chatState.getCursor().transcriptViewId
+			initialSnapshot.transcript.transcriptViewId === transcript.getCursor().transcriptViewId
 		) {
 			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}
@@ -768,46 +809,73 @@ export class ConversationSessionController {
 		return this.#handoffForkConfirmation;
 	}
 
-	forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void> {
-		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal);
+	forkChat(
+		sourceChatId: string,
+		upToOrdinal?: number,
+		transcript?: SessionTranscriptLoadTarget & ConversationForkSource['transcript'],
+	): Promise<void> {
+		const source = transcript
+			? {
+					transcript,
+					refetchTranscript: () =>
+						this.#loadChat(sourceChatId, { restoreBottom: false }, transcript),
+				} satisfies ConversationForkSource
+			: undefined;
+		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal, source);
 	}
 
 	handleAbort(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId || this.deps.lifecycle.currentChatId;
+		return chatId ? this.handleAbortForChat(chatId) : Promise.resolve();
+	}
+
+	handleAbortForChat(chatId: string): Promise<void> {
 		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(stopChat, (chatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+		return this.#requestTurnStop(chatId, stopChat, (targetChatId, result) => {
+			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
 	handleInterruptAndSend(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId || this.deps.lifecycle.currentChatId;
+		return chatId ? this.handleInterruptAndSendForChat(chatId) : Promise.resolve();
+	}
+
+	handleInterruptAndSendForChat(chatId: string): Promise<void> {
 		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(interruptAndSendChat, (chatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+		return this.#requestTurnStop(chatId, interruptAndSendChat, (targetChatId, result) => {
+			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
 	#requestTurnStop<T extends { outcome: ChatStopOutcome }>(
+		chatId: string,
 		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
 		onResult?: (chatId: string, result: T) => void,
 	): Promise<void> {
 		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		if (deps.lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
+		const chat = deps.sessions.byId[chatId];
+		if (!chat) return Promise.resolve();
+		const lifecycle = deps.lifecycleForChat(chatId);
+		if (lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
 		const clientRequestId = createClientCommandId();
-		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
-		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
+		const previous = lifecycle.beginStopping(chatId, clientRequestId);
+		const restore = () => lifecycle.restoreStopping(chatId, clientRequestId, previous);
 		const appendFailure = (detail: string) => {
-			if (deps.chatState.activeChatId !== chatId) return;
-			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_stop_chat({ detail }));
+			if (!deps.sessions.byId[chatId]) return;
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_failed_stop_chat({ detail }),
+			);
 		};
 		return request({
 			clientRequestId,
 			chatId,
-			agentId: deps.agentState.agentId,
+			agentId: chat.agentId,
 		})
 			.then(async (result) => {
-				onResult?.(chatId, result);
+				if (deps.sessions.byId[chatId]) onResult?.(chatId, result);
 				await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
 				if (isStopSatisfied(result.outcome)) return;
 				restore();
@@ -819,15 +887,21 @@ export class ConversationSessionController {
 			});
 	}
 
-	handlePermissionDecision(
+	handlePermissionDecisionForChat(
+		chatId: string,
 		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
-		this.#permissions.handlePermissionDecision(permissionOccurrenceId, decision);
+		this.#permissions.handlePermissionDecision(chatId, permissionOccurrenceId, decision);
 	}
 
-	handleExitPlanMode(permissionOccurrenceId: string, choice: string, plan: string): void {
-		this.#permissions.handleExitPlanMode(permissionOccurrenceId, choice, plan);
+	handleExitPlanModeForChat(
+		chatId: string,
+		permissionOccurrenceId: string,
+		choice: string,
+		plan: string,
+	): void {
+		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
 	handleQueuePause(): Promise<void> {
@@ -840,6 +914,14 @@ export class ConversationSessionController {
 
 	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
 		this.#queue.handleControlError(action, error);
+	}
+
+	handleQueueControlErrorForChat(
+		chatId: string,
+		action: 'pause' | 'resume',
+		error: unknown,
+	): void {
+		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
 
 	async pauseQueueForChat(chatId: string): Promise<void> {
@@ -880,6 +962,14 @@ export class ConversationSessionController {
 	async handleSteerQueuedInput(entry: QueueEntry, reorderRevision: number): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return;
+		await this.handleSteerQueuedInputForChat(chatId, entry, reorderRevision);
+	}
+
+	async handleSteerQueuedInputForChat(
+		chatId: string,
+		entry: QueueEntry,
+		reorderRevision: number,
+	): Promise<void> {
 		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
 	}
 

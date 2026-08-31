@@ -29,6 +29,7 @@
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
+		announcementsEnabled?: boolean;
 	}
 
 	let {
@@ -44,6 +45,7 @@
 		onEdit,
 		onOpenManager,
 		onDelete,
+		announcementsEnabled = true,
 	}: Props = $props();
 
 	interface QueuePreviewSelection {
@@ -288,7 +290,7 @@
 						</button>
 						<span
 							class="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground"
-							aria-live="polite"
+							aria-live={announcementsEnabled ? 'polite' : 'off'}
 							aria-atomic="true"
 						>
 							{m.chat_queue_message_position({

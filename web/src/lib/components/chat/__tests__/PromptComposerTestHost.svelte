@@ -4,9 +4,7 @@
 	import { onDestroy } from 'svelte';
 	import {
 		setAgentState,
-		setActiveTranscriptState,
 		setAppShell,
-		setConversationLifecycle,
 		setChatSessions,
 		setComposerState,
 		setLocalSettings,
@@ -237,9 +235,7 @@
 
 	setComposerState(composer);
 	setChatDrafts(chatDrafts);
-	setActiveTranscriptState(transcript);
 	setAgentState(agent);
-	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);
 	setLocalSettings({
 		get sendByShiftEnter() {

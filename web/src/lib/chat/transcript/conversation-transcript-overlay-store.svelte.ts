@@ -231,6 +231,17 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return this.#changed(feedStructureChanged);
 	}
 
+	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {
+		const feedStructureChanged = this.#notices.length > 0 || this.#optimisticInputs.length > 0;
+		this.#notices = [];
+		this.#noticeRevision = 0;
+		this.#optimisticInputs = [];
+		this.#optimisticAfterOrdinals = new Map();
+		this.#resendCandidates = [];
+		this.#excludedResendOrdinals = [];
+		return this.#changed(feedStructureChanged);
+	}
+
 	#changed(feedStructureChanged: boolean): ConversationTranscriptOverlayMutation {
 		this.#revision += 1;
 		return { revision: this.#revision, feedStructureChanged };
@@ -246,6 +257,10 @@ export class ConversationTranscriptOverlayStore {
 
 	forChat(chatId: string): ConversationTranscriptOverlayView {
 		return this.#entry(chatId);
+	}
+
+	viewFor(chatId: string): ConversationTranscriptOverlayView | null {
+		return this.#entries.get(chatId) ?? null;
 	}
 
 	noticeRevisionFor(chatId: string): number {
@@ -317,6 +332,10 @@ export class ConversationTranscriptOverlayStore {
 
 	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
 		return this.#entry(batch.chatId).applyCommittedBatch(batch);
+	}
+
+	resetForTranscriptReplacement(chatId: string): ConversationTranscriptOverlayMutation {
+		return this.#entry(chatId).resetForTranscriptReplacement();
 	}
 
 	remove(chatId: string): void {

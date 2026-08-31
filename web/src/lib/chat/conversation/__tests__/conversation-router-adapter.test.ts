@@ -11,6 +11,8 @@ import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.j
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
+import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -47,8 +49,23 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStoreDeps {
+	const lifecycle = new ConversationLifecycleState();
+	const lifecycleByChatId = new Map<string, ConversationLifecycleState>();
+	if (selectedChat) {
+		lifecycle.setCurrentChatId(selectedChat.id);
+		lifecycleByChatId.set(selectedChat.id, lifecycle);
+	}
+	const lifecycleForChat = (chatId: string) => {
+		const existing = lifecycleByChatId.get(chatId);
+		if (existing) return existing;
+		const created = new ConversationLifecycleState();
+		created.setCurrentChatId(chatId);
+		lifecycleByChatId.set(chatId, created);
+		return created;
+	};
 	return {
 		sessions: {
+			byId: selectedChat ? { [selectedChat.id]: selectedChat } : {},
 			selectedChat,
 			selectedChatId: selectedChat?.id ?? null,
 			order: selectedChat ? [selectedChat.id] : [],
@@ -65,7 +82,11 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		},
 		chatState: new ActiveTranscriptState(),
 		agentState: new AgentState(),
-		lifecycle: new ConversationLifecycleState(),
+		lifecycle,
+		lifecycles: {
+			forChat: lifecycleForChat,
+			get: (chatId) => lifecycleByChatId.get(chatId) ?? null,
+		},
 		conversationUi: new ConversationUiState(),
 		startupCoordinator: new StartupCoordinator(),
 		readReceiptOutbox: { enqueue: vi.fn() },
@@ -93,23 +114,81 @@ describe('buildRouterStores', () => {
 		expect(stores.sessions.selectedChat).toBe(selectedChat);
 	});
 
-	it('warms background transcripts through the shared transcript cache', () => {
+	it('updates background plan mode without mutating selected composer settings', () => {
+		const deps = depsFor(chatRecord());
+		deps.sessions.byId['chat-2'] = chatRecord({ id: 'chat-2', permissionMode: 'acceptEdits' });
+		deps.agentState.permissionMode = 'default';
+		const stores = buildRouterStores(deps);
+
+		expect(stores.agentSettings.permissionMode('chat-2')).toBe('acceptEdits');
+		stores.agentSettings.setPermissionMode('chat-2', 'plan');
+
+		expect(deps.sessions.patchChat).toHaveBeenCalledWith('chat-2', { permissionMode: 'plan' });
+		expect(deps.agentState.permissionMode).toBe('default');
+	});
+
+	it('routes loading status entries to the addressed chat lifecycle', () => {
+		const deps = depsFor(chatRecord());
+		const stores = buildRouterStores(deps);
+
+		stores.lifecycle.pushLoadingStatus('chat-2', {
+			id: 'permission',
+			text: 'Waiting',
+			tokens: 0,
+			can_interrupt: true,
+		});
+
+		expect(deps.lifecycles.get('chat-2')?.loadingStatus?.text).toBe('Waiting');
+		expect(deps.lifecycles.get('chat-1')?.loadingStatus).toBeNull();
+	});
+
+	it('applies background transcripts through the shared transcript cache', () => {
 		const deps = depsFor(chatRecord());
 		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1, null);
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript(
+		const applied = stores.chatState.applyChatMessages(
 			'chat-2',
 			'generation-2',
 			[entry(2, 'two')],
 			2,
 			2,
+			[],
 		);
 
-		expect(applied).toBe(true);
+		expect(applied).toBe('applied');
 		expect(
 			deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal),
 		).toEqual([1, 2]);
+	});
+
+	it('reads a selected but unrendered chat cursor from the shared panel cache', () => {
+		const deps = depsFor(chatRecord());
+		const panelLifecycle = new ConversationLifecycleState();
+		panelLifecycle.setCurrentChatId('chat-1');
+		deps.panels = new ConversationPanelRegistry({
+			cache: deps.chatState.transcriptCache,
+			overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: {
+				forChat: () => panelLifecycle,
+				remove: vi.fn(),
+			},
+		});
+		deps.chatState.transcriptCache.replace(
+			'chat-1',
+			'generation-cached',
+			[entry(1, 'cached')],
+			1,
+			null,
+		);
+		const stores = buildRouterStores(deps);
+
+		expect(stores.chatState.getChatCursor('chat-1')).toMatchObject({
+			transcriptViewId: 'generation-cached',
+			lastOrdinal: 1,
+		});
+		deps.panels.destroy();
+		deps.chatState.transcriptCache.flush();
 	});
 
 	it('does not create tail-only background transcripts and queues recovery', () => {
@@ -118,15 +197,16 @@ describe('buildRouterStores', () => {
 		deps.backgroundTranscriptLoader = { queueLoad };
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript(
+		const applied = stores.chatState.applyChatMessages(
 			'chat-2',
 			'generation-2',
 			[entry(4, 'tail')],
 			4,
 			4,
+			[],
 		);
 
-		expect(applied).toBe(false);
+		expect(applied).toBe('gap-detected');
 		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
 		expect(queueLoad).toHaveBeenCalledWith('chat-2', {
 			transcriptViewId: 'generation-2',
@@ -134,34 +214,6 @@ describe('buildRouterStores', () => {
 			firstOrdinal: 4,
 			lastOrdinal: 4,
 		});
-	});
-
-	it('maps visible preview callbacks into router chat state hooks', () => {
-		const deps = depsFor(chatRecord());
-		deps.visiblePreviews = {
-			isVisible: vi.fn((chatId) => chatId === 'chat-2'),
-			applyMessages: vi.fn(() => true),
-			loadSnapshot: vi.fn(),
-			markStale: vi.fn(),
-		};
-		const stores = buildRouterStores(deps);
-
-		expect(stores.chatState.isVisiblePreviewChat('chat-2')).toBe(true);
-		expect(
-			stores.chatState.warmVisibleChatPreview('chat-2', 'generation-2', [entry(2, 'two')], 2, 2),
-		).toBe(true);
-		stores.chatState.markVisibleChatPreviewStale('chat-2');
-		void stores.chatState.loadVisibleChatPreview('chat-2');
-
-		expect(deps.visiblePreviews.applyMessages).toHaveBeenCalledWith(
-			'chat-2',
-			'generation-2',
-			expect.arrayContaining([expect.objectContaining({ ordinal: 2 })]),
-			2,
-			2,
-		);
-		expect(deps.visiblePreviews.markStale).toHaveBeenCalledWith('chat-2');
-		expect(deps.visiblePreviews.loadSnapshot).toHaveBeenCalledWith('chat-2');
 	});
 
 	it('passes preview timestamps through to the sessions store', () => {

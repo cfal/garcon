@@ -18,6 +18,7 @@ import {
 	pendingPermissionsFromTransientFeed,
 	type TransientFeedApplyResult,
 } from '$lib/chat/transcript/transient-feed-state.js';
+import { untrack } from 'svelte';
 
 export type PendingPermissionRequestUpdate =
 	| PendingPermissionRequest[]
@@ -408,8 +409,10 @@ export class ConversationUiState implements ConversationUiPort {
 	mountExecutionControlPruning(options: ExecutionControlPruningOptions): void {
 		$effect(() => {
 			const activeChatIds = options.getActiveChatIds();
-			this.pruneExecutionControls(activeChatIds);
-			this.#pruneTransientState(activeChatIds);
+			untrack(() => {
+				this.pruneExecutionControls(activeChatIds);
+				this.#pruneTransientState(activeChatIds);
+			});
 		});
 	}
 

@@ -12,7 +12,6 @@
 	import {
 		setAgentState,
 		setAppShell,
-		setActiveTranscriptState,
 		setLocalSettings,
 		setModelCatalog,
 		setChatSessions,
@@ -143,7 +142,6 @@
 		};
 	}
 	setCanonicalWorkspaceLayout();
-	setActiveTranscriptState(chatState);
 	setAgentState(new AgentState());
 	const localSettings = createLocalSettingsStore();
 	localSettings.chatMaxWidth = 'medium';

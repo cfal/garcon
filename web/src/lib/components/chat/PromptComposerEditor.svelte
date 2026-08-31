@@ -43,7 +43,7 @@
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const workspace = getWorkspaceCoordinator();
-	const chatSurfaceId = $derived(workspace.currentChatSurfaceId);
+	const chatSurfaceId = $derived(workspace.composerAnchorSurfaceId);
 	const controller = new PromptComposerEditorController({
 		get ui() {
 			return ui;
@@ -109,7 +109,7 @@
 		selection={ui.composerEditorSelection}
 		focusRequestId={ui.composerEditorFocusRequestId}
 		readOnly={promptTransformPending}
-		surfaceId={chatSurfaceId}
+		surfaceId={chatSurfaceId ?? undefined}
 		headerStatus={expandedEditorHeaderStatus}
 		{canRefinePrompt}
 		{isPromptRefinementPending}

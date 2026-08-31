@@ -222,6 +222,7 @@
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 	// Resets ephemeral UI state when switching chats without remounting the composer.
+	// Explicit navigation owns focus requests; pane focus must remain on the control the user chose.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
@@ -229,7 +230,6 @@
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		composerState.isDragActive = false;
-		requestComposerFocusForChat(chatId);
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.

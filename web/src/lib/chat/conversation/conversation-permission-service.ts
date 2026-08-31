@@ -1,5 +1,4 @@
 import * as m from '$lib/paraglide/messages.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionMode } from '$lib/types/chat';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 import { sendPermissionDecision } from '$lib/api/chats.js';
@@ -10,20 +9,21 @@ import { isExecutionControlAdmissionConflict } from './execution-control-conflic
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
+import type { ConversationExecutionSelection } from './conversation-execution-draft-state.svelte.js';
 
 export interface ConversationPermissionServiceOptions {
 	readonly deps: Pick<
 		SessionControllerDeps,
-		'sessions' | 'chatState' | 'agentState' | 'lifecycle' | 'conversationUi' | 'appShell'
+		| 'sessions'
+		| 'chatState'
+		| 'agentState'
+		| 'lifecycleForChat'
+		| 'conversationUi'
+		| 'appShell'
 	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
-	executionModelSelection(): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	};
+	executionSelectionForChat(chatId: string): ConversationExecutionSelection | null;
 }
 
 // Owns what happens after the user answers a permission prompt, including the plan-approval
@@ -32,19 +32,20 @@ export class ConversationPermissionService {
 	constructor(private readonly options: ConversationPermissionServiceOptions) {}
 
 	handlePermissionDecision(
+		chatId: string,
 		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
 		const { deps } = this.options;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
-		const request = deps.conversationUi.pendingPermissionRequests.find(
+		if (!deps.sessions.byId[chatId]) return;
+		const request = deps.conversationUi.pendingPermissionsFor(chatId).find(
 			(entry) => (
 				entry.permissionOccurrenceId === permissionOccurrenceId
 			),
 		);
 		if (!request?.control) {
-			deps.chatState.appendLocalNotice(
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
 				'error',
 				m.chat_notice_failed_permission_decision({ detail: 'Permission request is stale' }),
 			);
@@ -60,16 +61,18 @@ export class ConversationPermissionService {
 			response: decision.response,
 		})
 			.then(() => {
-				deps.conversationUi.setPendingPermissionRequests(
-					deps.conversationUi.pendingPermissionRequests.filter(
-						(request) => (
-							request.permissionOccurrenceId !== permissionOccurrenceId
-						),
+				if (!deps.sessions.byId[chatId]) return;
+				deps.conversationUi.updatePendingPermissionsForChat(
+					chatId,
+					deps.conversationUi.pendingPermissionsFor(chatId).filter(
+						(request) => request.permissionOccurrenceId !== permissionOccurrenceId,
 					),
 				);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice(
+				if (!deps.sessions.byId[chatId]) return;
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
 					'error',
 					m.chat_notice_failed_permission_decision({ detail: errorDetail(error) }),
 				);
@@ -77,43 +80,54 @@ export class ConversationPermissionService {
 	}
 
 	handleExitPlanMode(
+		chatId: string,
 		permissionOccurrenceId: string,
 		choice: string,
 		plan: string,
 	): void {
 		const { deps } = this.options;
-		const permissionControl = deps.conversationUi.pendingPermissionRequests.find(
+		const chat = deps.sessions.byId[chatId];
+		if (!chat) return;
+		const permissionControl = deps.conversationUi.pendingPermissionsFor(chatId).find(
 			(request) => (
 				request.permissionOccurrenceId === permissionOccurrenceId
 			),
 		)?.control;
-		deps.conversationUi.setPendingPermissionRequests(
-			deps.conversationUi.pendingPermissionRequests.filter(
+		deps.conversationUi.updatePendingPermissionsForChat(
+			chatId,
+			deps.conversationUi.pendingPermissionsFor(chatId).filter(
 				(request) => (
 					request.permissionOccurrenceId !== permissionOccurrenceId
 				),
 			),
 		);
 
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		const path = deps.sessions.selectedChat?.projectPath;
+		const path = chat.projectPath;
 
 		const buildApprovalMessage = () =>
 			`User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\n## Approved Plan:\n${plan}`;
 
 		const resumeWithApproval = (mode: PermissionMode) => {
-			deps.conversationUi.setPreviousPermissionMode(null);
-			deps.agentState.permissionMode = mode;
-			if (!chatId || !path) return;
-			const selection = this.options.executionModelSelection();
+			deps.conversationUi.finishPlanModeForChat(chatId);
+			if (deps.sessions.selectedChatId === chatId) deps.agentState.permissionMode = mode;
+			if (!path) return;
+			const selection = this.options.executionSelectionForChat(chatId);
+			if (!selection) {
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_failed_resume_plan({ detail: 'Chat execution settings are unavailable' }),
+				);
+				return;
+			}
 
 			const submission = this.options.acceptedInputs.run({
 				chatId,
-				transcriptViewId: deps.chatState.getCursor().transcriptViewId,
+				transcriptViewId: deps.chatState.getCursorForChat(chatId).transcriptViewId,
 				command: buildApprovalMessage(),
 				permissionMode: mode,
-				thinkingMode: deps.agentState.thinkingMode,
-				agentSettings: deps.agentState.agentSettings,
+				thinkingMode: selection.thinkingMode,
+				agentSettings: selection.agentSettings,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
@@ -122,13 +136,18 @@ export class ConversationPermissionService {
 			void submission
 				.submit()
 				.then(() => {
-					deps.lifecycle.beginTurn(chatId);
+					if (!deps.sessions.byId[chatId]) return;
+					deps.lifecycleForChat(chatId).beginTurn(chatId);
 				})
 				.catch(async (error) => {
 					if (isExecutionControlAdmissionConflict(error)) {
-						await this.options.queue.settleControlRefresh(this.options.queue.startControlRefresh(chatId));
+						await this.options.queue.settleControlRefresh(
+							this.options.queue.startControlRefresh(chatId),
+						);
 					}
-					deps.chatState.appendLocalNotice(
+					if (!deps.sessions.byId[chatId]) return;
+					deps.chatState.appendLocalNoticeForChat(
+						chatId,
 						'error',
 						error instanceof CommandOutcomeUnknownError
 							? m.chat_notice_delivery_outcome_unconfirmed()
@@ -139,9 +158,11 @@ export class ConversationPermissionService {
 
 		switch (choice) {
 			case 'bypass-new': {
-				const restoreMode = deps.conversationUi.previousPermissionMode || 'default';
-				deps.conversationUi.setPreviousPermissionMode(null);
-				deps.agentState.permissionMode = restoreMode;
+				const restoreMode = deps.conversationUi.previousPermissionModeFor(chatId) || 'default';
+				deps.conversationUi.finishPlanModeForChat(chatId);
+				if (deps.sessions.selectedChatId === chatId) {
+					deps.agentState.permissionMode = restoreMode;
+				}
 
 				const planMessage = `Implement the following plan:\n\n${plan}`;
 				deps.appShell.openNewChatDialog({ prefill: planMessage });
@@ -154,7 +175,7 @@ export class ConversationPermissionService {
 				resumeWithApproval('acceptEdits');
 				break;
 			case 'deny': {
-				if (chatId && permissionControl) {
+				if (permissionControl) {
 					void sendPermissionDecision({
 						clientRequestId: createClientCommandId(),
 						chatId,
@@ -163,13 +184,16 @@ export class ConversationPermissionService {
 						allow: false,
 						alwaysAllow: false,
 					}).catch((error) => {
-						deps.chatState.appendLocalNotice(
+						if (!deps.sessions.byId[chatId]) return;
+						deps.chatState.appendLocalNoticeForChat(
+							chatId,
 							'error',
 							m.chat_notice_failed_deny_permission({ detail: errorDetail(error) }),
 						);
 					});
-				} else if (chatId) {
-					deps.chatState.appendLocalNotice(
+				} else {
+					deps.chatState.appendLocalNoticeForChat(
+						chatId,
 						'error',
 						m.chat_notice_failed_deny_permission({ detail: 'Permission request is stale' }),
 					);

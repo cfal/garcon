@@ -1,10 +1,13 @@
-import { ActiveTranscriptState, type SharedTranscriptCommit } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import {
+	ActiveTranscriptState,
+	type ChatLoadMessagesOptions,
+	type SharedTranscriptCommit,
+} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptApplyResult, ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
-import type { TranscriptPageDirection } from '$lib/chat/transcript/transcript-page-progress.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
@@ -25,12 +28,6 @@ export interface CommittedTranscriptBatch {
 	readonly lastOrdinal: number;
 	readonly resendCandidates: ResendCandidate[];
 	readonly noticeRevision: number;
-}
-
-export interface ConversationPanelScrollPort {
-	readonly viewport: HTMLDivElement;
-	noteUserScrollIntent(direction: TranscriptPageDirection | null): void;
-	scrollByPixels(deltaY: number): void;
 }
 
 export interface ConversationPanelPresentationPort {
@@ -80,6 +77,12 @@ interface StoredRestoreTarget {
 	readonly target: ConversationPanelRestoreTarget;
 }
 
+interface SnapshotLoad {
+	readonly minimumLimit: number;
+	readonly purpose: ChatLoadMessagesOptions['purpose'];
+	readonly promise: Promise<boolean>;
+}
+
 class PanelRegistration implements ConversationPanelRegistration {
 	#surfaceId: ChatViewSurfaceId;
 	#presentation: ConversationPanelPresentationPort | null = null;
@@ -95,9 +98,10 @@ class PanelRegistration implements ConversationPanelRegistration {
 		readonly chatId: string,
 		cache: ChatTranscriptCache,
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
+		overlays: ConversationTranscriptOverlayStore,
 	) {
 		this.#surfaceId = surfaceId;
-		this.transcript = new ActiveTranscriptState(cache);
+		this.transcript = new ActiveTranscriptState(cache, overlays.forChat(chatId));
 		this.transcript.activateChat(chatId);
 		this.lifecycle = lifecycle.forChat(chatId);
 		this.scroll = new ConversationScrollController({
@@ -142,11 +146,19 @@ class PanelRegistration implements ConversationPanelRegistration {
 		return this.#lastTarget;
 	}
 
-	async restore(target: ConversationPanelRestoreTarget | null): Promise<void> {
+	async restore(
+		target: ConversationPanelRestoreTarget | null,
+		loadSnapshot?: (options: ChatLoadMessagesOptions) => Promise<boolean>,
+	): Promise<void> {
 		if (this.#destroyed) return;
 		this.#lastTarget = target ?? { kind: 'end' };
 		const restored = this.transcript.activateChat(this.chatId);
-		if (!restored || restored.stale) await this.transcript.loadMessages(this.chatId);
+		if (!restored || restored.stale) {
+			const options = { minimumLimit: restored?.count ?? 0 };
+			if (loadSnapshot) await loadSnapshot(options);
+			else await this.transcript.loadMessages(this.chatId, options);
+		}
+		if (this.#destroyed) return;
 		if (this.#lastTarget.kind === 'end') {
 			this.scroll.setPinnedToBottom(true);
 			this.scroll.prepareInitialBottomRestore(this.chatId);
@@ -182,6 +194,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 export class ConversationPanelRegistry {
 	#panels = new Map<ChatViewSurfaceId, PanelRegistration>();
 	#restoreTargets = new Map<ChatViewSurfaceId, StoredRestoreTarget>();
+	#snapshotLoads = new Map<string, SnapshotLoad>();
 	#visible = $state.raw<readonly VisibleChatPresentation[]>([]);
 
 	constructor(
@@ -189,11 +202,28 @@ export class ConversationPanelRegistry {
 			cache: ChatTranscriptCache;
 			lifecycle: Pick<ConversationLifecycleRegistry, 'forChat' | 'remove'>;
 			overlays: ConversationTranscriptOverlayStore;
+			loadTranscriptSnapshot?: (
+				transcript: ActiveTranscriptState,
+				chatId: string,
+				options: ChatLoadMessagesOptions,
+			) => Promise<void>;
 		},
 	) {}
 
 	get visiblePresentations(): readonly VisibleChatPresentation[] {
 		return this.#visible;
+	}
+
+	get transcriptCache(): ChatTranscriptCache {
+		return this.options.cache;
+	}
+
+	overlayFor(chatId: string) {
+		return this.options.overlays.viewFor(chatId);
+	}
+
+	noticeRevisionFor(chatId: string): number {
+		return this.options.overlays.noticeRevisionFor(chatId);
 	}
 
 	reconcile(visible: readonly VisibleChatPresentation[]): void {
@@ -215,12 +245,15 @@ export class ConversationPanelRegistry {
 				item.chatId,
 				this.options.cache,
 				this.options.lifecycle,
+				this.options.overlays,
 			);
 			this.#panels.set(item.surfaceId, panel);
 			const stored = this.#restoreTargets.get(item.surfaceId);
 			const target = stored?.chatId === item.chatId ? stored.target : null;
 			if (stored?.chatId !== item.chatId) this.#restoreTargets.delete(item.surfaceId);
-			void panel.restore(target);
+			void panel.restore(target, (options) => this.loadChatSnapshot(item.chatId, options)).catch(() => {
+				this.options.cache.markStale(item.chatId);
+			});
 		}
 		this.#visible = [...visible];
 	}
@@ -269,14 +302,57 @@ export class ConversationPanelRegistry {
 	}
 
 	panel(surfaceId: ChatViewSurfaceId): ConversationPanelRegistration | null {
+		void this.#visible;
 		return this.#panels.get(surfaceId) ?? null;
 	}
 
 	panelsForChat(chatId: string): readonly ConversationPanelRegistration[] {
+		void this.#visible;
 		return [...this.#panels.values()].filter((panel) => panel.chatId === chatId);
 	}
 
+	loadChatSnapshot(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<boolean> {
+		const minimumLimit = Math.max(0, Math.floor(options.minimumLimit ?? 0));
+		const pending = this.#snapshotLoads.get(chatId);
+		if (pending) {
+			const purposeCovered = options.purpose === undefined || pending.purpose === options.purpose;
+			if (pending.minimumLimit >= minimumLimit && purposeCovered) return pending.promise;
+			return pending.promise.then(() => this.loadChatSnapshot(chatId, options));
+		}
+		const operation: SnapshotLoad = {
+			minimumLimit,
+			purpose: options.purpose,
+			promise: this.#performChatSnapshotLoad(chatId, options).finally(() => {
+				if (this.#snapshotLoads.get(chatId) === operation) this.#snapshotLoads.delete(chatId);
+			}),
+		};
+		this.#snapshotLoads.set(chatId, operation);
+		return operation.promise;
+	}
+
+	async #performChatSnapshotLoad(
+		chatId: string,
+		options: ChatLoadMessagesOptions,
+	): Promise<boolean> {
+		const loader = this.panelsForChat(chatId)[0];
+		if (!loader) return false;
+		if (this.options.loadTranscriptSnapshot) {
+			await this.options.loadTranscriptSnapshot(loader.transcript, chatId, options);
+		} else {
+			await loader.transcript.loadMessages(chatId, options);
+		}
+		const cursor = this.options.cache.readAppliedCursor(chatId);
+		if (!cursor || cursor.stale) return false;
+		const currentPanels = this.panelsForChat(chatId);
+		if (currentPanels.length === 0) return false;
+		for (const panel of currentPanels) {
+			if (panel !== loader) panel.transcript.installCachedSnapshot(chatId);
+		}
+		return true;
+	}
+
 	currentPanel(surfaceId: string | null): ConversationPanelRegistration | null {
+		void this.#visible;
 		if (!surfaceId) return null;
 		return this.#panels.get(surfaceId as ChatViewSurfaceId) ?? null;
 	}
@@ -362,12 +438,26 @@ export class ConversationPanelRegistry {
 		);
 	}
 
+	replaceResendCandidates(chatId: string, candidates: readonly ResendCandidate[]): void {
+		this.#applyOverlayMutation(
+			chatId,
+			this.options.overlays.replaceResendCandidates(chatId, candidates),
+		);
+	}
+
+	clearNotices(chatId: string, throughRevision?: number): void {
+		this.#applyOverlayMutation(
+			chatId,
+			this.options.overlays.clearNoticesThrough(chatId, throughRevision),
+		);
+	}
+
 	handleViewReplacement(chatId: string): void {
-		this.options.cache.remove(chatId);
-		this.options.overlays.remove(chatId);
-		for (const panel of this.#panels.values()) {
-			if (panel.chatId === chatId) panel.transcript.clearMessages();
-		}
+		this.options.cache.markStale(chatId);
+		this.#applyOverlayMutation(
+			chatId,
+			this.options.overlays.resetForTranscriptReplacement(chatId),
+		);
 		for (const [surfaceId, stored] of this.#restoreTargets) {
 			if (stored.chatId === chatId) this.#restoreTargets.delete(surfaceId);
 		}
@@ -395,6 +485,7 @@ export class ConversationPanelRegistry {
 		for (const panel of this.#panels.values()) panel.destroy();
 		this.#panels.clear();
 		this.#restoreTargets.clear();
+		this.#snapshotLoads.clear();
 		this.#visible = [];
 	}
 

@@ -209,6 +209,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			: chatViewSurfaceId(this.currentWindowId);
 	}
 
+	get composerAnchorSurfaceId(): ChatViewSurfaceId | null { return this.#presentation.composerAnchorSurfaceId; }
+
 	get lastFocusedWindowId(): WorkspaceWindowId {
 		return this.#resolveWindowId(this.layout.snapshot, this.#presentation.lastFocusedWindowId);
 	}
@@ -233,6 +235,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#presentation.isSurfacePresented(surfaceId);
 	}
 
+	windowOf(surfaceId: string): WorkspaceWindowId | null { return this.#presentation.windowOf(surfaceId); }
 	frameVersion(surfaceId: string): number {
 		return this.#presentation.frameVersion(surfaceId);
 	}
@@ -277,6 +280,22 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	noteWindowChromeFocus(windowId: WorkspaceWindowId, surfaceId: string): void {
 		this.#presentation.noteWindowChromeFocus(windowId, surfaceId);
+	}
+
+	beginWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		this.#presentation.beginWindowPointerInteraction(windowId, pointerId);
+	}
+
+	commitWindowPointerInteraction(windowId: WorkspaceWindowId): void {
+		this.#presentation.commitWindowPointerInteraction(windowId);
+	}
+
+	releaseWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		this.#presentation.releaseWindowPointerInteraction(windowId, pointerId);
+	}
+
+	cancelWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		this.#presentation.cancelWindowPointerInteraction(windowId, pointerId);
 	}
 
 	activateWindow(windowId: WorkspaceWindowId): void {

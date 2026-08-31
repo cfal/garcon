@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
+	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
+	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
+	import ConversationPanel from '$lib/components/chat/ConversationPanel.svelte';
+	import { resolveChatSurfacePresentation } from '$lib/components/chat/chat-surface-presentation.js';
+	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import TerminalWindowMenuItems from '$lib/components/terminal/TerminalWindowMenuItems.svelte';
 	import TerminalRenameDialog from '$lib/components/terminal/TerminalRenameDialog.svelte';
@@ -13,6 +18,7 @@
 		getChatSessions,
 		getFileSessions,
 		getGitBranchActions,
+		getGitQuickSummary,
 		getChatProcessingReconciler,
 		getModelCatalog,
 		getSurfaceFrames,
@@ -31,11 +37,11 @@
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-	import { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import {
 		chatViewSurfaceId,
 		type ChatViewSurfaceDescriptor,
@@ -55,6 +61,7 @@
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import {
 		renderedPortablePresentations,
+		visibleChatPresentations,
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
@@ -76,12 +83,12 @@
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
 	const gitBranchActions = getGitBranchActions();
+	const gitQuickSummary = getGitQuickSummary();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
-	const chatWindowPreviews = new ChatWindowPreviewStore(chatTranscriptCache);
 	const conversationUi = new ConversationUiState();
 	setConversationUi(conversationUi);
 	const conversationLifecycles = new ConversationLifecycleRegistry({
@@ -104,10 +111,31 @@
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
 	let renamingTerminalId = $state<string | null>(null);
+	let conversationPanelActions = $state<ConversationPanelActions | null>(null);
+	let composerInsetPx = $state(0);
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
+	const chatPresentations = $derived(
+		visibleChatPresentations(
+			snapshot,
+			isMobile ? 'mobile' : 'desktop',
+			workspace.composerAnchorSurfaceId,
+		).filter(
+			({ chatId }) =>
+				resolveChatSurfacePresentation(sessions.byId[chatId] ?? null, sessions.isLoadingChats) ===
+				'conversation',
+		),
+	);
+	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() =>
+		chatPresentations.flatMap(({ chatId }) => {
+			const chat = sessions.byId[chatId];
+			return chat?.projectPath
+				? [{ projectPath: chat.projectPath, isProcessing: chat.isProcessing }]
+				: [];
+		}),
+	);
 	const rootState = new WorkspaceRootState({
 		get snapshot() {
 			return snapshot;
@@ -138,20 +166,25 @@
 	const fullscreenWindowId = $derived(snapshot.fullscreenWindowId);
 	const currentWindowId = $derived(workspace.currentWindowId);
 	const presentedCurrentWindowId = $derived(fullscreenWindowId ?? currentWindowId);
-	const liveChat = $derived.by(
+	const composerPlacement = $derived.by(
 		(): {
 			surface: ChatViewSurfaceDescriptor;
 			windowId: WorkspaceWindowId | null;
 			rect: WorkspaceWindowRect | null;
 		} | null => {
-			if (isMobile) {
-				const surface = snapshot.surfaces[snapshot.mobileActiveSurfaceId];
-				return surface?.type === 'chat' ? { surface, windowId: null, rect: null } : null;
-			}
-			const workspaceWindow = windowNodeById(snapshot.desktopRoot, presentedCurrentWindowId);
-			if (!workspaceWindow) return null;
-			const surface = snapshot.surfaces[workspaceWindow.tabs.activeId];
+			const anchorSurfaceId = workspace.composerAnchorSurfaceId;
+			if (!anchorSurfaceId) return null;
+			const surface = snapshot.surfaces[anchorSurfaceId];
 			if (surface?.type !== 'chat') return null;
+			if (isMobile) {
+				return snapshot.mobileActiveSurfaceId === anchorSurfaceId
+					? { surface, windowId: null, rect: null }
+					: null;
+			}
+			const windowId = workspace.windowOf(anchorSurfaceId);
+			if (!windowId || (fullscreenWindowId && fullscreenWindowId !== windowId)) return null;
+			const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+			if (!workspaceWindow || workspaceWindow.tabs.activeId !== anchorSurfaceId) return null;
 			const rect = geometry.windows.find(
 				(entry) => entry.workspaceWindow.id === workspaceWindow.id,
 			)?.rect;
@@ -164,16 +197,16 @@
 				: null;
 		},
 	);
-	const previewChatIds = $derived(
-		isMobile
-			? []
-			: geometry.windows.flatMap(({ workspaceWindow }) => {
-					if (fullscreenWindowId && workspaceWindow.id !== fullscreenWindowId) return [];
-					const surface = snapshot.surfaces[workspaceWindow.tabs.activeId];
-					return surface?.type === 'chat' && surface.chatId ? [surface.chatId] : [];
-				}),
+	const composerBound = $derived(
+		Boolean(
+			composerPlacement?.surface.chatId &&
+				composerPlacement.surface.chatId === sessions.selectedChatId &&
+				conversationPanels.panel(composerPlacement.surface.id),
+		),
 	);
-	const liveLayerRectStyle = $derived(liveChat?.rect ? rectStyle(liveChat.rect) : 'inset: 0;');
+	const liveLayerRectStyle = $derived(
+		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
+	);
 	const fallbackChatSurfaceId = $derived(
 		Object.values(snapshot.surfaces).find(
 			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
@@ -181,6 +214,27 @@
 	);
 	const terminalToRename = $derived(
 		renamingTerminalId ? (terminals.sessions[renamingTerminalId]?.metadata ?? null) : null,
+	);
+	const mobileChatSurface = $derived.by(() => {
+		if (!isMobile) return null;
+		const surface = snapshot.surfaces[snapshot.mobileActiveSurfaceId];
+		return surface?.type === 'chat' ? surface : null;
+	});
+	const mobileChat = $derived(
+		mobileChatSurface?.chatId ? (sessions.byId[mobileChatSurface.chatId] ?? null) : null,
+	);
+	const mobilePanel = $derived(
+		mobileChatSurface ? conversationPanels.panel(mobileChatSurface.id) : null,
+	);
+	const mobileChatPresentation = $derived(
+		resolveChatSurfacePresentation(mobileChat, sessions.isLoadingChats),
+	);
+	const mobileChatIsComposerAnchor = $derived(
+		Boolean(
+			mobileChatSurface?.chatId &&
+				workspace.composerAnchorSurfaceId === mobileChatSurface.id &&
+				mobileChatSurface.chatId === sessions.selectedChatId,
+		),
 	);
 
 	$effect(() => {
@@ -191,11 +245,6 @@
 	});
 
 	$effect(() => {
-		const chatIds = previewChatIds;
-		untrack(() => chatWindowPreviews.prune(chatIds));
-	});
-
-	$effect(() => {
 		const activeChatIds = new Set(Object.keys(sessions.byId));
 		untrack(() => {
 			conversationLifecycles.prune(activeChatIds);
@@ -203,7 +252,23 @@
 		});
 	});
 
+	$effect(() => {
+		const visible = chatPresentations;
+		untrack(() => conversationPanels.reconcile(visible));
+	});
+
+	$effect(() => {
+		const projects = visibleGitProjects;
+		void gitQuickSummary.isEnabled;
+		untrack(() => {
+			gitQuickSummary.setVisibleProjects(projects);
+			gitQuickSummary.reconcilePolling();
+		});
+	});
+
 	onDestroy(() => {
+		gitQuickSummary.setVisibleProjects([]);
+		gitQuickSummary.reconcilePolling();
 		conversationPanels.destroy();
 		conversationLifecycles.destroy();
 		rootState.destroy();
@@ -248,13 +313,6 @@
 		rect: WorkspaceWindowRect,
 	): WorkspaceWindowRect {
 		return fullscreenWindowId === windowId ? { left: 0, top: 0, width: 1, height: 1 } : rect;
-	}
-
-	function chatContentModeForWindow(windowId: WorkspaceWindowId): 'live' | 'preview' | 'none' {
-		if (isMobile) return 'none';
-		if (fullscreenWindowId && fullscreenWindowId !== windowId) return 'none';
-		if (liveChat?.windowId === windowId) return 'live';
-		return 'preview';
 	}
 
 	function resizerStyle(partition: WorkspacePartitionNode, bounds: WorkspaceWindowRect): string {
@@ -347,12 +405,12 @@
 			<WorkspaceWindow
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
-				isVisible={!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id}
-				chatContentMode={chatContentModeForWindow(workspaceWindow.id)}
+				isVisible={!isMobile && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
 				presentations={renderedPresentations}
 				style={rectStyle(displayRect(workspaceWindow.id, rect))}
 				labelFor={label}
-				previewStore={chatWindowPreviews}
+				panelActions={conversationPanelActions}
+				{composerInsetPx}
 				{subagentToolbar}
 				{activeSurfaceMenuItems}
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
@@ -376,40 +434,73 @@
 		{/if}
 	</div>
 
+	{#if isMobile && mobileChatSurface}
+		<div class="absolute inset-0 overflow-hidden bg-background">
+			{#if mobileChat && mobilePanel}
+				<ConversationPanel
+					surfaceId={mobileChatSurface.id}
+					chat={mobileChat}
+					panel={mobilePanel}
+					isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
+						workspace.focusOwner.surfaceId === mobileChatSurface.id}
+					ownsComposer={composerBound &&
+						workspace.composerAnchorSurfaceId === mobileChatSurface.id}
+					isVisible={true}
+					actions={conversationPanelActions}
+					composerInsetPx={composerBound ? composerInsetPx : 0}
+					reserveMobileToolbar={true}
+				/>
+			{:else if mobileChatPresentation === 'loading'}
+				<ChatLoadingState announcementsEnabled={mobileChatIsComposerAnchor} />
+			{:else}
+				<ChatEmptyState />
+			{/if}
+		</div>
+	{/if}
+
 	<div
 		class="pointer-events-none absolute z-30 overflow-hidden"
-		class:invisible={!liveChat}
+		class:invisible={!composerBound}
 		style={liveLayerRectStyle}
-		aria-hidden={!liveChat}
+		aria-hidden={!composerBound}
+		inert={!composerBound}
 	>
 		<div
 			class={cn(
-				'pointer-events-auto absolute overflow-hidden bg-background',
-				liveChat && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
+				'pointer-events-none absolute overflow-visible',
+				composerPlacement && !isMobile ? 'inset-x-0 bottom-0 top-10' : 'inset-0',
 			)}
 			data-workspace-live-chat-body
-			data-workspace-surface-id={liveChat?.surface.id}
+			data-workspace-surface-id={composerPlacement?.surface.id}
+			onpointerdowncapture={() => {
+				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
+			}}
+			onfocusincapture={() => {
+				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
+			}}
 			use:surfaceFrame={{
 				registry: surfaceFrames,
-				surfaceId: liveChat?.surface.id ?? fallbackChatSurfaceId,
-				host: liveChat ? (liveChat.windowId ?? 'mobile') : null,
+				surfaceId: composerPlacement?.surface.id ?? fallbackChatSurfaceId,
+				host: composerBound && composerPlacement
+					? (composerPlacement.windowId ?? 'mobile')
+					: null,
 				version: 0,
 			}}
 		>
 			<ChatSurface
 				{isMobile}
-				isVisible={Boolean(liveChat)}
-				isInteractive={Boolean(liveChat) && workspace.isChatInteractive}
+				isVisible={composerBound}
+				isInteractive={composerBound && workspace.isChatInteractive}
 				{onRegisterReload}
 				onRegisterSubmit={(submit) => (chatSubmit = submit)}
 				onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
 					(openUserMessageNavigator = command)}
 				onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
+				onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
+				onComposerHeightChange={(height) => (composerInsetPx = height)}
 				{subagentToolbar}
 				{chatActions}
 				transcriptCache={chatTranscriptCache}
-				previewStore={chatWindowPreviews}
-				getVisibleChatIds={() => previewChatIds}
 			/>
 		</div>
 	</div>

@@ -30,9 +30,8 @@ function makeContext(initial: PendingPermissionRequest[] = []): {
 	const pushLoadingStatus = vi.fn();
 	const popLoadingStatus = vi.fn();
 	const ctx: PermissionLifecycleContext = {
-		getCurrentChatId: () => 'chat-1',
 		conversationUi: {
-			setPendingPermissionRequests: (updater) => {
+			updatePendingPermissionsForChat: (_chatId, updater) => {
 				pending = typeof updater === 'function' ? updater(pending) : updater;
 			},
 		},
@@ -87,6 +86,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		);
 
 		expect(pushLoadingStatus).toHaveBeenCalledWith(
+			'chat-1',
 			expect.objectContaining({ id: 'WAITING_FOR_PERMISSION' }),
 		);
 		expect(markTurnRunning).toHaveBeenCalledWith('chat-1');
@@ -135,7 +135,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		);
 
 		expect(read()).toHaveLength(0);
-		expect(popLoadingStatus).toHaveBeenCalledWith('WAITING_FOR_PERMISSION');
+		expect(popLoadingStatus).toHaveBeenCalledWith('chat-1', 'WAITING_FOR_PERMISSION');
 	});
 
 	it('pops WAITING_FOR_PERMISSION status on permission resolved', () => {
@@ -158,7 +158,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 			ctx,
 		);
 
-		expect(popLoadingStatus).toHaveBeenCalledWith('WAITING_FOR_PERMISSION');
+		expect(popLoadingStatus).toHaveBeenCalledWith('chat-1', 'WAITING_FOR_PERMISSION');
 		expect(read()).toHaveLength(0);
 	});
 

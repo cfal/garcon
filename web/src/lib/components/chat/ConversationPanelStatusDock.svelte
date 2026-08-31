@@ -27,6 +27,7 @@
 		isMobile: boolean;
 		onAbort: () => void;
 		onQuickCommit: () => void;
+		announcementsEnabled?: boolean;
 	}
 
 	let {
@@ -44,6 +45,7 @@
 		isMobile,
 		onAbort,
 		onQuickCommit,
+		announcementsEnabled = true,
 	}: Props = $props();
 
 	const shellClass = $derived(
@@ -70,6 +72,7 @@
 					quickCommitSummary={quickCommitSummary}
 					onQuickCommit={onQuickCommit}
 					onAbort={onAbort}
+					{announcementsEnabled}
 				/>
 			{:else}
 				<GitQuickStatusTray
@@ -80,6 +83,7 @@
 					lastError={quickCommitError}
 					branchSelector={quickCommitBranchSelector}
 					onCommit={onQuickCommit}
+					{announcementsEnabled}
 				/>
 			{/if}
 		</div>

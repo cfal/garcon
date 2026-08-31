@@ -6,10 +6,7 @@
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import type { ConversationPanelActions } from './conversation-panel-actions.js';
-	import type {
-		ConversationPanelRegistration,
-		ConversationPanelScrollPort,
-	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { observeConversationViewportScrollGestures } from '$lib/chat/transcript/conversation-scroll-gesture.js';
@@ -42,27 +39,24 @@
 		surfaceId: ChatViewSurfaceId;
 		chat: ChatSessionRecord;
 		panel: ConversationPanelRegistration;
-		isCurrent: boolean;
+		isCommandOwner: boolean;
+		ownsComposer: boolean;
 		isVisible?: boolean;
 		actions: ConversationPanelActions | null;
 		composerInsetPx?: number;
 		reserveMobileToolbar?: boolean;
-		registerScrollPort?: (
-			surfaceId: ChatViewSurfaceId,
-			port: ConversationPanelScrollPort,
-		) => () => void;
 	}
 
 	let {
 		surfaceId,
 		chat,
 		panel,
-		isCurrent,
+		isCommandOwner,
+		ownsComposer,
 		isVisible = true,
 		actions,
 		composerInsetPx = 0,
 		reserveMobileToolbar = false,
-		registerScrollPort,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -121,7 +115,7 @@
 	const branchSelector = $derived.by<GitQuickBranchSelectorControls | null>(() => {
 		if (!projectPath || !quickGitSummary) return null;
 		const exposesCurrentBranchState =
-			isCurrent && quickGitBranches.currentProjectPath === projectPath;
+			isCommandOwner && quickGitBranches.currentProjectPath === projectPath;
 		return {
 			refs: exposesCurrentBranchState ? quickGitBranches.refs : [],
 			sort: quickGitBranches.branchSort,
@@ -159,7 +153,7 @@
 	});
 
 	$effect.pre(() => {
-		if (isCurrent) return;
+		if (isCommandOwner) return;
 		untrack(() => panel.prepareForInteractionLoss());
 	});
 
@@ -226,29 +220,14 @@
 		);
 	});
 
-	const shieldScrollPort = $derived.by<ConversationPanelScrollPort | null>(() => {
-		const viewport = scrollContainer;
-		if (!viewport) return null;
-		return {
-			viewport,
-			noteUserScrollIntent: (direction) => panel.scroll.noteUserScrollIntent(direction),
-			scrollByPixels: (deltaY) => viewport.scrollBy({ top: deltaY, behavior: 'auto' }),
-		};
-	});
-
-	$effect(() => {
-		const register = registerScrollPort;
-		const port = shieldScrollPort;
-		if (!register || !port) return;
-		return register(surfaceId, port);
-	});
 </script>
 
 <div
 	class="flex h-full min-h-0 flex-col bg-background"
 	data-conversation-panel={surfaceId}
 	data-conversation-panel-chat-id={chatId}
-	data-conversation-panel-current={isCurrent ? 'true' : undefined}
+	data-conversation-panel-command-owner={isCommandOwner ? 'true' : undefined}
+	data-conversation-panel-composer-anchor={ownsComposer ? 'true' : undefined}
 >
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
@@ -283,7 +262,7 @@
 				reserveComposerTraySpace={capSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}
-				announcementsEnabled={isCurrent && isVisible}
+				announcementsEnabled={ownsComposer && isVisible}
 				pinnedToBottom={panel.scroll.isPinnedToBottom}
 				{surfaceIdentity}
 				onViewportPortChange={(port) => (conversationViewport = port)}
@@ -305,6 +284,7 @@
 				{queue}
 				{canInterrupt}
 				{canSteer}
+				announcementsEnabled={ownsComposer && isVisible}
 				onInterrupt={() => actions?.interruptQueue(surfaceId, chatId)}
 				onSteer={(entry, revision) => actions?.steerQueue(surfaceId, chatId, entry, revision)}
 				onPause={() => actions?.pauseQueue(surfaceId, chatId) ?? Promise.resolve()}
@@ -333,8 +313,13 @@
 		quickCommitError={quickGitError}
 		quickCommitBranchSelector={branchSelector}
 		isMobile={appShell.isMobile}
+		announcementsEnabled={ownsComposer && isVisible}
 		onAbort={() => void actions?.stop(surfaceId, chatId)}
 		onQuickCommit={() => actions?.openCommit(surfaceId, chatId)}
 	/>
-	<div aria-hidden="true" style:height={`${isCurrent ? composerInsetPx : 0}px`}></div>
+	<div
+		aria-hidden="true"
+		data-conversation-panel-composer-spacer
+		style:height={`${ownsComposer ? composerInsetPx : 0}px`}
+	></div>
 </div>

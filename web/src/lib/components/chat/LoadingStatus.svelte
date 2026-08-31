@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Renders the composer-anchored status tray shown while an agent is running.
+	// Renders a conversation panel's status tray while an agent is running.
 
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -18,6 +18,7 @@
 		quickCommitVisible?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		onQuickCommit?: (() => void) | null;
+		announcementsEnabled?: boolean;
 	}
 
 	let {
@@ -29,6 +30,7 @@
 		quickCommitVisible = false,
 		quickCommitSummary = null,
 		onQuickCommit = null,
+		announcementsEnabled = true,
 	}: Props = $props();
 
 	// Frame cadence for the character spinner. Lower feels snappier; the scale
@@ -123,8 +125,8 @@
 	<div class={statusTrayClass}>
 		<div
 			class={statusPanelClass}
-			role="status"
-			aria-live="polite"
+			role={announcementsEnabled ? 'status' : undefined}
+			aria-live={announcementsEnabled ? 'polite' : 'off'}
 			data-slot="chat-processing-status"
 		>
 			<div class="flex min-w-0 items-center gap-1.5">

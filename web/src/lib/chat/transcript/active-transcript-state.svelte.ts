@@ -10,13 +10,10 @@ import {
 	ChatTranscriptCache,
 	type ChatTranscriptApplyResult,
 } from './chat-transcript-cache.svelte';
-import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import { TranscriptNoticeFeed } from './transcript-notice-feed.svelte.js';
-import { TranscriptOptimisticInputs } from './transcript-optimistic-inputs.svelte.js';
-import { TranscriptResendCandidates } from './transcript-resend-candidates.svelte.js';
-import type { OptimisticUserInput } from './optimistic-user-input.js';
-import { ConversationFeedMutationState } from './ConversationFeedMutationState.svelte.js';
-import type { ConversationTranscriptOverlayMutation } from './conversation-transcript-overlay-store.svelte.js';
+import type {
+	ConversationTranscriptOverlayMutation,
+	ConversationTranscriptOverlayView,
+} from './conversation-transcript-overlay-store.svelte.js';
 import type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -24,14 +21,11 @@ import type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 import {
-	idlePageState,
 	mergeTranscriptEntriesByOrdinal,
 	retainTranscriptEntries,
 	retainedEarlierPageCursor,
 	type TranscriptPageApplicationGate,
-	type TranscriptPageDirection,
 	type TranscriptPageLoadResult,
-	type TranscriptPageState,
 	type TranscriptWindowLoadResult,
 	type TranscriptWindowTarget,
 } from './transcript-page-progress.js';
@@ -51,18 +45,14 @@ import {
 	type TranscriptBufferedBatch,
 	type TranscriptReplayApplyResult,
 } from './transcript-reconnect-replay.js';
-import { displayLocalNotices } from './degraded-history-notice.js';
 import {
 	echoedClientMessageOrdinals,
-	echoedClientMessageIds,
-	hasEarlierTranscriptRowsToReveal,
-	messagesFromDisplayRows,
 	responseMessageTypesAfter,
-	transcriptDisplayRows,
-	visibleOptimisticTranscriptInputs,
-	visibleTranscriptRows,
-	type ChatDisplayRow,
 } from './transcript-row-projection.js';
+import {
+	ActiveTranscriptPresentationState,
+	INITIAL_VISIBLE_MESSAGES,
+} from './active-transcript-presentation-state.svelte.js';
 export type {
 	ActiveTranscriptPort,
 	ChatCursor,
@@ -70,9 +60,10 @@ export type {
 	ChatRestoreResult,
 } from './active-transcript-port.js';
 export type { ChatDisplayRow, ChatTranscriptRow } from './transcript-row-projection.js';
+export { INITIAL_VISIBLE_MESSAGES } from './active-transcript-presentation-state.svelte.js';
+export type { ChatLoadStatus } from './active-transcript-presentation-state.svelte.js';
 
 const MESSAGES_PER_PAGE = 50;
-export const INITIAL_VISIBLE_MESSAGES = 100;
 type ActiveTranscriptSnapshot = TranscriptPage & { resendCandidates?: ResendCandidate[] };
 export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
@@ -105,30 +96,8 @@ function retainedWindow(
 	};
 }
 
-export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
-
-export class ActiveTranscriptState implements ActiveTranscriptPort {
+export class ActiveTranscriptState extends ActiveTranscriptPresentationState implements ActiveTranscriptPort {
 	readonly transcriptCache: ChatTranscriptCache;
-	activeChatId = $state<string | null>(null);
-	entries = $state<TranscriptMessage[]>([]);
-	#resend = new TranscriptResendCandidates();
-	transcriptViewId = $state('');
-	windowRevision = $state(0);
-	lastOrdinal = $state(0);
-	nextBeforeOrdinal = $state<number | null>(null);
-	loadedThroughOrdinal = $state(0);
-	hasLaterMessages = $state(false);
-	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
-	isLoadingMessages = $state(false);
-	hasEarlierMessages = $state(false);
-	pageStates = $state<Record<TranscriptPageDirection, TranscriptPageState>>({
-		earlier: idlePageState(),
-		later: idlePageState(),
-	});
-	isUserScrolledUp = $state(false);
-	loadStatus = $state<ChatLoadStatus>('idle');
-	loadError = $state<string | null>(null);
-	historyState = $state<ChatHistoryState>({ kind: 'complete' });
 	#snapshotBuffer: TranscriptBufferedBatch[] | null = null;
 	#reconnectReplay = new TranscriptReconnectReplayState((chatId, batch) => this.applyMessages(
 		chatId,
@@ -140,17 +109,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		batch.noticeRevision,
 	));
 	#loadEpoch = 0;
-	#notices = new TranscriptNoticeFeed();
-	#optimisticInputs = new TranscriptOptimisticInputs(() => {
-		this.#growExpandedVisibleWindow();
-		this.#feedMutations.record('presentation-structure');
-	});
 	#windowNavigationEpoch = 0;
-	#expandedVisibleStartOrdinal: number | null = null;
-	#feedMutations = new ConversationFeedMutationState();
 	#pageLoader: TranscriptPageLoader;
 
-	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
+	constructor(
+		transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES }),
+		sharedOverlay: ConversationTranscriptOverlayView | null = null,
+	) {
+		super(sharedOverlay);
 		this.transcriptCache = transcriptCache;
 		this.#pageLoader = new TranscriptPageLoader(this, {
 			pageSize: MESSAGES_PER_PAGE,
@@ -158,8 +124,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				this.#setUnavailableHistory(chatId, historyState);
 			},
 			onPageApplied: (direction) => {
-				this.#rememberExpandedVisibleWindow();
-				this.#feedMutations.record(
+				this.rememberExpandedVisibleWindow();
+				this.feedMutations.record(
 					direction === 'earlier' ? 'history-earlier' : 'history-later',
 				);
 			},
@@ -172,101 +138,6 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				);
 			},
 		});
-	}
-
-	get localNotices(): (LocalNoticeRow & { revision: number })[] {
-		return this.#notices.rows;
-	}
-
-	get optimisticUserInputs(): OptimisticUserInput[] {
-		return this.#optimisticInputs.rows;
-	}
-
-	get resendCandidates(): readonly ResendCandidate[] {
-		return this.#resend.included;
-	}
-
-	get excludedResendOrdinals(): readonly number[] {
-		return this.#resend.excludedOrdinals;
-	}
-
-	setResendCandidates(candidates: readonly ResendCandidate[]): void {
-		this.#resend.replace(candidates);
-	}
-
-	excludeResendCandidate(ordinal: number): void {
-		this.#resend.exclude(ordinal);
-	}
-
-	clearResendExclusions(): void {
-		this.#resend.clearExclusions();
-	}
-
-	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
-
-	#displayLocalNotices = $derived(
-		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
-	);
-
-	#displayRows = $derived(transcriptDisplayRows({
-		entries: this.entries,
-		transcriptViewId: this.transcriptViewId,
-		optimisticInputs: this.visibleOptimisticInputs,
-		optimisticAfterOrdinals: this.#optimisticInputs.afterOrdinalByClientMessageId,
-		notices: this.#displayLocalNotices,
-	}));
-
-	#visibleRows = $derived(visibleTranscriptRows({
-		entries: this.entries,
-		transcriptViewId: this.transcriptViewId,
-		optimisticInputs: this.visibleOptimisticInputs,
-		optimisticAfterOrdinals: this.#optimisticInputs.afterOrdinalByClientMessageId,
-		notices: this.#displayLocalNotices,
-		visibleCount: this.visibleMessageCount,
-	}));
-
-	get chatMessages(): ChatMessage[] {
-		return this.entries.map((entry) => entry.message);
-	}
-
-	get feedMutationClock() {
-		return this.#feedMutations.clock;
-	}
-
-	get displayMessages(): ChatMessage[] {
-		return messagesFromDisplayRows(this.#displayRows);
-	}
-
-	get displayRows(): readonly ChatDisplayRow[] {
-		return this.#displayRows;
-	}
-
-	get visibleRows(): ChatDisplayRow[] {
-		return this.#visibleRows;
-	}
-
-	get displayMessageCount(): number {
-		return this.entries.length + this.visibleOptimisticInputs.length + this.#displayLocalNotices.length;
-	}
-
-	get visibleMessages(): ChatMessage[] {
-		return messagesFromDisplayRows(this.#visibleRows);
-	}
-
-	get hasEarlierRowsToReveal(): boolean {
-		return hasEarlierTranscriptRowsToReveal(this.#visibleRows, this.entries);
-	}
-
-	get canLoadEarlier(): boolean {
-		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
-	}
-
-	get visibleOptimisticInputs(): OptimisticUserInput[] {
-		return visibleOptimisticTranscriptInputs(
-			this.hasLaterMessages,
-			this.optimisticUserInputs,
-			this.#echoedClientMessageIds,
-		);
 	}
 
 	getCursor(): ChatCursor {
@@ -300,7 +171,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			firstOrdinal,
 			lastOrdinal,
 			resendCandidates,
-			noticeRevision: this.#notices.revision,
+			noticeRevision: this.noticeRevision,
 		});
 	}
 
@@ -318,8 +189,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		messages: TranscriptMessage[],
 		firstOrdinal: number,
 		lastOrdinal: number,
-		resendCandidates: ResendCandidate[] = [...this.#resend.all],
-		noticeRevision = this.#notices.revision,
+		resendCandidates: ResendCandidate[] = [...this.resendCandidates],
+		noticeRevision = this.noticeRevision,
 	): MessageApplyResult {
 		if (this.historyState.kind !== 'complete') {
 			this.transcriptCache.markStale(chatId);
@@ -396,8 +267,8 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 
 	applySharedOverlayMutation(mutation: ConversationTranscriptOverlayMutation): void {
 		if (!mutation.feedStructureChanged) return;
-		this.#growExpandedVisibleWindow();
-		this.#feedMutations.record('presentation-structure');
+		this.growExpandedVisibleWindow();
+		this.feedMutations.record('presentation-structure');
 	}
 
 	#applyCommittedAppend(
@@ -440,9 +311,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				this.loadStatus = 'loaded';
 			}
 			if (cacheStateChanged) {
-				this.#feedMutations.record('live-append', responseMessageTypes);
+				this.feedMutations.record('live-append', responseMessageTypes);
 			}
-			this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
+			if (!this.usesSharedOverlay) {
+				this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
+			}
 			this.setResendCandidates(resendCandidates);
 			return 'applied';
 		}
@@ -475,14 +348,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
 		}
-		if (entriesChanged) this.#growExpandedVisibleWindow();
+		if (entriesChanged) this.growExpandedVisibleWindow();
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
 		if (entriesChanged) {
-			this.#feedMutations.record('live-append', responseMessageTypes);
+			this.feedMutations.record('live-append', responseMessageTypes);
 		}
-		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
+		if (!this.usesSharedOverlay) {
+			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));
+		}
 		this.setResendCandidates(resendCandidates);
 		return 'applied';
 	}
@@ -545,7 +420,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		);
 		const pageNewestOrdinal = options.pageNewestOrdinal ?? options.lastOrdinal;
 		this.#invalidatePageLoad();
-		this.#expandedVisibleStartOrdinal = null;
+		this.expandedVisibleStartOrdinal = null;
 		this.historyState = { kind: 'complete' };
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
@@ -568,14 +443,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = pageNewestOrdinal < options.lastOrdinal;
-		this.#optimisticInputs.clearAll();
+		if (!this.usesSharedOverlay) this.optimisticInputs.clearAll();
 		this.setResendCandidates(options.resendCandidates ?? []);
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
-		this.#notices.reset();
+		if (!this.usesSharedOverlay) this.notices.reset();
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
-		this.#feedMutations.record('replacement');
+		this.feedMutations.record('replacement');
 	}
 
 	setFromPage(
@@ -584,6 +459,25 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		epoch: number,
 	): PageApplyResult {
 		return this.#installSnapshotPage(chatId, page, epoch);
+	}
+
+	installCachedSnapshot(chatId: string): PageApplyResult {
+		const snapshot = this.transcriptCache.get(chatId);
+		if (!snapshot || snapshot.stale) return 'stale';
+		const epoch = this.beginSnapshotLoad();
+		return this.#installSnapshotPage(
+			chatId,
+			{
+				transcriptViewId: snapshot.transcriptViewId,
+				messages: snapshot.messages,
+				lastOrdinal: snapshot.lastOrdinal,
+				pageOldestOrdinal: snapshot.oldestOrdinal,
+				pageNewestOrdinal: snapshot.lastOrdinal,
+				nextBeforeOrdinal: snapshot.nextBeforeOrdinal,
+				hasMore: snapshot.nextBeforeOrdinal !== null,
+			},
+			epoch,
+		);
 	}
 
 	#installSnapshotPage(
@@ -621,7 +515,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		else if (installMode === 'preserve-window') this.#preserveWindowFromSnapshot(chatId, page);
 		else this.#replaceFromSnapshot(chatId, page);
 		this.setResendCandidates(page.resendCandidates ?? []);
-		this.clearLocalNotices(this.#notices.revisionAtLoadStart);
+		if (!this.usesSharedOverlay) this.clearLocalNotices(this.notices.revisionAtLoadStart);
 		this.loadStatus = this.entries.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
@@ -673,8 +567,10 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = mergedLoadedThroughOrdinal < mergedLastOrdinal;
-		this.#growExpandedVisibleWindow();
-		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		this.growExpandedVisibleWindow();
+		if (!this.usesSharedOverlay) {
+			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		}
 
 		const cursorAdvanced = mergedLastOrdinal > previousLastOrdinal;
 		if (mergedEntries === previousEntries && !cursorAdvanced) return;
@@ -682,12 +578,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			(entry, index) => mergedEntries[index] === entry,
 		);
 		if (preservesExistingPrefix) {
-			this.#feedMutations.record(
+			this.feedMutations.record(
 				'live-append',
 				responseMessageTypesAfter(page.messages, previousLastOrdinal),
 			);
 		} else {
-			this.#feedMutations.record('presentation-structure');
+			this.feedMutations.record('presentation-structure');
 		}
 	}
 
@@ -696,10 +592,12 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.lastOrdinal = Math.max(this.lastOrdinal, page.lastOrdinal);
 		this.hasLaterMessages = this.loadedThroughOrdinal < this.lastOrdinal;
-		this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
-		this.#growExpandedVisibleWindow();
+		if (!this.usesSharedOverlay) {
+			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		}
+		this.growExpandedVisibleWindow();
 		if (this.hasLaterMessages !== previouslyHadLaterMessages) {
-			this.#feedMutations.record('presentation-structure');
+			this.feedMutations.record('presentation-structure');
 		}
 	}
 
@@ -709,7 +607,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.windowRevision += 1;
 		if (replacesTranscriptView) {
-			this.#expandedVisibleStartOrdinal = null;
+			this.expandedVisibleStartOrdinal = null;
 			this.visibleMessageCount = Math.min(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
 		}
 		const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
@@ -724,9 +622,11 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.nextBeforeOrdinal = nextBeforeOrdinal;
 		this.hasEarlierMessages = nextBeforeOrdinal !== null;
 		this.hasLaterMessages = page.pageNewestOrdinal < page.lastOrdinal;
-		if (replacesTranscriptView) this.#optimisticInputs.clearAll();
-		else this.#optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
-		this.#feedMutations.record('replacement');
+		if (!this.usesSharedOverlay) {
+			if (replacesTranscriptView) this.optimisticInputs.clearAll();
+			else this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(page.messages));
+		}
+		this.feedMutations.record('replacement');
 	}
 
 	async loadMessages(
@@ -747,7 +647,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 					direction: 'backward',
 					chatId,
 					visibleLimit: limit,
-					purpose: 'activation',
+					purpose: options.purpose,
 					isCurrent: () => (
 						epoch === this.#loadEpoch
 						&& (!this.activeChatId || this.activeChatId === chatId)
@@ -813,60 +713,16 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.#pageLoader.invalidate();
 	}
 
-	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
-		this.#notices.append(noticeType, content);
-		this.#growExpandedVisibleWindow();
-		this.#feedMutations.record('presentation-structure');
-	}
-
-	// Routes a server-issued overlay notice by its chat identity: the active
-	// conversation shows it immediately, any other chat retains it until that
-	// chat activates. Retention is bounded per chat and dropped with the chat.
-	appendServerNotice(chatId: string, noticeType: LocalNoticeType, content: string): void {
-		if (chatId === this.activeChatId) this.appendLocalNotice(noticeType, content);
-		else this.#notices.retain(chatId, noticeType, content);
-	}
-
-	discardServerNotices(chatId: string): void {
-		this.#notices.discard(chatId);
-	}
-
-	#drainServerNotices(chatId: string): void {
-		if (!this.#notices.drain(chatId)) return;
-		this.#growExpandedVisibleWindow();
-		this.#feedMutations.record('presentation-structure');
-	}
-
-	clearLocalNotices(throughRevision?: number): void {
-		if (!this.#notices.clearThrough(throughRevision)) return;
-		this.#growExpandedVisibleWindow();
-		this.#feedMutations.record('presentation-structure');
-	}
-
-	upsertOptimisticUserInput(input: OptimisticUserInput): void {
-		this.clearLocalNotices();
-		if (this.#echoedClientMessageIds.has(input.clientMessageId)) return;
-		this.#optimisticInputs.upsert(input, this.lastOrdinal);
-	}
-
-	markOptimisticUserInputDelivered(clientMessageId: string): void {
-		this.#optimisticInputs.markDelivered(clientMessageId);
-	}
-
-	clearOptimisticUserInput(clientMessageId: string): void {
-		this.#optimisticInputs.clear(clientMessageId);
-	}
-
 	clearMessages(): void {
 		this.#resetToEmptyTranscript();
 		this.loadStatus = 'idle';
 		this.historyState = { kind: 'complete' };
-		this.#feedMutations.record('replacement');
+		this.feedMutations.record('replacement');
 	}
 
 	#resetToEmptyTranscript(): void {
 		this.#invalidatePageLoad();
-		this.#expandedVisibleStartOrdinal = null;
+		this.expandedVisibleStartOrdinal = null;
 		this.#loadEpoch += 1;
 		this.windowRevision += 1;
 		this.entries = [];
@@ -874,33 +730,17 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.lastOrdinal = 0;
 		this.nextBeforeOrdinal = null;
 		this.loadedThroughOrdinal = 0;
-		this.#optimisticInputs.clearAll();
-		this.#resend.clear();
-		this.#notices.reset();
+		if (!this.usesSharedOverlay) {
+			this.optimisticInputs.clearAll();
+			this.resend.clear();
+			this.notices.reset();
+		}
 		this.hasEarlierMessages = false;
 		this.hasLaterMessages = false;
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.#snapshotBuffer = null;
 		this.#reconnectReplay.reset();
-	}
-
-	revealEarlierLoadedRows(): boolean {
-		const previousCount = this.visibleMessageCount;
-		const nextCount = Math.min(this.displayMessageCount, previousCount + 100);
-		if (nextCount <= previousCount) return false;
-		this.visibleMessageCount = nextCount;
-		this.pageStates.earlier = idlePageState();
-		this.#rememberExpandedVisibleWindow();
-		this.#feedMutations.record('history-earlier');
-		return true;
-	}
-
-	revealAllLoadedMessages(): void {
-		const changed = this.visibleMessageCount < this.displayMessageCount;
-		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
-		this.#rememberExpandedVisibleWindow();
-		if (changed) this.#feedMutations.record('initial');
 	}
 
 	async navigateToWindow(
@@ -952,14 +792,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 				const latestPage = preferCachedLatestTranscriptPage(
 					page,
 					this.transcriptCache.get(chatId),
-					this.#resend.all,
+					this.resendCandidates,
 				);
 				return this.#installSnapshotPage(chatId, latestPage, loadEpoch, 'replace') === 'applied'
 					? 'loaded'
 					: 'invalidated';
 			}
 
-			this.#expandedVisibleStartOrdinal = null;
+			this.expandedVisibleStartOrdinal = null;
 			this.windowRevision += 1;
 			const { retainedMessages, nextBeforeOrdinal } = retainedWindow(
 				page.messages,
@@ -978,7 +818,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 			}
 			this.loadStatus = page.messages.length === 0 ? 'empty' : 'loaded';
 			this.loadError = null;
-			this.#feedMutations.record('replacement');
+			this.feedMutations.record('replacement');
 			return 'loaded';
 		} catch (error) {
 			if (
@@ -995,7 +835,7 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 	}
 
 	#beginLoadEpoch(): number {
-		this.#notices.markLoadStart();
+		if (!this.usesSharedOverlay) this.notices.markLoadStart();
 		return ++this.#loadEpoch;
 	}
 
@@ -1015,14 +855,14 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.loadStatus = 'loaded';
 		this.historyState = historyState;
-		this.#feedMutations.record('replacement');
+		this.feedMutations.record('replacement');
 	}
 
 	activateChat(chatId: string | null): ChatRestoreResult | null {
 		this.activeChatId = chatId;
 		this.resetForNewChat();
 		if (!chatId) return null;
-		this.#drainServerNotices(chatId);
+		this.drainServerNotices(chatId);
 		// Publishes the bounded cache window atomically; the virtual feed limits mounted row work.
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
@@ -1043,28 +883,4 @@ export class ActiveTranscriptState implements ActiveTranscriptPort {
 		this.transcriptCache.remove(chatId);
 	}
 
-	#rememberExpandedVisibleWindow(): void {
-		if (this.entries.length <= INITIAL_VISIBLE_MESSAGES) return;
-		let firstVisibleOrdinal: number | undefined;
-		for (const row of this.#visibleRows) {
-			if (row.kind !== 'message' || row.ordinal === undefined) continue;
-			firstVisibleOrdinal = row.ordinal;
-			break;
-		}
-		if (firstVisibleOrdinal === undefined) return;
-		this.#expandedVisibleStartOrdinal = firstVisibleOrdinal;
-		this.#growExpandedVisibleWindow();
-	}
-
-	#growExpandedVisibleWindow(): void {
-		if (this.#expandedVisibleStartOrdinal === null) return;
-		const firstVisibleIndex = this.#displayRows.findIndex(
-			(row) => row.kind === 'message' && row.ordinal === this.#expandedVisibleStartOrdinal,
-		);
-		if (firstVisibleIndex === -1) {
-			this.#expandedVisibleStartOrdinal = null;
-			return;
-		}
-		this.visibleMessageCount = this.#displayRows.length - firstVisibleIndex;
-	}
 }

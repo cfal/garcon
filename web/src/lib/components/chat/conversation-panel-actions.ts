@@ -5,7 +5,7 @@ import type { GitRefSortKey } from '$lib/api/git.js';
 
 export class StaleConversationSurfaceError extends Error {
 	constructor(surfaceId: ChatViewSurfaceId, chatId: string) {
-		super(`Conversation surface is no longer current: ${surfaceId} (${chatId})`);
+		super(`Conversation surface is no longer rendered: ${surfaceId} (${chatId})`);
 		this.name = 'StaleConversationSurfaceError';
 	}
 }

@@ -63,12 +63,13 @@ import {
 } from './handlers/sidebar';
 
 export interface EventRouterAgentSettings {
-	permissionMode: () => PermissionMode;
-	setPermissionMode: (mode: PermissionMode) => void;
+	permissionMode: (chatId: string) => PermissionMode | null;
+	setPermissionMode: (chatId: string, mode: PermissionMode) => void;
 }
 
 export type EventRouterSessionsStore = Pick<
 	ChatSessionsPort,
+	| 'byId'
 	| 'selectedChat'
 	| 'setSelectedChatId'
 	| 'patchPreview'
@@ -90,6 +91,9 @@ export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
 	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
 > & {
+	getChatCursor: (
+		chatId: string,
+	) => { transcriptViewId: string; lastOrdinal: number } | null;
 	applyChatMessages: (
 		chatId: string,
 		transcriptViewId: string,
@@ -99,23 +103,9 @@ export type EventRouterChatStateStore = Pick<
 		resendCandidates: ResendCandidate[],
 	) => 'applied' | 'view-changed' | 'gap-detected';
 	reloadChatTranscript: (chatId: string) => void;
-	warmBackgroundTranscript: (
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-	) => boolean;
-	isVisiblePreviewChat: (chatId: string) => boolean;
-	warmVisibleChatPreview: (
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-	) => boolean | void;
-	loadVisibleChatPreview: (chatId: string) => Promise<void> | void;
-	markVisibleChatPreviewStale: (chatId: string) => void;
+	isRenderedChat: (chatId: string) => boolean;
+	loadRenderedChat: (chatId: string) => Promise<void> | void;
+	markRenderedChatStale: (chatId: string) => void;
 	removeChatTranscript: (chatId: string) => void;
 	markChatTranscriptStale: (chatId: string) => void;
 	markChatTranscriptValidated: (chatId: string) => void;
@@ -130,9 +120,10 @@ export interface EventRouterLifecycleStore {
 		status: { text: string; tokens: number; can_interrupt: boolean } | null,
 	) => void;
 	pushLoadingStatus: (
+		chatId: string,
 		entry: import('$lib/chat/conversation/conversation-lifecycle-state.svelte.js').LoadingStatusEntry,
 	) => void;
-	popLoadingStatus: (id: string) => void;
+	popLoadingStatus: (chatId: string, id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 }
 
@@ -304,7 +295,6 @@ function buildDispatch(
 	};
 
 	const permLifecycleCtx: PermissionLifecycleContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
 		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		pushLoadingStatus: stores.lifecycle.pushLoadingStatus,
@@ -316,7 +306,6 @@ function buildDispatch(
 	};
 
 	const planModeCtx: PlanModeContext = {
-		getCurrentChatId: stores.lifecycle.currentChatId,
 		getPermissionMode: stores.agentSettings.permissionMode,
 		setPermissionMode: stores.agentSettings.setPermissionMode,
 		conversationUi: stores.conversationUi,
@@ -361,20 +350,18 @@ function buildDispatch(
 	const handleViewTransition = (chatId: string, transcriptViewId: string) => {
 		messagesAccumulator.flush();
 		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
-		if (selectedChatId === chatId) {
-			const cursor = stores.chatState.getCursor();
-			if (cursor.transcriptViewId !== transcriptViewId) {
-				stores.chatState.reloadChatTranscript(chatId);
-			} else {
-				stores.chatState.markChatTranscriptValidated(chatId);
-			}
+		const cursor = stores.chatState.getChatCursor(chatId);
+		if (cursor?.transcriptViewId === transcriptViewId) {
+			stores.chatState.markChatTranscriptValidated(chatId);
 			return;
 		}
-		if (stores.chatState.isVisiblePreviewChat(chatId)) {
-			stores.chatState.markVisibleChatPreviewStale(chatId);
-			void stores.chatState.loadVisibleChatPreview(chatId);
+		if (stores.chatState.isRenderedChat(chatId)) {
+			stores.chatState.markRenderedChatStale(chatId);
+			void stores.chatState.loadRenderedChat(chatId);
+			return;
 		}
 		stores.chatState.markChatTranscriptStale(chatId);
+		if (selectedChatId === chatId) stores.chatState.reloadChatTranscript(chatId);
 	};
 
 	return {
@@ -490,36 +477,10 @@ export function createEventRouter(
 				const selectedChat = stores.sessions.selectedChat;
 				const currentChatId = stores.lifecycle.currentChatId();
 				const pendingViewChatId = stores.conversationUi.pendingViewChat?.chatId || null;
-				const activeViewChatId = selectedChat?.id || currentChatId || pendingViewChatId;
-
-				// Pre-filter: patch sidebar preview for any chat so background
-				// chats update even when the filter skips full dispatch. Cached
-				// background transcripts are warmed only when already contiguous.
+				// Patch the sidebar and selected-chat read state before keyed reducers run.
 				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
 					if (agentMsg.chatId) {
-						if (agentMsg.chatId !== activeViewChatId) {
-							if (stores.chatState.isVisiblePreviewChat(agentMsg.chatId)) {
-								const applied = stores.chatState.warmVisibleChatPreview(
-									agentMsg.chatId,
-									agentMsg.transcriptViewId,
-									agentMsg.messages,
-									agentMsg.firstOrdinal,
-									agentMsg.lastOrdinal,
-								);
-								if (applied === false) {
-									stores.chatState.markVisibleChatPreviewStale(agentMsg.chatId);
-									void stores.chatState.loadVisibleChatPreview(agentMsg.chatId);
-								}
-							}
-							stores.chatState.warmBackgroundTranscript(
-								agentMsg.chatId,
-								agentMsg.transcriptViewId,
-								agentMsg.messages,
-								agentMsg.firstOrdinal,
-								agentMsg.lastOrdinal,
-							);
-						}
 						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
 						if (preview) {
 							stores.sessions.patchPreview(agentMsg.chatId, preview.content, preview.timestamp);

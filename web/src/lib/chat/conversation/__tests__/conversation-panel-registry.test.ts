@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
+import type { ChatLoadMessagesOptions } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
@@ -8,6 +9,7 @@ import {
 	ConversationPanelRegistry,
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
+import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 
 function message(ordinal: number): TranscriptMessage {
@@ -26,7 +28,13 @@ function presentation(
 	return { surfaceId, chatId, presentation: windowId, windowId, isCurrent };
 }
 
-function fixture() {
+function fixture(options: {
+	loadTranscriptSnapshot?: (
+		transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
+		chatId: string,
+		options: ChatLoadMessagesOptions,
+	) => Promise<void>;
+} = {}) {
 	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycles = new Map<string, ConversationLifecycleState>();
@@ -43,12 +51,25 @@ function fixture() {
 			lifecycles.delete(chatId);
 		},
 	};
-	const registry = new ConversationPanelRegistry({ cache, overlays, lifecycle });
+	const registry = new ConversationPanelRegistry({
+		cache,
+		overlays,
+		lifecycle,
+		loadTranscriptSnapshot: options.loadTranscriptSnapshot,
+	});
 	return { cache, overlays, lifecycles, registry };
 }
 
 function seed(cache: ChatTranscriptCache, chatId = 'chat-1'): void {
 	cache.replace(chatId, 'view-1', [message(1)], 1, null);
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
 }
 
 function port(target: ConversationPanelPresentationPort['captureRestoreTarget'] extends () => infer T ? T : never): ConversationPanelPresentationPort {
@@ -62,6 +83,10 @@ function port(target: ConversationPanelPresentationPort['captureRestoreTarget'] 
 }
 
 describe('ConversationPanelRegistry', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
 	it('commits one cache batch and fans it out to duplicate-chat surfaces', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
@@ -103,6 +128,237 @@ describe('ConversationPanelRegistry', () => {
 		expect(left?.scroll.isPinnedToBottom).toBe(false);
 		expect(right?.scroll.isPinnedToBottom).toBe(true);
 		expect(left?.lifecycle).toBe(right?.lifecycle);
+		cache.flush();
+	});
+
+	it('loads one snapshot and hydrates every current duplicate-chat surface', async () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const left = registry.panel('chat-view:window-left');
+		const right = registry.panel('chat-view:window-right');
+		if (!left || !right) throw new Error('Expected duplicate panels');
+		const loadMessages = vi.spyOn(left.transcript, 'loadMessages').mockImplementation(async () => {
+			cache.replace('chat-1', 'view-2', [message(1), message(2)], 2, null);
+			left.transcript.activateChat('chat-1');
+			return left.transcript.chatMessages;
+		});
+
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(true);
+
+		expect(loadMessages).toHaveBeenCalledOnce();
+		expect(left.transcript.transcriptViewId).toBe('view-2');
+		expect(right.transcript.transcriptViewId).toBe('view-2');
+		expect(right.transcript.entries.map((item) => item.ordinal)).toEqual([1, 2]);
+		cache.flush();
+	});
+
+	it('shares one initial snapshot request across duplicate-chat surfaces', async () => {
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+
+		await vi.waitFor(() => {
+			expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+			expect(registry.panel('chat-view:window-left')?.transcript.entries).toHaveLength(1);
+			expect(registry.panel('chat-view:window-right')?.transcript.entries).toHaveLength(1);
+		});
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('shares selected-chat revalidation with duplicate-panel restoration', async () => {
+		const loading = deferred<void>();
+		const loadTranscriptSnapshot = vi.fn(
+			async (transcript, chatId: string, _options: ChatLoadMessagesOptions) => {
+				await loading.promise;
+				transcript.transcriptCache.replace(chatId, 'view-2', [message(2)], 2, null);
+				transcript.installCachedSnapshot(chatId);
+			},
+		);
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		cache.replace(
+			'chat-1',
+			'view-1',
+			Array.from({ length: 100 }, (_, index) => message(index + 1)),
+			100,
+			null,
+		);
+		cache.markStale('chat-1');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+			getSelectedChatId: () => 'chat-1',
+		});
+		const selectedLoad = selected.loadMessages('chat-1', {
+			minimumLimit: 100,
+			purpose: 'activation',
+		});
+
+		await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledOnce());
+		expect(loadTranscriptSnapshot.mock.calls[0]?.[2]).toEqual({ minimumLimit: 100 });
+		loading.resolve();
+		await expect(selectedLoad).resolves.toHaveLength(1);
+		expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(2);
+		expect(loadTranscriptSnapshot.mock.calls[1]?.[2]).toEqual({
+			minimumLimit: 100,
+			purpose: 'activation',
+		});
+
+		expect(registry.panel('chat-view:window-left')?.transcript.transcriptViewId).toBe('view-2');
+		expect(registry.panel('chat-view:window-right')?.transcript.transcriptViewId).toBe('view-2');
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('retains rendered rows until a replacement snapshot installs atomically', async () => {
+		const replacement = deferred<void>();
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			await replacement.promise;
+			transcript.transcriptCache.replace(chatId, 'view-2', [message(2)], 2, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		const panel = registry.panel('chat-view:window-left');
+		if (!panel) throw new Error('Expected panel');
+		registry.handleViewReplacement('chat-1');
+		const loading = registry.loadChatSnapshot('chat-1');
+
+		expect(cache.readAppliedCursor('chat-1')?.stale).toBe(true);
+		expect(panel.transcript.entries.map((entry) => entry.ordinal)).toEqual([1]);
+
+		replacement.resolve();
+		await expect(loading).resolves.toBe(true);
+		expect(panel.transcript.transcriptViewId).toBe('view-2');
+		expect(panel.transcript.entries.map((entry) => entry.ordinal)).toEqual([2]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('preserves an expanded duplicate surface while installing a shared latest snapshot', async () => {
+		const { cache, registry } = fixture();
+		cache.replace(
+			'chat-1',
+			'view-1',
+			Array.from({ length: 100 }, (_, index) => message(index + 101)),
+			200,
+			101,
+		);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const left = registry.panel('chat-view:window-left');
+		const right = registry.panel('chat-view:window-right');
+		if (!left || !right) throw new Error('Expected duplicate panels');
+		const earlierWindow = Array.from({ length: 50 }, (_, index) => message(index + 1));
+		right.transcript.entries = earlierWindow;
+		right.transcript.transcriptViewId = 'view-1';
+		right.transcript.lastOrdinal = 200;
+		right.transcript.loadedThroughOrdinal = 50;
+		right.transcript.nextBeforeOrdinal = null;
+		right.transcript.hasEarlierMessages = false;
+		right.transcript.hasLaterMessages = true;
+		right.transcript.visibleMessageCount = 37;
+		right.transcript.isUserScrolledUp = true;
+		right.scroll.setPinnedToBottom(false);
+		const preservedEntries = right.transcript.entries;
+		vi.spyOn(left.transcript, 'loadMessages').mockImplementation(async () => {
+			cache.replace(
+				'chat-1',
+				'view-1',
+				Array.from({ length: 100 }, (_, index) => message(index + 102)),
+				201,
+				102,
+			);
+			left.transcript.installCachedSnapshot('chat-1');
+			return left.transcript.chatMessages;
+		});
+
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(true);
+
+		expect(right.transcript.entries).toBe(preservedEntries);
+		expect(right.transcript.entries.map((item) => item.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 1),
+		);
+		expect(right.transcript.visibleMessageCount).toBe(37);
+		expect(right.transcript.hasLaterMessages).toBe(true);
+		expect(right.transcript.isUserScrolledUp).toBe(true);
+		expect(right.scroll.isPinnedToBottom).toBe(false);
+		cache.flush();
+	});
+
+	it('projects selection onto a mounted surface without resetting either duplicate transcript', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const left = registry.panel('chat-view:window-left');
+		const right = registry.panel('chat-view:window-right');
+		if (!left || !right) throw new Error('Expected duplicate panels');
+		const leftEntries = [message(1)];
+		const rightEntries = Array.from({ length: 150 }, (_, index) => message(index + 1));
+		left.transcript.entries = leftEntries;
+		right.transcript.entries = rightEntries;
+		right.transcript.visibleMessageCount = 121;
+		right.transcript.hasLaterMessages = true;
+		right.transcript.isUserScrolledUp = true;
+		right.scroll.setPinnedToBottom(false);
+		const preservedLeftEntries = left.transcript.entries;
+		const preservedRightEntries = right.transcript.entries;
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getComposerAnchorSurfaceId: () => 'chat-view:window-right',
+			getSelectedChatId: () => 'chat-1',
+		});
+
+		expect(selected.hasMountedPresentation('chat-1')).toBe(true);
+		expect(selected.activateChat('chat-1')).toBeNull();
+
+		expect(left.transcript.entries).toBe(preservedLeftEntries);
+		expect(right.transcript.entries).toBe(preservedRightEntries);
+		expect(right.transcript.visibleMessageCount).toBe(121);
+		expect(right.transcript.hasLaterMessages).toBe(true);
+		expect(right.transcript.isUserScrolledUp).toBe(true);
+		expect(right.scroll.isPinnedToBottom).toBe(false);
+		cache.flush();
+	});
+
+	it('recognizes a rendered target during the pointerdown-to-anchor mismatch', () => {
+		const { cache, registry } = fixture();
+		seed(cache, 'chat-1');
+		seed(cache, 'chat-2');
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-right', 'chat-2'),
+		]);
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+			getSelectedChatId: () => 'chat-2',
+		});
+
+		expect(selected.hasMountedPresentation('chat-2')).toBe(true);
+		expect(selected.activateChat('chat-2')).toEqual({ count: 1, stale: false });
+		expect(registry.panel('chat-view:window-right')?.transcript.entries).toHaveLength(1);
 		cache.flush();
 	});
 

@@ -1,9 +1,18 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-	import ChatWindowPreview from '$lib/components/chat/ChatWindowPreview.svelte';
+	import { onDestroy, type Snippet } from 'svelte';
+	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
+	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
+	import ConversationPanel from '$lib/components/chat/ConversationPanel.svelte';
+	import { resolveChatSurfacePresentation } from '$lib/components/chat/chat-surface-presentation.js';
+	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
 	import SubagentManagementControl from '$lib/components/chat/SubagentManagementControl.svelte';
-	import type { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
-	import { getNotifications, getWorkspaceCoordinator, getWorkspaceWindowDnd } from '$lib/context';
+	import {
+		getChatSessions,
+		getConversationPanels,
+		getNotifications,
+		getWorkspaceCoordinator,
+		getWorkspaceWindowDnd,
+	} from '$lib/context';
 	import type { WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 	import { resolveWorkspaceWindowCenterDropResult } from '$lib/workspace/window-dnd.svelte.js';
 	import {
@@ -23,11 +32,11 @@
 		workspaceWindow,
 		isCurrent,
 		isVisible,
-		chatContentMode,
 		presentations,
 		style,
 		labelFor,
-		previewStore,
+		panelActions,
+		composerInsetPx,
 		subagentToolbar,
 		activeSurfaceMenuItems,
 		frameBridge,
@@ -38,11 +47,11 @@
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
 		isVisible: boolean;
-		chatContentMode: 'live' | 'preview' | 'none';
 		presentations: readonly RenderedPortablePresentation[];
 		style: string;
 		labelFor: (surfaceId: string) => string;
-		previewStore: ChatWindowPreviewStore;
+		panelActions: ConversationPanelActions | null;
+		composerInsetPx: number;
 		subagentToolbar: SubagentToolbarState;
 		activeSurfaceMenuItems?: Snippet<[string]>;
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
@@ -52,11 +61,34 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const sessions = getChatSessions();
+	const conversationPanels = getConversationPanels();
 	const notifications = getNotifications();
 	const dnd = getWorkspaceWindowDnd();
 	const snapshot = $derived(workspace.layout.snapshot);
-	const activeChatIsLive = $derived(chatContentMode === 'live');
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
+	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
+	const activeSurfaceIsCommandOwner = $derived(
+		workspace.focusOwner.kind !== 'chat-list' &&
+		workspace.focusOwner.surfaceId === activeSurface?.id,
+	);
+	const activeChat = $derived(
+		activeSurface?.type === 'chat' && activeSurface.chatId
+			? (sessions.byId[activeSurface.chatId] ?? null)
+			: null,
+	);
+	const activePanel = $derived(
+		activeSurface?.type === 'chat' ? conversationPanels.panel(activeSurface.id) : null,
+	);
+	const activeChatIsComposerAnchor = $derived(
+		activeSurface?.type === 'chat' &&
+		workspace.composerAnchorSurfaceId === activeSurface.id &&
+		activeSurface.chatId === sessions.selectedChatId,
+	);
+	const activeChatOwnsComposer = $derived(activeChatIsComposerAnchor && Boolean(activePanel));
+	const activeChatPresentation = $derived(
+		resolveChatSurfacePresentation(activeChat, sessions.isLoadingChats),
+	);
 	const chatSurface = $derived.by(() => {
 		for (const surfaceId of workspaceWindow.tabs.order) {
 			const surface = snapshot.surfaces[surfaceId];
@@ -155,16 +187,35 @@
 		}
 	}
 
-	function stopInactiveContentPointer(event: PointerEvent): void {
-		event.preventDefault();
-		event.stopPropagation();
+	let pendingPointerId: number | null = null;
+
+	function clearPointerReleaseListeners(): void {
+		document.removeEventListener('pointerup', releaseWindowPointerInteraction, true);
+		document.removeEventListener('pointercancel', cancelWindowPointerInteraction, true);
+		pendingPointerId = null;
 	}
 
-	function activateWindow(event: MouseEvent): void {
-		event.preventDefault();
-		event.stopPropagation();
-		workspace.activateWindow(workspaceWindow.id);
+	function beginWindowPointerInteraction(event: PointerEvent): void {
+		clearPointerReleaseListeners();
+		pendingPointerId = event.pointerId;
+		workspace.beginWindowPointerInteraction(workspaceWindow.id, event.pointerId);
+		document.addEventListener('pointerup', releaseWindowPointerInteraction, true);
+		document.addEventListener('pointercancel', cancelWindowPointerInteraction, true);
 	}
+
+	function releaseWindowPointerInteraction(event: PointerEvent): void {
+		if (event.pointerId !== pendingPointerId) return;
+		clearPointerReleaseListeners();
+		workspace.releaseWindowPointerInteraction(workspaceWindow.id, event.pointerId);
+	}
+
+	function cancelWindowPointerInteraction(event: PointerEvent): void {
+		if (event.pointerId !== pendingPointerId) return;
+		clearPointerReleaseListeners();
+		workspace.cancelWindowPointerInteraction(workspaceWindow.id, event.pointerId);
+	}
+
+	onDestroy(clearPointerReleaseListeners);
 </script>
 
 <section
@@ -181,6 +232,9 @@
 	inert={!isVisible}
 	aria-hidden={!isVisible}
 	aria-label={m.workspace_window_region({ title: labelFor(workspaceWindow.tabs.activeId) })}
+	onpointerdowncapture={beginWindowPointerInteraction}
+	onclickcapture={() => workspace.commitWindowPointerInteraction(workspaceWindow.id)}
+	oncontextmenucapture={() => workspace.commitWindowPointerInteraction(workspaceWindow.id)}
 	ondragover={(event) => dnd.handleWindowDragOver(workspaceWindow.id, event)}
 	ondragleave={(event) => dnd.handleWindowDragLeave(event)}
 	ondrop={(event) => void handleDrop(event)}
@@ -206,8 +260,6 @@
 	<div
 		class="relative min-h-0 flex-1 overflow-hidden"
 		data-workspace-window-content={workspaceWindow.id}
-		inert={!isCurrent}
-		aria-hidden={!isCurrent}
 	>
 		{#if chatSurface}
 			<div
@@ -221,12 +273,26 @@
 				class="absolute inset-0"
 				class:invisible={!chatIsActive}
 				class:pointer-events-none={!chatIsActive}
+				onfocusin={() => workspace.noteSurfaceFocus(chatSurface.id)}
 			>
-				{#if chatIsActive && chatContentMode === 'preview' && chatSurface.chatId}
-					<ChatWindowPreview chatId={chatSurface.chatId} {previewStore} />
-				{:else if chatIsActive && chatContentMode === 'preview'}
+				{#if isVisible && chatIsActive && activeChat && activePanel}
+					<ConversationPanel
+						surfaceId={chatSurface.id}
+						chat={activeChat}
+						panel={activePanel}
+						isCommandOwner={activeSurfaceIsCommandOwner}
+						ownsComposer={activeChatOwnsComposer}
+						isVisible={isVisible && chatIsActive}
+						actions={panelActions}
+						composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
+					/>
+				{:else if isVisible && chatIsActive && (
+					activeChatPresentation === 'loading' || (activeChat && !activePanel)
+				)}
+					<ChatLoadingState announcementsEnabled={activeChatIsComposerAnchor} />
+				{:else if isVisible && chatIsActive}
 					<div class="grid h-full place-items-center text-sm text-muted-foreground">
-						{m.workspace_chat_window_empty()}
+						<ChatEmptyState />
 					</div>
 				{/if}
 			</div>
@@ -248,20 +314,6 @@
 			{/if}
 		{/each}
 	</div>
-	{#if !isCurrent && isVisible && !dnd.isDragging}
-		<button
-			type="button"
-			tabindex="-1"
-			class="absolute inset-x-0 bottom-0 top-10 z-40 cursor-default"
-			data-workspace-window-activation-shield={workspaceWindow.id}
-			aria-label={m.workspace_activate_window({
-				title: labelFor(workspaceWindow.tabs.activeId),
-			})}
-			onpointerdown={stopInactiveContentPointer}
-			onclick={activateWindow}
-			oncontextmenu={activateWindow}
-		></button>
-	{/if}
 	{#if dnd.isDragging}
 		<div
 			class={cn('pointer-events-auto absolute z-50', dropLayerInsetClass)}

@@ -14,12 +14,11 @@ function makeContext(mode = 'plan'): {
 } {
 	let pending: PendingPermissionRequest[] = [];
 	const ctx: PlanModeContext = {
-		getCurrentChatId: () => 'chat-1',
 		getPermissionMode: () => mode as ReturnType<PlanModeContext['getPermissionMode']>,
 		setPermissionMode: vi.fn(),
 		conversationUi: {
-			setPreviousPermissionMode: vi.fn(),
-			setPendingPermissionRequests: (updater) => {
+			beginPlanModeForChat: vi.fn(),
+			updatePendingPermissionsForChat: (_chatId, updater) => {
 				pending = typeof updater === 'function' ? updater(pending) : updater;
 			},
 		},
@@ -52,8 +51,8 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.setPreviousPermissionMode).toHaveBeenCalledWith('default');
-		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
+		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
+		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
 	it('handles enter_plan_mode (snake_case variant)', () => {
@@ -61,8 +60,8 @@ describe('plan mode handler', () => {
 		const message = batch([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc')]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.setPreviousPermissionMode).toHaveBeenCalledWith('default');
-		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
+		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
+		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
 	it('handles exit_plan_mode (snake_case variant)', () => {
@@ -85,8 +84,8 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.setPreviousPermissionMode).not.toHaveBeenCalled();
-		expect(ctx.setPermissionMode).toHaveBeenCalledWith('plan');
+		expect(ctx.conversationUi.beginPlanModeForChat).not.toHaveBeenCalled();
+		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
 	it('deduplicates ExitPlanMode with the same toolId', () => {

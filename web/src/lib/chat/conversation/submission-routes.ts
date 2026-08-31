@@ -286,12 +286,12 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		if (handoff) {
 			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
 			deps.sessions.upsertServerChat(response.chat);
 			onHandoffAccepted(response.chat);
 		}
+		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		return 'accepted';

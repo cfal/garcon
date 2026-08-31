@@ -132,6 +132,14 @@ describe('AppShellChatNavigationController', () => {
 		]);
 		expect(harness.routeChatId).toBe('chat-b');
 		expect(harness.selectedChatId).toBe('chat-b');
+		expect(harness.requestComposerFocus).not.toHaveBeenCalled();
+	});
+
+	it('requests composer focus for explicit Chat placement', async () => {
+		const harness = createHarness();
+
+		await harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
+
 		expect(harness.requestComposerFocus).toHaveBeenCalledOnce();
 	});
 

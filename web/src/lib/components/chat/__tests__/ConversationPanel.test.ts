@@ -199,7 +199,8 @@ describe('ConversationPanel', () => {
 			surfaceId: panel.surfaceId,
 			chat: chat(),
 			panel,
-			isCurrent: true,
+			isCommandOwner: true,
+			ownsComposer: true,
 			actions,
 		});
 
@@ -216,20 +217,25 @@ describe('ConversationPanel', () => {
 		expect(actions.pauseQueue).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
 	});
 
-	it('keeps composition mounted when currentness changes and closes interaction transients', async () => {
+	it('separates command ownership from composer inset and announcement ownership', async () => {
 		runtime.queue = queue();
 		const { panel, prepareForInteractionLoss } = makePanel();
+		const actions = makeActions();
 		const rendered = render(ConversationPanel, {
 			surfaceId: panel.surfaceId,
 			chat: chat(),
 			panel,
-			isCurrent: true,
-			actions: makeActions(),
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions,
 			composerInsetPx: 96,
 		});
 
 		const root = rendered.container.querySelector('[data-conversation-panel]');
-		expect(root?.getAttribute('data-conversation-panel-current')).toBe('true');
+		const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]');
+		expect(root?.getAttribute('data-conversation-panel-command-owner')).toBe('true');
+		expect(root?.getAttribute('data-conversation-panel-composer-anchor')).toBe('true');
+		expect(spacer?.getAttribute('style')).toContain('height: 96px');
 		expect(
 			rendered.container.querySelector('[data-announcements-enabled]')?.getAttribute(
 				'data-announcements-enabled',
@@ -240,15 +246,42 @@ describe('ConversationPanel', () => {
 			surfaceId: panel.surfaceId,
 			chat: chat(),
 			panel,
-			isCurrent: false,
-			actions: makeActions(),
+			isCommandOwner: false,
+			ownsComposer: true,
+			actions,
 			composerInsetPx: 96,
 		});
 
 		await waitFor(() => expect(prepareForInteractionLoss).toHaveBeenCalled());
-		expect(root?.getAttribute('data-conversation-panel-current')).toBeNull();
+		expect(root?.getAttribute('data-conversation-panel-command-owner')).toBeNull();
+		expect(root?.getAttribute('data-conversation-panel-composer-anchor')).toBe('true');
+		expect(spacer?.getAttribute('style')).toContain('height: 96px');
 		expect(rendered.container.querySelector('[data-conversation-feed-stub]')).toBeTruthy();
 		expect(screen.getByText('Queued input')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
+		expect(actions.pauseQueue).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
+
+		await rendered.rerender({
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: false,
+			ownsComposer: false,
+			actions,
+			composerInsetPx: 96,
+		});
+
+		expect(root?.getAttribute('data-conversation-panel-composer-anchor')).toBeNull();
+		expect(spacer?.getAttribute('style')).toContain('height: 0px');
+		expect(
+			rendered.container.querySelector('[data-announcements-enabled]')?.getAttribute(
+				'data-announcements-enabled',
+			),
+		).toBe('false');
+		const status = rendered.container.querySelector('[data-slot="chat-processing-status"]');
+		expect(status?.getAttribute('role')).toBeNull();
+		expect(status?.getAttribute('aria-live')).toBe('off');
+		expect(screen.getByRole('button', { name: m.chat_loading_stop() })).toBeTruthy();
 	});
 
 	it('renders the shared Git tray and routes its buttons through surface-qualified actions', async () => {
@@ -260,7 +293,8 @@ describe('ConversationPanel', () => {
 			surfaceId: panel.surfaceId,
 			chat: chat(),
 			panel,
-			isCurrent: true,
+			isCommandOwner: true,
+			ownsComposer: true,
 			actions,
 		});
 
