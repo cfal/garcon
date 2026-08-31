@@ -294,7 +294,7 @@ describe('garcon-cli', () => {
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.find(
         (chat) => chat.id === childChatId,
-      )?.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+      )?.parentChat).toEqual({ chatId: parentChatId!, relation: 'delegation' });
 
       const missingParentId = '1785337200999999';
       const missingArguments = startArguments(fixture, 'review-missing-parent');

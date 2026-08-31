@@ -230,8 +230,12 @@ describe('native transcript reload', () => {
         (chat) => chat.id === childChatId,
       );
       expect(childAfterReload?.parentChat).toEqual(child.chat.parentChat);
-      expect(childAfterReload?.parentChat?.transcriptViewId)
-        .not.toBe(reloaded.transcriptViewId);
+      const childParentAfterReload = childAfterReload?.parentChat;
+      expect(childParentAfterReload?.relation).toBe('handoff');
+      if (childParentAfterReload?.relation !== 'handoff') {
+        throw new Error('Expected handoff parentage after native transcript reload.');
+      }
+      expect(childParentAfterReload.transcriptViewId).not.toBe(reloaded.transcriptViewId);
 
       await reloadFromNativeHistory(fixture, chatId);
       const reloadedAgain = await fixture.client.getMessages(chatId);
