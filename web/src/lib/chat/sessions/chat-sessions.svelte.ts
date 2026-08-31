@@ -147,12 +147,12 @@ function sameParentChat(
 ): boolean {
 	if (left === right) return true;
 	if (left === null || right === null) return false;
-	return (
-		left.chatId === right.chatId &&
-		left.relation === right.relation &&
-		left.transcriptViewId === right.transcriptViewId &&
-		left.ordinal === right.ordinal
-	);
+	if (left.chatId !== right.chatId) return false;
+	if (left.relation === 'delegation') return right.relation === 'delegation';
+	if (right.relation === 'delegation') return false;
+	return left.relation === right.relation
+		&& left.transcriptViewId === right.transcriptViewId
+		&& left.ordinal === right.ordinal;
 }
 
 function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
