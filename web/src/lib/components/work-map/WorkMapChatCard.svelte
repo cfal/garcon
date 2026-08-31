@@ -13,6 +13,19 @@
 		searchActive: boolean;
 	}
 
+	function getRelationLabel(relation: WorkMapChatNode['relation']): string | null {
+		switch (relation) {
+			case 'fork':
+				return m.work_map_relation_fork();
+			case 'handoff':
+				return m.work_map_relation_handoff();
+			case 'delegation':
+				return m.work_map_relation_delegation();
+			case null:
+				return null;
+		}
+	}
+
 	let { node, selectedChatId, currentTime, searchActive }: WorkMapChatCardProps = $props();
 
 	const title = $derived(node.chat.title || m.sidebar_chats_unnamed());
@@ -21,15 +34,7 @@
 	const activity = $derived(
 		formatRelativeTimestamp(node.chat.lastActivityAt ?? node.chat.createdAt, currentTime),
 	);
-	const relation = $derived(
-		node.relation === 'fork'
-			? m.work_map_relation_fork()
-			: node.relation === 'handoff'
-				? m.work_map_relation_handoff()
-				: node.relation === 'delegation'
-					? m.work_map_relation_delegation()
-					: null,
-	);
+	const relation = $derived(getRelationLabel(node.relation));
 </script>
 
 <article

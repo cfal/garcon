@@ -199,17 +199,21 @@ export function buildWorkMapModel(
 	const topologyByKey = new Map<WorkMapNodeKey, TopologyNode>();
 	for (const chat of chatsById.values()) {
 		const cycleBreak = cycleRootIds.has(chat.id);
+		const parentChat = chat.parentChat;
 		let parentKey: WorkMapNodeKey | null = null;
-		if (!cycleBreak && chat.parentChat) {
-			parentKey = chatsById.has(chat.parentChat.chatId)
-				? chatKey(chat.parentChat.chatId)
-				: missingParentKey(chat.parentChat.chatId);
+		let relation: ChatParentRelation | null = null;
+		if (!cycleBreak && parentChat) {
+			parentKey = chatsById.has(parentChat.chatId)
+				? chatKey(parentChat.chatId)
+				: missingParentKey(parentChat.chatId);
+			relation = parentChat.relation;
 		}
-		topologyByKey.set(chatKey(chat.id), {
-			key: chatKey(chat.id),
+		const key = chatKey(chat.id);
+		topologyByKey.set(key, {
+			key,
 			kind: 'chat',
 			chat,
-			relation: parentKey ? (chat.parentChat?.relation ?? null) : null,
+			relation,
 			inCycle: cycleChatIds.has(chat.id),
 			cycleBreak,
 			parentKey,
@@ -218,13 +222,14 @@ export function buildWorkMapModel(
 	}
 
 	for (const chat of chatsById.values()) {
-		if (!chat.parentChat || chatsById.has(chat.parentChat.chatId)) continue;
-		const key = missingParentKey(chat.parentChat.chatId);
+		const parentChat = chat.parentChat;
+		if (!parentChat || chatsById.has(parentChat.chatId)) continue;
+		const key = missingParentKey(parentChat.chatId);
 		if (topologyByKey.has(key)) continue;
 		topologyByKey.set(key, {
 			key,
 			kind: 'missing-parent',
-			chatId: chat.parentChat.chatId,
+			chatId: parentChat.chatId,
 			parentKey: null,
 			childrenKeys: [],
 		});
@@ -270,17 +275,23 @@ export function buildWorkMapModel(
 	}
 
 	const renderedByKey = new Map<WorkMapNodeKey, WorkMapNode>();
-	for (const key of allOrderedKeys) {
+	for (let index = allOrderedKeys.length - 1; index >= 0; index -= 1) {
+		const key = allOrderedKeys[index];
 		if (!includedKeys.has(key)) continue;
 		const source = topologyByKey.get(key);
 		if (!source) continue;
+		const children: WorkMapNode[] = [];
+		for (const childKey of source.childrenKeys) {
+			const child = renderedByKey.get(childKey);
+			if (child) children.push(child);
+		}
 		if (source.kind === 'chat') {
 			renderedByKey.set(key, {
 				key: source.key,
 				kind: 'chat',
 				chat: source.chat,
 				relation: source.relation,
-				children: [],
+				children,
 				matchesQuery: matchingChatIds.has(source.chat.id),
 				inCycle: source.inCycle,
 				cycleBreak: source.cycleBreak,
@@ -290,20 +301,9 @@ export function buildWorkMapModel(
 				key: source.key,
 				kind: 'missing-parent',
 				chatId: source.chatId,
-				children: [],
+				children,
 				matchesQuery: false,
 			});
-		}
-	}
-
-	for (const key of allOrderedKeys) {
-		const source = topologyByKey.get(key);
-		const rendered = renderedByKey.get(key);
-		if (!source || !rendered) continue;
-		const children = rendered.children as WorkMapNode[];
-		for (const childKey of source.childrenKeys) {
-			const child = renderedByKey.get(childKey);
-			if (child) children.push(child);
 		}
 	}
 

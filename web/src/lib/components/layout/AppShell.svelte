@@ -406,20 +406,8 @@
 			void workspace.focusChat();
 			return;
 		}
-		if (tab === 'git') {
-			void workspace.focusMobileSingleton('git');
-			return;
-		}
-		if (tab === 'work-map') {
-			void workspace.focusMobileSingleton('work-map');
-			return;
-		}
-		if (tab === 'pull-requests') {
-			void workspace.focusMobileSingleton('pull-requests');
-			return;
-		}
-		if (tab === 'files') {
-			void workspace.focusMobileSingleton('files');
+		if (tab !== 'terminal') {
+			void workspace.focusMobileSingleton(tab);
 			return;
 		}
 		void workspace.focusMostRecentTerminalOrCreate().catch((error) => {
