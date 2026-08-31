@@ -125,15 +125,21 @@ describe('SingletonSurfaceRegistry', () => {
 		const { registry } = createRegistry();
 		registry.setPresentationVisible('git', true);
 		registry.setPresentationVisible('files', true);
+		registry.setPresentationVisible('work-map', true);
 		const git = registry.gitWorkbench();
 		const files = registry.files();
+		const workMap = registry.workMap();
+		workMap.setQuery('retained query');
 		git.target.showTargetDialog = true;
 
 		registry.setPresentationVisible('git', false);
 		registry.setPresentationVisible('files', false);
+		registry.setPresentationVisible('work-map', false);
 
 		expect(registry.gitWorkbench()).toBe(git);
 		expect(registry.files()).toBe(files);
+		expect(registry.workMap()).toBe(workMap);
+		expect(workMap.query).toBe('retained query');
 		expect(git.presentationVisible).toBe(false);
 		expect(git.target.showTargetDialog).toBe(false);
 		expect(files.presentationVisible).toBe(false);
@@ -177,16 +183,19 @@ describe('SingletonSurfaceRegistry', () => {
 		const firstFiles = registry.files();
 		const firstPullRequests = registry.pullRequests();
 		const firstCommit = registry.commit();
+		const firstWorkMap = registry.workMap();
 
 		registry.disposeSurface('git');
 		registry.disposeSurface('files');
 		registry.disposeSurface('pull-requests');
 		registry.disposeSurface('commit');
+		registry.disposeSurface('work-map');
 
 		expect(registry.gitWorkbench()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
+		expect(registry.workMap()).not.toBe(firstWorkMap);
 		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
 	});

@@ -7,7 +7,7 @@ import {
 	CANONICAL_WINDOW_ID,
 	canonicalWorkspaceSnapshot,
 } from '$lib/workspace/canonical-layout';
-import type { WorkspaceWindowId } from '$lib/workspace/surface-types';
+import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 
 export class AppShellLocalSettingsState {
@@ -27,6 +27,8 @@ export class AppShellBreakpointWorkspace {
 	enterCalls = 0;
 	exitCalls = 0;
 	showChatCalls = 0;
+	readonly focusedMobileSingletons: PortableSingletonKind[] = [];
+	readonly openedSingletons: PortableSingletonKind[] = [];
 
 	get currentWindowId(): WorkspaceWindowId {
 		return CANONICAL_WINDOW_ID;
@@ -73,7 +75,13 @@ export class AppShellBreakpointWorkspace {
 	clearDeletedChat(): Promise<void> {
 		return Promise.resolve();
 	}
-	focusMobileSingleton(): void {}
+	focusMobileSingleton(kind: PortableSingletonKind): void {
+		this.focusedMobileSingletons.push(kind);
+	}
+	openSingletonInNewWindow(kind: PortableSingletonKind): Promise<string> {
+		this.openedSingletons.push(kind);
+		return Promise.resolve(`singleton:${kind}`);
+	}
 	focusMostRecentTerminalOrCreate(): Promise<void> {
 		return Promise.resolve();
 	}

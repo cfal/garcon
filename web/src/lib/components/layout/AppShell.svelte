@@ -126,6 +126,7 @@
 		if (surface?.type === 'chat') return 'chat';
 		if (surface?.type === 'singleton') {
 			if (surface.kind === 'pull-requests') return 'pull-requests';
+			if (surface.kind === 'work-map') return 'work-map';
 			if (surface.kind === 'git' || surface.kind === 'files') {
 				return surface.kind;
 			}
@@ -409,6 +410,10 @@
 			void workspace.focusMobileSingleton('git');
 			return;
 		}
+		if (tab === 'work-map') {
+			void workspace.focusMobileSingleton('work-map');
+			return;
+		}
 		if (tab === 'pull-requests') {
 			void workspace.focusMobileSingleton('pull-requests');
 			return;
@@ -428,6 +433,17 @@
 
 	function closeMobileSidebar() {
 		appShell.setSidebarOpen(false);
+	}
+
+	function handleShowWorkMap(): void {
+		if (isMobile) {
+			closeMobileSidebar();
+			void workspace.focusMobileSingleton('work-map');
+			return;
+		}
+		void workspace.openSingletonInNewWindow('work-map').catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		});
 	}
 
 	function handleMobileChatSelect(chatId: string): void {
@@ -575,6 +591,7 @@
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
+		onShowWorkMap={handleShowWorkMap}
 		onShowSettings={() => appShell.openSettings()}
 		newWindowBlocked={!workspace.canOpenNewWindow}
 	/>

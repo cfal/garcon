@@ -40,6 +40,7 @@ const PORTABLE_SINGLETON_REF_KINDS = new Set<PortableSingletonKind>([
 	'pull-requests',
 	'files',
 	'commit',
+	'work-map',
 ]);
 
 function parseV2Ref(value: unknown): PersistedWorkspaceSurfaceRef | null {

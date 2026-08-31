@@ -139,6 +139,55 @@ describe('workspace layout V2 schema', () => {
 		expect(result.snapshot.unplacedTerminalIds).toEqual(['t2']);
 	});
 
+	it('round-trips and globally deduplicates the Work Map singleton', () => {
+		const result = parsePersistedWorkspaceLayout(
+			JSON.stringify({
+				version: 2,
+				root: {
+					type: 'partition',
+					id: 'partition-root',
+					direction: 'horizontal',
+					ratio: 0.5,
+					children: [
+						{
+							type: 'window',
+							id: 'window-a',
+							order: [
+								{ type: 'chat', chatId: 'chat-a' },
+								{ type: 'singleton', kind: 'work-map' },
+							],
+							active: { type: 'singleton', kind: 'work-map' },
+							mru: [],
+						},
+						{
+							type: 'window',
+							id: 'window-b',
+							order: [
+								{ type: 'chat', chatId: 'chat-b' },
+								{ type: 'singleton', kind: 'work-map' },
+							],
+							active: { type: 'chat', chatId: 'chat-b' },
+							mru: [],
+						},
+					],
+				},
+				unplacedTerminalIds: [],
+			}),
+		);
+
+		expect(result.source).toBe('valid');
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-a')?.tabs.order).toContain(
+			'singleton:work-map',
+		);
+		expect(windowNodeById(result.snapshot.desktopRoot, 'window-b')?.tabs.order).not.toContain(
+			'singleton:work-map',
+		);
+		expect(serializeWorkspaceLayout(result.snapshot).root).toMatchObject({
+			type: 'partition',
+		});
+		expect(JSON.stringify(serializeWorkspaceLayout(result.snapshot))).toContain('work-map');
+	});
+
 	it('repairs invalid active and MRU refs, clamps ratios, and collapses empty branches', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({

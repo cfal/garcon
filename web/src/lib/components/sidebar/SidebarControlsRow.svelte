@@ -23,6 +23,7 @@
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
+	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -50,6 +51,7 @@
 		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowScheduledPrompts: () => void;
+		onShowWorkMap?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -77,6 +79,7 @@
 		onSetDockOnRight,
 		onApplySidebarMenuSearch,
 		onShowScheduledPrompts,
+		onShowWorkMap,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -226,6 +229,12 @@
 					{m.sidebar_actions_dock_sidebar_right()}
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuSeparator />
+				{#if onShowWorkMap}
+					<DropdownMenuItem onclick={onShowWorkMap}>
+						<Waypoints class="h-3.5 w-3.5" />
+						{m.workspace_open_surface({ surface: m.workspace_surface_work_map() })}
+					</DropdownMenuItem>
+				{/if}
 				<DropdownMenuItem onclick={onShowScheduledPrompts}>
 					<CalendarClock class="h-3.5 w-3.5" />
 					{m.sidebar_actions_scheduled_prompts()}

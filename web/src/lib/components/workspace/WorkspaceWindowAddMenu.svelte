@@ -58,6 +58,7 @@
 		'pull-requests': m.workspace_surface_pull_requests,
 		files: m.workspace_surface_files,
 		commit: m.workspace_surface_commit,
+		'work-map': m.workspace_surface_work_map,
 	};
 
 	function canOffer(kind: PortableSingletonKind): boolean {

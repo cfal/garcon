@@ -14,7 +14,8 @@ export type PersistedWorkspaceSurfaceRef =
         | "git-compare"
         | "pull-requests"
         | "files"
-        | "commit";
+        | "commit"
+        | "work-map";
     }
   | { type: "terminal"; terminalId: string };
 

@@ -22,10 +22,14 @@
 		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
 	);
 	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
+	const workMapRenderer = lazyRenderer(
+		() => import('$lib/components/work-map/WorkMapPanel.svelte'),
+	);
 </script>
 
 <script lang="ts">
 	import {
+		getChatSessions,
 		getFileSessions,
 		getGhCapability,
 		getSingletonSurfaces,
@@ -64,6 +68,7 @@
 	const ghCapability = getGhCapability();
 	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
+	const sessions = getChatSessions();
 	const projectState = $derived(workspaceContext.projectState);
 </script>
 
@@ -180,6 +185,17 @@
 				<CommitSurface {controller} {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
+	{:else if surface.type === 'singleton' && surface.kind === 'work-map'}
+		{@const controller = singletonSurfaces.workMap()}
+		{#await workMapRenderer() then WorkMapPanel}
+			<WorkMapPanel
+				{controller}
+				chats={sessions.orderedChats}
+				selectedChatId={sessions.selectedChatId}
+				{visible}
+				{presentation}
+			/>
+		{/await}
 	{/if}
 
 	{#snippet failed(error, reset)}

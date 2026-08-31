@@ -316,6 +316,7 @@
 			'pull-requests': m.workspace_surface_pull_requests_short(),
 			files: m.workspace_surface_files(),
 			commit: m.workspace_surface_commit(),
+			'work-map': m.workspace_surface_work_map(),
 		};
 		return labels[surface.kind];
 	}

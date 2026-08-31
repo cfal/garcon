@@ -447,4 +447,36 @@ describe('AppShell responsive workspace binding', () => {
 			expect(screen.queryByTestId('bottom-tab-bar-stub')).toBeNull();
 		},
 	);
+
+	it('keeps Work Map in the persistent mobile navigation and marks it active', async () => {
+		const workspace = installContext();
+		const mobile = reduceWorkspaceLayout(workspace.layout.snapshot, [
+			{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('work-map'),
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:work-map',
+				returnStack: [],
+			},
+		]);
+		workspace.layout.publish(workspace.layout.revision, mobile);
+		workspace.isMobile = true;
+		breakpointMediaQuery.matches = true;
+
+		render(AppShell);
+		const bottomBar = screen.getByTestId('bottom-tab-bar-stub');
+		expect(bottomBar.getAttribute('data-active-item')).toBe('work-map');
+		await fireEvent.click(screen.getByRole('button', { name: 'Select Map tab' }));
+		expect(workspace.focusedMobileSingletons).toContain('work-map');
+	});
+
+	it('opens Work Map in a new window from the desktop sidebar', async () => {
+		const workspace = installContext();
+		render(AppShell);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open Work Map from sidebar' }));
+		expect(workspace.openedSingletons).toEqual(['work-map']);
+	});
 });

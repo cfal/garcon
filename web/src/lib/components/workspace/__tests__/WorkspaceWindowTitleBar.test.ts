@@ -498,6 +498,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			'pull-requests',
 			'files',
 			'commit',
+			'work-map',
 		] as const;
 		runtime.surfaces = Object.fromEntries(
 			[chatSurface, ...kinds.map((kind) => portableSingletonDescriptor(kind))].map((surface) => [
@@ -521,11 +522,12 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_pull_requests() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_files() }),
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
+			m.workspace_open_surface({ surface: m.workspace_surface_work_map() }),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
 		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });
 
-		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6, 7]);
 		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));
 	});
 

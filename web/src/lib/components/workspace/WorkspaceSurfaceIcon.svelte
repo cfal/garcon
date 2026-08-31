@@ -8,6 +8,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
+	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import type { ActiveSurfaceKind } from '$lib/workspace/surface-types.js';
 
 	let {
@@ -23,5 +24,6 @@
 {:else if kind === 'pull-requests'}<GitPullRequest class={className} />
 {:else if kind === 'files'}<Files class={className} />
 {:else if kind === 'commit'}<GitCommitHorizontal class={className} />
+{:else if kind === 'work-map'}<Waypoints class={className} />
 {:else if kind === 'terminal' || kind === 'terminal-launcher'}<SquareTerminal class={className} />
 {:else}<FileCode class={className} />{/if}
