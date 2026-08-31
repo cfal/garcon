@@ -6,6 +6,12 @@ import { withChromiumFixture, type ChromiumFixture } from '../../support/chromiu
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 
+function conversationPanel(page: Page, windowId: string): Locator {
+  return page.locator(
+    `[data-workspace-window-id="${windowId}"] [data-conversation-panel="chat-view:${windowId}"]`,
+  );
+}
+
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const child = Bun.spawn(['git', ...args], {
     cwd: projectPath,
@@ -247,9 +253,7 @@ async function openChatTabBelow(
       expectedSurfaceId: `chat-view:${openedWindowId}`,
     },
   );
-  await page
-    .locator('[data-conversation-workspace-layer]')
-    .getByLabel('Chat messages')
+  await conversationPanel(page, openedWindowId)
     .getByText(expectedTranscriptText, { exact: true })
     .waitFor();
   expect(
@@ -848,8 +852,7 @@ describe('Chromium workspace windows', () => {
             `chat-view:${expectedWindowId}`,
         filesWindowId,
       );
-      await fixture.page
-        .getByLabel('Chat messages')
+      await conversationPanel(fixture.page, filesWindowId)
         .getByText('echo:workspace-window-chat-b', { exact: true })
         .waitFor();
 
@@ -860,8 +863,7 @@ describe('Chromium workspace windows', () => {
         target: 'center',
         expectedLabel: 'Replace existing chat',
       });
-      await fixture.page
-        .getByLabel('Chat messages')
+      await conversationPanel(fixture.page, filesWindowId)
         .getByText(
           'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
           { exact: true },
@@ -889,8 +891,7 @@ describe('Chromium workspace windows', () => {
           destinationWindowId: filesWindowId,
         },
       );
-      await fixture.page
-        .getByLabel('Chat messages')
+      await conversationPanel(fixture.page, filesWindowId)
         .getByText(
           'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
           { exact: true },

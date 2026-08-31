@@ -276,16 +276,24 @@
 				onfocusin={() => workspace.noteSurfaceFocus(chatSurface.id)}
 			>
 				{#if isVisible && chatIsActive && activeChat && activePanel}
-					<ConversationPanel
-						surfaceId={chatSurface.id}
-						chat={activeChat}
-						panel={activePanel}
-						isCommandOwner={activeSurfaceIsCommandOwner}
-						ownsComposer={activeChatOwnsComposer}
-						isVisible={isVisible && chatIsActive}
-						actions={panelActions}
-						composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
-					/>
+					{#key activePanel}
+						{const panel = activePanel}
+						{const surfaceId = chatSurface.id}
+						{const initialChat = activeChat}
+						{const panelChat = $derived(
+							activeChat?.id === panel.chatId ? activeChat : initialChat,
+						)}
+						<ConversationPanel
+							{surfaceId}
+							chat={panelChat}
+							{panel}
+							isCommandOwner={activeSurfaceIsCommandOwner}
+							ownsComposer={activeChatOwnsComposer}
+							isVisible={isVisible && chatIsActive}
+							actions={panelActions}
+							composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
+						/>
+					{/key}
 				{:else if isVisible && chatIsActive && (
 					activeChatPresentation === 'loading' || (activeChat && !activePanel)
 				)}

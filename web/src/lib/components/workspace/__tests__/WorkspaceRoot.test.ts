@@ -666,6 +666,40 @@ describe('WorkspaceRoot', () => {
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
 	});
 
+	it('tears down a rekeyed Chat panel with its original registration', async () => {
+		const { layout } = installContext();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-a',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+			]),
+		);
+		const { container } = renderRoot();
+		await waitFor(() => expect(screen.getAllByTestId('conversation-panel')).toHaveLength(2));
+
+		const moved = reduceWorkspaceLayout(layout.snapshot, [
+			{
+				type: 'move-chat-to-window',
+				sourceWindowId: 'window-main',
+				destinationWindowId: 'window-2',
+			},
+		]);
+		expect(layout.publish(layout.revision, moved)).toBe(true);
+
+		await waitFor(() => expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1));
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1);
+		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
+		expect(screen.getByTestId('conversation-panel').dataset.transcriptViewId).toBe('view-chat-a');
+		expect(screen.getByTestId('conversation-panel').dataset.panelPinned).toBe('true');
+	});
+
 	it('keeps one composer mounted and hidden during anchor-selection reconciliation', async () => {
 		const { layout, runtime } = installContext();
 		layout.publish(
