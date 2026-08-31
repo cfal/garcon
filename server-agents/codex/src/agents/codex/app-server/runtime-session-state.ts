@@ -1,5 +1,6 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { cleanupOwnedGoalAttachments } from './goal-files.js';
 import type { GoalAttachmentOperations } from './goal-attachment-operations.js';
@@ -10,6 +11,7 @@ import type {
   CodexThreadGoal,
   JsonRpcNotification,
   JsonRpcServerRequest,
+  ThreadSettingsUpdatedNotification,
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
 
@@ -32,7 +34,17 @@ interface TurnStartWaiter {
   reject: (error: Error) => void;
 }
 
+export interface ThreadSettingsConfirmation {
+  readonly expectedModel: string;
+  readonly expectedServiceTier: CodexServiceTier;
+  readonly promise: Promise<ThreadSettingsUpdatedNotification['threadSettings']>;
+  resolve(settings: ThreadSettingsUpdatedNotification['threadSettings']): void;
+  reject(error: Error): void;
+  dispose(): void;
+}
+
 export class TurnStartWaitCancelledError extends Error {}
+export class ThreadSettingsConfirmationCancelledError extends Error {}
 
 export type BufferedClientEvent =
   | { type: 'notification'; notification: JsonRpcNotification }
@@ -55,6 +67,11 @@ export interface RunningCodexSession {
   completedGoalTurn: boolean;
   ignoredGoalClears: number;
   activeInputChain: Promise<void>;
+  confirmedModel: string | null;
+  confirmedServiceTier: CodexServiceTier | null;
+  prioritySupportModel: string | null;
+  threadSettingsUpdateChain: Promise<void>;
+  pendingThreadSettingsConfirmation: ThreadSettingsConfirmation | null;
   goalAttachments: GoalAttachmentOperations;
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
@@ -76,6 +93,9 @@ export interface RunningCodexSession {
 export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
+  modelListTimeoutMs?: number;
+  modelListMaxPages?: number;
+  threadSettingsTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
   nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;
@@ -148,6 +168,90 @@ function registerTurnStartWaiter(
 export function cancelTurnStartWaiters(session: RunningCodexSession, message: string): void {
   const error = new TurnStartWaitCancelledError(message);
   for (const waiter of [...session.turnStartWaiters]) waiter.reject(error);
+}
+
+export function registerThreadSettingsConfirmation(
+  session: RunningCodexSession,
+  expected: {
+    readonly model: string;
+    readonly serviceTier: CodexServiceTier;
+  },
+): ThreadSettingsConfirmation {
+  if (session.pendingThreadSettingsConfirmation) {
+    throw new Error('A Codex thread settings confirmation is already pending');
+  }
+  let settled = false;
+  let resolvePromise!: (
+    settings: ThreadSettingsUpdatedNotification['threadSettings'],
+  ) => void;
+  let rejectPromise!: (error: Error) => void;
+  const promise = new Promise<ThreadSettingsUpdatedNotification['threadSettings']>(
+    (resolve, reject) => {
+      resolvePromise = resolve;
+      rejectPromise = reject;
+    },
+  );
+  const confirmation: ThreadSettingsConfirmation = {
+    expectedModel: expected.model,
+    expectedServiceTier: expected.serviceTier,
+    promise,
+    resolve(settings) {
+      if (settled) return;
+      settled = true;
+      resolvePromise(settings);
+    },
+    reject(error) {
+      if (settled) return;
+      settled = true;
+      rejectPromise(error);
+    },
+    dispose() {
+      if (session.pendingThreadSettingsConfirmation === confirmation) {
+        session.pendingThreadSettingsConfirmation = null;
+      }
+      if (settled) return;
+      settled = true;
+      rejectPromise(new ThreadSettingsConfirmationCancelledError(
+        'Codex thread settings confirmation was cancelled',
+      ));
+    },
+  };
+  session.pendingThreadSettingsConfirmation = confirmation;
+  return confirmation;
+}
+
+export function cancelThreadSettingsConfirmation(
+  session: RunningCodexSession,
+  message: string,
+): void {
+  const confirmation = session.pendingThreadSettingsConfirmation;
+  if (!confirmation) return;
+  confirmation.reject(new ThreadSettingsConfirmationCancelledError(message));
+  confirmation.dispose();
+}
+
+export function canApplyTurnAttempt(
+  sessions: ReadonlyMap<string, RunningCodexSession>,
+  session: RunningCodexSession,
+  generation: number,
+): boolean {
+  return sessions.get(session.threadId) === session
+    && (session.status === 'running' || session.status === 'completing')
+    && !session.pendingFinish?.failedMessage
+    && !session.pendingFinish?.aborted
+    && session.turnAttemptGeneration === generation;
+}
+
+export function generationAcrossTurnBoundary(
+  session: RunningCodexSession,
+  generation: number,
+): number | null {
+  const currentGeneration = session.turnAttemptGeneration;
+  // Allows an accepted delivery to cross one ordinary turn boundary while a
+  // second generation advance keeps ownership with a nested capacity retry.
+  return currentGeneration === generation || currentGeneration === generation + 1
+    ? currentGeneration
+    : null;
 }
 
 export function sessionForClientThread(

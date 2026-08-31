@@ -185,6 +185,7 @@ export interface NormalizedSubmitRunInput {
 
 export interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   sourceChatId: string;
+  agentSettings: AgentSettingsEnvelope;
   allowHandoffFork?: boolean;
 }
 

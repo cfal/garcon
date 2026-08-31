@@ -8,6 +8,7 @@ import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/co
 import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
 import { projectCodexCodeModeCommands } from '../../../server-agents/codex/src/agents/codex/code-mode-command-projection.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { codexAgentSettings } from '../../support/live-codex.js';
 
 describe('Codex fork at message', () => {
   test('preserves resumable Code Mode prefixes across forks and reforks', async () => {
@@ -43,6 +44,7 @@ describe('Codex fork at message', () => {
       const fork = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: source.transcriptViewId,
         upToOrdinal: source.messages.at(-1)!.ordinal,
       });
@@ -56,6 +58,7 @@ describe('Codex fork at message', () => {
       const secondFork = await fixture.client.forkChat({
         sourceChatId: targetChatId,
         chatId: secondTargetChatId,
+        agentSettings: codexAgentSettings(),
       });
       expect(secondFork.chat.id).toBe(secondTargetChatId);
       const secondForked = await fixture.client.getMessages(secondTargetChatId);
@@ -107,6 +110,7 @@ describe('Codex fork at message', () => {
           model: 'gpt-5.6-sol',
           projectPath: fixture.dirs.project,
           permissionMode: 'default',
+          serviceTier: 'default',
         }));
         expect(resumed.thread).toMatchObject({
           id: targetNative.agentSessionId,
@@ -127,6 +131,7 @@ describe('Codex fork at message', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: partialChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: source.transcriptViewId,
         upToOrdinal: source.messages[5]!.ordinal,
       });
@@ -160,6 +165,7 @@ describe('Codex fork at message', () => {
       await fixture.client.forkChat({
         sourceChatId: partialChatId,
         chatId: reforkChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: partial.transcriptViewId,
         upToOrdinal: partial.messages.at(-1)!.ordinal,
       });

@@ -1383,13 +1383,14 @@ describe('chats API contract', () => {
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
 		);
 
-		const result = await forkChat({ sourceChatId: '1', chatId: '2' });
+		const agentSettings = { ownerId: 'claude', schemaVersion: 1, values: {} };
+		const result = await forkChat({ sourceChatId: '1', chatId: '2', agentSettings });
 
 		expect(result.success).toBe(true);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
+		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2', agentSettings });
 	});
 
 	it('forkChat surfaces retryable transcript-persistence refusals', async () => {
@@ -1408,7 +1409,11 @@ describe('chats API contract', () => {
 
 		let failure: unknown;
 		try {
-			await forkChat({ sourceChatId: '1', chatId: '2' });
+			await forkChat({
+				sourceChatId: '1',
+				chatId: '2',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+			});
 		} catch (error) {
 			failure = error;
 		}
@@ -1430,6 +1435,7 @@ describe('chats API contract', () => {
 		await forkChat({
 			sourceChatId: '1',
 			chatId: '2',
+			agentSettings: { ownerId: 'codex', schemaVersion: 2, values: { codexFastMode: 'off' } },
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 		});
@@ -1438,6 +1444,7 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({
 			sourceChatId: '1',
 			chatId: '2',
+			agentSettings: { ownerId: 'codex', schemaVersion: 2, values: { codexFastMode: 'off' } },
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 		});
@@ -1451,6 +1458,7 @@ describe('chats API contract', () => {
 		await forkChat({
 			sourceChatId: '1',
 			chatId: '2',
+			agentSettings: { ownerId: 'codex', schemaVersion: 2, values: { codexFastMode: 'on' } },
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 			allowHandoffFork: true,
@@ -1460,6 +1468,7 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({
 			sourceChatId: '1',
 			chatId: '2',
+			agentSettings: { ownerId: 'codex', schemaVersion: 2, values: { codexFastMode: 'on' } },
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 			allowHandoffFork: true,

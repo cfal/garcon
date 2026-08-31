@@ -21,6 +21,7 @@ import {
   waitForVisibleResponse,
 } from '../../../support/live-agent.js';
 import {
+  codexAgentSettings,
   liveCodexForkRunRequest,
   liveCodexRunRequest,
   liveCodexStartRequest,
@@ -95,6 +96,7 @@ describe('live Codex fork while running', () => {
       await expectNativeForkOrTypedRefusal(fixture, streamedForkChatId, fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: streamedForkChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: settledHistory.transcriptViewId,
         upToOrdinal: streamingSeq,
       }));
@@ -104,6 +106,7 @@ describe('live Codex fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: settledHistory.transcriptViewId,
         upToOrdinal: settledLastSeq,
       });
@@ -155,6 +158,7 @@ describe('live Codex fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: recoveredChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: parentAfterTurn.transcriptViewId,
         upToOrdinal: runningAssistant.ordinal,
       });

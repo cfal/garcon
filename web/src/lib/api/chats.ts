@@ -633,6 +633,7 @@ export async function validateStart(
 export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
+	agentSettings: AgentSettingsEnvelope;
 	upToOrdinal?: number;
 	transcriptViewId?: string;
 	// Set only after the user confirms a handoff fork, so an unconfirmed request still

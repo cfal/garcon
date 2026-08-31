@@ -322,6 +322,7 @@ describe('repeated agent handoff lifecycle', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: forkChatId,
+        agentSettings: agentB.agentSettings,
         transcriptViewId: completeSource.transcriptViewId,
         upToOrdinal: cutoff.ordinal,
       });

@@ -902,4 +902,178 @@ describe('ChatExecutionCoordinator', () => {
     expect(coordinator.ownsExecution('chat-2')).toBe(false);
     await coordinator.releaseTranscriptSnapshot(snapshot);
   });
+
+  it('defers queued dispatch until a settings transaction publishes durable options', async () => {
+    const operation = deferred();
+    const entered = deferred();
+    const provider = deferred();
+    let persistedMode = 'on';
+    const getDrainOptions = mock(() => ({
+      model: 'test-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: {
+        ownerId: 'codex',
+        schemaVersion: 2,
+        values: { codexFastMode: persistedMode },
+      },
+    }));
+    const fixture = createFixture({
+      getDrainOptions,
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+
+    const updating = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      entered.resolve();
+      await operation.promise;
+      persistedMode = 'off';
+    });
+    await entered.promise;
+    await coordinator.checkChatIdle('chat-1');
+
+    expect(getDrainOptions).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+
+    operation.resolve();
+    await updating;
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    expect(options.agentSettings.values.codexFastMode).toBe('off');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
+  });
+
+  it('resumes queued dispatch with restored settings after a failed transaction', async () => {
+    const operation = deferred();
+    const entered = deferred();
+    const provider = deferred();
+    const getDrainOptions = mock(() => ({
+      model: 'test-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      agentSettings: {
+        ownerId: 'codex',
+        schemaVersion: 2,
+        values: { codexFastMode: 'on' },
+      },
+    }));
+    const fixture = createFixture({
+      getDrainOptions,
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+    const failure = new Error('settings flush failed');
+
+    const updating = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      entered.resolve();
+      await operation.promise;
+      throw failure;
+    });
+    await entered.promise;
+    await coordinator.checkChatIdle('chat-1');
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+
+    operation.resolve();
+    await expect(updating).rejects.toBe(failure);
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    expect(options.agentSettings.values.codexFastMode).toBe('on');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
+  });
+
+  it('keeps automatic dispatch held until the last overlapping settings transaction exits', async () => {
+    const first = deferred();
+    const second = deferred();
+    const firstEntered = deferred();
+    const secondEntered = deferred();
+    const provider = deferred();
+    const fixture = createFixture({
+      turnRunner: { runAgentTurn: mock(() => provider.promise) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+
+    const firstUpdate = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      firstEntered.resolve();
+      await first.promise;
+    });
+    const secondUpdate = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      secondEntered.resolve();
+      await second.promise;
+    });
+    await Promise.all([firstEntered.promise, secondEntered.promise]);
+    await coordinator.checkChatIdle('chat-1');
+
+    first.resolve();
+    await firstUpdate;
+    await Promise.resolve();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+
+    second.resolve();
+    await secondUpdate;
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    const options = fixture.turnRunner.runAgentTurn.mock.calls[0][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: options.turnId });
+    provider.resolve();
+    await coordinator.waitForDispatches();
+  });
+
+  it('does not retrigger held work after chat deletion', async () => {
+    const operation = deferred();
+    const entered = deferred();
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued input');
+    const updating = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      entered.resolve();
+      await operation.promise;
+    });
+    await entered.promise;
+    await coordinator.checkChatIdle('chat-1');
+
+    await coordinator.deleteChatQueueFile('chat-1');
+    operation.resolve();
+    await updating;
+    await Promise.resolve();
+
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+  });
+
+  it('blocks server control dispatch while settings persistence is held', async () => {
+    const operation = deferred();
+    const entered = deferred();
+    const getDrainOptions = mock(() => ({
+      model: 'test-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    }));
+    const fixture = createFixture({ getDrainOptions });
+    coordinator = fixture.coordinator;
+    const updating = coordinator.runWithAutomaticDispatchSuppressed('chat-1', async () => {
+      entered.resolve();
+      await operation.promise;
+    });
+    await entered.promise;
+
+    await expect(coordinator.deliverControlInput(
+      'chat-1',
+      '<garcon-chat-id>1787836573296800</garcon-chat-id>',
+      'view-1',
+      null,
+      new AbortController().signal,
+      mock(() => undefined),
+    )).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(getDrainOptions).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    operation.resolve();
+    await updating;
+  });
 });

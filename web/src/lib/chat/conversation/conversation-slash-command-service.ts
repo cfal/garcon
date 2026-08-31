@@ -520,6 +520,7 @@ export class ConversationSlashCommandService {
 			await compactChat({
 				chatId,
 				clientRequestId: createClientCommandId(),
+				agentSettings: chat.agentSettings,
 				instructions: instructions || undefined,
 			});
 			return 'accepted';
@@ -585,6 +586,7 @@ export class ConversationSlashCommandService {
 			sourceChatId,
 			chatId: createClientChatId(),
 			command: message.trim(),
+			agentSettings: sourceChat.agentSettings,
 			...(imagePayload.length > 0 ? { images: imagePayload } : {}),
 		});
 		try {
@@ -738,6 +740,11 @@ export class ConversationSlashCommandService {
 		upToOrdinal?: number,
 	): Promise<ChatListEntry | null> {
 		const chatId = createClientChatId();
+		const sourceChat = this.deps.sessions.byId[sourceChatId];
+		if (!sourceChat || sourceChat.status === 'draft') {
+			throw new Error(m.chat_notice_cannot_fork_draft());
+		}
+		const agentSettings = sourceChat.agentSettings;
 		const selection =
 			upToOrdinal === undefined
 				? null
@@ -754,6 +761,7 @@ export class ConversationSlashCommandService {
 			result = await this.#requestFork({
 				sourceChatId,
 				chatId,
+				agentSettings,
 				...(selection ? forkPointParams(selection) : {}),
 			});
 		} catch (error) {
@@ -774,6 +782,7 @@ export class ConversationSlashCommandService {
 			result = await this.#requestFork({
 				sourceChatId,
 				chatId,
+				agentSettings,
 				...forkPointParams(remapped),
 			});
 		}

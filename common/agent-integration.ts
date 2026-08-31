@@ -27,7 +27,7 @@ export interface AgentSettingsEnvelope {
   readonly values: JsonObject;
 }
 
-export const AGENT_SETTING_LABEL_KEYS = ['thinking', 'mode'] as const;
+export const AGENT_SETTING_LABEL_KEYS = ['thinking', 'mode', 'fastMode'] as const;
 export type AgentSettingLabelKey = (typeof AGENT_SETTING_LABEL_KEYS)[number];
 
 export const AGENT_SETTING_OPTION_LABEL_KEYS = [
@@ -43,6 +43,8 @@ export const AGENT_SETTING_OPTION_DESCRIPTION_KEYS = [
   'thinkingAutomatic',
   'thinkingEnabled',
   'thinkingDisabled',
+  'fastModeEnabled',
+  'fastModeDisabled',
 ] as const;
 export type AgentSettingOptionDescriptionKey =
   (typeof AGENT_SETTING_OPTION_DESCRIPTION_KEYS)[number];

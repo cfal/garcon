@@ -107,12 +107,17 @@ async function forkWithRetry(
   const transcriptViewId = upToOrdinal === undefined
     ? undefined
     : (await fixture.client.getMessages(sourceChatId, { limit: 1 })).transcriptViewId;
+  const source = (await fixture.client.listChats()).sessions.find(
+    (chat) => chat.id === sourceChatId,
+  );
+  if (!source) throw new Error(`Source chat not found: ${sourceChatId}`);
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       await fixture.client.forkChat({
         sourceChatId,
         chatId,
+        agentSettings: source.agentSettings,
         ...(upToOrdinal === undefined ? {} : { transcriptViewId, upToOrdinal }),
       });
       return;

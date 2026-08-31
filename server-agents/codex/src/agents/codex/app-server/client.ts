@@ -1,12 +1,18 @@
 import { EventEmitter } from 'events';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
-import { parseThreadTurnsListResponse } from './protocol.js';
+import {
+  parseModelListResponse,
+  parseThreadSettingsUpdateResponse,
+  parseThreadTurnsListResponse,
+} from './protocol.js';
 import type {
   InitializeResponse,
   JsonRpcFailure,
   JsonRpcNotification,
   JsonRpcServerRequest,
   JsonRpcSuccess,
+  ModelListParams,
+  ModelListResponse,
   ThreadListResponse,
   ThreadForkResponse,
   ThreadGoalClearResponse,
@@ -18,6 +24,8 @@ import type {
   ThreadTurnsListParams,
   ThreadTurnsListResponse,
   ThreadResumeResponse,
+  ThreadSettingsUpdateParams,
+  ThreadSettingsUpdateResponse,
   ThreadStartResponse,
   CodexThreadGoalStatus,
   ThreadUnsubscribeResponse,
@@ -215,6 +223,18 @@ export class CodexAppServerClient extends EventEmitter {
 
   forkThread(params: Record<string, unknown>): Promise<ThreadForkResponse> {
     return this.request<ThreadForkResponse>('thread/fork', params);
+  }
+
+  async updateThreadSettings(
+    params: ThreadSettingsUpdateParams,
+  ): Promise<ThreadSettingsUpdateResponse> {
+    return parseThreadSettingsUpdateResponse(
+      await this.request<unknown>('thread/settings/update', params),
+    );
+  }
+
+  async listModels(params: ModelListParams): Promise<ModelListResponse> {
+    return parseModelListResponse(await this.request<unknown>('model/list', params));
   }
 
   setThreadGoal(

@@ -91,11 +91,26 @@ describe('ModelCatalogStore', () => {
 									},
 								],
 							},
+							{
+								key: 'fast',
+								type: 'enum',
+								label: 'Fast',
+								labelKey: 'fastMode',
+								options: [
+									{
+										value: 'off',
+										label: 'Off',
+										labelKey: 'disabled',
+										description: 'Uses Standard processing.',
+										descriptionKey: 'fastModeDisabled',
+									},
+								],
+							},
 						],
 						defaultSettings: {
 							ownerId: 'sample',
 							schemaVersion: 2,
-							values: { effort: 'high' },
+							values: { effort: 'high', fast: 'off' },
 						},
 						defaultModel: 'sample-model',
 					}),
@@ -128,11 +143,23 @@ describe('ModelCatalogStore', () => {
 					}),
 				],
 			}),
+			expect.objectContaining({
+				key: 'fast',
+				type: 'enum',
+				labelKey: 'fastMode',
+				options: [
+					expect.objectContaining({
+						value: 'off',
+						labelKey: 'disabled',
+						descriptionKey: 'fastModeDisabled',
+					}),
+				],
+			}),
 		]);
 		expect(store.getDefaultAgentSettings('sample')).toEqual({
 			ownerId: 'sample',
 			schemaVersion: 2,
-			values: { effort: 'high' },
+			values: { effort: 'high', fast: 'off' },
 		});
 	});
 

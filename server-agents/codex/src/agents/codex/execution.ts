@@ -27,6 +27,7 @@ import type {
   CodexResumeRequest,
   CodexStartRequest,
 } from './runtime-types.js';
+import { codexFastMode, codexServiceTier } from './service-tier.js';
 
 interface CodexRuntimeConfiguration {
   readonly envOverrides: Record<string, string>;
@@ -126,8 +127,10 @@ export class CodexExecution implements AgentRuntimeExecution {
     agentSessionId: string,
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
   ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
+    await this.runtime.updateSessionSettings(agentSessionId, {
+      model: configuration.model,
       permissionMode: configuration.permissionMode,
+      serviceTier: codexServiceTier(codexFastMode(configuration.settings)),
     });
   }
 
@@ -179,6 +182,7 @@ function executionFields(
     model: request.model,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
+    serviceTier: codexServiceTier(codexFastMode(request.settings)),
     executionAdmission: {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),

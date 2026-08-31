@@ -48,15 +48,41 @@ describe('CodexAgentIntegration', () => {
     expect(host.environment.get).not.toHaveBeenCalled();
   });
 
-  it('preserves version 1 settings and native-session migration envelopes', async () => {
+  it('defaults Fast mode off and migrates version 1 settings safely', async () => {
     const integration = new CodexAgentIntegration(createHost());
     const signal = new AbortController().signal;
 
     expect(integration.settings.defaults()).toEqual({
       ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'off' },
+    });
+    expect(integration.settings.describe()).toEqual([
+      expect.objectContaining({
+        key: 'codexFastMode',
+        type: 'enum',
+        labelKey: 'fastMode',
+      }),
+    ]);
+    await expect(integration.settings.migrate({
+      ownerId: 'codex',
       schemaVersion: 1,
       values: {},
+    })).resolves.toEqual({
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'off' },
     });
+    expect(integration.settings.parse({
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'on' },
+    }).values.codexFastMode).toBe('on');
+    expect(() => integration.settings.parse({
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'automatic' },
+    })).toThrow('Invalid value for setting codexFastMode');
     await expect(integration.migration.translateLegacyNativeSession({
       chatId: 'chat-1',
       projectPath: '/repo',

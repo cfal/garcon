@@ -633,7 +633,11 @@ describe('Claude turn correlation', () => {
       // Claude tolerates a live fork, so the background continuation does not block one; the
       // source keeps its queue and its own turn.
       const liveForkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId: chatId, chatId: liveForkChatId });
+      await fixture.client.forkChat({
+        sourceChatId: chatId,
+        chatId: liveForkChatId,
+        agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+      });
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries
         .map((entry) => entry.content)).toEqual(['after-background']);
 
@@ -654,6 +658,7 @@ describe('Claude turn correlation', () => {
       await expect(fixture.client.forkChat({
         sourceChatId: chatId,
         chatId: forkChatId,
+        agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
       })).resolves.toMatchObject({ chat: { id: forkChatId } });
       const forked = await fixture.client.getMessages(forkChatId);
       expect(forked.messages.map((entry) => entry.message)).toEqual(expect.arrayContaining([

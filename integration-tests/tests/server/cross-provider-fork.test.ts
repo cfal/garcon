@@ -36,9 +36,17 @@ describe('cross-provider fork lifecycle', () => {
       ]);
 
       const targetChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: targetChatId,
+        agentSettings: anthropic.agentSettings,
+      });
       const reforkedChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId: targetChatId, chatId: reforkedChatId });
+      await fixture.client.forkChat({
+        sourceChatId: targetChatId,
+        chatId: reforkedChatId,
+        agentSettings: anthropic.agentSettings,
+      });
 
       await fixture.restartGarcon();
       const targetTurn = await fixture.client.runDirectChat({

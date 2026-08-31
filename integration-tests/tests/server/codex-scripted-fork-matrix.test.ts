@@ -28,6 +28,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  codexAgentSettings,
   liveCodexRunRequest,
   liveCodexStartRequest,
 } from '../../support/live-codex.js';
@@ -86,6 +87,7 @@ describe('scripted Codex fork lifecycle matrix', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: forkChatId,
+          agentSettings: codexAgentSettings(),
         });
         const forkedWhileRunning = await fixture.client.getMessages(forkChatId);
         expect(userContents(forkedWhileRunning.messages)).toEqual([prompt]);
@@ -198,7 +200,11 @@ describe('scripted Codex fork lifecycle matrix', () => {
 
     await withIntegrationFixture('codex-scripted-fork-empty', async (fixture) => {
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: codexAgentSettings(),
+      });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
       expect(await readCodexChatRecord(fixture.dirs.workspace, forkChatId)).toMatchObject({
         agentSessionId: null,
@@ -275,7 +281,11 @@ describe('scripted Codex fork lifecycle matrix', () => {
       await reloadUntilNativeContains(fixture, sourceChatId, reply);
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: codexAgentSettings(),
+      });
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt]);
       expect(assistantContents(fork.messages)).toContain(reply);
@@ -328,7 +338,11 @@ describe('scripted Codex fork lifecycle matrix', () => {
       await waitForFile(join(fixture.dirs.project, startedFile));
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: codexAgentSettings(),
+      });
       expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
         firstPrompt,
         secondPrompt,

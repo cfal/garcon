@@ -75,6 +75,7 @@ describe('native transcript reload', () => {
           clientMessageId: crypto.randomUUID(),
           sourceChatId: chatId,
           chatId: childChatId,
+          agentSettings: claude.defaultSettings,
           command: 'native-reload-lineage-child',
         },
       );

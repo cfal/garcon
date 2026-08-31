@@ -101,7 +101,11 @@ function startRequest(overrides = {}) {
     model: 'gpt-5.4',
     permissionMode: 'default',
     thinkingMode: 'high',
-    settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+    settings: {
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'off' },
+    },
     endpoint: null,
     runId: 'run-1',
     admission: {
@@ -185,6 +189,7 @@ describe('CodexExecution', () => {
         publish: expect.any(Function),
       }),
       envOverrides: { CODEX_HOME: '/tmp/codex-home' },
+      serviceTier: 'default',
       codexConfig: expect.objectContaining({
         env: { GARCON_CODEX_PROVIDER_API_KEY_ENDPOINT_1: 'secret' },
       }),
@@ -202,6 +207,87 @@ describe('CodexExecution', () => {
     expect(events).toContainEqual(expect.objectContaining({
       type: 'session',
       session: expect.objectContaining({ agentSessionId: 'thread-1' }),
+    }));
+  });
+
+  it('maps exact Fast mode intent across start, resume, compact, goal, and live settings', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const fastSettings = {
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'on' },
+    };
+    const publish = () => undefined;
+
+    await execution.start(startRequest({ settings: fastSettings }), publish);
+    await execution.resume({
+      ...goalControlRequest('run-resume', commitHandoff),
+      settings: fastSettings,
+    }, publish);
+    await execution.compact({
+      ...goalControlRequest('run-compact', commitHandoff),
+      settings: fastSettings,
+    }, publish);
+    await execution.submitGoalControl(
+      {
+        ...goalControlRequest('run-goal', commitHandoff),
+        settings: fastSettings,
+      },
+      publish,
+    );
+    await execution.applySessionConfiguration('thread-1', {
+      model: 'gpt-5.6',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+      settings: fastSettings,
+      endpoint: null,
+    });
+
+    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      serviceTier: 'priority',
+    }));
+    expect(runtime.runTurn).toHaveBeenCalledWith(expect.objectContaining({
+      serviceTier: 'priority',
+    }));
+    expect(runtime.compact).toHaveBeenCalledWith(expect.objectContaining({
+      serviceTier: 'priority',
+    }));
+    expect(runtime.submitGoalControl).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceTier: 'priority' }),
+      expect.any(Function),
+    );
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model: 'gpt-5.6',
+      permissionMode: 'manualBypass',
+      serviceTier: 'priority',
+    });
+  });
+
+  it('maps malformed internal Codex settings defensively to Standard', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+
+    await execution.start(startRequest({
+      settings: {
+        ownerId: 'codex',
+        schemaVersion: 2,
+        values: { codexFastMode: 'enabled' },
+      },
+    }), () => undefined);
+
+    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      serviceTier: 'default',
     }));
   });
 

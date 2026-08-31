@@ -83,7 +83,8 @@ export class SelfHandoffCommands {
     // and schedules the prompt into the unrelated chat the first call correctly
     // refused. Both chat mutation locks are held for the whole method, so
     // reading the registry here is safe.
-    const targetExists = this.deps.chats.getChat(input.chatId) !== null;
+    const existingTarget = this.deps.chats.getChat(input.chatId);
+    const targetExists = existingTarget !== null;
     if (targetExists && (!priorRecord || retryingPreScheduleFailure)) {
       throw new CommandValidationError(
         'IDEMPOTENCY_CONFLICT',
@@ -98,6 +99,13 @@ export class SelfHandoffCommands {
     // happened. A payload mismatch is still rejected, by `accept` below.
     const replaying = targetExists && priorRecord !== undefined && !retryingPreScheduleFailure;
     const source = replaying ? null : this.#requireSource(input.sourceChatId);
+    const settingsOwner = source?.agentId ?? existingTarget?.agentId;
+    if (!settingsOwner || input.agentSettings.ownerId !== settingsOwner) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `agentSettings must be owned by ${settingsOwner ?? 'the source agent'}`,
+      );
+    }
     if (source) {
       await this.support.assertAttachmentsSupported({
         agentId: source.agentId,
@@ -120,6 +128,7 @@ export class SelfHandoffCommands {
         chatId: input.chatId,
         command: input.command,
         clientMessageId,
+        agentSettings: input.agentSettings,
         ...(input.images === undefined ? {} : { images: input.images }),
       },
       turnId,
@@ -133,9 +142,7 @@ export class SelfHandoffCommands {
         ...(input.images === undefined ? {} : { images: input.images }),
         clientRequestId,
         clientMessageId,
-        // The target inherits the source's agent, model, and modes from the
-        // registry entry created below, so the turn carries no overrides.
-        options: {},
+        options: { agentSettings: input.agentSettings },
       },
       { clientRequestId, clientMessageId, turnId },
       'fork-run',
@@ -195,7 +202,10 @@ export class SelfHandoffCommands {
         nextForkOrdinal: 1,
         permissionMode: source.permissionMode,
         thinkingMode: source.thinkingMode,
-        agentSettingsById: { ...source.agentSettingsById },
+        agentSettingsById: {
+          ...source.agentSettingsById,
+          [source.agentId]: input.agentSettings,
+        },
         carryOverSegments: [],
         nativeSeedReceipt: null,
         carryOverMigrationQuarantine: null,

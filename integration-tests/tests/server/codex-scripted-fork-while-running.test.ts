@@ -14,7 +14,7 @@ import {
   reloadUntilNativeAnswersAfter,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
-import { liveCodexStartRequest } from '../../support/live-codex.js';
+import { codexAgentSettings, liveCodexStartRequest } from '../../support/live-codex.js';
 import {
   startScriptedCodexTestEnvironment,
   type ScriptedCodexTestEnvironment,
@@ -59,7 +59,11 @@ describe('scripted Codex fork while running', () => {
 
       try {
         const wholeForkId = fixture.newChatId();
-        await fixture.client.forkChat({ sourceChatId, chatId: wholeForkId });
+        await fixture.client.forkChat({
+          sourceChatId,
+          chatId: wholeForkId,
+          agentSettings: codexAgentSettings(),
+        });
         const wholeFork = await fixture.client.getMessages(wholeForkId);
         expect(userContents(wholeFork.messages)).toEqual([prompt]);
         expect(messagesOfType(wholeFork.messages, 'assistant-message')
@@ -71,6 +75,7 @@ describe('scripted Codex fork while running', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: streamedForkId,
+          agentSettings: codexAgentSettings(),
           upToOrdinal: streamedBash.ordinal,
           transcriptViewId: streamedBash.transcriptViewId,
         });
@@ -100,6 +105,7 @@ describe('scripted Codex fork while running', () => {
       await expectForkRefusal(fixture.client.forkChat({
         sourceChatId,
         chatId: fixture.newChatId(),
+        agentSettings: codexAgentSettings(),
         upToOrdinal: persistedBash.ordinal,
         transcriptViewId: streamedBash.transcriptViewId,
       }), 'STALE_TRANSCRIPT_VIEW');
@@ -108,6 +114,7 @@ describe('scripted Codex fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: recoveredForkId,
+        agentSettings: codexAgentSettings(),
         upToOrdinal: persistedBash.ordinal,
         transcriptViewId: persisted.transcriptViewId,
       });

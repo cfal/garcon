@@ -22,6 +22,7 @@ import {
   waitForVisibleResponse,
 } from '../../../support/live-agent.js';
 import {
+  codexAgentSettings,
   liveCodexForkRunRequest,
   liveCodexRunRequest,
   liveCodexStartRequest,
@@ -142,6 +143,7 @@ describe('live Codex lifecycle', () => {
       await fixture.client.forkChat({
         sourceChatId: parentChatId,
         chatId: pointChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: parentAfterQueue.transcriptViewId,
         upToOrdinal: firstAssistant.ordinal,
       });

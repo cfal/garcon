@@ -87,7 +87,11 @@ async function createMigrationTargets(
 ): Promise<Array<{ relativePath: string; value: JsonValue }>> {
   const targets: Array<{ relativePath: string; value: JsonValue }> = [];
   const chats = await readJson(path.join(workspaceDir, 'chats.json'));
-  if (isRecord(chats) && isRecord(chats.sessions) && needsChatMigration(chats)) {
+  if (
+    isRecord(chats)
+    && isRecord(chats.sessions)
+    && needsChatMigration(chats, integrations)
+  ) {
     const sessions: Record<string, JsonValue> = {};
     for (const [chatId, value] of Object.entries(chats.sessions)) {
       signal.throwIfAborted();
@@ -143,7 +147,7 @@ async function createMigrationTargets(
   }
 
   const settings = await readJson(path.join(workspaceDir, 'project-settings.json'));
-  if (isRecord(settings) && needsSettingsMigration(settings)) {
+  if (isRecord(settings) && needsSettingsMigration(settings, integrations)) {
     const executionDefaults = isRecord(settings.executionDefaults) ? settings.executionDefaults : {};
     const global = isRecord(executionDefaults.global) ? executionDefaults.global : {};
     const legacyRootDefaults = legacyRootExecutionDefaults(settings);
@@ -203,8 +207,10 @@ async function createMigrationTargets(
         continue;
       }
       const target = candidate.target;
-      const hasLegacySettings = 'claudeThinkingMode' in target || 'ampAgentMode' in target;
-      if (isRecord(target.agentSettingsById) && !hasLegacySettings) {
+      const needsMigration = 'claudeThinkingMode' in target
+        || 'ampAgentMode' in target
+        || agentSettingsNeedMigration(integrations, target.agentSettingsById);
+      if (!needsMigration) {
         prompts.push(candidate);
         continue;
       }
@@ -262,7 +268,11 @@ async function translateSettings(
     const existing = result[agentId];
     if (existing) {
       const migrated = await integration.settings.migrate(parseSettingsEnvelope(agentId, existing));
-      const parsed = integration.settings.parse(migrated);
+      const normalized = integration.settings.applyPatch(
+        integration.settings.defaults(),
+        migrated.values,
+      );
+      const parsed = integration.settings.parse(normalized);
       assertSettingsOwner(agentId, parsed);
       result[agentId] = asJsonValue(parsed);
       continue;
@@ -299,7 +309,10 @@ function assertSettingsOwner(agentId: string, envelope: AgentSettingsEnvelope): 
   }
 }
 
-function needsSettingsMigration(settings: JsonObject): boolean {
+function needsSettingsMigration(
+  settings: JsonObject,
+  integrations: IntegrationRegistry,
+): boolean {
   const execution = isRecord(settings.executionDefaults) ? settings.executionDefaults : {};
   const records = [
     isRecord(execution.global) ? execution.global : {},
@@ -312,9 +325,9 @@ function needsSettingsMigration(settings: JsonObject): boolean {
     'lastClaudeThinkingMode',
     'lastAmpAgentMode',
   ].some((key) => key in settings) || records.some((record) => (
-    !isRecord(record.agentSettingsById)
-    || 'claudeThinkingMode' in record
+    'claudeThinkingMode' in record
     || 'ampAgentMode' in record
+    || agentSettingsNeedMigration(integrations, record.agentSettingsById)
   ));
 }
 
@@ -332,7 +345,10 @@ function legacyRootExecutionDefaults(settings: JsonObject): JsonObject {
   return defaults;
 }
 
-function needsChatMigration(chats: JsonObject): boolean {
+function needsChatMigration(
+  chats: JsonObject,
+  integrations: IntegrationRegistry,
+): boolean {
   if (chats.version !== CHAT_SCHEMA_VERSION || !isRecord(chats.sessions)) return true;
   return Object.values(chats.sessions).some((candidate) => isRecord(candidate) && (
     'provider' in candidate
@@ -340,9 +356,39 @@ function needsChatMigration(chats: JsonObject): boolean {
     || 'nativePath' in candidate
     || 'claudeThinkingMode' in candidate
     || 'ampAgentMode' in candidate
-    || !isRecord(candidate.agentSettingsById)
+    || agentSettingsNeedMigration(integrations, candidate.agentSettingsById)
     || typeof candidate.agentOwnershipEpoch !== 'string'
   ));
+}
+
+function agentSettingsNeedMigration(
+  integrations: IntegrationRegistry,
+  value: JsonValue | undefined,
+): boolean {
+  if (!isRecord(value)) return true;
+
+  for (const integration of integrations.list()) {
+    const defaults = integration.settings.defaults();
+    const candidate = value[integration.descriptor.id];
+    if (candidate === undefined) {
+      if (Object.keys(defaults.values).length > 0) return true;
+      continue;
+    }
+    if (!isRecord(candidate)) return true;
+    if (candidate.ownerId !== defaults.ownerId) return true;
+    if (candidate.schemaVersion !== defaults.schemaVersion) return true;
+    if (!isRecord(candidate.values)) return true;
+    const values = candidate.values;
+    if (Object.keys(defaults.values).some((key) => !Object.hasOwn(values, key))) {
+      return true;
+    }
+    try {
+      integration.settings.parse(parseSettingsEnvelope(integration.descriptor.id, candidate));
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 function assertNativeSessionOwner(agentId: string, value: unknown): void {

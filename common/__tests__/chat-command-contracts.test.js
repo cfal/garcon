@@ -4,6 +4,7 @@ import {
   QUEUE_ENTRY_ID_MAX_BYTES,
   CommandRequestValidationError,
   parseAgentRunCommandRequest,
+  parseCompactCommandRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
   parseGoalControlCommandRequest,
@@ -412,6 +413,7 @@ describe('chat command request parsers', () => {
       sourceChatId: SOURCE_CHAT_ID,
       chatId: CHAT_ID,
       command: 'continue in fork',
+      agentSettings: agentSettings(),
     };
 
     expect(parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: true }))
@@ -419,12 +421,38 @@ describe('chat command request parsers', () => {
     expect(parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: CHAT_ID,
+      agentSettings: agentSettings(),
       allowHandoffFork: true,
     })).toMatchObject({ allowHandoffFork: true });
     expect(parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: false }))
       .not.toHaveProperty('allowHandoffFork');
     expect(() => parseForkRunCommandRequest({ ...forkRun, allowHandoffFork: 'yes' }))
       .toThrow('allowHandoffFork must be a boolean');
+  });
+
+  it('requires settings snapshots on fork and compact commands', () => {
+    const compact = {
+      clientRequestId: 'request-compact',
+      chatId: CHAT_ID,
+      agentSettings: agentSettings('codex'),
+      instructions: 'retain decisions',
+    };
+    expect(parseCompactCommandRequest(compact)).toEqual(compact);
+    expect(() => parseCompactCommandRequest({
+      clientRequestId: compact.clientRequestId,
+      chatId: compact.chatId,
+    })).toThrow('agentSettings is invalid');
+    expect(() => parseForkChatCommandRequest({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+    })).toThrow('agentSettings is invalid');
+    expect(() => parseForkRunCommandRequest({
+      clientRequestId: 'request-fork-run',
+      clientMessageId: 'message-fork-run',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: CHAT_ID,
+      command: 'continue',
+    })).toThrow('agentSettings is invalid');
   });
 
   it('rejects malformed structured command fields', () => {

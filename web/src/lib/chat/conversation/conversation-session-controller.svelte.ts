@@ -262,35 +262,6 @@ export class ConversationSessionController {
 		const acceptedInputs = this.#acceptedInputs;
 		const agentSwitch = this.#agentSwitch;
 		const executionDraft = this.#executionDraft;
-		this.#queue = new ConversationQueueController({
-			get sessions() {
-				return deps.sessions;
-			},
-			get chatState() {
-				return deps.chatState;
-			},
-			get composerState() {
-				return deps.composerState;
-			},
-			get lifecycle() {
-				return deps.lifecycle;
-			},
-			get conversationUi() {
-				return deps.conversationUi;
-			},
-			get acceptedInputs() {
-				return acceptedInputs;
-			},
-		});
-		const queue = this.#queue;
-		this.#permissions = new ConversationPermissionService({
-			deps,
-			acceptedInputs,
-			get queue() {
-				return queue;
-			},
-			executionModelSelection: () => this.#executionModelSelection(),
-		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() {
 				return deps.sessions;
@@ -310,6 +281,37 @@ export class ConversationSessionController {
 			get executionDraft() {
 				return executionDraft;
 			},
+		});
+		const settings = this.#settings;
+		this.#queue = new ConversationQueueController({
+			get sessions() {
+				return deps.sessions;
+			},
+			get chatState() {
+				return deps.chatState;
+			},
+			get composerState() {
+				return deps.composerState;
+			},
+			get lifecycle() {
+				return deps.lifecycle;
+			},
+			get conversationUi() {
+				return deps.conversationUi;
+			},
+			get acceptedInputs() {
+				return acceptedInputs;
+			},
+			awaitPendingAgentSettings: (chatId) => settings.awaitPendingAgentSettings(chatId),
+		});
+		const queue = this.#queue;
+		this.#permissions = new ConversationPermissionService({
+			deps,
+			acceptedInputs,
+			get queue() {
+				return queue;
+			},
+			executionModelSelection: () => this.#executionModelSelection(),
 		});
 	}
 
@@ -783,40 +785,47 @@ export class ConversationSessionController {
 		const { conversationUi } = this.deps;
 		return this.#requestTurnStop(interruptAndSendChat, (chatId, result) => {
 			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
-		});
+		}, (chatId) => this.#settings.awaitPendingAgentSettings(chatId));
 	}
 
-	#requestTurnStop<T extends { outcome: ChatStopOutcome }>(
+	async #requestTurnStop<T extends { outcome: ChatStopOutcome }>(
 		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
 		onResult?: (chatId: string, result: T) => void,
+		beforeRequest?: (chatId: string) => Promise<void>,
 	): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		if (deps.lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
-		const clientRequestId = createClientCommandId();
-		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
-		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
+		if (!chatId || deps.lifecycle.loadingStatus?.can_interrupt === false) return;
 		const appendFailure = (detail: string) => {
 			if (deps.chatState.activeChatId !== chatId) return;
 			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_stop_chat({ detail }));
 		};
-		return request({
-			clientRequestId,
-			chatId,
-			agentId: deps.agentState.agentId,
-		})
-			.then(async (result) => {
-				onResult?.(chatId, result);
-				await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
-				if (isStopSatisfied(result.outcome)) return;
-				restore();
-				appendFailure(m.chat_notice_stop_request_failed());
-			})
-			.catch((error) => {
-				restore();
+		if (beforeRequest) {
+			try {
+				await beforeRequest(chatId);
+			} catch (error) {
 				appendFailure(errorDetail(error));
+				return;
+			}
+		}
+		const clientRequestId = createClientCommandId();
+		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
+		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
+		try {
+			const result = await request({
+				clientRequestId,
+				chatId,
+				agentId: deps.agentState.agentId,
 			});
+			onResult?.(chatId, result);
+			await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
+			if (isStopSatisfied(result.outcome)) return;
+			restore();
+			appendFailure(m.chat_notice_stop_request_failed());
+		} catch (error) {
+			restore();
+			appendFailure(errorDetail(error));
+		}
 	}
 
 	handlePermissionDecision(

@@ -6,10 +6,12 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import { resolveCodexCliCommand } from './cli.js';
 import { buildCodexEnv, codexSandboxSettings } from './request-builders.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
+import type { CodexConfigServiceTier } from '../service-tier.js';
 
 export { resolveCodexCliCommand } from './cli.js';
 
 interface CodexSingleQueryOptions {
+  serviceTier: CodexConfigServiceTier;
   cwd?: string;
   projectPath?: string;
   model?: string;
@@ -58,7 +60,7 @@ async function runCodexExec(
   return { stdout, stderr };
 }
 
-export async function runSingleQuery(prompt: string, options: CodexSingleQueryOptions = {}): Promise<string> {
+export async function runSingleQuery(prompt: string, options: CodexSingleQueryOptions): Promise<string> {
   const {
     cwd,
     projectPath,
@@ -69,6 +71,7 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
     codexConfig,
     timeoutMs,
     signal,
+    serviceTier,
   } = options;
 
   return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
@@ -98,6 +101,7 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
 
     if (model) args.push('--model', model);
     appendCodexConfigArgs(args, codexConfig?.config);
+    args.push('--config', `service_tier=${JSON.stringify(serviceTier)}`);
     if (reasoningEffort) args.push('--config', `model_reasoning_effort="${reasoningEffort}"`);
     if (approvalPolicy) args.push('--config', `approval_policy="${approvalPolicy}"`);
     args.push('-');

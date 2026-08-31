@@ -45,6 +45,12 @@ import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
 import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
+import {
+  CODEX_FAST_MODE_SETTING,
+  codexConfigServiceTier,
+  codexFastMode,
+  codexServiceTier,
+} from './agents/codex/service-tier.js';
 
 const CODEX_DESCRIPTOR = {
   id: 'codex',
@@ -122,9 +128,40 @@ export default class CodexAgentIntegration implements AgentIntegration {
 
     this.settings = createVersionedSettings({
       ownerId: 'codex',
-      schemaVersion: 1,
-      defaults: {},
-      descriptors: [],
+      schemaVersion: 2,
+      defaults: { [CODEX_FAST_MODE_SETTING]: 'off' },
+      descriptors: [{
+        key: CODEX_FAST_MODE_SETTING,
+        type: 'enum',
+        label: 'Fast mode',
+        labelKey: 'fastMode',
+        options: [
+          {
+            value: 'on',
+            label: 'On',
+            labelKey: 'enabled',
+            description: 'Uses priority processing for supported Codex models on future turns. Uses credits or API billing at a higher rate.',
+            descriptionKey: 'fastModeEnabled',
+          },
+          {
+            value: 'off',
+            label: 'Off',
+            labelKey: 'disabled',
+            description: 'Uses Standard processing on future turns and overrides any global Codex Fast setting.',
+            descriptionKey: 'fastModeDisabled',
+          },
+        ],
+      }],
+      migrateValues(fromVersion) {
+        if (fromVersion === 1) {
+          return Promise.resolve({ [CODEX_FAST_MODE_SETTING]: 'off' });
+        }
+        throw new AgentIntegrationError(
+          'INVALID_SETTINGS',
+          'Invalid settings for codex',
+          false,
+        );
+      },
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
     this.sessionConfiguration = {
@@ -274,6 +311,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
             model: request.model,
             ...singleQueryRuntimeOptions(request),
             permissionMode: 'default',
+            serviceTier: codexConfigServiceTier(codexFastMode(request.settings)),
             envOverrides: buildCodexHostEnvironment(config),
             codexConfig: endpointRuntime?.codexConfig,
           });
@@ -320,6 +358,7 @@ async function forkWholeCodexSession(
         agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
         nativePath: source.path,
       },
+      serviceTier: codexServiceTier(codexFastMode(request.settings)),
       envOverrides: buildCodexHostEnvironment(config),
       codexConfig: endpointRuntime?.codexConfig,
     });

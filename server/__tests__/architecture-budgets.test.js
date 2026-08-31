@@ -10,8 +10,10 @@ const MAX_LINES = 1000;
 // Keeps command and execution orchestration from regrowing persistence or
 // provider concerns now owned by the ledger and integration boundary. The
 // provider-neutral control routes include one-shot discovery delivery and one
-// bounded private lane sharing the existing queue drainer.
-const EXECUTION_FOOTPRINT_BUDGET = 8250;
+// bounded private lane sharing the existing queue drainer. Settings mutations
+// add one coordinator-owned barrier that linearizes durable settings with
+// automatic queue and control dispatch.
+const EXECUTION_FOOTPRINT_BUDGET = 8350;
 
 const GRANDFATHER = {
   'server/git/diff-engine.ts': 1575,

@@ -66,12 +66,13 @@ export async function submitQueueRoute(
 		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 	});
 	try {
+		await queue.awaitPendingAgentSettings(context.chatId);
 		const result = await submission.submit();
 		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		deps.chatState.clearResendExclusions();
 		return 'accepted';
 	} catch (error) {
-		return settleSubmissionFailure(deps, context, error, {
+		const outcome = await settleSubmissionFailure(deps, context, error, {
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
 			rejectedNotice: (failure) =>
 				m.chat_notice_failed_queue_message({
@@ -86,6 +87,7 @@ export async function submitQueueRoute(
 				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
 		});
+		return outcome;
 	} finally {
 		queue.finishSubmission(context.chatId);
 	}
@@ -106,11 +108,12 @@ export async function submitGoalControlRoute(
 		content: context.content,
 	});
 	try {
+		await queue.awaitPendingAgentSettings(context.chatId);
 		const result = await submission.submit();
 		deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, result.control);
 		return 'accepted';
 	} catch (error) {
-		return settleSubmissionFailure(deps, context, error, {
+		const outcome = await settleSubmissionFailure(deps, context, error, {
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
 			rejectedNotice: (failure) =>
 				m.chat_notice_failed_queue_message({
@@ -125,6 +128,7 @@ export async function submitGoalControlRoute(
 				}),
 			refreshControl: () => queue.startControlRefresh(context.chatId),
 		});
+		return outcome;
 	} finally {
 		queue.finishSubmission(context.chatId);
 	}

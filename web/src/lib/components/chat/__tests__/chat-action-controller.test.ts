@@ -288,6 +288,7 @@ describe('ChatActionController', () => {
 		expect(chatsApi.forkChat).toHaveBeenCalledWith({
 			sourceChatId: 'chat-1',
 			chatId: 'fork-chat-id',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		});
 		expect(callbacks.onUpsertServerChat).toHaveBeenCalledWith(fork);
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');

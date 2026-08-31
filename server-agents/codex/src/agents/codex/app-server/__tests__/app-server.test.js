@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -13,6 +14,7 @@ import {
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { cleanupOwnedGoalAttachments, materializeGoalDraft } from '../goal-files.ts';
+import { CodexProtocolParseError } from '../protocol.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
@@ -82,6 +84,7 @@ function makeRequest(overrides = {}) {
     model: 'gpt-5.4-codex',
     permissionMode: 'default',
     thinkingMode: 'medium',
+    serviceTier: 'default',
     ...overrides,
   };
   if (request.operation) return request;
@@ -152,6 +155,16 @@ function emitCapacityFailure(client, turnId) {
   });
 }
 
+function emitThreadSettingsUpdated(client, model, serviceTier, threadId = 'thread-1') {
+  client.emit('notification', {
+    method: 'thread/settings/updated',
+    params: {
+      threadId,
+      threadSettings: { model, serviceTier },
+    },
+  });
+}
+
 function createControlledDelay() {
   let release;
   let resolveStarted;
@@ -168,8 +181,12 @@ function createControlledDelay() {
 
 function createDeferred() {
   let resolve;
-  const promise = new Promise((settle) => { resolve = settle; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function makeGoal(threadId, objective, status = 'active') {
@@ -223,9 +240,30 @@ class FakeClient extends EventEmitter {
   constructor(script = {}) {
     super();
     this.script = script;
-    this.startThread = mock(script.startThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
-    this.resumeThread = mock(script.resumeThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
-    this.forkThread = mock(script.forkThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
+    this.startThread = mock(script.startThread ?? (async (params) => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: params.serviceTier, cwd: '/repo' })));
+    this.resumeThread = mock(script.resumeThread ?? (async (params) => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: params.serviceTier, cwd: '/repo' })));
+    this.forkThread = mock(script.forkThread ?? (async (params) => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: params.serviceTier, cwd: '/repo' })));
+    this.listModels = mock(script.listModels ?? (async () => ({
+      data: [{
+        id: 'gpt-5.4-codex',
+        model: 'gpt-5.4-codex',
+        serviceTiers: [{ id: 'priority' }],
+      }],
+      nextCursor: null,
+    })));
+    this.updateThreadSettings = mock(script.updateThreadSettings ?? (async (params) => {
+      this.emit('notification', {
+        method: 'thread/settings/updated',
+        params: {
+          threadId: params.threadId,
+          threadSettings: {
+            model: params.model,
+            serviceTier: params.serviceTier,
+          },
+        },
+      });
+      return {};
+    }));
     this.setThreadGoal = mock(script.setThreadGoal ?? (async (threadId, params) => ({
       goal: makeGoal(threadId, params.objective ?? 'Ship the feature', params.status ?? 'active'),
     })));
@@ -678,6 +716,77 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: false }),
     ]));
   });
+
+  it('uses typed model-list and thread-settings RPC contracts', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'model/list') {
+        return {
+          data: [{
+            id: 'model-id',
+            model: 'gpt-fast',
+            serviceTiers: [{ id: 'priority' }],
+          }],
+          nextCursor: null,
+        };
+      }
+      if (message.method === 'thread/settings/update') return {};
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.listModels({
+      cursor: 'next-page',
+      limit: null,
+      includeHidden: true,
+    })).resolves.toEqual({
+      data: [{
+        id: 'model-id',
+        model: 'gpt-fast',
+        serviceTiers: [{ id: 'priority' }],
+      }],
+      nextCursor: null,
+    });
+    await expect(client.updateThreadSettings({
+      threadId: 'thread-1',
+      model: 'gpt-fast',
+      serviceTier: 'priority',
+    })).resolves.toEqual({});
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'model/list',
+      params: { cursor: 'next-page', limit: null, includeHidden: true },
+    }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/settings/update',
+      params: {
+        threadId: 'thread-1',
+        model: 'gpt-fast',
+        serviceTier: 'priority',
+      },
+    }));
+  });
+
+  it.each([
+    ['model/list', { data: [{ id: 'model-id', model: 'gpt-fast' }], nextCursor: null }],
+    ['thread/settings/update', { accepted: true }],
+  ])('rejects malformed %s responses at the client boundary', async (method, result) => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === method) return result;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    const request = method === 'model/list'
+      ? client.listModels({ includeHidden: true })
+      : client.updateThreadSettings({
+          threadId: 'thread-1',
+          model: 'gpt-fast',
+          serviceTier: 'priority',
+        });
+    await expect(request).rejects.toBeInstanceOf(CodexProtocolParseError);
+    await client.shutdown();
+  });
 });
 
 describe('Codex app-server request builders', () => {
@@ -693,6 +802,7 @@ describe('Codex app-server request builders', () => {
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
       approvalsReviewer: 'user',
+      serviceTier: 'default',
       config: { model_provider: 'openai' },
     });
     expect(params).not.toHaveProperty('experimentalRawEvents');
@@ -705,6 +815,7 @@ describe('Codex app-server request builders', () => {
       threadId: 'thread-1',
       command: 'run this',
       model: 'gpt-5.4-codex',
+      serviceTier: 'default',
       projectPath: '/repo',
       permissionMode: 'manualBypass',
       thinkingMode: 'none',
@@ -740,12 +851,14 @@ describe('Codex app-server request builders', () => {
       threadId: 'thread-1',
       command: 'hello',
       model: 'gpt-5.6-luna',
+      serviceTier: 'priority',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'max',
     });
 
     expect(params.effort).toBe('max');
+    expect(params.serviceTier).toBe('priority');
   });
 
   it('keeps max compatible with models that only support xhigh', () => {
@@ -753,6 +866,7 @@ describe('Codex app-server request builders', () => {
       threadId: 'thread-1',
       command: 'hello',
       model: 'gpt-5.5',
+      serviceTier: 'default',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'max',
@@ -784,12 +898,14 @@ describe('Codex app-server request builders', () => {
       nativePath: '/tmp/jsonl.jsonl',
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
+      serviceTier: 'priority',
     });
 
     expect(params).toEqual({
       threadId: 'thread-1',
       cwd: '/repo',
       model: 'gpt-5.4-codex',
+      serviceTier: 'priority',
       ephemeral: false,
       excludeTurns: true,
       path: '/tmp/jsonl.jsonl',
@@ -801,6 +917,7 @@ describe('Codex app-server request builders', () => {
       agentSessionId: 'thread-1',
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
+      serviceTier: 'default',
       codexConfig: { config: { model_provider: 'custom-openai' } },
     });
 
@@ -816,6 +933,7 @@ describe('Codex app-server request builders', () => {
       command: 'run this',
       imagePaths: ['/tmp/a.png'],
       model: 'gpt-5.4-codex',
+      serviceTier: 'priority',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'high',
@@ -826,6 +944,7 @@ describe('Codex app-server request builders', () => {
       { type: 'localImage', path: '/tmp/a.png' },
     ]);
     expect(params.effort).toBe('high');
+    expect(params.serviceTier).toBe('priority');
   });
 
   it('omits turn/start effort for provider default thinking', () => {
@@ -833,6 +952,7 @@ describe('Codex app-server request builders', () => {
       threadId: 'thread-1',
       command: 'run this',
       model: 'gpt-5.4-codex',
+      serviceTier: 'default',
       projectPath: '/repo',
       permissionMode: 'default',
       thinkingMode: 'none',
@@ -847,6 +967,7 @@ describe('Codex app-server request builders', () => {
       command: 'read this',
       filePaths: ['/tmp/guide.md', '/tmp/spec.pdf'],
       model: 'gpt-5.4-codex',
+      serviceTier: 'default',
       projectPath: '/repo',
       permissionMode: 'default',
     });
@@ -1618,10 +1739,629 @@ describe('CodexAppServerRuntime', () => {
     );
   }
 
+  async function createRunningRuntime({
+    serviceTier = 'default',
+    model = 'gpt-5.4-codex',
+    script = {},
+    runtimeOptions = {},
+  } = {}) {
+    const nativePath = path.join(tmpDir, `running-${randomUUID()}.jsonl`);
+    const fake = new FakeClient({
+      startThread: async (params) => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: params.model,
+        modelProvider: 'openai',
+        serviceTier: params.serviceTier,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress' }) };
+      },
+      ...script,
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      ...runtimeOptions,
+    });
+    await provider.startSession(makeRequest({ model, serviceTier }));
+    return { fake, provider, nativePath };
+  }
+
+  it.each([
+    ['default', null, 'PROVIDER_FAILURE'],
+    ['default', 'priority', 'PROVIDER_FAILURE'],
+    ['priority', null, 'INVALID_SETTINGS'],
+    ['priority', 'default', 'INVALID_SETTINGS'],
+  ])('fails thread/start before prompt delivery when %s resolves as %s', async (
+    requested,
+    effective,
+    code,
+  ) => {
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread(),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: effective,
+        cwd: '/repo',
+      }),
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const markStarted = mock(async () => undefined);
+
+    await expect(provider.startSession(makeRequest({
+      serviceTier: requested,
+      executionAdmission: {
+        signal: new AbortController().signal,
+        markStarted,
+      },
+    }))).rejects.toMatchObject({ code });
+
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(false);
+  });
+
+  it.each(['runTurn', 'compact'])(
+    'fails %s before prompt-bearing work when resume cannot confirm Standard',
+    async (method) => {
+      const fake = new FakeClient({
+        resumeThread: async () => ({
+          thread: makeThread(),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'openai',
+          serviceTier: null,
+          cwd: '/repo',
+        }),
+      });
+      const provider = createRuntime({ createClient: () => fake });
+      const markStarted = mock(async () => undefined);
+
+      await expect(provider[method](makeRequest({
+        agentSessionId: 'thread-1',
+        nativePath: null,
+        executionAdmission: {
+          signal: new AbortController().signal,
+          markStarted,
+        },
+      }))).rejects.toMatchObject({ code: 'PROVIDER_FAILURE' });
+
+      expect(fake.startTurn).not.toHaveBeenCalled();
+      expect(fake.compactThread).not.toHaveBeenCalled();
+      expect(markStarted).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails native fork when the effective tier does not match', async () => {
+    const fake = new FakeClient({
+      forkThread: async () => ({
+        thread: makeThread({ id: 'forked-thread' }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+    });
+    const provider = createRuntime({ createClient: () => fake });
+
+    await expect(provider.forkSession({
+      sourceSession: {
+        agentSessionId: 'thread-1',
+        model: 'gpt-5.4-codex',
+        projectPath: '/repo',
+      },
+      serviceTier: 'priority',
+    })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+
+    expect(fake.unsubscribeThread).toHaveBeenCalledWith('forked-thread');
+  });
+
+  it('preflights paginated model support before applying live Priority', async () => {
+    const calls = [];
+    const { fake, provider } = await createRunningRuntime({
+      script: {
+        listModels: async ({ cursor, includeHidden }) => {
+          calls.push(['model/list', cursor, includeHidden]);
+          return cursor === null
+            ? { data: [], nextCursor: 'next' }
+            : {
+                data: [{
+                  id: 'alias',
+                  model: 'gpt-fast',
+                  serviceTiers: [{ id: 'priority' }],
+                }],
+                nextCursor: null,
+              };
+        },
+        updateThreadSettings: async (params) => {
+          calls.push(['thread/settings/update', params.model, params.serviceTier]);
+          emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+          return {};
+        },
+      },
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-fast',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    })).resolves.toEqual({
+      kind: 'applied',
+      confirmedModel: 'gpt-fast',
+      confirmedServiceTier: 'priority',
+    });
+
+    expect(calls).toEqual([
+      ['model/list', null, true],
+      ['model/list', 'next', true],
+      ['thread/settings/update', 'gpt-fast', 'priority'],
+    ]);
+  });
+
+  it('rejects unsupported live Priority without mutating or retiring the session', async () => {
+    const { fake, provider } = await createRunningRuntime({
+      script: {
+        listModels: async () => ({
+          data: [{
+            id: 'gpt-5.4-codex',
+            model: 'gpt-5.4-codex',
+            serviceTiers: [],
+          }],
+          nextCursor: null,
+        }),
+      },
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    })).rejects.toMatchObject({
+      code: 'INVALID_SETTINGS',
+      details: { provider: 'codex', setting: 'codexFastMode' },
+    });
+
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('applies live Off without consulting a failing model catalog', async () => {
+    const { fake, provider } = await createRunningRuntime({ serviceTier: 'priority' });
+    fake.listModels.mockImplementation(async () => {
+      throw new Error('catalog unavailable');
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    })).resolves.toMatchObject({
+      kind: 'applied',
+      confirmedServiceTier: 'default',
+    });
+
+    expect(fake.listModels).not.toHaveBeenCalled();
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-codex',
+      serviceTier: 'default',
+    });
+  });
+
+  it('awaits both the settings response and the exact notification', async () => {
+    const response = createDeferred();
+    let capturedFake;
+    const { fake, provider } = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => response.promise,
+      },
+    });
+    capturedFake = fake;
+    const updating = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await Promise.resolve();
+    emitThreadSettingsUpdated(capturedFake, 'stale-model', 'default');
+    emitThreadSettingsUpdated(capturedFake, 'gpt-new', 'default');
+    let settled = false;
+    void updating.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    response.resolve({});
+    await expect(updating).resolves.toEqual({
+      kind: 'applied',
+      confirmedModel: 'gpt-new',
+      confirmedServiceTier: 'default',
+    });
+  });
+
+  it('keeps the confirmed session after a definitive settings RPC rejection', async () => {
+    const { fake, provider } = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => {
+          throw new CodexAppServerRpcError('rejected', -32602);
+        },
+      },
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    })).rejects.toMatchObject({ code: 'PROVIDER_FAILURE' });
+
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it.each(['response-only', 'notification-only'])(
+    'retires an ambiguous client after a %s live update',
+    async (mode) => {
+      let fake;
+      const updateStarted = createDeferred();
+      const runtime = await createRunningRuntime({
+        script: {
+          updateThreadSettings: async (params) => {
+            updateStarted.resolve();
+            if (mode === 'notification-only') {
+              emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+              return new Promise(() => {});
+            }
+            return {};
+          },
+        },
+        runtimeOptions: { threadSettingsTimeoutMs: 5 },
+      });
+      fake = runtime.fake;
+
+      const updating = runtime.provider.updateSessionSettings('thread-1', {
+        model: 'gpt-new',
+        permissionMode: 'default',
+        serviceTier: 'default',
+      });
+      await updateStarted.promise;
+
+      await expect(updating).resolves.toEqual({ kind: 'session-absent' });
+      expect(runtime.provider.isRunning('thread-1')).toBe(false);
+      expect(fake.shutdown).toHaveBeenCalled();
+    },
+  );
+
+  it('serializes rapid live settings updates in invocation order', async () => {
+    const firstResponse = createDeferred();
+    const firstCalled = createDeferred();
+    let fake;
+    const runtime = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async (params) => {
+          if (params.serviceTier === 'priority') {
+            firstCalled.resolve();
+            emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+            return firstResponse.promise;
+          }
+          emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+          return {};
+        },
+      },
+    });
+    fake = runtime.fake;
+    const first = runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    });
+    const second = runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await firstCalled.promise;
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+
+    firstResponse.resolve({});
+    await expect(first).resolves.toMatchObject({ confirmedServiceTier: 'priority' });
+    await expect(second).resolves.toMatchObject({ confirmedServiceTier: 'default' });
+    expect(fake.updateThreadSettings.mock.calls.map(([params]) => params.serviceTier)).toEqual([
+      'priority',
+      'default',
+    ]);
+  });
+
+  it.each([
+    ['id', { id: 'gpt-fast', model: 'provider-model' }],
+    ['model name', { id: 'provider-id', model: 'gpt-fast' }],
+  ])('accepts Priority support matched by model %s', async (_label, catalogModel) => {
+    let fake;
+    const runtime = await createRunningRuntime({
+      script: {
+        listModels: async () => ({
+          data: [{ ...catalogModel, serviceTiers: [{ id: 'priority' }] }],
+          nextCursor: null,
+        }),
+        updateThreadSettings: async (params) => {
+          emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+          return {};
+        },
+      },
+    });
+    fake = runtime.fake;
+
+    await expect(runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-fast',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    })).resolves.toMatchObject({ confirmedServiceTier: 'priority' });
+  });
+
+  it('invalidates cached Priority support when the selected model changes', async () => {
+    let fake;
+    const runtime = await createRunningRuntime({
+      script: {
+        listModels: async () => ({
+          data: [
+            { id: 'model-a', model: 'model-a', serviceTiers: [{ id: 'priority' }] },
+            { id: 'model-b', model: 'model-b', serviceTiers: [{ id: 'priority' }] },
+          ],
+          nextCursor: null,
+        }),
+        updateThreadSettings: async (params) => {
+          emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+          return {};
+        },
+      },
+    });
+    fake = runtime.fake;
+
+    const applyPriority = (model) => runtime.provider.updateSessionSettings('thread-1', {
+      model,
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    });
+    await applyPriority('model-a');
+    await applyPriority('model-a');
+    await applyPriority('model-b');
+
+    expect(fake.listModels).toHaveBeenCalledTimes(2);
+    expect(fake.updateThreadSettings.mock.calls.map(([params]) => params.model)).toEqual([
+      'model-a',
+      'model-b',
+    ]);
+  });
+
+  it.each([
+    ['malformed response', async () => { throw new CodexProtocolParseError('malformed catalog'); }],
+    ['cursor cycle', async () => ({ data: [], nextCursor: 'cycle' })],
+  ])('rejects a %s catalog without mutating or retiring the live session', async (_label, listModels) => {
+    const { fake, provider } = await createRunningRuntime({
+      script: { listModels },
+      runtimeOptions: { modelListMaxPages: 4 },
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-fast',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('times out a stalled model catalog without mutating or retiring the live session', async () => {
+    const { fake, provider } = await createRunningRuntime({
+      script: { listModels: async () => new Promise(() => {}) },
+      runtimeOptions: { modelListTimeoutMs: 5 },
+    });
+
+    await expect(provider.updateSessionSettings('thread-1', {
+      model: 'gpt-fast',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    })).rejects.toMatchObject({ code: 'TIMEOUT' });
+
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('retires a client after a malformed settings confirmation', async () => {
+    let fake;
+    const runtime = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => {
+          fake.emit('notification', {
+            method: 'thread/settings/updated',
+            params: { threadId: 'thread-1', threadSettings: { model: '' } },
+          });
+          return {};
+        },
+      },
+    });
+    fake = runtime.fake;
+
+    await expect(runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    })).resolves.toEqual({ kind: 'session-absent' });
+
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(runtime.provider.isRunning('thread-1')).toBe(false);
+  });
+
+  it('trusts unsolicited Standard but revalidates unsolicited Priority after a model change', async () => {
+    let fake;
+    const runtime = await createRunningRuntime({
+      serviceTier: 'priority',
+      script: {
+        listModels: async () => ({
+          data: [{ id: 'gpt-new', model: 'gpt-new', serviceTiers: [{ id: 'priority' }] }],
+          nextCursor: null,
+        }),
+        updateThreadSettings: async (params) => {
+          emitThreadSettingsUpdated(fake, params.model, params.serviceTier);
+          return {};
+        },
+      },
+    });
+    fake = runtime.fake;
+
+    emitThreadSettingsUpdated(fake, 'gpt-standard', 'default');
+    await runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-standard',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+
+    emitThreadSettingsUpdated(fake, 'gpt-new', 'priority');
+    await runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'priority',
+    });
+    expect(fake.listModels).toHaveBeenCalledTimes(1);
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns session-absent when the captured client exits during a settings update', async () => {
+    const updateStarted = createDeferred();
+    const { fake, provider } = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => {
+          updateStarted.resolve();
+          return new Promise(() => {});
+        },
+      },
+    });
+    const updating = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await updateStarted.promise;
+    fake.emit('exit', 17);
+
+    await expect(updating).resolves.toEqual({ kind: 'session-absent' });
+    expect(provider.isRunning('thread-1')).toBe(false);
+  });
+
+  it('cancels a pending settings update during runtime shutdown', async () => {
+    const updateStarted = createDeferred();
+    const { provider } = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => {
+          updateStarted.resolve();
+          return new Promise(() => {});
+        },
+      },
+    });
+    const updating = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await updateStarted.promise;
+    await provider.shutdown();
+
+    await expect(updating).resolves.toEqual({ kind: 'session-absent' });
+  });
+
+  it('retries a superseded settings update on the replacement client', async () => {
+    const oldUpdateStarted = createDeferred();
+    const nativePath = path.join(tmpDir, 'superseded-settings-thread.jsonl');
+    await fs.writeFile(nativePath, '{}\n');
+    const oldClient = new FakeClient({
+      startThread: async (params) => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: params.model,
+        modelProvider: 'openai',
+        serviceTier: params.serviceTier,
+        cwd: '/repo',
+      }),
+      updateThreadSettings: async () => {
+        oldUpdateStarted.resolve();
+        return new Promise(() => {});
+      },
+    });
+    let replacementClient;
+    replacementClient = new FakeClient({
+      resumeThread: async (params) => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: params.model,
+        modelProvider: 'openai',
+        serviceTier: params.serviceTier,
+        cwd: '/repo',
+      }),
+      updateThreadSettings: async (params) => {
+        emitThreadSettingsUpdated(replacementClient, params.model, params.serviceTier);
+        return {};
+      },
+    });
+    const clients = [oldClient, replacementClient];
+    const provider = createRuntime({ createClient: () => clients.shift() });
+    await provider.startSession(makeRequest());
+
+    const updating = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await oldUpdateStarted.promise;
+    await provider.runTurn(makeRequest({ agentSessionId: 'thread-1', nativePath: null }));
+
+    await expect(updating).resolves.toEqual({
+      kind: 'applied',
+      confirmedModel: 'gpt-new',
+      confirmedServiceTier: 'default',
+    });
+    expect(oldClient.updateThreadSettings).toHaveBeenCalledTimes(1);
+    expect(replacementClient.updateThreadSettings).toHaveBeenCalledTimes(1);
+    expect(oldClient.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('defers a terminal completion until its settings update is confirmed', async () => {
+    const response = createDeferred();
+    const updateStarted = createDeferred();
+    let fake;
+    const runtime = await createRunningRuntime({
+      script: {
+        updateThreadSettings: async () => {
+          updateStarted.resolve();
+          return response.promise;
+        },
+      },
+    });
+    fake = runtime.fake;
+    const updating = runtime.provider.updateSessionSettings('thread-1', {
+      model: 'gpt-new',
+      permissionMode: 'default',
+      serviceTier: 'default',
+    });
+    await updateStarted.promise;
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(runtime.provider.isRunning('thread-1')).toBe(true);
+
+    emitThreadSettingsUpdated(fake, 'gpt-new', 'default');
+    response.resolve({});
+    await expect(updating).resolves.toMatchObject({ kind: 'applied' });
+    expect(runtime.provider.isRunning('thread-1')).toBe(false);
+  });
+
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
     const nativePath = path.join(tmpDir, 'thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
@@ -1647,7 +2387,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-private-diagnostics', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -1680,7 +2420,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -1726,7 +2466,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -1771,7 +2511,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -1818,7 +2558,7 @@ describe('CodexAppServerRuntime', () => {
           thread: makeThread({ id: `thread-${turnKind}`, path: nativePath }),
           model: 'gpt',
           modelProvider: 'openai',
-          serviceTier: null,
+          serviceTier: 'default',
           cwd: '/repo',
         }),
         startTurn: async () => {
@@ -1865,7 +2605,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -1909,7 +2649,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -2155,7 +2895,7 @@ describe('CodexAppServerRuntime', () => {
     const nativePath = path.join(tmpDir, 'completed-before-start-response-goal-thread.jsonl');
     let fake;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         fake.emit('notification', {
@@ -2235,7 +2975,7 @@ describe('CodexAppServerRuntime', () => {
   it('keeps the turn running when Codex reports a retryable stream error', async () => {
     const nativePath = path.join(tmpDir, 'retryable-error-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -2294,14 +3034,14 @@ describe('CodexAppServerRuntime', () => {
   it('ignores lifecycle notifications emitted by a stale app-server client', async () => {
     const nativePath = path.join(tmpDir, 'stale-client-error-thread.jsonl');
     const staleClient = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'old-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
       },
     });
     const activeClient = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -2385,7 +3125,7 @@ describe('CodexAppServerRuntime', () => {
   it('ignores lifecycle notifications for a turn that is no longer active', async () => {
     const nativePath = path.join(tmpDir, 'stale-turn-error-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -2450,7 +3190,7 @@ describe('CodexAppServerRuntime', () => {
     let resolveRetryStarted;
     const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async (params) => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -2468,7 +3208,12 @@ describe('CodexAppServerRuntime', () => {
 
     emitCapacityFailure(fake, 'turn-1');
 
-    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
+    await expect(retryStarted).resolves.toEqual({
+      threadId: 'thread-1',
+      input: [],
+      model: 'gpt-5.4-codex',
+      serviceTier: 'default',
+    });
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(failureMessages(published.events)).toEqual([]);
 
@@ -2490,7 +3235,7 @@ describe('CodexAppServerRuntime', () => {
     let resolveRetryStarted;
     const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -2556,7 +3301,7 @@ describe('CodexAppServerRuntime', () => {
     let fake;
     let turnNumber = 0;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -2771,7 +3516,7 @@ describe('CodexAppServerRuntime', () => {
     let fake;
     let turnNumber = 0;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -2828,7 +3573,7 @@ describe('CodexAppServerRuntime', () => {
     let fake;
     let goalRetryCount = 0;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -2919,7 +3664,7 @@ describe('CodexAppServerRuntime', () => {
             });
           }
           emitCapacityFailure(fake, 'restored-turn');
-          return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+          return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
         },
         getThreadGoal: async () => ({
           goal: goalStatus ? makeGoal('thread-1', 'Finish the work') : null,
@@ -2984,7 +3729,7 @@ describe('CodexAppServerRuntime', () => {
       const controlledDelay = createControlledDelay();
       const goalCalls = [];
       const fake = new FakeClient({
-        startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+        startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
         startTurn: async () => {
           await fs.writeFile(nativePath, '{}\n');
           return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -3036,7 +3781,7 @@ describe('CodexAppServerRuntime', () => {
     const controlledDelay = createControlledDelay();
     let turnNumber = 0;
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -3085,7 +3830,7 @@ describe('CodexAppServerRuntime', () => {
     const retryResolvers = [];
     const retryStarts = Array.from({ length: 3 }, () => new Promise((resolve) => retryResolvers.push(resolve)));
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async (params) => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -3107,7 +3852,12 @@ describe('CodexAppServerRuntime', () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       emitCapacityFailure(fake, `turn-${attempt + 1}`);
       if (attempt < 3) {
-        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [] });
+        await expect(retryStarts[attempt]).resolves.toEqual({
+          threadId: 'thread-1',
+          input: [],
+          model: 'gpt-5.4-codex',
+          serviceTier: 'default',
+        });
       }
     }
 
@@ -3126,7 +3876,7 @@ describe('CodexAppServerRuntime', () => {
     const retryResolvers = [];
     const retryStarts = Array.from({ length: 3 }, () => new Promise((resolve) => retryResolvers.push(resolve)));
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -3188,7 +3938,7 @@ describe('CodexAppServerRuntime', () => {
   it('ends the turn when Codex reports a non-retryable error', async () => {
     const nativePath = path.join(tmpDir, 'terminal-error-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -3226,7 +3976,7 @@ describe('CodexAppServerRuntime', () => {
   it('streams raw Code Mode calls and their paired outputs through the shared contract', async () => {
     const nativePath = path.join(tmpDir, 'live-exec-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -3332,7 +4082,7 @@ describe('CodexAppServerRuntime', () => {
   it('streams terminal subagent communications without another management call', async () => {
     const nativePath = path.join(tmpDir, 'live-subagent-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
@@ -3450,7 +4200,7 @@ describe('CodexAppServerRuntime', () => {
     const calls = [];
     let fake;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       getThreadGoal: async () => {
         calls.push('get');
         return { goal: null };
@@ -3485,7 +4235,7 @@ describe('CodexAppServerRuntime', () => {
     const calls = [];
     let fake;
     fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       injectThreadItems: async (params) => { calls.push(['inject', params]); },
       getThreadGoal: async () => { calls.push(['get']); return { goal: null }; },
       setThreadGoal: async (threadId, params) => {
@@ -3968,7 +4718,7 @@ describe('CodexAppServerRuntime', () => {
           params: { threadId: 'thread-1', turn: makeTurn({ id: 'early-goal-turn', status: 'inProgress' }) },
         }));
         await Promise.resolve();
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
     });
@@ -3990,7 +4740,7 @@ describe('CodexAppServerRuntime', () => {
       const fake = new FakeClient({
         resumeThread: async () => {
           calls.push('resume');
-          return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+          return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
         },
         getThreadGoal: async () => {
           await new Promise((resolve) => setTimeout(resolve, 0));
@@ -4037,7 +4787,7 @@ describe('CodexAppServerRuntime', () => {
           method: 'turn/started',
           params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
         });
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
       setThreadGoalStatus: async (threadId, status) => ({
@@ -4093,7 +4843,7 @@ describe('CodexAppServerRuntime', () => {
           method: 'turn/started',
           params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
         });
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
       clearThreadGoal: async () => ({ cleared: true }),
@@ -4154,7 +4904,7 @@ describe('CodexAppServerRuntime', () => {
             goal: makeGoal('thread-1', 'Ship the feature', 'complete'),
           },
         });
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       setThreadGoalStatus: async (threadId) => {
         queueMicrotask(() => fake.emit('notification', {
@@ -4284,7 +5034,7 @@ describe('CodexAppServerRuntime', () => {
           params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
         }));
         await Promise.resolve();
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Ship the feature', 'active') }),
     });
@@ -4362,7 +5112,7 @@ describe('CodexAppServerRuntime', () => {
           },
         }));
         await Promise.resolve();
-        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
     });
     const provider = createRuntime({ createClient: () => fake });
@@ -4852,7 +5602,7 @@ describe('CodexAppServerRuntime', () => {
   it('declines goal control without accepting its user row after the Codex session ends', async () => {
     const nativePath = path.join(tmpDir, 'ended-before-acceptance.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
@@ -5564,7 +6314,7 @@ describe('CodexAppServerRuntime', () => {
     let fake;
     fake = new FakeClient({
       connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       getThreadGoal: async () => ({ goal: null }),
       setThreadGoal: async (threadId, params) => {
         objective = params.objective;
@@ -5934,7 +6684,7 @@ describe('CodexAppServerRuntime', () => {
     let fake;
     fake = new FakeClient({
       connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       getThreadGoal: async () => ({ goal: null }),
       setThreadGoal: async (threadId, params) => {
         storedObjective = params.objective;
@@ -6290,7 +7040,7 @@ describe('CodexAppServerRuntime', () => {
     const operationClient = new FakeClient({
       forkThread: async () => {
         await fs.writeFile(nativePath, '{}\n');
-        return { thread: makeThread({ id: 'forked-thread', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        return { thread: makeThread({ id: 'forked-thread', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' };
       },
       unsubscribeThread: async () => ({ status: 'unsubscribed' }),
     });
@@ -6311,6 +7061,7 @@ describe('CodexAppServerRuntime', () => {
         model: 'gpt-5.4-codex',
         projectPath: '/repo',
       },
+      serviceTier: 'default',
       envOverrides: { OPENAI_API_KEY: 'endpoint-key' },
       codexConfig: {
         env: { CODEX_HOME: '/tmp/codex-home' },
@@ -6339,7 +7090,7 @@ describe('CodexAppServerRuntime', () => {
     await fs.writeFile(secondResolvedPath, '{}\n');
     let listedPath = firstResolvedPath;
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: runningNativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: runningNativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(runningNativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
@@ -6380,7 +7131,7 @@ describe('CodexAppServerRuntime', () => {
   it('does not backfill terminal JSONL rows during a healthy live turn', async () => {
     const nativePath = path.join(tmpDir, 'no-backfill-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await writeJsonl(nativePath, [{
           type: 'response_item',
@@ -6414,7 +7165,7 @@ describe('CodexAppServerRuntime', () => {
     const nativePath = path.join(tmpDir, 'live-source-thread.jsonl');
     const liveItem = { type: 'agentMessage', id: 'a1', text: 'Already emitted', phase: null, memoryCitation: null };
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await writeJsonl(nativePath, [
           {
@@ -6515,7 +7266,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -6619,7 +7370,7 @@ describe('CodexAppServerRuntime', () => {
   it('routes app-server approval requests back to the pending JSON-RPC request', async () => {
     const nativePath = path.join(tmpDir, 'approval-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
@@ -6654,7 +7405,7 @@ describe('CodexAppServerRuntime', () => {
       error: mock(() => undefined),
     };
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
@@ -6699,7 +7450,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       getThreadGoal: async () => ({ goal }),
@@ -6782,7 +7533,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       getThreadGoal: async () => ({ goal }),
@@ -6878,7 +7629,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -6936,7 +7687,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: `thread-${index}`, path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       startTurn: async () => {
@@ -6985,7 +7736,7 @@ describe('CodexAppServerRuntime', () => {
         thread: makeThread({ id: 'thread-1', path: nativePath }),
         model: 'gpt',
         modelProvider: 'openai',
-        serviceTier: null,
+        serviceTier: 'default',
         cwd: '/repo',
       }),
       getThreadGoal: async () => ({ goal }),
@@ -7065,7 +7816,7 @@ describe('CodexAppServerRuntime', () => {
   it('auto-approves app-server approvals in manual bypass without emitting a permission row', async () => {
     const nativePath = path.join(tmpDir, 'manual-bypass-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
@@ -7091,7 +7842,7 @@ describe('CodexAppServerRuntime', () => {
   it('applies live manual bypass updates to app-server approvals', async () => {
     const nativePath = path.join(tmpDir, 'manual-bypass-updated-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
@@ -7101,7 +7852,11 @@ describe('CodexAppServerRuntime', () => {
     const published = collectOperation();
 
     const started = await provider.startSession(makeRequest({ operation: published.operation }));
-    provider.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'manualBypass',
+      serviceTier: 'default',
+    });
     fake.emit('serverRequest', {
       id: 10,
       method: 'item/commandExecution/requestApproval',
@@ -7115,7 +7870,7 @@ describe('CodexAppServerRuntime', () => {
   it('does not re-emit the submitted prompt when app-server echoes userMessage items', async () => {
     const nativePath = path.join(tmpDir, 'live-user-echo-thread.jsonl');
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };

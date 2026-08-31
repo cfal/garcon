@@ -143,6 +143,7 @@ export interface ForkChatResponse {
 export interface ForkChatCommandRequest {
   sourceChatId: string;
   chatId: string;
+  agentSettings: AgentSettingsEnvelope;
   upToOrdinal?: number;
   // Consent to a handoff fork when the request cannot be forked natively. The client sets it
   // only after asking the user, so an unconfirmed request surfaces the refusal instead.
@@ -230,7 +231,7 @@ export interface ForkRunCommandRequest {
   images?: AgentCommandImage[];
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
-  agentSettings?: AgentSettingsEnvelope;
+  agentSettings: AgentSettingsEnvelope;
   model?: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -413,6 +414,7 @@ export interface AgentInterruptAndSendResponse extends CommandAcceptedResponse {
 export interface CompactCommandRequest {
   clientRequestId: string;
   chatId: string;
+  agentSettings: AgentSettingsEnvelope;
   // Optional focus instructions for agents that support steering the summary.
   instructions?: string;
 }
@@ -627,7 +629,7 @@ function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest | unde
 export function parseForkRunCommandRequest(value: unknown): ForkRunCommandRequest {
   const body = requestRecord(value);
   const images = optionalImages(body.images);
-  const agentSettings = optionalAgentSettings(body.agentSettings, 'agentSettings');
+  const agentSettings = requiredAgentSettings(body.agentSettings, 'agentSettings');
   const model = optionalString(body, 'model');
   const allowHandoffFork = parseHandoffForkConsent(body);
   return {
@@ -644,7 +646,7 @@ export function parseForkRunCommandRequest(value: unknown): ForkRunCommandReques
     thinkingMode: body.thinkingMode === undefined
       ? undefined
       : normalizeThinkingMode(body.thinkingMode),
-    ...(agentSettings === undefined ? {} : { agentSettings }),
+    agentSettings,
     ...(model === undefined ? {} : { model }),
     apiProviderId: optionalNullableString(body, 'apiProviderId'),
     modelEndpointId: optionalNullableString(body, 'modelEndpointId'),
@@ -672,6 +674,7 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
+    agentSettings: requiredAgentSettings(body.agentSettings, 'agentSettings'),
     ...(upToOrdinal === undefined ? {} : { upToOrdinal: Number(upToOrdinal) }),
     ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
     ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
@@ -896,6 +899,7 @@ export function parseCompactCommandRequest(value: unknown): CompactCommandReques
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     chatId: requiredChatId(body, 'chatId'),
+    agentSettings: requiredAgentSettings(body.agentSettings, 'agentSettings'),
     ...(instructions === undefined ? {} : { instructions }),
   };
 }

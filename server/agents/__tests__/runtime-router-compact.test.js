@@ -71,10 +71,21 @@ describe('AgentRuntimeRouter compaction', () => {
     });
     const { router, execution } = makeRouter({ compact }, { conversationMessages });
 
-    await router.compactSession('chat-1', { instructions: 'focus on auth' });
+    const agentSettings = {
+      ownerId: 'test',
+      schemaVersion: 1,
+      values: { fastMode: 'off' },
+    };
+    await router.compactSession('chat-1', {
+      instructions: 'focus on auth',
+      agentSettings,
+    });
 
     expect(compact).toHaveBeenCalledTimes(1);
-    expect(compact.mock.calls[0][0]).toMatchObject({ prompt: '/compact focus on auth' });
+    expect(compact.mock.calls[0][0]).toMatchObject({
+      prompt: '/compact focus on auth',
+      settings: agentSettings,
+    });
     expect(compact.mock.calls[0][0]).not.toHaveProperty('priorContext');
     expect(conversationMessages).not.toHaveBeenCalled();
     expect(execution.resume).not.toHaveBeenCalled();
@@ -83,7 +94,9 @@ describe('AgentRuntimeRouter compaction', () => {
   it('refuses instead of sending a literal /compact prompt without the facet', async () => {
     const { router, execution } = makeRouter(null);
 
-    await expect(router.compactSession('chat-1')).rejects.toMatchObject({
+    await expect(router.compactSession('chat-1', {
+      agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
+    })).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
     });
     // Regression: this used to resume the session with the text `/compact`, which
@@ -94,6 +107,8 @@ describe('AgentRuntimeRouter compaction', () => {
   it('points at the provider-agnostic alternative', async () => {
     const { router } = makeRouter(null);
 
-    await expect(router.compactSession('chat-1')).rejects.toThrow('/handoff');
+    await expect(router.compactSession('chat-1', {
+      agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
+    })).rejects.toThrow('/handoff');
   });
 });

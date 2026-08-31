@@ -54,7 +54,7 @@ describe('ChatExecutionControlOperations', () => {
     expect(queued.control.version).toBe(0);
     expect(publish).not.toHaveBeenCalled();
 
-    const dequeued = await operations.dequeueNextTurn('chat-1', (turn) => {
+    const dequeued = await operations.dequeueNextTurn('chat-1', () => true, (turn) => {
       expect(turn).toMatchObject({ kind: 'control', entry: input });
       return true;
     });

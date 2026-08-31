@@ -77,6 +77,7 @@ export class QueueDrainer {
       || ownership.hasSuppression(chatId, 'abort')
       || ownership.hasSuppression(chatId, 'deletion')
       || ownership.hasSuppression(chatId, 'manual-stop')
+      || ownership.hasSuppression(chatId, 'settings-mutation')
       || ownership.hasDirect(chatId)
       || turnRunner.isChatRunning(chatId);
   }
@@ -96,7 +97,7 @@ export class QueueDrainer {
       let inputInserted = false;
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
-        result = await controls.dequeueNextTurn(chatId, (input) => {
+        result = await controls.dequeueNextTurn(chatId, () => !this.#shouldHalt(chatId), (input) => {
           if (input.kind === 'control') {
             options = optionsForControlTurn(this.deps.getDrainOptions(chatId), input.entry);
             callbacks.appendControlReceipt(chatId, input.entry);

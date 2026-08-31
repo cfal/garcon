@@ -265,6 +265,30 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     while (this.#dispatchTasks.size > 0) await Promise.all([...this.#dispatchTasks]);
   }
 
+  async runWithAutomaticDispatchSuppressed<T>(
+    chatId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const lockKey = `chat:${chatId}`;
+    const holdId = await this.#locks.runExclusive(lockKey, async () => {
+      const id = this.#ownership.beginSettingsMutationSuppression(chatId);
+      if (this.#ownership.isDraining(chatId)) this.#ownership.requestDrain(chatId);
+      return id;
+    });
+
+    try {
+      return await operation();
+    } finally {
+      const resumePendingDrain = await this.#locks.runExclusive(lockKey, async () => {
+        const releasedLast = this.#ownership.releaseSettingsMutationSuppression(chatId, holdId);
+        return releasedLast && this.#ownership.hasDrainRequest(chatId);
+      });
+      if (resumePendingDrain && !this.#shuttingDown && this.#chatExists(chatId)) {
+        this.#requestDrain(chatId, 'settings mutation completed');
+      }
+    }
+  }
+
   #trackDispatch(task: Promise<void>): void {
     this.#dispatchTasks.add(task);
     void task.finally(() => this.#dispatchTasks.delete(task));
@@ -305,7 +329,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatExecutionControl(chatId);
     if (this.#isDrainSuppressed(chatId)) {
-      if (!hasPendingTurnInput(queue)) {
+      if (
+        hasPendingTurnInput(queue)
+        && this.#ownership.hasSuppression(chatId, 'settings-mutation')
+      ) {
+        this.#ownership.requestDrain(chatId);
+      } else if (!hasPendingTurnInput(queue)) {
         this.#ownership.consumeDrainRequest(chatId);
         this.emit('chat-idle', chatId);
       }
@@ -619,6 +648,12 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return;
     }
     if (
+      this.#ownership.hasSuppression(chatId, 'settings-mutation')
+    ) {
+      this.#ownership.requestDrain(chatId);
+      return;
+    }
+    if (
       this.#isDrainSuppressed(chatId)
       || this.#turnRunner.isChatRunning(chatId)
     ) return;
@@ -627,6 +662,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
 
   async #drain(chatId: string): Promise<void> {
+    if (this.#ownership.hasSuppression(chatId, 'settings-mutation')) {
+      this.#ownership.requestDrain(chatId);
+      return;
+    }
     if (
       this.#shuttingDown
       || this.#ownership.isDraining(chatId)
@@ -660,7 +699,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
   #isDrainSuppressed(chatId: string): boolean {
     return this.#hasDrainSuppression(chatId, 'abort')
-      || this.#hasDrainSuppression(chatId, 'deletion');
+      || this.#hasDrainSuppression(chatId, 'deletion')
+      || this.#hasDrainSuppression(chatId, 'settings-mutation');
   }
 
   #hasDrainSuppression(chatId: string, reason: DrainSuppressionReason): boolean {
@@ -754,6 +794,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       const control = await this.#controlOperations.read(chatId);
       this.#checkpointDirect(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
+      if (this.#isDrainSuppressed(chatId) || !this.#chatExists(chatId)) {
+        throw controlInputBlockedError();
+      }
       if (hasPendingTurnInput(control) || control.pause) {
         throw controlInputBlockedError();
       }

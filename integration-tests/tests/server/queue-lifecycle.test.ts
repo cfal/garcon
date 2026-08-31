@@ -765,6 +765,7 @@ describe('queue lifecycle', () => {
       const forked = await fixture.client.forkChat({
         sourceChatId,
         chatId: targetChatId,
+        agentSettings: fixture.directAgents.openAi.agentSettings,
       });
       expect(forked.chat.id).toBe(targetChatId);
       expect((await fixture.client.ping()).processing).toEqual({

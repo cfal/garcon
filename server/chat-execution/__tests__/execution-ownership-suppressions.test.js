@@ -60,4 +60,31 @@ describe('ExecutionOwnership drain suppressions', () => {
     expect(ownership.hasSuppression('c1', 'manual-stop')).toBe(true);
     expect(ownership.hasSuppression('c2', 'deletion')).toBe(true);
   });
+
+  test('settings mutation holds remain active until the final token is released', () => {
+    const ownership = new ExecutionOwnership();
+    const first = ownership.beginSettingsMutationSuppression('c1');
+    const second = ownership.beginSettingsMutationSuppression('c1');
+    const other = ownership.beginSettingsMutationSuppression('c2');
+
+    expect(ownership.hasSuppression('c1', 'settings-mutation')).toBe(true);
+    expect(ownership.releaseSettingsMutationSuppression('c1', first)).toBe(false);
+    expect(ownership.hasSuppression('c1', 'settings-mutation')).toBe(true);
+    expect(ownership.releaseSettingsMutationSuppression('c1', first)).toBe(false);
+    expect(ownership.releaseSettingsMutationSuppression('c1', second)).toBe(true);
+    expect(ownership.hasSuppression('c1', 'settings-mutation')).toBe(false);
+    expect(ownership.hasSuppression('c2', 'settings-mutation')).toBe(true);
+    expect(ownership.releaseSettingsMutationSuppression('c2', other)).toBe(true);
+  });
+
+  test('chat deletion clears settings holds without allowing late release to recreate state', () => {
+    const ownership = new ExecutionOwnership();
+    const hold = ownership.beginSettingsMutationSuppression('c1');
+
+    ownership.clearChat('c1', new Error('deleted'));
+
+    expect(ownership.hasSuppression('c1', 'settings-mutation')).toBe(false);
+    expect(ownership.releaseSettingsMutationSuppression('c1', hold)).toBe(false);
+    expect(ownership.hasSuppression('c1', 'settings-mutation')).toBe(false);
+  });
 });

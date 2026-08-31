@@ -156,6 +156,27 @@ function projectedChat(chatId, projectPath = '/repo', source = {}) {
 }
 
 class TestChatCommandService extends ChatCommandService {
+  forkChat(input) {
+    return super.forkChat({
+      agentSettings: input.agentSettings ?? agentSettings(),
+      ...input,
+    });
+  }
+
+  submitForkRun(input) {
+    return super.submitForkRun({
+      agentSettings: input.agentSettings ?? agentSettings(),
+      ...input,
+    });
+  }
+
+  submitCompact(input) {
+    return super.submitCompact({
+      agentSettings: input.agentSettings ?? agentSettings(),
+      ...input,
+    });
+  }
+
   submitRun(input) {
     return super.submitRun(this.#qualify(input));
   }
@@ -2526,6 +2547,34 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
+  it('overlays a fork command settings snapshot without mutating the source', async () => {
+    const { service, forkChatFileCopy, sessions } = makeService();
+    const requested = agentSettings('claude', { thinking: 'disabled' });
+    const persisted = sessions.get(SOURCE_CHAT_ID).agentSettingsById.claude;
+
+    await service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: requested,
+    });
+
+    expect(forkChatFileCopy.mock.calls[0][0].sourceSession.agentSettingsById.claude)
+      .toEqual(requested);
+    expect(sessions.get(SOURCE_CHAT_ID).agentSettingsById.claude).toBe(persisted);
+  });
+
+  it('rejects a fork settings snapshot owned by another agent', async () => {
+    const { service, forkChatFileCopy } = makeService();
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: agentSettings('codex'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('admits a fork run without consulting provider-native settlement state', async () => {
     const { service, ledger, queue } = makeService();
     const input = {
@@ -2865,11 +2914,13 @@ describe('ChatCommandService', () => {
     expect(parseForkChatCommandRequest({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: agentSettings(),
       upToOrdinal: 2,
       transcriptViewId: 'view-1',
     })).toEqual({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: agentSettings(),
       upToOrdinal: 2,
       transcriptViewId: 'view-1',
     });
@@ -3168,9 +3219,11 @@ describe('ChatCommandService', () => {
       agentSessionId: 'agent-1',
     });
 
+    const requested = agentSettings('claude', { thinking: 'disabled' });
     const result = await service.submitCompact({
       chatId: SOURCE_CHAT_ID,
       clientRequestId: 'req-compact-1',
+      agentSettings: requested,
       instructions: 'focus on api',
     });
 
@@ -3181,10 +3234,23 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         instructions: 'focus on api',
         clientRequestId: 'req-compact-1',
+        agentSettings: requested,
       }),
     );
     expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
     expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a compact settings snapshot owned by another agent', async () => {
+    const { service, agents } = makeService();
+
+    await expect(service.submitCompact({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-compact-wrong-owner',
+      agentSettings: agentSettings('codex'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    expect(agents.compactSession).not.toHaveBeenCalled();
   });
 
   it('refuses /compact while a turn is already running', async () => {

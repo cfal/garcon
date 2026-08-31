@@ -69,7 +69,7 @@ export function scriptOpenCodeRetryExhaustion(
 
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
-const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
+export const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   ownerId: 'opencode',
   schemaVersion: 1,
   values: {},

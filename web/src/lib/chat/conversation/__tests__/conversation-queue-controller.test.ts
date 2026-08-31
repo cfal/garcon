@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getChatExecutionControl, moveQueuedInput } from '$lib/api/chats.js';
+import {
+	getChatExecutionControl,
+	moveQueuedInput,
+	resumeChatQueue,
+} from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { emptyChatExecutionControlState } from '$shared/chat-execution-control';
 import {
@@ -27,6 +31,16 @@ function queueEntry(id: string, revision: number) {
 		createdAt: '2026-07-22T00:00:00.000Z',
 		updatedAt: '2026-07-22T00:00:00.000Z',
 	};
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, resolve, reject };
 }
 
 function createHarness() {
@@ -98,6 +112,9 @@ function createHarness() {
 		steerQueuedEntry: vi.fn(),
 	};
 	const scrollToBottom = vi.fn();
+	const awaitPendingAgentSettings = vi.fn<(_chatId: string) => Promise<void>>(
+		async () => undefined,
+	);
 	const options = {
 		get sessions() {
 			return sessions;
@@ -117,6 +134,7 @@ function createHarness() {
 		get acceptedInputs() {
 			return acceptedInputs;
 		},
+		awaitPendingAgentSettings,
 	} satisfies ConversationQueueControllerOptions;
 	return {
 		controller: new ConversationQueueController(options),
@@ -127,6 +145,7 @@ function createHarness() {
 		conversationUi,
 		acceptedInputs,
 		scrollToBottom,
+		awaitPendingAgentSettings,
 	};
 }
 
@@ -153,6 +172,7 @@ function controllerWithConversationUi(
 		get acceptedInputs() {
 			return harness.acceptedInputs;
 		},
+		awaitPendingAgentSettings: harness.awaitPendingAgentSettings,
 	} satisfies ConversationQueueControllerOptions);
 }
 
@@ -178,6 +198,98 @@ function queueSteerError(
 describe('ConversationQueueController', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+	});
+
+	it('holds enqueue transport behind pending agent settings', async () => {
+		const gate = deferred<void>();
+		const { controller, acceptedInputs, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockReturnValueOnce(gate.promise);
+
+		const pending = controller.createForChat('chat-1', 'queued input');
+		await Promise.resolve();
+		const submission = acceptedInputs.enqueue.mock.results[0].value;
+		expect(submission.submit).not.toHaveBeenCalled();
+		gate.resolve(undefined);
+
+		await pending;
+		expect(submission.submit).toHaveBeenCalledTimes(1);
+	});
+
+	it('holds queue resume behind pending agent settings', async () => {
+		const gate = deferred<void>();
+		const { controller, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockReturnValueOnce(gate.promise);
+		vi.mocked(resumeChatQueue).mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			control: emptyChatExecutionControlState('server-instance-test'),
+		});
+
+		const pending = controller.resumeForChat('chat-1', 'pause-1');
+		await Promise.resolve();
+		expect(resumeChatQueue).not.toHaveBeenCalled();
+		gate.resolve(undefined);
+
+		await pending;
+		expect(resumeChatQueue).toHaveBeenCalledWith('chat-1', 'pause-1');
+	});
+
+	it('holds queued-head steering behind pending agent settings', async () => {
+		const gate = deferred<void>();
+		const { controller, acceptedInputs, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockReturnValueOnce(gate.promise);
+		const submit = vi.fn(async () => ({
+			control: null,
+			serverInstanceId: 'server-instance-test',
+		}));
+		acceptedInputs.steerQueuedEntry.mockReturnValueOnce({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit,
+		});
+
+		const pending = controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+		await Promise.resolve();
+		expect(submit).not.toHaveBeenCalled();
+		gate.resolve(undefined);
+
+		await pending;
+		expect(submit).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not send a queue action when its settings prerequisite fails', async () => {
+		const failure = new Error('settings rejected');
+		const { controller, acceptedInputs, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockRejectedValueOnce(failure);
+
+		await expect(controller.createForChat('chat-1', 'queued input')).rejects.toBe(failure);
+		expect(acceptedInputs.enqueue.mock.results[0].value.submit).not.toHaveBeenCalled();
+	});
+
+	it('does not resume a queue when its settings prerequisite fails', async () => {
+		const failure = new Error('settings rejected');
+		const { controller, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockRejectedValueOnce(failure);
+
+		await expect(controller.resumeForChat('chat-1', 'pause-1')).rejects.toBe(failure);
+		expect(resumeChatQueue).not.toHaveBeenCalled();
+	});
+
+	it('does not steer a queued head when its settings prerequisite fails', async () => {
+		const failure = new Error('settings rejected');
+		const { controller, acceptedInputs, awaitPendingAgentSettings } = createHarness();
+		awaitPendingAgentSettings.mockRejectedValueOnce(failure);
+		const submit = vi.fn();
+		acceptedInputs.steerQueuedEntry.mockReturnValueOnce({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit,
+		});
+
+		await expect(
+			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+		).rejects.toBe(failure);
+		expect(submit).not.toHaveBeenCalled();
 	});
 
 	it('restores the earliest failed concurrent submission after all requests settle', () => {

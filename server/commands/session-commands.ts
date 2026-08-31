@@ -421,6 +421,12 @@ export class SessionCommands {
   private async submitCompactLocked(input: CompactInput): Promise<CommandAcceptedResponse> {
     // Compaction starts its own turn and cannot share its agent session with an active turn.
     const chat = this.deps.chats.getChat(input.chatId);
+    if (chat && input.agentSettings.ownerId !== chat.agentId) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `agentSettings must be owned by ${chat.agentId}`,
+      );
+    }
     if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
     }
@@ -433,6 +439,7 @@ export class SessionCommands {
       payload: {
         chatId: input.chatId,
         instructions: input.instructions ?? null,
+        agentSettings: input.agentSettings,
       },
       turnId,
     });
@@ -454,6 +461,7 @@ export class SessionCommands {
             clientRequestId,
             turnId,
             executionAdmission,
+            agentSettings: input.agentSettings,
           }),
         });
       } catch (error) {

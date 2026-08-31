@@ -4,11 +4,17 @@
 import type { ForkRunCommandRequest } from './chat-command-contracts.js';
 import { parseForkRunCommandRequest } from './chat-command-contracts.js';
 
-// Carries no model or mode overrides: the target inherits everything from the
-// source chat, which is what makes this a continuation rather than a fork.
+// Carries no model or mode overrides. The full settings envelope is the command's
+// immutable snapshot for target creation and the continuation's first turn.
 export type SelfHandoffRunCommandRequest = Pick<
   ForkRunCommandRequest,
-  'clientRequestId' | 'clientMessageId' | 'sourceChatId' | 'chatId' | 'command' | 'images'
+  | 'clientRequestId'
+  | 'clientMessageId'
+  | 'sourceChatId'
+  | 'chatId'
+  | 'command'
+  | 'images'
+  | 'agentSettings'
 >;
 
 // Reuses the fork parser for the shared fields, then drops the overrides a
@@ -21,6 +27,7 @@ export function parseSelfHandoffRunCommandRequest(value: unknown): SelfHandoffRu
     sourceChatId: parsed.sourceChatId,
     chatId: parsed.chatId,
     command: parsed.command,
+    agentSettings: parsed.agentSettings,
     ...(parsed.images === undefined ? {} : { images: parsed.images }),
   };
 }

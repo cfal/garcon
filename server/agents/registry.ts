@@ -11,6 +11,7 @@ import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
+import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
 import type { SlashCommand } from '../../common/slash-commands.js';
 import type {
@@ -22,6 +23,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import type { SessionSettingsExecutionBarrier } from './session-settings-service.js';
 import type { IntegrationRegistry } from './integration-registry.js';
 import type {
   AgentChatEntry,
@@ -97,7 +99,7 @@ export interface AgentRegistryServiceContract {
     messageOrdinal?: number;
   }): Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
-  compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
+  compactSession(chatId: string, opts: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
@@ -147,6 +149,7 @@ interface StartSessionOptions {
 }
 
 interface CompactSessionOptions {
+  agentSettings: AgentSettingsEnvelope;
   instructions?: string;
   clientRequestId?: string;
   turnId?: string;
@@ -180,6 +183,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     chatMutationLock?: KeyedPromiseLock;
+    settingsExecutionBarrier: SessionSettingsExecutionBarrier;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -211,6 +215,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
+      executionBarrier: args.settingsExecutionBarrier,
     });
     this.#ledger.subscribeSessionCommitted((event) => {
       this.#registry.updateChat(event.chatId, {
@@ -271,7 +276,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.submitGoalControl(chatId, command, opts, beforeDelivery);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
-  compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
+  compactSession(chatId: string, opts: CompactSessionOptions): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean {
     return this.#runtime.isAgentSessionRunning(agentId, agentSessionId);

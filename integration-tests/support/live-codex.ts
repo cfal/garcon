@@ -17,16 +17,12 @@ import { withTimeout } from './deferred.js';
 
 export const LIVE_CODEX_MODEL = 'gpt-5.4-nano';
 export const LIVE_CODEX_THINKING_MODE = 'low';
+export type CodexFastMode = 'on' | 'off';
 export type CodexTestToolMode = 'direct' | 'code_mode' | 'code_mode_only';
 
 const CODEX_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/codex', import.meta.url),
 );
-const CODEX_AGENT_SETTINGS: AgentSettingsEnvelope = {
-  ownerId: 'codex',
-  schemaVersion: 1,
-  values: {},
-};
 const SYSTEM_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 const PROXY_START_TIMEOUT_MS = 10_000;
 const PROXY_STOP_TIMEOUT_MS = 5_000;
@@ -85,12 +81,14 @@ export interface LiveCodexTestEnvironment {
   dispose(): Promise<void>;
 }
 
-interface LiveCodexTestEnvironmentOptions {
+export interface LiveCodexTestEnvironmentOptions {
   upstreamUrl?: string;
   // Scripted-model environments proxy to a local fake, so any placeholder key works and no
   // credential needs to exist in the environment.
   testingKey?: string;
   toolMode?: CodexTestToolMode;
+  supportsPriority?: boolean;
+  globalServiceTier?: 'fast' | 'default';
 }
 
 type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
@@ -236,11 +234,21 @@ export async function startLiveCodexTestEnvironment(
         models: LIVE_MODEL_CATALOG.models.map((model) => ({
           ...model,
           tool_mode: options.toolMode ?? model.tool_mode,
+          service_tiers: options.supportsPriority
+            ? [{
+                id: 'priority',
+                name: 'Fast',
+                description: 'Priority service tier for deterministic tests.',
+              }]
+            : [],
         })),
       };
       await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });
       await writeFile(join(codexHome, 'config.toml'), [
         'model_provider = "garcon-live-openai"',
+        ...(options.globalServiceTier
+          ? [`service_tier = ${JSON.stringify(options.globalServiceTier)}`]
+          : []),
         `model_catalog_json = ${JSON.stringify(catalogPath)}`,
         '',
         '[model_providers.garcon-live-openai]',
@@ -269,11 +277,20 @@ export async function startLiveCodexTestEnvironment(
   };
 }
 
+export function codexAgentSettings(mode: CodexFastMode = 'off'): AgentSettingsEnvelope {
+  return {
+    ownerId: 'codex',
+    schemaVersion: 2,
+    values: { codexFastMode: mode },
+  };
+}
+
 export function liveCodexStartRequest(input: {
   chatId: string;
   projectPath: string;
   command: string;
   permissionMode?: StartChatCommandRequest['permissionMode'];
+  fastMode?: CodexFastMode;
 }): StartChatCommandRequest {
   return {
     origin: 'interactive',
@@ -285,7 +302,7 @@ export function liveCodexStartRequest(input: {
     model: LIVE_CODEX_MODEL,
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
-    agentSettings: CODEX_AGENT_SETTINGS,
+    agentSettings: codexAgentSettings(input.fastMode),
     command: input.command,
   };
 }
@@ -294,6 +311,7 @@ export function liveCodexRunRequest(input: {
   chatId: string;
   command: string;
   permissionMode?: AgentRunCommandRequest['permissionMode'];
+  fastMode?: CodexFastMode;
 }): Omit<AgentRunCommandRequest, 'transcriptViewId'> {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -302,7 +320,7 @@ export function liveCodexRunRequest(input: {
     command: input.command,
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
-    agentSettings: CODEX_AGENT_SETTINGS,
+    agentSettings: codexAgentSettings(input.fastMode),
     model: LIVE_CODEX_MODEL,
   };
 }
@@ -312,6 +330,7 @@ export function liveCodexForkRunRequest(input: {
   chatId: string;
   command: string;
   permissionMode?: ForkRunCommandRequest['permissionMode'];
+  fastMode?: CodexFastMode;
 }): ForkRunCommandRequest {
   return {
     clientRequestId: crypto.randomUUID(),
@@ -321,7 +340,7 @@ export function liveCodexForkRunRequest(input: {
     command: input.command,
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
-    agentSettings: CODEX_AGENT_SETTINGS,
+    agentSettings: codexAgentSettings(input.fastMode),
     model: LIVE_CODEX_MODEL,
   };
 }

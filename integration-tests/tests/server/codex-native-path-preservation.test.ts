@@ -78,6 +78,7 @@ describe('Codex native transcript path preservation', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: targetChatId,
+          agentSettings: codex.defaultSettings,
           transcriptViewId: source.transcriptViewId,
           upToOrdinal: source.messages.at(-1)!.ordinal,
         });

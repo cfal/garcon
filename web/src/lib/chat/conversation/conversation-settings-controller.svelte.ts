@@ -4,7 +4,10 @@ import {
 	normalizeSupportedPermissionMode,
 	normalizeSupportedThinkingMode,
 } from '$shared/execution-defaults';
-import type { AgentSettingDescriptor } from '$shared/agent-integration';
+import type {
+	AgentSettingDescriptor,
+	AgentSettingsEnvelope,
+} from '$shared/agent-integration';
 import type { JsonObject, JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type {
@@ -16,10 +19,32 @@ import { errorDetail } from './conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ConversationExecutionDraftState } from './conversation-execution-draft-state.svelte.js';
 
+type AgentSettingsMutationOutcome =
+	| { readonly kind: 'applied' }
+	| { readonly kind: 'rejected'; readonly error: unknown };
+
+interface PendingAgentSettingsMutation {
+	readonly descriptor: AgentSettingDescriptor;
+	readonly value: JsonValue;
+	readonly completion: Promise<AgentSettingsMutationOutcome>;
+	settle(outcome: AgentSettingsMutationOutcome): void;
+}
+
+interface AgentSettingsMutationQueue {
+	confirmed: AgentSettingsEnvelope;
+	readonly pending: PendingAgentSettingsMutation[];
+	draining: boolean;
+}
+
 export interface ConversationSettingsControllerOptions {
 	get sessions(): Pick<
 		SessionControllerDeps['sessions'],
-		'selectedChatId' | 'selectedChat' | 'isDraft' | 'patchDraftStartup' | 'patchChat'
+		| 'selectedChatId'
+		| 'selectedChat'
+		| 'byId'
+		| 'isDraft'
+		| 'patchDraftStartup'
+		| 'patchChat'
 	>;
 	get agentState(): Pick<
 		SessionControllerDeps['agentState'],
@@ -51,7 +76,7 @@ export interface ConversationSettingsControllerOptions {
 }
 
 export class ConversationSettingsController {
-	#latestAgentSettingsMutationByChatId = new Map<string, symbol>();
+	#agentSettingsMutationsByChatId = new Map<string, AgentSettingsMutationQueue>();
 
 	constructor(private readonly options: ConversationSettingsControllerOptions) {}
 
@@ -227,7 +252,7 @@ export class ConversationSettingsController {
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
-		const { sessions, agentState, chatState } = this.options;
+		const { sessions, agentState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		const previous = agentState.agentSettings;
@@ -244,32 +269,91 @@ export class ConversationSettingsController {
 			return;
 		}
 		sessions.patchChat(chatId, { agentSettings: next });
-		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
-		const mutation = Symbol(chatId);
-		this.#latestAgentSettingsMutationByChatId.set(chatId, mutation);
-		void updateExecutionSettings({ chatId, agentSettingsPatch })
-			.then((response) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (sessions.selectedChatId === chatId) {
-					agentState.setAgentSettings(response.agentSettings);
-				}
-				sessions.patchChat(chatId, { agentSettings: response.agentSettings });
-			})
-			.catch((error) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (sessions.selectedChatId === chatId) {
-					agentState.setAgentSettings(previous);
-				}
-				sessions.patchChat(chatId, { agentSettings: previous });
-				chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
-				);
-			})
-			.finally(() => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) === mutation) {
-					this.#latestAgentSettingsMutationByChatId.delete(chatId);
-				}
-			});
+		const queue = this.#agentSettingsMutationsByChatId.get(chatId) ?? {
+			confirmed: previous,
+			pending: [],
+			draining: false,
+		};
+		queue.pending.push(pendingAgentSettingsMutation(descriptor, value));
+		this.#agentSettingsMutationsByChatId.set(chatId, queue);
+		void this.#drainAgentSettingsMutations(chatId, queue);
 	}
+
+	async awaitPendingAgentSettings(chatId: string): Promise<void> {
+		const captured = this.#agentSettingsMutationsByChatId.get(chatId)?.pending.at(-1);
+		if (!captured) return;
+		const outcome = await captured.completion;
+		if (outcome.kind === 'rejected') throw outcome.error;
+	}
+
+	async #drainAgentSettingsMutations(
+		chatId: string,
+		queue: AgentSettingsMutationQueue,
+	): Promise<void> {
+		if (queue.draining) return;
+		queue.draining = true;
+		try {
+			while (queue.pending.length > 0) {
+				const mutation = queue.pending[0];
+				let outcome: AgentSettingsMutationOutcome;
+				try {
+					const agentSettingsPatch: JsonObject = {
+						[mutation.descriptor.key]: mutation.value,
+					};
+					const response = await updateExecutionSettings({ chatId, agentSettingsPatch });
+					queue.confirmed = response.agentSettings;
+					outcome = { kind: 'applied' };
+				} catch (error) {
+					outcome = { kind: 'rejected', error };
+					if (this.options.sessions.selectedChatId === chatId) {
+						this.options.chatState.appendLocalNotice(
+							'error',
+							m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
+						);
+					}
+				}
+				queue.pending.shift();
+				const projected = projectAgentSettings(queue.confirmed, queue.pending);
+				if (this.options.sessions.byId[chatId]) {
+					this.options.sessions.patchChat(chatId, { agentSettings: projected });
+					if (this.options.sessions.selectedChatId === chatId) {
+						this.options.agentState.setAgentSettings(projected);
+					}
+				}
+				mutation.settle(outcome);
+			}
+		} finally {
+			queue.draining = false;
+			if (queue.pending.length === 0) {
+				this.#agentSettingsMutationsByChatId.delete(chatId);
+			} else {
+				void this.#drainAgentSettingsMutations(chatId, queue);
+			}
+		}
+	}
+}
+
+function pendingAgentSettingsMutation(
+	descriptor: AgentSettingDescriptor,
+	value: JsonValue,
+): PendingAgentSettingsMutation {
+	let settle!: (outcome: AgentSettingsMutationOutcome) => void;
+	const completion = new Promise<AgentSettingsMutationOutcome>((resolve) => {
+		settle = resolve;
+	});
+	return { descriptor, value, completion, settle };
+}
+
+function projectAgentSettings(
+	confirmed: AgentSettingsEnvelope,
+	pending: readonly PendingAgentSettingsMutation[],
+): AgentSettingsEnvelope {
+	return pending.reduce(
+		(envelope, mutation) => withAgentSetting(
+			envelope,
+			mutation.descriptor,
+			mutation.value,
+		),
+		confirmed,
+	);
 }

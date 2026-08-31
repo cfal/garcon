@@ -106,16 +106,18 @@ describe('AcceptedInputSubmissionService', () => {
 			sourceChatId: 'chat-1',
 			chatId: 'chat-2',
 			command: 'continue',
+			agentSettings: { ownerId: 'direct', schemaVersion: 1, values: {} },
 		});
 
 		await submission.submit();
 		await submission.submitWithHandoffFork();
 
 		expect(fork).toHaveBeenCalledTimes(2);
-		expect(fork.mock.calls[0]?.[0]).toEqual({
+			expect(fork.mock.calls[0]?.[0]).toEqual({
 			sourceChatId: 'chat-1',
 			chatId: 'chat-2',
 			command: 'continue',
+			agentSettings: { ownerId: 'direct', schemaVersion: 1, values: {} },
 			clientRequestId: 'request-fork',
 			clientMessageId: 'message-fork',
 		});

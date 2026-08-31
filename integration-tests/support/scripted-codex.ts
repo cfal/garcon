@@ -6,17 +6,20 @@
 import { FakeCodexModel } from './fake-codex-model.js';
 import {
   startLiveCodexTestEnvironment,
-  type CodexTestToolMode,
   type LiveCodexTestEnvironment,
+  type LiveCodexTestEnvironmentOptions,
 } from './live-codex.js';
 
 export interface ScriptedCodexTestEnvironment extends LiveCodexTestEnvironment {
   readonly model: FakeCodexModel;
 }
 
-export async function startScriptedCodexTestEnvironment(options: {
-  readonly toolMode?: CodexTestToolMode;
-} = {}): Promise<ScriptedCodexTestEnvironment> {
+export async function startScriptedCodexTestEnvironment(
+  options: Pick<
+    LiveCodexTestEnvironmentOptions,
+    'toolMode' | 'supportsPriority' | 'globalServiceTier'
+  > = {},
+): Promise<ScriptedCodexTestEnvironment> {
   const model = FakeCodexModel.start();
   let environment: LiveCodexTestEnvironment;
   try {
@@ -24,6 +27,8 @@ export async function startScriptedCodexTestEnvironment(options: {
       upstreamUrl: model.responsesUrl,
       testingKey: `garcon-scripted-codex-${crypto.randomUUID()}`,
       toolMode: options.toolMode,
+      supportsPriority: options.supportsPriority,
+      globalServiceTier: options.globalServiceTier,
     });
   } catch (error) {
     model.stop();

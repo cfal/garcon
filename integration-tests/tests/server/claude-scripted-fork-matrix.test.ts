@@ -33,6 +33,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  CLAUDE_AGENT_SETTINGS,
   liveClaudeRunRequest,
   liveClaudeStartRequest,
 } from '../../support/live-claude.js';
@@ -285,7 +286,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await waitForFile(join(fixture.dirs.project, startedFile));
       await waitForNativeFileContains(fixture.dirs.workspace, sourceChatId, secondPrompt);
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
+      });
       expect(userContents((await fixture.client.getMessages(forkChatId)).messages)).toEqual([
         firstPrompt,
         secondPrompt,
@@ -335,7 +340,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await appendMicrocompaction(persisted);
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
+      });
       const fork = await fixture.client.getMessages(forkChatId);
       expect(countUserContent(fork.messages, prompt)).toBe(1);
       expect(assistantContents(fork.messages).filter((content) => content === reply)).toHaveLength(1);
@@ -378,7 +387,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
       const hookUuids = await injectOutOfOrderHookAttachments(source);
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
+      });
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([sourcePrompt]);
       expect(assistantContents(fork.messages)).toContain(sourceReply);
@@ -445,7 +458,11 @@ describe('scripted Claude fork lifecycle matrix', () => {
 
     await withIntegrationFixture('claude-scripted-fork-empty', async (fixture) => {
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
+      });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
       expect(await readClaudeChatRecord(fixture.dirs.workspace, forkChatId)).toMatchObject({
         agentSessionId: null,
@@ -502,11 +519,13 @@ describe('scripted Claude fork lifecycle matrix', () => {
       await expectTranscriptNotYetPersisted(fixture.client.forkChat({
         sourceChatId,
         chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
       }));
 
       await fixture.client.forkChat({
         sourceChatId,
         chatId: forkChatId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
         allowHandoffFork: true,
       });
 
