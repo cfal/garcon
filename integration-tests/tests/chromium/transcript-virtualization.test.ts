@@ -1666,7 +1666,9 @@ async function openNewWorkspaceWindow(page: Page, name: string): Promise<string>
 async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void> {
   const workspaceWindow = page.locator(`[data-workspace-window-id="${windowId}"]`);
   if ((await workspaceWindow.getAttribute('data-workspace-window-current')) === 'true') return;
-  await page.locator(`[data-workspace-window-activation-shield="${windowId}"]`).click();
+  await page
+    .locator(`[data-workspace-window-titlebar="${windowId}"]`)
+    .click({ position: { x: 3, y: 3 } });
   await page.waitForFunction(
     (expectedWindowId) =>
       document
@@ -4287,15 +4289,15 @@ async function verifyWindowCountGeometryStability(
   await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-enter');
   await focusWorkspaceWindow(fixture.page, backgroundWindowId);
-  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'visible' });
   const hiddenAppendMarker = 'chromium-hidden-window-append';
   await appendTurn(fixture.integration, chatId, hiddenAppendMarker);
-  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
-  await expectFixedTranscriptTypography(fixture.page);
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText(`echo:${hiddenAppendMarker}`, { exact: true })
     .waitFor();
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
+  await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-show');
   await closeWorkspaceWindow(fixture.page, backgroundWindowId);
   await expectFixedTranscriptTypography(fixture.page);

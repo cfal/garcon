@@ -138,7 +138,7 @@ describe('Lightpanda workspace windows', () => {
       expect(secondWindowId).not.toBe(originalWindowId);
       expect(
         await fixture.page.$(
-          `[data-workspace-window-id="${originalWindowId}"] [data-chat-window-preview] textarea`,
+          `[data-conversation-panel="chat-view:${originalWindowId}"] textarea`,
         ),
       ).toBeNull();
 
@@ -163,7 +163,7 @@ describe('Lightpanda workspace windows', () => {
       await app.waitForSelectedChat(chatB.id);
       expect(
         await fixture.page.$(
-          `[data-workspace-window-id="${secondWindowId}"] [data-chat-window-preview] textarea`,
+          `[data-conversation-panel="chat-view:${secondWindowId}"] textarea`,
         ),
       ).toBeNull();
       await app.clickSidebarChatContaining('workspace-chat-a');
