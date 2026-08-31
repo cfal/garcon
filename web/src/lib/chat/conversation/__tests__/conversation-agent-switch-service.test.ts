@@ -36,6 +36,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 	};
 }
 

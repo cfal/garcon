@@ -166,6 +166,7 @@ export class ChatListProjector {
     const lastActivityAt = chat.activity.lastActivityAt;
     return {
       id: chat.id,
+      parentChat: session.parentChat,
       agentId: chat.agentId,
       agentOwnershipEpoch: session.agentOwnershipEpoch,
       model: chat.model,

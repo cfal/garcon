@@ -22,6 +22,7 @@ function sourceChat(overrides = {}) {
     carryOverSegments: [{ id: 'seg-old', agentId: 'claude', model: 'opus' }],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    parentChat: null,
     ...overrides,
   };
 }
@@ -120,6 +121,12 @@ describe('self handoff commands', () => {
     expect(target.agentSessionId).toBeNull();
     expect(target.nativeSession).toBeNull();
     expect(target.nativeSeedReceipt).toBeNull();
+    expect(target.parentChat).toEqual({
+      chatId: SOURCE_ID,
+      relation: 'handoff',
+      transcriptViewId: 'source-view',
+      ordinal: 4,
+    });
     expect(target.agentOwnershipEpoch).not.toBe('epoch-1');
     expect(support.deps.handoffs.seedContinuationLedger).toHaveBeenCalledWith({
       sourceChatId: SOURCE_ID,

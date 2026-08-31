@@ -175,6 +175,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 	};
 }
 
@@ -291,6 +292,7 @@ function controlWithQueue(
 function createServerEntry(id: string) {
 	return {
 		id,
+		parentChat: null,
 		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default' as const,

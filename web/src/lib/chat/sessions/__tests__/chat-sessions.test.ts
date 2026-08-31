@@ -27,6 +27,7 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }
@@ -45,6 +46,54 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']).toBe(ref);
 		expect(store.byId['b']).toBeTruthy();
+	});
+
+	it('preserves identity for structurally equal parent references', () => {
+		const store = new ChatSessionsStore();
+		const parentChat = {
+			chatId: '1783725900000000',
+			relation: 'fork' as const,
+			transcriptViewId: 'view-parent',
+			ordinal: 7,
+		};
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat })]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([makeServerSession({ id: 'a', parentChat: { ...parentChat } })]);
+
+		expect(store.byId['a']).toBe(ref);
+	});
+
+	it('replaces a record when its parent reference changes', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: {
+					chatId: '1783725900000000',
+					relation: 'fork',
+					transcriptViewId: 'view-parent',
+					ordinal: 7,
+				},
+			}),
+		]);
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				parentChat: {
+					chatId: '1783725900000000',
+					relation: 'fork',
+					transcriptViewId: 'view-parent',
+					ordinal: 8,
+				},
+			}),
+		]);
+
+		expect(store.byId['a']).not.toBe(ref);
+		expect(store.byId['a']?.parentChat?.ordinal).toBe(8);
 	});
 
 	it('replaces record when fields change', () => {
@@ -76,6 +125,7 @@ describe('ChatSessionsStore', () => {
 		});
 
 		expect(store.byId['draft-1']?.status).toBe('draft');
+		expect(store.byId['draft-1']?.parentChat).toBeNull();
 		expect(store.byId['draft-1']?.title).toBe('Hello');
 		expect(store.startupByChatId['draft-1']).toBeTruthy();
 		expect(store.selectedChatId).toBe('draft-1');

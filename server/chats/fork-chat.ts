@@ -295,6 +295,12 @@ export async function forkChatFileCopy({
       carryOverSegments: [],
       nativeSeedReceipt: nativeFork?.nativeSeedReceipt ?? null,
       carryOverMigrationQuarantine: null,
+      parentChat: {
+        chatId: sourceChatId,
+        relation: 'fork',
+        transcriptViewId: selectedWatermark.viewId,
+        ordinal: selectedWatermark.ordinal,
+      },
     });
   } catch (error) {
     ledger.deleteChat(targetChatId);

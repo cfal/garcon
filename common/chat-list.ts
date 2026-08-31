@@ -2,9 +2,11 @@ import type { ApiProtocol } from './api-providers.js';
 import type { PermissionMode, ThinkingMode } from './chat-modes.js';
 import type { AgentSettingsEnvelope } from './agent-integration.js';
 import type { ChatProcessingPhase } from './chat-types.js';
+import type { ParentChatRef } from './chat-parentage.js';
 
 export interface ChatListEntry {
   id: string;
+  parentChat: ParentChatRef | null;
   agentId: string;
   agentOwnershipEpoch: string;
   model: string | null;

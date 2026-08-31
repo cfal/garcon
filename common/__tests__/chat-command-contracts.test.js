@@ -55,6 +55,12 @@ describe('chat command request parsers', () => {
       agentSettings: agentSettings(),
       command: ' hello ',
       tags: ['Review Needed', 'review-needed', ' QA ', 42],
+      parentChat: {
+        chatId: SOURCE_CHAT_ID,
+        relation: 'fork',
+        transcriptViewId: TRANSCRIPT_VIEW_ID,
+        ordinal: 1,
+      },
     });
 
     expect(parsed).toMatchObject({
@@ -68,6 +74,7 @@ describe('chat command request parsers', () => {
       tags: ['qa', 'review-needed'],
       origin: 'interactive',
     });
+    expect(parsed).not.toHaveProperty('parentChat');
   });
 
   it('accepts only public chat start origins', () => {

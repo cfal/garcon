@@ -49,6 +49,7 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		status: 'draft',
 		tags: [],
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -76,6 +77,7 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isUnread: false,
 		canReloadFromNativeHistory: false,
 		...overrides,
+		parentChat: overrides.parentChat ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }

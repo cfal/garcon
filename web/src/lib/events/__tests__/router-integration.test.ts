@@ -44,6 +44,7 @@ function executionControl(serverInstanceId: string, version: number, content: st
 function chatRecord(): ChatSessionRecord {
 	return {
 		id: 'chat-a',
+		parentChat: null,
 		projectPath: '/repo',
 		effectiveProjectKey: '/repo',
 		projectIdentityState: 'available',
