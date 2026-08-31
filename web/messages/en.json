@@ -514,6 +514,7 @@
 	"filetree_filter_placeholder": "Filter by name...",
 	"filetree_go_to_chat_project": "Go to chat project",
 	"filetree_home": "Home",
+	"filetree_home_unavailable": "Home directory isn't available in Files",
 	"filetree_hours_ago": "{count} hours ago",
 	"filetree_just_now": "just now",
 	"filetree_loading": "Loading files...",

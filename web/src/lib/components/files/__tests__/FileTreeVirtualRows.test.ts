@@ -29,6 +29,7 @@ function entries(count: number): FileTreeEntry[] {
 function response(items: FileTreeEntry[]): FileTreeResponse {
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: '/workspace',
 			relativePath: '',

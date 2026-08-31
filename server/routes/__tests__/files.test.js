@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
+import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import {
   FILE_REVISION_HEADER,
@@ -16,15 +17,19 @@ import {
 let projectPath;
 let outsidePath;
 let originalProjectBaseDir;
+let originalHome;
 
 beforeEach(async () => {
   originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+  originalHome = process.env.HOME;
   projectPath = path.join(os.tmpdir(), `garcon-files-route-${randomUUID()}`);
   outsidePath = path.join(
     os.tmpdir(),
     `garcon-files-route-outside-${randomUUID()}`,
   );
   process.env.GARCON_PROJECT_BASE_DIR = projectPath;
+  process.env.HOME = projectPath;
+  resetServerConfigForTests();
   await fs.mkdir(path.join(projectPath, 'src'), { recursive: true });
   await fs.mkdir(outsidePath, { recursive: true });
   await fs.writeFile(path.join(projectPath, 'src/main.ts'), 'hello\n', 'utf8');
@@ -36,6 +41,12 @@ afterEach(async () => {
   } else {
     process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
   }
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+  resetServerConfigForTests();
   await fs.rm(projectPath, { recursive: true, force: true });
   await fs.rm(outsidePath, { recursive: true, force: true });
 });
@@ -53,6 +64,10 @@ describe('files route', () => {
     expect(response.status).toBe(200);
     expect(parseFileTreeResponse(body)).not.toBeNull();
     expect(body.fileRootPath).toBe(projectPath);
+    expect(body.homeDirectory).toEqual({
+      path: projectPath,
+      breadcrumbs: [{ name: path.basename(projectPath), path: projectPath }],
+    });
     expect(body.directory).toEqual({
       path: projectPath,
       relativePath: '',
@@ -67,6 +82,131 @@ describe('files route', () => {
         type: 'directory',
       }),
     );
+  });
+
+  it('returns a canonical Home target inside the configured base', async () => {
+    const homePath = path.join(projectPath, 'users', 'me');
+    await fs.mkdir(homePath, { recursive: true });
+    process.env.HOME = homePath;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toEqual({
+      path: homePath,
+      breadcrumbs: [
+        { name: path.basename(projectPath), path: projectPath },
+        { name: 'users', path: path.join(projectPath, 'users') },
+        { name: 'me', path: homePath },
+      ],
+    });
+  });
+
+  it('canonicalizes an in-base symlinked Home target', async () => {
+    const homePath = path.join(projectPath, 'users', 'me');
+    const homeAlias = path.join(projectPath, 'home-alias');
+    await fs.mkdir(homePath, { recursive: true });
+    await fs.symlink(homePath, homeAlias, 'dir');
+    process.env.HOME = homeAlias;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toEqual({
+      path: homePath,
+      breadcrumbs: [
+        { name: path.basename(projectPath), path: projectPath },
+        { name: 'users', path: path.join(projectPath, 'users') },
+        { name: 'me', path: homePath },
+      ],
+    });
+  });
+
+  it('withholds Home when it is outside the configured base', async () => {
+    process.env.HOME = outsidePath;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(outsidePath);
+  });
+
+  it('withholds Home when an in-base symlink escapes the configured base', async () => {
+    const homeAlias = path.join(projectPath, 'home-alias');
+    await fs.symlink(outsidePath, homeAlias, 'dir');
+    process.env.HOME = homeAlias;
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(outsidePath);
+  });
+
+  it('withholds Home when the configured path is missing or not a directory', async () => {
+    const filePath = path.join(projectPath, 'home-file');
+    await fs.writeFile(filePath, 'not a directory\n', 'utf8');
+
+    for (const homePath of [path.join(projectPath, 'missing-home'), filePath]) {
+      process.env.HOME = homePath;
+      resetServerConfigForTests();
+      const routes = createFilesRoutes({ getChat: () => null });
+      const url = new URL('http://localhost/api/v1/files/tree');
+      const response = await routes['/api/v1/files/tree'].GET(
+        new Request(url),
+        url,
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(parseFileTreeResponse(body)).not.toBeNull();
+      expect(body.homeDirectory).toBeNull();
+    }
+  });
+
+  it('keeps the file tree available when Home resolution fails', async () => {
+    process.env.HOME = path.join(projectPath, 'x'.repeat(4096));
+    resetServerConfigForTests();
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.homeDirectory).toBeNull();
   });
 
   it('navigates to parent and sibling directories inside the base', async () => {

@@ -41,6 +41,7 @@
 	});
 	let response: FileTreeResponse = {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: '/workspace',
 			relativePath: '',
