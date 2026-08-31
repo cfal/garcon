@@ -181,19 +181,7 @@ export class TerminalManager {
   ): TerminalRenameResponse {
     const session = this.#requireSession(principal, terminalId);
     session.metadata.title = title;
-    for (const subscriber of session.subscribers) {
-      try {
-        subscriber.sendTerminalMessage({
-          type: "terminal-status",
-          terminal: cloneTerminalMetadata(session.metadata),
-        });
-      } catch (error) {
-        logger.warn(
-          `terminal rename notification failed id=${terminalId} connection=${subscriber.connectionId}:`,
-          errorMessage(error),
-        );
-      }
-    }
+    this.#broadcastStatus(session, "rename");
     return { success: true, terminalId, title };
   }
 
@@ -634,23 +622,27 @@ export class TerminalManager {
       if (session.terminating) return;
       session.metadata.processStatus = "exited";
       session.metadata.exitCode = exitCode;
-      for (const subscriber of session.subscribers) {
-        try {
-          subscriber.sendTerminalMessage({
-            type: "terminal-status",
-            terminal: cloneTerminalMetadata(session.metadata),
-          });
-        } catch (error) {
-          logger.warn(
-            `terminal exit notification failed id=${session.metadata.terminalId} connection=${subscriber.connectionId}:`,
-            errorMessage(error),
-          );
-        }
-      }
+      this.#broadcastStatus(session, "exit");
       logger.info(
         `terminal exited id=${session.metadata.terminalId} principal=${session.principalKey} code=${exitCode}`,
       );
     });
+  }
+
+  #broadcastStatus(session: TerminalSession, event: "rename" | "exit"): void {
+    for (const subscriber of session.subscribers) {
+      try {
+        subscriber.sendTerminalMessage({
+          type: "terminal-status",
+          terminal: cloneTerminalMetadata(session.metadata),
+        });
+      } catch (error) {
+        logger.warn(
+          `terminal ${event} notification failed id=${session.metadata.terminalId} connection=${subscriber.connectionId}:`,
+          errorMessage(error),
+        );
+      }
+    }
   }
 
   #enqueue(

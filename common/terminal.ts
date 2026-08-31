@@ -196,7 +196,7 @@ function normalizeTerminalTitle(value: unknown): string | null | undefined {
   return title.length <= TERMINAL_TITLE_MAX_LENGTH ? title : undefined;
 }
 
-function parseStoredTerminalTitle(value: unknown): string | null | undefined {
+function parseNormalizedTerminalTitle(value: unknown): string | null | undefined {
   const title = normalizeTerminalTitle(value);
   if (title === undefined || (typeof value === 'string' && title !== value))
     return undefined;
@@ -288,7 +288,7 @@ export function parseTerminalMetadata(value: unknown): TerminalMetadata | null {
   const terminalId = terminalIdentifier(input.terminalId);
   const displaySequence = positiveInteger(input.displaySequence);
   const latestOutputSequence = nonNegativeInteger(input.latestOutputSequence);
-  const title = parseStoredTerminalTitle(input.title);
+  const title = parseNormalizedTerminalTitle(input.title);
   if (
     !terminalId ||
     !displaySequence ||
@@ -473,7 +473,7 @@ export function parseTerminalRenameResponse(
   const input = record(value);
   if (!input || input.success !== true) return null;
   const terminalId = terminalIdentifier(input.terminalId);
-  const title = parseStoredTerminalTitle(input.title);
+  const title = parseNormalizedTerminalTitle(input.title);
   return terminalId && title !== undefined
     ? { success: true, terminalId, title }
     : null;
