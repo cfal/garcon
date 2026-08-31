@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import type { ScrollControllerDeps } from '$lib/chat/transcript/conversation-scroll-controller-contract.js';
+import type { ConversationScrollControllerDeps } from '$lib/chat/transcript/conversation-scroll-controller-contract.js';
 import type {
 	TranscriptPageApplicationGate,
 	TranscriptPageDirection,
@@ -68,7 +68,7 @@ export class ConversationScrollController {
 	#lastObservedTranscriptViewId: string;
 	#lastObservedFeedDataRevision: number;
 
-	constructor(private deps: ScrollControllerDeps) {
+	constructor(private deps: ConversationScrollControllerDeps) {
 		this.#nativeScrollSettlement = new ConversationNativeScrollSettlement((activity) => {
 			this.deps.getViewport()?.setNativeScrollActivity(activity);
 		});
@@ -173,7 +173,7 @@ export class ConversationScrollController {
 		) {
 			this.#deferredLiveEdgeIntent = null;
 			this.setPinnedToBottom(true);
-			this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+			this.#expireUserScrollIntent();
 			viewport?.scrollToEnd();
 		}
 	}
@@ -184,7 +184,7 @@ export class ConversationScrollController {
 
 	finishDirectionlessUserScrollIntent(): void {
 		if (this.#userScrollIntent.direction !== null) return;
-		this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+		this.#expireUserScrollIntent();
 		this.#nativeScrollHandoff = null;
 	}
 
@@ -352,12 +352,13 @@ export class ConversationScrollController {
 			if (hasFreshFollowIntent) {
 				this.deps.chatState.isUserScrolledUp = false;
 				this.setPinnedToBottom(true);
-				this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
+				this.#expireUserScrollIntent();
 				this.deps.getViewport()?.scrollToEnd();
 			} else if (!nearBottom || this.#userScrollIntent.direction === 'earlier') {
 				this.#preserveHistoryBrowsing();
 			}
 		} else if (!nearBottom && (this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp)) {
+			// Resize observers correct layout drift; scroll events preserve explicit positioning.
 			return;
 		}
 
@@ -827,10 +828,8 @@ export class ConversationScrollController {
 	}
 
 	#beginViewportOperation(): number {
-		this.#deferredLiveEdgeIntent = null;
-		this.#nativeScrollHandoff = null;
-		this.deps.chatState.invalidatePendingWindowNavigation();
-		return ++this.#viewportOperationEpoch;
+		this.#cancelViewportOperations();
+		return this.#viewportOperationEpoch;
 	}
 
 	#cancelViewportOperations(): void {
@@ -885,6 +884,9 @@ export class ConversationScrollController {
 	#preserveHistoryBrowsing(): void {
 		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
+	}
+	#expireUserScrollIntent(): void {
+		this.#userScrollIntent = { ...this.#userScrollIntent, receivedAt: 0 };
 	}
 	#hasRecentUserScrollIntent(): boolean {
 		return (

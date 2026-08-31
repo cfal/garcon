@@ -12,6 +12,7 @@ export interface ConversationScrollIntent {
 	direction: TranscriptPageDirection | null;
 	// Carries the native touch lifetime; a directionless start stays stateless for settlement.
 	touch: ConversationNativeTouchPhase | null;
+	// Contact reports delimit a press lifetime and never carry a direction.
 	contact: ConversationScrollContactPhase | null;
 }
 

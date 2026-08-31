@@ -6,9 +6,8 @@ export type ConversationScrollState = Pick<
 	| 'canLoadEarlier'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
-	| 'transcriptViewId'
-	| 'hasLaterMessages'
 	| 'hasEarlierRowsToReveal'
+	| 'hasLaterMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
 	| 'invalidatePendingHistoryLoad'
@@ -19,10 +18,11 @@ export type ConversationScrollState = Pick<
 	| 'navigateToWindow'
 	| 'pageStates'
 	| 'revealEarlierLoadedRows'
+	| 'transcriptViewId'
 	| 'windowRevision'
 >;
 
-export interface ScrollControllerDeps {
+export interface ConversationScrollControllerDeps {
 	getScrollContainer: () => HTMLDivElement | null;
 	getViewport: () => ConversationViewportPort | null;
 	getQueueContainer: () => HTMLDivElement | undefined;

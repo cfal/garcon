@@ -91,7 +91,7 @@ describe('conversation viewport scroll gestures', () => {
 		cleanup();
 	});
 
-	it('delimits an ordinary pointer press without assigning a direction', () => {
+	it('reports pointer press start and end without a scroll direction', () => {
 		const node = document.createElement('div');
 		const report = vi.fn();
 		const cleanup = observeConversationViewportScrollGestures(node, report);
@@ -106,7 +106,7 @@ describe('conversation viewport scroll gestures', () => {
 		cleanup();
 	});
 
-	it('delivers pointer cancellation as a terminal contact', () => {
+	it('reports pointer cancellation as a contact end', () => {
 		const node = document.createElement('div');
 		const report = vi.fn();
 		const cleanup = observeConversationViewportScrollGestures(node, report);
