@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ScrollControllerDeps } from '$lib/chat/transcript/conversation-scroll-controller-contract.js';
 import type {
 	TranscriptPageApplicationGate,
 	TranscriptPageDirection,
@@ -40,35 +40,6 @@ interface UserScrollIntent {
 }
 type DeferredLiveEdgeIntent = { chatId: string; epoch: number };
 type NativeScrollHandoff = DeferredLiveEdgeIntent & { direction: TranscriptPageDirection | null };
-
-export type ConversationScrollState = Pick<
-	ActiveTranscriptState,
-	| 'canLoadEarlier'
-	| 'displayMessageCount'
-	| 'feedMutationClock'
-	| 'transcriptViewId'
-	| 'hasLaterMessages'
-	| 'hasEarlierRowsToReveal'
-	| 'isLoadingMessages'
-	| 'isUserScrolledUp'
-	| 'invalidatePendingHistoryLoad'
-	| 'invalidatePendingWindowNavigation'
-	| 'loadEarlierPage'
-	| 'loadLaterPage'
-	| 'loadStatus'
-	| 'navigateToWindow'
-	| 'pageStates'
-	| 'revealEarlierLoadedRows'
-	| 'windowRevision'
->;
-
-export interface ScrollControllerDeps {
-	getScrollContainer: () => HTMLDivElement | null;
-	getViewport: () => ConversationViewportPort | null;
-	getQueueContainer: () => HTMLDivElement | undefined;
-	chatState: ConversationScrollState;
-	getChatId: () => string | null;
-}
 
 export class ConversationScrollController {
 	isPinnedToBottom = $state(true);

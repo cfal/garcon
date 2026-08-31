@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
-import {
-	ConversationScrollController,
-	type ConversationScrollState,
-} from '../conversation-scroll-controller.svelte';
+import type { ConversationScrollState } from '../conversation-scroll-controller-contract.js';
+import { ConversationScrollController } from '../conversation-scroll-controller.svelte';
 import type { ConversationFeedMutationClock } from '../conversation-feed-mutations';
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
