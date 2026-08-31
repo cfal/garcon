@@ -244,6 +244,7 @@ Rules:
 - `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
+- `web/src/lib/work-map/` owns chat-lineage normalization and retained Work Map surface state.
 - Their Svelte renderers remain in the corresponding `components` directories.
 
 ### Utilities Layer
