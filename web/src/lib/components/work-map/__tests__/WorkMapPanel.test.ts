@@ -83,13 +83,21 @@ describe('WorkMapPanel', () => {
 		expect(childLink.getAttribute('href')).toBe('/chat/child');
 		expect(childLink.getAttribute('aria-current')).toBe('page');
 		expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
-		expect(within(childLink).getByText(m.work_map_relation_fork())).toBeTruthy();
-		expect(within(childLink).getByText('claude')).toBeTruthy();
+		expect(
+			within(childLink).getByText(m.work_map_relation_fork()).classList,
+		).toContain('text-foreground');
+		expect(within(childLink).getByText('claude').classList).toContain('text-foreground');
 		expect(within(childLink).getByText('opus')).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_processing())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_unread())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_archived())).toBeTruthy();
 		expect(container.querySelector('[role="tree"]')).toBeNull();
+		expect(screen.getByText(m.work_map_chat_count({ count: 2 })).classList).toContain(
+			'text-foreground',
+		);
+		expect(screen.getByText(m.work_map_root_count({ count: 1 })).classList).toContain(
+			'text-foreground',
+		);
 	});
 
 	it('collapses and expands a branch with accessible disclosure state', async () => {

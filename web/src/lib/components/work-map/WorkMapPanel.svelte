@@ -101,12 +101,12 @@
 			</label>
 
 			<div class="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
-				<span class="rounded-full bg-muted px-2 py-1">
+				<span class="rounded-full bg-muted px-2 py-1 text-foreground">
 					{model.queryActive
 						? m.work_map_result_count({ count: model.matchCount })
 						: m.work_map_chat_count({ count: model.chatCount })}
 				</span>
-				<span class="rounded-full bg-muted px-2 py-1">
+				<span class="rounded-full bg-muted px-2 py-1 text-foreground">
 					{m.work_map_root_count({ count: model.rootCount })}
 				</span>
 				{#if model.missingParentCount > 0}

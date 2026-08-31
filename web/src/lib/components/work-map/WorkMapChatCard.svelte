@@ -51,7 +51,7 @@
 					<span class="min-w-0 truncate text-sm font-semibold">{title}</span>
 					{#if relation}
 						<span
-							class="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+							class="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground"
 						>
 							{relation}
 						</span>
@@ -71,7 +71,9 @@
 				<div
 					class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
 				>
-					<span class="rounded bg-muted px-1.5 py-0.5 font-medium">{node.chat.agentId}</span>
+					<span class="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">
+						{node.chat.agentId}
+					</span>
 					{#if node.chat.model}
 						<span class="max-w-48 truncate" title={node.chat.model}>{node.chat.model}</span>
 					{/if}
