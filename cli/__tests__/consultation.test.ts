@@ -156,6 +156,7 @@ describe('runConsultation', () => {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
       title: 'Implementation review',
+      parentChatId: '1785337200123455',
       userMessagePresentation: { origin: 'cli', style: 'notice', title: 'Operator context' },
       additionalTags: ['review-needed'],
     };
@@ -167,6 +168,7 @@ describe('runConsultation', () => {
     expect(testClient.starts[0]).toMatchObject({
       origin: 'cli',
       chatId: CHAT_ID,
+      parentChatId: '1785337200123455',
       agentId: 'codex',
       projectPath: '/repo',
       command: 'Implement it',
@@ -213,6 +215,7 @@ describe('runConsultation', () => {
     const invocation: CliInvocation = {
       kind: 'start', workspace: 'default', configDir: '/config', cwd: '/repo',
       agentId: 'codex', model: 'gpt-5.4', prompt: 'Implement it', readsPromptFromStdin: false,
+      parentChatId: '1785337200123455',
     };
 
     await runConsultation(invocation, 'Implement it', testClient, output(), undefined, {
@@ -221,16 +224,24 @@ describe('runConsultation', () => {
     });
 
     expect(starts).toHaveLength(2);
-    expect(starts.map(({ origin, chatId, clientRequestId, clientMessageId }) => ({
+    expect(starts.map(({ origin, chatId, parentChatId, clientRequestId, clientMessageId }) => ({
       origin,
       chatId,
+      parentChatId,
       clientRequestId,
       clientMessageId,
     }))).toEqual([
-      { origin: 'cli', chatId: CHAT_ID, clientRequestId: 'request-1', clientMessageId: 'message-1' },
+      {
+        origin: 'cli',
+        chatId: CHAT_ID,
+        parentChatId: '1785337200123455',
+        clientRequestId: 'request-1',
+        clientMessageId: 'message-1',
+      },
       {
         origin: 'cli',
         chatId: '1785337200123457',
+        parentChatId: '1785337200123455',
         clientRequestId: 'request-2',
         clientMessageId: 'message-2',
       },

@@ -53,7 +53,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
-  garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
+  garcon-cli [options] [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] --resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] list <resource>
   garcon-cli [options] send-async <chat-id> [--allow-steer] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <message>
@@ -96,6 +96,7 @@ Options:
   --config-dir <path>          Garcon config root (default: ~/.garcon)
   --server <url>               Assert the workspace descriptor's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
+  --parent <chat-id>           Record an existing parent for a new delegated chat
   --agent <id>                 Agent ID; required for a new chat and agent-scoped lists
   --provider <id>              Configured API provider ID
   --endpoint <id>              Endpoint ID within --provider
@@ -167,6 +168,7 @@ export interface StartCliInvocation extends CliInvocationBase {
   agentId: string;
   model: string;
   cwd: string;
+  parentChatId?: ChatId;
 }
 
 export interface ResumeCliInvocation extends CliInvocationBase {
@@ -270,6 +272,7 @@ const SINGLE_STRING_OPTIONS = [
   'config-dir',
   'server',
   'cwd',
+  'parent',
   'agent',
   'provider',
   'endpoint',
@@ -416,6 +419,7 @@ type ControlCommandKind = 'send-async' | 'stop' | 'add-row';
 
 const CONTROL_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
+  ['parent', '--parent'],
   ['agent', '--agent'],
   ['provider', '--provider'],
   ['endpoint', '--endpoint'],
@@ -576,6 +580,7 @@ type ObservationCommandKind = 'status' | 'wait' | 'export' | 'handoff';
 
 const OBSERVATION_FORBIDDEN_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ['cwd', '--cwd'],
+  ['parent', '--parent'],
   ['agent', '--agent'],
   ['provider', '--provider'],
   ['endpoint', '--endpoint'],
@@ -833,6 +838,7 @@ export function parseCliArgs(
         'config-dir': { type: 'string' },
         server: { type: 'string' },
         cwd: { type: 'string' },
+        parent: { type: 'string' },
         agent: { type: 'string' },
         provider: { type: 'string' },
         endpoint: { type: 'string' },
@@ -904,6 +910,7 @@ export function parseCliArgs(
   const endpointId = nonEmptyOption(values.endpoint as string | undefined, '--endpoint');
   const model = nonEmptyOption(values.model as string | undefined, '--model');
   const cwd = nonEmptyOption(values.cwd as string | undefined, '--cwd');
+  const parent = nonEmptyOption(values.parent as string | undefined, '--parent');
   const resume = nonEmptyOption(values.resume as string | undefined, '--resume');
   const additionalTags = parseAdditionalTags(values.tag);
   const tokens = parsed.tokens ?? [];
@@ -941,6 +948,7 @@ export function parseCliArgs(
       throw argumentError(`list requires one resource: ${LIST_RESOURCE_VALUES.join(', ')}`);
     }
     rejectListOption(cwd, '--cwd');
+    rejectListOption(parent, '--parent');
     rejectListOption(values.model, '--model');
     rejectListOption(values.permissions, '--permissions');
     rejectListOption(values['reasoning-effort'], '--reasoning-effort');
@@ -1054,6 +1062,7 @@ export function parseCliArgs(
 
   if (resume !== undefined) {
     if (cwd !== undefined) throw argumentError('--cwd cannot be used with --resume');
+    if (parent !== undefined) throw argumentError('--parent cannot be used with --resume');
     let chatId: ChatId;
     try {
       chatId = parseChatId(resume);
@@ -1065,11 +1074,20 @@ export function parseCliArgs(
 
   if (agentId === undefined) throw argumentError('--agent is required for a new chat');
   if (model === undefined) throw argumentError('--model is required for a new chat');
+  let parentChatId: ChatId | undefined;
+  if (parent !== undefined) {
+    try {
+      parentChatId = parseChatId(parent);
+    } catch (error) {
+      throw argumentError('--parent must be a valid Garcon chat ID', { cause: error });
+    }
+  }
   return {
     kind: 'start',
     ...shared,
     agentId,
     model,
     cwd: path.resolve(currentDirectory, cwd ?? '.'),
+    ...(parentChatId === undefined ? {} : { parentChatId }),
   };
 }

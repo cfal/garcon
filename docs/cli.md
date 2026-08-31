@@ -62,6 +62,24 @@ bun cli/main.ts --workspace default --resume 1785337200123456 \
 
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
 
+Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
+for example when one agent starts another for review. Garcon records an immutable
+`delegation` relationship and shows it in Work Map. The parent must exist in the
+same workspace. Declaring it does not copy transcript content, inherit execution
+settings, or make either chat wait for the other. `--parent` is creation-only and
+cannot be used with `--resume`.
+
+```bash
+bun cli/main.ts \
+  --workspace default \
+  --cwd /path/to/project \
+  --parent 1785337200123456 \
+  --agent claude \
+  --model claude-sonnet-4-5 \
+  --tag review \
+  "Review the parent chat's implementation."
+```
+
 The CLI supports write-capable delegation and does not force plan mode. Permission and reasoning values use the selected agent's live catalog. A single `-` prompt reads UTF-8 stdin. Use `--` before a prompt whose first word is a CLI subcommand.
 
 Interrupting the terminal detaches the CLI without stopping work in Garcon.

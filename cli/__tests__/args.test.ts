@@ -3,6 +3,7 @@ import { CLI_HELP, parseCliArgs } from '../args.js';
 import { CliError } from '../errors.js';
 
 const CHAT_ID = '1785337200123456';
+const PARENT_CHAT_ID = '1785337200123455';
 const ENV = { HOME: '/home/test' };
 
 describe('parseCliArgs', () => {
@@ -10,6 +11,7 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs([
       '--workspace', 'work',
       '--cwd', './project',
+      '--parent', PARENT_CHAT_ID,
       '--agent', 'codex',
       '--model', 'gpt-5.4',
       '--permissions', 'acceptEdits',
@@ -21,6 +23,7 @@ describe('parseCliArgs', () => {
       workspace: 'work',
       configDir: '/home/test/.garcon',
       cwd: '/repo/project',
+      parentChatId: PARENT_CHAT_ID,
       agentId: 'codex',
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
@@ -184,6 +187,10 @@ describe('parseCliArgs', () => {
     { args: ['--agent', 'codex', 'prompt'], message: '--model is required' },
     { args: ['--model', 'gpt', 'prompt'], message: '--agent is required' },
     { args: ['--resume', CHAT_ID, '--cwd', '.', 'prompt'], message: '--cwd cannot' },
+    { args: ['--resume', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot' },
+    { args: ['--parent', 'invalid', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: '--parent must be a valid' },
+    { args: ['--parent', PARENT_CHAT_ID, '--parent', CHAT_ID, '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'only once' },
+    { args: ['send-async', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot be used' },
     { args: ['--resume', CHAT_ID, '--provider', 'p', 'prompt'], message: 'require --model' },
     { args: ['--endpoint', 'e', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'requires --provider' },
     { args: ['--workspace', '../other', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'without path separators' },
@@ -215,7 +222,7 @@ describe('parseCliArgs', () => {
 
   test('documents presentation on conversational commands and its native-history boundary', () => {
     expect(CLI_HELP).toContain(
-      'garcon-cli [options] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
+      'garcon-cli [options] [--parent <chat-id>] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
     );
     expect(CLI_HELP).toContain(
       '--resume <chat-id> [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>',
@@ -223,6 +230,7 @@ describe('parseCliArgs', () => {
     expect(CLI_HELP).toContain('Native-history\nReload');
     expect(CLI_HELP).toContain('provider-native fork segments may drop');
     expect(CLI_HELP).toContain('--color selects custom styling');
+    expect(CLI_HELP).toContain('--parent <chat-id>');
   });
 
   test('parses an exact turn wait with connection options and JSON output', () => {

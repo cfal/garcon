@@ -100,6 +100,9 @@ async function submitStart(
       clientRequestId: createId(),
       clientMessageId: createId(),
       chatId: createChatId(),
+      ...(invocation.parentChatId === undefined
+        ? {}
+        : { parentChatId: invocation.parentChatId }),
       agentId: invocation.agentId,
       projectPath: invocation.cwd,
       ...selection,
