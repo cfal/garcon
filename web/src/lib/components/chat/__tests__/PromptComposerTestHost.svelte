@@ -405,6 +405,7 @@
 	quickCommitError={null}
 	quickCommitBranchSelector={null}
 	isMobile={false}
+	{reduceMotion}
 	{onAbort}
 	{onQuickCommit}
 />

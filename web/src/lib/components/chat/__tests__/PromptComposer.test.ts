@@ -587,9 +587,12 @@ describe('PromptComposer focus', () => {
 			quickCommitTrayVisible: false,
 		});
 		const composer = container.querySelector('[data-composer]');
+		const composerShell = container.querySelector('[data-composer-shell]');
+		const statusAnchor = container.querySelector('[data-conversation-panel-status-anchor]');
 		const processingTray = screen.getByRole('status');
 
 		expect(composer).toBeTruthy();
+		expect(composerShell?.className).not.toMatch(/(^|\s)bg-/);
 		expect(composer?.className).toContain('rounded-2xl');
 		expect(composer?.className).toContain('z-20');
 		expect(composer?.className).not.toContain('rounded-t-none');
@@ -599,6 +602,7 @@ describe('PromptComposer focus', () => {
 		expect(processingTray.className).toContain('min-h-14');
 		expect(processingTray.className).toContain('border-b-0');
 		expect(processingTray.className).toContain('pb-5');
+		expect(statusAnchor?.className).toContain('composer-thinking-active');
 
 		await rerender({
 			selectedChatId: 'chat-1',
@@ -618,6 +622,7 @@ describe('PromptComposer focus', () => {
 		expect(gitTray.className).toContain('min-h-14');
 		expect(gitTray.className).toContain('border-b-0');
 		expect(gitTray.className).toContain('pb-5');
+		expect(statusAnchor?.className).not.toContain('composer-thinking-active');
 	});
 
 	it('always decorates processing and uses the static treatment when motion is reduced', async () => {
@@ -629,9 +634,12 @@ describe('PromptComposer focus', () => {
 			reduceMotion: false,
 		});
 		const frame = container.querySelector('[data-composer]')?.parentElement;
+		const statusAnchor = container.querySelector('[data-conversation-panel-status-anchor]');
 
 		expect(frame?.className).not.toContain('composer-thinking-active');
 		expect(frame?.className).not.toContain('composer-reduce-motion');
+		expect(statusAnchor?.className).not.toContain('composer-thinking-active');
+		expect(statusAnchor?.className).not.toContain('composer-reduce-motion');
 
 		await rerender({
 			selectedChatId: 'chat-1',
@@ -642,6 +650,8 @@ describe('PromptComposer focus', () => {
 		});
 		expect(frame?.className).toContain('composer-thinking-active');
 		expect(frame?.className).not.toContain('composer-reduce-motion');
+		expect(statusAnchor?.className).toContain('composer-thinking-active');
+		expect(statusAnchor?.className).not.toContain('composer-reduce-motion');
 
 		await rerender({
 			selectedChatId: 'chat-1',
@@ -652,6 +662,8 @@ describe('PromptComposer focus', () => {
 		});
 		expect(frame?.className).toContain('composer-thinking-active');
 		expect(frame?.className).toContain('composer-reduce-motion');
+		expect(statusAnchor?.className).toContain('composer-thinking-active');
+		expect(statusAnchor?.className).toContain('composer-reduce-motion');
 	});
 
 	it('defaults to static and pulses only when motion is allowed', () => {
