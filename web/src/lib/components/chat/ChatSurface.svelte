@@ -81,7 +81,8 @@
 	);
 	const canRenderConversation = $derived(chatSurfacePresentation === 'conversation');
 	const conversationWorkspacePresented = $derived(isVisible && canRenderConversation);
-	const conversationWorkspaceVisible = $derived(conversationWorkspacePresented && isInteractive);
+	// Keeps modal interactivity separate from visibility so row-owned dialogs remain mounted.
+	const conversationWorkspaceVisible = $derived(conversationWorkspacePresented);
 	const reserveMobileToolbar = $derived(isMobile && hasUsableChatContext);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat

@@ -93,11 +93,16 @@ function subagentModel(): SubagentManagementModel {
 	};
 }
 
-function props(subagentToolbar: SubagentToolbarState, isMobile = true, isVisible = true) {
+function props(
+	subagentToolbar: SubagentToolbarState,
+	isMobile = true,
+	isVisible = true,
+	isInteractive = true,
+) {
 	return {
 		isMobile,
 		isVisible,
-		isInteractive: true,
+		isInteractive,
 		subagentToolbar,
 	};
 }
@@ -166,5 +171,17 @@ describe('ChatSurface mobile toolbar', () => {
 		expect(workspace.getAttribute('data-prepare-hide-count')).toBe('0');
 		await rendered.rerender(props(subagentToolbar, true, false));
 		expect(workspace.getAttribute('data-prepare-hide-count')).toBe('1');
+	});
+
+	it('keeps row-owned transient UI visible while a modal makes the chat inert', async () => {
+		sessions.selectedChat = chat();
+		const subagentToolbar = new SubagentToolbarState();
+		const rendered = render(ChatSurface, props(subagentToolbar));
+		const workspace = screen.getByTestId('conversation-workspace-stub');
+
+		await rendered.rerender(props(subagentToolbar, true, true, false));
+
+		expect(workspace.getAttribute('data-visible')).toBe('true');
+		expect(workspace.getAttribute('data-prepare-hide-count')).toBe('0');
 	});
 });

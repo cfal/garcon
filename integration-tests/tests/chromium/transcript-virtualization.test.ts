@@ -4227,6 +4227,16 @@ async function verifyHiddenPortalCleanup(fixture: ChromiumFixture, chatId: strin
   await openVisibleMessageMenu();
   const menu = fixture.page.locator('[data-slot="context-menu-content"]');
   await menu.waitFor({ state: 'visible' });
+
+  await menu.getByRole('menuitem', { name: 'Select text' }).click();
+  const selectionSurface = fixture.page.getByRole('region', { name: 'Select text' });
+  await selectionSurface.waitFor({ state: 'visible' });
+  expect(await selectionSurface.textContent()).not.toBe('');
+  await fixture.page.keyboard.press('Escape');
+  await selectionSurface.waitFor({ state: 'detached' });
+
+  await openVisibleMessageMenu();
+  await menu.waitFor({ state: 'visible' });
   await menu.getByRole('menuitem', { name: 'Copy text' }).focus();
 
   await selectWorkspaceWindowSurface(
