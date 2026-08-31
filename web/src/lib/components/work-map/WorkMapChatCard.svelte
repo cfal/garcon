@@ -26,7 +26,9 @@
 			? m.work_map_relation_fork()
 			: node.relation === 'handoff'
 				? m.work_map_relation_handoff()
-				: null,
+				: node.relation === 'delegation'
+					? m.work_map_relation_delegation()
+					: null,
 	);
 </script>
 

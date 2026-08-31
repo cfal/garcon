@@ -921,6 +921,7 @@
 	"work_map_cycle_count": "{count} chats in cycles",
 	"work_map_relation_fork": "Fork",
 	"work_map_relation_handoff": "Handoff",
+	"work_map_relation_delegation": "Delegation",
 	"work_map_status_processing": "Processing",
 	"work_map_status_unread": "Unread",
 	"work_map_status_archived": "Archived",

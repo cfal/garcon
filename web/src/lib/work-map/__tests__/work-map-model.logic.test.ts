@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatParentRelation } from '$shared/chat-parentage';
+import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
 import { buildWorkMapModel, type WorkMapChatNode, type WorkMapNode } from '../work-map-model';
 
-function parent(chatId: string, relation: ChatParentRelation = 'fork') {
-	return { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 1 } as const;
+function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentChatRef {
+	return relation === 'delegation'
+		? { chatId, relation }
+		: { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 1 };
 }
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
@@ -62,16 +64,19 @@ describe('buildWorkMapModel', () => {
 		const model = buildWorkMapModel([
 			chat('root'),
 			chat('fork', { parentChat: parent('root', 'fork') }),
-			chat('handoff', { parentChat: parent('fork', 'handoff') }),
+				chat('handoff', { parentChat: parent('fork', 'handoff') }),
+				chat('delegation', { parentChat: parent('handoff', 'delegation') }),
 		]);
 
 		expect(model.roots).toHaveLength(1);
 		expect(model.roots[0].key).toBe('chat:root');
 		expect(model.roots[0].children[0].key).toBe('chat:fork');
-		expect(model.roots[0].children[0].children[0].key).toBe('chat:handoff');
+			expect(model.roots[0].children[0].children[0].key).toBe('chat:handoff');
+			expect(model.roots[0].children[0].children[0].children[0].key).toBe('chat:delegation');
 		expect(chatNode(flatten(model.roots), 'root').relation).toBeNull();
 		expect(chatNode(flatten(model.roots), 'fork').relation).toBe('fork');
-		expect(chatNode(flatten(model.roots), 'handoff').relation).toBe('handoff');
+			expect(chatNode(flatten(model.roots), 'handoff').relation).toBe('handoff');
+			expect(chatNode(flatten(model.roots), 'delegation').relation).toBe('delegation');
 	});
 
 	it('orders siblings by creation time and ID, then roots by newest subtree activity', () => {

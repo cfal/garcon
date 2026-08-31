@@ -1,15 +1,17 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatParentRelation } from '$shared/chat-parentage';
+import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
 import { WorkMapController } from '$lib/work-map/work-map-controller.svelte';
 import * as m from '$lib/paraglide/messages.js';
 import WorkMapPanel from '../WorkMapPanel.svelte';
 
 afterEach(cleanup);
 
-function parent(chatId: string, relation: ChatParentRelation = 'fork') {
-	return { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 4 } as const;
+function parent(chatId: string, relation: ChatParentRelation = 'fork'): ParentChatRef {
+	return relation === 'delegation'
+		? { chatId, relation }
+		: { chatId, relation, transcriptViewId: `view-${chatId}`, ordinal: 4 };
 }
 
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
@@ -72,27 +74,35 @@ describe('WorkMapPanel', () => {
 					isUnread: true,
 					isArchived: true,
 				}),
+				chat('delegate', {
+					title: 'Delegated review',
+					parentChat: parent('child', 'delegation'),
+					agentId: 'codex',
+				}),
 			],
 			{ selectedChatId: 'child' },
 		);
 
 		const map = screen.getByRole('list', { name: m.workspace_surface_work_map() });
 		const parentLink = within(map).getByRole('link', { name: /Parent work/ });
-		const childLink = within(map).getByRole('link', { name: /Child work/ });
+			const childLink = within(map).getByRole('link', { name: /Child work/ });
+			const delegateLink = within(map).getByRole('link', { name: /Delegated review/ });
 		expect(parentLink.getAttribute('href')).toBe('/chat/parent');
 		expect(childLink.getAttribute('href')).toBe('/chat/child');
 		expect(childLink.getAttribute('aria-current')).toBe('page');
-		expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
+			expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
+			expect(delegateLink.closest('li')?.parentElement?.closest('li')).toBe(childLink.closest('li'));
 		expect(
 			within(childLink).getByText(m.work_map_relation_fork()).classList,
 		).toContain('text-foreground');
 		expect(within(childLink).getByText('claude').classList).toContain('text-foreground');
-		expect(within(childLink).getByText('opus')).toBeTruthy();
+			expect(within(childLink).getByText('opus')).toBeTruthy();
+			expect(within(delegateLink).getByText(m.work_map_relation_delegation())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_processing())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_unread())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_archived())).toBeTruthy();
 		expect(container.querySelector('[role="tree"]')).toBeNull();
-		expect(screen.getByText(m.work_map_chat_count({ count: 2 })).classList).toContain(
+			expect(screen.getByText(m.work_map_chat_count({ count: 3 })).classList).toContain(
 			'text-foreground',
 		);
 		expect(screen.getByText(m.work_map_root_count({ count: 1 })).classList).toContain(
