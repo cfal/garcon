@@ -906,6 +906,24 @@ async function releaseBrowserSelection(page: Page): Promise<void> {
   });
 }
 
+async function waitForVirtualItemToRemainUnmounted(page: Page, key: string): Promise<void> {
+  await page.waitForFunction(
+    async ({ itemSelector, itemKey }) => {
+      const isMounted = () =>
+        [...document.querySelectorAll<HTMLElement>(itemSelector)].some(
+          (item) => item.dataset.chatVirtualItem === itemKey,
+        );
+      if (isMounted()) return false;
+      for (let frame = 0; frame < 6; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (isMounted()) return false;
+      }
+      return true;
+    },
+    { itemSelector: ITEM_SELECTOR, itemKey: key },
+  );
+}
+
 async function verifyDetachedNearEndGrowth(page: Page): Promise<void> {
   await signalScrollIntent(page, 'earlier');
   await page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
@@ -4772,7 +4790,7 @@ async function seedPermissionTranscript(
   environment: ScriptedClaudeTestEnvironment,
 ): Promise<string> {
   const chatId = fixture.integration.newChatId();
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 20; index += 1) {
     environment.model.scriptTurn([claudeText(`permission history response ${index}`)]);
     const accepted =
       index === 0
@@ -4850,13 +4868,7 @@ async function verifyPermissionDraftPersistence(
   await fixture.page.locator(FEED_SELECTOR).focus();
   await fixture.page.evaluate(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
   await scrollToPosition(fixture.page, 'start');
-  await fixture.page.waitForFunction(
-    ({ itemSelector, key }) =>
-      ![...document.querySelectorAll<HTMLElement>(itemSelector)].some(
-        (item) => item.dataset.chatVirtualItem === key,
-      ),
-    { itemSelector: ITEM_SELECTOR, key: permissionKey },
-  );
+  await waitForVirtualItemToRemainUnmounted(fixture.page, permissionKey);
 
   await scrollToPosition(fixture.page, 'end');
   const restoredPostgres = fixture.page.getByRole('radio', {
