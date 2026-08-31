@@ -52,13 +52,20 @@ describe('Lightpanda terminal window lifecycle', () => {
         await app.fill('input[aria-label="Terminal name"]', 'Build logs');
         await app.clickButton('Save');
         await fixture.page.waitForFunction(
-          (expectedWindowId, expectedTerminalId) =>
-            document
-              .getElementById(`${expectedWindowId}-tab-terminal:${expectedTerminalId}`)
-              ?.getAttribute('aria-label') === 'Build logs',
+          (expectedWindowId, expectedSurfaceId) => {
+            const workspaceWindow = [
+              ...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]'),
+            ].find((element) => element.dataset.workspaceWindowId === expectedWindowId);
+            const terminalTab = [
+              ...(workspaceWindow?.querySelectorAll<HTMLElement>(
+                '[data-window-tab-measure-id]',
+              ) ?? []),
+            ].find((element) => element.dataset.windowTabMeasureId === expectedSurfaceId);
+            return terminalTab?.textContent?.trim() === 'Build logs';
+          },
           { timeout: 20_000 },
           windowId,
-          terminalId,
+          `terminal:${terminalId}`,
         );
         expect(
           await fixture.integration.client.get<TerminalListResponse>('/api/v1/terminals'),
