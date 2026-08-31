@@ -23,7 +23,7 @@ describe('TerminalSurface', () => {
 		render(TerminalSurfaceTestHost, { host: 'mobile' });
 
 		expect(screen.getByRole('option', { name: 'Terminal 1 - running - Window 1' })).toBeTruthy();
-		expect(screen.getByRole('option', { name: 'Terminal 2 - running' })).toBeTruthy();
+		expect(screen.getByRole('option', { name: 'Build logs - running' })).toBeTruthy();
 	});
 
 	it('shows input helpers on a coarse-pointer desktop', () => {
@@ -118,6 +118,18 @@ describe('TerminalSurface', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Terminate' }));
 
 		expect(onTerminate).toHaveBeenCalledWith('terminal-1');
+	});
+
+	it('renames the session from the mobile toolbar action', async () => {
+		const onRename = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'mobile', onRename });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+		const input = screen.getByRole('textbox', { name: 'Terminal name' });
+		await fireEvent.input(input, { target: { value: 'Dev server' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(onRename).toHaveBeenCalledWith('terminal-1', 'Dev server');
 	});
 
 	it('focuses the session picker when the server reports the terminal cap', async () => {

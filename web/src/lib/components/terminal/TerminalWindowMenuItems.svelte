@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Clipboard from '@lucide/svelte/icons/clipboard';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Settings from '@lucide/svelte/icons/settings';
 	import Square from '@lucide/svelte/icons/square';
@@ -22,7 +23,7 @@
 	import { terminalSurfaceId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { terminalId }: { terminalId: string } = $props();
+	let { terminalId, onRename }: { terminalId: string; onRename: () => void } = $props();
 
 	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
@@ -67,6 +68,10 @@
 		{m.terminal_reattach()}
 	</DropdownMenuItem>
 {/if}
+<DropdownMenuItem disabled={!session} onSelect={onRename}>
+	<Pencil />
+	{m.terminal_rename()}
+</DropdownMenuItem>
 <DropdownMenuItem disabled={!session} onSelect={() => void paste()}>
 	<Clipboard />
 	{m.terminal_paste()}

@@ -23,6 +23,7 @@ export interface TerminalSurfaceRegistryPort {
 	readonly listError: string | null;
 	ensureRuntime(terminalId: string): TerminalSurfaceRuntimePort;
 	reattach(terminalId: string): void;
+	rename(terminalId: string, title: string | null): Promise<void>;
 	list(): Promise<void>;
 }
 

@@ -23,6 +23,7 @@
 		type WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -129,7 +130,7 @@
 					onSelect={() => void workspace.openTerminalSession(session.metadata.terminalId, windowId)}
 				>
 					<SquareTerminal />
-					{m.workspace_surface_terminal_number({ number: session.metadata.displaySequence })}
+					{terminalDisplayName(session.metadata)}
 				</DropdownMenuItem>
 			{/each}
 		{/if}

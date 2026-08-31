@@ -1,5 +1,6 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
@@ -332,7 +333,7 @@ export class TerminalPlacementService {
 				(session.metadata.processStatus === 'running' || session.attachmentState === 'attached') &&
 				!(await this.deps.confirmClose({
 					surfaceId,
-					title: m.terminal_terminate_title({ number: session.metadata.displaySequence }),
+					title: m.terminal_terminate_title({ name: terminalDisplayName(session.metadata) }),
 					description: m.terminal_terminate_description(),
 					confirmLabel: m.terminal_terminate(),
 				}))

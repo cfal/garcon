@@ -49,7 +49,7 @@ const {
 		processingChatIds: new Set<string>(),
 		chatSessions: {} as Record<string, Pick<ChatSessionRecord, 'projectPath'>>,
 		terminalSessions: [] as Array<{
-			metadata: { terminalId: string; displaySequence: number };
+			metadata: { terminalId: string; displaySequence: number; title: string | null };
 		}>,
 		surfaces: {} as Record<string, SurfaceDescriptor>,
 	},
@@ -498,7 +498,9 @@ describe('WorkspaceWindowTitleBar', () => {
 				surface,
 			]),
 		);
-		runtime.terminalSessions = [{ metadata: { terminalId: 'terminal-seven', displaySequence: 7 } }];
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+		];
 		renderTitleBar(workspaceWindow([chatSurface.id]));
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_add_to_window() }));
@@ -514,9 +516,7 @@ describe('WorkspaceWindowTitleBar', () => {
 			m.workspace_open_surface({ surface: m.workspace_surface_commit() }),
 		];
 		const viewItems = viewLabels.map((label) => screen.getByRole('menuitem', { name: label }));
-		const terminal = screen.getByRole('menuitem', {
-			name: m.workspace_surface_terminal_number({ number: 7 }),
-		});
+		const terminal = screen.getByRole('menuitem', { name: 'Build logs' });
 
 		expect(viewItems.map((item) => items.indexOf(item))).toEqual([1, 2, 3, 4, 5, 6]);
 		expect(items.indexOf(viewItems.at(-1)!)).toBeLessThan(items.indexOf(terminal));

@@ -25,7 +25,7 @@ describe('Lightpanda terminal window lifecycle', () => {
           await fixture.integration.client.get<TerminalListResponse>('/api/v1/terminals'),
         ).toMatchObject({
           success: true,
-          terminals: [{ terminalId, processStatus: 'exited', exitCode: 0 }],
+          terminals: [{ terminalId, title: null, processStatus: 'exited', exitCode: 0 }],
         });
         expect(
           await fixture.page.$(
@@ -42,11 +42,32 @@ describe('Lightpanda terminal window lifecycle', () => {
             ),
         );
         expect(menuItems).toContain('Paste into terminal');
+        expect(menuItems).toContain('Rename');
         expect(menuItems.some((item) => item.startsWith('Font size'))).toBe(true);
         expect(menuItems).toContain('Terminate');
         expect(menuItems).toContain('Close tab');
         expect(menuItems).not.toContain('New Terminal');
 
+        await app.clickMenuItem('Rename');
+        await app.fill('input[aria-label="Terminal name"]', 'Build logs');
+        await app.clickButton('Save');
+        await fixture.page.waitForFunction(
+          (expectedWindowId, expectedTerminalId) =>
+            document
+              .getElementById(`${expectedWindowId}-tab-terminal:${expectedTerminalId}`)
+              ?.getAttribute('aria-label') === 'Build logs',
+          { timeout: 20_000 },
+          windowId,
+          terminalId,
+        );
+        expect(
+          await fixture.integration.client.get<TerminalListResponse>('/api/v1/terminals'),
+        ).toMatchObject({
+          success: true,
+          terminals: [{ terminalId, title: 'Build logs' }],
+        });
+
+        await app.openWorkspaceWindowActions(windowId);
         await app.clickMenuItem('Close tab');
         await waitForTerminatedTerminal(fixture.page, terminalId);
         await waitForPersistedTerminalRemoval(fixture.page, terminalId);

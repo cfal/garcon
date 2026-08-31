@@ -24,6 +24,7 @@
 		onSwitch?: (currentTerminalId: string, nextTerminalId: string) => void;
 		onCreateReplacing?: (currentTerminalId: string) => void;
 		onTerminate?: (terminalId: string) => void;
+		onRename?: (terminalId: string, title: string | null) => void;
 		onFocus?: () => void;
 		onFontSize?: (fontSize: number) => void;
 		focusRequestToken?: number;
@@ -39,6 +40,7 @@
 		onSwitch = () => undefined,
 		onCreateReplacing = () => undefined,
 		onTerminate = () => undefined,
+		onRename = () => undefined,
 		onFocus = () => undefined,
 		onFontSize = () => undefined,
 		focusRequestToken = 0,
@@ -65,7 +67,12 @@
 	};
 	const secondSession = {
 		...session,
-		metadata: { ...session.metadata, terminalId: 'terminal-2', displaySequence: 2 },
+		metadata: {
+			...session.metadata,
+			terminalId: 'terminal-2',
+			displaySequence: 2,
+			title: 'Build logs',
+		},
 	};
 	const runtime: TerminalSurfaceRuntimePort = {
 		inputControls: {
@@ -104,6 +111,9 @@
 		listError: null,
 		ensureRuntime: () => runtime,
 		reattach: () => undefined,
+		rename: async (selectedTerminalId: string, title: string | null) => {
+			onRename(selectedTerminalId, title);
+		},
 		list: () => Promise.resolve(),
 	} satisfies TerminalSurfaceRegistryPort;
 	const workspace = {

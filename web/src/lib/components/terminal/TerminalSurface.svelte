@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
@@ -10,6 +11,7 @@
 	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { ApiError } from '$lib/api/client.js';
@@ -17,6 +19,7 @@
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
+	import TerminalRenameDialog from './TerminalRenameDialog.svelte';
 	import type {
 		TerminalSurfaceRegistryPort,
 		TerminalSurfaceWorkspacePort,
@@ -44,6 +47,7 @@
 	let lease: number | null = null;
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
+	let renameOpen = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
@@ -61,12 +65,20 @@
 				priority: 0,
 			},
 			{
+				id: 'rename',
+				label: m.terminal_rename(),
+				icon: Pencil,
+				onclick: () => (renameOpen = true),
+				disabled: !session,
+				priority: 1,
+			},
+			{
 				id: 'terminate',
 				label: m.terminal_terminate(),
 				icon: Square,
 				onclick: () => void terminateTerminal(),
 				disabled: !session || workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId)),
-				priority: 1,
+				priority: 2,
 				variant: 'destructive',
 			},
 		];
@@ -80,7 +92,7 @@
 				label: m.terminal_reattach(),
 				icon: RefreshCw,
 				onclick: () => terminals.reattach(terminalId),
-				priority: 2,
+				priority: 3,
 			});
 		}
 		actions.push({
@@ -89,7 +101,7 @@
 			icon: Clipboard,
 			onclick: () => void runtime?.pasteFromClipboard(),
 			disabled: !runtime,
-			priority: 3,
+			priority: 4,
 		});
 		return actions;
 	});
@@ -237,7 +249,7 @@
 						{@const placement = placementLabel(item.metadata.terminalId)}
 						<option value={item.metadata.terminalId}>
 							{m.terminal_session_status({
-								number: item.metadata.displaySequence,
+								name: terminalDisplayName(item.metadata),
 								status: item.metadata.processStatus,
 							})}{placement ? ` - ${placement}` : ''}
 						</option>
@@ -332,6 +344,12 @@
 		{/if}
 	{/if}
 </div>
+
+<TerminalRenameDialog
+	terminal={host === 'mobile' && renameOpen ? (session?.metadata ?? null) : null}
+	onClose={() => (renameOpen = false)}
+	onRename={(selectedTerminalId, title) => terminals.rename(selectedTerminalId, title)}
+/>
 
 <style>
 	.mobile-terminal-host :global(.xterm) {

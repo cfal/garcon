@@ -7,12 +7,18 @@
 	import TerminalWindowMenuItems from '../TerminalWindowMenuItems.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { terminalId }: { terminalId: string } = $props();
+	let {
+		terminalId,
+		onRename = () => undefined,
+	}: {
+		terminalId: string;
+		onRename?: () => void;
+	} = $props();
 </script>
 
 <DropdownMenu>
 	<DropdownMenuTrigger>{m.workspace_window_actions()}</DropdownMenuTrigger>
 	<DropdownMenuContent class="w-64">
-		<TerminalWindowMenuItems {terminalId} />
+		<TerminalWindowMenuItems {terminalId} {onRename} />
 	</DropdownMenuContent>
 </DropdownMenu>

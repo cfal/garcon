@@ -3,6 +3,7 @@
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import TerminalWindowMenuItems from '$lib/components/terminal/TerminalWindowMenuItems.svelte';
+	import TerminalRenameDialog from '$lib/components/terminal/TerminalRenameDialog.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindow from './WorkspaceWindow.svelte';
@@ -49,6 +50,7 @@
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
+	import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -74,6 +76,7 @@
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
+	let terminalRenameId = $state<string | null>(null);
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
@@ -149,6 +152,9 @@
 			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
 		)?.id ?? chatViewSurfaceId(CANONICAL_WINDOW_ID),
 	);
+	const terminalRenameTarget = $derived(
+		terminalRenameId ? (terminals.sessions[terminalRenameId]?.metadata ?? null) : null,
+	);
 
 	$effect(() => {
 		void snapshot;
@@ -175,10 +181,8 @@
 				: m.workspace_surface_chat();
 		}
 		if (surface.type === 'terminal') {
-			const sequence = terminals.sessions[surface.terminalId]?.metadata.displaySequence;
-			return sequence
-				? m.workspace_surface_terminal_number({ number: sequence })
-				: m.workspace_surface_terminal();
+			const metadata = terminals.sessions[surface.terminalId]?.metadata;
+			return metadata ? terminalDisplayName(metadata) : m.workspace_surface_terminal();
 		}
 		if (surface.type === 'file') {
 			const session = fileSessions.get(surface.fileSessionId);
@@ -262,7 +266,10 @@
 			onDelete={() => chatActions.requestDelete(chat)}
 		/>
 	{:else if surface?.type === 'terminal'}
-		<TerminalWindowMenuItems terminalId={surface.terminalId} />
+		<TerminalWindowMenuItems
+			terminalId={surface.terminalId}
+			onRename={() => (terminalRenameId = surface.terminalId)}
+		/>
 	{/if}
 {/snippet}
 
@@ -392,3 +399,9 @@
 		onClose={() => gitBranchActions.closeNewBranchDialog()}
 	/>
 {/if}
+
+<TerminalRenameDialog
+	terminal={terminalRenameTarget}
+	onClose={() => (terminalRenameId = null)}
+	onRename={(terminalId, title) => terminals.rename(terminalId, title)}
+/>

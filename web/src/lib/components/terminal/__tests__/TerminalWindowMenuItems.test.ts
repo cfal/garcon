@@ -87,15 +87,20 @@ describe('TerminalWindowMenuItems', () => {
 	afterEach(cleanup);
 
 	it('offers active terminal actions without duplicating terminal creation', async () => {
-		render(TerminalWindowMenuItemsTestHost, { terminalId: 'terminal-1' });
+		const onRename = vi.fn();
+		render(TerminalWindowMenuItemsTestHost, { terminalId: 'terminal-1', onRename });
 		await openMenu();
 
+		expect(screen.getByRole('menuitem', { name: m.terminal_rename() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: /Font size 13px/ })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_terminate() })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: m.terminal_reattach() })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: m.workspace_new_terminal() })).toBeNull();
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.terminal_rename() }));
+		expect(onRename).toHaveBeenCalledOnce();
 
+		await openMenu();
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.terminal_paste() }));
 		await waitFor(() => expect(fakes.ensureRuntime).toHaveBeenCalledWith('terminal-1'));
 		expect(fakes.pasteFromClipboard).toHaveBeenCalledOnce();
