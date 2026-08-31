@@ -47,10 +47,11 @@ export class LedgerFailureFences<Entry extends LedgerConnection> {
       return work(entry);
     } catch (error) {
       const failure = asError(error);
-      const readUnsafe = isQueryFailure(failure) || isSqliteCorruptionFailure(failure);
+      const rollbackFailure = getTransactionRollbackFailure(failure);
+      const readUnsafe = isReadUnsafeFailure(failure) || isReadUnsafeFailure(rollbackFailure);
       if (isDomainError(error)
           && !readUnsafe
-          && !getTransactionRollbackFailure(failure)
+          && !rollbackFailure
           && !entry.db.inTransaction) throw error;
       this.#writeFailures.set(chatId, failure);
       if (readUnsafe || entry.db.inTransaction) this.#readFailures.set(chatId, failure);
@@ -74,6 +75,10 @@ export class LedgerFailureFences<Entry extends LedgerConnection> {
     this.#readFailures.clear();
     this.#writeFailures.clear();
   }
+}
+
+function isReadUnsafeFailure(error: Error | null): boolean {
+  return error !== null && (isQueryFailure(error) || isSqliteCorruptionFailure(error));
 }
 
 function isSqliteCorruptionFailure(error: Error): boolean {

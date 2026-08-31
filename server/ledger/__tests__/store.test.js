@@ -296,6 +296,51 @@ describe('TranscriptLedgerStore', () => {
     closeStoreAfterInjectedRollbackFailure();
   });
 
+  it('fences reads when a completed rollback reports SQLite corruption', () => {
+    const view = store.initializeCurrentView('failed-chat', {
+      viewId: transcriptViewId('failed-view'),
+      contentStartOrdinal: 1,
+    });
+    const exec = Database.prototype.exec;
+    let commitFailed = false;
+    let rollbackReportedCorruption = false;
+    Database.prototype.exec = function (sql) {
+      if (!commitFailed && sql === 'COMMIT') {
+        commitFailed = true;
+        throw Object.assign(new Error('injected primary SQLite failure'), { code: 'SQLITE_FULL' });
+      }
+      if (sql === 'ROLLBACK') {
+        rollbackReportedCorruption = true;
+        exec.call(this, sql);
+        throw Object.assign(new Error('injected rollback corruption'), { code: 'SQLITE_CORRUPT' });
+      }
+      return exec.call(this, sql);
+    };
+    let failure;
+    try {
+      store.append('failed-chat', view.viewId, [provider('must stay unreadable')]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(commitFailed).toBe(true);
+    expect(rollbackReportedCorruption).toBe(true);
+    expect(failure).toBeInstanceOf(LedgerFencedError);
+    expect(failure.cause).toMatchObject({
+      message: 'injected primary SQLite failure',
+      code: 'SQLITE_FULL',
+      rollbackFailure: {
+        message: 'injected rollback corruption',
+        code: 'SQLITE_CORRUPT',
+      },
+    });
+    expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
+    expect(() => store.append('failed-chat', view.viewId, [provider('must stay fenced')]))
+      .toThrow(LedgerFencedError);
+  });
+
   it('fences domain write failures when rollback fails and leaves the transaction active', () => {
     const current = store.initializeCurrentView('failed-chat', {
       viewId: transcriptViewId('old-view'),
