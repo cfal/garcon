@@ -59,6 +59,7 @@ function renderControls(
 		chatId: string | null;
 		canInterrupt: boolean;
 		canSteer: boolean;
+		announcementsEnabled: boolean;
 		onInterrupt: () => void | Promise<void>;
 		onSteer: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
@@ -103,6 +104,15 @@ describe('QueueControls', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
 		expect(onPause).toHaveBeenCalledOnce();
+	});
+
+	it('keeps queue controls visible while disabling non-anchor announcements', () => {
+		const { container } = renderControls(makeQueue(2), { announcementsEnabled: false });
+
+		const position = screen.getByText('1 of 2');
+		expect(position.getAttribute('aria-live')).toBe('off');
+		expect(screen.getByRole('button', { name: m.chat_queue_pause() })).toBeTruthy();
+		expect(container.textContent).toContain('queued 0');
 	});
 
 	it('shows Send now with a fast-forward icon when the current turn can be interrupted', async () => {

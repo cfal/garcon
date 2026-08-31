@@ -155,12 +155,11 @@ export async function submitSteerRoute(
 			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
 			restoreSteerComposer(deps, context, clearedComposerRevision);
 		}
-		if (deps.sessions.selectedChatId === context.chatId) {
-			deps.chatState.appendLocalNotice(
-				'error',
-				outcomeUnknown ? m.chat_notice_steer_outcome_unconfirmed() : steerFailureNotice(error),
-			);
-		}
+		deps.chatState.appendLocalNoticeForChat(
+			context.chatId,
+			'error',
+			outcomeUnknown ? m.chat_notice_steer_outcome_unconfirmed() : steerFailureNotice(error),
+		);
 		return outcomeUnknown ? 'unknown' : 'rejected';
 	}
 }
@@ -183,7 +182,11 @@ export function submitSteerPreferenceRoute(
 		handoffPending: input.handoffPending,
 	});
 	if (rejection) {
-		deps.chatState.appendLocalNotice('error', steerShortcutRejectionNotice(rejection));
+		deps.chatState.appendLocalNoticeForChat(
+			input.chatId,
+			'error',
+			steerShortcutRejectionNotice(rejection),
+		);
 		return Promise.resolve('rejected');
 	}
 
@@ -286,12 +289,12 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		if (handoff) {
 			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
 			deps.sessions.upsertServerChat(response.chat);
 			onHandoffAccepted(response.chat);
 		}
+		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
 		return 'accepted';

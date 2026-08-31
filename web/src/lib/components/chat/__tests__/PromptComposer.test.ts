@@ -399,7 +399,7 @@ describe('PromptComposer focus', () => {
 		expect(textarea.scrollTop).toBe(100);
 	});
 
-	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
+	it('keeps pane focus on chat switch until explicit navigation requests the composer', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';
 		outsideButton.textContent = 'Outside focus';
@@ -419,38 +419,14 @@ describe('PromptComposer focus', () => {
 
 		await rerender({
 			selectedChatId: 'chat-2',
-			selectedStatus: 'draft',
-			isSubmitting: true,
-		});
-		await nextAnimationFrame();
-
-		expect(textarea.disabled).toBe(true);
-		expect(
-			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
-		).toBe(true);
-		expect(document.activeElement).toBe(outsideButton);
-
-		await rerender({
-			selectedChatId: 'chat-2',
-			selectedStatus: 'draft',
+			selectedStatus: 'running',
 			isSubmitting: false,
 		});
+		await nextAnimationFrame();
+		expect(document.activeElement).toBe(outsideButton);
+
+		await rerender({ focusRequestToken: 1 });
 		await expectComposerFocus(textarea);
-		expect(
-			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
-		).toBe(false);
-
-		for (const chatId of ['chat-3', 'chat-4', 'chat-5']) {
-			outsideButton.focus();
-			expect(document.activeElement).toBe(outsideButton);
-
-			await rerender({
-				selectedChatId: chatId,
-				selectedStatus: 'running',
-				isSubmitting: false,
-			});
-			await expectComposerFocus(textarea);
-		}
 	});
 
 	it('keeps the next draft editable but blocks sending during direct admission', async () => {

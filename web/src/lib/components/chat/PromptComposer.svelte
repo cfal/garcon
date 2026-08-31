@@ -7,12 +7,8 @@
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
-	import LoadingStatus from './LoadingStatus.svelte';
-	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
-		getActiveTranscriptState,
 		getComposerState,
-		getConversationLifecycle,
 		getLocalSettings,
 		getChatSessions,
 		getAppShell,
@@ -80,8 +76,7 @@
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { AgentSettingDescriptor } from '$shared/agent-integration';
 	import type { JsonValue } from '$shared/json';
-	import type { GitQuickSummaryReady } from '$lib/api/git.js';
-	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
+	import type { ResendCandidate } from '$shared/chat-view';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
@@ -108,13 +103,8 @@
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
 		onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-		onAbort?: (() => void) | null;
-		quickCommitTrayVisible?: boolean;
-		quickCommitSummary?: GitQuickSummaryReady | null;
-		quickCommitRefreshing?: boolean;
-		quickCommitError?: string | null;
-		quickCommitBranchSelector?: GitQuickBranchSelectorControls | null;
-		onQuickCommit?: (() => void) | null;
+		resendCandidates?: readonly ResendCandidate[];
+		onExcludeResendCandidate?: (ordinal: number) => void;
 		directAdmissionPending?: boolean;
 		// False when the composer is mounted but hidden (e.g. the Git tab is
 		// active). Focus requests must not be consumed while hidden, since
@@ -131,13 +121,8 @@
 		onPermissionModeChange,
 		onThinkingModeChange,
 		onAgentSettingChange,
-		onAbort = null,
-		quickCommitTrayVisible = false,
-		quickCommitSummary = null,
-		quickCommitRefreshing = false,
-		quickCommitError = null,
-		quickCommitBranchSelector = null,
-		onQuickCommit = null,
+		resendCandidates = [],
+		onExcludeResendCandidate,
 		directAdmissionPending = false,
 		isVisible = true,
 		isPresented: isPresentedOverride,
@@ -145,8 +130,6 @@
 	}: Props = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
-	const transcriptState = getActiveTranscriptState();
-	const lifecycle = getConversationLifecycle();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();
@@ -239,6 +222,7 @@
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 	// Resets ephemeral UI state when switching chats without remounting the composer.
+	// Explicit navigation owns focus requests; pane focus must remain on the control the user chose.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
@@ -246,7 +230,6 @@
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		composerState.isDragActive = false;
-		requestComposerFocusForChat(chatId);
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -653,11 +636,6 @@
 	});
 	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
-	const quickCommitRunningActionVisible = $derived(
-		selectedIsProcessing &&
-			localSettings.showQuickCommitTray &&
-			Boolean(onQuickCommit && quickCommitSummary && quickCommitSummary.changedFiles > 0),
-	);
 	// Existing (already-started) chats expose the full agent/source picker so a
 	// conversation can move between configured providers and models. Drafts keep
 	// the compact trigger; the new-chat form owns agent selection before start.
@@ -769,8 +747,8 @@
 		>
 			{#if !selectedIsProcessing}
 				<ResendCandidateChips
-					candidates={transcriptState.resendCandidates}
-					onExclude={(ordinal) => transcriptState.excludeResendCandidate(ordinal)}
+					candidates={resendCandidates}
+					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
 			{/if}
 			{#if composerState.isDragActive}
@@ -942,25 +920,6 @@
 			onClose={() => ui.closeSlashMenu()}
 		/>
 
-		<LoadingStatus
-			isVisible={selectedIsProcessing}
-			status={lifecycle.loadingStatus}
-			agentId={agentState.agentId}
-			spinnerSelectionKey={sessions.selectedChatId}
-			quickCommitVisible={quickCommitRunningActionVisible}
-			{quickCommitSummary}
-			onQuickCommit={() => onQuickCommit?.()}
-			{onAbort}
-		/>
-		<GitQuickStatusTray
-			isVisible={quickCommitTrayVisible}
-			summary={quickCommitSummary}
-			isRefreshing={quickCommitRefreshing}
-			isMobile={appShell.isMobile}
-			lastError={quickCommitError}
-			branchSelector={quickCommitBranchSelector}
-			onCommit={() => onQuickCommit?.()}
-		/>
 		{#if !appShell.isMobile}
 			<ComposerResizeHandle
 				value={composerHeight.renderedHeight}

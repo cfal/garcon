@@ -1,5 +1,4 @@
 import { untrack } from 'svelte';
-import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
@@ -10,7 +9,6 @@ import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 
 interface WorkspaceDomainBindingsDeps {
 	workspaceContext: WorkspaceContextStore;
-	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	singletons: SingletonSurfaceRegistry;
@@ -38,9 +36,7 @@ export class WorkspaceDomainBindings {
 
 			$effect(() => {
 				const projectState = deps.workspaceContext.projectState;
-				const processing = deps.chatSessions.selectedChat?.isProcessing ?? false;
 				deps.gitQuickSummary.setEnabled(deps.localSettings.showQuickCommitTray);
-				deps.gitQuickSummary.setProcessing(processing);
 				if (projectState.kind === 'resolving') {
 					untrack(() => deps.gitBranchActions.closeNewBranchDialog());
 					return;
@@ -53,7 +49,6 @@ export class WorkspaceDomainBindings {
 					deps.gitQuickSummary.summaryFor(projectPath)?.branch,
 					currentProject?.effectiveProjectKey ?? null,
 				);
-				return untrack(() => deps.gitQuickSummary.startPolling());
 			});
 
 			$effect(() => {

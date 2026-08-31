@@ -5,7 +5,14 @@ import type {
 	ChatQueueState,
 	PendingPermissionRequest,
 } from '$lib/types/chat';
-import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '$shared/chat-types';
+import {
+	BashToolUseMessage,
+	ExitPlanModeToolUseMessage,
+	PermissionRequestMessage,
+} from '$shared/chat-types';
+import type { ChatTransientFeedSnapshot } from '$shared/chat-transient-feed';
+import { tick } from 'svelte';
+import { mountConversationUiPruning } from './conversation-ui-state-effect-harness.svelte.js';
 
 function makeQueue(overrides: Partial<ChatQueueState> = {}): ChatQueueState {
 	return {
@@ -60,6 +67,33 @@ function makeExitPlanRequest(id: string): PendingPermissionRequest {
 	};
 }
 
+function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
+	const requestedTool = new BashToolUseMessage(
+		'2026-07-15T00:00:00.000Z',
+		'tool-live',
+		'echo live',
+	);
+	return {
+		serverInstanceId: 'server-instance-test',
+		chatId,
+		transcriptViewId: 'view-live',
+		transientRevision: 1,
+		rows: [
+			{
+				permissionOccurrenceId: 'permission-live',
+				runId: 'run-live',
+				transcript: { transcriptViewId: 'view-live', afterOrdinal: 4 },
+				displayOrder: 4,
+				message: new PermissionRequestMessage(
+					'2026-07-15T00:00:00.000Z',
+					'permission-live',
+					requestedTool,
+				),
+			},
+		],
+	};
+}
+
 describe('ConversationUiState', () => {
 	it('updates pending permission requests through values or updater functions', () => {
 		const store = new ConversationUiState();
@@ -96,6 +130,48 @@ describe('ConversationUiState', () => {
 		]);
 	});
 
+	it('keeps permission projections independent by chat', () => {
+		const store = new ConversationUiState();
+		store.updatePendingPermissionsForChat('chat-a', [makePermissionRequest('a', 'chat-a')]);
+		store.updatePendingPermissionsForChat('chat-b', [
+			makePermissionRequest('b', 'chat-b'),
+			makeExitPlanRequest('plan-exit-b'),
+		]);
+
+		store.clearTurnPermissionRequestsForChat('chat-b');
+
+		expect(store.pendingPermissionsFor('chat-a').map((request) => request.chatId)).toEqual([
+			'chat-a',
+		]);
+		expect(
+			store.pendingPermissionsFor('chat-b').map((request) => request.permissionOccurrenceId),
+		).toEqual(['plan-exit-b']);
+		expect(store.pendingPermissionChatIds.sort()).toEqual(['chat-a', 'chat-b']);
+	});
+
+	it('projects compatibility permissions from the activated chat', () => {
+		const store = new ConversationUiState();
+		store.updatePendingPermissionsForChat('chat-a', [makePermissionRequest('a', 'chat-a')]);
+		store.updatePendingPermissionsForChat('chat-b', [makePermissionRequest('b', 'chat-b')]);
+
+		store.activateTransientFeed('chat-b');
+
+		expect(store.pendingPermissionRequests.map((request) => request.chatId)).toEqual(['chat-b']);
+	});
+
+	it('retains plan-mode restoration independently by chat', () => {
+		const store = new ConversationUiState();
+		store.beginPlanModeForChat('chat-a', 'default');
+		store.beginPlanModeForChat('chat-b', 'acceptEdits');
+		store.beginPlanModeForChat('chat-a', 'bypassPermissions');
+
+		expect(store.previousPermissionModeFor('chat-a')).toBe('default');
+		expect(store.previousPermissionModeFor('chat-b')).toBe('acceptEdits');
+		expect(store.finishPlanModeForChat('chat-a')).toBe('default');
+		expect(store.previousPermissionModeFor('chat-a')).toBeNull();
+		expect(store.previousPermissionModeFor('chat-b')).toBe('acceptEdits');
+	});
+
 	it('stores execution controls by chat and prunes controls for removed chats', () => {
 		const store = new ConversationUiState();
 		const control = makeControl();
@@ -107,6 +183,25 @@ describe('ConversationUiState', () => {
 		expect(store.getExecutionControl('chat-a')).toEqual(control);
 		expect(store.getExecutionControl('chat-b')).toBeNull();
 		expect(store.executionControlChatIds).toEqual(['chat-a']);
+	});
+
+	it('retains live transient controls while chat-list hydration is pending', async () => {
+		const store = new ConversationUiState();
+		expect(store.setTransientFeedFromSnapshot(makeTransientFeed('chat-live'))).toMatchObject({
+			kind: 'applied',
+		});
+
+		const cleanup = mountConversationUiPruning(store, () => new Set());
+		await tick();
+
+		expect(store.transientFeedChatIds).toEqual(['chat-live']);
+		expect(store.pendingPermissionsFor('chat-live')).toMatchObject([
+			{
+				permissionOccurrenceId: 'permission-live',
+				control: { chatId: 'chat-live', permissionOccurrenceId: 'permission-live' },
+			},
+		]);
+		cleanup();
 	});
 
 	it('does not let refresh responses overwrite same-version live execution-control state', () => {

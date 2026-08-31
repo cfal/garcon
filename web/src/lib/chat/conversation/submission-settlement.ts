@@ -6,7 +6,7 @@ import type { SessionControllerDeps } from './conversation-session-controller.sv
 export interface SubmissionSettlementDeps {
 	chatState: Pick<
 		SessionControllerDeps['chatState'],
-		'appendLocalNotice' | 'clearOptimisticUserInput'
+		'appendLocalNoticeForChat' | 'clearOptimisticUserInput'
 	>;
 	composerState: Pick<SessionControllerDeps['composerState'], 'restoreDraftIfRevision'>;
 }
@@ -58,7 +58,8 @@ export async function settleSubmissionFailure(
 		}
 	}
 
-	deps.chatState.appendLocalNotice(
+	deps.chatState.appendLocalNoticeForChat(
+		context.chatId,
 		'error',
 		outcomeUnknown ? options.unknownNotice : options.rejectedNotice(error),
 	);

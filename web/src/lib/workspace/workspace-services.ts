@@ -153,11 +153,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (effectiveProjectKey) => {
+		onChanged: async (effectiveProjectKey, projectPath) => {
 			gitProjectInvalidations.markChanged(effectiveProjectKey);
-			if (context.currentProject?.effectiveProjectKey === effectiveProjectKey) {
-				await gitQuickSummary.refresh('invalidation');
-			}
+			await gitQuickSummary.refreshFor(projectPath, 'invalidation');
 		},
 		onInvalidationError: (error, _effectiveProjectKey, projectPath) => {
 			deps.notifications.error(
@@ -210,7 +208,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const domainBindings = new WorkspaceDomainBindings({
 		workspaceContext: context,
-		chatSessions: deps.chatSessions,
 		ghCapability: deps.ghCapability,
 		localSettings: deps.localSettings,
 		singletons: singletonSurfaces,

@@ -769,7 +769,9 @@ describe('ActiveTranscriptState', () => {
 				}),
 			});
 
-		await expect(chat.loadMessages('chat-1')).resolves.toHaveLength(50);
+		await expect(
+			chat.loadMessages('chat-1', { purpose: 'activation' }),
+		).resolves.toHaveLength(50);
 
 		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
 			{ chatId: 'chat-1', limit: 50, purpose: 'activation' },
@@ -784,6 +786,60 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.hasEarlierMessages).toBe(false);
 		expect(chat.feedMutationClock.dataRevision).toBe(revisionBeforeLoad + 1);
 		expect(chat.transcriptCache.get('chat-1')?.nextBeforeOrdinal).toBeNull();
+	});
+
+	it('[TLV5-L09.03-WEB-BACKGROUND-01] [TLV5-L09.03-WEB-PREVIEW-01] [TLV5-PAGE.09-WEB-BACKGROUND-01] [TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01] fills a rendered panel across hidden raw budgets without activation', async () => {
+		const chat = new ActiveTranscriptState();
+		vi.mocked(getChatMessages)
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: [],
+					lastOrdinal: 150,
+					pageOldestOrdinal: 0,
+					pageNewestOrdinal: 150,
+					nextBeforeOrdinal: 101,
+					hasMore: true,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: [],
+					lastOrdinal: 150,
+					pageOldestOrdinal: 0,
+					pageNewestOrdinal: 100,
+					nextBeforeOrdinal: 51,
+					hasMore: true,
+				}),
+			})
+			.mockResolvedValueOnce({
+				chatId: 'chat-1',
+				limit: 50,
+				...page({
+					messages: assistantEntries(1, 50),
+					lastOrdinal: 150,
+					pageOldestOrdinal: 1,
+					pageNewestOrdinal: 50,
+					nextBeforeOrdinal: null,
+					hasMore: false,
+				}),
+			});
+
+		await expect(chat.loadMessages('chat-1')).resolves.toHaveLength(50);
+
+		expect(vi.mocked(getChatMessages).mock.calls.map(([request]) => request)).toEqual([
+			{ chatId: 'chat-1', limit: 50 },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 101, transcriptViewId: 'generation-1' },
+			{ chatId: 'chat-1', limit: 50, beforeOrdinal: 51, transcriptViewId: 'generation-1' },
+		]);
+		expect(chat.entries.map((message) => message.ordinal)).toEqual(
+			Array.from({ length: 50 }, (_, index) => index + 1),
+		);
+		expect(chat.loadedThroughOrdinal).toBe(150);
+		expect(chat.nextBeforeOrdinal).toBeNull();
 	});
 
 	it('[TLV5-PAGE.10-WEB-UNIT-01] rejects a stalled raw continuation before mutating the loaded interval', async () => {

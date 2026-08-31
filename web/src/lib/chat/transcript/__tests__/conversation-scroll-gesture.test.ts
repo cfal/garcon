@@ -11,6 +11,24 @@ function dispatchTouch(
 	node.dispatchEvent(event);
 }
 
+function dispatchPointer(
+	node: HTMLElement,
+	type: 'pointerdown' | 'pointerup' | 'pointercancel',
+	input: {
+		pointerId: number;
+		button?: number;
+		pointerType?: string;
+	},
+): void {
+	const event = new Event(type, { bubbles: true });
+	Object.defineProperties(event, {
+		pointerId: { value: input.pointerId },
+		button: { value: input.button ?? 0 },
+		pointerType: { value: input.pointerType ?? 'mouse' },
+	});
+	node.dispatchEvent(event);
+}
+
 describe('conversation viewport scroll gestures', () => {
 	it('continues with the remaining finger after the tracked touch ends', () => {
 		const node = document.createElement('div');
@@ -30,9 +48,9 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchmove', [{ identifier: 2, clientY: 280 }]);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: 'later', touch: 'move' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: 'later', touch: 'move', contact: null }],
 		]);
 		cleanup();
 		node.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
@@ -49,9 +67,9 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchend', []);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: null, touch: 'end' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: null, touch: 'end', contact: 'end' }],
 		]);
 		cleanup();
 	});
@@ -66,9 +84,39 @@ describe('conversation viewport scroll gestures', () => {
 		dispatchTouch(node, 'touchcancel', []);
 
 		expect(report.mock.calls).toEqual([
-			[{ direction: null, touch: 'start' }],
-			[{ direction: 'earlier', touch: 'move' }],
-			[{ direction: null, touch: 'end' }],
+			[{ direction: null, touch: 'start', contact: 'start' }],
+			[{ direction: 'earlier', touch: 'move', contact: null }],
+			[{ direction: null, touch: 'end', contact: 'end' }],
+		]);
+		cleanup();
+	});
+
+	it('reports pointer press start and end without a scroll direction', () => {
+		const node = document.createElement('div');
+		const report = vi.fn();
+		const cleanup = observeConversationViewportScrollGestures(node, report);
+
+		dispatchPointer(node, 'pointerdown', { pointerId: 1 });
+		dispatchPointer(node, 'pointerup', { pointerId: 1 });
+
+		expect(report.mock.calls).toEqual([
+			[{ direction: null, touch: null, contact: 'start' }],
+			[{ direction: null, touch: null, contact: 'end' }],
+		]);
+		cleanup();
+	});
+
+	it('reports pointer cancellation as a contact end', () => {
+		const node = document.createElement('div');
+		const report = vi.fn();
+		const cleanup = observeConversationViewportScrollGestures(node, report);
+
+		dispatchPointer(node, 'pointerdown', { pointerId: 1 });
+		dispatchPointer(node, 'pointercancel', { pointerId: 1 });
+
+		expect(report.mock.calls).toEqual([
+			[{ direction: null, touch: null, contact: 'start' }],
+			[{ direction: null, touch: null, contact: 'end' }],
 		]);
 		cleanup();
 	});

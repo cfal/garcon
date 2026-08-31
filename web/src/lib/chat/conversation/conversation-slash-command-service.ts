@@ -70,6 +70,16 @@ interface SlashCommandChatState {
 	isUserScrolledUp: boolean;
 	getCursor(): { transcriptViewId: string; lastOrdinal: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
+	appendLocalNoticeForChat(
+		chatId: string,
+		noticeType: LocalNoticeType,
+		content: string,
+	): void;
+}
+
+export interface ConversationForkSource {
+	readonly transcript: Pick<SlashCommandChatState, 'entries' | 'getCursor'>;
+	readonly refetchTranscript?: () => Promise<void>;
 }
 
 interface SlashCommandComposerState {
@@ -718,16 +728,28 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	async forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void> {
+	async forkChat(
+		sourceChatId: string,
+		upToOrdinal?: number,
+		source?: ConversationForkSource,
+	): Promise<void> {
 		const sourceChat = this.deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
-			this.deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
+			this.deps.chatState.appendLocalNoticeForChat(
+				sourceChatId,
+				'error',
+				m.chat_notice_cannot_fork_draft(),
+			);
 			return;
 		}
 		try {
-			await this.#performForkOnly(sourceChatId, upToOrdinal);
+			await this.#performForkOnly(sourceChatId, upToOrdinal, source);
 		} catch (error) {
-			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
+			this.deps.chatState.appendLocalNoticeForChat(
+				sourceChatId,
+				'error',
+				forkFailureNotice(error),
+			);
 		}
 	}
 
@@ -736,14 +758,16 @@ export class ConversationSlashCommandService {
 	async #performForkOnly(
 		sourceChatId: string,
 		upToOrdinal?: number,
+		source?: ConversationForkSource,
 	): Promise<ChatListEntry | null> {
+		const sourceTranscript = source?.transcript ?? this.deps.chatState;
 		const chatId = createClientChatId();
 		const selection =
 			upToOrdinal === undefined
 				? null
 				: selectForkAtMessage(
-						this.deps.chatState.entries,
-						this.deps.chatState.getCursor().transcriptViewId,
+						sourceTranscript.entries,
+						sourceTranscript.getCursor().transcriptViewId,
 						upToOrdinal,
 					);
 		if (upToOrdinal !== undefined && !selection) {
@@ -757,17 +781,21 @@ export class ConversationSlashCommandService {
 				...(selection ? forkPointParams(selection) : {}),
 			});
 		} catch (error) {
-			if (!selection || !isStaleForkPointError(error) || !this.deps.refetchTranscript) {
+			const defaultRefetch = this.deps.refetchTranscript;
+			const refetchTranscript =
+				source?.refetchTranscript ??
+				(defaultRefetch ? () => defaultRefetch(sourceChatId) : null);
+			if (!selection || !isStaleForkPointError(error) || !refetchTranscript) {
 				throw error;
 			}
 			try {
-				await this.deps.refetchTranscript(sourceChatId);
+				await refetchTranscript();
 			} catch {
 				throw error;
 			}
 			const remapped = remapForkAtMessage(
-				this.deps.chatState.entries,
-				this.deps.chatState.getCursor().transcriptViewId,
+				sourceTranscript.entries,
+				sourceTranscript.getCursor().transcriptViewId,
 				selection,
 			);
 			if (!remapped) throw error;

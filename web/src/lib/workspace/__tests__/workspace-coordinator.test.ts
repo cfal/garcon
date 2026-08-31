@@ -428,6 +428,71 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.lastFocusedSurfaceId).toBe(destinationSurfaceId);
 	});
 
+	it('publishes Chat surface transfers for existing and new destination windows', async () => {
+		const { coordinator, layout } = createHarness();
+		const publications = [
+			{ publish: vi.fn(), rollback: vi.fn() },
+			{ publish: vi.fn(), rollback: vi.fn() },
+		];
+		const prepareChatSurfaceTransfer = vi
+			.fn()
+			.mockReturnValueOnce(publications[0])
+			.mockReturnValueOnce(publications[1]);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const destinationWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+		const sourceSurfaceId = chatViewSurfaceId('window-main');
+		const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+
+		await coordinator.moveTabToWindow(sourceSurfaceId, destinationWindowId);
+		await coordinator.moveTabToNewWindow(destinationSurfaceId, destinationWindowId, 'right');
+
+		expect(prepareChatSurfaceTransfer).toHaveBeenCalledTimes(2);
+		expect(prepareChatSurfaceTransfer).toHaveBeenNthCalledWith(1, {
+			sourceSurfaceId,
+			destinationSurfaceId,
+			chatId: 'chat-a',
+		});
+		expect(prepareChatSurfaceTransfer.mock.calls[1]?.[0]).toMatchObject({
+			sourceSurfaceId: destinationSurfaceId,
+			chatId: 'chat-a',
+		});
+		expect(prepareChatSurfaceTransfer.mock.calls[1]?.[0].destinationSurfaceId).not.toBe(
+			destinationSurfaceId,
+		);
+		expect(publications[0].publish).toHaveBeenCalledOnce();
+		expect(publications[1].publish).toHaveBeenCalledOnce();
+		expect(publications[0].rollback).not.toHaveBeenCalled();
+		expect(publications[1].rollback).not.toHaveBeenCalled();
+	});
+
+	it('rolls back a Chat surface transfer when layout publication fails', async () => {
+		const { coordinator, layout } = createHarness({ failLayoutPublishAt: 3 });
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const prepareChatSurfaceTransfer = vi.fn(() => publication);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer });
+		await coordinator.showChatInCurrentWindow('chat-a');
+		await coordinator.openSingletonInNewWindow('git-history');
+		const destinationWindowId = windowIdOfSurface(
+			layout.snapshot.desktopRoot,
+			'singleton:git-history',
+		)!;
+
+		await expect(
+			coordinator.moveTabToWindow(chatViewSurfaceId('window-main'), destinationWindowId),
+		).rejects.toThrow('layout publication failed');
+
+		expect(prepareChatSurfaceTransfer).toHaveBeenCalledOnce();
+		expect(publication.publish).toHaveBeenCalledOnce();
+		expect(publication.rollback).toHaveBeenCalledOnce();
+		expect(layout.surface(chatViewSurfaceId('window-main'))).toMatchObject({ chatId: 'chat-a' });
+		expect(layout.surface(chatViewSurfaceId(destinationWindowId))).toBeNull();
+	});
+
 	it('publishes a collapsing Chat move with the destination already current', async () => {
 		let coordinator: WorkspaceCoordinator | null = null;
 		let observeMove = false;
@@ -1437,7 +1502,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
 	});
 
-	it('does not let passive focus bookkeeping activate an inactive window', () => {
+	it('promotes a presented pane when keyboard focus enters it', () => {
 		const { coordinator, layout } = createHarness();
 		layout.publish(
 			layout.revision,
@@ -1455,8 +1520,98 @@ describe('WorkspaceCoordinator', () => {
 
 		coordinator.noteSurfaceFocus('singleton:files');
 
-		expect(coordinator.currentWindowId).toBe('window-main');
-		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:files');
+		expect(coordinator.focusOwner).toEqual({
+			kind: 'surface',
+			surfaceId: 'singleton:files',
+		});
+		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('updates command ownership on pointerdown and defers Chat anchoring until click', () => {
+		const { coordinator, layout } = createHarness();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-chat',
+					partitionId: 'partition-chat',
+				},
+			]),
+		);
+		const surfaceId = chatViewSurfaceId('window-chat');
+
+		coordinator.beginWindowPointerInteraction('window-chat', 7);
+		coordinator.activateWindow('window-chat');
+		coordinator.noteSurfaceFocus(surfaceId);
+
+		expect(coordinator.currentWindowId).toBe('window-chat');
+		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId });
+		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+
+		coordinator.commitWindowPointerInteraction('window-chat');
+
+		expect(coordinator.composerAnchorSurfaceId).toBe(surfaceId);
+	});
+
+	it('retains a hidden Chat anchor until its surface is removed', async () => {
+		const { coordinator, layout } = createHarness();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-chat',
+					partitionId: 'partition-chat',
+				},
+			]),
+		);
+		await coordinator.openSingletonAsTab('git', 'window-main');
+
+		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+
+		await expect(coordinator.closeSurface(CANONICAL_CHAT_SURFACE_ID)).resolves.toBe(true);
+
+		expect(coordinator.composerAnchorSurfaceId).toBeNull();
+	});
+
+	it('clears cancelled and released pointer gestures without changing the Chat anchor', async () => {
+		const { coordinator, layout } = createHarness();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-chat',
+					partitionId: 'partition-chat',
+				},
+			]),
+		);
+		const surfaceId = chatViewSurfaceId('window-chat');
+
+		coordinator.beginWindowPointerInteraction('window-chat', 7);
+		coordinator.cancelWindowPointerInteraction('window-chat', 7);
+		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+
+		coordinator.beginWindowPointerInteraction('window-chat', 8);
+		coordinator.releaseWindowPointerInteraction('window-chat', 8);
+		coordinator.noteSurfaceFocus(surfaceId);
+		expect(coordinator.composerAnchorSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		coordinator.noteSurfaceFocus(surfaceId);
+		expect(coordinator.composerAnchorSurfaceId).toBe(surfaceId);
 	});
 
 	it('moves between tabs in the focused window without wrapping at either boundary', async () => {

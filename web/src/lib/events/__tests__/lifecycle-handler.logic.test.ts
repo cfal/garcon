@@ -13,8 +13,8 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		appendServerNotice: vi.fn(),
 		setIsSystemChatChange: vi.fn(),
 		conversationUi: {
-			clearPendingPermissionRequests: vi.fn(),
-			clearTurnPermissionRequests: vi.fn(),
+			clearPendingPermissionsForChat: vi.fn(),
+			clearTurnPermissionRequestsForChat: vi.fn(),
 		},
 		clearTurnStatus: vi.fn(),
 		isChatProcessing: vi.fn(() => false),
@@ -60,14 +60,7 @@ describe('handleAgentComplete', () => {
 	it('does not notify when the turn was interrupted', () => {
 		const ctx = createCtx();
 		handleAgentComplete(
-			new AgentRunFinishedMessage(
-				'chat-1',
-				0,
-				undefined,
-				undefined,
-				undefined,
-				'interrupted',
-			),
+			new AgentRunFinishedMessage('chat-1', 0, undefined, undefined, undefined, 'interrupted'),
 			ctx,
 		);
 
@@ -87,7 +80,7 @@ describe('handleAgentComplete', () => {
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 
 		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
-		expect(ctx.conversationUi.clearTurnPermissionRequests).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.clearTurnPermissionRequestsForChat).not.toHaveBeenCalled();
 		expect(ctx.notifyCompletion).not.toHaveBeenCalled();
 	});
 
@@ -108,16 +101,32 @@ describe('handleAgentComplete', () => {
 	});
 
 	it('preserves plan-exit permission requests', () => {
-		const clearTurnPermissionRequests = vi.fn();
+		const clearTurnPermissionRequestsForChat = vi.fn();
 		const ctx = createCtx({
 			conversationUi: {
-				clearPendingPermissionRequests: vi.fn(),
-				clearTurnPermissionRequests,
+				clearPendingPermissionsForChat: vi.fn(),
+				clearTurnPermissionRequestsForChat,
 			},
 		});
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 
-		expect(clearTurnPermissionRequests).toHaveBeenCalledOnce();
+		expect(clearTurnPermissionRequestsForChat).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('clears only the completed chat permissions when another chat is current', () => {
+		const clearTurnPermissionRequestsForChat = vi.fn();
+		const ctx = createCtx({
+			getCurrentChatId: () => 'chat-current',
+			conversationUi: {
+				clearPendingPermissionsForChat: vi.fn(),
+				clearTurnPermissionRequestsForChat,
+			},
+		});
+
+		handleAgentComplete(new AgentRunFinishedMessage('chat-completed', 0), ctx);
+
+		expect(clearTurnPermissionRequestsForChat).toHaveBeenCalledWith('chat-completed');
+		expect(clearTurnPermissionRequestsForChat).not.toHaveBeenCalledWith('chat-current');
 	});
 });
 
@@ -128,7 +137,7 @@ describe('handleAgentError', () => {
 
 		expect(ctx.clearTurnStatus).toHaveBeenCalledWith('chat-1');
 		expect(ctx.appendServerNotice).toHaveBeenCalledWith('chat-1', 'error', 'Something broke');
-		expect(ctx.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
+		expect(ctx.conversationUi.clearPendingPermissionsForChat).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('preserves successor-turn metadata and permission requests', () => {
@@ -137,6 +146,22 @@ describe('handleAgentError', () => {
 		handleAgentError(new AgentRunFailedMessage('chat-1', 'Previous turn failed'), ctx);
 
 		expect(ctx.clearTurnStatus).not.toHaveBeenCalled();
-		expect(ctx.conversationUi.clearPendingPermissionRequests).not.toHaveBeenCalled();
+		expect(ctx.conversationUi.clearPendingPermissionsForChat).not.toHaveBeenCalled();
+	});
+
+	it('clears only the failed chat permissions when another chat is current', () => {
+		const clearPendingPermissionsForChat = vi.fn();
+		const ctx = createCtx({
+			getCurrentChatId: () => 'chat-current',
+			conversationUi: {
+				clearPendingPermissionsForChat,
+				clearTurnPermissionRequestsForChat: vi.fn(),
+			},
+		});
+
+		handleAgentError(new AgentRunFailedMessage('chat-failed', 'Something broke'), ctx);
+
+		expect(clearPendingPermissionsForChat).toHaveBeenCalledWith('chat-failed');
+		expect(clearPendingPermissionsForChat).not.toHaveBeenCalledWith('chat-current');
 	});
 });

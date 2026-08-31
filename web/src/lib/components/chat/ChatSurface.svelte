@@ -6,12 +6,9 @@
 		getModelCatalog,
 		type WorkspaceChatActions,
 	} from '$lib/context';
-	import ChatEmptyState from './ChatEmptyState.svelte';
-	import ChatLoadingState from './ChatLoadingState.svelte';
 	import ConversationWorkspace from './ConversationWorkspace.svelte';
 	import SubagentManagementControl from './SubagentManagementControl.svelte';
 	import CurrentChatMenu from '$lib/components/layout/CurrentChatMenu.svelte';
-	import { ChatWindowPreviewStore } from '$lib/chat/transcript/chat-window-preview-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
@@ -22,6 +19,7 @@
 	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+	import type { ConversationPanelActions } from './conversation-panel-actions.js';
 
 	const noopChatActions: WorkspaceChatActions = {
 		requestDelete() {},
@@ -41,11 +39,11 @@
 		onRegisterSubmit,
 		onRegisterUserMessageNavigator,
 		onRegisterAppendToDraft,
+		onRegisterPanelActions,
+		onComposerHeightChange,
 		subagentToolbar,
 		chatActions = noopChatActions,
 		transcriptCache: providedTranscriptCache,
-		previewStore: providedPreviewStore,
-		getVisibleChatIds,
 	}: {
 		isMobile: boolean;
 		isVisible: boolean;
@@ -54,11 +52,11 @@
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
+		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
+		onComposerHeightChange?: (height: number) => void;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
 		transcriptCache?: ChatTranscriptCache;
-		previewStore?: ChatWindowPreviewStore;
-		getVisibleChatIds?: () => string[];
 	} = $props();
 
 	const sessions = getChatSessions();
@@ -67,8 +65,6 @@
 	const transcriptCache =
 		untrack(() => providedTranscriptCache) ??
 		new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
-	const previewStore =
-		untrack(() => providedPreviewStore) ?? new ChatWindowPreviewStore(transcriptCache);
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let prepareConversationHide: (() => void) | null = $state(null);
 
@@ -84,7 +80,6 @@
 		resolveChatSurfacePresentation(selectedChat, sessions.isLoadingChats),
 	);
 	const canRenderConversation = $derived(chatSurfacePresentation === 'conversation');
-	const showChatLoadingState = $derived(chatSurfacePresentation === 'loading');
 	const conversationWorkspacePresented = $derived(isVisible && canRenderConversation);
 	const conversationWorkspaceVisible = $derived(conversationWorkspacePresented && isInteractive);
 	const reserveMobileToolbar = $derived(isMobile && hasUsableChatContext);
@@ -117,9 +112,6 @@
 		onRegisterUserMessageNavigator?.(command);
 	}
 
-	function isVisiblePreviewChat(chatId: string): boolean {
-		return getVisibleChatIds?.().includes(chatId) ?? false;
-	}
 </script>
 
 {#snippet currentChatMenu(shadow: boolean)}
@@ -185,27 +177,11 @@
 			onRegisterPrepareHide={(prepare) => (prepareConversationHide = prepare)}
 			onRegisterAppendToDraft={(append) => onRegisterAppendToDraft?.(append)}
 			{onRegisterReload}
+			{onRegisterPanelActions}
+			{onComposerHeightChange}
 			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspaceVisible}
-			getVisibleChatIds={() => getVisibleChatIds?.() ?? []}
-			{isVisiblePreviewChat}
-			getVisiblePreviewCursor={(chatId) => previewStore.cursor(chatId)}
-			applyVisiblePreviewMessages={(
-				chatId,
-				transcriptViewId,
-				messages,
-				firstOrdinal,
-				lastOrdinal,
-			) =>
-				previewStore.applyMessages(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal)}
-			loadVisiblePreviewSnapshot={(chatId) => previewStore.loadSnapshot(chatId)}
-			markVisiblePreviewStale={(chatId) => previewStore.markStale(chatId)}
 		/>
 	</div>
-	{#if showChatLoadingState}
-		<div class="absolute inset-0 z-30 bg-background"><ChatLoadingState /></div>
-	{:else if !canRenderConversation}
-		<div class="absolute inset-0 z-30 bg-background"><ChatEmptyState /></div>
-	{/if}
 </div>

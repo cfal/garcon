@@ -14,11 +14,10 @@ import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-
 import * as m from '$lib/paraglide/messages.js';
 
 export interface PermissionLifecycleContext {
-	getCurrentChatId: () => string | null;
-	conversationUi: Pick<ConversationUiPort, 'setPendingPermissionRequests'>;
-	markTurnRunning: (chatId?: string | null) => void;
-	pushLoadingStatus: (entry: LoadingStatusEntry) => void;
-	popLoadingStatus: (id: string) => void;
+	conversationUi: Pick<ConversationUiPort, 'updatePendingPermissionsForChat'>;
+	markTurnRunning: (chatId: string) => void;
+	pushLoadingStatus: (chatId: string, entry: LoadingStatusEntry) => void;
+	popLoadingStatus: (chatId: string, id: string) => void;
 }
 
 const WAITING_FOR_PERMISSION_ID = 'WAITING_FOR_PERMISSION';
@@ -29,15 +28,18 @@ export function handlePermissionLifecycleFromBatch(
 	msg: { chatId?: string | null; messages: ChatMessage[] },
 	ctx: PermissionLifecycleContext,
 ) {
-	if (!msg.messages) return;
+	const chatId = msg.chatId ?? null;
+	if (!chatId || !msg.messages) return;
 
 	for (const entry of msg.messages) {
 		if (entry instanceof PermissionRequestMessage) {
 			let requestAdded = false;
-			ctx.conversationUi.setPendingPermissionRequests((previous) => {
-				if (previous.some((request) => (
-					request.permissionOccurrenceId === entry.permissionOccurrenceId
-				)))
+			ctx.conversationUi.updatePendingPermissionsForChat(chatId, (previous) => {
+				if (
+					previous.some(
+						(request) => request.permissionOccurrenceId === entry.permissionOccurrenceId,
+					)
+				)
 					return previous;
 				requestAdded = true;
 				return [
@@ -45,15 +47,15 @@ export function handlePermissionLifecycleFromBatch(
 					{
 						permissionOccurrenceId: entry.permissionOccurrenceId,
 						requestedTool: entry.requestedTool,
-						chatId: msg.chatId || null,
+						chatId,
 						receivedAt: new Date(),
 					},
 				];
 			});
 
 			if (requestAdded) {
-				ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
-				ctx.pushLoadingStatus({
+				ctx.markTurnRunning(chatId);
+				ctx.pushLoadingStatus(chatId, {
 					id: WAITING_FOR_PERMISSION_ID,
 					text: m.chat_loading_waiting_for_permission(),
 					tokens: 0,
@@ -63,19 +65,19 @@ export function handlePermissionLifecycleFromBatch(
 		}
 
 		if (
-			entry instanceof PermissionResolvedMessage
-			|| entry instanceof PermissionCancelledMessage
-			|| entry instanceof PermissionExpiredMessage
+			entry instanceof PermissionResolvedMessage ||
+			entry instanceof PermissionCancelledMessage ||
+			entry instanceof PermissionExpiredMessage
 		) {
 			let occurrenceRemoved = false;
-			ctx.conversationUi.setPendingPermissionRequests((previous) => {
-				const remaining = previous.filter((request) => (
-					request.permissionOccurrenceId !== entry.permissionOccurrenceId
-				));
+			ctx.conversationUi.updatePendingPermissionsForChat(chatId, (previous) => {
+				const remaining = previous.filter(
+					(request) => request.permissionOccurrenceId !== entry.permissionOccurrenceId,
+				);
 				occurrenceRemoved = remaining.length !== previous.length;
 				return occurrenceRemoved ? remaining : previous;
 			});
-			if (occurrenceRemoved) ctx.popLoadingStatus(WAITING_FOR_PERMISSION_ID);
+			if (occurrenceRemoved) ctx.popLoadingStatus(chatId, WAITING_FOR_PERMISSION_ID);
 		}
 	}
 }

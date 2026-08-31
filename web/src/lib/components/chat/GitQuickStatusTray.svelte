@@ -17,6 +17,7 @@
 		lastError?: string | null;
 		branchSelector?: GitQuickBranchSelectorControls | null;
 		onCommit: () => void;
+		announcementsEnabled?: boolean;
 	}
 
 	let {
@@ -27,6 +28,7 @@
 		lastError = null,
 		branchSelector = null,
 		onCommit,
+		announcementsEnabled = true,
 	}: Props = $props();
 
 	// The cap stays out of flow while sliding underneath the rounded composer
@@ -61,8 +63,8 @@
 	<div class={trayClass}>
 		<div
 			class={panelClass}
-			role="status"
-			aria-live="polite"
+			role={announcementsEnabled ? 'status' : undefined}
+			aria-live={announcementsEnabled ? 'polite' : 'off'}
 			aria-busy={isRefreshing || (!summary && !lastError)}
 			aria-label={summary ? undefined : lastError || m.status_loading()}
 		>

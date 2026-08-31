@@ -15,6 +15,7 @@ import {
 	isTransientMobileSingletonKind,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
+	type ChatViewSurfaceId,
 	type FocusOwner,
 	type PortableSingletonKind,
 	type PresentationHostId,
@@ -78,11 +79,17 @@ export class WorkspacePresentationController {
 	lastFocusedSurfaceId = $state('');
 	lastFocusedWindowId = $state<WorkspaceWindowId | null>(null);
 	focusOwner = $state<FocusOwner>({ kind: 'chat-list' });
+	composerAnchorSurfaceId = $state<ChatViewSurfaceId | null>(null);
 	#inFlightCommitCount = 0;
 	#presentationMode = $state<PresentationMode>('desktop');
 	#requestedPresentationMode: PresentationMode = 'desktop';
 	#responsiveGeneration = 0;
 	#focusIntentGeneration = 0;
+	#pointerInteraction: {
+		readonly windowId: WorkspaceWindowId;
+		readonly pointerId: number;
+	} | null = null;
+	#pointerInteractionRelease: ReturnType<typeof setTimeout> | null = null;
 	readonly #mobilePresentation: MobilePresentationPlanner;
 	readonly #frames: WorkspacePresentationFrames;
 
@@ -101,6 +108,7 @@ export class WorkspacePresentationController {
 		this.lastFocusedSurfaceId = this.layout.defaultActiveId;
 		this.lastFocusedWindowId = this.layout.defaultWindowId;
 		this.focusOwner = { kind: 'surface', surfaceId: this.lastFocusedSurfaceId };
+		this.#adoptComposerAnchor(this.lastFocusedSurfaceId);
 		this.#syncSingletonVisibility(this.layout.snapshot, this.#presentationMode);
 	}
 
@@ -204,11 +212,11 @@ export class WorkspacePresentationController {
 	noteSurfaceFocus(surfaceId: string): void {
 		if (!this.isSurfacePresented(surfaceId)) return;
 		const windowId = this.windowOf(surfaceId);
-		if (windowId && windowId !== this.currentWindowId) return;
 		this.#supersedeFocusIntent();
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedSurfaceId = surfaceId;
 		if (windowId) this.lastFocusedWindowId = windowId;
+		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
 	}
 
 	noteChatListFocus(): void {
@@ -222,6 +230,54 @@ export class WorkspacePresentationController {
 		this.focusOwner = { kind: 'window-chrome', windowId, surfaceId };
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
+		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
+	}
+
+	beginWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		if (this.isMobile) return;
+		const snapshot = this.layout.snapshot;
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) return;
+		this.#clearPointerInteractionRelease();
+		this.#supersedeFocusIntent();
+		const surfaceId = workspaceWindow.tabs.activeId;
+		this.focusOwner = { kind: 'surface', surfaceId };
+		this.lastFocusedWindowId = windowId;
+		this.lastFocusedSurfaceId = surfaceId;
+		this.#pointerInteraction = { windowId, pointerId };
+	}
+
+	commitWindowPointerInteraction(windowId: WorkspaceWindowId): void {
+		if (this.isMobile) return;
+		const snapshot = this.layout.snapshot;
+		const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
+		if (!workspaceWindow || !isDesktopWindowPresented(snapshot, windowId)) {
+			this.#clearPointerInteraction();
+			return;
+		}
+		this.#supersedeFocusIntent();
+		const surfaceId = workspaceWindow.tabs.activeId;
+		this.focusOwner = { kind: 'surface', surfaceId };
+		this.lastFocusedWindowId = windowId;
+		this.lastFocusedSurfaceId = surfaceId;
+		this.#adoptComposerAnchor(surfaceId);
+		this.#clearPointerInteraction();
+	}
+
+	releaseWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		const pending = this.#pointerInteraction;
+		if (!pending || pending.windowId !== windowId || pending.pointerId !== pointerId) return;
+		this.#clearPointerInteractionRelease();
+		this.#pointerInteractionRelease = setTimeout(() => {
+			this.#pointerInteractionRelease = null;
+			if (this.#pointerInteraction === pending) this.#pointerInteraction = null;
+		}, 0);
+	}
+
+	cancelWindowPointerInteraction(windowId: WorkspaceWindowId, pointerId: number): void {
+		const pending = this.#pointerInteraction;
+		if (!pending || pending.windowId !== windowId || pending.pointerId !== pointerId) return;
+		this.#clearPointerInteraction();
 	}
 
 	activateWindow(windowId: WorkspaceWindowId): void {
@@ -236,6 +292,7 @@ export class WorkspacePresentationController {
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
+		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
 
 		void tick().then(() => {
 			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;
@@ -435,6 +492,7 @@ export class WorkspacePresentationController {
 		const windowId = this.windowOf(surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
 		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
+		this.#adoptComposerAnchor(surfaceId);
 		this.focusPresentedSurface(surfaceId);
 	}
 
@@ -668,6 +726,7 @@ export class WorkspacePresentationController {
 		this.lastFocusedSurfaceId = surfaceId;
 		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
 		if (windowId) this.lastFocusedWindowId = windowId;
+		this.#adoptComposerAnchor(surfaceId, snapshot);
 	}
 
 	#normalizeFocusOwner(
@@ -683,6 +742,7 @@ export class WorkspacePresentationController {
 				collectWindowNodes(snapshot.desktopRoot)[0]?.id ??
 				null;
 		}
+		this.#normalizeComposerAnchor(snapshot);
 		if (this.focusOwner.kind === 'chat-list') return;
 		const visible = new Set(this.#visiblePresentations(snapshot, mode).values());
 		if (visible.has(this.focusOwner.surfaceId)) return;
@@ -692,6 +752,31 @@ export class WorkspacePresentationController {
 			this.layout.defaultActiveId;
 		this.focusOwner = { kind: 'surface', surfaceId: fallback };
 		this.lastFocusedSurfaceId = fallback;
+	}
+
+	#adoptComposerAnchor(
+		surfaceId: string,
+		snapshot: WorkspaceLayoutSnapshot = this.layout.snapshot,
+	): void {
+		const surface = snapshot.surfaces[surfaceId];
+		if (surface?.type === 'chat') this.composerAnchorSurfaceId = surface.id;
+	}
+
+	#normalizeComposerAnchor(snapshot: WorkspaceLayoutSnapshot): void {
+		const anchor = this.composerAnchorSurfaceId;
+		if (!anchor) return;
+		if (snapshot.surfaces[anchor]?.type !== 'chat') this.composerAnchorSurfaceId = null;
+	}
+
+	#clearPointerInteraction(): void {
+		this.#clearPointerInteractionRelease();
+		this.#pointerInteraction = null;
+	}
+
+	#clearPointerInteractionRelease(): void {
+		if (this.#pointerInteractionRelease === null) return;
+		clearTimeout(this.#pointerInteractionRelease);
+		this.#pointerInteractionRelease = null;
 	}
 
 	#chatSurfaceInWindow(

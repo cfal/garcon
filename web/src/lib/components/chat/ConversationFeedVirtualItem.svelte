@@ -28,7 +28,7 @@
 		renderModel: ConversationFeedRenderModel;
 		agentId: SessionAgentId | string;
 		showThinking: boolean;
-		pendingPermissionRequests: PendingPermissionRequest[];
+		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		earlierPageState: TranscriptPageState;
 		laterPageState: TranscriptPageState;

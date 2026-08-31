@@ -24,7 +24,7 @@
 		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 		hiddenToolTypes?: HideableToolType[];
-		pendingPermissionRequests?: PendingPermissionRequest[];
+		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;

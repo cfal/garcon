@@ -1,5 +1,4 @@
-// Owns chat lifecycle, submission, permission, queue, and mode transitions.
-// Delegates all viewport operations through the dependency interface.
+// Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
@@ -7,6 +6,7 @@ import { createClientCommandId } from '$lib/chat/conversation/client-command-id.
 import {
 	INITIAL_VISIBLE_MESSAGES,
 	type ActiveTranscriptPort,
+	type ChatLoadMessagesOptions,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -33,7 +33,10 @@ import {
 	ConversationAgentSwitchService,
 	type AgentSwitchSelection,
 } from '$lib/chat/conversation/conversation-agent-switch-service.js';
-import { ConversationSlashCommandService } from '$lib/chat/conversation/conversation-slash-command-service.js';
+import {
+	ConversationSlashCommandService,
+	type ConversationForkSource,
+} from '$lib/chat/conversation/conversation-slash-command-service.js';
 import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
@@ -59,6 +62,7 @@ import {
 	executionSelectionFromProjection,
 	type ConversationExecutionSelection,
 } from './conversation-execution-draft-state.svelte.js';
+import { resolveConversationModelSelection } from './conversation-model-selection.js';
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
@@ -76,8 +80,25 @@ type SessionTranscriptState = Pick<
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
+	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+	hasMountedPresentation(chatId: string): boolean;
+	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
+	appendLocalNoticeForChat(
+		chatId: string,
+		noticeType: Parameters<ActiveTranscriptPort['appendLocalNotice']>[0],
+		content: string,
+	): void;
+	clearLocalNoticesForChat(chatId: string): void;
 };
+
+type SessionTranscriptLoadTarget = Pick<
+	ActiveTranscriptPort,
+	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
+> & {
+	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
+};
+
+type PanelTranscriptSnapshotLoader = (options: ChatLoadMessagesOptions) => Promise<boolean>;
 
 type SessionComposerState = Pick<
 	ComposerState,
@@ -135,6 +156,11 @@ type SessionConversationUiState = Pick<
 	| 'isExecutionControlSocketInstanceConfirmed'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
+	| 'pendingPermissionsFor'
+	| 'updatePendingPermissionsForChat'
+	| 'beginPlanModeForChat'
+	| 'previousPermissionModeFor'
+	| 'finishPlanModeForChat'
 	| 'setTransientFeedFromSnapshot'
 >;
 
@@ -176,6 +202,7 @@ export interface SessionControllerDeps {
 	composerState: SessionComposerState;
 	agentState: SessionAgentState;
 	lifecycle: SessionLifecycleState;
+	lifecycleForChat(chatId: string): SessionLifecycleState;
 	conversationUi: SessionConversationUiState;
 	startupCoordinator: SessionStartupCoordinator;
 	modelCatalog: {
@@ -272,9 +299,6 @@ export class ConversationSessionController {
 			get composerState() {
 				return deps.composerState;
 			},
-			get lifecycle() {
-				return deps.lifecycle;
-			},
 			get conversationUi() {
 				return deps.conversationUi;
 			},
@@ -289,7 +313,7 @@ export class ConversationSessionController {
 			get queue() {
 				return queue;
 			},
-			executionModelSelection: () => this.#executionModelSelection(),
+			executionSelectionForChat: (chatId) => this.#executionSelectionForChat(chatId),
 		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() {
@@ -313,24 +337,16 @@ export class ConversationSessionController {
 		});
 	}
 
-	#executionModelSelection(): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	} {
-		const { agentState, modelCatalog } = this.deps;
-		const resolved = modelCatalog.selectionFor(
-			agentState.agentId,
-			agentState.model,
-			agentState.modelEndpointId,
-		);
-		if (resolved.modelEndpointId || !agentState.modelEndpointId) return resolved;
+	#executionModelSelection() {
+		return resolveConversationModelSelection(this.deps.agentState, this.deps.modelCatalog);
+	}
+
+	#executionSelectionForChat(chatId: string): ConversationExecutionSelection | null {
+		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
+		if (!selection) return null;
 		return {
-			model: resolved.model,
-			apiProviderId: agentState.apiProviderId,
-			modelEndpointId: agentState.modelEndpointId,
-			modelProtocol: agentState.modelProtocol,
+			...selection,
+			...resolveConversationModelSelection(selection, this.deps.modelCatalog),
 		};
 	}
 
@@ -360,9 +376,7 @@ export class ConversationSessionController {
 
 	#resetSelectionState(): void {
 		const { deps } = this;
-		const currentChatId = deps.lifecycle.currentChatId;
 		deps.chatState.activateChat(null);
-		if (currentChatId) deps.lifecycle.clearTurnStatus(currentChatId);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.activateTransientFeed(null);
 		deps.setIsViewportPinnedToBottom(true);
@@ -396,18 +410,19 @@ export class ConversationSessionController {
 			return;
 		}
 
-		deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
+		const preservesMountedPresentation = deps.chatState.hasMountedPresentation(chatId);
+		if (!preservesMountedPresentation) {
+			deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
+		}
 
 		// Restores cached messages immediately while the server round-trip completes.
 		const restored = deps.chatState.activateChat(chatId);
-		if (restored) {
+		if (!preservesMountedPresentation && restored) {
 			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
-		const previousChatId = deps.lifecycle.currentChatId;
-		if (previousChatId) deps.lifecycle.clearTurnStatus(previousChatId);
 		deps.conversationUi.activateTransientFeed(chatId);
-		deps.setIsViewportPinnedToBottom(true);
+		if (!preservesMountedPresentation) deps.setIsViewportPinnedToBottom(true);
 
 		const activeSelection = this.#executionDraft.activate(chatId);
 		if (activeSelection) this.#applyExecutionSelection(activeSelection);
@@ -466,42 +481,72 @@ export class ConversationSessionController {
 			deps.sessions.patchLastReadAt(chatId, selected.lastActivityAt);
 		}
 
-		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
+		this.loadChat(chatId, {
+			minimumMessageLimit: restored?.count ?? 0,
+			restoreBottom: !preservesMountedPresentation,
+		});
 	}
 
-	async loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
+	async loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+	): Promise<void> {
 		try {
 			await this.#loadChat(chatId, options);
 		} catch {
-			// Leaves restored messages visible until reconnect or manual retry reloads them.
+			// Leaves restored messages visible until reconnect or a manual retry.
 		}
 	}
 
-	async #loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
+	async loadPanelChat(
+		chatId: string,
+		transcript: SessionTranscriptLoadTarget,
+		loadPanelSnapshot: PanelTranscriptSnapshotLoader,
+	): Promise<void> {
+		try {
+			await this.#loadChat(chatId, { restoreBottom: false }, transcript, loadPanelSnapshot);
+		} catch {
+			// Leaves the panel's load error visible for another explicit retry.
+		}
+	}
+
+	async #loadChat(
+		chatId: string,
+		options: { minimumMessageLimit?: number; restoreBottom?: boolean } = {},
+		transcript: SessionTranscriptLoadTarget = this.deps.chatState,
+		loadPanelSnapshot?: PanelTranscriptSnapshotLoader,
+	): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
-			Math.min(deps.chatState.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
+			Math.min(transcript.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
 
 		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
 		// The primary restore happens earlier in handleChatSwitch.
-		if (deps.chatState.chatMessages.length === 0) {
-			const restored = deps.chatState.activateChat(chatId);
+		if (transcript.chatMessages.length === 0) {
+			const restored = transcript.activateChat(chatId);
 			minimumMessageLimit = Math.max(minimumMessageLimit, restored?.count ?? 0);
 		}
 
-		if (deps.chatState.chatMessages.length > 0) {
+		if (options.restoreBottom !== false && transcript.chatMessages.length > 0) {
 			this.#requestBottomRestore(chatId);
 		}
 
 		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
-		await deps.chatState.loadMessages(chatId, {
+		const loadOptions: ChatLoadMessagesOptions = {
 			minimumLimit: minimumMessageLimit,
-		});
+			purpose: 'activation',
+		};
+		if (loadPanelSnapshot) {
+			const loaded = await loadPanelSnapshot(loadOptions);
+			if (!loaded) return;
+		} else {
+			await transcript.loadMessages(chatId, loadOptions);
+		}
+		transcript.transcriptCache.markValidated(chatId);
 		if (deps.sessions.selectedChatId !== chatId) return;
 
-		deps.chatState.transcriptCache.markValidated(chatId);
-		this.#requestBottomRestore(chatId);
+		if (options.restoreBottom !== false) this.#requestBottomRestore(chatId);
 
 		const record = deps.sessions.byId[chatId];
 		if (
@@ -513,11 +558,12 @@ export class ConversationSessionController {
 		}
 
 		const initialSnapshot = await initialSnapshotPromise;
+		const loadedCursor = transcript.transcriptCache.readAppliedCursor(chatId);
 		if (
 			deps.sessions.selectedChatId === chatId &&
 			initialSnapshot?.chat.id === chatId &&
 			initialSnapshot.transcript.availability === 'available' &&
-			initialSnapshot.transcript.transcriptViewId === deps.chatState.getCursor().transcriptViewId
+			initialSnapshot.transcript.transcriptViewId === loadedCursor?.transcriptViewId
 		) {
 			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}
@@ -601,7 +647,11 @@ export class ConversationSessionController {
 		});
 		if (slash.kind === 'handled') return slash.outcome;
 		if (handoffPending && slash.kind === 'goal-control') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_handoff_requires_idle(),
+			);
 			return 'rejected';
 		}
 
@@ -656,7 +706,11 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice('error', m.chat_notice_queue_attachments_unavailable());
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_queue_attachments_unavailable(),
+				);
 				return 'rejected';
 			}
 			if (route === 'handoff-requires-idle') {
@@ -666,7 +720,11 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_idle());
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
+					'error',
+					m.chat_notice_handoff_requires_idle(),
+				);
 				return 'rejected';
 			}
 			if (route !== 'direct' && directAdmission) {
@@ -687,7 +745,8 @@ export class ConversationSessionController {
 					previousImages,
 					composerRevisionAfterClear,
 				);
-				deps.chatState.appendLocalNotice(
+				deps.chatState.appendLocalNoticeForChat(
+					chatId,
 					'error',
 					m.chat_notice_failed_prepare_attachments({
 						detail: errorDetail(error),
@@ -768,46 +827,68 @@ export class ConversationSessionController {
 		return this.#handoffForkConfirmation;
 	}
 
-	forkChat(sourceChatId: string, upToOrdinal?: number): Promise<void> {
-		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal);
+	forkChat(
+		sourceChatId: string,
+		upToOrdinal?: number,
+		transcript?: SessionTranscriptLoadTarget & ConversationForkSource['transcript'],
+	): Promise<void> {
+		const source = transcript
+			? ({
+					transcript,
+					refetchTranscript: () =>
+						this.#loadChat(sourceChatId, { restoreBottom: false }, transcript),
+				} satisfies ConversationForkSource)
+			: undefined;
+		return this.#slashCommands.forkChat(sourceChatId, upToOrdinal, source);
 	}
 
 	handleAbort(): Promise<void> {
+		const chatId = this.deps.sessions.selectedChatId || this.deps.lifecycle.currentChatId;
+		return chatId ? this.handleAbortForChat(chatId) : Promise.resolve();
+	}
+
+	handleAbortForChat(chatId: string): Promise<void> {
 		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(stopChat, (chatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+		return this.#requestTurnStop(chatId, stopChat, (targetChatId, result) => {
+			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
-	handleInterruptAndSend(): Promise<void> {
+	handleInterruptAndSendForChat(chatId: string): Promise<void> {
 		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(interruptAndSendChat, (chatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+		return this.#requestTurnStop(chatId, interruptAndSendChat, (targetChatId, result) => {
+			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
 		});
 	}
 
 	#requestTurnStop<T extends { outcome: ChatStopOutcome }>(
+		chatId: string,
 		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
 		onResult?: (chatId: string, result: T) => void,
 	): Promise<void> {
 		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		if (deps.lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
+		const chat = deps.sessions.byId[chatId];
+		if (!chat) return Promise.resolve();
+		const lifecycle = deps.lifecycleForChat(chatId);
+		if (lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
 		const clientRequestId = createClientCommandId();
-		const previous = deps.lifecycle.beginStopping(chatId, clientRequestId);
-		const restore = () => deps.lifecycle.restoreStopping(chatId, clientRequestId, previous);
+		const previous = lifecycle.beginStopping(chatId, clientRequestId);
+		const restore = () => lifecycle.restoreStopping(chatId, clientRequestId, previous);
 		const appendFailure = (detail: string) => {
-			if (deps.chatState.activeChatId !== chatId) return;
-			deps.chatState.appendLocalNotice('error', m.chat_notice_failed_stop_chat({ detail }));
+			if (!deps.sessions.byId[chatId]) return;
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_failed_stop_chat({ detail }),
+			);
 		};
 		return request({
 			clientRequestId,
 			chatId,
-			agentId: deps.agentState.agentId,
+			agentId: chat.agentId,
 		})
 			.then(async (result) => {
-				onResult?.(chatId, result);
+				if (deps.sessions.byId[chatId]) onResult?.(chatId, result);
 				await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
 				if (isStopSatisfied(result.outcome)) return;
 				restore();
@@ -819,27 +900,25 @@ export class ConversationSessionController {
 			});
 	}
 
-	handlePermissionDecision(
+	handlePermissionDecisionForChat(
+		chatId: string,
 		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
-		this.#permissions.handlePermissionDecision(permissionOccurrenceId, decision);
+		this.#permissions.handlePermissionDecision(chatId, permissionOccurrenceId, decision);
 	}
 
-	handleExitPlanMode(permissionOccurrenceId: string, choice: string, plan: string): void {
-		this.#permissions.handleExitPlanMode(permissionOccurrenceId, choice, plan);
+	handleExitPlanModeForChat(
+		chatId: string,
+		permissionOccurrenceId: string,
+		choice: string,
+		plan: string,
+	): void {
+		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
-	handleQueuePause(): Promise<void> {
-		return this.#queue.handlePause();
-	}
-
-	handleQueueResume(pauseId: string): Promise<void> {
-		return this.#queue.handleResume(pauseId);
-	}
-
-	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
-		this.#queue.handleControlError(action, error);
+	handleQueueControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
+		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
 
 	async pauseQueueForChat(chatId: string): Promise<void> {
@@ -867,6 +946,10 @@ export class ConversationSessionController {
 		await this.#queue.deleteForChat(chatId, entryId);
 	}
 
+	async deleteQueueEntryFromPanelForChat(chatId: string, entryId: string): Promise<void> {
+		await this.#queue.deleteFromPanelForChat(chatId, entryId);
+	}
+
 	async moveQueueEntryForChat(
 		chatId: string,
 		source: QueueEntry,
@@ -877,14 +960,12 @@ export class ConversationSessionController {
 		await this.#queue.moveForChat(chatId, source, target, placement, reorderRevision);
 	}
 
-	async handleSteerQueuedInput(entry: QueueEntry, reorderRevision: number): Promise<void> {
-		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId) return;
+	async handleSteerQueuedInputForChat(
+		chatId: string,
+		entry: QueueEntry,
+		reorderRevision: number,
+	): Promise<void> {
 		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
-	}
-
-	async handleDeleteQueuedInput(entryId: string): Promise<void> {
-		await this.#queue.handleDelete(entryId);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {

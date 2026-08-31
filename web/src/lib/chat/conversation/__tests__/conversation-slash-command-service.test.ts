@@ -5,6 +5,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage } from '$shared/chat-types';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -143,6 +144,10 @@ function createDeps(chat = createChat()) {
 		restoreDraftIfRevision,
 	};
 	const appendLocalNotice = vi.fn();
+	const appendLocalNoticeForChat = vi.fn(
+		(_chatId: string, noticeType: LocalNoticeType, content: string) =>
+			appendLocalNotice(noticeType, content),
+	);
 	const sessions = {
 		selectedChatId: chat.id,
 		byId: { [chat.id]: chat },
@@ -175,6 +180,7 @@ function createDeps(chat = createChat()) {
 			isUserScrolledUp: true,
 			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
+			appendLocalNoticeForChat,
 		},
 		composerState,
 		agentState: { model: 'sonnet' },
@@ -199,7 +205,7 @@ function createDeps(chat = createChat()) {
 		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
-	return { deps, composerState, appendLocalNotice, cursor };
+	return { deps, composerState, appendLocalNotice, appendLocalNoticeForChat, cursor };
 }
 
 describe('ConversationSlashCommandService', () => {
@@ -1059,6 +1065,32 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('forks from the explicitly supplied panel transcript', async () => {
+		const { deps } = createDeps();
+		const forked = createServerEntry('chat-2');
+		mockForkChat.mockResolvedValueOnce({ success: true, chat: forked });
+		const panelTranscript = {
+			entries: [
+				{
+					ordinal: 4,
+					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'panel reply'),
+				},
+			],
+			getCursor: () => ({ transcriptViewId: 'view-panel', lastOrdinal: 4 }),
+		};
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 4, {
+			transcript: panelTranscript,
+		});
+
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: 'chat-1',
+			chatId: expect.stringMatching(/^\d+$/),
+			upToOrdinal: 4,
+			transcriptViewId: 'view-panel',
+		});
 	});
 
 	it('refetches, remaps, and retries a stale fork point once', async () => {

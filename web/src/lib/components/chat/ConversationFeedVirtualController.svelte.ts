@@ -39,11 +39,13 @@ import {
 	settleConversationEndRestore,
 	settleConversationTarget,
 } from './conversation-feed-virtual-runtime.js';
+import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_SETTLE_ITERATIONS = 8;
+const MAX_TARGET_READY_ITERATIONS = 180;
 const OFFSET_TOLERANCE_PX = 0.5;
 
 interface ConversationFeedVirtualControllerOptions {
@@ -301,6 +303,52 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#virt.suspend();
 	}
 
+	captureRestoreTarget(
+		transcriptViewId: string,
+		pinned: boolean,
+	): ConversationPanelRestoreTarget | null {
+		if (pinned) return { kind: 'end' };
+		const messageKeys = new Set<string>();
+		for (const item of this.#configuredModel.items) {
+			if (
+				item.kind !== 'transcript' ||
+				item.item.kind !== 'message' ||
+				item.item.ordinal === undefined
+			)
+				continue;
+			messageKeys.add(item.key);
+		}
+		const viewport = this.options.viewport;
+		const visibleAnchor = viewport
+			? this.#mountedItems.visibleAnchor({
+					viewport,
+					configuredKeys: this.#configuredGeometry.keys,
+					eligibleKeys: messageKeys,
+				})
+			: null;
+		const virtualAnchor = this.#captureVirtualAnchor(true);
+		const anchor = visibleAnchor ?? virtualAnchor;
+		if (!anchor) return null;
+		for (const key of [anchor.key, ...anchor.fallbackKeys]) {
+			const index = this.#configuredModel.indexByKey.get(key);
+			if (index === undefined) continue;
+			const virtualItem = this.#configuredModel.items[index];
+			if (
+				virtualItem?.kind !== 'transcript' ||
+				virtualItem.item.kind !== 'message' ||
+				virtualItem.item.ordinal === undefined
+			)
+				continue;
+			return {
+				kind: 'row',
+				transcriptViewId,
+				ordinal: virtualItem.item.ordinal,
+				viewportOffset: key === anchor.key ? anchor.viewportOffset : 0,
+			};
+		}
+		return null;
+	}
+
 	finishScrollbarDrag(): void {
 		this.#earlierPrependAnchor.finishScrollbarDrag();
 	}
@@ -467,13 +515,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 
 	async scrollToTarget(
 		target: ConversationViewportTarget,
-		options: { align?: 'center' | 'start' | 'end' } = {},
+		options: { align?: 'center' | 'start' | 'end'; viewportOffset?: number } = {},
 	): Promise<ConversationViewportTargetResult> {
-		if (!this.isReady()) return 'not-ready';
+		if (this.#destroyed || !this.options.visible) return 'not-ready';
 		this.#endRestoreEpoch += 1;
 		this.#activeTargetScrolls += 1;
 		const token = ++this.#targetToken;
 		try {
+			for (let attempt = 0; attempt < MAX_TARGET_READY_ITERATIONS; attempt += 1) {
+				if (this.isReady()) break;
+				await nextConversationLayoutFrame();
+				if (token !== this.#targetToken) return 'cancelled';
+				if (this.#destroyed || !this.options.visible) return 'not-ready';
+			}
+			if (!this.isReady()) return 'not-ready';
 			this.cancelPendingLayoutMutation();
 			await nextConversationLayoutFrame();
 			if (token !== this.#targetToken) return 'cancelled';
@@ -491,12 +546,14 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (!key) return 'target-missing';
 			const releaseTarget = this.options.retention.acquire(key, 'target');
 			try {
-				this.#virt.scrollToIndex(resolved.index, { align: options.align ?? 'center' });
+				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
+				this.#virt.scrollToIndex(resolved.index, { align });
 				return await settleConversationTarget({
 					root: () => this.options.virtualRoot,
 					rowId: resolved.innerRowId,
 					viewport: () => this.options.viewport,
-					align: options.align ?? 'center',
+					align,
+					viewportOffset: options.viewportOffset,
 					isCurrent: () => token === this.#targetToken,
 					isReady: () => this.isReady(),
 					scrollBy: (delta) => {

@@ -10,11 +10,12 @@ import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
-import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
-import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import type { ConversationLifecyclePort } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
+import type { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { ReadReceiptOutboxStore } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
@@ -105,10 +106,11 @@ export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsS
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)
-export const [getActiveTranscriptState, setActiveTranscriptState] =
-	createContext<ActiveTranscriptState>();
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
 export const [getChatDrafts, setChatDrafts] = createContext<ChatDraftStore>();
 export const [getAgentState, setAgentState] = createContext<AgentState>();
-export const [getConversationLifecycle, setConversationLifecycle] =
-	createContext<ConversationLifecycleState>();
+export const [getConversationUi, setConversationUi] = createContext<ConversationUiPort>();
+export const [getConversationLifecycles, setConversationLifecycles] =
+	createContext<ConversationLifecyclePort>();
+export const [getConversationPanels, setConversationPanels] =
+	createContext<ConversationPanelRegistry>();

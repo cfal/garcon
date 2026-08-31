@@ -478,11 +478,23 @@ export class SpaDriver {
       const workspaceWindow = [
         ...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]'),
       ].find((element) => element.dataset.workspaceWindowId === expectedWindowId);
-      const focusTarget = workspaceWindow?.querySelector<HTMLElement>(
+      const titlebar = workspaceWindow?.querySelector<HTMLElement>(
         '[data-workspace-window-titlebar]',
       );
-      if (!focusTarget) throw new Error(`Missing workspace window: ${expectedWindowId}`);
-      focusTarget.focus();
+      if (!titlebar) throw new Error(`Missing workspace window: ${expectedWindowId}`);
+      titlebar.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          buttons: 1,
+          pointerId: 1,
+        }),
+      );
+      titlebar.focus();
+      titlebar.dispatchEvent(
+        new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 1 }),
+      );
+      titlebar.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
     }, windowId);
     await this.#page.waitForFunction(
       (expectedWindowId) =>
@@ -555,7 +567,7 @@ export class SpaDriver {
         '[data-workspace-window-tab-action="move-new-right"]',
       );
       if (!item) throw new Error(`Missing move-to-new-window action: ${expectedWindowId}`);
-      item.click();
+      setTimeout(() => item.click(), 0);
     }, sourceWindowId);
     await this.waitForWorkspaceWindowCount(existingWindowIds.size + 1);
     const openedWindowId = (await this.workspaceWindowIds()).find(

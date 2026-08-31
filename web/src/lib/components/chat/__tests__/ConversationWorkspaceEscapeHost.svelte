@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import ConversationWorkspace from '../ConversationWorkspace.svelte';
+	import ConversationPanel from '../ConversationPanel.svelte';
 	import {
 		setAppShell,
 		setChatSessions,
@@ -17,6 +18,9 @@
 		setGitBranchActions,
 		setChatProcessingReconciler,
 		setChatDrafts,
+		setConversationUi,
+		setConversationLifecycles,
+		setConversationPanels,
 	} from '$lib/context';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -34,6 +38,11 @@
 	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
 	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
+	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
@@ -62,6 +71,8 @@
 		tags: [],
 	});
 	setChatDrafts(new ChatDraftStore());
+	const conversationUi = new ConversationUiState();
+	setConversationUi(conversationUi);
 
 	const sessions = {
 		get selectedChatId() {
@@ -82,6 +93,7 @@
 		startupByChatId: {},
 		hasChat: (chatId: string) => chatId === selectedChat.id,
 		isDraft: () => false,
+		isChatProcessing: (chatId: string) => chatId === selectedChat.id && selectedChat.isProcessing,
 		processingPhase: () => selectedChat.processingPhase,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},
@@ -116,9 +128,10 @@
 		addMessageConsumer: () => () => {},
 		sendRequest: () => Promise.resolve({}),
 	} as never);
-	setChatProcessingReconciler({
+	const processingReconciler = {
 		addPresentation: () => () => {},
-	} satisfies ChatProcessingPresentationRegistry);
+	} satisfies ChatProcessingPresentationRegistry;
+	setChatProcessingReconciler(processingReconciler);
 	setReadReceiptOutbox({
 		enqueue: () => {},
 	} as never);
@@ -153,6 +166,7 @@
 			WorkspaceCoordinator,
 			| 'currentWindowId'
 			| 'currentChatSurfaceId'
+			| 'composerAnchorSurfaceId'
 			| 'focusChat'
 			| 'focusMobileSingleton'
 			| 'openSingletonAsTab'
@@ -175,6 +189,9 @@
 		get currentChatSurfaceId() {
 			return CANONICAL_CHAT_SURFACE_ID;
 		},
+		get composerAnchorSurfaceId() {
+			return CANONICAL_CHAT_SURFACE_ID;
+		},
 		focusChat: () => Promise.resolve(),
 		focusMobileSingleton: () => Promise.resolve(),
 		openSingletonAsTab: () => Promise.resolve(),
@@ -192,6 +209,29 @@
 	setTransientLayers(transientLayers);
 	setGitQuickSummary(new GitQuickSummaryStore());
 	setGitBranchActions(new GitBranchSelectorState());
+	const conversationLifecycles = new ConversationLifecycleRegistry({
+		sessions,
+		processing: processingReconciler,
+		conversationUi,
+	});
+	setConversationLifecycles(conversationLifecycles);
+	const conversationPanels = new ConversationPanelRegistry({
+		cache: new ChatTranscriptCache({ limit: 100 }),
+		lifecycle: conversationLifecycles,
+		overlays: new ConversationTranscriptOverlayStore(),
+		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
+		getSelectedChatId: () => sessions.selectedChatId,
+	});
+	conversationPanels.reconcile([
+		{
+			surfaceId: CANONICAL_CHAT_SURFACE_ID,
+			chatId: 'chat-1',
+			presentation: 'window-main',
+			windowId: 'window-main',
+		},
+	]);
+	setConversationPanels(conversationPanels);
+	const conversationPanel = conversationPanels.panel(CANONICAL_CHAT_SURFACE_ID)!;
 
 	const subagentToolbar = new SubagentToolbarState();
 	let showTestLayer = $state(false);
@@ -256,3 +296,11 @@
 	</div>
 {/if}
 <ConversationWorkspace isVisible={!showTestLayer} isPresented={true} {subagentToolbar} />
+<ConversationPanel
+	surfaceId={CANONICAL_CHAT_SURFACE_ID}
+	chat={selectedChat}
+	panel={conversationPanel}
+	isCommandOwner={true}
+	ownsComposer={true}
+	actions={null}
+/>

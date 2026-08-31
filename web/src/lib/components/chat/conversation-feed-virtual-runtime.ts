@@ -142,6 +142,40 @@ export class ConversationMountedVirtualItems {
 		return keys;
 	}
 
+	visibleAnchor(input: {
+		viewport: HTMLElement;
+		configuredKeys: readonly string[];
+		eligibleKeys: ReadonlySet<string>;
+	}): ConversationVirtualAnchor | null {
+		const viewportRect = input.viewport.getBoundingClientRect();
+		let anchor: { key: string; index: number; offset: number } | null = null;
+		for (const element of this.#elements) {
+			if (!element.isConnected) continue;
+			const index = Number(element.dataset.index);
+			const key = element.dataset.chatVirtualItem;
+			if (
+				!Number.isInteger(index) ||
+				key === undefined ||
+				input.configuredKeys[index] !== key ||
+				!input.eligibleKeys.has(key)
+			) continue;
+			const rect = element.getBoundingClientRect();
+			if (
+				rect.bottom <= viewportRect.top + CHAT_GEOMETRY_END_THRESHOLD_PX ||
+				rect.top >= viewportRect.bottom - CHAT_GEOMETRY_END_THRESHOLD_PX
+			) continue;
+			const offset = rect.top - viewportRect.top;
+			if (!anchor || offset < anchor.offset) anchor = { key, index, offset };
+		}
+		return anchor
+			? {
+					key: anchor.key,
+					viewportOffset: anchor.offset,
+					fallbackKeys: conversationAnchorFallbackKeys(input.configuredKeys, anchor.index),
+				}
+			: null;
+	}
+
 	committedViewportRangeSignature(input: {
 		snapshot: VirtualListSnapshot;
 		configuredKeys: readonly string[];
@@ -357,6 +391,7 @@ export async function settleConversationTarget(input: {
 	rowId: string;
 	viewport(): HTMLDivElement | null;
 	align: 'center' | 'start' | 'end';
+	viewportOffset?: number;
 	isCurrent(): boolean;
 	isReady(): boolean;
 	scrollBy(delta: number): void;
@@ -378,7 +413,12 @@ export async function settleConversationTarget(input: {
 		input.onSettledNode(node);
 		const viewport = input.viewport();
 		if (!viewport) return 'not-ready';
-		const alignmentDelta = conversationTargetAlignmentDelta(viewport, node, input.align);
+		const nodeRect = node.getBoundingClientRect();
+		const viewportRect = viewport.getBoundingClientRect();
+		const alignmentDelta =
+			input.viewportOffset === undefined
+				? conversationTargetAlignmentDelta(viewport, node, input.align)
+				: nodeRect.top - viewportRect.top - input.viewportOffset;
 		const attainableOffset = attainableConversationTargetOffset({
 			currentOffset: viewport.scrollTop,
 			alignmentDelta,
@@ -391,8 +431,6 @@ export async function settleConversationTarget(input: {
 			stableFrames = 0;
 			continue;
 		}
-		const nodeRect = node.getBoundingClientRect();
-		const viewportRect = viewport.getBoundingClientRect();
 		const currentRect = { top: nodeRect.top - viewportRect.top, height: nodeRect.height };
 		const stable =
 			previousRect !== null &&

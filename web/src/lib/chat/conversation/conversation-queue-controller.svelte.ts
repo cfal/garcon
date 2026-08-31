@@ -33,16 +33,15 @@ interface FailedQueueSubmission {
 }
 
 export interface ConversationQueueControllerOptions {
-	get sessions(): Pick<SessionControllerDeps['sessions'], 'selectedChatId'>;
+	get sessions(): Pick<SessionControllerDeps['sessions'], 'byId'>;
 	get chatState(): Pick<
 		SessionControllerDeps['chatState'],
-		'clearLocalNotices' | 'appendLocalNotice' | 'loadMessages' | 'getCursor'
+		'loadMessages' | 'clearLocalNoticesForChat' | 'appendLocalNoticeForChat' | 'getCursorForChat'
 	>;
 	get composerState(): Pick<
 		SessionControllerDeps['composerState'],
 		'draftRevision' | 'isDraftEmpty' | 'restoreDraftIfRevision'
 	>;
-	get lifecycle(): Pick<SessionControllerDeps['lifecycle'], 'currentChatId'>;
 	get conversationUi(): Pick<
 		SessionControllerDeps['conversationUi'],
 		| 'setExecutionControlFromLiveUpdate'
@@ -67,7 +66,7 @@ export class ConversationQueueController {
 
 	beginSubmission(chatId: string): number {
 		const pendingCount = this.#pendingSubmissionsByChatId.get(chatId) ?? 0;
-		if (pendingCount === 0) this.options.chatState.clearLocalNotices();
+		if (pendingCount === 0) this.options.chatState.clearLocalNoticesForChat(chatId);
 		this.#pendingSubmissionsByChatId.set(chatId, pendingCount + 1);
 		return ++this.#submissionSequence;
 	}
@@ -113,8 +112,10 @@ export class ConversationQueueController {
 	}
 
 	startControlRefresh(chatId: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return Promise.resolve();
 		const refresh = getChatExecutionControl(chatId)
 			.then((result) => {
+				if (!this.#hasChat(chatId)) return;
 				this.options.conversationUi.setExecutionControlFromRefresh(chatId, result.control);
 			})
 			.finally(() => {
@@ -137,20 +138,10 @@ export class ConversationQueueController {
 		}
 	}
 
-	handlePause(): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.pauseForChat(chatId);
-	}
-
-	handleResume(pauseId: string): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return Promise.resolve();
-		return this.resumeForChat(chatId, pauseId);
-	}
-
-	handleControlError(action: 'pause' | 'resume', error: unknown): void {
-		this.options.chatState.appendLocalNotice(
+	handleControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
+		if (!this.#hasChat(chatId)) return;
+		this.options.chatState.appendLocalNoticeForChat(
+			chatId,
 			'error',
 			action === 'pause'
 				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
@@ -159,13 +150,17 @@ export class ConversationQueueController {
 	}
 
 	async pauseForChat(chatId: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		const result = await pauseChatQueue(chatId);
+		if (!this.#hasChat(chatId)) return;
 		this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 	}
 
 	async resumeForChat(chatId: string, pauseId: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		try {
 			const result = await resumeChatQueue(chatId, pauseId);
+			if (!this.#hasChat(chatId)) return;
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
@@ -174,6 +169,7 @@ export class ConversationQueueController {
 	}
 
 	async createForChat(chatId: string, content: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		const submission = this.options.acceptedInputs.enqueue({
 			chatId,
 			transcriptViewId: this.#transcriptViewId(chatId),
@@ -181,6 +177,7 @@ export class ConversationQueueController {
 		});
 		try {
 			const result = await submission.submit();
+			if (!this.#hasChat(chatId)) return;
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
@@ -194,6 +191,7 @@ export class ConversationQueueController {
 		content: string,
 		expectedRevision: number,
 	): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		try {
 			const result = await replaceQueuedInput({
 				clientRequestId: createClientCommandId(),
@@ -202,6 +200,7 @@ export class ConversationQueueController {
 				content,
 				expectedRevision,
 			});
+			if (!this.#hasChat(chatId)) return;
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
@@ -210,16 +209,31 @@ export class ConversationQueueController {
 	}
 
 	async deleteForChat(chatId: string, entryId: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		try {
 			const result = await deleteQueuedInput({
 				clientRequestId: createClientCommandId(),
 				chatId,
 				entryId,
 			});
+			if (!this.#hasChat(chatId)) return;
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
 			throw error;
+		}
+	}
+
+	async deleteFromPanelForChat(chatId: string, entryId: string): Promise<void> {
+		try {
+			await this.deleteForChat(chatId, entryId);
+		} catch (error) {
+			if (isDepartedQueueEntryError(error) || !this.#hasChat(chatId)) return;
+			this.options.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
+			);
 		}
 	}
 
@@ -230,6 +244,7 @@ export class ConversationQueueController {
 		placement: QueueEntryPlacement,
 		reorderRevision: number,
 	): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		const request: QueueEntryMoveCommandRequest = {
 			clientRequestId: createClientCommandId(),
 			chatId,
@@ -242,6 +257,7 @@ export class ConversationQueueController {
 		};
 		try {
 			const result = await submitIdempotentCommand(() => moveQueuedInput(request));
+			if (!this.#hasChat(chatId)) return;
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 		} catch (error) {
 			this.#applyMutationErrorControl(chatId, error);
@@ -257,7 +273,8 @@ export class ConversationQueueController {
 		entry: QueueEntry,
 		expectedReorderRevision: number,
 	): Promise<void> {
-		this.options.chatState.clearLocalNotices();
+		if (!this.#hasChat(chatId)) return;
+		this.options.chatState.clearLocalNoticesForChat(chatId);
 		const submission = this.options.acceptedInputs.steerQueuedEntry({
 			chatId,
 			transcriptViewId: this.#transcriptViewId(chatId),
@@ -268,6 +285,7 @@ export class ConversationQueueController {
 
 		try {
 			const result = await submission.submit();
+			if (!this.#hasChat(chatId)) return;
 			if (result.control) {
 				this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
 			}
@@ -276,10 +294,11 @@ export class ConversationQueueController {
 					result.serverInstanceId,
 				);
 			if (!instanceConfirmed) {
-				await this.#reconcileSelectedSteerTranscript(chatId);
+				await this.#reconcileSteerTranscript(chatId);
 				this.#appendUnconfirmedSteerNotice(chatId);
 			}
 		} catch (error) {
+			if (!this.#hasChat(chatId)) throw error;
 			const failure = queueEntrySteerFailure(error);
 			if (failure.control) {
 				this.options.conversationUi.setExecutionControlFromRefresh(chatId, failure.control);
@@ -291,41 +310,27 @@ export class ConversationQueueController {
 				this.options.conversationUi.isExecutionControlSocketInstanceConfirmed(
 					failure.serverInstanceId,
 				);
-			if (!instanceConfirmed) await this.#reconcileSelectedSteerTranscript(chatId);
-			if (this.options.sessions.selectedChatId === chatId) {
-				this.options.chatState.appendLocalNotice(
-					'error',
-					!instanceConfirmed || failure.deliveryOutcome === 'unknown' || !failure.structured
-						? m.chat_notice_steer_outcome_unconfirmed()
-						: steerFailureNotice(error),
-				);
-			}
+			if (!instanceConfirmed) await this.#reconcileSteerTranscript(chatId);
+			if (!this.#hasChat(chatId)) throw error;
+			this.options.chatState.appendLocalNoticeForChat(
+				chatId,
+				'error',
+				!instanceConfirmed || failure.deliveryOutcome === 'unknown' || !failure.structured
+					? m.chat_notice_steer_outcome_unconfirmed()
+					: steerFailureNotice(error),
+			);
 			throw error;
 		}
 	}
 
 	#transcriptViewId(chatId: string): string {
-		const transcriptViewId = this.options.chatState.getCursor().transcriptViewId;
+		const transcriptViewId = this.options.chatState.getCursorForChat(chatId).transcriptViewId;
 		if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
 		return transcriptViewId;
 	}
 
-	async handleDelete(entryId: string): Promise<void> {
-		const chatId = this.options.sessions.selectedChatId || this.options.lifecycle.currentChatId;
-		if (!chatId) return;
-		try {
-			await this.deleteForChat(chatId, entryId);
-		} catch (error) {
-			if (isDepartedQueueEntryError(error)) return;
-			this.options.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
-			);
-		}
-	}
-
-	async #reconcileSelectedSteerTranscript(chatId: string): Promise<void> {
-		if (this.options.sessions.selectedChatId !== chatId) return;
+	async #reconcileSteerTranscript(chatId: string): Promise<void> {
+		if (!this.#hasChat(chatId)) return;
 		try {
 			await this.options.chatState.loadMessages(chatId);
 		} catch {
@@ -334,13 +339,22 @@ export class ConversationQueueController {
 	}
 
 	#appendUnconfirmedSteerNotice(chatId: string): void {
-		if (this.options.sessions.selectedChatId !== chatId) return;
-		this.options.chatState.appendLocalNotice('error', m.chat_notice_steer_outcome_unconfirmed());
+		if (!this.#hasChat(chatId)) return;
+		this.options.chatState.appendLocalNoticeForChat(
+			chatId,
+			'error',
+			m.chat_notice_steer_outcome_unconfirmed(),
+		);
 	}
 
 	#applyMutationErrorControl(chatId: string, error: unknown): void {
+		if (!this.#hasChat(chatId)) return;
 		const control = controlFromMutationError(error);
 		if (control) this.options.conversationUi.setExecutionControlFromRefresh(chatId, control);
+	}
+
+	#hasChat(chatId: string): boolean {
+		return Boolean(this.options.sessions.byId[chatId]);
 	}
 }
 

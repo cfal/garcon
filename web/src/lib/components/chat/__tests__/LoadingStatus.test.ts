@@ -33,4 +33,22 @@ describe('LoadingStatus', () => {
 		expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
 		expect(screen.getByText('Stopping...')).toBeTruthy();
 	});
+
+	it('keeps controls visible while disabling non-anchor announcements', () => {
+		const { container } = render(LoadingStatus, {
+			props: {
+				isVisible: true,
+				status: { text: 'Processing', tokens: 0, can_interrupt: true },
+				agentId: 'claude',
+				onAbort: vi.fn(),
+				spinnerSelectionKey: 'chat-1',
+				announcementsEnabled: false,
+			},
+		});
+
+		const tray = container.querySelector('[data-slot="chat-processing-status"]');
+		expect(tray?.getAttribute('role')).toBeNull();
+		expect(tray?.getAttribute('aria-live')).toBe('off');
+		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+	});
 });

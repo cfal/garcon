@@ -99,6 +99,23 @@ describe('GitQuickStatusTray', () => {
 		expect(onCommit).toHaveBeenCalledOnce();
 	});
 
+	it('keeps controls visible while disabling non-anchor announcements', () => {
+		const { container } = render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				onCommit: vi.fn(),
+				announcementsEnabled: false,
+			},
+		});
+
+		const tray = container.firstElementChild?.firstElementChild;
+		expect(tray?.getAttribute('role')).toBeNull();
+		expect(tray?.getAttribute('aria-live')).toBe('off');
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
+
 	it('skips zero-value summary items', () => {
 		render(GitQuickStatusTray, {
 			props: {

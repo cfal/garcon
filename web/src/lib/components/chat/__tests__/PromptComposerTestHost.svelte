@@ -1,11 +1,10 @@
 <script lang="ts">
 	import PromptComposer from '../PromptComposer.svelte';
+	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
 	import { onDestroy } from 'svelte';
 	import {
 		setAgentState,
-		setActiveTranscriptState,
 		setAppShell,
-		setConversationLifecycle,
 		setChatSessions,
 		setComposerState,
 		setLocalSettings,
@@ -236,9 +235,7 @@
 
 	setComposerState(composer);
 	setChatDrafts(chatDrafts);
-	setActiveTranscriptState(transcript);
 	setAgentState(agent);
-	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);
 	setLocalSettings({
 		get sendByShiftEnter() {
@@ -395,18 +392,31 @@
 </script>
 
 <KeyboardShortcuts />
+<ConversationPanelStatusDock
+	chatMaxWidth="medium"
+	isProcessing={selectedIsProcessing}
+	status={lifecycle.loadingStatus}
+	agentId={selectedAgentId}
+	spinnerSelectionKey={selectedChatId}
+	quickCommitEnabled={true}
+	{quickCommitTrayVisible}
+	{quickCommitSummary}
+	{quickCommitRefreshing}
+	quickCommitError={null}
+	quickCommitBranchSelector={null}
+	isMobile={false}
+	{onAbort}
+	{onQuickCommit}
+/>
 <PromptComposer
 	{onsubmit}
 	{onSteerPreferredSubmit}
 	{isVisible}
 	{isPresented}
 	{composerEditorOpenRequestId}
-	{quickCommitTrayVisible}
-	{quickCommitRefreshing}
-	{quickCommitSummary}
 	{directAdmissionPending}
-	{onAbort}
-	{onQuickCommit}
+	resendCandidates={transcript.resendCandidates}
+	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />
 
 <button

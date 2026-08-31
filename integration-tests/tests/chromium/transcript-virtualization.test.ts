@@ -753,6 +753,14 @@ async function waitForSurfaceIdentity(page: Page, expected: string): Promise<voi
   );
 }
 
+async function currentConversationSurfaceIdentity(
+  page: Page,
+  transcriptViewId: string,
+): Promise<string> {
+  const { surfaceId } = await currentWorkspaceIdentity(page);
+  return `${surfaceId}:${transcriptViewId}`;
+}
+
 async function synchronizeNativeTranscriptGeneration(
   fixture: ChromiumFixture,
   chatId: string,
@@ -761,7 +769,10 @@ async function synchronizeNativeTranscriptGeneration(
     limit: 200,
   });
   expect(transcript.hasMore).toBe(false);
-  await waitForSurfaceIdentity(fixture.page, `${chatId}:${transcript.transcriptViewId}`);
+  await waitForSurfaceIdentity(
+    fixture.page,
+    await currentConversationSurfaceIdentity(fixture.page, transcript.transcriptViewId),
+  );
   await waitForTranscriptReady(fixture.page);
 }
 
@@ -1666,7 +1677,9 @@ async function openNewWorkspaceWindow(page: Page, name: string): Promise<string>
 async function focusWorkspaceWindow(page: Page, windowId: string): Promise<void> {
   const workspaceWindow = page.locator(`[data-workspace-window-id="${windowId}"]`);
   if ((await workspaceWindow.getAttribute('data-workspace-window-current')) === 'true') return;
-  await page.locator(`[data-workspace-window-activation-shield="${windowId}"]`).click();
+  await page
+    .locator(`[data-workspace-window-titlebar="${windowId}"]`)
+    .click({ position: { x: 3, y: 3 } });
   await page.waitForFunction(
     (expectedWindowId) =>
       document
@@ -1722,36 +1735,42 @@ async function expectFixedTranscriptTypography(page: Page): Promise<void> {
 }
 
 async function userMessageNavigatorRowIdContaining(page: Page, text: string): Promise<string> {
-  const hasTarget = await page.evaluate(
-    (expected) =>
-      [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
-        (candidate) => candidate.textContent?.includes(expected),
-      ),
-    text,
-  );
-  if (!hasTarget) {
-    await page.locator('[data-user-message-navigator-list]').evaluate((listElement) => {
-      const list = listElement as HTMLElement;
-      list.scrollTop = list.scrollHeight;
-      list.dispatchEvent(new Event('scroll', { bubbles: true }));
+  await page.locator('[data-user-message-navigator-row]').first().waitFor({ state: 'visible' });
+  const list = page.locator('[data-user-message-navigator-list]');
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const rows = await page.evaluate((expected) => {
+      const candidates = [
+        ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
+      ];
+      return {
+        targetId: candidates.find((candidate) => candidate.textContent?.includes(expected))?.dataset
+          .userMessageNavigatorRow,
+        lastId: candidates.at(-1)?.dataset.userMessageNavigatorRow,
+      };
+    }, text);
+    if (rows.targetId) return rows.targetId;
+    if (!rows.lastId) break;
+
+    await list.evaluate((listElement) => {
+      const element = listElement as HTMLElement;
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
     await page.waitForFunction(
-      (expected) =>
-        [...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]')].some(
-          (candidate) => candidate.textContent?.includes(expected),
-        ),
-      text,
+      ({ expected, previousLastId }) => {
+        const candidates = [
+          ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
+        ];
+        return (
+          candidates.some((candidate) => candidate.textContent?.includes(expected)) ||
+          candidates.at(-1)?.dataset.userMessageNavigatorRow !== previousLastId
+        );
+      },
+      { expected: text, previousLastId: rows.lastId },
       { timeout: 20_000 },
     );
   }
-  return page.evaluate((expected) => {
-    const row = [
-      ...document.querySelectorAll<HTMLElement>('[data-user-message-navigator-row]'),
-    ].find((candidate) => candidate.textContent?.includes(expected));
-    const rowId = row?.dataset.userMessageNavigatorRow;
-    if (!rowId) throw new Error(`Missing user-message navigator row containing: ${expected}`);
-    return rowId;
-  }, text);
+  throw new Error(`Missing user-message navigator row containing: ${text}`);
 }
 
 async function clickUserMessageNavigatorRowContaining(page: Page, text: string): Promise<void> {
@@ -3465,14 +3484,25 @@ async function expectNoSwitchPaintFlicker(
   fixture: ChromiumFixture,
   switchAction: () => Promise<void>,
 ): Promise<void> {
-  const samples = fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
-    const feed = feedElement as HTMLElement;
+  const samples = fixture.page.evaluate(async (feedSelector) => {
     const browserGlobal = globalThis as typeof globalThis & {
       __chatSwitchPaintSamplerReady?: boolean;
     };
     const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const surfaceOf = (): string => {
-      const item = feed.querySelector<HTMLElement>('[data-chat-virtual-item]');
+    const currentFeed = (): HTMLElement | null => {
+      const anchored = document.querySelector<HTMLElement>(
+        `[data-conversation-panel-composer-anchor="true"] ${feedSelector}`,
+      );
+      if (anchored) return anchored;
+      return (
+        [...document.querySelectorAll<HTMLElement>(feedSelector)].find(
+          (candidate) =>
+            candidate.isConnected && candidate.closest('[aria-hidden="true"]') === null,
+        ) ?? null
+      );
+    };
+    const surfaceOf = (feed: HTMLElement | null): string => {
+      const item = feed?.querySelector<HTMLElement>('[data-chat-virtual-item]');
       const value = item?.dataset.chatVirtualItem;
       if (!value) return '';
       try {
@@ -3482,11 +3512,11 @@ async function expectNoSwitchPaintFlicker(
         return '';
       }
     };
-    const initialSurface = surfaceOf();
+    const initialSurface = surfaceOf(currentFeed());
     browserGlobal.__chatSwitchPaintSamplerReady = true;
     const violations: Array<Record<string, unknown>> = [];
     const transition: Array<Record<string, unknown>> = [];
-    const visibleItemGeometry = () => {
+    const visibleItemGeometry = (feed: HTMLElement) => {
       const feedRect = feed.getBoundingClientRect();
       return [...feed.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')].flatMap((item) => {
         const rect = item.getBoundingClientRect();
@@ -3507,6 +3537,8 @@ async function expectNoSwitchPaintFlicker(
     let settledGeometry: ReturnType<typeof visibleItemGeometry> | null = null;
     for (let attempt = 0; attempt < 600 && settledFrames < 12; attempt += 1) {
       await frame();
+      const feed = currentFeed();
+      if (!feed) continue;
       const content = feed.querySelector<HTMLElement>('[data-chat-feed-content]');
       if (!content) continue;
       const rowCount = content.querySelectorAll('[data-chat-virtual-item]').length;
@@ -3519,7 +3551,7 @@ async function expectNoSwitchPaintFlicker(
         scrollbar && scrollbar.isConnected && getComputedStyle(scrollbar).visibility !== 'hidden',
       );
       const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
-      const currentSurface = surfaceOf();
+      const currentSurface = surfaceOf(feed);
       if (currentSurface && currentSurface !== initialSurface) switchObserved = true;
       const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
       const sample = {
@@ -3557,7 +3589,7 @@ async function expectNoSwitchPaintFlicker(
       }
       const settled = contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
       if (settled) {
-        const currentGeometry = visibleItemGeometry();
+        const currentGeometry = visibleItemGeometry(feed);
         if (settledGeometry) {
           const changed =
             currentGeometry.length !== settledGeometry.length ||
@@ -3599,7 +3631,7 @@ async function expectNoSwitchPaintFlicker(
       violationCount,
       violations,
     };
-  });
+  }, FEED_SELECTOR);
   await fixture.page.waitForFunction(
     () =>
       Boolean(
@@ -3792,7 +3824,11 @@ async function verifyHeldEarlierPageChatSwitch(
       targetChatId,
       `held-page-switch-target-${viewport.width}-0`,
     );
-    await waitForSurfaceIdentity(fixture.page, `${targetChatId}:${targetPage.transcriptViewId}`);
+    const targetSurfaceIdentity = await currentConversationSurfaceIdentity(
+      fixture.page,
+      targetPage.transcriptViewId,
+    );
+    await waitForSurfaceIdentity(fixture.page, targetSurfaceIdentity);
     const targetRevision = await virtualDataRevision(fixture.page);
     const targetEntryCount = await transcriptEntryCount(fixture.page);
     releaseEarlierPage();
@@ -3805,9 +3841,7 @@ async function verifyHeldEarlierPageChatSwitch(
     expect(fixture.page.url()).toContain(`/chat/${targetChatId}`);
     expect(await transcriptEntryCount(fixture.page)).toBe(targetEntryCount);
     expect(await virtualDataRevision(fixture.page)).toBe(targetRevision);
-    expect(await surfaceIdentity(fixture.page)).toBe(
-      `${targetChatId}:${targetPage.transcriptViewId}`,
-    );
+    expect(await surfaceIdentity(fixture.page)).toBe(targetSurfaceIdentity);
     const targetScan = await scanLoadedTranscript(fixture.page);
     expect(targetScan.rows.map((row) => row.rowId)).toEqual(
       targetPage.messages.map((entry) => `${targetPage.transcriptViewId}:${entry.ordinal}`),
@@ -3885,7 +3919,9 @@ async function verifyDetachedNativeReload(
     userScrolledUp: true,
   });
   const oldSurfaceIdentity = await surfaceIdentity(fixture.page);
-  expect(oldSurfaceIdentity).toBe(`${chatId}:${beforeReload.transcriptViewId}`);
+  expect(oldSurfaceIdentity).toBe(
+    await currentConversationSurfaceIdentity(fixture.page, beforeReload.transcriptViewId),
+  );
 
   const native = await claudeNativeTranscript(fixture, chatId);
   const externalContent = `detached-native-reload-final-assistant-${viewport.width}`;
@@ -3907,7 +3943,10 @@ async function verifyDetachedNativeReload(
 
   const reloaded = await fixture.integration.client.reloadChat(chatId);
   expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
-  await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+  await waitForSurfaceIdentity(
+    fixture.page,
+    await currentConversationSurfaceIdentity(fixture.page, reloaded.transcriptViewId),
+  );
   await waitForTranscriptReady(fixture.page);
   expect(await surfaceIdentity(fixture.page)).not.toBe(oldSurfaceIdentity);
 
@@ -4058,7 +4097,11 @@ async function verifyHeldEarlierPageNativeReload(
 
     const reloaded = await fixture.integration.client.reloadChat(chatId);
     expect(reloaded.transcriptViewId).not.toBe(beforeReload.transcriptViewId);
-    await waitForSurfaceIdentity(fixture.page, `${chatId}:${reloaded.transcriptViewId}`);
+    const reloadedSurfaceIdentity = await currentConversationSurfaceIdentity(
+      fixture.page,
+      reloaded.transcriptViewId,
+    );
+    await waitForSurfaceIdentity(fixture.page, reloadedSurfaceIdentity);
     await waitForTranscriptReady(fixture.page);
     const replacementRevision = await virtualDataRevision(fixture.page);
     const replacementEntryCount = await transcriptEntryCount(fixture.page);
@@ -4071,7 +4114,7 @@ async function verifyHeldEarlierPageNativeReload(
     });
 
     expect(earlierRequestCount).toBe(1);
-    expect(await surfaceIdentity(fixture.page)).toBe(`${chatId}:${reloaded.transcriptViewId}`);
+    expect(await surfaceIdentity(fixture.page)).toBe(reloadedSurfaceIdentity);
     expect(await virtualDataRevision(fixture.page)).toBe(replacementRevision);
     expect(await transcriptEntryCount(fixture.page)).toBe(replacementEntryCount);
     const canonical = await fixture.integration.client.getMessages(chatId, {
@@ -4287,15 +4330,15 @@ async function verifyWindowCountGeometryStability(
   await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-enter');
   await focusWorkspaceWindow(fixture.page, backgroundWindowId);
-  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'hidden' });
+  await fixture.page.locator(FEED_SELECTOR).waitFor({ state: 'visible' });
   const hiddenAppendMarker = 'chromium-hidden-window-append';
   await appendTurn(fixture.integration, chatId, hiddenAppendMarker);
-  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
-  await expectFixedTranscriptTypography(fixture.page);
   await fixture.page
     .locator(FEED_SELECTOR)
     .getByText(`echo:${hiddenAppendMarker}`, { exact: true })
     .waitFor();
+  await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
+  await expectFixedTranscriptTypography(fixture.page);
   await waitForStablePinnedTranscriptLayout(fixture.page, 'background-window-show');
   await closeWorkspaceWindow(fixture.page, backgroundWindowId);
   await expectFixedTranscriptTypography(fixture.page);

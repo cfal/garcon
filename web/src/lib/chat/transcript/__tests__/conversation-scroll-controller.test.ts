@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
-import {
-	ConversationScrollController,
-	type ConversationScrollState,
-} from '../conversation-scroll-controller.svelte';
+import type { ConversationScrollState } from '../conversation-scroll-controller-contract.js';
+import { ConversationScrollController } from '../conversation-scroll-controller.svelte';
 import type { ConversationFeedMutationClock } from '../conversation-feed-mutations';
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
@@ -190,7 +188,7 @@ function controllerFixture(
 		getViewport: () => viewport,
 		getQueueContainer: () => queue,
 		chatState: state,
-		sessions,
+		getChatId: () => sessions.selectedChatId,
 	});
 	return { controller, viewport, state, scroller, sessions };
 }
@@ -225,6 +223,33 @@ describe('ConversationScrollController', () => {
 		const { controller, viewport } = controllerFixture();
 		controller.noteUserScrollIntent('earlier');
 		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
+	});
+
+	it('does not treat layout movement after an unscrolled press as user scrolling', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
+		const fixture = controllerFixture({ viewport });
+		fixture.controller.noteUserScrollIntent();
+		fixture.controller.finishDirectionlessUserScrollIntent();
+		fixture.scroller.scrollTop = 100;
+
+		fixture.controller.handleScroll();
+
+		expect(fixture.controller.isPinnedToBottom).toBe(true);
+		expect(fixture.state.isUserScrolledUp).toBe(false);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
+	});
+
+	it('retains directional intent after a press ends', () => {
+		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
+		const fixture = controllerFixture({ viewport });
+		fixture.controller.noteUserScrollIntent();
+		fixture.scroller.scrollTop = 100;
+		fixture.controller.handleScroll();
+		fixture.controller.finishDirectionlessUserScrollIntent();
+
+		expect(fixture.controller.isPinnedToBottom).toBe(false);
+		expect(fixture.state.isUserScrolledUp).toBe(true);
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
 	it('requires fresh downward intent to repin inside the later threshold', () => {
@@ -1053,9 +1078,24 @@ describe('ConversationScrollController', () => {
 			{ kind: 'row', id: 'generation-1:7' },
 			{ align: 'center' },
 		);
-		expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		expect(
+			await controller.jumpToMessageRow(
+				{
+					chatId: 'chat-1',
+					transcriptViewId: 'generation-1',
+					rowId: 'generation-1:7',
+				},
+				{ viewportOffset: -3 },
+			),
+		).toBe('completed');
 		expect(viewport.scrollToTarget).toHaveBeenNthCalledWith(
 			2,
+			{ kind: 'row', id: 'generation-1:7' },
+			{ viewportOffset: -3 },
+		);
+		expect(await controller.jumpToDomAnchor('tool-input-9')).toBe(true);
+		expect(viewport.scrollToTarget).toHaveBeenNthCalledWith(
+			3,
 			{ kind: 'dom-anchor', id: 'tool-input-9' },
 			{ align: 'center' },
 		);

@@ -1,4 +1,5 @@
 import type {
+	ChatViewSurfaceId,
 	PresentationHostId,
 	WorkspaceLayoutSnapshot,
 	WorkspaceWindowId,
@@ -13,6 +14,13 @@ export interface PortablePresentation {
 export interface RenderedPortablePresentation extends PortablePresentation {
 	visible: boolean;
 	windowId: WorkspaceWindowId | null;
+}
+
+export interface VisibleChatPresentation {
+	readonly surfaceId: ChatViewSurfaceId;
+	readonly chatId: string;
+	readonly presentation: WorkspaceWindowId | 'mobile';
+	readonly windowId: WorkspaceWindowId | null;
 }
 
 export function portablePresentationKey(
@@ -73,6 +81,24 @@ export function visiblePortablePresentations(
 			];
 		},
 	);
+}
+
+export function visibleChatPresentations(
+	snapshot: WorkspaceLayoutSnapshot,
+	mode: 'desktop' | 'mobile',
+): VisibleChatPresentation[] {
+	return [...visiblePresentationMap(snapshot, mode, false)].flatMap(([presentation, surfaceId]) => {
+		const surface = snapshot.surfaces[surfaceId];
+		if (surface?.type !== 'chat' || !surface.chatId) return [];
+		return [
+			{
+				surfaceId: surface.id,
+				chatId: surface.chatId,
+				presentation: presentation as WorkspaceWindowId | 'mobile',
+				windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
+			},
+		];
+	});
 }
 
 export function nextRetainedSingletonPresentationKeys(
