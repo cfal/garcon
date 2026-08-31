@@ -16,15 +16,12 @@ describe('transcript retention architecture', () => {
 		expect(mutations).not.toContain("'history-pruned'");
 	});
 
-	it('[TLV5-PAGE.09-WEB-STATIC-01] shares visible-demand paging across rendered-panel and background loads', () => {
+	it('[TLV5-PAGE.09-WEB-STATIC-01] routes rendered-panel snapshots through visible-demand paging', () => {
 		const activeTranscript = transcriptSource('active-transcript-state.svelte.ts');
-		const backgroundLoader = transcriptSource('background-transcript-loader.ts');
 
-		for (const source of [activeTranscript, backgroundLoader]) {
-			expect(source).toMatch(
-				/import[\s\S]*\bloadTranscriptPageDemand\b[\s\S]*from\s+['"][^'"]*transcript-page-demand\.js['"]/,
-			);
-			expect(source).toMatch(/\bloadTranscriptPageDemand\s*\(/);
-		}
+		expect(activeTranscript).toMatch(
+			/import[\s\S]*\bloadTranscriptPageDemand\b[\s\S]*from\s+['"][^'"]*transcript-page-demand\.js['"]/,
+		);
+		expect(activeTranscript).toMatch(/\bloadTranscriptPageDemand\s*\(/);
 	});
 });

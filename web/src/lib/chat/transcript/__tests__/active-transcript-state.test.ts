@@ -788,7 +788,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.transcriptCache.get('chat-1')?.nextBeforeOrdinal).toBeNull();
 	});
 
-	it('[TLV5-L09.03-WEB-PREVIEW-01] [TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01] fills a rendered panel across hidden raw budgets without activation', async () => {
+	it('[TLV5-L09.03-WEB-BACKGROUND-01] [TLV5-L09.03-WEB-PREVIEW-01] [TLV5-PAGE.09-WEB-BACKGROUND-01] [TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01] fills a rendered panel across hidden raw budgets without activation', async () => {
 		const chat = new ActiveTranscriptState();
 		vi.mocked(getChatMessages)
 			.mockResolvedValueOnce({
