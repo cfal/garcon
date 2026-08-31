@@ -3484,14 +3484,25 @@ async function expectNoSwitchPaintFlicker(
   fixture: ChromiumFixture,
   switchAction: () => Promise<void>,
 ): Promise<void> {
-  const samples = fixture.page.locator(FEED_SELECTOR).evaluate(async (feedElement) => {
-    const feed = feedElement as HTMLElement;
+  const samples = fixture.page.evaluate(async (feedSelector) => {
     const browserGlobal = globalThis as typeof globalThis & {
       __chatSwitchPaintSamplerReady?: boolean;
     };
     const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const surfaceOf = (): string => {
-      const item = feed.querySelector<HTMLElement>('[data-chat-virtual-item]');
+    const currentFeed = (): HTMLElement | null => {
+      const anchored = document.querySelector<HTMLElement>(
+        `[data-conversation-panel-composer-anchor="true"] ${feedSelector}`,
+      );
+      if (anchored) return anchored;
+      return (
+        [...document.querySelectorAll<HTMLElement>(feedSelector)].find(
+          (candidate) =>
+            candidate.isConnected && candidate.closest('[aria-hidden="true"]') === null,
+        ) ?? null
+      );
+    };
+    const surfaceOf = (feed: HTMLElement | null): string => {
+      const item = feed?.querySelector<HTMLElement>('[data-chat-virtual-item]');
       const value = item?.dataset.chatVirtualItem;
       if (!value) return '';
       try {
@@ -3501,11 +3512,11 @@ async function expectNoSwitchPaintFlicker(
         return '';
       }
     };
-    const initialSurface = surfaceOf();
+    const initialSurface = surfaceOf(currentFeed());
     browserGlobal.__chatSwitchPaintSamplerReady = true;
     const violations: Array<Record<string, unknown>> = [];
     const transition: Array<Record<string, unknown>> = [];
-    const visibleItemGeometry = () => {
+    const visibleItemGeometry = (feed: HTMLElement) => {
       const feedRect = feed.getBoundingClientRect();
       return [...feed.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')].flatMap((item) => {
         const rect = item.getBoundingClientRect();
@@ -3526,6 +3537,8 @@ async function expectNoSwitchPaintFlicker(
     let settledGeometry: ReturnType<typeof visibleItemGeometry> | null = null;
     for (let attempt = 0; attempt < 600 && settledFrames < 12; attempt += 1) {
       await frame();
+      const feed = currentFeed();
+      if (!feed) continue;
       const content = feed.querySelector<HTMLElement>('[data-chat-feed-content]');
       if (!content) continue;
       const rowCount = content.querySelectorAll('[data-chat-virtual-item]').length;
@@ -3538,7 +3551,7 @@ async function expectNoSwitchPaintFlicker(
         scrollbar && scrollbar.isConnected && getComputedStyle(scrollbar).visibility !== 'hidden',
       );
       const distanceFromEnd = feed.scrollHeight - feed.clientHeight - feed.scrollTop;
-      const currentSurface = surfaceOf();
+      const currentSurface = surfaceOf(feed);
       if (currentSurface && currentSurface !== initialSurface) switchObserved = true;
       const sizer = feed.querySelector<HTMLElement>('[data-chat-virtual-sizer]');
       const sample = {
@@ -3576,7 +3589,7 @@ async function expectNoSwitchPaintFlicker(
       }
       const settled = contentVisible && rowCount > 0 && Math.abs(distanceFromEnd) <= 1;
       if (settled) {
-        const currentGeometry = visibleItemGeometry();
+        const currentGeometry = visibleItemGeometry(feed);
         if (settledGeometry) {
           const changed =
             currentGeometry.length !== settledGeometry.length ||
@@ -3618,7 +3631,7 @@ async function expectNoSwitchPaintFlicker(
       violationCount,
       violations,
     };
-  });
+  }, FEED_SELECTOR);
   await fixture.page.waitForFunction(
     () =>
       Boolean(
