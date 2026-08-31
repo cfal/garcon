@@ -412,6 +412,11 @@ function createDeps(chat = createRunningChat()) {
 		}),
 		transcriptCache: {
 			markValidated: vi.fn(),
+			readAppliedCursor: vi.fn(() => ({
+				transcriptViewId: 'generation-1',
+				lastOrdinal: chatState.entries.at(-1)?.ordinal ?? 0,
+				stale: false,
+			})),
 		},
 	};
 	const conversationUi = {
@@ -601,7 +606,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 		modelCatalog: {
 			isLocalModel: vi.fn(() => false),
-			selectionFor: vi.fn((_provider, model) => ({
+			selectionFor: vi.fn<SessionControllerDeps['modelCatalog']['selectionFor']>((_provider, model) => ({
 				model,
 				apiProviderId: null,
 				modelEndpointId: null,
@@ -1001,6 +1006,33 @@ describe('ConversationSessionController', () => {
 					runId: 'run-live',
 					permissionOccurrenceId: 'permission-live',
 				},
+				transcript: { transcriptViewId: 'generation-1', afterOrdinal: 28 },
+			},
+		]);
+	});
+
+	it('validates a selected snapshot against the shared cursor after its load target changes', async () => {
+		const permission = transientPermission('permission-panel', 'run-panel', 28);
+		mockGetChatSnapshot.mockResolvedValue(
+			chatSnapshot(transientFeed([permission], 1), [{ ordinal: 28, message: permission.message }]),
+		);
+		const conversationUi = new ConversationUiState();
+		conversationUi.activateTransientFeed('chat-1');
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.chatState.getCursorForChat.mockReturnValue({
+			transcriptViewId: 'fallback-generation',
+			lastOrdinal: 0,
+		});
+		deps.chatState.loadMessages = vi.fn().mockResolvedValue([permission.message]);
+		const controller = new ConversationSessionController({ ...deps, conversationUi });
+
+		await controller.loadChat('chat-1');
+
+		expect(deps.chatState.transcriptCache.readAppliedCursor).toHaveBeenCalledWith('chat-1');
+		expect(conversationUi.pendingPermissionRequests).toMatchObject([
+			{
+				permissionOccurrenceId: 'permission-panel',
+				chatId: 'chat-1',
 				transcript: { transcriptViewId: 'generation-1', afterOrdinal: 28 },
 			},
 		]);
@@ -2106,6 +2138,10 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(
 			createRunningChat({
+				model: 'configured-model',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
 				agentSettings: {
 					ownerId: 'claude',
 					schemaVersion: 1,
@@ -2119,6 +2155,12 @@ describe('ConversationSessionController', () => {
 			schemaVersion: 1,
 			values: { thinkingMode: 'auto' },
 		};
+		vi.mocked(deps.modelCatalog.selectionFor).mockReturnValue({
+			model: 'resolved-model',
+			apiProviderId: 'provider-1',
+			modelEndpointId: 'endpoint-default',
+			modelProtocol: 'openai-compatible',
+		});
 		const controller = new ConversationSessionController(deps);
 
 		controller.handleExitPlanModeForChat(
@@ -2130,10 +2172,14 @@ describe('ConversationSessionController', () => {
 		await flushPromises();
 
 		expect(mockRunChat).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				permissionMode: 'bypassPermissions',
-				agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
+				expect.objectContaining({
+					chatId: 'chat-1',
+					permissionMode: 'bypassPermissions',
+					model: 'resolved-model',
+					apiProviderId: 'provider-1',
+					modelEndpointId: 'endpoint-default',
+					modelProtocol: 'openai-compatible',
+					agentSettings: expect.objectContaining({ values: { thinkingMode: 'off' } }),
 			}),
 		);
 		expect(deps.lifecycleForChat).toHaveBeenCalledWith('chat-1');

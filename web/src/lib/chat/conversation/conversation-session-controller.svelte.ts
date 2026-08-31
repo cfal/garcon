@@ -78,7 +78,7 @@ type SessionTranscriptState = Pick<
 	| 'excludedResendOrdinals'
 	| 'clearResendExclusions'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
+	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
 	hasMountedPresentation(chatId: string): boolean;
 	getCursorForChat(chatId: string): ReturnType<ActiveTranscriptPort['getCursor']>;
 	appendLocalNoticeForChat(
@@ -93,7 +93,7 @@ type SessionTranscriptLoadTarget = Pick<
 	ActiveTranscriptPort,
 	'activeChatId' | 'chatMessages' | 'getCursor' | 'activateChat' | 'loadMessages'
 > & {
-	transcriptCache: Pick<ChatTranscriptCache, 'markValidated'>;
+	transcriptCache: Pick<ChatTranscriptCache, 'markValidated' | 'readAppliedCursor'>;
 };
 
 type SessionComposerState = Pick<
@@ -312,8 +312,7 @@ export class ConversationSessionController {
 			get queue() {
 				return queue;
 			},
-			executionSelectionForChat: (chatId) =>
-				executionSelectionFromProjection(deps.sessions.byId[chatId]),
+			executionSelectionForChat: (chatId) => this.#executionSelectionForChat(chatId),
 		});
 		this.#settings = new ConversationSettingsController({
 			get sessions() {
@@ -356,6 +355,25 @@ export class ConversationSessionController {
 			modelEndpointId: agentState.modelEndpointId,
 			modelProtocol: agentState.modelProtocol,
 		};
+	}
+
+	#executionSelectionForChat(chatId: string): ConversationExecutionSelection | null {
+		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
+		if (!selection) return null;
+		const resolved = this.deps.modelCatalog.selectionFor(
+			selection.agentId,
+			selection.model,
+			selection.modelEndpointId,
+		);
+		const modelSelection = resolved.modelEndpointId || !selection.modelEndpointId
+			? resolved
+			: {
+					model: resolved.model,
+					apiProviderId: selection.apiProviderId,
+					modelEndpointId: selection.modelEndpointId,
+					modelProtocol: selection.modelProtocol,
+				};
+		return { ...selection, ...modelSelection };
 	}
 
 	#applyExecutionSelection(selection: ConversationExecutionSelection): void {
@@ -554,11 +572,12 @@ export class ConversationSessionController {
 		}
 
 		const initialSnapshot = await initialSnapshotPromise;
+		const loadedCursor = transcript.transcriptCache.readAppliedCursor(chatId);
 		if (
 			deps.sessions.selectedChatId === chatId &&
 			initialSnapshot?.chat.id === chatId &&
 			initialSnapshot.transcript.availability === 'available' &&
-			initialSnapshot.transcript.transcriptViewId === transcript.getCursor().transcriptViewId
+			initialSnapshot.transcript.transcriptViewId === loadedCursor?.transcriptViewId
 		) {
 			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}

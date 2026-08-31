@@ -20,7 +20,7 @@ export class CurrentConversationLifecycle {
 
 	get loadingStatus(): LoadingStatus | null {
 		const chatId = this.currentChatId;
-		return chatId ? this.options.lifecycles.forChat(chatId).loadingStatus : null;
+		return chatId ? this.options.lifecycles.get(chatId)?.loadingStatus ?? null : null;
 	}
 
 	beginTurn(chatId: string): void {

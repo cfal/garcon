@@ -409,20 +409,7 @@ export class ConversationUiState implements ConversationUiPort {
 	mountExecutionControlPruning(options: ExecutionControlPruningOptions): void {
 		$effect(() => {
 			const activeChatIds = options.getActiveChatIds();
-			untrack(() => {
-				this.pruneExecutionControls(activeChatIds);
-				this.#pruneTransientState(activeChatIds);
-			});
+			untrack(() => this.pruneExecutionControls(activeChatIds));
 		});
-	}
-
-	#pruneTransientState(activeChatIds: Set<string>): void {
-		const pruneRecord = <T>(record: Record<string, T>): Record<string, T> =>
-			Object.fromEntries(Object.entries(record).filter(([chatId]) => activeChatIds.has(chatId)));
-		this.transientFeedByChatId = pruneRecord(this.transientFeedByChatId);
-		this.pendingPermissionRequestsByChatId = pruneRecord(
-			this.pendingPermissionRequestsByChatId,
-		);
-		this.previousPermissionModeByChatId = pruneRecord(this.previousPermissionModeByChatId);
 	}
 }
