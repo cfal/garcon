@@ -61,6 +61,7 @@ import {
 	executionSelectionFromProjection,
 	type ConversationExecutionSelection,
 } from './conversation-execution-draft-state.svelte.js';
+import { resolveConversationModelSelection } from './conversation-model-selection.js';
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
 	| 'activeChatId'
@@ -336,44 +337,17 @@ export class ConversationSessionController {
 		});
 	}
 
-	#executionModelSelection(): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	} {
-		const { agentState, modelCatalog } = this.deps;
-		const resolved = modelCatalog.selectionFor(
-			agentState.agentId,
-			agentState.model,
-			agentState.modelEndpointId,
-		);
-		if (resolved.modelEndpointId || !agentState.modelEndpointId) return resolved;
-		return {
-			model: resolved.model,
-			apiProviderId: agentState.apiProviderId,
-			modelEndpointId: agentState.modelEndpointId,
-			modelProtocol: agentState.modelProtocol,
-		};
+	#executionModelSelection() {
+		return resolveConversationModelSelection(this.deps.agentState, this.deps.modelCatalog);
 	}
 
 	#executionSelectionForChat(chatId: string): ConversationExecutionSelection | null {
 		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
 		if (!selection) return null;
-		const resolved = this.deps.modelCatalog.selectionFor(
-			selection.agentId,
-			selection.model,
-			selection.modelEndpointId,
-		);
-		const modelSelection = resolved.modelEndpointId || !selection.modelEndpointId
-			? resolved
-			: {
-					model: resolved.model,
-					apiProviderId: selection.apiProviderId,
-					modelEndpointId: selection.modelEndpointId,
-					modelProtocol: selection.modelProtocol,
-				};
-		return { ...selection, ...modelSelection };
+		return {
+			...selection,
+			...resolveConversationModelSelection(selection, this.deps.modelCatalog),
+		};
 	}
 
 	#applyExecutionSelection(selection: ConversationExecutionSelection): void {

@@ -33,15 +33,12 @@ type PageRequestReason = 'scroll' | 'button';
 type PageApplicationPolicy = 'immediate' | 'after-native-scroll';
 type UserScrollIntentSource = 'native-touch' | 'other';
 type WindowNavigationResult = 'settled' | 'committed-unsettled' | 'invalidated';
-
 interface UserScrollIntent {
 	epoch: number;
 	direction: TranscriptPageDirection | null;
 	receivedAt: number;
 }
-
 type DeferredLiveEdgeIntent = { chatId: string; epoch: number };
-
 type NativeScrollHandoff = DeferredLiveEdgeIntent & { direction: TranscriptPageDirection | null };
 
 export type ConversationScrollState = Pick<
