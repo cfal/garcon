@@ -154,6 +154,10 @@ function makePanel() {
 				presentation = null;
 			};
 		},
+		captureRestoreTarget: () => {
+			lastRestoreTarget = presentation?.captureRestoreTarget() ?? lastRestoreTarget;
+			return lastRestoreTarget;
+		},
 		resumePendingRestore: () => {},
 		prepareForInteractionLoss,
 		prepareForHide: () => {
@@ -306,9 +310,9 @@ describe('ConversationPanel', () => {
 		expect(root?.getAttribute('data-conversation-panel-composer-anchor')).toBe('true');
 		expect(spacer?.getAttribute('style')).toContain('height: 96px');
 		expect(
-			rendered.container.querySelector('[data-announcements-enabled]')?.getAttribute(
-				'data-announcements-enabled',
-			),
+			rendered.container
+				.querySelector('[data-announcements-enabled]')
+				?.getAttribute('data-announcements-enabled'),
 		).toBe('true');
 
 		await rendered.rerender({
@@ -343,9 +347,9 @@ describe('ConversationPanel', () => {
 		expect(root?.getAttribute('data-conversation-panel-composer-anchor')).toBeNull();
 		expect(spacer?.getAttribute('style')).toContain('height: 0px');
 		expect(
-			rendered.container.querySelector('[data-announcements-enabled]')?.getAttribute(
-				'data-announcements-enabled',
-			),
+			rendered.container
+				.querySelector('[data-announcements-enabled]')
+				?.getAttribute('data-announcements-enabled'),
 		).toBe('false');
 		const status = rendered.container.querySelector('[data-slot="chat-processing-status"]');
 		expect(status?.getAttribute('role')).toBeNull();

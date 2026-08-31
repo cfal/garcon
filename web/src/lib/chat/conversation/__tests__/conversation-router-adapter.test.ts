@@ -63,7 +63,9 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		lifecycleByChatId.set(chatId, created);
 		return created;
 	};
-	const chatState = new ActiveTranscriptState();
+	const chatState = Object.assign(new ActiveTranscriptState(), {
+		discardChat: vi.fn(),
+	});
 	const panels = new ConversationPanelRegistry({
 		cache: chatState.transcriptCache,
 		overlays: new ConversationTranscriptOverlayStore(),
@@ -233,6 +235,7 @@ describe('buildRouterStores', () => {
 
 		stores.chatState.removeChatTranscript('chat-1');
 
+		expect(deps.chatState.discardChat).toHaveBeenCalledWith('chat-1');
 		expect(discardChat).toHaveBeenCalledWith('chat-1');
 	});
 

@@ -105,6 +105,8 @@
 		overlays: conversationTranscriptOverlays,
 	});
 	setConversationPanels(conversationPanels);
+	const unregisterChatSurfaceTransfers =
+		workspace.registerChatSurfaceTransferPort(conversationPanels);
 	conversationUi.mountExecutionControlPruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
 	});
@@ -119,21 +121,19 @@
 	const snapshot = $derived(workspace.layout.snapshot);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const chatPresentations = $derived(
-		visibleChatPresentations(
-			snapshot,
-			isMobile ? 'mobile' : 'desktop',
-			workspace.composerAnchorSurfaceId,
-		).filter(
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').filter(
 			({ chatId }) =>
 				resolveChatSurfacePresentation(sessions.byId[chatId] ?? null, sessions.isLoadingChats) ===
 				'conversation',
 		),
 	);
 	const existingChatSurfaceIds = $derived.by(
-		() => new Set<ChatViewSurfaceId>(
-			Object.values(snapshot.surfaces).flatMap((surface) =>
-				surface.type === 'chat' ? [surface.id] : []),
-		),
+		() =>
+			new Set<ChatViewSurfaceId>(
+				Object.values(snapshot.surfaces).flatMap((surface) =>
+					surface.type === 'chat' ? [surface.id] : [],
+				),
+			),
 	);
 	const visibleGitProjects = $derived.by<GitQuickProjectLease[]>(() =>
 		chatPresentations.flatMap(({ chatId }) => {
@@ -207,8 +207,8 @@
 	const composerBound = $derived(
 		Boolean(
 			composerPlacement?.surface.chatId &&
-				composerPlacement.surface.chatId === sessions.selectedChatId &&
-				conversationPanels.panel(composerPlacement.surface.id),
+			composerPlacement.surface.chatId === sessions.selectedChatId &&
+			conversationPanels.panel(composerPlacement.surface.id),
 		),
 	);
 	const liveLayerRectStyle = $derived(
@@ -239,8 +239,8 @@
 	const mobileChatIsComposerAnchor = $derived(
 		Boolean(
 			mobileChatSurface?.chatId &&
-				workspace.composerAnchorSurfaceId === mobileChatSurface.id &&
-				mobileChatSurface.chatId === sessions.selectedChatId,
+			workspace.composerAnchorSurfaceId === mobileChatSurface.id &&
+			mobileChatSurface.chatId === sessions.selectedChatId,
 		),
 	);
 
@@ -285,6 +285,7 @@
 	onDestroy(() => {
 		gitQuickSummary.setVisibleProjects([]);
 		gitQuickSummary.reconcilePolling();
+		unregisterChatSurfaceTransfers();
 		conversationPanels.destroy();
 		conversationLifecycles.destroy();
 		rootState.destroy();
@@ -459,8 +460,7 @@
 					panel={mobilePanel}
 					isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
 						workspace.focusOwner.surfaceId === mobileChatSurface.id}
-					ownsComposer={composerBound &&
-						workspace.composerAnchorSurfaceId === mobileChatSurface.id}
+					ownsComposer={composerBound && workspace.composerAnchorSurfaceId === mobileChatSurface.id}
 					isVisible={true}
 					actions={conversationPanelActions}
 					composerInsetPx={composerBound ? composerInsetPx : 0}
@@ -497,9 +497,7 @@
 			use:surfaceFrame={{
 				registry: surfaceFrames,
 				surfaceId: composerPlacement?.surface.id ?? fallbackChatSurfaceId,
-				host: composerBound && composerPlacement
-					? (composerPlacement.windowId ?? 'mobile')
-					: null,
+				host: composerBound && composerPlacement ? (composerPlacement.windowId ?? 'mobile') : null,
 				version: 0,
 			}}
 		>

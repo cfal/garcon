@@ -93,8 +93,7 @@
 		startupByChatId: {},
 		hasChat: (chatId: string) => chatId === selectedChat.id,
 		isDraft: () => false,
-		isChatProcessing: (chatId: string) =>
-			chatId === selectedChat.id && selectedChat.isProcessing,
+		isChatProcessing: (chatId: string) => chatId === selectedChat.id && selectedChat.isProcessing,
 		processingPhase: () => selectedChat.processingPhase,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},
@@ -227,7 +226,6 @@
 			chatId: 'chat-1',
 			presentation: 'window-main',
 			windowId: 'window-main',
-			isCurrent: true,
 		},
 	]);
 	setConversationPanels(conversationPanels);

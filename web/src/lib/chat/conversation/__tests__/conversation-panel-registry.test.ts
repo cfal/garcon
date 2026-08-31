@@ -26,19 +26,20 @@ function candidate(ordinal: number): ResendCandidate {
 function presentation(
 	surfaceId: `chat-view:window-${string}`,
 	chatId: string,
-	isCurrent = false,
 ): VisibleChatPresentation {
 	const windowId = surfaceId.slice('chat-view:'.length) as `window-${string}`;
-	return { surfaceId, chatId, presentation: windowId, windowId, isCurrent };
+	return { surfaceId, chatId, presentation: windowId, windowId };
 }
 
-function fixture(options: {
-	loadTranscriptSnapshot?: (
-		transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
-		chatId: string,
-		options: ChatLoadMessagesOptions,
-	) => Promise<void>;
-} = {}) {
+function fixture(
+	options: {
+		loadTranscriptSnapshot?: (
+			transcript: import('$lib/chat/transcript/active-transcript-state.svelte.js').ActiveTranscriptState,
+			chatId: string,
+			options: ChatLoadMessagesOptions,
+		) => Promise<void>;
+	} = {},
+) {
 	const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 	const overlays = new ConversationTranscriptOverlayStore();
 	const lifecycles = new Map<string, ConversationLifecycleState>();
@@ -76,7 +77,11 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-function port(target: ConversationPanelPresentationPort['captureRestoreTarget'] extends () => infer T ? T : never): ConversationPanelPresentationPort {
+function port(
+	target: ConversationPanelPresentationPort['captureRestoreTarget'] extends () => infer T
+		? T
+		: never,
+): ConversationPanelPresentationPort {
 	return {
 		getScrollContainer: () => null,
 		getViewport: () => null,
@@ -95,7 +100,7 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const applyMessages = vi.spyOn(cache, 'applyMessages');
@@ -112,8 +117,12 @@ describe('ConversationPanelRegistry', () => {
 
 		expect(result).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 		expect(applyMessages).toHaveBeenCalledOnce();
-		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal)).toEqual([1, 2]);
-		expect(registry.panel('chat-view:window-right')?.transcript.entries.map((entry) => entry.ordinal)).toEqual([1, 2]);
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2]);
+		expect(
+			registry.panel('chat-view:window-right')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2]);
 		cache.flush();
 	});
 
@@ -121,48 +130,56 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const applyMessages = vi.spyOn(cache, 'applyMessages');
 		const replayToken = registry.beginReconnectReplay('chat-1', 'view-1');
 
-		expect(registry.applyReconnectReplayPage(replayToken, 'chat-1', {
-			transcriptViewId: 'view-1',
-			messages: [message(2)],
-			firstOrdinal: 2,
-			lastOrdinal: 2,
-			resendCandidates: [],
-			noticeRevision: 0,
-		})).toBe('applied');
-		expect(registry.applyCommittedBatch({
-			chatId: 'chat-1',
-			transcriptViewId: 'view-1',
-			messages: [message(4)],
-			firstOrdinal: 4,
-			lastOrdinal: 4,
-			resendCandidates: [],
-			noticeRevision: 0,
-		})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+		expect(
+			registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+				transcriptViewId: 'view-1',
+				messages: [message(2)],
+				firstOrdinal: 2,
+				lastOrdinal: 2,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toBe('applied');
+		expect(
+			registry.applyCommittedBatch({
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				messages: [message(4)],
+				firstOrdinal: 4,
+				lastOrdinal: 4,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 
 		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(2);
-		expect(registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal))
-			.toEqual([1, 2]);
-		expect(registry.applyReconnectReplayPage(replayToken, 'chat-1', {
-			transcriptViewId: 'view-1',
-			messages: [message(3)],
-			firstOrdinal: 3,
-			lastOrdinal: 3,
-			resendCandidates: [],
-			noticeRevision: 0,
-		})).toBe('applied');
+		expect(
+			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+		).toEqual([1, 2]);
+		expect(
+			registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+				transcriptViewId: 'view-1',
+				messages: [message(3)],
+				firstOrdinal: 3,
+				lastOrdinal: 3,
+				resendCandidates: [],
+				noticeRevision: 0,
+			}),
+		).toBe('applied');
 		expect(registry.finishReconnectReplay(replayToken, 'chat-1')).toBe('applied');
 
 		expect(applyMessages).toHaveBeenCalledTimes(3);
 		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(4);
 		for (const surfaceId of ['chat-view:window-left', 'chat-view:window-right'] as const) {
-			expect(registry.panel(surfaceId)?.transcript.entries.map((entry) => entry.ordinal))
-				.toEqual([1, 2, 3, 4]);
+			expect(registry.panel(surfaceId)?.transcript.entries.map((entry) => entry.ordinal)).toEqual([
+				1, 2, 3, 4,
+			]);
 		}
 		cache.flush();
 	});
@@ -171,7 +188,7 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const left = registry.panel('chat-view:window-left');
@@ -189,7 +206,7 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const left = registry.panel('chat-view:window-left');
@@ -218,7 +235,7 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture({ loadTranscriptSnapshot });
 
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 
@@ -234,21 +251,25 @@ describe('ConversationPanelRegistry', () => {
 	it('publishes snapshot resend candidates without cache hydration clearing them', async () => {
 		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
 			const epoch = transcript.beginSnapshotLoad();
-			transcript.setFromPage(chatId, {
-				transcriptViewId: 'view-1',
-				messages: [message(1)],
-				lastOrdinal: 1,
-				pageOldestOrdinal: 1,
-				pageNewestOrdinal: 1,
-				nextBeforeOrdinal: null,
-				hasMore: false,
-				resendCandidates: [candidate(1)],
-			}, epoch);
+			transcript.setFromPage(
+				chatId,
+				{
+					transcriptViewId: 'view-1',
+					messages: [message(1)],
+					lastOrdinal: 1,
+					pageOldestOrdinal: 1,
+					pageNewestOrdinal: 1,
+					nextBeforeOrdinal: null,
+					hasMore: false,
+					resendCandidates: [candidate(1)],
+				},
+				epoch,
+			);
 		});
 		const { cache, registry } = fixture({ loadTranscriptSnapshot });
 
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 
@@ -285,7 +306,7 @@ describe('ConversationPanelRegistry', () => {
 		);
 		cache.markStale('chat-1');
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const selected = new CurrentConversationPanelTranscript({
@@ -323,7 +344,7 @@ describe('ConversationPanelRegistry', () => {
 		});
 		const { cache, registry } = fixture({ loadTranscriptSnapshot });
 		seed(cache);
-		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
 		registry.handleViewReplacement('chat-1');
@@ -350,7 +371,7 @@ describe('ConversationPanelRegistry', () => {
 			101,
 		);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const left = registry.panel('chat-view:window-left');
@@ -397,7 +418,7 @@ describe('ConversationPanelRegistry', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-1'),
 		]);
 		const left = registry.panel('chat-view:window-left');
@@ -436,7 +457,7 @@ describe('ConversationPanelRegistry', () => {
 		seed(cache, 'chat-1');
 		seed(cache, 'chat-2');
 		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1', true),
+			presentation('chat-view:window-left', 'chat-1'),
 			presentation('chat-view:window-right', 'chat-2'),
 		]);
 		const selected = new CurrentConversationPanelTranscript({
@@ -454,7 +475,7 @@ describe('ConversationPanelRegistry', () => {
 	it('uses generation-checked presentation disposal and captures the current port', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
 		const oldPort = port({ kind: 'end' });
@@ -474,10 +495,36 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('purges optimistic input ownership when its chat is discarded', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getComposerAnchorSurfaceId: () => 'chat-view:window-left',
+			getSelectedChatId: () => 'chat-1',
+		});
+		selected.upsertOptimisticUserInput({
+			chatId: 'chat-1',
+			clientMessageId: 'input-1',
+			content: 'pending',
+			createdAt: '2026-08-30T00:00:00.000Z',
+			delivery: 'pending',
+		});
+		const markDelivered = vi.spyOn(registry, 'markOptimisticInputDelivered');
+
+		selected.discardChat('chat-1');
+		selected.markOptimisticUserInputDelivered('input-1');
+
+		expect(markDelivered).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('captures a panel target before presentation teardown and consumes it on restore', () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		const visible = [presentation('chat-view:window-left', 'chat-1', true)];
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
 		registry.reconcile(visible);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
@@ -498,10 +545,131 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('transfers a captured row target when a Chat move rekeys its surface', async () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const source = registry.panel('chat-view:window-left');
+		if (!source) throw new Error('Expected source panel');
+		const target = {
+			kind: 'row' as const,
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: -17,
+		};
+		source.attachPresentation(port(target));
+		const publication = registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		});
+
+		publication.publish();
+		const visible = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible);
+		const destination = registry.panel('chat-view:window-right');
+		if (!destination) throw new Error('Expected destination panel');
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+
+		await vi.waitFor(() => expect(jump).toHaveBeenCalledOnce());
+		expect(jump).toHaveBeenCalledWith(
+			{
+				chatId: 'chat-1',
+				transcriptViewId: 'view-1',
+				rowId: 'view-1:1',
+			},
+			{ viewportOffset: -17 },
+		);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps an existing duplicate destination viewport during a Chat move', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		const visible = [
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-1'),
+		];
+		registry.reconcile(visible);
+		const source = registry.panel('chat-view:window-left');
+		const destination = registry.panel('chat-view:window-right');
+		if (!source || !destination) throw new Error('Expected duplicate panels');
+		source.attachPresentation(
+			port({
+				kind: 'row',
+				transcriptViewId: 'view-1',
+				ordinal: 1,
+				viewportOffset: -3,
+			}),
+		);
+		const destinationTarget = {
+			kind: 'row' as const,
+			transcriptViewId: 'view-1',
+			ordinal: 1,
+			viewportOffset: -31,
+		};
+		destination.attachPresentation(port(destinationTarget));
+		const publication = registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		});
+
+		publication.publish();
+		const remaining = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(remaining);
+		registry.reconcile(remaining);
+
+		expect(registry.panel('chat-view:window-right')).toBe(destination);
+		expect(destination.captureRestoreTarget()).toEqual(destinationTarget);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('discards a rolled-back surface rekey target', async () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const source = registry.panel('chat-view:window-left');
+		if (!source) throw new Error('Expected source panel');
+		source.attachPresentation(
+			port({
+				kind: 'row',
+				transcriptViewId: 'view-1',
+				ordinal: 1,
+				viewportOffset: -17,
+			}),
+		);
+		const publication = registry.prepareChatSurfaceTransfer({
+			sourceSurfaceId: 'chat-view:window-left',
+			destinationSurfaceId: 'chat-view:window-right',
+			chatId: 'chat-1',
+		});
+		publication.publish();
+		publication.rollback();
+
+		const visible = [presentation('chat-view:window-right', 'chat-1')];
+		registry.prepareForReconcile(visible);
+		registry.reconcile(visible);
+		const destination = registry.panel('chat-view:window-right');
+		if (!destination) throw new Error('Expected destination panel');
+		const jump = vi.spyOn(destination.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
+		destination.attachPresentation(port({ kind: 'end' }));
+		await Promise.resolve();
+
+		expect(destination.scroll.isPinnedToBottom).toBe(true);
+		expect(jump).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
 	it('restores a detached row at its captured viewport offset', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
 		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
@@ -528,7 +696,7 @@ describe('ConversationPanelRegistry', () => {
 	it('defers a detached row restore until its presentation attaches', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
 		const jump = vi.spyOn(panel.scroll, 'jumpToMessageRow').mockResolvedValue('completed');
@@ -557,7 +725,7 @@ describe('ConversationPanelRegistry', () => {
 	it('retries a pending restore when the attached viewport becomes ready', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		registry.reconcile([presentation('chat-view:window-left', 'chat-1', true)]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
 		const firstJump = deferred<'unavailable'>();
@@ -584,16 +752,18 @@ describe('ConversationPanelRegistry', () => {
 	it('drops detached restore targets after their surface is permanently removed', async () => {
 		const { cache, registry } = fixture();
 		seed(cache);
-		const visible = [presentation('chat-view:window-left', 'chat-1', true)];
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
 		registry.reconcile(visible);
 		const first = registry.panel('chat-view:window-left');
 		if (!first) throw new Error('Expected panel');
-		first.attachPresentation(port({
-			kind: 'row',
-			transcriptViewId: 'view-1',
-			ordinal: 1,
-			viewportOffset: -3,
-		}));
+		first.attachPresentation(
+			port({
+				kind: 'row',
+				transcriptViewId: 'view-1',
+				ordinal: 1,
+				viewportOffset: -3,
+			}),
+		);
 
 		registry.prepareForReconcile([]);
 		registry.reconcile([]);
@@ -610,5 +780,4 @@ describe('ConversationPanelRegistry', () => {
 		registry.destroy();
 		cache.flush();
 	});
-
 });

@@ -236,6 +236,13 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		this.options.panels.clearOptimisticInput(chatId, clientMessageId);
 	}
 
+	discardChat(chatId: string): void {
+		for (const [clientMessageId, optimisticChatId] of this.#optimisticChatIds) {
+			if (optimisticChatId === chatId) this.#optimisticChatIds.delete(clientMessageId);
+		}
+		if (this.#fallback.activeChatId === chatId) this.#fallback.activateChat(null);
+	}
+
 	hasMountedPresentation(chatId: string): boolean {
 		return this.options.panels.panelsForChat(chatId).length > 0;
 	}

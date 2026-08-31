@@ -36,7 +36,7 @@ export interface ConversationRouterStoreDeps {
 		| 'reconcileProcessing'
 		| 'quietRefreshChats'
 	>;
-	chatState: ActiveTranscriptPort;
+	chatState: ActiveTranscriptPort & { discardChat(chatId: string): void };
 	agentState: AgentState;
 	lifecycle: Pick<
 		ConversationLifecycleState,
@@ -103,13 +103,9 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					noticeRevision: deps.panels.noticeRevisionFor(chatId),
 				});
 				if (result.kind === 'applied') {
-					return result.localRecoverySurfaceIds.length === 0
-						? 'applied'
-						: 'gap-detected';
+					return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 				}
-				return result.outcome.status === 'view-changed'
-					? 'view-changed'
-					: 'gap-detected';
+				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 			},
 			reloadChatTranscript: (chatId) => {
 				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
@@ -132,6 +128,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.panels.appendServerNotice(chatId, noticeType, content),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatTranscript: (chatId) => {
+				deps.chatState.discardChat(chatId);
 				deps.panels.removeChat(chatId);
 				deps.chatDrafts?.discardChat(chatId);
 			},

@@ -20,12 +20,9 @@ function optimistic(clientMessageId: string) {
 function echoed(clientMessageId: string, ordinal: number): TranscriptMessage {
 	return {
 		ordinal,
-		message: new UserMessage(
-			'2026-08-30T00:00:01.000Z',
-			'committed input',
-			undefined,
-			{ clientMessageId },
-		),
+		message: new UserMessage('2026-08-30T00:00:01.000Z', 'committed input', undefined, {
+			clientMessageId,
+		}),
 	};
 }
 
@@ -121,5 +118,15 @@ describe('ConversationTranscriptOverlayStore', () => {
 
 		expect(overlays.forChat('chat-1').notices).toEqual([]);
 		expect(overlays.forChat('chat-2').notices).toHaveLength(1);
+	});
+
+	it('does not recreate a removed chat for late optimistic settlement', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 1);
+		overlays.remove('chat-1');
+
+		expect(overlays.markOptimisticInputDelivered('chat-1', 'input-1')).toBeNull();
+		expect(overlays.clearOptimisticInput('chat-1', 'input-1')).toBeNull();
+		expect(overlays.viewFor('chat-1')).toBeNull();
 	});
 });

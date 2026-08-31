@@ -21,6 +21,11 @@ import {
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { ChatSurfaceTransferPort } from '$lib/workspace/chat-surface-transfer.js';
+import type {
+	ConversationPanelPresentationPort,
+	ConversationPanelRegistry,
+} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
@@ -153,6 +158,7 @@ function installContext() {
 		}
 		commit([{ type: 'activate-window-tab', windowId, surfaceId }]);
 	});
+	let chatSurfaceTransferPort: ChatSurfaceTransferPort | null = null;
 	const activateWindow = vi.fn((windowId: WorkspaceWindowId) => {
 		const workspaceWindow = collectWindowNodes(layout.snapshot.desktopRoot).find(
 			(item) => item.id === windowId,
@@ -191,6 +197,12 @@ function installContext() {
 		get isChatInteractive() {
 			return true;
 		},
+		registerChatSurfaceTransferPort: vi.fn((port: ChatSurfaceTransferPort) => {
+			chatSurfaceTransferPort = port;
+			return () => {
+				if (chatSurfaceTransferPort === port) chatSurfaceTransferPort = null;
+			};
+		}),
 		frameVersion: () => 0,
 		windowOf: (surfaceId: string) => windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId),
 		noteSurfaceFocus: vi.fn((surfaceId: string) => {
@@ -253,6 +265,36 @@ function installContext() {
 		setPartitionRatio: vi.fn(async () => undefined),
 		moveTabToWindow: vi.fn(
 			async (surfaceId: string, destinationWindowId: WorkspaceWindowId, index?: number) => {
+				const surface = layout.snapshot.surfaces[surfaceId];
+				const sourceWindowId = windowIdOfSurface(layout.snapshot.desktopRoot, surfaceId);
+				if (
+					surface?.type === 'chat' &&
+					surface.chatId &&
+					sourceWindowId &&
+					sourceWindowId !== destinationWindowId
+				) {
+					const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+					const publication = chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+						sourceSurfaceId: surface.id,
+						destinationSurfaceId,
+						chatId: surface.chatId,
+					});
+					publication?.publish();
+					try {
+						commit([
+							{
+								type: 'move-chat-to-window',
+								sourceWindowId,
+								destinationWindowId,
+								index,
+							},
+						]);
+					} catch (error) {
+						publication?.rollback();
+						throw error;
+					}
+					return;
+				}
 				commit([{ type: 'move-tab', surfaceId, destinationWindowId, index }]);
 			},
 		),
@@ -377,6 +419,18 @@ function positionedDragEvent(type: string, clientX: number, clientY: number): Dr
 		clientY: { value: clientY },
 	});
 	return event;
+}
+
+function panelPresentation(
+	target: ReturnType<ConversationPanelPresentationPort['captureRestoreTarget']>,
+): ConversationPanelPresentationPort {
+	return {
+		getScrollContainer: () => null,
+		getViewport: () => null,
+		getQueueContainer: () => undefined,
+		captureRestoreTarget: () => target,
+		closeTransients: () => {},
+	};
 }
 
 describe('WorkspaceRoot', () => {
@@ -666,14 +720,14 @@ describe('WorkspaceRoot', () => {
 		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
 	});
 
-	it('tears down a rekeyed Chat panel with its original registration', async () => {
-		const { layout } = installContext();
+	it('restores a rekeyed Chat panel at its transferred row target', async () => {
+		const { layout, workspace } = installContext();
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
 				{
-					type: 'open-chat-in-new-window',
-					chatId: 'chat-a',
+					type: 'register-surface-in-new-window',
+					surface: portableSingletonDescriptor('git'),
 					targetWindowId: 'window-main',
 					edge: 'right',
 					newWindowId: 'window-2',
@@ -682,22 +736,29 @@ describe('WorkspaceRoot', () => {
 			]),
 		);
 		const { container } = renderRoot();
-		await waitFor(() => expect(screen.getAllByTestId('conversation-panel')).toHaveLength(2));
+		const panels = testContext.current?.conversationPanels as ConversationPanelRegistry;
+		const source = panels.panel(chatViewSurfaceId('window-main'));
+		if (!source) throw new Error('Expected source panel');
+		await waitFor(() => expect(source.transcript.transcriptViewId).toBe('view-chat-a'));
+		const target = {
+			kind: 'row' as const,
+			transcriptViewId: 'view-chat-a',
+			ordinal: 1,
+			viewportOffset: -23,
+		};
+		source.attachPresentation(panelPresentation(target));
 
-		const moved = reduceWorkspaceLayout(layout.snapshot, [
-			{
-				type: 'move-chat-to-window',
-				sourceWindowId: 'window-main',
-				destinationWindowId: 'window-2',
-			},
-		]);
-		expect(layout.publish(layout.revision, moved)).toBe(true);
+		await workspace.moveTabToWindow(chatViewSurfaceId('window-main'), 'window-2');
 
 		await waitFor(() => expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1));
+		const destination = panels.panel(chatViewSurfaceId('window-2'));
+		if (!destination) throw new Error('Expected destination panel');
+		destination.attachPresentation(panelPresentation({ kind: 'end' }));
+		await waitFor(() => expect(destination.scroll.isPinnedToBottom).toBe(false));
 		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1);
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
 		expect(screen.getByTestId('conversation-panel').dataset.transcriptViewId).toBe('view-chat-a');
-		expect(screen.getByTestId('conversation-panel').dataset.panelPinned).toBe('true');
+		expect(screen.getByTestId('conversation-panel').dataset.panelPinned).toBe('false');
 	});
 
 	it('keeps one composer mounted and hidden during anchor-selection reconciliation', async () => {
@@ -764,9 +825,7 @@ describe('WorkspaceRoot', () => {
 		const filesWindow = container.querySelector<HTMLElement>(
 			'[data-workspace-window-id="window-files"]',
 		)!;
-		const filesContent = filesWindow.querySelector<HTMLElement>(
-			'[data-workspace-window-content]',
-		)!;
+		const filesContent = filesWindow.querySelector<HTMLElement>('[data-workspace-window-content]')!;
 		const filesRenderer = filesWindow.querySelector<HTMLElement>(
 			'[data-testid="surface-renderer-stub"]',
 		)!;

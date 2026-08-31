@@ -44,7 +44,11 @@ import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
-import type { WorkspaceCommitOptions } from './workspace-commit.js';
+import type { WorkspaceCommitOptions, WorkspacePublication } from './workspace-commit.js';
+import {
+	deferredChatSurfaceTransferPublication,
+	type ChatSurfaceTransferPort,
+} from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
 
@@ -79,6 +83,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #fileDialog: FileDialogCoordinator;
 	readonly #terminalPlacement: TerminalPlacementService;
 	readonly #windowDestruction: WorkspaceWindowDestructionService;
+	#chatSurfaceTransferPort: ChatSurfaceTransferPort | null = null;
 	closeGuardRequest = $state<{
 		surfaceId: string;
 		title: string;
@@ -209,7 +214,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			: chatViewSurfaceId(this.currentWindowId);
 	}
 
-	get composerAnchorSurfaceId(): ChatViewSurfaceId | null { return this.#presentation.composerAnchorSurfaceId; }
+	get composerAnchorSurfaceId(): ChatViewSurfaceId | null {
+		return this.#presentation.composerAnchorSurfaceId;
+	}
 
 	get lastFocusedWindowId(): WorkspaceWindowId {
 		return this.#resolveWindowId(this.layout.snapshot, this.#presentation.lastFocusedWindowId);
@@ -217,6 +224,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	get windowCount(): number {
 		return collectWindowNodes(this.layout.snapshot.desktopRoot).length;
+	}
+
+	registerChatSurfaceTransferPort(port: ChatSurfaceTransferPort): () => void {
+		if (this.#chatSurfaceTransferPort && this.#chatSurfaceTransferPort !== port) {
+			throw new Error('A Chat surface transfer port is already registered');
+		}
+		this.#chatSurfaceTransferPort = port;
+		return () => {
+			if (this.#chatSurfaceTransferPort === port) this.#chatSurfaceTransferPort = null;
+		};
 	}
 
 	get canOpenNewWindow(): boolean {
@@ -235,7 +252,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#presentation.isSurfacePresented(surfaceId);
 	}
 
-	windowOf(surfaceId: string): WorkspaceWindowId | null { return this.#presentation.windowOf(surfaceId); }
+	windowOf(surfaceId: string): WorkspaceWindowId | null {
+		return this.#presentation.windowOf(surfaceId);
+	}
 	frameVersion(surfaceId: string): number {
 		return this.#presentation.frameVersion(surfaceId);
 	}
@@ -523,6 +542,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
 		let movedSurfaceId: string | null = null;
+		let transferPublication: WorkspacePublication | null = null;
 		const current = await this.#presentation.commitWithPresentationTarget(
 			(latest) => {
 				const surface = latest.surfaces[surfaceId];
@@ -541,6 +561,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
 					if (!surface.chatId || this.#reservedSurfaceIds.has(destinationSurfaceId)) return [];
 					movedSurfaceId = destinationSurfaceId;
+					transferPublication =
+						this.#chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+							sourceSurfaceId: surface.id,
+							destinationSurfaceId,
+							chatId: surface.chatId,
+						}) ?? null;
 					return [
 						{
 							type: 'move-chat-to-window',
@@ -554,6 +580,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				return [{ type: 'move-tab', surfaceId, destinationWindowId, index }];
 			},
 			() => movedSurfaceId,
+			{
+				publication: deferredChatSurfaceTransferPublication(() => transferPublication),
+			},
 		);
 		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
 			this.#presentation.presentSurface(movedSurfaceId);
@@ -578,6 +607,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
 		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
 		let movedSurfaceId: string | null = null;
+		let transferPublication: WorkspacePublication | null = null;
 		const current = await this.#presentation.commitWithPresentationTarget(
 			(latest) => {
 				const surface = latest.surfaces[surfaceId];
@@ -593,12 +623,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					return [];
 				}
 				const sourceWindow = windowNodeById(latest.desktopRoot, sourceWindowId);
-				if (
-					surface.type === 'chat' &&
-					(!surface.chatId ||
-						(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1))
-				) {
-					return [];
+				let movingChatId: string | null = null;
+				if (surface.type === 'chat') {
+					movingChatId = surface.chatId;
+					if (
+						!movingChatId ||
+						(sourceWindowId === targetWindowId && sourceWindow?.tabs.order.length === 1)
+					) {
+						return [];
+					}
 				}
 				if (
 					projectedWindowCountAfterTabMove(latest.desktopRoot, sourceWindowId, targetWindowId) >
@@ -606,7 +639,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				) {
 					throw new WorkspaceWindowLimitError();
 				}
-				movedSurfaceId = surface.type === 'chat' ? chatViewSurfaceId(newWindowId) : surfaceId;
+				if (surface.type === 'chat' && movingChatId) {
+					const destinationSurfaceId = chatViewSurfaceId(newWindowId);
+					movedSurfaceId = destinationSurfaceId;
+					transferPublication =
+						this.#chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+							sourceSurfaceId: surface.id,
+							destinationSurfaceId,
+							chatId: movingChatId,
+						}) ?? null;
+				} else {
+					movedSurfaceId = surfaceId;
+				}
 				return [
 					{
 						type: 'move-tab-to-new-window',
@@ -619,6 +663,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				];
 			},
 			() => movedSurfaceId,
+			{
+				publication: deferredChatSurfaceTransferPublication(() => transferPublication),
+			},
 		);
 		if (current && movedSurfaceId && this.layout.surface(movedSurfaceId)) {
 			this.#presentation.presentSurface(movedSurfaceId);

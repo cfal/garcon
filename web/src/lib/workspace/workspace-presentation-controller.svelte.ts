@@ -293,7 +293,7 @@ export class WorkspacePresentationController {
 		this.focusOwner = { kind: 'surface', surfaceId };
 		this.lastFocusedWindowId = windowId;
 		this.lastFocusedSurfaceId = surfaceId;
-		this.#adoptComposerAnchor(surfaceId);
+		if (!this.#pointerInteraction) this.#adoptComposerAnchor(surfaceId);
 
 		void tick().then(() => {
 			if (generation !== this.#focusIntentGeneration || this.currentWindowId !== windowId) return;

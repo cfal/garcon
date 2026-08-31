@@ -283,10 +283,7 @@ export class ConversationTranscriptOverlayStore {
 		return this.#entry(chatId).appendNotice('server', noticeType, content);
 	}
 
-	clearNoticesThrough(
-		chatId: string,
-		revision?: number,
-	): ConversationTranscriptOverlayMutation {
+	clearNoticesThrough(chatId: string, revision?: number): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).clearNoticesThrough(revision);
 	}
 
@@ -301,15 +298,15 @@ export class ConversationTranscriptOverlayStore {
 	markOptimisticInputDelivered(
 		chatId: string,
 		clientMessageId: string,
-	): ConversationTranscriptOverlayMutation {
-		return this.#entry(chatId).markOptimisticInputDelivered(clientMessageId);
+	): ConversationTranscriptOverlayMutation | null {
+		return this.#entries.get(chatId)?.markOptimisticInputDelivered(clientMessageId) ?? null;
 	}
 
 	clearOptimisticInput(
 		chatId: string,
 		clientMessageId: string,
-	): ConversationTranscriptOverlayMutation {
-		return this.#entry(chatId).clearOptimisticInput(clientMessageId);
+	): ConversationTranscriptOverlayMutation | null {
+		return this.#entries.get(chatId)?.clearOptimisticInput(clientMessageId) ?? null;
 	}
 
 	replaceResendCandidates(
@@ -319,10 +316,7 @@ export class ConversationTranscriptOverlayStore {
 		return this.#entry(chatId).replaceResendCandidates(candidates);
 	}
 
-	excludeResendCandidate(
-		chatId: string,
-		ordinal: number,
-	): ConversationTranscriptOverlayMutation {
+	excludeResendCandidate(chatId: string, ordinal: number): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).excludeResendCandidate(ordinal);
 	}
 
