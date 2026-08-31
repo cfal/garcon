@@ -51,6 +51,7 @@
 		metadata: {
 			terminalId,
 			displaySequence: 1,
+			title: null,
 			initialWorkingDirectory: '/workspace/project',
 			processStatus: 'running',
 			attachmentStatus: 'attached',

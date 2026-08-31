@@ -7,6 +7,7 @@ import {
   type TerminalCreateResponse,
   type TerminalErrorCode,
   type TerminalMetadata,
+  type TerminalRenameResponse,
   type TerminalStreamServerMessage,
   type TerminalTerminateResponse,
 } from "../../common/terminal.js";
@@ -173,6 +174,29 @@ export class TerminalManager {
       .sort((left, right) => left.displaySequence - right.displaySequence);
   }
 
+  rename(
+    principal: ServerPrincipal,
+    terminalId: string,
+    title: string | null,
+  ): TerminalRenameResponse {
+    const session = this.#requireSession(principal, terminalId);
+    session.metadata.title = title;
+    for (const subscriber of session.subscribers) {
+      try {
+        subscriber.sendTerminalMessage({
+          type: "terminal-status",
+          terminal: cloneTerminalMetadata(session.metadata),
+        });
+      } catch (error) {
+        logger.warn(
+          `terminal rename notification failed id=${terminalId} connection=${subscriber.connectionId}:`,
+          errorMessage(error),
+        );
+      }
+    }
+    return { success: true, terminalId, title };
+  }
+
   async create(
     principal: ServerPrincipal,
     request: TerminalCreateRequest,
@@ -255,6 +279,7 @@ export class TerminalManager {
       const metadata: TerminalMetadata = {
         terminalId,
         displaySequence,
+        title: null,
         initialWorkingDirectory: cwd,
         processStatus: "running",
         attachmentStatus: "detached",

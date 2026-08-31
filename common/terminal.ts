@@ -2,6 +2,7 @@ export const TERMINAL_SESSION_LIMIT = 8;
 export const TERMINAL_REQUEST_ID_MAX_BYTES = 256;
 export const TERMINAL_ID_MAX_BYTES = 256;
 export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024;
+export const TERMINAL_TITLE_MAX_LENGTH = 120;
 
 export type TerminalProcessStatus = 'running' | 'exited';
 export type TerminalServerAttachmentStatus = 'attached' | 'detached';
@@ -9,6 +10,7 @@ export type TerminalServerAttachmentStatus = 'attached' | 'detached';
 export interface TerminalMetadata {
   terminalId: string;
   displaySequence: number;
+  title: string | null;
   initialWorkingDirectory: string;
   processStatus: TerminalProcessStatus;
   attachmentStatus: TerminalServerAttachmentStatus;
@@ -37,6 +39,11 @@ export interface TerminalTerminateRequest {
   requestId: string;
 }
 
+export interface TerminalRenameRequest {
+  terminalId: string;
+  title: string | null;
+}
+
 export interface TerminalListResponse {
   success: true;
   terminals: TerminalMetadata[];
@@ -51,6 +58,12 @@ export interface TerminalTerminateResponse {
   success: true;
   terminalId: string;
   terminal: TerminalMetadata | null;
+}
+
+export interface TerminalRenameResponse {
+  success: true;
+  terminalId: string;
+  title: string | null;
 }
 
 export type TerminalErrorCode =
@@ -174,6 +187,22 @@ function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+function normalizeTerminalTitle(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value))
+    return undefined;
+  const title = value.trim();
+  if (title.length === 0) return null;
+  return title.length <= TERMINAL_TITLE_MAX_LENGTH ? title : undefined;
+}
+
+function parseStoredTerminalTitle(value: unknown): string | null | undefined {
+  const title = normalizeTerminalTitle(value);
+  if (title === undefined || (typeof value === 'string' && title !== value))
+    return undefined;
+  return title;
+}
+
 export function parseTerminalCreateRequest(
   value: unknown,
 ): TerminalCreateRequest | null {
@@ -207,6 +236,16 @@ export function parseTerminalTerminateRequest(
     utf8ByteLength(requestId) <= TERMINAL_REQUEST_ID_MAX_BYTES
     ? { terminalId, requestId }
     : null;
+}
+
+export function parseTerminalRenameRequest(
+  value: unknown,
+): TerminalRenameRequest | null {
+  const input = record(value);
+  if (!input) return null;
+  const terminalId = terminalIdentifier(input.terminalId);
+  const title = normalizeTerminalTitle(input.title);
+  return terminalId && title !== undefined ? { terminalId, title } : null;
 }
 
 export function parseTerminalStreamClientMessage(
@@ -249,7 +288,13 @@ export function parseTerminalMetadata(value: unknown): TerminalMetadata | null {
   const terminalId = terminalIdentifier(input.terminalId);
   const displaySequence = positiveInteger(input.displaySequence);
   const latestOutputSequence = nonNegativeInteger(input.latestOutputSequence);
-  if (!terminalId || !displaySequence || latestOutputSequence === null)
+  const title = parseStoredTerminalTitle(input.title);
+  if (
+    !terminalId ||
+    !displaySequence ||
+    latestOutputSequence === null ||
+    title === undefined
+  )
     return null;
   if (
     typeof input.initialWorkingDirectory !== 'string' ||
@@ -268,6 +313,7 @@ export function parseTerminalMetadata(value: unknown): TerminalMetadata | null {
   return {
     terminalId,
     displaySequence,
+    title,
     initialWorkingDirectory: input.initialWorkingDirectory,
     processStatus: input.processStatus,
     attachmentStatus: input.attachmentStatus,
@@ -419,6 +465,18 @@ export function parseTerminalTerminateResponse(
     return { success: true, terminalId, terminal: null };
   const terminal = parseTerminalMetadata(input.terminal);
   return terminal ? { success: true, terminalId, terminal } : null;
+}
+
+export function parseTerminalRenameResponse(
+  value: unknown,
+): TerminalRenameResponse | null {
+  const input = record(value);
+  if (!input || input.success !== true) return null;
+  const terminalId = terminalIdentifier(input.terminalId);
+  const title = parseStoredTerminalTitle(input.title);
+  return terminalId && title !== undefined
+    ? { success: true, terminalId, title }
+    : null;
 }
 
 export function cloneTerminalMetadata(

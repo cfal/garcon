@@ -48,6 +48,7 @@ function terminalSession(attachmentState: TerminalAttachmentState): TerminalClie
 		metadata: {
 			terminalId: 'terminal-1',
 			displaySequence: 1,
+			title: null,
 			initialWorkingDirectory: '/workspace/project',
 			processStatus: 'running',
 			attachmentStatus: 'attached',

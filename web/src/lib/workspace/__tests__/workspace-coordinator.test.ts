@@ -35,6 +35,7 @@ function terminalMetadata(terminalId: string): TerminalMetadata {
 	return {
 		terminalId,
 		displaySequence: 1,
+		title: null,
 		initialWorkingDirectory: '/workspace',
 		processStatus: 'running',
 		attachmentStatus: 'attached',

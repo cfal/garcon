@@ -1,5 +1,6 @@
 import {
   parseTerminalCreateRequest,
+  parseTerminalRenameRequest,
   parseTerminalTerminateRequest,
   type TerminalListResponse,
 } from '../../common/terminal.js';
@@ -70,6 +71,31 @@ export default function createTerminalRoutes(
             return Response.json(await manager.create(principal, input), {
               status: 201,
             });
+          } catch (error) {
+            return terminalError(error);
+          }
+        },
+      ),
+      PATCH: withJsonBody(
+        async (body: unknown, _request, _url, _server, context) => {
+          const principal = requirePrincipal(context);
+          if (!principal)
+            return jsonError(
+              'Authentication required.',
+              401,
+              'terminal-validation',
+            );
+          const input = parseTerminalRenameRequest(body);
+          if (!input)
+            return jsonError(
+              'Invalid terminal rename request.',
+              400,
+              'terminal-validation',
+            );
+          try {
+            return Response.json(
+              manager.rename(principal, input.terminalId, input.title),
+            );
           } catch (error) {
             return terminalError(error);
           }

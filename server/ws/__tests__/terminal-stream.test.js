@@ -332,6 +332,7 @@ describe("TerminalStreamHandler", () => {
       terminal: {
         terminalId: "terminal-2",
         displaySequence: 2,
+        title: null,
         initialWorkingDirectory: "/workspace",
         processStatus: "running",
         attachmentStatus: "attached",

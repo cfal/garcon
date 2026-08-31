@@ -25,6 +25,7 @@ function metadata(
 	return {
 		terminalId,
 		displaySequence,
+		title: null,
 		initialWorkingDirectory: `/workspace/${displaySequence}`,
 		processStatus: 'running',
 		attachmentStatus: 'detached',
@@ -114,6 +115,7 @@ describe('TerminalRegistry', () => {
 	>;
 	let createTerminal: ReturnType<typeof vi.fn>;
 	let terminateTerminal: ReturnType<typeof vi.fn>;
+	let renameTerminal: ReturnType<typeof vi.fn>;
 	let onSessionTerminated: ReturnType<typeof vi.fn>;
 	let onSuccessfulList: ReturnType<typeof vi.fn<(terminalIds: readonly string[]) => void>>;
 	let now: number;
@@ -125,6 +127,7 @@ describe('TerminalRegistry', () => {
 			.fn<() => Promise<{ success: true; terminals: TerminalMetadata[] }>>()
 			.mockResolvedValue({ success: true, terminals: [] });
 		createTerminal = vi.fn();
+		renameTerminal = vi.fn();
 		onSessionTerminated = vi.fn();
 		onSuccessfulList = vi.fn<(terminalIds: readonly string[]) => void>();
 		terminateTerminal = vi.fn().mockResolvedValue({
@@ -154,6 +157,7 @@ describe('TerminalRegistry', () => {
 			terminateTerminal: terminateTerminal as NonNullable<
 				TerminalRegistryDeps['terminateTerminal']
 			>,
+			renameTerminal: renameTerminal as NonNullable<TerminalRegistryDeps['renameTerminal']>,
 			createTransport: (options) => {
 				transport = new FakeTransport(options);
 				return transport;
@@ -331,6 +335,96 @@ describe('TerminalRegistry', () => {
 
 		expect(registry.sessions['terminal-1']).toBeUndefined();
 		expect(runtime.disposeCount).toBe(1);
+	});
+
+	it('applies rename responses without regressing other session metadata', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [
+				metadata('terminal-1', 1, {
+					processStatus: 'exited',
+					exitCode: 0,
+					latestOutputSequence: 4,
+				}),
+			],
+		});
+		renameTerminal.mockResolvedValue({
+			success: true,
+			terminalId: 'terminal-1',
+			title: 'Build logs',
+		});
+		const registry = createRegistry();
+		await registry.list();
+
+		await registry.rename('terminal-1', ' Build logs ');
+
+		expect(renameTerminal).toHaveBeenCalledWith({
+			terminalId: 'terminal-1',
+			title: ' Build logs ',
+		});
+		expect(registry.sessions['terminal-1'].metadata).toMatchObject({
+			title: 'Build logs',
+			processStatus: 'exited',
+			exitCode: 0,
+			latestOutputSequence: 4,
+		});
+	});
+
+	it('protects a rename from an older List snapshot', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockImplementationOnce(() => pendingList.promise);
+		renameTerminal.mockResolvedValue({
+			success: true,
+			terminalId: 'terminal-1',
+			title: 'Build logs',
+		});
+		const registry = createRegistry();
+		await registry.list();
+
+		const reconciliation = registry.list();
+		await registry.rename('terminal-1', 'Build logs');
+		pendingList.resolve({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		await reconciliation;
+
+		expect(registry.sessions['terminal-1'].metadata.title).toBe('Build logs');
+	});
+
+	it('leaves the current title unchanged when rename fails', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1, { title: 'Current' })],
+		});
+		renameTerminal.mockRejectedValue(new Error('Rename failed'));
+		const registry = createRegistry();
+		await registry.list();
+
+		await expect(registry.rename('terminal-1', 'Next')).rejects.toThrow('Rename failed');
+
+		expect(registry.sessions['terminal-1'].metadata.title).toBe('Current');
+	});
+
+	it('applies title updates from terminal status broadcasts', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.list();
+
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-1', 1, { title: 'Remote title' }),
+		});
+
+		expect(registry.sessions['terminal-1'].metadata.title).toBe('Remote title');
 	});
 
 	it('disposes a remotely terminated session and notifies workspace placement', async () => {

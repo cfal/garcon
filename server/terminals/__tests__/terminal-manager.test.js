@@ -116,6 +116,53 @@ describe("TerminalManager", () => {
     });
   });
 
+  it("renames running and exited sessions and broadcasts the current metadata", async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal("alice");
+    const bob = principal("bob");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+
+    expect(created.terminal.title).toBeNull();
+    expect(manager.rename(alice, terminalId, "Build logs")).toEqual({
+      success: true,
+      terminalId,
+      title: "Build logs",
+    });
+    expect(manager.list(alice)[0].title).toBe("Build logs");
+    expect(() => manager.rename(bob, terminalId, "Other")).toThrow(
+      TerminalManagerError,
+    );
+
+    const browser = peer("socket-1");
+    manager.attach(alice, browser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    expect(browser.messages.at(-1)).toMatchObject({
+      type: "terminal-attached",
+      terminal: { title: "Build logs" },
+    });
+
+    pty.emitExit(0);
+    expect(manager.rename(alice, terminalId, null)).toEqual({
+      success: true,
+      terminalId,
+      title: null,
+    });
+    expect(browser.messages.at(-1)).toMatchObject({
+      type: "terminal-status",
+      terminal: { terminalId, title: null, processStatus: "exited" },
+    });
+  });
+
   it("enforces the principal cap under concurrent creation", async () => {
     const manager = new TerminalManager({ spawnPty: () => new FakePty() });
     const alice = principal("alice");

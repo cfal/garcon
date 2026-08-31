@@ -1,4 +1,9 @@
-import { createTerminal, listTerminals, terminateTerminal } from '$lib/api/terminals.js';
+import {
+	createTerminal,
+	listTerminals,
+	renameTerminal,
+	terminateTerminal,
+} from '$lib/api/terminals.js';
 import { ApiError } from '$lib/api/client.js';
 import {
 	TerminalRuntime,
@@ -61,6 +66,7 @@ export interface TerminalRegistryDeps {
 	listTerminals?: typeof listTerminals;
 	createTerminal?: typeof createTerminal;
 	terminateTerminal?: typeof terminateTerminal;
+	renameTerminal?: typeof renameTerminal;
 	createTransport?: (options: TerminalTransportOptions) => TerminalTransportPort;
 	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime;
 	onSuccessfulList?(terminalIds: readonly string[]): void;
@@ -90,6 +96,7 @@ export class TerminalRegistry {
 	readonly #listTerminals: typeof listTerminals;
 	readonly #createTerminal: typeof createTerminal;
 	readonly #terminateTerminal: typeof terminateTerminal;
+	readonly #renameTerminal: typeof renameTerminal;
 	readonly #createRuntime: (options: TerminalRuntimeOptions) => TerminalRuntime;
 	readonly #sessionMutationVersions = new Map<string, number>();
 	readonly #outputFragments = new Map<string, PendingOutputFragments>();
@@ -103,6 +110,7 @@ export class TerminalRegistry {
 		this.#listTerminals = deps.listTerminals ?? listTerminals;
 		this.#createTerminal = deps.createTerminal ?? createTerminal;
 		this.#terminateTerminal = deps.terminateTerminal ?? terminateTerminal;
+		this.#renameTerminal = deps.renameTerminal ?? renameTerminal;
 		this.#createRuntime = deps.createRuntime ?? ((options) => new TerminalRuntime(options));
 		this.#transport = (deps.createTransport ?? ((options) => new TerminalTransport(options)))({
 			connection: deps.connection,
@@ -258,6 +266,14 @@ export class TerminalRegistry {
 
 	async requestTermination(terminalId: string, requestId: string): Promise<void> {
 		await this.#terminateTerminal({ terminalId, requestId });
+	}
+
+	async rename(terminalId: string, title: string | null): Promise<void> {
+		const result = await this.#renameTerminal({ terminalId, title });
+		const session = this.sessions[result.terminalId];
+		if (!session) return;
+		session.metadata.title = result.title;
+		this.#recordSessionMutation(result.terminalId);
 	}
 
 	disposeTerminatedSession(terminalId: string): void {

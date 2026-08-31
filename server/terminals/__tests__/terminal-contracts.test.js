@@ -3,10 +3,14 @@ import {
   parseTerminalCreateRequest,
   parseTerminalCreateResponse,
   parseTerminalListResponse,
+  parseTerminalMetadata,
+  parseTerminalRenameRequest,
+  parseTerminalRenameResponse,
   parseTerminalStreamClientMessage,
   parseTerminalStreamServerMessage,
   parseTerminalTerminateRequest,
   parseTerminalTerminateResponse,
+  TERMINAL_TITLE_MAX_LENGTH,
 } from '../../../common/terminal.ts';
 import {
   isTerminalStreamClientMessageType,
@@ -18,6 +22,7 @@ import {
 const metadata = {
   terminalId: 'terminal-1',
   displaySequence: 1,
+  title: null,
   initialWorkingDirectory: '/workspace',
   processStatus: 'running',
   attachmentStatus: 'detached',
@@ -44,6 +49,15 @@ describe('terminal contracts', () => {
       }),
     ).toEqual({ terminalId: 'terminal-1', requestId: 'delete-1' });
     expect(
+      parseTerminalRenameRequest({
+        terminalId: 'terminal-1',
+        title: '  Build logs  ',
+      }),
+    ).toEqual({ terminalId: 'terminal-1', title: 'Build logs' });
+    expect(
+      parseTerminalRenameRequest({ terminalId: 'terminal-1', title: '   ' }),
+    ).toEqual({ terminalId: 'terminal-1', title: null });
+    expect(
       parseTerminalListResponse({ success: true, terminals: [metadata] }),
     ).toEqual({
       success: true,
@@ -62,6 +76,29 @@ describe('terminal contracts', () => {
         terminal: metadata,
       }),
     ).toEqual({ success: true, terminalId: 'terminal-1', terminal: metadata });
+    expect(
+      parseTerminalRenameResponse({
+        success: true,
+        terminalId: 'terminal-1',
+        title: 'Build logs',
+      }),
+    ).toEqual({ success: true, terminalId: 'terminal-1', title: 'Build logs' });
+  });
+
+  it('requires normalized titles in terminal metadata and responses', () => {
+    const { title: _title, ...missingTitle } = metadata;
+
+    expect(parseTerminalMetadata(missingTitle)).toBeNull();
+    expect(
+      parseTerminalMetadata({ ...metadata, title: ' Build logs ' }),
+    ).toBeNull();
+    expect(
+      parseTerminalRenameResponse({
+        success: true,
+        terminalId: 'terminal-1',
+        title: '',
+      }),
+    ).toBeNull();
   });
 
   it('round-trips every client stream message', () => {
@@ -210,6 +247,19 @@ describe('terminal contracts', () => {
       parseTerminalTerminateRequest({
         terminalId: 'terminal-1',
         requestId: 'x'.repeat(257),
+      }),
+    ).toBeNull();
+    expect(parseTerminalRenameRequest({ terminalId: 'terminal-1' })).toBeNull();
+    expect(
+      parseTerminalRenameRequest({
+        terminalId: 'terminal-1',
+        title: 'x'.repeat(TERMINAL_TITLE_MAX_LENGTH + 1),
+      }),
+    ).toBeNull();
+    expect(
+      parseTerminalRenameRequest({
+        terminalId: 'terminal-1',
+        title: 'build\nlogs',
       }),
     ).toBeNull();
     expect(
