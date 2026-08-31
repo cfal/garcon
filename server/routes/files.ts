@@ -6,7 +6,7 @@ import {
   listDirectoryNames,
   listDirectoryStrict,
 } from './projects.utils.js';
-import { getProjectBasePath } from '../config.js';
+import { getHomeDirectoryPath, getProjectBasePath } from '../config.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -49,6 +49,7 @@ import {
   type SaveTextResponse,
   type FileTreeBreadcrumb,
   type FileTreeEntry,
+  type FileTreeHomeDirectory,
   type FileTreeResponse,
 } from '../../common/file-contracts.ts';
 
@@ -157,6 +158,26 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
   );
 }
 
+async function resolveFileTreeHomeDirectory(
+  fileRootPath: string,
+): Promise<FileTreeHomeDirectory | null> {
+  let homePath: string;
+  try {
+    homePath = await resolveRealWithinCanonicalBase(
+      fileRootPath,
+      getHomeDirectoryPath(),
+    );
+    if (!(await fs.stat(homePath)).isDirectory()) return null;
+  } catch {
+    // Optional Home discovery never discloses paths or blocks the file tree.
+    return null;
+  }
+  return {
+    path: homePath,
+    breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, homePath),
+  };
+}
+
 interface FilesRouteDependencies {
   listTreeDirectory: typeof listDirectoryStrict;
   resolveSaveTarget: typeof resolveRealWithinBase;
@@ -216,6 +237,7 @@ export default function createFilesRoutes(
           false,
         );
       }
+      const homeDirectory = await resolveFileTreeHomeDirectory(fileRootPath);
 
       const listedEntries = await dependencies.listTreeDirectory(
         directoryPath,
@@ -249,6 +271,7 @@ export default function createFilesRoutes(
 
       const response: FileTreeResponse = {
         fileRootPath,
+        homeDirectory,
         directory: {
           path: directoryPath,
           relativePath: portableRelativePath(fileRootPath, directoryPath),

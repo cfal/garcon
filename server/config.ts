@@ -25,6 +25,7 @@ export interface ServerConfig {
   jwtTokenExpiry: string;
   testEnvironment: boolean;
   projectBasePath: string;
+  homeDirectoryPath: string;
   userShell: string;
   maxRequestBodySize: number;
   maxConnections: number;
@@ -113,6 +114,7 @@ function parseServerConfig(): ServerConfig {
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
     testEnvironment: envValue('NODE_ENV') === 'test',
     projectBasePath: parseProjectBasePath(),
+    homeDirectoryPath: path.resolve(envValue('HOME') ?? os.homedir()),
     userShell: parseUserShell(),
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 50 * 1024 * 1024),
     maxConnections: envInt('MAX_CONNECTIONS', 1024),
@@ -240,6 +242,10 @@ export function isTestEnvironment(): boolean {
 // File access boundary
 export function getProjectBasePath(): string {
   return currentConfig().projectBasePath;
+}
+
+export function getHomeDirectoryPath(): string {
+  return currentConfig().homeDirectoryPath;
 }
 
 // User shell for PTY sessions

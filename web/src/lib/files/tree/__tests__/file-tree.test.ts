@@ -43,18 +43,27 @@ function entry(
 function response(
 	directoryPath = '/workspace/project',
 	entries: FileTreeEntry[] = [],
+	homeDirectoryPath: string | null = '/workspace',
 ): FileTreeResponse {
+	function breadcrumbsForPath(targetPath: string) {
+		const relativePath = targetPath === '/workspace' ? '' : targetPath.slice('/workspace/'.length);
+		const segments = relativePath ? relativePath.split('/') : [];
+		let breadcrumbPath = '/workspace';
+		const breadcrumbs = [{ name: 'workspace', path: breadcrumbPath }];
+		for (const segment of segments) {
+			breadcrumbPath += `/${segment}`;
+			breadcrumbs.push({ name: segment, path: breadcrumbPath });
+		}
+		return breadcrumbs;
+	}
 	const relativePath =
 		directoryPath === '/workspace' ? '' : directoryPath.slice('/workspace/'.length);
-	const segments = relativePath ? relativePath.split('/') : [];
-	let breadcrumbPath = '/workspace';
-	const breadcrumbs = [{ name: 'workspace', path: breadcrumbPath }];
-	for (const segment of segments) {
-		breadcrumbPath += `/${segment}`;
-		breadcrumbs.push({ name: segment, path: breadcrumbPath });
-	}
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory:
+			homeDirectoryPath === null
+				? null
+				: { path: homeDirectoryPath, breadcrumbs: breadcrumbsForPath(homeDirectoryPath) },
 		directory: {
 			path: directoryPath,
 			relativePath,
@@ -62,7 +71,7 @@ function response(
 				directoryPath === '/workspace'
 					? null
 					: directoryPath.slice(0, directoryPath.lastIndexOf('/')) || '/',
-			breadcrumbs,
+			breadcrumbs: breadcrumbsForPath(directoryPath),
 		},
 		entries,
 	};
@@ -369,10 +378,11 @@ describe('FileTreeStore', () => {
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 	});
 
-	it('navigates to Home and no-ops once it reaches the file root', async () => {
+	it('navigates to the literal Home directory and no-ops once it arrives', async () => {
+		const homePath = '/workspace/users/me';
 		vi.mocked(filesApi.getTree)
-			.mockResolvedValueOnce(response('/workspace/project'))
-			.mockResolvedValueOnce(response('/workspace'));
+			.mockResolvedValueOnce(response('/workspace/project', [], homePath))
+			.mockResolvedValueOnce(response(homePath, [], homePath));
 		store.setProjectState(availableProject());
 		store.activate();
 		await tick();
@@ -382,15 +392,19 @@ describe('FileTreeStore', () => {
 		expect(store.navigation).toMatchObject({
 			kind: 'loading',
 			target: {
-				path: '/workspace',
-				label: 'workspace',
-				breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
+				path: homePath,
+				label: 'me',
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'users', path: '/workspace/users' },
+					{ name: 'me', path: homePath },
+				],
 				reason: 'home',
 			},
 		});
 		await navigation;
 
-		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.currentDirectoryPath).toBe(homePath);
 		expect(store.isAtHome).toBe(true);
 		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
 		const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
@@ -398,24 +412,40 @@ describe('FileTreeStore', () => {
 		expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
 	});
 
-	it('navigates Home from an error using the retained file root', async () => {
+	it('navigates Home from an error using the retained Home target', async () => {
 		const src = entry('src', 'directory');
+		const homePath = '/workspace/users/me';
 		vi.mocked(filesApi.getTree)
-			.mockResolvedValueOnce(response('/workspace/project', [src]))
+			.mockResolvedValueOnce(response('/workspace/project', [src], homePath))
 			.mockRejectedValueOnce(new Error('Directory unavailable'))
-			.mockResolvedValueOnce(response('/workspace'));
+			.mockResolvedValueOnce(response(homePath, [], homePath));
 		store.setProjectState(availableProject());
 		store.activate();
 		await tick();
 
 		await store.enterDirectory(src);
 		expect(store.navigation.kind).toBe('error');
-		expect(store.fileRootPath).toBe('/workspace');
+		expect(store.homeDirectory?.path).toBe(homePath);
 
 		await store.goToHome();
 
-		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.currentDirectoryPath).toBe(homePath);
 		expect(store.isAtHome).toBe(true);
+	});
+
+	it('leaves Home unavailable without treating the file root as Home', async () => {
+		vi.mocked(filesApi.getTree).mockResolvedValueOnce(response('/workspace', [], null));
+		store.setProjectState(availableProject('/workspace'));
+		store.activate();
+		await tick();
+
+		expect(store.homeDirectory).toBeNull();
+		expect(store.isAtHome).toBe(false);
+		const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
+
+		await store.goToHome();
+
+		expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
 	});
 
 	it('restores row focus after breadcrumb navigation', async () => {

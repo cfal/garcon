@@ -68,6 +68,7 @@ describe('FilesPanel', () => {
 				kind: 'ready',
 				response: {
 					fileRootPath: '/workspace',
+					homeDirectory: null,
 					directory: {
 						path: '/workspace/sibling-project',
 						relativePath: 'sibling-project',

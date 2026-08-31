@@ -10,7 +10,12 @@ import {
 } from '$lib/utils/local-persistence';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
-import type { FileTreeBreadcrumb, FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
+import type {
+	FileTreeBreadcrumb,
+	FileTreeEntry,
+	FileTreeHomeDirectory,
+	FileTreeResponse,
+} from '$shared/file-contracts';
 
 export type SortDirection = 'asc' | 'desc';
 
@@ -251,6 +256,10 @@ export class FileTreeStore {
 		return this.retainedResponse?.fileRootPath ?? null;
 	}
 
+	get homeDirectory(): FileTreeHomeDirectory | null {
+		return this.retainedResponse?.homeDirectory ?? null;
+	}
+
 	get currentDirectoryPath(): string | null {
 		return this.readyResponse?.directory.path ?? null;
 	}
@@ -292,7 +301,8 @@ export class FileTreeStore {
 	}
 
 	get isAtHome(): boolean {
-		return Boolean(this.fileRootPath && this.currentDirectoryPath === this.fileRootPath);
+		const homeDirectory = this.homeDirectory;
+		return Boolean(homeDirectory && this.currentDirectoryPath === homeDirectory.path);
 	}
 
 	get visibleColumnKeys(): FileTreeColumnKey[] {
@@ -409,15 +419,12 @@ export class FileTreeStore {
 	}
 
 	async goToHome(): Promise<void> {
-		const response = this.retainedResponse;
-		const path = response?.fileRootPath;
-		if (!response || !path || this.isAtHome) return;
-		// The response contract anchors the leading breadcrumb to fileRootPath.
-		const breadcrumbs = response.directory.breadcrumbs.slice(0, 1);
+		const homeDirectory = this.homeDirectory;
+		if (!homeDirectory || this.isAtHome) return;
 		await this.navigateTo({
-			path,
-			label: breadcrumbs[0]?.name ?? path,
-			breadcrumbs,
+			path: homeDirectory.path,
+			label: homeDirectory.breadcrumbs.at(-1)?.name ?? homeDirectory.path,
+			breadcrumbs: [...homeDirectory.breadcrumbs],
 			reason: 'home',
 			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
 		});

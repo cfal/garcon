@@ -25,6 +25,7 @@ function row(name: string, type: 'file' | 'directory'): FileTableRow {
 function response(entries: FileTreeEntry[]): FileTreeResponse {
 	return {
 		fileRootPath: '/workspace',
+		homeDirectory: null,
 		directory: {
 			path: '/workspace/project',
 			relativePath: 'project',

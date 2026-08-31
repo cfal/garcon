@@ -36,6 +36,13 @@
 		store.openFilter();
 	}
 
+	const homeUnavailable = $derived(Boolean(store.retainedResponse && !store.homeDirectory));
+	const homeTitle = $derived.by(() => {
+		if (!store.retainedResponse) return m.filetree_home();
+		if (homeUnavailable) return m.filetree_home_unavailable();
+		return store.isAtHome ? m.filetree_already_at_home() : m.filetree_home();
+	});
+
 	const actions = $derived.by<ResponsiveSurfaceAction[]>(() => [
 		{
 			id: 'filter-files',
@@ -47,11 +54,11 @@
 		},
 		{
 			id: 'home',
-			label: m.filetree_home(),
-			title: store.isAtHome ? m.filetree_already_at_home() : m.filetree_home(),
+			label: homeUnavailable ? m.filetree_home_unavailable() : m.filetree_home(),
+			title: homeTitle,
 			icon: House,
 			onclick: () => void store.goToHome(),
-			disabled: !store.fileRootPath || store.isAtHome || store.isNavigationLoading,
+			disabled: !store.homeDirectory || store.isAtHome || store.isNavigationLoading,
 			priority: 1,
 		},
 		{

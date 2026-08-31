@@ -16,6 +16,14 @@ function readyStore(): FileTreeStore {
 		kind: 'ready',
 		response: {
 			fileRootPath: '/workspace',
+			homeDirectory: {
+				path: '/workspace/users/me',
+				breadcrumbs: [
+					{ name: 'workspace', path: '/workspace' },
+					{ name: 'users', path: '/workspace/users' },
+					{ name: 'me', path: '/workspace/users/me' },
+				],
+			},
 			directory: {
 				path: '/workspace/project',
 				relativePath: 'project',
@@ -102,7 +110,7 @@ describe('FileTreeToolbar', () => {
 		expect(chatProject.querySelector('svg')?.classList.contains('lucide-folder-code')).toBe(true);
 	});
 
-	it('opens Home and disables it at the file root', async () => {
+	it('opens Home and disables it while loading or at the Home directory', async () => {
 		const { store } = await renderMeasuredToolbar();
 		const goToHome = vi.spyOn(store, 'goToHome').mockResolvedValue();
 		const initialResponse = store.readyResponse!;
@@ -129,17 +137,19 @@ describe('FileTreeToolbar', () => {
 
 		store.navigation = { kind: 'idle' };
 		await tick();
-		expect(screen.getByRole('button', { name: 'Home' }).hasAttribute('disabled')).toBe(true);
+		const idleHome = screen.getByRole('button', { name: 'Home' });
+		expect(idleHome.hasAttribute('disabled')).toBe(true);
+		expect(idleHome.getAttribute('title')).toBe('Home');
 
 		store.navigation = {
 			kind: 'ready',
 			response: {
 				...initialResponse,
 				directory: {
-					path: '/workspace',
-					relativePath: '',
-					parentPath: null,
-					breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
+					path: '/workspace/users/me',
+					relativePath: 'users/me',
+					parentPath: '/workspace/users',
+					breadcrumbs: initialResponse.homeDirectory!.breadcrumbs,
 				},
 			},
 		};
@@ -148,6 +158,25 @@ describe('FileTreeToolbar', () => {
 		const home = screen.getByRole('button', { name: 'Home' });
 		expect(home.hasAttribute('disabled')).toBe(true);
 		expect(home.getAttribute('title')).toBe('Already at home');
+	});
+
+	it('disables Home with an unavailable title when it is outside the file root', async () => {
+		const { store, setWidth } = await renderMeasuredToolbar();
+		store.navigation = {
+			kind: 'ready',
+			response: { ...store.readyResponse!, homeDirectory: null },
+		};
+		await tick();
+
+		const unavailableLabel = "Home directory isn't available in Files";
+		const home = screen.getByRole('button', { name: unavailableLabel });
+		expect(home.hasAttribute('disabled')).toBe(true);
+		expect(home.getAttribute('title')).toBe(unavailableLabel);
+
+		await setWidth(60);
+		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
+		const menuItem = screen.getByRole('menuitem', { name: unavailableLabel });
+		expect(menuItem.hasAttribute('data-disabled')).toBe(true);
 	});
 
 	it('moves Refresh from its toolbar button into the persistent menu when space runs out', async () => {
