@@ -1059,6 +1059,9 @@
 .collapsible-body-collapsed {
 	max-height: 10rem;
 	overflow: hidden;
+}
+
+.collapsible-body-truncated {
 	-webkit-mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
 	mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
 }

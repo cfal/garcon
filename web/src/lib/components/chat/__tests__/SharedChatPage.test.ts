@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SharedChatPageTestHost from './SharedChatPageTestHost.svelte';
+import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 
@@ -41,7 +42,11 @@ function response(
 }
 
 describe('SharedChatPage', () => {
+	let collapsibleLayout: CollapsibleBodyLayoutHarness;
+
 	beforeEach(() => {
+		collapsibleLayout = new CollapsibleBodyLayoutHarness();
+		collapsibleLayout.install();
 		vi.clearAllMocks();
 		vi.stubGlobal('scrollTo', vi.fn());
 		vi.stubGlobal(
@@ -266,6 +271,7 @@ describe('SharedChatPage', () => {
 	});
 
 	it('renders shared inter-agent messages as compact neutral Markdown with ID fallbacks', async () => {
+		collapsibleLayout.contentHeight = 64;
 		const sourceChatId = '1788090107980900';
 		const targetChatId = '1788090107980901';
 		const shared = response([], 0, 2, { nextBefore: null });
@@ -304,7 +310,8 @@ describe('SharedChatPage', () => {
 			expect(card.className).not.toContain('border-status-info-border');
 			expect(card.parentElement?.className).toContain('sm:max-w-[85%]');
 		}
-		expect(screen.getAllByRole('button', { name: 'Show more' })).toHaveLength(2);
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
 	});
 
 	it('styles the complete shared CLI user message surface', async () => {

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	CliRowMessage,
 	ErrorMessage,
@@ -7,6 +7,7 @@ import {
 	UserMessage,
 } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
+import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
 
 const AT = '2026-08-18T12:00:00.000Z';
@@ -24,7 +25,17 @@ function handoffNotice(): TranscriptNoticeMessage {
 }
 
 describe('ConversationMessage chat rows', () => {
-	afterEach(() => cleanup());
+	let collapsibleLayout: CollapsibleBodyLayoutHarness;
+
+	beforeEach(() => {
+		collapsibleLayout = new CollapsibleBodyLayoutHarness();
+		collapsibleLayout.install();
+	});
+
+	afterEach(() => {
+		cleanup();
+		vi.restoreAllMocks();
+	});
 
 	it('keeps internal notices on the generic information-card path', () => {
 		const { container } = render(ConversationMessageHost, {
@@ -125,7 +136,8 @@ describe('ConversationMessage chat rows', () => {
 		);
 	});
 
-	it('renders received inter-agent messages as compact neutral Markdown bubbles', async () => {
+	it('renders short received inter-agent messages without a redundant disclosure', () => {
+		collapsibleLayout.contentHeight = 96;
 		const { container } = render(ConversationMessageHost, {
 			message: new TranscriptNoticeMessage(
 				AT,
@@ -138,7 +150,7 @@ describe('ConversationMessage chat rows', () => {
 
 		const row = container.querySelector('[data-inter-agent-message-direction="received"]');
 		const card = row?.querySelector('article');
-		expect(screen.getByText('Received Message')).toBeTruthy();
+		expect(screen.getByText('Received Message').className).toContain('text-xs');
 		expect(screen.getByText('From')).toBeTruthy();
 		expect(screen.getByText('Protocol review')).toBeTruthy();
 		expect(screen.getByText(`(${SOURCE_CHAT_ID})`)).toBeTruthy();
@@ -146,13 +158,12 @@ describe('ConversationMessage chat rows', () => {
 		expect(card?.className).toContain('border-status-neutral-border');
 		expect(card?.className).not.toContain('border-status-info-border');
 		expect(card?.parentElement?.className).toContain('sm:max-w-[85%]');
-		const disclosure = screen.getByRole('button', { name: 'Show more' });
-		expect(disclosure.getAttribute('aria-expanded')).toBe('false');
-		await fireEvent.click(disclosure);
-		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
 	});
 
-	it('renders sent inter-agent messages with titles and no queue audit text', () => {
+	it('renders short sent inter-agent messages with titles and no redundant disclosure', () => {
+		collapsibleLayout.contentHeight = 48;
 		const { container } = render(ConversationMessageHost, {
 			message: new TranscriptNoticeMessage(
 				AT,
@@ -166,7 +177,7 @@ describe('ConversationMessage chat rows', () => {
 			chatTitles: { [TARGET_CHAT_ID]: 'Parser cleanup' },
 		});
 
-		expect(screen.getByText('Sent Message')).toBeTruthy();
+		expect(screen.getByText('Sent Message').className).toContain('text-xs');
 		expect(screen.getByText('To')).toBeTruthy();
 		expect(screen.getByText('Parser cleanup')).toBeTruthy();
 		expect(screen.getByText(`(${TARGET_CHAT_ID})`)).toBeTruthy();
@@ -176,7 +187,8 @@ describe('ConversationMessage chat rows', () => {
 		expect(container.textContent).not.toContain('Queued:');
 		expect(container.textContent).not.toContain('pending delivery');
 		expect(container.querySelector('article')?.className).toContain('border-status-neutral-border');
-		expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
 	});
 
 	it('lists each target and marks only failed deliveries', () => {

@@ -94,7 +94,7 @@
 					{:else}
 						<MessageSquareReply class="size-3.5 shrink-0" aria-hidden="true" />
 					{/if}
-					<span class="min-w-0 flex-1 truncate text-sm font-medium" title={displayTitle}>
+					<span class="min-w-0 flex-1 truncate text-xs font-medium" title={displayTitle}>
 						{displayTitle}
 					</span>
 				</div>
