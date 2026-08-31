@@ -43,9 +43,11 @@ describe('TerminalRenameDialog', () => {
 
 	it('keeps the dialog open and surfaces rename failures', async () => {
 		const onClose = vi.fn();
-		const onRename = vi.fn(async () => {
-			throw new Error('Rename unavailable');
+		let rejectRename!: (reason?: unknown) => void;
+		const rename = new Promise<void>((_resolve, reject) => {
+			rejectRename = reject;
 		});
+		const onRename = vi.fn(() => rename);
 		render(TerminalRenameDialog, {
 			terminal: metadata(null),
 			onClose,
@@ -55,8 +57,35 @@ describe('TerminalRenameDialog', () => {
 		const input = await screen.findByRole('textbox', { name: 'Terminal name' });
 		await fireEvent.input(input, { target: { value: 'Dev server' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		const dialog = screen.getByRole('dialog');
+		await waitFor(() => expect(onRename).toHaveBeenCalledOnce());
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+		expect(dialog.isConnected).toBe(true);
+
+		rejectRename(new Error('Rename unavailable'));
 
 		expect((await screen.findByRole('alert')).textContent).toContain('Rename unavailable');
 		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByRole('dialog')).toBe(dialog);
+	});
+
+	it('preserves the draft when status metadata refreshes the same terminal', async () => {
+		const onClose = vi.fn();
+		const onRename = vi.fn(async () => undefined);
+		const view = render(TerminalRenameDialog, {
+			terminal: metadata('Build logs'),
+			onClose,
+			onRename,
+		});
+
+		const input = await screen.findByRole('textbox', { name: 'Terminal name' });
+		await fireEvent.input(input, { target: { value: 'Local draft' } });
+		await view.rerender({
+			terminal: metadata('Server refresh'),
+			onClose,
+			onRename,
+		});
+
+		expect((input as HTMLInputElement).value).toBe('Local draft');
 	});
 });

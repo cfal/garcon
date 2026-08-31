@@ -43,10 +43,6 @@
 		input.select();
 	});
 
-	function handleOpenChange(nextOpen: boolean): void {
-		if (!nextOpen && !saving) onClose();
-	}
-
 	async function submit(): Promise<void> {
 		const target = terminal;
 		if (!target || saving) return;
@@ -63,7 +59,7 @@
 	}
 </script>
 
-<Dialog.Root {open} onOpenChange={handleOpenChange}>
+<Dialog.Root {open} requestClose={() => !saving && onClose()}>
 	<Dialog.Content>
 		<form
 			class="grid gap-4"
