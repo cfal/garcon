@@ -111,12 +111,6 @@
 		class={activeChatMetadata ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-64'}
 		data-workspace-window-menu={windowId}
 	>
-		{#if activeChatMetadata}
-			<WorkspaceWindowChatMetadata
-				projectPath={activeChatMetadata.projectPath}
-				chatId={activeChatMetadata.chatId}
-			/>
-		{/if}
 		<DropdownMenuItem
 			data-workspace-window-tab-action="move-left"
 			disabled={!tabActions.canReorder || tabActions.index <= 0}
@@ -194,6 +188,13 @@
 			</DropdownMenuItem>
 		{/if}
 		<DropdownMenuSeparator data-workspace-window-tab-actions-separator />
+		{#if activeChatMetadata}
+			<WorkspaceWindowChatMetadata
+				projectPath={activeChatMetadata.projectPath}
+				chatId={activeChatMetadata.chatId}
+			/>
+			<DropdownMenuSeparator data-workspace-chat-metadata-separator />
+		{/if}
 		{#if hiddenSurfaceIds.length > 0}
 			<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
 			{#each hiddenSurfaceIds as surfaceId (surfaceId)}

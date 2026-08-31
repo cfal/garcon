@@ -4,7 +4,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import { cn } from '$lib/utils/cn';
 	import type { SidebarVirtualProjectHeaderRow } from './sidebar-virtual-chat-list';
-	import { formatSidebarProjectPath } from './sidebar-project-path-display';
+	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
 
 	interface SidebarProjectHeaderRowProps {
 		row: SidebarVirtualProjectHeaderRow;
@@ -14,7 +14,7 @@
 
 	let { row, containsSelectedChat = false, onToggle }: SidebarProjectHeaderRowProps = $props();
 	let fullLabel = $derived(row.projectPath || m.sidebar_project_unknown());
-	let displayLabel = $derived(formatSidebarProjectPath(fullLabel));
+	let displayLabel = $derived(formatCompactProjectPath(fullLabel));
 
 	function handleToggle(): void {
 		onToggle?.(row.projectKey);
