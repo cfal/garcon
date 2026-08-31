@@ -35,6 +35,7 @@ describe('self handoff', () => {
           clientMessageId: crypto.randomUUID(),
           sourceChatId,
           chatId: targetChatId,
+          agentSettings: agent.agentSettings,
           command: 'continue the work',
         },
       );
@@ -109,6 +110,7 @@ describe('self handoff', () => {
         clientMessageId: crypto.randomUUID(),
         sourceChatId,
         chatId: otherChatId,
+        agentSettings: agent.agentSettings,
         command: 'should not land here',
       })).rejects.toMatchObject({ status: 409 });
 

@@ -1,3 +1,5 @@
+import type { CodexServiceTier } from '../service-tier.js';
+
 export type JsonRpcId = number;
 
 export interface JsonRpcSuccess<T = unknown> {
@@ -385,6 +387,12 @@ function protocolString(value: unknown, label: string): string {
   return value;
 }
 
+function nonemptyProtocolString(value: unknown, label: string): string {
+  const result = protocolString(value, label);
+  if (!result) throw new Error(`Invalid ${label}`);
+  return result;
+}
+
 function protocolArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`Invalid ${label}`);
   return value;
@@ -425,6 +433,32 @@ export interface ThreadStartResponse {
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
 export interface ThreadForkResponse extends ThreadStartResponse {}
+export interface ThreadSettingsUpdateParams {
+  readonly threadId: string;
+  readonly model: string;
+  readonly serviceTier: CodexServiceTier;
+}
+export type ThreadSettingsUpdateResponse = Record<string, never>;
+export interface ThreadSettingsUpdatedNotification {
+  readonly threadId: string;
+  readonly threadSettings: {
+    readonly model: string;
+    readonly serviceTier: string | null;
+  };
+}
+export interface ModelListParams {
+  readonly cursor?: string | null;
+  readonly limit?: number | null;
+  readonly includeHidden?: boolean | null;
+}
+export interface ModelListResponse {
+  readonly data: readonly {
+    readonly id: string;
+    readonly model: string;
+    readonly serviceTiers: readonly { readonly id: string }[];
+  }[];
+  readonly nextCursor: string | null;
+}
 export type CodexThreadGoalStatus =
   | 'active'
   | 'paused'
@@ -478,6 +512,100 @@ export interface ThreadUnsubscribeResponse {
 }
 export interface TurnStartResponse { turn: CodexTurn }
 export interface TurnSteerResponse { turnId: string }
+
+export class CodexProtocolParseError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'CodexProtocolParseError';
+  }
+}
+
+export function parseThreadSettingsUpdateResponse(
+  value: unknown,
+): ThreadSettingsUpdateResponse {
+  try {
+    const response = protocolRecord(value, 'thread/settings/update response');
+    if (Object.keys(response).length > 0) {
+      throw new Error('Invalid thread/settings/update response');
+    }
+    return {};
+  } catch (error) {
+    throw new CodexProtocolParseError('Invalid Codex thread/settings/update response', {
+      cause: error,
+    });
+  }
+}
+
+export function parseThreadSettingsUpdatedNotification(
+  value: unknown,
+): ThreadSettingsUpdatedNotification {
+  try {
+    const params = protocolRecord(value, 'thread/settings/updated params');
+    const threadSettings = protocolRecord(
+      params.threadSettings,
+      'thread/settings/updated threadSettings',
+    );
+    const serviceTier = threadSettings.serviceTier;
+    if (serviceTier !== null && typeof serviceTier !== 'string') {
+      throw new Error('Invalid thread/settings/updated serviceTier');
+    }
+    return {
+      threadId: nonemptyProtocolString(
+        params.threadId,
+        'thread/settings/updated threadId',
+      ),
+      threadSettings: {
+        model: nonemptyProtocolString(
+          threadSettings.model,
+          'thread/settings/updated model',
+        ),
+        serviceTier,
+      },
+    };
+  } catch (error) {
+    throw new CodexProtocolParseError('Invalid Codex thread/settings/updated notification', {
+      cause: error,
+    });
+  }
+}
+
+export function parseModelListResponse(value: unknown): ModelListResponse {
+  try {
+    const response = protocolRecord(value, 'model/list response');
+    const data = protocolArray(response.data, 'model/list data').map((candidate, index) => {
+      const model = protocolRecord(candidate, `model/list data[${index}]`);
+      const serviceTiers = protocolArray(
+        model.serviceTiers,
+        `model/list data[${index}] serviceTiers`,
+      ).map((tier, tierIndex) => {
+        const entry = protocolRecord(
+          tier,
+          `model/list data[${index}] serviceTiers[${tierIndex}]`,
+        );
+        return {
+          id: nonemptyProtocolString(
+            entry.id,
+            `model/list data[${index}] serviceTiers[${tierIndex}] id`,
+          ),
+        };
+      });
+      return {
+        id: nonemptyProtocolString(model.id, `model/list data[${index}] id`),
+        model: nonemptyProtocolString(model.model, `model/list data[${index}] model`),
+        serviceTiers,
+      };
+    });
+    if (!Object.hasOwn(response, 'nextCursor')) {
+      throw new Error('Invalid model/list nextCursor');
+    }
+    const nextCursor = response.nextCursor === null
+      ? null
+      : nonemptyProtocolString(response.nextCursor, 'model/list nextCursor');
+    return { data, nextCursor };
+  } catch (error) {
+    throw new CodexProtocolParseError('Invalid Codex model/list response', { cause: error });
+  }
+}
 
 export interface TurnStartedNotification {
   threadId: string;

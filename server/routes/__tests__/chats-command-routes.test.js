@@ -72,6 +72,7 @@ import {
 
 const CHAT_ID = '1783725900000700';
 const TARGET_CHAT_ID = '1783725900000701';
+const CLAUDE_AGENT_SETTINGS = { ownerId: 'claude', schemaVersion: 1, values: {} };
 
 function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
   return {
@@ -924,6 +925,7 @@ describe('REST chat command routes', () => {
     const { response, body } = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
       sourceChatId: CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: CLAUDE_AGENT_SETTINGS,
     });
 
     expect(response.status).toBe(409);
@@ -941,6 +943,7 @@ describe('REST chat command routes', () => {
     const accepted = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
       sourceChatId: CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: CLAUDE_AGENT_SETTINGS,
       allowHandoffFork: true,
     });
 
@@ -950,6 +953,7 @@ describe('REST chat command routes', () => {
     const rejected = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
       sourceChatId: CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: CLAUDE_AGENT_SETTINGS,
       allowHandoffFork: 'yes',
     });
 
@@ -1699,6 +1703,69 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(422);
     expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
     expect(body.error).toBe('Endpoint not found');
+  });
+
+  for (const [route, payload] of [
+    ['execution-settings', { chatId: CHAT_ID, agentSettingsPatch: { codexFastMode: 'on' } }],
+    ['model', { chatId: CHAT_ID, model: 'gpt-5.4-codex' }],
+  ]) {
+    it.each([
+      ['INVALID_SETTINGS', 422, false],
+      ['PROVIDER_FAILURE', 503, true],
+      ['UNAVAILABLE', 503, true],
+      ['TIMEOUT', 504, true],
+    ])(`PATCH /${route} exposes controlled Codex Fast %s failures`, async (
+      code,
+      status,
+      retryable,
+    ) => {
+      const agent = createRouteAgent();
+      agent.agents.updateSessionSettings.mockRejectedValueOnce(
+        new AgentIntegrationError(code, 'Safe Codex Fast mode failure', retryable, {
+          provider: 'codex',
+          setting: 'codexFastMode',
+        }),
+      );
+
+      const { response, body } = await callJson(
+        agent.routes[`/api/v1/chats/${route}`].PATCH,
+        payload,
+        'PATCH',
+      );
+
+      expect(response.status).toBe(status);
+      expect(body).toMatchObject({
+        success: false,
+        error: 'Safe Codex Fast mode failure',
+        errorCode: code,
+        retryable,
+      });
+    });
+  }
+
+  it.each([
+    [new AgentIntegrationError('PROVIDER_FAILURE', 'untagged secret', true)],
+    [new AgentIntegrationError('PROVIDER_FAILURE', 'other provider secret', true, {
+      provider: 'claude',
+      setting: 'codexFastMode',
+    })],
+    [new Error('raw provider secret')],
+  ])('keeps uncontrolled settings failures opaque', async (error) => {
+    const agent = createRouteAgent();
+    agent.agents.updateSessionSettings.mockRejectedValueOnce(error);
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/execution-settings'].PATCH,
+      { chatId: CHAT_ID, agentSettingsPatch: { codexFastMode: 'on' } },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+    });
+    expect(body.error).not.toContain('secret');
   });
 
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {

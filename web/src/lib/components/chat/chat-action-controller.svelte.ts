@@ -117,7 +117,12 @@ export class ChatActionController {
 
 	async forkChat(sourceChatId: string): Promise<void> {
 		await this.run('Failed to fork chat:', m.notifications_fork_chat_failed(), async () => {
-			const entry = await this.#sidebarController.forkChat(sourceChatId);
+			const source = this.deps.chats.find((chat) => chat.id === sourceChatId);
+			if (!source) throw new Error(`Chat not found: ${sourceChatId}`);
+			const entry = await this.#sidebarController.forkChat(
+				sourceChatId,
+				source.agentSettings,
+			);
 			this.deps.onUpsertServerChat(entry);
 			this.deps.onSelectChat(entry.id);
 		});

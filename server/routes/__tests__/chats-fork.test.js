@@ -25,6 +25,7 @@ import { DomainError } from '../../lib/domain-error.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
 const TARGET_CHAT_ID = '1783725900000301';
+const TEST_AGENT_SETTINGS = { ownerId: 'test-agent', schemaVersion: 1, values: {} };
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
@@ -160,7 +161,11 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 400 when sourceChatId equals chatId', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: SOURCE_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: SOURCE_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
+    });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);
@@ -172,7 +177,11 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 404 when source chat not found', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
+    });
     registry.getChat.mockReturnValue(null);
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
@@ -185,7 +194,11 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 422 for unsupported agent', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: { ...TEST_AGENT_SETTINGS, ownerId: 'unsupported-agent' },
+    });
     agents.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'unsupported-agent', projectPath: '/proj' };
@@ -202,7 +215,11 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 409 when target chat already exists', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
+    });
     registry.getChat.mockImplementation((id) => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       if (id === TARGET_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
@@ -220,7 +237,11 @@ describe('POST /api/v1/chats/fork', () => {
 
   it('returns 200 on successful fork', async () => {
     let forkedChat = null;
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
+    });
     registry.getChat.mockImplementation((id) => {
       if (id === SOURCE_CHAT_ID) return {
         agentId: 'test-agent',
@@ -316,6 +337,7 @@ describe('POST /api/v1/chats/fork', () => {
     parseJsonBody.mockResolvedValue({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
       upToSeq: 2,
     });
     registry.getChat.mockImplementation((id) => {
@@ -341,7 +363,11 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 500 for unexpected errors', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    parseJsonBody.mockResolvedValue({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      agentSettings: TEST_AGENT_SETTINGS,
+    });
     registry.getChat.mockImplementation((id) => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       return null;

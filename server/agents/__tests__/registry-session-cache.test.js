@@ -65,6 +65,9 @@ describe('AgentRegistry session cache', () => {
       ledger,
       adoption,
       hasPendingOwnershipTransfer: () => false,
+      settingsExecutionBarrier: {
+        runWithAutomaticDispatchSuppressed: (_chatId, operation) => operation(),
+      },
     });
   }
 

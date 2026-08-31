@@ -4,6 +4,7 @@ import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
+import type { CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
@@ -84,7 +85,7 @@ export function buildCodexEnv(
 
 function appendCommonThreadParams(
   params: Record<string, unknown>,
-  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>,
+  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'serviceTier' | 'codexConfig'>,
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
@@ -92,6 +93,7 @@ function appendCommonThreadParams(
   params.sandbox = sandbox;
   params.approvalPolicy = approvalPolicy;
   params.approvalsReviewer = 'user';
+  params.serviceTier = request.serviceTier;
   if (request.codexConfig?.config) params.config = request.codexConfig.config;
   return params;
 }
@@ -115,7 +117,7 @@ export function buildInjectedContextItems(context: string): ThreadInjectItemsPar
 export function buildThreadResumeParams(request: {
   agentSessionId: string;
   nativePath?: string | null;
-} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
+} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'serviceTier' | 'codexConfig'>): Record<string, unknown> {
   const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
@@ -129,12 +131,14 @@ export function buildThreadForkParams(sourceSession: {
   nativePath?: string | null;
   model?: string | null;
   projectPath: string;
+  serviceTier: CodexServiceTier;
   codexConfig?: CodexProviderConfig;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.agentSessionId,
     cwd: sourceSession.projectPath,
     model: sourceSession.model ?? null,
+    serviceTier: sourceSession.serviceTier,
     ephemeral: false,
     excludeTurns: true,
   };
@@ -149,6 +153,7 @@ export function buildTurnStartParams(request: {
   imagePaths?: string[];
   filePaths?: string[];
   model: string;
+  serviceTier: CodexServiceTier;
   projectPath: string;
   permissionMode: PermissionMode;
   thinkingMode?: ThinkingMode;
@@ -163,6 +168,7 @@ export function buildTurnStartParams(request: {
     approvalPolicy,
     approvalsReviewer: 'user',
     model: request.model,
+    serviceTier: request.serviceTier,
   };
   if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
   const effort = mapThinkingModeToCodexEffort(request.thinkingMode, request.model);

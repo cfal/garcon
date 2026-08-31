@@ -192,10 +192,12 @@ describe('SidebarController', () => {
 				},
 			});
 
-			const result = await controller.forkChat('c-1');
+			const agentSettings = { ownerId: 'claude', schemaVersion: 1, values: {} };
+			const result = await controller.forkChat('c-1', agentSettings);
 
 			const request = mockForkChat.mock.calls[0]?.[0];
 			expect(request?.sourceChatId).toBe('c-1');
+			expect(request?.agentSettings).toEqual(agentSettings);
 			expect(parseChatId(request?.chatId)).toBe(request?.chatId);
 			expect(quietRefresh).not.toHaveBeenCalled();
 			expect(result.id).toBe('c-fork');

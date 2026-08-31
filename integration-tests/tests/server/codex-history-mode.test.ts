@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { codexAgentSettings } from '../../support/live-codex.js';
 
 describe('Codex history modes', () => {
   test('falls back to a frozen point fork when paginated native history cannot fork', async () => {
@@ -36,7 +37,11 @@ describe('Codex history modes', () => {
       ]);
       const sourceBefore = await readFile(sourceNativePath, 'utf8');
       const targetChatId = fixture.newChatId();
-      const wholeFork = await fixture.client.forkChat({ sourceChatId, chatId: targetChatId });
+      const wholeFork = await fixture.client.forkChat({
+        sourceChatId,
+        chatId: targetChatId,
+        agentSettings: codexAgentSettings(),
+      });
       expect(wholeFork.chat.id).toBe(targetChatId);
       expect((await fixture.client.getMessages(targetChatId)).messages.map((entry) => (
         entry.message.type === 'user-message' || entry.message.type === 'assistant-message'
@@ -48,6 +53,7 @@ describe('Codex history modes', () => {
       const pointFork = await fixture.client.forkChat({
         sourceChatId,
         chatId: pointTargetChatId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: messages.transcriptViewId,
         upToOrdinal: messages.messages[0]!.ordinal,
       });

@@ -16,6 +16,7 @@ import { createClientChatId } from '$shared/client-chat-id';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';
+import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { RelativeChatOrderPlacement } from '$shared/chat-order-contracts';
 
 export interface SidebarControllerDeps {
@@ -71,9 +72,12 @@ export class SidebarController {
 		return updateChatProjectPath({ chatId, projectPath });
 	}
 
-	async forkChat(sourceChatId: string): Promise<ChatListEntry> {
+	async forkChat(
+		sourceChatId: string,
+		agentSettings: AgentSettingsEnvelope,
+	): Promise<ChatListEntry> {
 		const candidateId = createClientChatId();
-		const result = await forkChat({ sourceChatId, chatId: candidateId });
+		const result = await forkChat({ sourceChatId, chatId: candidateId, agentSettings });
 		return result.chat;
 	}
 

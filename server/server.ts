@@ -67,6 +67,7 @@ import { ApiProviderService } from './api-providers/service.js';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
+import type { SessionSettingsExecutionBarrier } from './agents/session-settings-service.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -339,6 +340,12 @@ export async function startServer(): Promise<void> {
 
     // Every chat mutation shares one lock, including live settings changes.
     const chatMutationLock = new KeyedPromiseLock();
+    const settingsExecutionBarrier: SessionSettingsExecutionBarrier = {
+      runWithAutomaticDispatchSuppressed(chatId, operation) {
+        if (!queue) throw new Error('Chat execution coordinator is not initialized');
+        return queue.runWithAutomaticDispatchSuppressed(chatId, operation);
+      },
+    };
 
     // Agent registry wraps runtimes, persisted chat state, and endpoint selection.
     let eventWiring: ServerEventWiring | null = null;
@@ -416,6 +423,7 @@ export async function startServer(): Promise<void> {
       },
       hasPendingOwnershipTransfer: (chatId) => agentOwnership.hasPending(chatId),
       chatMutationLock,
+      settingsExecutionBarrier,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
     });

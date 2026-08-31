@@ -1,6 +1,7 @@
 // /api/chats/* route handlers for registry operations and ledger-backed transcripts.
 
 import { promises as fs } from 'fs';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
 import {
@@ -263,6 +264,22 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 function chatSettingsPatchErrorResponse(error: unknown): Response {
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
+  }
+  if (
+    error instanceof AgentIntegrationError
+    && error.details?.provider === 'codex'
+    && error.details?.setting === 'codexFastMode'
+  ) {
+    const status = error.code === 'INVALID_SETTINGS'
+      ? 422
+      : error.code === 'TIMEOUT'
+        ? 504
+        : error.code === 'UNAVAILABLE' || error.code === 'PROVIDER_FAILURE'
+          ? 503
+          : null;
+    if (status !== null) {
+      return jsonError(error.message, status, error.code, error.retryable);
+    }
   }
   return jsonErrorFromUnknown(error);
 }

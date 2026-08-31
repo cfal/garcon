@@ -50,6 +50,7 @@ export interface ConversationQueueControllerOptions {
 		| 'isExecutionControlSocketInstanceConfirmed'
 	>;
 	get acceptedInputs(): Pick<AcceptedInputSubmissionService, 'enqueue' | 'steerQueuedEntry'>;
+	awaitPendingAgentSettings(chatId: string): Promise<void>;
 }
 
 export class ConversationQueueController {
@@ -63,6 +64,10 @@ export class ConversationQueueController {
 
 	pendingControlRefresh(chatId: string): Promise<void> | undefined {
 		return this.#controlRefreshByChatId.get(chatId);
+	}
+
+	awaitPendingAgentSettings(chatId: string): Promise<void> {
+		return this.options.awaitPendingAgentSettings(chatId);
 	}
 
 	beginSubmission(chatId: string): number {
@@ -164,6 +169,7 @@ export class ConversationQueueController {
 	}
 
 	async resumeForChat(chatId: string, pauseId: string): Promise<void> {
+		await this.options.awaitPendingAgentSettings(chatId);
 		try {
 			const result = await resumeChatQueue(chatId, pauseId);
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
@@ -179,6 +185,7 @@ export class ConversationQueueController {
 			transcriptViewId: this.#transcriptViewId(chatId),
 			content,
 		});
+		await this.options.awaitPendingAgentSettings(chatId);
 		try {
 			const result = await submission.submit();
 			this.options.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
@@ -265,6 +272,7 @@ export class ConversationQueueController {
 			expectedRevision: entry.revision,
 			expectedReorderRevision,
 		});
+		await this.options.awaitPendingAgentSettings(chatId);
 
 		try {
 			const result = await submission.submit();

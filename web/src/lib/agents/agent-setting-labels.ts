@@ -10,6 +10,7 @@ import * as m from '$lib/paraglide/messages.js';
 const SETTING_LABELS = {
 	thinking: m.chat_composer_agent_setting_thinking,
 	mode: m.chat_composer_agent_setting_mode,
+	fastMode: m.chat_composer_agent_setting_fast_mode,
 } satisfies Record<AgentSettingLabelKey, () => string>;
 
 const OPTION_LABELS = {
@@ -24,6 +25,8 @@ const OPTION_DESCRIPTIONS = {
 	thinkingAutomatic: m.chat_composer_agent_setting_thinking_automatic_description,
 	thinkingEnabled: m.chat_composer_agent_setting_thinking_enabled_description,
 	thinkingDisabled: m.chat_composer_agent_setting_thinking_disabled_description,
+	fastModeEnabled: m.chat_composer_agent_setting_fast_mode_enabled_description,
+	fastModeDisabled: m.chat_composer_agent_setting_fast_mode_disabled_description,
 } satisfies Record<AgentSettingOptionDescriptionKey, () => string>;
 
 export function agentSettingLabel(descriptor: AgentSettingDescriptor): string {

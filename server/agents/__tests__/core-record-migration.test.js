@@ -12,14 +12,23 @@ function envelope(ownerId, values = {}) {
 }
 
 function integration(id, legacyKey, defaultValue) {
+  const defaults = () => envelope(id, { [legacyKey]: defaultValue });
+  const parse = (input) => {
+    if (input.ownerId !== id || input.schemaVersion !== 1) {
+      throw new Error(`wrong settings for ${id}`);
+    }
+    return input;
+  };
   return {
     descriptor: { id },
     settings: {
-      parse(input) {
-        if (input.ownerId !== id) throw new Error(`wrong owner for ${id}`);
-        return input;
+      defaults,
+      parse,
+      migrate: async (input) => parse(input),
+      applyPatch(current, patch) {
+        const parsed = parse(current);
+        return envelope(id, { ...parsed.values, ...patch });
       },
-      migrate: async (input) => input,
     },
     migration: {
       translateLegacyNativeSession: async ({ legacyNativePath }) => ({
@@ -32,6 +41,45 @@ function integration(id, legacyKey, defaultValue) {
           ? legacyValues[legacyKey]
           : defaultValue,
       }),
+    },
+  };
+}
+
+function codexIntegration() {
+  const defaults = () => ({
+    ownerId: 'codex',
+    schemaVersion: 2,
+    values: { codexFastMode: 'off' },
+  });
+  const parse = (input) => {
+    if (input.ownerId !== 'codex' || input.schemaVersion !== 2) {
+      throw new Error('invalid codex settings');
+    }
+    for (const [key, value] of Object.entries(input.values)) {
+      if (key !== 'codexFastMode' || !['on', 'off'].includes(value)) {
+        throw new Error('invalid codex settings');
+      }
+    }
+    return { ...input, values: { ...input.values } };
+  };
+  return {
+    descriptor: { id: 'codex' },
+    settings: {
+      defaults,
+      parse,
+      async migrate(input) {
+        if (input.ownerId !== 'codex') throw new Error('invalid codex settings');
+        if (input.schemaVersion === 1) return defaults();
+        return parse(input);
+      },
+      applyPatch(current, patch) {
+        const parsed = parse(current);
+        return parse({ ...parsed, values: { ...parsed.values, ...patch } });
+      },
+    },
+    migration: {
+      translateLegacyNativeSession: async () => null,
+      translateLegacySettings: async () => defaults(),
     },
   };
 }
@@ -193,6 +241,139 @@ describe('agent integration core-record migration', () => {
     ));
     expect(manifest.state).toBe('committed');
 
+  });
+
+  it('normalizes installed integration schemas and preserves chat parentage', async () => {
+    const codexV1 = { ownerId: 'codex', schemaVersion: 1, values: {} };
+    const codexV2MissingDefault = { ownerId: 'codex', schemaVersion: 2, values: {} };
+    const codexV2Off = {
+      ownerId: 'codex',
+      schemaVersion: 2,
+      values: { codexFastMode: 'off' },
+    };
+    const parentChat = {
+      chatId: 'parent-chat',
+      relation: 'fork',
+      transcriptViewId: 'parent-view',
+      ordinal: 7,
+    };
+    const chat = (agentSettingsById, overrides = {}) => ({
+      agentId: 'codex',
+      agentSessionId: null,
+      nativeSession: null,
+      projectPath: '/workspace/project',
+      model: 'gpt-5.4',
+      agentOwnershipEpoch: crypto.randomUUID(),
+      agentSettingsById,
+      ...overrides,
+    });
+    const originalChats = {
+      version: 3,
+      sessions: {
+        'chat-v1': chat({ codex: codexV1 }, { parentChat }),
+        'chat-v2-missing-default': chat({ codex: codexV2MissingDefault }),
+        'chat-missing': chat({ custom: envelope('custom', { retained: true }) }),
+      },
+    };
+    const originalSettings = {
+      executionDefaults: {
+        global: { agentSettingsById: { codex: codexV1 } },
+        byAgent: {
+          codex: { agentSettingsById: { codex: codexV2MissingDefault } },
+        },
+      },
+    };
+    const originalScheduled = {
+      version: 1,
+      prompts: [{
+        id: 'scheduled-1',
+        target: {
+          type: 'new-chat',
+          agentId: 'codex',
+          agentSettingsById: { codex: codexV1 },
+        },
+      }],
+    };
+    const paths = [
+      ['chats.json', originalChats],
+      ['project-settings.json', originalSettings],
+      ['scheduled-prompts.json', originalScheduled],
+    ];
+    await Promise.all(paths.map(([relativePath, value]) => (
+      fs.writeFile(path.join(workspaceDir, relativePath), `${JSON.stringify(value)}\n`)
+    )));
+    const registry = integrations(codexIntegration());
+
+    await migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: registry });
+
+    const chats = JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+    expect(chats.sessions['chat-v1'].agentSettingsById.codex).toEqual(codexV2Off);
+    expect(chats.sessions['chat-v1'].parentChat).toEqual(parentChat);
+    expect(chats.sessions['chat-v2-missing-default'].agentSettingsById.codex)
+      .toEqual(codexV2Off);
+    expect(chats.sessions['chat-missing'].agentSettingsById).toEqual({
+      codex: codexV2Off,
+      custom: envelope('custom', { retained: true }),
+    });
+    const settings = JSON.parse(await fs.readFile(
+      path.join(workspaceDir, 'project-settings.json'),
+      'utf8',
+    ));
+    expect(settings.executionDefaults.global.agentSettingsById.codex).toEqual(codexV2Off);
+    expect(settings.executionDefaults.byAgent.codex.agentSettingsById.codex).toEqual(codexV2Off);
+    const scheduled = JSON.parse(await fs.readFile(
+      path.join(workspaceDir, 'scheduled-prompts.json'),
+      'utf8',
+    ));
+    expect(scheduled.prompts[0].target.agentSettingsById.codex).toEqual(codexV2Off);
+
+    const firstPass = await Promise.all(paths.map(([relativePath]) => (
+      fs.readFile(path.join(workspaceDir, relativePath))
+    )));
+    await migrateAgentIntegrationCoreRecords({ workspaceDir, integrations: registry });
+    const secondPass = await Promise.all(paths.map(([relativePath]) => (
+      fs.readFile(path.join(workspaceDir, relativePath))
+    )));
+    expect(secondPass).toEqual(firstPass);
+  });
+
+  it('rejects future integration schemas before replacing any core record', async () => {
+    const records = [
+      ['chats.json', {
+        version: 3,
+        sessions: {
+          'chat-future': {
+            agentId: 'codex',
+            agentSessionId: null,
+            nativeSession: null,
+            projectPath: '/workspace/project',
+            model: 'gpt-5.4',
+            agentOwnershipEpoch: crypto.randomUUID(),
+            agentSettingsById: {
+              codex: { ownerId: 'codex', schemaVersion: 3, values: {} },
+            },
+          },
+        },
+      }],
+      ['project-settings.json', { executionDefaults: { global: {}, byAgent: {} } }],
+      ['scheduled-prompts.json', { version: 1, prompts: [] }],
+    ];
+    const originals = records.map(([relativePath, value]) => ({
+      relativePath,
+      contents: Buffer.from(`${JSON.stringify(value)}\n`),
+    }));
+    await Promise.all(originals.map(({ relativePath, contents }) => (
+      fs.writeFile(path.join(workspaceDir, relativePath), contents)
+    )));
+
+    await expect(migrateAgentIntegrationCoreRecords({
+      workspaceDir,
+      integrations: integrations(codexIntegration()),
+    })).rejects.toThrow('invalid codex settings');
+
+    for (const { relativePath, contents } of originals) {
+      expect(await fs.readFile(path.join(workspaceDir, relativePath))).toEqual(contents);
+    }
   });
 
   it('discards a prepared journal before loading core records', async () => {

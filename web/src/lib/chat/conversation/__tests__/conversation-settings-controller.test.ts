@@ -15,13 +15,17 @@ vi.mock('$lib/api/chats.js', () => ({
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
-function chat(): ChatSessionRecord {
+type Effort = 'low' | 'high';
+
+function chat(initialEffort: Effort = 'low'): ChatSessionRecord {
 	return {
 		id: 'chat-1',
 		parentChat: null,
@@ -37,7 +41,11 @@ function chat(): ChatSessionRecord {
 		modelProtocol: null,
 		permissionMode: 'default',
 		thinkingMode: 'none',
-		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'low' } },
+		agentSettings: {
+			ownerId: 'claude',
+			schemaVersion: 1,
+			values: { effort: initialEffort },
+		},
 		createdAt: null,
 		lastActivityAt: null,
 		lastReadAt: null,
@@ -63,14 +71,32 @@ const effort = {
 	],
 } satisfies AgentSettingDescriptor;
 
-function createHarness() {
-	const selectedChat = chat();
+function settingsResponse(effort: Effort): ExecutionSettingsPatchResponse {
+	return {
+		success: true,
+		chatId: 'chat-1',
+		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort } },
+	};
+}
+
+function createHarness(initialEffort: Effort = 'low') {
+	const selectedChat = chat(initialEffort);
+	const byId: Record<string, ChatSessionRecord> = { [selectedChat.id]: selectedChat };
 	const sessions = {
 		selectedChatId: selectedChat.id as string | null,
-		selectedChat,
+		get byId() {
+			return byId;
+		},
+		get selectedChat() {
+			return sessions.selectedChatId ? (byId[sessions.selectedChatId] ?? null) : null;
+		},
+		hasChat: vi.fn((chatId: string) => Boolean(byId[chatId])),
 		isDraft: vi.fn(() => false),
 		patchDraftStartup: vi.fn(),
-		patchChat: vi.fn(),
+		patchChat: vi.fn((chatId: string, patch: Partial<ChatSessionRecord>) => {
+			const current = byId[chatId];
+			if (current) byId[chatId] = { ...current, ...patch };
+		}),
 	};
 	const agentState = {
 		agentId: 'claude' as const,
@@ -117,6 +143,10 @@ function createHarness() {
 		sessions,
 		agentState,
 		executionDraft,
+		chatState,
+		deleteChat: (chatId: string) => {
+			delete byId[chatId];
+		},
 	};
 }
 
@@ -125,30 +155,162 @@ describe('ConversationSettingsController', () => {
 		vi.clearAllMocks();
 	});
 
-	it('ignores an older agent-settings response after a newer mutation settles', async () => {
+	it.each([
+		{
+			name: 'On succeeds and Off succeeds',
+			initial: 'low' as const,
+			first: 'high' as const,
+			firstOutcome: 'success' as const,
+			second: 'low' as const,
+			secondOutcome: 'success' as const,
+			expected: 'low' as const,
+			notices: 0,
+		},
+		{
+			name: 'On fails and Off succeeds',
+			initial: 'low' as const,
+			first: 'high' as const,
+			firstOutcome: 'failure' as const,
+			second: 'low' as const,
+			secondOutcome: 'success' as const,
+			expected: 'low' as const,
+			notices: 1,
+		},
+		{
+			name: 'On succeeds and Off fails',
+			initial: 'low' as const,
+			first: 'high' as const,
+			firstOutcome: 'success' as const,
+			second: 'low' as const,
+			secondOutcome: 'failure' as const,
+			expected: 'high' as const,
+			notices: 1,
+		},
+		{
+			name: 'Off succeeds and On fails',
+			initial: 'high' as const,
+			first: 'low' as const,
+			firstOutcome: 'success' as const,
+			second: 'high' as const,
+			secondOutcome: 'failure' as const,
+			expected: 'low' as const,
+			notices: 1,
+		},
+	])('serializes and projects $name', async ({
+		initial,
+		first: firstValue,
+		firstOutcome,
+		second: secondValue,
+		secondOutcome,
+		expected,
+		notices,
+	}) => {
 		const first = deferred<ExecutionSettingsPatchResponse>();
 		const second = deferred<ExecutionSettingsPatchResponse>();
 		vi.mocked(updateExecutionSettings)
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
-		const { controller, sessions, agentState } = createHarness();
+		const { controller, sessions, agentState, chatState } = createHarness(initial);
+
+		controller.handleAgentSettingChange(effort, firstValue);
+		controller.handleAgentSettingChange(effort, secondValue);
+		const waiting = controller.awaitPendingAgentSettings('chat-1');
+		expect(updateExecutionSettings).toHaveBeenCalledTimes(1);
+		if (firstOutcome === 'success') first.resolve(settingsResponse(firstValue));
+		else first.reject(new Error(`Failed to apply ${firstValue}`));
+		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledTimes(2));
+		expect(vi.mocked(updateExecutionSettings).mock.calls[1][0]).toMatchObject({
+			agentSettingsPatch: { effort: secondValue },
+		});
+		if (secondOutcome === 'success') second.resolve(settingsResponse(secondValue));
+		else second.reject(new Error(`Failed to apply ${secondValue}`));
+		if (secondOutcome === 'success') await expect(waiting).resolves.toBeUndefined();
+		else await expect(waiting).rejects.toThrow(`Failed to apply ${secondValue}`);
+
+		expect(agentState.agentSettings.values.effort).toBe(expected);
+		expect(sessions.byId['chat-1']?.agentSettings.values.effort).toBe(expected);
+		expect(chatState.appendLocalNotice).toHaveBeenCalledTimes(notices);
+	});
+
+	it('waits through both FIFO entries when the captured mutation is second', async () => {
+		const first = deferred<ExecutionSettingsPatchResponse>();
+		const second = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings)
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const { controller } = createHarness();
 
 		controller.handleAgentSettingChange(effort, 'high');
 		controller.handleAgentSettingChange(effort, 'low');
-		const latest = { ownerId: 'claude', schemaVersion: 1, values: { effort: 'low' } };
-		second.resolve({ success: true, chatId: 'chat-1', agentSettings: latest });
-		await second.promise;
+		const waiting = controller.awaitPendingAgentSettings('chat-1');
+		let settled = false;
+		void waiting.then(() => {
+			settled = true;
+		});
+
+		first.resolve(settingsResponse('high'));
+		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledTimes(2));
 		await Promise.resolve();
-		first.resolve({
+		expect(settled).toBe(false);
+
+		second.resolve(settingsResponse('low'));
+		await expect(waiting).resolves.toBeUndefined();
+	});
+
+	it('does not adopt a mutation added after a waiter captures the current tail', async () => {
+		const first = deferred<ExecutionSettingsPatchResponse>();
+		const second = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings)
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const { controller } = createHarness();
+
+		controller.handleAgentSettingChange(effort, 'high');
+		const waiting = controller.awaitPendingAgentSettings('chat-1');
+		controller.handleAgentSettingChange(effort, 'low');
+		first.resolve(settingsResponse('high'));
+
+		await expect(waiting).resolves.toBeUndefined();
+		expect(updateExecutionSettings).toHaveBeenCalledTimes(2);
+		second.resolve(settingsResponse('low'));
+		await controller.awaitPendingAgentSettings('chat-1');
+	});
+
+	it('settles a captured completion only after failure rollback is projected', async () => {
+		const update = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings).mockReturnValueOnce(update.promise);
+		const { controller, agentState, chatState } = createHarness();
+
+		controller.handleAgentSettingChange(effort, 'high');
+		const waiting = controller.awaitPendingAgentSettings('chat-1');
+		const failure = new Error('settings rejected');
+		update.reject(failure);
+
+		await expect(waiting).rejects.toBe(failure);
+		expect(agentState.agentSettings.values.effort).toBe('low');
+		expect(chatState.appendLocalNotice).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not update a switched or deleted chat when a mutation settles', async () => {
+		const update = deferred<ExecutionSettingsPatchResponse>();
+		vi.mocked(updateExecutionSettings).mockReturnValueOnce(update.promise);
+		const { controller, sessions, agentState, deleteChat } = createHarness();
+
+		controller.handleAgentSettingChange(effort, 'high');
+		const waiting = controller.awaitPendingAgentSettings('chat-1');
+		sessions.patchChat.mockClear();
+		agentState.setAgentSettings.mockClear();
+		deleteChat('chat-1');
+		sessions.selectedChatId = null;
+		update.resolve({
 			success: true,
 			chatId: 'chat-1',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'high' } },
 		});
-		await first.promise;
-		await Promise.resolve();
 
-		expect(agentState.agentSettings).toEqual(latest);
-		expect(sessions.patchChat).toHaveBeenLastCalledWith('chat-1', { agentSettings: latest });
+		await expect(waiting).resolves.toBeUndefined();
+		expect(sessions.patchChat).not.toHaveBeenCalled();
+		expect(agentState.setAgentSettings).not.toHaveBeenCalled();
 	});
 
 	it('keeps target execution edits local while a handoff is pending', () => {

@@ -33,7 +33,11 @@ interface ChatExecutionState {
   // event retires it, so its admission handle is released with the attempt, not the reservation.
   turn: { attempt: QueueExecutionAttempt; admissionController: AbortController } | null;
   // Intent recorded while something else owns the chat.
-  pending: { drainRequested: boolean; suppressions: Set<DrainSuppressionReason> };
+  pending: {
+    drainRequested: boolean;
+    suppressions: Set<Exclude<DrainSuppressionReason, 'settings-mutation'>>;
+    settingsMutationHolds: Set<string>;
+  };
   repairSnapshot: TranscriptSnapshotReservation | null;
 }
 
@@ -52,7 +56,11 @@ function emptyChatExecutionState(): ChatExecutionState {
   return {
     owner: IDLE_OWNER,
     turn: null,
-    pending: { drainRequested: false, suppressions: new Set() },
+    pending: {
+      drainRequested: false,
+      suppressions: new Set(),
+      settingsMutationHolds: new Set(),
+    },
     repairSnapshot: null,
   };
 }
@@ -74,7 +82,8 @@ function createExecutionAdmission(): {
 function isIdle(state: ChatExecutionState): boolean {
   return !ownsExecution(state)
     && !state.pending.drainRequested
-    && state.pending.suppressions.size === 0;
+    && state.pending.suppressions.size === 0
+    && state.pending.settingsMutationHolds.size === 0;
 }
 
 export class ExecutionOwnership {
@@ -354,7 +363,25 @@ export class ExecutionOwnership {
   }
 
   hasSuppression(chatId: string, reason: DrainSuppressionReason): boolean {
-    return this.#chats.get(chatId)?.pending.suppressions.has(reason) === true;
+    const pending = this.#chats.get(chatId)?.pending;
+    if (!pending) return false;
+    return reason === 'settings-mutation'
+      ? pending.settingsMutationHolds.size > 0
+      : pending.suppressions.has(reason);
+  }
+
+  beginSettingsMutationSuppression(chatId: string): string {
+    const holdId = crypto.randomUUID();
+    this.#state(chatId).pending.settingsMutationHolds.add(holdId);
+    return holdId;
+  }
+
+  releaseSettingsMutationSuppression(chatId: string, holdId: string): boolean {
+    const state = this.#chats.get(chatId);
+    if (!state || !state.pending.settingsMutationHolds.delete(holdId)) return false;
+    const releasedLast = state.pending.settingsMutationHolds.size === 0;
+    this.#gc(chatId);
+    return releasedLast;
   }
 
   enterAbortSuppression(chatId: string): void {
@@ -384,11 +411,17 @@ export class ExecutionOwnership {
     this.#removeSuppression(chatId, 'deletion');
   }
 
-  #addSuppression(chatId: string, reason: DrainSuppressionReason): void {
+  #addSuppression(
+    chatId: string,
+    reason: Exclude<DrainSuppressionReason, 'settings-mutation'>,
+  ): void {
     this.#state(chatId).pending.suppressions.add(reason);
   }
 
-  #removeSuppression(chatId: string, reason: DrainSuppressionReason): void {
+  #removeSuppression(
+    chatId: string,
+    reason: Exclude<DrainSuppressionReason, 'settings-mutation'>,
+  ): void {
     const state = this.#chats.get(chatId);
     if (!state) return;
     state.pending.suppressions.delete(reason);
@@ -400,6 +433,7 @@ export class ExecutionOwnership {
     const state = this.#chats.get(chatId);
     if (state) {
       state.pending.suppressions.clear();
+      state.pending.settingsMutationHolds.clear();
       state.pending.drainRequested = false;
       this.#abortAdmissions(state, reason);
       state.turn?.attempt.markSettled();

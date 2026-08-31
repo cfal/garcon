@@ -36,7 +36,11 @@ describe('Codex runSingleQuery', () => {
     // workspace-write default would let that text modify the project.
     for (const permissionMode of ['default', 'acceptEdits', 'bypassPermissions']) {
       spawnMock.mockClear();
-      await runSingleQuery('hello', { permissionMode, projectPath: '/workspace' });
+      await runSingleQuery('hello', {
+        permissionMode,
+        projectPath: '/workspace',
+        serviceTier: 'default',
+      });
       const args = spawnMock.mock.calls[0][0];
       expect(args[args.indexOf('--sandbox') + 1], permissionMode).toBe('read-only');
       expect(args).not.toContain('danger-full-access');
@@ -49,9 +53,11 @@ describe('Codex runSingleQuery', () => {
 
     await runSingleQuery('hello', {
       model: 'acme-code',
+      serviceTier: 'default',
       codexConfig: {
         config: {
           model_provider: 'garcon_acme_openai',
+          service_tier: 'fast',
           model_providers: {
             garcon_acme_openai: {
               name: 'Acme',
@@ -73,6 +79,13 @@ describe('Codex runSingleQuery', () => {
     expect(command[0]).toBe(expectedCodexCommand);
     expect(command).toContain('--config');
     expect(command).toContain('model_provider="garcon_acme_openai"');
+    const serviceTierArguments = command.filter((argument) => (
+      argument.startsWith('service_tier=')
+    ));
+    expect(serviceTierArguments).toEqual([
+      'service_tier="fast"',
+      'service_tier="default"',
+    ]);
     expect(command).toContain('model_providers.garcon_acme_openai.base_url="https://api.acme.test/v1"');
     expect(command).toContain('model_providers.garcon_acme_openai.wire_api="responses"');
     expect(command).toContain('model_providers.garcon_acme_openai.requires_openai_auth=false');
@@ -83,6 +96,7 @@ describe('Codex runSingleQuery', () => {
 
   it('omits reasoning effort for provider default thinking', async () => {
     await runSingleQuery('hello', {
+      serviceTier: 'default',
       thinkingMode: 'none',
     });
 
@@ -93,12 +107,25 @@ describe('Codex runSingleQuery', () => {
 
   it('preserves max reasoning effort for codex exec', async () => {
     await runSingleQuery('hello', {
+      serviceTier: 'default',
       thinkingMode: 'max',
     });
 
     const [command] = spawnMock.mock.calls[0];
     expect(command).toContain('model_reasoning_effort="max"');
     expect(command).not.toContain('model_reasoning_effort="xhigh"');
+  });
+
+  it.each([
+    ['default', 'service_tier="default"'],
+    ['fast', 'service_tier="fast"'],
+  ])('always sends the explicit %s service tier', async (serviceTier, expected) => {
+    await runSingleQuery('hello', { serviceTier });
+
+    const [command] = spawnMock.mock.calls[0];
+    expect(command.filter((argument) => argument.startsWith('service_tier='))).toEqual([
+      expected,
+    ]);
   });
 
   it('honors an explicit codex CLI override', async () => {

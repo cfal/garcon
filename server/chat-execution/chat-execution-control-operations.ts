@@ -243,6 +243,7 @@ export class ChatExecutionControlOperations {
 
   async dequeueNextTurn(
     chatId: string,
+    canDispatch: () => boolean,
     admit: (input: DequeuedTurnInput) => boolean,
   ): Promise<{
     input: DequeuedTurnInput;
@@ -250,6 +251,7 @@ export class ChatExecutionControlOperations {
     inserted: boolean;
   } | null> {
     return this.host.runExclusive(chatId, () => {
+      if (!canDispatch()) return Promise.resolve(null);
       const current = this.#load(chatId);
       const transition = dequeueNextTurn(current, transitionContext());
       if (transition.outcome.status === 'rejected') {

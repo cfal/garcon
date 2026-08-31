@@ -11,6 +11,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  OPENCODE_AGENT_SETTINGS,
   openCodeNativeSession,
   readOpenCodeSessionRows,
   scriptedOpenCodeRunRequest,
@@ -105,6 +106,7 @@ describeOnLinux('scripted OpenCode fork while running', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: pointForkChatId,
+          agentSettings: OPENCODE_AGENT_SETTINGS,
           transcriptViewId: running.transcriptViewId,
           upToOrdinal: settledReply.ordinal,
         });
@@ -117,7 +119,11 @@ describeOnLinux('scripted OpenCode fork while running', () => {
         )).toEqual(pointForkConversation);
 
         wholeForkChatId = fixture.newChatId();
-        await fixture.client.forkChat({ sourceChatId, chatId: wholeForkChatId });
+        await fixture.client.forkChat({
+          sourceChatId,
+          chatId: wholeForkChatId,
+          agentSettings: OPENCODE_AGENT_SETTINGS,
+        });
         const wholeForkNative = await openCodeNativeSession(fixture, wholeForkChatId);
         expect(wholeForkNative.agentSessionId).not.toBe(sourceNative.agentSessionId);
         expect(wholeForkNative.agentSessionId).not.toBe(pointForkNative.agentSessionId);

@@ -14,6 +14,7 @@ import {
 } from '../../support/live-agent.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
+  OPENCODE_AGENT_SETTINGS,
   OPENCODE_TEST_MODEL,
   openCodeNativeSession,
   readOpenCodeSessionRows,
@@ -62,7 +63,11 @@ describeOnLinux('scripted OpenCode fork matrix', () => {
 
       const forkChatId = fixture.newChatId();
       try {
-        await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+        await fixture.client.forkChat({
+          sourceChatId,
+          chatId: forkChatId,
+          agentSettings: OPENCODE_AGENT_SETTINGS,
+        });
         const forkedWhileRunning = await fixture.client.getMessages(forkChatId);
         expect(userContents(forkedWhileRunning.messages)).toEqual([prompt]);
         expect(assistantContents(forkedWhileRunning.messages)).toEqual([]);
@@ -120,7 +125,11 @@ describeOnLinux('scripted OpenCode fork matrix', () => {
 
     await withIntegrationFixture('opencode-fork-empty', async (fixture) => {
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: OPENCODE_AGENT_SETTINGS,
+      });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
 
       testEnvironment.model.scriptTurn((request) => {
@@ -187,13 +196,21 @@ describeOnLinux('scripted OpenCode fork matrix', () => {
       expect(readOpenCodeSessionRows(sourceNative).messages.length).toBeGreaterThan(0);
 
       const forkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: forkChatId,
+        agentSettings: OPENCODE_AGENT_SETTINGS,
+      });
       const fork = await fixture.client.getMessages(forkChatId);
       expect(userContents(fork.messages)).toEqual([prompt]);
       expect(assistantContents(fork.messages)).toEqual([reply]);
 
       const reforkChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId: forkChatId, chatId: reforkChatId });
+      await fixture.client.forkChat({
+        sourceChatId: forkChatId,
+        chatId: reforkChatId,
+        agentSettings: OPENCODE_AGENT_SETTINGS,
+      });
       const reforkSeed = await fixture.client.getMessages(reforkChatId);
       expect(userContents(reforkSeed.messages)).toEqual([prompt]);
       expect(assistantContents(reforkSeed.messages)).toEqual([reply]);

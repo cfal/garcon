@@ -19,6 +19,7 @@ import {
 	startChat,
 	stopChat,
 	updateChatModel,
+	updateExecutionSettings,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
@@ -56,6 +57,7 @@ import {
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
+import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 
 vi.mock('$lib/api/chats.js', () => ({
 	createQueuedInput: vi.fn(),
@@ -102,7 +104,18 @@ const mockSteerQueuedEntry = vi.mocked(steerQueuedEntry);
 const mockSubmitGoalControl = vi.mocked(submitGoalControl);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
+const mockUpdateExecutionSettings = vi.mocked(updateExecutionSettings);
 const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
+
+const codexFastMode = {
+	key: 'codexFastMode',
+	type: 'enum',
+	label: 'Fast mode',
+	options: [
+		{ value: 'on', label: 'On' },
+		{ value: 'off', label: 'Off' },
+	],
+} satisfies AgentSettingDescriptor;
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -511,7 +524,11 @@ function createDeps(chat = createRunningChat()) {
 			modelProtocol: null as SessionControllerDeps['agentState']['modelProtocol'],
 			permissionMode: 'default',
 			thinkingMode: 'none',
-			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
+			agentSettings: {
+				ownerId: 'claude',
+				schemaVersion: 1,
+				values: { thinkingMode: 'auto' },
+			} as AgentSettingsEnvelope,
 		},
 		lifecycle: {
 			currentChatId: chat.id as string | null,
@@ -603,6 +620,35 @@ function createDeps(chat = createRunningChat()) {
 	return { deps, waitForConnection };
 }
 
+function configureCodexFastMode(
+	deps: ReturnType<typeof createDeps>['deps'],
+	mode: 'on' | 'off',
+): void {
+	const settings: AgentSettingsEnvelope = {
+		ownerId: 'codex',
+		schemaVersion: 2,
+		values: { codexFastMode: mode },
+	};
+	deps.sessions.byId['chat-1']!.agentId = 'codex';
+	deps.sessions.byId['chat-1']!.model = 'gpt-5.4-nano';
+	deps.sessions.byId['chat-1']!.agentSettings = settings;
+	deps.agentState.agentId = 'codex';
+	deps.agentState.model = 'gpt-5.4-nano';
+	deps.agentState.agentSettings = settings;
+}
+
+function codexSettingsResponse(mode: 'on' | 'off') {
+	return {
+		success: true as const,
+		chatId: 'chat-1',
+		agentSettings: {
+			ownerId: 'codex',
+			schemaVersion: 2,
+			values: { codexFastMode: mode },
+		},
+	};
+}
+
 describe('ConversationSessionController', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -625,6 +671,7 @@ describe('ConversationSessionController', () => {
 		mockSubmitGoalControl.mockReset();
 		mockStopChat.mockReset();
 		mockUpdateChatModel.mockReset();
+		mockUpdateExecutionSettings.mockReset();
 		mockUpdateChatModel.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
@@ -1168,6 +1215,52 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
 	});
 
+	it('waits for pending agent settings before beginning Interrupt and Send', async () => {
+		const update = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		configureCodexFastMode(deps, 'on');
+		mockUpdateExecutionSettings.mockReturnValueOnce(update.promise);
+		mockInterruptAndSendChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-interrupt-and-send',
+			clientRequestId: 'req-interrupt-settings',
+			status: 'accepted',
+			acceptedAt: '2026-08-31T00:00:00.000Z',
+			outcome: 'interrupt-requested',
+			control: emptyControl(),
+		});
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleAgentSettingChange(codexFastMode, 'off');
+		const stopping = controller.handleInterruptAndSend();
+		await flushPromises();
+
+		expect(mockInterruptAndSendChat).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginStopping).not.toHaveBeenCalled();
+
+		update.resolve(codexSettingsResponse('off'));
+		await stopping;
+		expect(deps.lifecycle.beginStopping).toHaveBeenCalledWith('chat-1', expect.any(String));
+		expect(mockInterruptAndSendChat).toHaveBeenCalledOnce();
+	});
+
+	it('leaves Interrupt and Send idle when its settings prerequisite fails', async () => {
+		const update = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		configureCodexFastMode(deps, 'on');
+		mockUpdateExecutionSettings.mockReturnValueOnce(update.promise);
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleAgentSettingChange(codexFastMode, 'off');
+		const stopping = controller.handleInterruptAndSend();
+		update.reject(new Error('settings rejected'));
+		await stopping;
+
+		expect(mockInterruptAndSendChat).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginStopping).not.toHaveBeenCalled();
+		expect(deps.lifecycle.restoreStopping).not.toHaveBeenCalled();
+	});
+
 	it('treats an already-idle Stop as satisfied and requests reconciliation', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		mockStopChat.mockResolvedValue({
@@ -1416,6 +1509,7 @@ describe('ConversationSessionController', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
+			agentSettings: chat.agentSettings,
 		});
 		expect(deps.chatState.localNotices).toHaveLength(1);
 		expect(deps.chatState.localNotices[0]).toMatchObject({
@@ -1494,6 +1588,7 @@ describe('ConversationSessionController', () => {
 			chatId: expect.stringMatching(/^\d+$/),
 			upToOrdinal: 9,
 			transcriptViewId: 'generation-1',
+			agentSettings: chat.agentSettings,
 		});
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 	});
@@ -1745,6 +1840,93 @@ describe('ConversationSessionController', () => {
 				},
 			}),
 		);
+	});
+
+	it('does not gate an ordinary run that carries the optimistic settings snapshot', async () => {
+		const update = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const { deps } = createDeps();
+		configureCodexFastMode(deps, 'on');
+		deps.composerState.inputText = 'run with the visible setting';
+		mockUpdateExecutionSettings.mockReturnValueOnce(update.promise);
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-direct-settings',
+			chatId: 'chat-1',
+			turnId: 'turn-direct-settings',
+			status: 'accepted',
+			acceptedAt: '2026-08-31T00:00:00.000Z',
+		});
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleAgentSettingChange(codexFastMode, 'off');
+		const submission = controller.submitForChat('chat-1');
+		await flushPromises();
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				agentSettings: codexSettingsResponse('off').agentSettings,
+			}),
+		);
+		await expect(submission).resolves.toBe('accepted');
+		update.resolve(codexSettingsResponse('off'));
+		await flushPromises();
+	});
+
+	it('waits for pending agent settings before sending goal control', async () => {
+		const update = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		configureCodexFastMode(deps, 'on');
+		deps.composerState.inputText = '/goal pause';
+		mockUpdateExecutionSettings.mockReturnValueOnce(update.promise);
+		mockSubmitGoalControl.mockResolvedValueOnce({
+			success: true,
+			commandType: 'goal-control',
+			clientRequestId: 'req-goal-settings',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-08-31T00:00:00.000Z',
+			delivery: 'active',
+			control: emptyControl(),
+		});
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleAgentSettingChange(codexFastMode, 'off');
+		const submission = controller.submitForChat('chat-1');
+		await flushPromises();
+		expect(mockSubmitGoalControl).not.toHaveBeenCalled();
+
+		update.resolve(codexSettingsResponse('off'));
+		await expect(submission).resolves.toBe('accepted');
+		expect(mockSubmitGoalControl).toHaveBeenCalledWith(
+			expect.objectContaining({ chatId: 'chat-1', content: '/goal pause' }),
+		);
+	});
+
+	it('restores goal control input when its settings prerequisite fails', async () => {
+		const update = deferred<Awaited<ReturnType<typeof updateExecutionSettings>>>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		configureCodexFastMode(deps, 'on');
+		deps.composerState.inputText = '/goal pause';
+		mockUpdateExecutionSettings.mockReturnValueOnce(update.promise);
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleAgentSettingChange(codexFastMode, 'off');
+		const submission = controller.submitForChat('chat-1');
+		await flushPromises();
+		expect(deps.composerState.inputText).toBe('');
+
+		update.reject(new Error('settings rejected'));
+		await expect(submission).resolves.toBe('rejected');
+		expect(mockSubmitGoalControl).not.toHaveBeenCalled();
+		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalledWith(
+			'chat-1',
+			1,
+			'/goal pause',
+			[],
+		);
+		expect(deps.composerState.inputText).toBe('/goal pause');
 	});
 
 	it('retains the loaded endpoint when catalog lookup is incomplete after restart', async () => {

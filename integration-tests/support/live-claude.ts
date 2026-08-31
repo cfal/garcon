@@ -14,7 +14,7 @@ const SCRIPTED_CLAUDE_MODEL = 'haiku';
 export const CLAUDE_BINARY = fileURLToPath(
   new URL('../node_modules/.bin/claude', import.meta.url),
 );
-const CLAUDE_AGENT_SETTINGS: AgentSettingsEnvelope = {
+export const CLAUDE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   ownerId: 'claude',
   schemaVersion: 1,
   values: {},

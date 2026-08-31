@@ -295,7 +295,11 @@ export interface ChatExecutionCoordinatorEvents {
   'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
 }
 
-export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';
+export type DrainSuppressionReason =
+  | 'abort'
+  | 'manual-stop'
+  | 'deletion'
+  | 'settings-mutation';
 
 // Accepted-command surface consumed by the command service and route handlers.
 export interface ChatExecutionCommands {

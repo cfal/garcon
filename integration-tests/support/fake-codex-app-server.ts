@@ -14,8 +14,12 @@ import { createCodexRolloutFileName, parseCodexRolloutFileName } from './codex-r
 
 export {};
 
+type FakeCodexServiceTier = 'default' | 'priority';
+
 const decoder = new TextDecoder();
 const startedThreads = new Map<string, string>();
+const threadServiceTiers = new Map<string, FakeCodexServiceTier>();
+const threadModels = new Map<string, string>();
 const routingControlDirectory = process.env.INTEGRATION_CODEX_ROUTING_CONTROL_DIR;
 const answeredApprovalControls = new Map<number, string>();
 const emittedApprovalControls = new Set<string>();
@@ -23,6 +27,8 @@ const emittedMessageControls = new Set<string>();
 let processRole: 'started' | 'resumed' | null = null;
 let processThreadId: string | null = null;
 let processTurnId: string | null = null;
+let completeActiveTurn: (() => void) | null = null;
+let completedTurnDuringSettingsUpdate = false;
 let buffered = '';
 
 const routingControlPoll = routingControlDirectory
@@ -81,6 +87,14 @@ function respond(line: string): void {
   }
   if (request.method === 'thread/unsubscribe') {
     write(request.id, {});
+    return;
+  }
+  if (request.method === 'model/list') {
+    listModels(request.id);
+    return;
+  }
+  if (request.method === 'thread/settings/update') {
+    updateThreadSettings(request.id, request.params);
     return;
   }
   if (request.method === 'turn/start') {
@@ -191,6 +205,13 @@ function startThread(id: number, params: Record<string, unknown> | undefined): v
   const nativePath = join(nativeDirectory, createCodexRolloutFileName(threadId, now));
   const timestamp = now.toISOString();
   const cwd = typeof params?.cwd === 'string' ? params.cwd : '/';
+  const model = requestedModel(params);
+  const requestedTier = explicitServiceTier(params);
+  if (!model || !requestedTier) {
+    writeError(id, -32602, 'thread/start requires explicit model and serviceTier');
+    return;
+  }
+  const serviceTier = requestedServiceTier(params);
   mkdirSync(nativeDirectory, { recursive: true, mode: 0o700 });
   writeFileSync(
     nativePath,
@@ -211,13 +232,16 @@ function startThread(id: number, params: Record<string, unknown> | undefined): v
     { mode: 0o600 },
   );
   startedThreads.set(threadId, nativePath);
+  threadModels.set(threadId, model);
+  if (serviceTier) threadServiceTiers.set(threadId, serviceTier);
   processRole = 'started';
   processThreadId = threadId;
+  logServiceTier('thread/start', threadId, model, serviceTier);
   write(id, {
     thread: { id: threadId, path: nativePath },
-    model: typeof params?.model === 'string' ? params.model : 'gpt',
+    model,
     modelProvider: 'openai',
-    serviceTier: null,
+    serviceTier,
     cwd,
   });
 }
@@ -229,14 +253,24 @@ function resumeThread(id: number, params: Record<string, unknown> | undefined): 
     writeError(id, -32602, 'thread not found without a rollout path');
     return;
   }
+  const model = requestedModel(params);
+  const requestedTier = explicitServiceTier(params);
+  if (!model || !requestedTier) {
+    writeError(id, -32602, 'thread/resume requires explicit model and serviceTier');
+    return;
+  }
+  const serviceTier = requestedServiceTier(params);
   startedThreads.set(threadId, nativePath);
+  threadModels.set(threadId, model);
+  if (serviceTier) threadServiceTiers.set(threadId, serviceTier);
   processRole = 'resumed';
   processThreadId = threadId;
+  logServiceTier('thread/resume', threadId, model, serviceTier);
   write(id, {
     thread: { id: threadId, path: nativePath },
-    model: typeof params?.model === 'string' ? params.model : 'gpt',
+    model,
     modelProvider: 'openai',
-    serviceTier: null,
+    serviceTier,
     cwd: typeof params?.cwd === 'string' ? params.cwd : '/',
   });
 }
@@ -248,6 +282,18 @@ function startTurn(id: number, params: Record<string, unknown> | undefined): voi
     writeError(id, -32602, 'thread not found');
     return;
   }
+  const model = requestedModel(params);
+  const serviceTier = explicitServiceTier(params);
+  if (
+    !model
+    || !serviceTier
+    || threadModels.get(threadId) !== model
+    || threadServiceTiers.get(threadId) !== serviceTier
+  ) {
+    writeError(id, -32602, 'turn/start model or serviceTier does not match the thread');
+    return;
+  }
+  logServiceTier('turn/start', threadId, model, serviceTier);
 
   const input = Array.isArray(params?.input) ? params.input : [];
   const providerInput = input
@@ -391,7 +437,10 @@ function startStreamingTurn(
     });
   });
 
-  awaitTurnRelease(() => {
+  let completed = false;
+  const finish = () => {
+    if (completed) return;
+    completed = true;
     const completedAt = new Date().toISOString();
     appendFileSync(
       nativePath,
@@ -408,7 +457,10 @@ function startStreamingTurn(
       })).join('\n')}\n`,
     );
     notify('turn/completed', { threadId, turn: codexTurn(turnId, 'completed', completedAt) });
-  });
+    if (completeActiveTurn === finish) completeActiveTurn = null;
+  };
+  completeActiveTurn = finish;
+  awaitTurnRelease(finish);
 }
 
 function awaitTurnRelease(finish: () => void): void {
@@ -437,6 +489,13 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
     })}\n`);
     return;
   }
+  const model = requestedModel(params);
+  const requestedTier = explicitServiceTier(params);
+  if (!model || !requestedTier) {
+    writeError(id, -32602, 'thread/fork requires explicit model and serviceTier');
+    return;
+  }
+  const serviceTier = requestedServiceTier(params);
 
   try {
     const targetThreadId = randomUUID();
@@ -458,11 +517,15 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
       payload: { ...metadata.payload, id: targetThreadId },
     });
     writeFileSync(targetPath, lines.join('\n'));
+    startedThreads.set(targetThreadId, targetPath);
+    threadModels.set(targetThreadId, model);
+    if (serviceTier) threadServiceTiers.set(targetThreadId, serviceTier);
+    logServiceTier('thread/fork', targetThreadId, model, serviceTier);
     write(id, {
       thread: { id: targetThreadId, path: targetPath },
-      model: typeof params?.model === 'string' ? params.model : 'gpt',
+      model,
       modelProvider: 'openai',
-      serviceTier: null,
+      serviceTier,
       cwd: typeof params?.cwd === 'string' ? params.cwd : '/',
     });
   } catch (error) {
@@ -474,6 +537,91 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
       },
     })}\n`);
   }
+}
+
+function listModels(id: number): void {
+  const models = [...new Set(threadModels.values())];
+  if (models.length === 0) models.push('gpt-5.4-codex');
+  const serviceTiers = process.env.INTEGRATION_CODEX_REJECT_PRIORITY === '1'
+    ? []
+    : [{ id: 'priority' }];
+  write(id, {
+    data: models.map((model) => ({ id: model, model, serviceTiers })),
+    nextCursor: null,
+  });
+}
+
+function updateThreadSettings(
+  id: number,
+  params: Record<string, unknown> | undefined,
+): void {
+  const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
+  const model = requestedModel(params);
+  const requestedTier = explicitServiceTier(params);
+  const serviceTier = requestedServiceTier(params);
+  if (
+    !threadId
+    || !startedThreads.has(threadId)
+    || !model
+    || !requestedTier
+    || !serviceTier
+  ) {
+    writeError(id, -32602, 'invalid model, unsupported service tier, or unknown thread');
+    return;
+  }
+
+  logServiceTier('thread/settings/update', threadId, model, serviceTier);
+  if (
+    process.env.INTEGRATION_CODEX_COMPLETE_TURN_DURING_SETTINGS_UPDATE === '1'
+    && !completedTurnDuringSettingsUpdate
+    && completeActiveTurn
+  ) {
+    completedTurnDuringSettingsUpdate = true;
+    completeActiveTurn();
+  }
+  threadModels.set(threadId, model);
+  threadServiceTiers.set(threadId, serviceTier);
+  write(id, {});
+  if (process.env.INTEGRATION_CODEX_DROP_SETTINGS_NOTIFICATION !== '1') {
+    notify('thread/settings/updated', {
+      threadId,
+      threadSettings: { model, serviceTier },
+    });
+  }
+}
+
+function requestedModel(params: Record<string, unknown> | undefined): string | null {
+  return typeof params?.model === 'string' && params.model.length > 0 ? params.model : null;
+}
+
+function explicitServiceTier(
+  params: Record<string, unknown> | undefined,
+): FakeCodexServiceTier | null {
+  return params?.serviceTier === 'default' || params?.serviceTier === 'priority'
+    ? params.serviceTier
+    : null;
+}
+
+function requestedServiceTier(
+  params: Record<string, unknown> | undefined,
+): FakeCodexServiceTier | null {
+  const serviceTier = explicitServiceTier(params);
+  if (
+    serviceTier === 'priority'
+    && process.env.INTEGRATION_CODEX_REJECT_PRIORITY === '1'
+  ) return null;
+  return serviceTier;
+}
+
+function logServiceTier(
+  method: string,
+  threadId: string,
+  model: string,
+  serviceTier: FakeCodexServiceTier | null,
+): void {
+  const logPath = process.env.INTEGRATION_CODEX_SERVICE_TIER_LOG;
+  if (!logPath) return;
+  appendFileSync(logPath, `${JSON.stringify({ method, threadId, model, serviceTier })}\n`);
 }
 
 function write(id: number, result: unknown): void {

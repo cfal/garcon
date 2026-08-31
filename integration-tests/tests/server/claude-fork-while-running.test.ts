@@ -72,6 +72,7 @@ describe('Claude fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: streamingPointChatId,
+        agentSettings: claude.defaultSettings,
         transcriptViewId: streaming.transcriptViewId,
         allowHandoffFork: true,
         upToOrdinal: streaming.lastOrdinal,
@@ -86,6 +87,7 @@ describe('Claude fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: pointChatId,
+        agentSettings: claude.defaultSettings,
         transcriptViewId: settledHistory.transcriptViewId,
         upToOrdinal: settledLastSeq,
       });
@@ -100,7 +102,11 @@ describe('Claude fork while a turn is running', () => {
       expect(assistantContents(sourceAtWholeFork.messages))
         .toEqual([`echo:${SETTLED_PROMPT}`, `echo:${RUNNING_PROMPT}`]);
       const wholeChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: wholeChatId,
+        agentSettings: claude.defaultSettings,
+      });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
       expect(userContents(wholeForked.messages)).toEqual([SETTLED_PROMPT, RUNNING_PROMPT]);
       expect(assistantContents(wholeForked.messages)).toEqual([`echo:${SETTLED_PROMPT}`]);
@@ -122,6 +128,7 @@ describe('Claude fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: recoveredChatId,
+        agentSettings: claude.defaultSettings,
         transcriptViewId: reloaded.transcriptViewId,
         upToOrdinal: reloaded.lastOrdinal,
       });

@@ -1053,6 +1053,7 @@ describe('ConversationSlashCommandService', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: 'chat-1',
 			chatId: expect.stringMatching(/^\d+$/),
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 			upToOrdinal: 9,
 			transcriptViewId: 'view-1',
 		});

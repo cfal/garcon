@@ -101,6 +101,7 @@ function request(overrides = {}) {
     sourceChatId: SOURCE_ID,
     chatId: TARGET_ID,
     command: 'keep going on the auth fix',
+    agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
     ...overrides,
   };
 }
@@ -108,8 +109,13 @@ function request(overrides = {}) {
 describe('self handoff commands', () => {
   it('creates a target under the same agent after seeding its ledger', async () => {
     const { commands, added, support } = harness();
+    const agentSettings = {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      values: { thinking: 'disabled' },
+    };
 
-    const response = await commands.submitSelfHandoffRun(request());
+    const response = await commands.submitSelfHandoffRun(request({ agentSettings }));
 
     expect(response.chat.id).toBe(TARGET_ID);
     expect(added).toHaveLength(1);
@@ -121,6 +127,7 @@ describe('self handoff commands', () => {
     expect(target.agentSessionId).toBeNull();
     expect(target.nativeSession).toBeNull();
     expect(target.nativeSeedReceipt).toBeNull();
+    expect(target.agentSettingsById.claude).toEqual(agentSettings);
     expect(target.parentChat).toEqual({
       chatId: SOURCE_ID,
       relation: 'handoff',
@@ -147,12 +154,28 @@ describe('self handoff commands', () => {
 
   it('submits the prompt as the target chat first turn', async () => {
     const { commands, scheduled } = harness();
+    const agentSettings = {
+      ownerId: 'claude',
+      schemaVersion: 1,
+      values: { thinking: 'disabled' },
+    };
 
-    await commands.submitSelfHandoffRun(request());
+    await commands.submitSelfHandoffRun(request({ agentSettings }));
 
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0].input.chatId).toBe(TARGET_ID);
     expect(scheduled[0].input.command).toBe('keep going on the auth fix');
+    expect(scheduled[0].input.options.agentSettings).toEqual(agentSettings);
+  });
+
+  it('rejects a settings snapshot owned by another agent before target creation', async () => {
+    const { commands, added } = harness();
+
+    await expect(commands.submitSelfHandoffRun(request({
+      agentSettings: { ownerId: 'codex', schemaVersion: 2, values: { codexFastMode: 'off' } },
+    }))).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    expect(added).toEqual([]);
   });
 
   it('deletes the prepared ledger when registration fails', async () => {

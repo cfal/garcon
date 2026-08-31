@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
 import {
   assistantContents,
   userContents,
@@ -64,6 +65,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           await forkChatOnceSettled(fixture, {
             sourceChatId: source.chatId,
             chatId: forkChatId,
+            agentSettings: source.agentSettings,
             upToOrdinal: anchor.ordinal,
             transcriptViewId: transcript.transcriptViewId,
           });
@@ -119,6 +121,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           const refusal = await fixture.client.forkChat({
             sourceChatId: source.chatId,
             chatId: forkChatId,
+            agentSettings: source.agentSettings,
             upToOrdinal: anchor.ordinal,
             transcriptViewId: transcript.transcriptViewId,
           }).then(() => null, (error: unknown) => error);
@@ -134,6 +137,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           const consented = await fixture.client.forkChat({
             sourceChatId: source.chatId,
             chatId: forkChatId,
+            agentSettings: source.agentSettings,
             upToOrdinal: anchor.ordinal,
             transcriptViewId: transcript.transcriptViewId,
             allowHandoffFork: true,
@@ -157,6 +161,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
 
 interface TwoTurnChat {
   readonly chatId: string;
+  readonly agentSettings: AgentSettingsEnvelope;
   readonly firstPrompt: string;
   readonly firstReply: string;
   readonly secondPrompt: string;
@@ -175,11 +180,12 @@ async function twoTurnChat(
   driver.scriptAssistant(fixture, firstReply);
   driver.scriptAssistant(fixture, secondReply);
   const chatId = fixture.newChatId();
-  const first = await fixture.client.startChat(driver.startRequest(fixture, {
+  const firstRequest = driver.startRequest(fixture, {
     chatId,
     projectPath: fixture.dirs.project,
     command: firstPrompt,
-  }));
+  });
+  const first = await fixture.client.startChat(firstRequest);
   expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type)
     .toBe('agent-run-finished');
   const second = await fixture.client.runChat(driver.runRequest(fixture, {
@@ -188,7 +194,14 @@ async function twoTurnChat(
   }));
   expect((await fixture.client.waitForTurnTerminal(chatId, second.turnId)).type)
     .toBe('agent-run-finished');
-  return { chatId, firstPrompt, firstReply, secondPrompt, secondReply };
+  return {
+    chatId,
+    agentSettings: firstRequest.agentSettings,
+    firstPrompt,
+    firstReply,
+    secondPrompt,
+    secondReply,
+  };
 }
 
 // A row the provider has not settled into native history yet refuses with a

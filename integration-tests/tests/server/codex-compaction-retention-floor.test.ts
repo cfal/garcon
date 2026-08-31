@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { codexAgentSettings } from '../../support/live-codex.js';
 
 const FIRST_PROMPT = 'pre-compaction prompt';
 const FIRST_ANSWER = 'pre-compaction answer';
@@ -89,6 +90,7 @@ describe('Codex compaction interleaving', () => {
       await fixture.client.forkChat({
         sourceChatId: chatId,
         chatId: forkId,
+        agentSettings: codexAgentSettings(),
         transcriptViewId: after.transcriptViewId,
         upToOrdinal: after.messages[0]!.ordinal,
       });

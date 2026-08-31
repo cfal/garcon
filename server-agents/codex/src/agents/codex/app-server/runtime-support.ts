@@ -1,4 +1,4 @@
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
 import { CodexAppServerRpcError } from './client.js';
 import type { CodexTurnError } from './protocol.js';
 import type {
@@ -26,6 +26,7 @@ export function denialResponseForRequest(method: string): unknown {
 }
 
 export function humanizeCodexAppServerError(error: unknown): string {
+  if (error instanceof AgentIntegrationError) return error.message;
   const raw = String((error as Error)?.message || error || '');
   if (/not found|ENOENT.*codex|spawn codex/i.test(raw)) {
     return 'Codex CLI is not installed or not in PATH. Install it with: npm i -g @openai/codex';

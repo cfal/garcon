@@ -45,4 +45,12 @@ describe('chat execution predicate surface', () => {
     const inlineUnions = coordinator.match(/hasOwner\([^)]*\)\s*\|\|\s*this\.#turnRunner\.isChatRunning/g);
     expect(inlineUnions ?? []).toHaveLength(1);
   });
+
+  it('keeps settings suppression off the accepted command and query facets', () => {
+    for (const facet of ['ChatExecutionCommands', 'ChatExecutionQueries']) {
+      const body = source.split(`export interface ${facet} {`)[1]?.split('\n}')[0];
+      expect(body).not.toContain('runWithAutomaticDispatchSuppressed');
+      expect(body).not.toContain('settings-mutation');
+    }
+  });
 });

@@ -353,11 +353,12 @@ export class AgentRuntimeRouter {
   }
 
   async compactSession(chatId: string, opts: {
+    agentSettings: AgentSettingsEnvelope;
     instructions?: string;
     clientRequestId?: string;
     turnId?: string;
     executionAdmission?: AgentExecutionAdmission;
-  } = {}): Promise<void> {
+  }): Promise<void> {
     assertExecutionAdmissionOpen(opts);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);

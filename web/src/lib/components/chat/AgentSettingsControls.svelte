@@ -15,6 +15,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
+	import Gauge from '@lucide/svelte/icons/gauge';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 
 	interface Props {
@@ -80,6 +81,8 @@
 						>
 							{#if descriptor.labelKey === 'thinking'}
 								<AgentThinkingIcon />
+							{:else if descriptor.labelKey === 'fastMode'}
+								<Gauge class="size-4" aria-hidden="true" data-slot="agent-fast-mode-icon" />
 							{:else}
 								<BrainCircuit class="size-4" aria-hidden="true" />
 							{/if}

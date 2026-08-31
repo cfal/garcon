@@ -17,7 +17,10 @@ import {
   reloadUntilNativeAnswersAfter,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
-import { liveClaudeStartRequest } from '../../support/live-claude.js';
+import {
+  CLAUDE_AGENT_SETTINGS,
+  liveClaudeStartRequest,
+} from '../../support/live-claude.js';
 import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
@@ -62,7 +65,11 @@ describe('scripted Claude fork while running', () => {
       expect(testEnvironment.model.requests()).toHaveLength(1);
 
       const wholeForkId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: wholeForkId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: wholeForkId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
+      });
       const wholeFork = await fixture.client.getMessages(wholeForkId);
       expect(userContents(wholeFork.messages)).toEqual([prompt]);
       expect(messagesOfType(wholeFork.messages, 'assistant-message')
@@ -74,6 +81,7 @@ describe('scripted Claude fork while running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: streamedForkId,
+        agentSettings: CLAUDE_AGENT_SETTINGS,
         transcriptViewId: (await fixture.client.getMessages(sourceChatId, { limit: 1 }))
           .transcriptViewId,
         upToOrdinal: streamedBash.ordinal,

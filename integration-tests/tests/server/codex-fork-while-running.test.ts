@@ -70,6 +70,7 @@ describe('Codex fork while a turn is running', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: targetChatId,
+          agentSettings: codex.defaultSettings,
           transcriptViewId: running.transcriptViewId,
           allowHandoffFork: true,
           upToOrdinal: sourcePoint.ordinal,
@@ -85,6 +86,7 @@ describe('Codex fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: pointChatId,
+        agentSettings: codex.defaultSettings,
         transcriptViewId: settled.transcriptViewId,
         upToOrdinal: settled.messages[0]!.ordinal,
       });
@@ -97,7 +99,11 @@ describe('Codex fork while a turn is running', () => {
       // settled history rather than rows its own agent has no memory of.
       const sourceAtWholeFork = await fixture.client.getMessages(sourceChatId);
       const wholeChatId = fixture.newChatId();
-      await fixture.client.forkChat({ sourceChatId, chatId: wholeChatId });
+      await fixture.client.forkChat({
+        sourceChatId,
+        chatId: wholeChatId,
+        agentSettings: codex.defaultSettings,
+      });
       const wholeForked = await fixture.client.getMessages(wholeChatId);
       const sourceSemantic = sourceAtWholeFork.messages.map(semantic);
       const forkedSemantic = wholeForked.messages.map(semantic);
@@ -127,6 +133,7 @@ describe('Codex fork while a turn is running', () => {
       await fixture.client.forkChat({
         sourceChatId,
         chatId: recoveredChatId,
+        agentSettings: codex.defaultSettings,
         transcriptViewId: reloaded.transcriptViewId,
         upToOrdinal: selected.ordinal,
       });

@@ -54,6 +54,7 @@ export class ForkCommands {
       images: input.images,
       clientRequestId: input.clientRequestId,
       clientMessageId: input.clientMessageId,
+      agentSettings: input.agentSettings,
       ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
       options: runOptionsForCommand(input),
     };
@@ -98,7 +99,12 @@ export class ForkCommands {
     const preparedFork = priorRecord?.forkPreparation;
     const forkAlreadyCreated = preparedFork !== undefined
       && this.deps.chats.getChat(input.chatId) !== null;
-    const forkContext = await this.validateFork(input, { allowExistingTarget: forkAlreadyCreated });
+    const forkContext = await this.validateFork({
+      sourceChatId: input.sourceChatId,
+      chatId: input.chatId,
+      agentSettings: input.agentSettings,
+      ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
+    }, { allowExistingTarget: forkAlreadyCreated });
     const source = forkContext.sourceSession;
     await this.support.assertAttachmentsSupported({
       agentId: source.agentId,
@@ -212,6 +218,12 @@ export class ForkCommands {
     if (!sourceSession) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
     }
+    if (input.agentSettings.ownerId !== sourceSession.agentId) {
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `agentSettings must be owned by ${sourceSession.agentId}`,
+      );
+    }
     if (!this.deps.agents.supportsFork(sourceSession.agentId)) {
       throw new CommandValidationError(
         'UNSUPPORTED_AGENT',
@@ -249,7 +261,7 @@ export class ForkCommands {
     return {
       sourceChatId,
       targetChatId,
-      sourceSession,
+      sourceSession: sourceWithAgentSettings(sourceSession, input.agentSettings),
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToOrdinal ? { upToOrdinal } : {}),
       ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),
@@ -331,10 +343,23 @@ function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: strin
     images: input.images,
     permissionMode: input.options?.permissionMode,
     thinkingMode: input.options?.thinkingMode,
-    agentSettings: input.options?.agentSettings,
+    agentSettings: input.agentSettings,
     model: input.options?.model,
     apiProviderId: input.options?.apiProviderId,
     modelEndpointId: input.options?.modelEndpointId,
     modelProtocol: input.options?.modelProtocol,
+  };
+}
+
+function sourceWithAgentSettings(
+  source: ChatRegistryEntry,
+  settings: ForkChatCommandRequest['agentSettings'],
+): ChatRegistryEntry {
+  return {
+    ...source,
+    agentSettingsById: {
+      ...source.agentSettingsById,
+      [source.agentId]: settings,
+    },
   };
 }

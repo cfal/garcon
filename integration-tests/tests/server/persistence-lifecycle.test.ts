@@ -401,10 +401,15 @@ describe('persistence lifecycle', () => {
 
       const fullChatId = fixture.newChatId();
       const boundedChatId = fixture.newChatId();
-      const fullFork = await fixture.client.forkChat({ sourceChatId, chatId: fullChatId });
+      const fullFork = await fixture.client.forkChat({
+        sourceChatId,
+        chatId: fullChatId,
+        agentSettings: fixture.directAgents.openAi.agentSettings,
+      });
       const boundedFork = await fixture.client.forkChat({
         sourceChatId,
         chatId: boundedChatId,
+        agentSettings: fixture.directAgents.openAi.agentSettings,
         transcriptViewId: sourceBefore.transcriptViewId,
         upToOrdinal: firstAssistantSeq,
       });
