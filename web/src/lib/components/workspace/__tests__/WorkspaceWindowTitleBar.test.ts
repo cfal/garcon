@@ -584,21 +584,18 @@ describe('WorkspaceWindowTitleBar', () => {
 
 		await fireEvent.click(projectPathItem);
 		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(fullProjectPath));
-		expect(trigger.getAttribute('aria-expanded')).toBe('true');
-		await waitFor(() =>
-			expect(projectPathItem.getAttribute('title')).toBe(
-				m.workspace_chat_metadata_copied({ field: 'Project path' }),
-			),
-		);
+		await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
 
-		await fireEvent.click(chatId);
+		await fireEvent.click(trigger);
+		const reopenedMenu = document.querySelector<HTMLElement>(
+			'[data-workspace-window-menu="window-main"]',
+		)!;
+		const reopenedChatId = within(reopenedMenu).getByRole('menuitem', {
+			name: `${m.workspace_chat_metadata_copy_chat_id()}: chat-a`,
+		});
+		await fireEvent.click(reopenedChatId);
 		await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith('chat-a'));
-		expect(trigger.getAttribute('aria-expanded')).toBe('true');
-		await waitFor(() =>
-			expect(chatId.getAttribute('title')).toBe(
-				m.workspace_chat_metadata_copied({ field: 'Chat ID' }),
-			),
-		);
+		await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
 	});
 
 	it('closes the active movable tab from the window menu', async () => {

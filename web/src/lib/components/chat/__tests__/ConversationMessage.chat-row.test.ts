@@ -207,7 +207,13 @@ describe('ConversationMessage chat rows', () => {
 		});
 
 		expect(screen.getByText('Sent Message')).toBeTruthy();
-		expect(screen.getByText('To')).toBeTruthy();
+		const participantLabel = screen.getByText('To');
+		const participantList = participantLabel.nextElementSibling;
+		expect(participantLabel.parentElement?.className).toContain(
+			'grid-cols-[auto_minmax(0,1fr)]',
+		);
+		expect(participantList?.tagName).toBe('UL');
+		expect(participantList?.querySelectorAll('li')).toHaveLength(2);
 		const deliveredRecipient = screen.getByText('Build verification').closest('li');
 		const failedRecipient = screen.getByText('Release coordinator').closest('li');
 		expect(deliveredRecipient?.textContent).toContain(`(${TARGET_CHAT_ID})`);
