@@ -62,6 +62,7 @@ import ConversationPanel from '../ConversationPanel.svelte';
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/project',
 		effectiveProjectKey: '/project',
 		projectIdentityState: 'available',

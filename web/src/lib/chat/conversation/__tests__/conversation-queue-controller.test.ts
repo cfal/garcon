@@ -33,6 +33,7 @@ function queueEntry(id: string, revision: number) {
 function chatRecord(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
+		parentChat: null,
 		projectPath: '/repo',
 		effectiveProjectKey: '/repo',
 		projectIdentityState: 'available',
