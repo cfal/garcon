@@ -61,7 +61,7 @@ describe('FileSurface', () => {
 		expect(screen.queryByRole('button', { name: m.file_session_close() })).toBeNull();
 	});
 
-	it('keeps Close visible and rightmost while lower-priority actions overflow', async () => {
+	it('keeps Close visible and rightmost while toolbar actions overflow', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		try {
 			const { container } = render(FileSurfaceTestHost, {
@@ -83,7 +83,6 @@ describe('FileSurface', () => {
 				'[data-surface-action-measure]',
 			)) {
 				const widths: Record<string, number> = {
-					'open-files': 32,
 					save: 64,
 					'refresh-file': 32,
 				};
@@ -109,34 +108,21 @@ describe('FileSurface', () => {
 
 			await setWidth(190);
 			const close = screen.getByRole('button', { name: m.file_session_close() });
-			expect(screen.getByRole('button', { name: m.file_session_open_files() })).toBeTruthy();
+			expect(screen.getByRole('button', { name: m.file_session_refresh() })).toBeTruthy();
 			expect(header.lastElementChild).toBe(close);
 
-			await setWidth(140);
+			await setWidth(130);
 			expect(screen.getByRole('button', { name: m.file_session_close() })).toBe(close);
-			expect(screen.getByRole('button', { name: m.editor_actions_save() })).toBeTruthy();
-			expect(screen.queryByRole('button', { name: m.file_session_open_files() })).toBeNull();
-			expect(screen.queryByRole('button', { name: m.file_session_refresh() })).toBeNull();
+			expect(screen.queryByRole('button', { name: m.editor_actions_save() })).toBeNull();
+			expect(screen.getByRole('button', { name: m.file_session_refresh() })).toBeTruthy();
 			expect(header.lastElementChild).toBe(close);
 
 			await fireEvent.click(screen.getByRole('button', { name: m.workspace_surface_actions() }));
-			expect(screen.getByRole('menuitem', { name: m.file_session_open_files() })).toBeTruthy();
-			expect(screen.getByRole('menuitem', { name: m.file_session_refresh() })).toBeTruthy();
+			expect(screen.getByRole('menuitem', { name: m.editor_actions_save() })).toBeTruthy();
+			expect(screen.queryByRole('menuitem', { name: m.file_session_refresh() })).toBeNull();
 		} finally {
 			restoreResizeObserver();
 		}
-	});
-
-	it('hides File Sessions from mobile file chrome', () => {
-		const { container } = render(FileSurfaceTestHost, { presentation: 'mobile' });
-
-		expect(container.querySelector('[data-surface-action-measure="open-files"]')).toBeNull();
-	});
-
-	it('retains File Sessions in desktop file chrome', () => {
-		const { container } = render(FileSurfaceTestHost, { presentation: 'window-main' });
-
-		expect(container.querySelector('[data-surface-action-measure="open-files"]')).not.toBeNull();
 	});
 
 	it.each(['code', 'markdown', 'image'] as const)(

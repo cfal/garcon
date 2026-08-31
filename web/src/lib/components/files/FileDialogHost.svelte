@@ -7,7 +7,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import SurfaceErrorState from '$lib/components/workspace/SurfaceErrorState.svelte';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
-	import OpenFilesDialog from './OpenFilesDialog.svelte';
 	import {
 		getAppShell,
 		getFileSessions,
@@ -209,7 +208,7 @@
 </Dialog.Root>
 
 <Dialog.Root
-	open={Boolean(files.thresholdRequest) && (!files.openFilesVisible || appShell.isMobile)}
+	open={Boolean(files.thresholdRequest)}
 	requestClose={() => files.resolveThreshold('cancel')}
 >
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
@@ -223,16 +222,7 @@
 			<Button variant="ghost" onclick={() => files.resolveThreshold('cancel')}
 				>{m.file_session_cancel()}</Button
 			>
-			{#if !appShell.isMobile}
-				<Button variant="outline" onclick={() => files.resolveThreshold('review')}
-					>{m.file_session_review_open()}</Button
-				>
-			{/if}
 			<Button onclick={() => files.resolveThreshold('open')}>{m.file_session_open_anyway()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
-
-{#if !appShell.isMobile}
-	<OpenFilesDialog />
-{/if}

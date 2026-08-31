@@ -60,7 +60,7 @@ export interface FileOverwriteRequest {
 	fileName: string;
 }
 
-export type FileThresholdChoice = 'open' | 'review' | 'cancel';
+export type FileThresholdChoice = 'open' | 'cancel';
 
 export interface FileThresholdRequest {
 	identity: CanonicalFileIdentity;
@@ -105,7 +105,6 @@ export class FileSessionRegistry {
 	guardRequest = $state<FileGuardRequest | null>(null);
 	overwriteRequest = $state<FileOverwriteRequest | null>(null);
 	thresholdRequest = $state<FileThresholdRequest | null>(null);
-	openFilesVisible = $state(false);
 
 	#sessionIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileSession | null>>();
@@ -400,22 +399,8 @@ export class FileSessionRegistry {
 	resolveThreshold(choice: FileThresholdChoice): void {
 		const request = this.thresholdRequest;
 		if (!request) return;
-		if (choice === 'review') {
-			this.openFilesVisible = true;
-			return;
-		}
 		this.thresholdRequest = null;
 		request.resolve(choice);
-	}
-
-	showOpenFiles(): void {
-		this.#openMainInert(() => {
-			this.openFilesVisible = true;
-		});
-	}
-
-	hideOpenFiles(): void {
-		this.openFilesVisible = false;
 	}
 
 	async #createAndOpen(

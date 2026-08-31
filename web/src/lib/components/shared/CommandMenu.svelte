@@ -7,7 +7,6 @@
 	import Eye from '@lucide/svelte/icons/eye';
 	import {
 		getAppShell,
-		getFileSessions,
 		getGhCapability,
 		getLocalSettings,
 		getNotifications,
@@ -36,7 +35,6 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
-	const files = getFileSessions();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const ghCapability = getGhCapability();
@@ -106,17 +104,6 @@
 						? workspace.focusMobileSingleton('files')
 						: workspace.openSingletonInNewWindow('files').catch(reportOpenError)),
 			},
-			...(!workspace.isMobile
-				? [
-						{
-							id: 'workspace-open-files',
-							label: m.file_session_open_files(),
-							description: m.file_session_open_files_description(),
-							category: categories.workspace,
-							action: () => files.showOpenFiles(),
-						},
-					]
-				: []),
 			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),

@@ -335,15 +335,8 @@ describe('FileSessionRegistry', () => {
 				firstOverLimitPath,
 			),
 		);
-		harness.registry.resolveThreshold('review');
-		expect(harness.registry.openFilesVisible).toBe(true);
-		expect(harness.registry.thresholdRequest?.identity.normalizedRelativePath).toBe(
-			firstOverLimitPath,
-		);
-
 		const secondOverLimitPath = `src/file-${FILE_SESSION_SOFT_LIMIT + 1}.ts`;
 		const secondOverLimit = harness.registry.open(request(secondOverLimitPath));
-		harness.registry.hideOpenFiles();
 		harness.registry.resolveThreshold('open');
 		await expect(firstOverLimit).resolves.toBeTruthy();
 		await vi.waitFor(() =>

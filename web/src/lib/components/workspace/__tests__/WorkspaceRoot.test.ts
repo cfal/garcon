@@ -213,7 +213,7 @@ function installContext() {
 		workspace,
 		windowDnd,
 		surfaceFrames: new SurfaceFrameRegistry(),
-		fileSessions: { get: () => null, showOpenFiles: vi.fn() },
+		fileSessions: { get: () => null },
 		terminals: { orderedSessions: [], sessions: {}, listStatus: 'ready' },
 		sessions: {
 			selectedChatId: 'chat-a',

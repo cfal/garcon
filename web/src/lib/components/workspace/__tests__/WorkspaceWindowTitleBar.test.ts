@@ -102,7 +102,6 @@ vi.mock('$lib/context', () => ({
 		isChatProcessing: (chatId: string) => runtime.processingChatIds.has(chatId),
 	}),
 	getNotifications: () => ({ error: vi.fn() }),
-	getFileSessions: () => ({ showOpenFiles: vi.fn() }),
 	getTerminalRegistry: () => ({
 		get orderedSessions() {
 			return runtime.terminalSessions;

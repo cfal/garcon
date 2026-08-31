@@ -3,7 +3,6 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import PanelTop from '@lucide/svelte/icons/panel-top';
@@ -18,7 +17,6 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import {
 		getChatSessions,
-		getFileSessions,
 		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
@@ -54,7 +52,6 @@
 
 	const workspace = getWorkspaceCoordinator();
 	const sessions = getChatSessions();
-	const fileSessions = getFileSessions();
 	const notifications = getNotifications();
 	const tabActions = $derived(
 		resolveWorkspaceWindowTabActions(workspace.layout.snapshot, windowId, tabs, tabs.activeId),
@@ -212,13 +209,6 @@
 		{/if}
 		{#if menuItems}
 			{@render menuItems(tabs.activeId)}
-		{/if}
-		{#if activeSurface?.type === 'singleton' && activeSurface.kind === 'files'}
-			{#if menuItems}<DropdownMenuSeparator />{/if}
-			<DropdownMenuItem onSelect={() => fileSessions.showOpenFiles()}>
-				<FolderOpen />
-				{m.file_session_file_sessions()}
-			</DropdownMenuItem>
 		{/if}
 		{#if activeSurface?.type === 'file'}
 			{#if menuItems}<DropdownMenuSeparator />{/if}

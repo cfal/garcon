@@ -4,7 +4,6 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
@@ -38,15 +37,6 @@
 	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
-		if (presentation !== 'mobile') {
-			actions.push({
-				id: 'open-files',
-				label: m.file_session_open_files(),
-				icon: FolderOpen,
-				onclick: () => files.showOpenFiles(),
-				priority: 3,
-			});
-		}
 		if (session.contentKind === 'markdown') {
 			const showingMarkdown = session.rendererMode === 'markdown';
 			actions.push({

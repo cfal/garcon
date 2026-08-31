@@ -26,7 +26,7 @@
 		onMove = () => undefined,
 		notifications = createNotificationsStore(),
 	}: {
-		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'open-files';
+		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 		moveError?: Error;
@@ -69,7 +69,6 @@
 				}
 			: null,
 	);
-	let openFilesVisible = $state(initialRequest === 'open-files');
 	const localSettings = createLocalSettingsStore();
 
 	setAppShell({
@@ -109,12 +108,6 @@
 		get overwriteRequest() {
 			return overwriteRequest;
 		},
-		get openFilesVisible() {
-			return openFilesVisible;
-		},
-		get all() {
-			return initialRequest === 'file' ? [fileSession] : [];
-		},
 		get: (sessionId: string) => (sessionId === fileSession.id ? fileSession : null),
 		resolveGuard: (choice: string) => {
 			guardRequest = null;
@@ -127,9 +120,6 @@
 		resolveThreshold: (choice: string) => {
 			thresholdRequest = null;
 			onResolve(choice);
-		},
-		hideOpenFiles: () => {
-			openFilesVisible = false;
 		},
 	} as never);
 	onDestroy(() => localSettings.destroy());

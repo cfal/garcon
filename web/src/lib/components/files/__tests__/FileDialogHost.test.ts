@@ -70,25 +70,16 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
-	it('does not present File Sessions on mobile', () => {
-		const rendered = render(FileDialogHostTestHost, {
-			request: 'open-files',
-			isMobile: true,
-		});
-
-		expect(screen.queryByRole('dialog')).toBeNull();
-		rendered.unmount();
-	});
-
-	it('omits File Sessions recovery from the mobile threshold dialog', async () => {
+	it('limits file-threshold decisions to cancel or opening anyway', async () => {
 		const rendered = render(FileDialogHostTestHost, {
 			request: 'threshold',
-			isMobile: true,
 		});
 
 		await screen.findByRole('dialog');
-		expect(screen.queryByRole('button', { name: m.file_session_review_open() })).toBeNull();
-		expect(screen.getByRole('button', { name: m.file_session_open_anyway() })).toBeTruthy();
+		expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+			m.file_session_cancel(),
+			m.file_session_open_anyway(),
+		]);
 		rendered.unmount();
 	});
 

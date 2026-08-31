@@ -26,9 +26,6 @@ const mocks = vi.hoisted(() => ({
 		listStatus: 'ready',
 		orderedSessions: [],
 	},
-	files: {
-		showOpenFiles: vi.fn(),
-	},
 	appShell: {
 		openNewChatDialog: vi.fn(),
 		openSettings: vi.fn(),
@@ -54,7 +51,6 @@ vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
 	getWorkspaceCoordinator: () => mocks.workspace,
 	getTerminalRegistry: () => mocks.terminals,
-	getFileSessions: () => mocks.files,
 	getAppShell: () => mocks.appShell,
 	getLocalSettings: () => mocks.localSettings,
 	getGhCapability: () => mocks.ghCapability,
@@ -71,22 +67,6 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
-	it('offers File Sessions on desktop', async () => {
-		const { component } = render(CommandMenu);
-		component.toggle();
-
-		expect(await screen.findByText(m.file_session_open_files())).toBeTruthy();
-	});
-
-	it('hides File Sessions on mobile', async () => {
-		mocks.workspace.isMobile = true;
-		const { component } = render(CommandMenu);
-		component.toggle();
-
-		await screen.findByRole('dialog');
-		expect(screen.queryByText(m.file_session_open_files())).toBeNull();
-	});
-
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
