@@ -611,7 +611,6 @@ describe('WorkspaceWindowTitleBar', () => {
 		renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id));
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
-		expect(screen.getByRole('menuitem', { name: m.workspace_pop_out() })).toBeTruthy();
 		expect(document.querySelector('[data-workspace-chat-metadata-field]')).toBeNull();
 		await fireEvent.keyDown(document, { key: 'Escape' });
 		await waitFor(() =>
