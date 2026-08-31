@@ -452,18 +452,23 @@
 	{#if isMobile && mobileChatSurface}
 		<div class="absolute inset-0 overflow-hidden bg-background">
 			{#if mobileChat && mobilePanel}
-				<ConversationPanel
-					surfaceId={mobileChatSurface.id}
-					chat={mobileChat}
-					panel={mobilePanel}
-					isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
-						workspace.focusOwner.surfaceId === mobileChatSurface.id}
-					ownsComposer={composerBound && mobilePanel === composerPanel}
-					isVisible={true}
-					actions={conversationPanelActions}
-					composerInsetPx={composerBound ? composerInsetPx : 0}
-					reserveMobileToolbar={true}
-				/>
+				{#key mobilePanel}
+					{const panel = mobilePanel}
+					{const chat = mobileChat}
+					{const surfaceId = mobileChatSurface.id}
+					<ConversationPanel
+						{surfaceId}
+						{chat}
+						{panel}
+						isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
+							workspace.focusOwner.surfaceId === surfaceId}
+						ownsComposer={composerBound && panel === composerPanel}
+						isVisible={true}
+						actions={conversationPanelActions}
+						composerInsetPx={composerBound ? composerInsetPx : 0}
+						reserveMobileToolbar={true}
+					/>
+				{/key}
 			{:else if mobileChatPresentation === 'loading'}
 				<ChatLoadingState announcementsEnabled={mobileChatIsComposerAnchor} />
 			{:else}

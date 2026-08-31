@@ -977,6 +977,32 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByTestId('chat-surface-stub').dataset.visible).toBe('true');
 	});
 
+	it('replaces the active mobile Chat panel with a transient singleton', async () => {
+		const { layout } = installContext();
+		const { container } = renderRoot(true);
+		const history = portableSingletonDescriptor('git-history');
+
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [{ type: 'register-surface', surface: history }]),
+		);
+		await tick();
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-mobile-presentation', activeId: history.id, returnStack: [] },
+			]),
+		);
+		await tick();
+
+		expect(screen.queryByTestId('conversation-panel')).toBeNull();
+		expect(
+			container.querySelector(
+				`[role="tabpanel"][data-workspace-surface-id="${history.id}"][aria-hidden="false"]`,
+			),
+		).not.toBeNull();
+	});
+
 	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {
 		const { layout } = installContext();
 		layout.publish(
