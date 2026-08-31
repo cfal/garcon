@@ -68,7 +68,6 @@
 		chatListAutohideAvailable?: boolean;
 		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
-		onShowChatMap: () => void;
 		onShowSettings: () => void;
 		newWindowBlocked: boolean;
 	}
@@ -94,7 +93,6 @@
 		chatListAutohideAvailable = false,
 		onChatListAutohideChange,
 		onShowScheduledPrompts,
-		onShowChatMap,
 		onShowSettings,
 		newWindowBlocked,
 	}: SidebarProps = $props();
@@ -486,7 +484,6 @@
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
 			{onShowScheduledPrompts}
-			{onShowChatMap}
 			{onShowSettings}
 		/>
 	</div>

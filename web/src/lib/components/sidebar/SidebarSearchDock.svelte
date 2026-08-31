@@ -32,7 +32,6 @@
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
 		onShowScheduledPrompts: () => void;
-		onShowChatMap?: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -63,7 +62,6 @@
 		onApplyPillSearch,
 		onClearActiveQuery,
 		onShowScheduledPrompts,
-		onShowChatMap,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -98,7 +96,6 @@
 		{onSetDockOnRight}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
-		{onShowChatMap}
 		{onShowSettings}
 	/>
 	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />

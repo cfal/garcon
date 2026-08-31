@@ -423,17 +423,6 @@
 		appShell.setSidebarOpen(false);
 	}
 
-	function handleShowChatMap(): void {
-		if (isMobile) {
-			closeMobileSidebar();
-			void workspace.focusMobileSingleton('chat-map');
-			return;
-		}
-		void workspace.openSingletonInNewWindow('chat-map').catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
-	}
-
 	function handleMobileChatSelect(chatId: string): void {
 		handleChatSelect(chatId);
 		closeMobileSidebar();
@@ -579,7 +568,6 @@
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-		onShowChatMap={handleShowChatMap}
 		onShowSettings={() => appShell.openSettings()}
 		newWindowBlocked={!workspace.canOpenNewWindow}
 	/>

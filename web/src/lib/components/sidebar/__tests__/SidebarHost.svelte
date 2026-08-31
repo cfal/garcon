@@ -215,7 +215,6 @@
 	onManageTags={() => {}}
 	{chatListAutohideAvailable}
 	onShowScheduledPrompts={() => {}}
-	onShowChatMap={() => {}}
 	onShowSettings={() => {}}
 	newWindowBlocked={false}
 />

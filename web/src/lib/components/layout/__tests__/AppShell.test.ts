@@ -471,12 +471,4 @@ describe('AppShell responsive workspace binding', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Select Map tab' }));
 		expect(workspace.focusedMobileSingletons).toContain('chat-map');
 	});
-
-	it('opens Chat Map in a new window from the desktop sidebar', async () => {
-		const workspace = installContext();
-		render(AppShell);
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Open chat map from sidebar' }));
-		expect(workspace.openedSingletons).toEqual(['chat-map']);
-	});
 });
