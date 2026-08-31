@@ -94,6 +94,12 @@ describe('WorkMapPanel', () => {
 
 	it('collapses and expands a branch with accessible disclosure state', async () => {
 		renderPanel([chat('parent'), chat('child', { parentChat: parent('parent') })]);
+		expect(
+			screen.getByRole('button', { name: m.work_map_expand_all() }).getAttribute('aria-label'),
+		).toBe(m.work_map_expand_all());
+		expect(
+			screen.getByRole('button', { name: m.work_map_collapse_all() }).getAttribute('aria-label'),
+		).toBe(m.work_map_collapse_all());
 		const collapse = screen.getByRole('button', {
 			name: m.work_map_collapse_branch({ title: 'Chat parent' }),
 		});

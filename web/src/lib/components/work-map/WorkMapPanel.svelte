@@ -63,6 +63,7 @@
 			<div class="flex items-center gap-1.5">
 				<button
 					type="button"
+					aria-label={m.work_map_expand_all()}
 					class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 					disabled={model.collapsibleNodeKeys.length === 0}
 					onclick={() => controller.expandAll()}
@@ -72,6 +73,7 @@
 				</button>
 				<button
 					type="button"
+					aria-label={m.work_map_collapse_all()}
 					class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
 					disabled={model.collapsibleNodeKeys.length === 0}
 					onclick={() => controller.collapseAll(model.collapsibleNodeKeys)}
