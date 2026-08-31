@@ -85,7 +85,11 @@
 						</span>
 					{/if}
 					{#if activity}
-						<time class="whitespace-nowrap tabular-nums" title={activity.tooltip}>
+						<time
+							class="whitespace-nowrap tabular-nums"
+							datetime={node.chat.lastActivityAt ?? node.chat.createdAt ?? undefined}
+							title={activity.tooltip}
+						>
 							{activity.label}
 						</time>
 					{/if}

@@ -85,24 +85,27 @@ describe('WorkMapPanel', () => {
 
 		const map = screen.getByRole('list', { name: m.workspace_surface_work_map() });
 		const parentLink = within(map).getByRole('link', { name: /Parent work/ });
-			const childLink = within(map).getByRole('link', { name: /Child work/ });
-			const delegateLink = within(map).getByRole('link', { name: /Delegated review/ });
+		const childLink = within(map).getByRole('link', { name: /Child work/ });
+		const delegateLink = within(map).getByRole('link', { name: /Delegated review/ });
 		expect(parentLink.getAttribute('href')).toBe('/chat/parent');
 		expect(childLink.getAttribute('href')).toBe('/chat/child');
 		expect(childLink.getAttribute('aria-current')).toBe('page');
-			expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
-			expect(delegateLink.closest('li')?.parentElement?.closest('li')).toBe(childLink.closest('li'));
-		expect(
-			within(childLink).getByText(m.work_map_relation_fork()).classList,
-		).toContain('text-foreground');
+		expect(childLink.closest('li')?.parentElement?.closest('li')).toBe(parentLink.closest('li'));
+		expect(delegateLink.closest('li')?.parentElement?.closest('li')).toBe(childLink.closest('li'));
+		expect(within(childLink).getByText(m.work_map_relation_fork()).classList).toContain(
+			'text-foreground',
+		);
 		expect(within(childLink).getByText('claude').classList).toContain('text-foreground');
-			expect(within(childLink).getByText('opus')).toBeTruthy();
-			expect(within(delegateLink).getByText(m.work_map_relation_delegation())).toBeTruthy();
+		expect(within(childLink).getByText('opus')).toBeTruthy();
+		expect(within(delegateLink).getByText(m.work_map_relation_delegation())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_processing())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_unread())).toBeTruthy();
 		expect(within(childLink).getByText(m.work_map_status_archived())).toBeTruthy();
+		expect(childLink.querySelector('time')?.getAttribute('datetime')).toBe(
+			'2026-08-30T13:00:00.000Z',
+		);
 		expect(container.querySelector('[role="tree"]')).toBeNull();
-			expect(screen.getByText(m.work_map_chat_count({ count: 3 })).classList).toContain(
+		expect(screen.getByText(m.work_map_chat_count({ count: 3 })).classList).toContain(
 			'text-foreground',
 		);
 		expect(screen.getByText(m.work_map_root_count({ count: 1 })).classList).toContain(
@@ -132,6 +135,21 @@ describe('WorkMapPanel', () => {
 		expect(expand.getAttribute('aria-expanded')).toBe('false');
 		await fireEvent.click(expand);
 		expect(screen.getByRole('link', { name: /Chat child/ })).toBeTruthy();
+	});
+
+	it('prunes stale collapse keys when the rendered topology changes', async () => {
+		const initialChats = [
+			chat('parent'),
+			chat('child', { parentChat: parent('parent') }),
+			chat('other'),
+			chat('other-child', { parentChat: parent('other') }),
+		];
+		const { controller, rerender } = renderPanel(initialChats);
+		controller.collapseAll(['chat:parent', 'chat:other']);
+
+		await rerender({ chats: initialChats.filter((entry) => entry.id !== 'parent') });
+
+		expect(controller.collapsedNodeKeys).toEqual(new Set(['chat:other']));
 	});
 
 	it('searches metadata, preserves ancestors as context, and reports zero results', async () => {

@@ -64,19 +64,19 @@ describe('buildWorkMapModel', () => {
 		const model = buildWorkMapModel([
 			chat('root'),
 			chat('fork', { parentChat: parent('root', 'fork') }),
-				chat('handoff', { parentChat: parent('fork', 'handoff') }),
-				chat('delegation', { parentChat: parent('handoff', 'delegation') }),
+			chat('handoff', { parentChat: parent('fork', 'handoff') }),
+			chat('delegation', { parentChat: parent('handoff', 'delegation') }),
 		]);
 
 		expect(model.roots).toHaveLength(1);
 		expect(model.roots[0].key).toBe('chat:root');
 		expect(model.roots[0].children[0].key).toBe('chat:fork');
-			expect(model.roots[0].children[0].children[0].key).toBe('chat:handoff');
-			expect(model.roots[0].children[0].children[0].children[0].key).toBe('chat:delegation');
+		expect(model.roots[0].children[0].children[0].key).toBe('chat:handoff');
+		expect(model.roots[0].children[0].children[0].children[0].key).toBe('chat:delegation');
 		expect(chatNode(flatten(model.roots), 'root').relation).toBeNull();
 		expect(chatNode(flatten(model.roots), 'fork').relation).toBe('fork');
-			expect(chatNode(flatten(model.roots), 'handoff').relation).toBe('handoff');
-			expect(chatNode(flatten(model.roots), 'delegation').relation).toBe('delegation');
+		expect(chatNode(flatten(model.roots), 'handoff').relation).toBe('handoff');
+		expect(chatNode(flatten(model.roots), 'delegation').relation).toBe('delegation');
 	});
 
 	it('orders siblings by creation time and ID, then roots by newest subtree activity', () => {
