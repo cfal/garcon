@@ -13,12 +13,7 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
-import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import type {
-	ChatTranscriptApplyResult,
-	ChatTranscriptCache,
-} from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
+import type { ResendCandidate } from '$shared/chat-view';
 import type { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
@@ -59,10 +54,8 @@ export interface ConversationRouterStoreDeps {
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	notifyCompletion: () => void;
-	transcriptCache?: ChatTranscriptCache;
-	backgroundTranscriptLoader?: Pick<BackgroundTranscriptLoader, 'queueLoad'>;
 	chatDrafts?: Pick<ChatDraftStore, 'discardChat'>;
-	panels?: ConversationPanelRegistry;
+	panels: ConversationPanelRegistry;
 	clearDeletedChat: (chatId: string) => void;
 }
 
@@ -71,48 +64,9 @@ export interface ConversationRouterDeps extends ConversationRouterStoreDeps {
 	drainHandle: DrainHandle;
 }
 
-function routerApplyStatus(
-	result: ChatTranscriptApplyResult,
-): 'applied' | 'view-changed' | 'gap-detected' {
-	if (result.status === 'applied') return 'applied';
-	if (result.status === 'view-changed') return 'view-changed';
-	return 'gap-detected';
-}
-
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRouterStores {
-	const transcriptCache = deps.transcriptCache ?? deps.chatState.transcriptCache;
-	const queueBackgroundLoad = (
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-	): void => {
-		deps.backgroundTranscriptLoader?.queueLoad(chatId, {
-			transcriptViewId,
-			messages,
-			firstOrdinal,
-			lastOrdinal,
-		});
-	};
-	const applyBackgroundTranscript = (
-		chatId: string,
-		transcriptViewId: string,
-		messages: TranscriptMessage[],
-		firstOrdinal: number,
-		lastOrdinal: number,
-	): ChatTranscriptApplyResult => {
-		const result = transcriptCache.applyMessages(chatId, transcriptViewId, {
-			messages,
-			firstOrdinal,
-			lastOrdinal,
-		});
-		if (result.status !== 'applied') {
-			queueBackgroundLoad(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal);
-		}
-		return result;
-	};
+	const transcriptCache = deps.panels.transcriptCache;
 	return {
 		agentSettings: {
 			permissionMode: (chatId) => {
@@ -130,12 +84,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		},
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
-			getChatCursor: (chatId) => {
-				if (!deps.panels && deps.sessions.selectedChatId === chatId) {
-					return deps.chatState.getCursor();
-				}
-				return transcriptCache.readAppliedCursor(chatId);
-			},
+			getChatCursor: (chatId) => transcriptCache.readAppliedCursor(chatId),
 			applyChatMessages: (
 				chatId,
 				transcriptViewId,
@@ -144,89 +93,49 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				lastOrdinal,
 				resendCandidates: ResendCandidate[],
 			) => {
-				if (deps.panels) {
-					const result = deps.panels.applyCommittedBatch({
-						chatId,
-						transcriptViewId,
-						messages,
-						firstOrdinal,
-						lastOrdinal,
-						resendCandidates,
-						noticeRevision: deps.panels.noticeRevisionFor(chatId),
-					});
-					if (result.kind === 'applied') {
-						return result.localRecoverySurfaceIds.length === 0
-							? 'applied'
-							: 'gap-detected';
-					}
-					return result.outcome.status === 'view-changed'
-						? 'view-changed'
-						: 'gap-detected';
-				}
-				if (deps.sessions.selectedChatId !== chatId) {
-					return routerApplyStatus(
-						applyBackgroundTranscript(
-							chatId,
-							transcriptViewId,
-							messages,
-							firstOrdinal,
-							lastOrdinal,
-						),
-					);
-				}
-				return deps.chatState.applyMessages(
+				const result = deps.panels.applyCommittedBatch({
 					chatId,
 					transcriptViewId,
 					messages,
 					firstOrdinal,
 					lastOrdinal,
 					resendCandidates,
-				);
+					noticeRevision: deps.panels.noticeRevisionFor(chatId),
+				});
+				if (result.kind === 'applied') {
+					return result.localRecoverySurfaceIds.length === 0
+						? 'applied'
+						: 'gap-detected';
+				}
+				return result.outcome.status === 'view-changed'
+					? 'view-changed'
+					: 'gap-detected';
 			},
 			reloadChatTranscript: (chatId) => {
-				if (deps.panels) {
-					void deps.panels.loadChatSnapshot(chatId).catch(() => {});
-					return;
-				}
-				if (deps.sessions.selectedChatId !== chatId) return;
-				void deps.chatState.loadMessages(chatId).catch(() => {
-					// Leaves current visible state until a later retry succeeds.
-				});
+				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
 			},
-			isRenderedChat: (chatId) =>
-				(deps.panels?.panelsForChat(chatId).length ?? 0) > 0,
+			isRenderedChat: (chatId) => deps.panels.panelsForChat(chatId).length > 0,
 			loadRenderedChat: async (chatId) => {
 				try {
-					await deps.panels?.loadChatSnapshot(chatId);
+					await deps.panels.loadChatSnapshot(chatId);
 				} catch {
 					// Leaves the stale cache flag set so a later activation retries.
 				}
 			},
-			markRenderedChatStale: (chatId) => {
-				deps.panels?.handleViewReplacement(chatId);
-			},
+			markRenderedChatStale: (chatId) => deps.panels.handleViewReplacement(chatId),
 			appendLocalNotice: (noticeType, content) => {
 				const chatId = deps.sessions.selectedChatId;
-				if (deps.panels && chatId) deps.panels.appendLocalNotice(chatId, noticeType, content);
+				if (chatId) deps.panels.appendLocalNotice(chatId, noticeType, content);
 				else deps.chatState.appendLocalNotice(noticeType, content);
 			},
 			appendServerNotice: (chatId, noticeType, content) =>
-				deps.panels
-					? deps.panels.appendServerNotice(chatId, noticeType, content)
-					: deps.chatState.appendServerNotice(chatId, noticeType, content),
+				deps.panels.appendServerNotice(chatId, noticeType, content),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
 			removeChatTranscript: (chatId) => {
-				if (deps.panels) deps.panels.removeChat(chatId);
-				else {
-					transcriptCache.remove(chatId);
-					deps.chatState.discardServerNotices(chatId);
-				}
+				deps.panels.removeChat(chatId);
 				deps.chatDrafts?.discardChat(chatId);
 			},
-			markChatTranscriptStale: (chatId) => {
-				if (deps.panels) deps.panels.markChatStale(chatId);
-				else transcriptCache.markStale(chatId);
-			},
+			markChatTranscriptStale: (chatId) => deps.panels.markChatStale(chatId),
 			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {

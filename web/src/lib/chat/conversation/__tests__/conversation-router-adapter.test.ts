@@ -63,6 +63,15 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		lifecycleByChatId.set(chatId, created);
 		return created;
 	};
+	const chatState = new ActiveTranscriptState();
+	const panels = new ConversationPanelRegistry({
+		cache: chatState.transcriptCache,
+		overlays: new ConversationTranscriptOverlayStore(),
+		lifecycle: {
+			forChat: lifecycleForChat,
+			remove: (chatId) => lifecycleByChatId.delete(chatId),
+		},
+	});
 	return {
 		sessions: {
 			byId: selectedChat ? { [selectedChat.id]: selectedChat } : {},
@@ -80,7 +89,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			reconcileProcessing: vi.fn(),
 			quietRefreshChats: vi.fn(),
 		},
-		chatState: new ActiveTranscriptState(),
+		chatState,
 		agentState: new AgentState(),
 		lifecycle,
 		lifecycles: {
@@ -91,6 +100,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 		startupCoordinator: new StartupCoordinator(),
 		readReceiptOutbox: { enqueue: vi.fn() },
 		notifyCompletion: vi.fn(),
+		panels,
 		clearDeletedChat: vi.fn(),
 	};
 }
@@ -160,20 +170,12 @@ describe('buildRouterStores', () => {
 		expect(
 			deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.ordinal),
 		).toEqual([1, 2]);
+		deps.panels.destroy();
+		deps.chatState.transcriptCache.flush();
 	});
 
 	it('reads a selected but unrendered chat cursor from the shared panel cache', () => {
 		const deps = depsFor(chatRecord());
-		const panelLifecycle = new ConversationLifecycleState();
-		panelLifecycle.setCurrentChatId('chat-1');
-		deps.panels = new ConversationPanelRegistry({
-			cache: deps.chatState.transcriptCache,
-			overlays: new ConversationTranscriptOverlayStore(),
-			lifecycle: {
-				forChat: () => panelLifecycle,
-				remove: vi.fn(),
-			},
-		});
 		deps.chatState.transcriptCache.replace(
 			'chat-1',
 			'generation-cached',
@@ -191,10 +193,8 @@ describe('buildRouterStores', () => {
 		deps.chatState.transcriptCache.flush();
 	});
 
-	it('does not create tail-only background transcripts and queues recovery', () => {
+	it('does not create tail-only background transcripts before a rendered-panel recovery', () => {
 		const deps = depsFor(chatRecord());
-		const queueLoad = vi.fn();
-		deps.backgroundTranscriptLoader = { queueLoad };
 		const stores = buildRouterStores(deps);
 
 		const applied = stores.chatState.applyChatMessages(
@@ -208,12 +208,8 @@ describe('buildRouterStores', () => {
 
 		expect(applied).toBe('gap-detected');
 		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
-		expect(queueLoad).toHaveBeenCalledWith('chat-2', {
-			transcriptViewId: 'generation-2',
-			messages: [expect.objectContaining({ ordinal: 4 })],
-			firstOrdinal: 4,
-			lastOrdinal: 4,
-		});
+		deps.panels.destroy();
+		deps.chatState.transcriptCache.flush();
 	});
 
 	it('passes preview timestamps through to the sessions store', () => {

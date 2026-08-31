@@ -17,7 +17,6 @@
 	import type { ChatProcessingPhase } from '$shared/chat-types';
 	import { searchResultNavigation } from '$lib/chat/actions/search-result-navigation.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
@@ -135,7 +134,6 @@
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
 	});
-	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState(chatDrafts, {
 		get activeChatId() {
 			return sessions.selectedChatId;
@@ -225,9 +223,7 @@
 				visibility: localSettings.completionSoundVisibility,
 			});
 		},
-		transcriptCache,
 		panels: conversationPanels,
-		backgroundTranscriptLoader,
 		chatDrafts,
 		clearDeletedChat: (chatId) => {
 			void workspace.clearDeletedChat(chatId).catch((error) => {
