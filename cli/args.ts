@@ -300,6 +300,14 @@ function nonEmptyOption(value: string | undefined, flag: string): string | undef
   return value;
 }
 
+function parseChatIdOption(value: string, flag: string): ChatId {
+  try {
+    return parseChatId(value);
+  } catch (error) {
+    throw argumentError(`${flag} must be a valid Garcon chat ID`, { cause: error });
+  }
+}
+
 function resolvedEnvironmentValue(value: string | undefined): string | undefined {
   return value === undefined || value === '' ? undefined : value;
 }
@@ -1063,25 +1071,12 @@ export function parseCliArgs(
   if (resume !== undefined) {
     if (cwd !== undefined) throw argumentError('--cwd cannot be used with --resume');
     if (parent !== undefined) throw argumentError('--parent cannot be used with --resume');
-    let chatId: ChatId;
-    try {
-      chatId = parseChatId(resume);
-    } catch (error) {
-      throw argumentError('--resume must be a valid Garcon chat ID', { cause: error });
-    }
-    return { kind: 'resume', ...shared, chatId };
+    return { kind: 'resume', ...shared, chatId: parseChatIdOption(resume, '--resume') };
   }
 
   if (agentId === undefined) throw argumentError('--agent is required for a new chat');
   if (model === undefined) throw argumentError('--model is required for a new chat');
-  let parentChatId: ChatId | undefined;
-  if (parent !== undefined) {
-    try {
-      parentChatId = parseChatId(parent);
-    } catch (error) {
-      throw argumentError('--parent must be a valid Garcon chat ID', { cause: error });
-    }
-  }
+  const parentChatId = parent === undefined ? undefined : parseChatIdOption(parent, '--parent');
   return {
     kind: 'start',
     ...shared,
