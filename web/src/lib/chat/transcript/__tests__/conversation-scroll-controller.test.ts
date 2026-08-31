@@ -225,7 +225,7 @@ describe('ConversationScrollController', () => {
 		expect(viewport.cancelForUserIntent).toHaveBeenCalledWith('earlier');
 	});
 
-	it('expires an unscrolled press before layout movement', () => {
+	it('does not treat layout movement after an unscrolled press as user scrolling', () => {
 		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
 		const fixture = controllerFixture({ viewport });
 		fixture.controller.noteUserScrollIntent();
@@ -236,7 +236,7 @@ describe('ConversationScrollController', () => {
 
 		expect(fixture.controller.isPinnedToBottom).toBe(true);
 		expect(fixture.state.isUserScrolledUp).toBe(false);
-		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		expect(viewport.scrollToEnd).not.toHaveBeenCalled();
 	});
 
 	it('retains directional intent after a press ends', () => {
@@ -530,17 +530,6 @@ describe('ConversationScrollController', () => {
 		fixture.controller.handleScroll();
 
 		expect(fixture.viewport.cancelForUserIntent).toHaveBeenCalledOnce();
-	});
-
-	it('corrects physical end drift while the viewport remains logically pinned', () => {
-		const viewport = fakeViewport({ isAtEnd: vi.fn(() => false) });
-		const fixture = controllerFixture({ viewport });
-
-		fixture.controller.handleScroll();
-
-		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
-		expect(fixture.controller.isPinnedToBottom).toBe(true);
-		expect(fixture.state.isUserScrolledUp).toBe(false);
 	});
 
 	it('discards a preserved prepend handoff on opposite native movement', () => {
