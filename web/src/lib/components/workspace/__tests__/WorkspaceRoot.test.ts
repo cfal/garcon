@@ -213,20 +213,16 @@ function installContext() {
 		mobileBack: vi.fn(async () => undefined),
 		focusChat: vi.fn(async () => undefined),
 	};
-	const terminalSessions: Record<string, TerminalClientSession> = {};
 	const terminals = {
 		orderedSessions: [] as TerminalClientSession[],
-		sessions: terminalSessions,
+		sessions: {} as Record<string, TerminalClientSession>,
 		listStatus: 'ready' as const,
 		ensureRuntime: vi.fn(() => ({
 			clipboardMessage: '',
 			pasteFromClipboard: vi.fn(async () => true),
 		})),
 		reattach: vi.fn(),
-		rename: vi.fn(async (terminalId: string, title: string | null) => {
-			const session = terminalSessions[terminalId];
-			if (session) session.metadata.title = title?.trim() || null;
-		}),
+		rename: vi.fn(async (_terminalId: string, _title: string | null) => undefined),
 	};
 	const localSettings = {
 		terminalFontSize: '13',

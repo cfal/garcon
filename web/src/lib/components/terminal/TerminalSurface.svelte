@@ -47,7 +47,7 @@
 	let lease: number | null = null;
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
-	let renameOpen = $state(false);
+	let renameDialogOpen = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
@@ -68,7 +68,7 @@
 				id: 'rename',
 				label: m.terminal_rename(),
 				icon: Pencil,
-				onclick: () => (renameOpen = true),
+				onclick: () => (renameDialogOpen = true),
 				disabled: !session,
 				priority: 1,
 			},
@@ -346,8 +346,8 @@
 </div>
 
 <TerminalRenameDialog
-	terminal={host === 'mobile' && renameOpen ? (session?.metadata ?? null) : null}
-	onClose={() => (renameOpen = false)}
+	terminal={host === 'mobile' && renameDialogOpen ? (session?.metadata ?? null) : null}
+	onClose={() => (renameDialogOpen = false)}
 	onRename={(selectedTerminalId, title) => terminals.rename(selectedTerminalId, title)}
 />
 

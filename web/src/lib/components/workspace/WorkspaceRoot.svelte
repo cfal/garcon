@@ -76,7 +76,7 @@
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
-	let terminalRenameId = $state<string | null>(null);
+	let renamingTerminalId = $state<string | null>(null);
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
@@ -152,8 +152,8 @@
 			(surface): surface is ChatViewSurfaceDescriptor => surface.type === 'chat',
 		)?.id ?? chatViewSurfaceId(CANONICAL_WINDOW_ID),
 	);
-	const terminalRenameTarget = $derived(
-		terminalRenameId ? (terminals.sessions[terminalRenameId]?.metadata ?? null) : null,
+	const terminalToRename = $derived(
+		renamingTerminalId ? (terminals.sessions[renamingTerminalId]?.metadata ?? null) : null,
 	);
 
 	$effect(() => {
@@ -268,7 +268,7 @@
 	{:else if surface?.type === 'terminal'}
 		<TerminalWindowMenuItems
 			terminalId={surface.terminalId}
-			onRename={() => (terminalRenameId = surface.terminalId)}
+			onRename={() => (renamingTerminalId = surface.terminalId)}
 		/>
 	{/if}
 {/snippet}
@@ -401,7 +401,7 @@
 {/if}
 
 <TerminalRenameDialog
-	terminal={terminalRenameTarget}
-	onClose={() => (terminalRenameId = null)}
+	terminal={terminalToRename}
+	onClose={() => (renamingTerminalId = null)}
 	onRename={(terminalId, title) => terminals.rename(terminalId, title)}
 />

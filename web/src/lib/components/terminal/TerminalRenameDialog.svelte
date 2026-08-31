@@ -15,11 +15,11 @@
 		onRename: (terminalId: string, title: string) => Promise<void>;
 	} = $props();
 
-	let title = $state('');
-	let input = $state<HTMLInputElement | null>(null);
-	let activeTerminalId = $state<string | null>(null);
-	let saving = $state(false);
-	let error = $state<string | null>(null);
+	let titleDraft = $state('');
+	let titleInput = $state<HTMLInputElement | null>(null);
+	let draftTerminalId = $state<string | null>(null);
+	let isSaving = $state(false);
+	let renameError = $state<string | null>(null);
 	const open = $derived(terminal !== null);
 	const defaultName = $derived(
 		terminal ? defaultTerminalDisplayName(terminal) : m.workspace_surface_terminal(),
@@ -28,44 +28,44 @@
 	$effect(() => {
 		const target = terminal;
 		if (!target) {
-			activeTerminalId = null;
+			draftTerminalId = null;
 			return;
 		}
-		if (activeTerminalId === target.terminalId) return;
-		activeTerminalId = target.terminalId;
-		title = target.title ?? '';
-		error = null;
+		if (draftTerminalId === target.terminalId) return;
+		draftTerminalId = target.terminalId;
+		titleDraft = target.title ?? '';
+		renameError = null;
 	});
 
 	$effect(() => {
-		if (!input || !activeTerminalId) return;
-		input.focus();
-		input.select();
+		if (!titleInput || !draftTerminalId) return;
+		titleInput.focus();
+		titleInput.select();
 	});
 
-	async function submit(): Promise<void> {
+	async function submitRename(): Promise<void> {
 		const target = terminal;
-		if (!target || saving) return;
-		saving = true;
-		error = null;
+		if (!target || isSaving) return;
+		isSaving = true;
+		renameError = null;
 		try {
-			await onRename(target.terminalId, title);
+			await onRename(target.terminalId, titleDraft);
 			onClose();
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : m.terminal_rename_failed();
+			renameError = cause instanceof Error ? cause.message : m.terminal_rename_failed();
 		} finally {
-			saving = false;
+			isSaving = false;
 		}
 	}
 </script>
 
-<Dialog.Root {open} requestClose={() => !saving && onClose()}>
+<Dialog.Root {open} requestClose={() => !isSaving && onClose()}>
 	<Dialog.Content>
 		<form
 			class="grid gap-4"
 			onsubmit={(event) => {
 				event.preventDefault();
-				void submit();
+				void submitRename();
 			}}
 		>
 			<Dialog.Header>
@@ -74,23 +74,23 @@
 					>{m.terminal_rename_description({ name: defaultName })}</Dialog.Description
 				>
 				<input
-					bind:this={input}
+					bind:this={titleInput}
 					type="text"
-					bind:value={title}
+					bind:value={titleDraft}
 					maxlength={TERMINAL_TITLE_MAX_LENGTH}
 					autocomplete="off"
 					aria-label={m.terminal_name()}
 					class="w-full rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 sm:pointer-fine:text-sm"
 				/>
-				{#if error}
-					<p class="text-sm text-destructive" role="alert">{error}</p>
+				{#if renameError}
+					<p class="text-sm text-destructive" role="alert">{renameError}</p>
 				{/if}
 			</Dialog.Header>
 			<Dialog.Footer>
-				<Button type="button" variant="outline" disabled={saving} onclick={onClose}
+				<Button type="button" variant="outline" disabled={isSaving} onclick={onClose}
 					>{m.common_cancel()}</Button
 				>
-				<Button type="submit" disabled={saving}>{m.sidebar_actions_save()}</Button>
+				<Button type="submit" disabled={isSaving}>{m.sidebar_actions_save()}</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
