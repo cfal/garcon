@@ -237,6 +237,10 @@ export class AgentOwnershipJournal {
     return this.#scheduleDeleteWork(() => this.#deleteNow(chatId));
   }
 
+  waitForProviderCleanup(): Promise<void> {
+    return this.#providerCleanupPromise;
+  }
+
   async #deleteNow(chatId: string): Promise<void> {
     const current = this.#registry.getChat(chatId);
     const intent = await this.#mutate((journal) => {

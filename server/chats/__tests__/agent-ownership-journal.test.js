@@ -288,11 +288,8 @@ describe('AgentOwnershipJournal', () => {
     await started;
     expect(release).toHaveBeenCalledTimes(1);
     releaseProvider();
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      if ((await readJournal(workspaceDir)).ownershipIntents.length === 0) return;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    throw new Error('delete cleanup did not settle');
+    await journal.waitForProviderCleanup();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
   });
 
   it('does not let blocked cleanup A delay delete B', async () => {
@@ -318,7 +315,8 @@ describe('AgentOwnershipJournal', () => {
     ]);
     expect(registry.getChat('chatB')).toBeNull();
     releaseA();
-    await waitForEmptyJournal(workspaceDir);
+    await journal.waitForProviderCleanup();
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
   });
 
   it('does not delete a recreated same-id ledger during old provider cleanup', async () => {
@@ -339,10 +337,11 @@ describe('AgentOwnershipJournal', () => {
     await journal.delete('chat');
     registry.setChat('chat', replacement);
     releaseProvider();
-    await waitForEmptyJournal(workspaceDir);
+    await journal.waitForProviderCleanup();
 
     expect(ledger.deleteChat).toHaveBeenCalledTimes(1);
     expect(registry.getChat('chat')).toBe(replacement);
+    expect((await readJournal(workspaceDir)).ownershipIntents).toEqual([]);
   });
 
   it('retains delete cleanup when provider release fails', async () => {
@@ -370,7 +369,7 @@ describe('AgentOwnershipJournal', () => {
     });
 
     await journal.initialize();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await journal.waitForProviderCleanup();
 
     expect(release).toHaveBeenCalledTimes(1);
     expect(ledger.deleteChat).toHaveBeenCalledWith('chat');
@@ -407,14 +406,6 @@ function referenceFor(agentId) {
     settings: envelope(agentId),
     agentOwnershipEpoch: `${agentId}-epoch`,
   };
-}
-
-async function waitForEmptyJournal(workspaceDir) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if ((await readJournal(workspaceDir)).ownershipIntents.length === 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error('delete cleanup did not settle');
 }
 
 async function readJournal(workspaceDir) {
