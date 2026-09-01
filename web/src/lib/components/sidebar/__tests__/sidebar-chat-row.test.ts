@@ -89,6 +89,7 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
 		expect(pinnedBadges).toHaveLength(1);
+		expect(screen.getByText('Pinned').className).toContain('sr-only');
 		const title = screen.getByText('Shared row chat');
 		expect(title.className).toContain('font-bold');
 		const unreadStatus = screen.getByText('Unread');

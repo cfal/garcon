@@ -218,7 +218,6 @@
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
 			)}
-			aria-hidden={isSingleLineLayout ? undefined : 'true'}
 			data-slot="sidebar-chat-state-badge"
 		>
 			{#if isPinned}
@@ -226,11 +225,9 @@
 			{:else}
 				<Archive class="size-2.5 text-sidebar-badge-archived-foreground" />
 			{/if}
-			{#if isSingleLineLayout}
-				<span class="sr-only">
-					{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
-				</span>
-			{/if}
+			<span class="sr-only">
+				{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
+			</span>
 		</div>
 	{/if}
 {/snippet}
