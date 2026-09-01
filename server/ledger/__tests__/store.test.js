@@ -1383,12 +1383,13 @@ describe('TranscriptLedgerStore', () => {
     expect(() => store.currentRows('failed-chat')).toThrow(LedgerFencedError);
   });
 
-  it('attributes an eviction checkpoint failure to the evicted chat', () => {
+  it('[TLV5-L11.06-STORE-UNIT-01] does not fence an evicted chat after a passive checkpoint failure', () => {
     store.close();
     store = new TranscriptLedgerStore(root, { connectionCacheSize: 1 });
-    store.initializeCurrentView('chat-one', {
+    const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
       contentStartOrdinal: 1,
+      rows: [provider('durable row')],
     });
 
     const exec = Database.prototype.exec;
@@ -1400,19 +1401,49 @@ describe('TranscriptLedgerStore', () => {
       }
       return exec.call(this, sql);
     };
+    let opened;
     try {
-      const opened = store.initializeCurrentView('chat-two', {
+      opened = store.initializeCurrentView('chat-two', {
         viewId: transcriptViewId('view-two'),
         contentStartOrdinal: 1,
       });
-
-      expect(checkpointFailed).toBe(true);
-      expect(opened.viewId).toBe('view-two');
-      expect(store.currentView('chat-two').viewId).toBe('view-two');
-      expect(() => store.currentView('chat-one')).toThrow(LedgerFencedError);
     } finally {
       Database.prototype.exec = exec;
     }
+
+    expect(checkpointFailed).toBe(true);
+    expect(opened.viewId).toBe('view-two');
+    expect(store.currentView('chat-two').viewId).toBe('view-two');
+    store.append('chat-one', view.viewId, [provider('later row')]);
+    expect(store.currentRows('chat-one').map(renderedContent)).toEqual([
+      'durable row',
+      'later row',
+    ]);
+  });
+
+  it('[TLV5-L11.06-STORE-UNIT-02] completes chat deletion after a passive checkpoint failure', () => {
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    const exec = Database.prototype.exec;
+    let checkpointFailed = false;
+    Database.prototype.exec = function (sql) {
+      if (!checkpointFailed && sql === 'PRAGMA wal_checkpoint(PASSIVE)') {
+        checkpointFailed = true;
+        throw new Error('injected deletion checkpoint failure');
+      }
+      return exec.call(this, sql);
+    };
+    try {
+      store.deleteChat('chat-one');
+    } finally {
+      Database.prototype.exec = exec;
+    }
+
+    expect(checkpointFailed).toBe(true);
+    expect(nodeFs.existsSync(path.join(root, 'chat-one'))).toBe(false);
   });
 
   it('[TLV5-L11.04-STORE-UNIT-01] attributes an eviction close failure and retries that handle on shutdown', () => {

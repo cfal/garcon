@@ -15,7 +15,7 @@ Governing artifact:
 - `docs/transcript-ledger-v5-design.md`, revision 28, SHA-256
   `8c6c1a937bb46495519c00c5df79137ca03dd91a7cf762c562d3a17db7ae1abe`
 
-Current inventory: 401 discovered stable IDs, validated by
+Current inventory: 410 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
 `scripts/conformance/transcript-ledger-v5-cases.txt`. The PR #500 squash merge
 above is the historical acceptance anchor for the first 256. Later cases are
@@ -359,6 +359,7 @@ routine local testing.
 | TLV5-L11.03 | Search, handoff, replay, and provider-stream failure for one chat cannot block another. | Unit, server black-box, provider scripted |
 | TLV5-L11.04 | LRU close failure is attributed to the evicted chat and its handle is retried safely.   | Unit                                      |
 | TLV5-L11.05 | A write-fenced ledger rehydrates durable state for reads while later writes remain fenced. | Unit, server black-box                  |
+| TLV5-L11.06 | A failed close-time passive checkpoint never fences the evicted chat.                    | Unit                                      |
 
 ### L12 Provider Neutrality
 
@@ -542,7 +543,7 @@ The status below describes test coverage, not implementation completion.
 | R10 silent handoff fork fallback              | TLV5-FORK.01 through TLV5-FORK.04                     | Core fork units; no complete browser consent workflow                                               | Partial |
 | R11 unbounded reconnect replay                | TLV5-REPLAY.01 through TLV5-REPLAY.07                 | Contract, 50,000-row server, and Chromium replay including exact mid-replay disconnect               | Covered |
 | R12 unqualified HTTP pages                    | TLV5-PAGE.01 through TLV5-PAGE.10                     | Bounded server, contract, multi-budget state, cache, and held-page browser cases                     | Covered |
-| R13 LRU failure attribution                   | TLV5-L11.04                                           | Store and close-recovery units                                                                      | Covered |
+| R13 LRU failure attribution                   | TLV5-L11.04, TLV5-L11.06                              | Store and close-recovery units                                                                      | Covered |
 | R14 duplicate prepared input                  | TLV5-L04.04                                           | Ledger, coordinator, and handler units                                                              | Covered |
 | R15 temporary diagnostics and weak quiescence | TLV5-OBS.01 through TLV5-OBS.04                       | Static diagnostic guard and scattered privacy tests                                                 | Partial |
 
@@ -787,7 +788,8 @@ Static negative guards should reject reintroduction of:
 | Native probe never resolves                                          | Active newest history returns first; the bounded probe aborts and leaves no warning or ledger row | Covered unit and route evidence                  |
 | WebSocket closes or drops send between replay pages                  | Partial replay discarded; next reconnect restarts safely                  | Covered unit and exact Chromium fault placement |
 | Handoff registry, journal, checkpoint, reopen, or notification fails | Only affected chat fenced; independent recovery and shutdown cleanup      | Partial full-stage matrix                       |
-| Evicted ledger checkpoint or close fails                             | Failure belongs to evicted chat; requested chat opens                     | Covered                                         |
+| Evicted ledger close fails                                           | Failure belongs to evicted chat; requested chat opens                     | Covered                                         |
+| Evicted ledger passive checkpoint fails                              | Evicted chat is never fenced; requested chat opens                        | Covered                                         |
 | Permission response fails after claim                                | Claim restored only while exact occurrence remains actionable             | Covered                                         |
 
 ## Existing Evidence Catalog
@@ -821,6 +823,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L11.05-STORE-UNIT-03      | `server/ledger/__tests__/store.test.js`: `rejects a handoff checkpoint after a write failure`                                                              | L11.05, HANDOFF.01          |
 | TLV5-L11.05-HANDOFF-CORE-UNIT-01 | `server/agents/__tests__/agent-handoff-service.test.js`: `does not persist an ownership decision when the ledger is write-fenced`                        | L11.05, HANDOFF.01          |
 | TLV5-L11.05-RELOAD-CORE-UNIT-01 | `server/ledger/__tests__/reload.test.js`: `reconciles an ambiguously committed cutover`                                                                    | L11.05, L08.02              |
+| TLV5-L11.06-STORE-UNIT-01      | `server/ledger/__tests__/store.test.js`: `does not fence an evicted chat after a passive checkpoint failure`                                                | L11.06                      |
+| TLV5-L11.06-STORE-UNIT-02      | `server/ledger/__tests__/store.test.js`: `completes chat deletion after a passive checkpoint failure`                                                       | L11.06                      |
 | TLV5-L09.03-CORE-STATIC-01     | `server/ledger/__tests__/native-activity-page-reader.test.js`: production scheduling has exactly one activation-history call site and no runtime pre-resume hook | L09.03 |
 | TLV5-L09.03-CORE-UNIT-01       | `server/ledger/__tests__/native-activity-page-reader.test.js`: newest history returns before its advisory probe is scheduled | L09.03 |
 | TLV5-L09.03-CORE-UNIT-02       | `server/ledger/__tests__/native-activity-page-reader.test.js`: earlier, background, and failed history reads schedule nothing | L09.03 |
