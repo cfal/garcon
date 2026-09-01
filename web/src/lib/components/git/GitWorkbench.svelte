@@ -356,7 +356,7 @@
 
 {#snippet diffTabs()}
 	<div class="flex min-w-0">
-		{#each ['unstaged', 'staged'] as const as tab}
+		{#each ['unstaged', 'staged'] as const as tab (tab)}
 			<button
 				type="button"
 				onclick={() => wb.setActiveTab(tab)}
@@ -565,7 +565,7 @@
 
 			{#if containerPresentation === 'narrow'}
 				<div class="flex shrink-0 border-b border-border" data-git-segmented-navigation>
-					{#each ['files', 'diff'] as const as pane}
+					{#each ['files', 'diff'] as const as pane (pane)}
 						<button
 							type="button"
 							onclick={() => {

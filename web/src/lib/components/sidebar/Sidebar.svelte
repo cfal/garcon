@@ -589,7 +589,7 @@
 				>
 				{#if bulkDelete.confirmation}
 					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
-						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title}
+						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title, index (index)}
 							<li class="truncate">{title}</li>
 						{/each}
 						{#if bulkDelete.confirmation.chatTitles.length > 5}

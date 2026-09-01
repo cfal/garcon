@@ -89,7 +89,7 @@
 
 		<!-- Severity -->
 		<div class="flex gap-3">
-			{#each ['note', 'warning', 'blocker'] as const as sev}
+			{#each ['note', 'warning', 'blocker'] as const as sev (sev)}
 				<label class="flex items-center gap-1.5 text-xs cursor-pointer">
 					<input
 						type="radio"

@@ -145,7 +145,7 @@
 						value={snapshot.selectedParent ?? ''}
 						onchange={(event) => onSelectParent(event.currentTarget.value || null)}
 					>
-						{#each snapshot.parentOptions as parent}
+						{#each snapshot.parentOptions as parent (parent.hash)}
 							<option value={parent.hash}>{parent.label} {parent.shortHash}</option>
 						{/each}
 					</select>

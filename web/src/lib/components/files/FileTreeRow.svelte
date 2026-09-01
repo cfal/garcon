@@ -87,7 +87,7 @@
 	>
 		{#if row.level > 1}
 			<div class="pointer-events-none absolute inset-y-0 left-0" aria-hidden="true">
-				{#each Array(row.level - 1) as _, index}
+				{#each Array(row.level - 1) as _, index (index)}
 					<span class="absolute inset-y-0 w-px bg-border/70" style={`left: ${index * 16 + 7}px`}
 					></span>
 				{/each}

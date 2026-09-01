@@ -103,7 +103,7 @@
 				>
 					<div class="text-xs font-medium leading-5 text-muted-foreground">{participantLabel}</div>
 					<ul class="min-w-0 space-y-1.5">
-						{#each participants as participant}
+						{#each participants as participant, index (index)}
 							<li class="flex min-w-0 items-center gap-1.5 leading-5">
 								<span class="min-w-0 truncate text-sm" title={participant.label}>
 									{participant.label}

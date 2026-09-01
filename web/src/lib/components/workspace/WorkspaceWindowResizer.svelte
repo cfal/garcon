@@ -177,7 +177,7 @@
 		)}
 	>
 		<div class={cn('flex gap-0.5', isHorizontal ? 'flex-col' : 'flex-row')}>
-			{#each [0, 1, 2] as _}
+			{#each [0, 1, 2] as _, index (index)}
 				<div class="w-0.5 h-0.5 rounded-full bg-primary/50"></div>
 			{/each}
 		</div>

@@ -107,7 +107,7 @@
 >
 	{#if row.depth > 0}
 		<span class="pointer-events-none absolute inset-y-0 left-0" aria-hidden="true">
-			{#each Array(row.depth) as _, depthIndex}
+			{#each Array(row.depth) as _, depthIndex (depthIndex)}
 				<span
 					class="absolute inset-y-0 w-px bg-border/70"
 					style:left={`${treeGuideColumnLeft(depthIndex)}px`}

@@ -353,7 +353,7 @@
 						{m.command_no_matching()}
 					</div>
 				{:else}
-					{#each filteredCommands as item, i}
+					{#each filteredCommands as item, i (item.id)}
 						{@const Icon = getCategoryIcon(item.category)}
 						<button
 							id={optionIdFor(item.id)}

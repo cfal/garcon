@@ -12,7 +12,7 @@
 </script>
 
 <span class="code-highlight {className}"
-	>{prefix}{#if segments}{#each segments as segment}{#if segment.className}<span
+	>{prefix}{#if segments}{#each segments as segment, index (index)}{#if segment.className}<span
 					class={segment.className}>{segment.text}</span
 				>{:else}{segment.text}{/if}{/each}{:else}{text}{/if}</span
 >
