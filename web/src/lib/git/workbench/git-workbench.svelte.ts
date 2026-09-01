@@ -552,9 +552,7 @@ export class GitWorkbenchStore {
 				return;
 			this.hasCompletedInitialLoadValue = true;
 			this.repositoryError = null;
-			this.treeState.applyTree([], this.treeState.hasCommits, 'pending');
-			this.virtualReview.applySummary(null);
-			this.treeState.selectedFile = null;
+			if (this.loadedWorkbenchFingerprint !== null) this.isExternallyStale = true;
 			this.surfaceError(
 				`Failed to load Git workbench: ${error instanceof Error ? error.message : String(error)}`,
 			);

@@ -736,6 +736,29 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.repositoryError).toBeNull();
 			expect(wb.isInitialLoadPending).toBe(false);
 		});
+
+		it('keeps loaded workbench state when a refresh fails', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
+					root: [makeTreeFile('a.ts')],
+					selectedFile: 'a.ts',
+					workbenchFingerprint: 'v1:loaded',
+				}),
+			);
+
+			await wb.setTarget(makeTarget());
+			const loadedSummary = wb.review.summary;
+			mockedApi.getGitWorkbenchSnapshot.mockRejectedValueOnce(new Error('network error'));
+
+			await wb.refresh({ reason: 'manual' });
+
+			expect(wb.files.filePaths).toEqual(['a.ts']);
+			expect(wb.files.selectedFile).toBe('a.ts');
+			expect(wb.review.summary).toBe(loadedSummary);
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:loaded');
+			expect(wb.isExternallyStale).toBe(true);
+			expect(wb.lastError).toContain('network error');
+		});
 	});
 
 	describe('virtual review document', () => {
