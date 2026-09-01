@@ -486,7 +486,9 @@ export class TerminalRegistry {
 
 	#syncTransportDemand(): void {
 		if (this.orderedSessions.length > 0) {
-			if (this.#transport.status === 'idle') this.#transport.connect();
+			if (this.#transport.status === 'idle' || this.#transport.status === 'waiting-auth') {
+				this.#transport.connect();
+			}
 			return;
 		}
 		if (this.#transport.status !== 'idle' && this.#transport.status !== 'closed') {
