@@ -151,6 +151,9 @@
 				<div class="space-y-1">
 					{#each palette.filteredSnippets as snippet (snippet.id)}
 						<svelte:boundary>
+							<!-- The combobox keeps focus in the search input, tracks this option with aria-activedescendant, and handles keyboard selection through the input. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+							<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The ESLint rule misses the compiler warnings reported by svelte-check for this option. -->
+							<!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_interactive_supports_focus, a11y_click_events_have_key_events -->
 							<div
 								id={palette.optionIdFor(snippet.id)}
 								role="option"
