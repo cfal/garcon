@@ -178,6 +178,7 @@
 	{/if}
 	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page.
 	     html stays at 100% height so body overflows within it, enabling trackpad scroll. -->
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- The value is a static style literal with no external input. -->
 	{@html '<style>html { overflow: auto !important; } body { overflow: visible !important; height: auto !important; }</style>'}
 </svelte:head>
 

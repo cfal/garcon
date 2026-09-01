@@ -169,6 +169,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		{:else if renderError}
 			<div class="text-sm text-destructive">{renderError}</div>
 		{:else}
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- Mermaid generates this SVG in strict security mode. -->
 			{@html renderedSvg}
 		{/if}
 	</div>

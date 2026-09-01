@@ -55,6 +55,7 @@ Preserves escaped source while loading or when rendering fails.
 	title={renderFailed ? m.markdown_math_render_failed() : undefined}
 >
 	{#if renderedHtml}
+		<!-- eslint-disable-next-line svelte/no-at-html-tags -- KaTeX generates this markup from math text with trust disabled. -->
 		{@html renderedHtml}
 	{:else}
 		<code
