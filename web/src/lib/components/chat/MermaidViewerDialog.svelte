@@ -402,7 +402,8 @@
 			</div>
 		</header>
 
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- overflow-auto makes this region keyboard-scrollable; follow-up: sveltejs/svelte#11885 -->
+		<!-- Overflow makes this region keyboard-scrollable. Follow-up: sveltejs/svelte#11885. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
 			bind:this={viewportElement}
 			class:cursor-grabbing={dragging || pinching}

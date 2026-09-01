@@ -151,7 +151,6 @@
 				<div class="space-y-1">
 					{#each palette.filteredSnippets as snippet (snippet.id)}
 						<svelte:boundary>
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_interactive_supports_focus, a11y_click_events_have_key_events -- combobox pattern: focus stays in the search input, aria-activedescendant tracks this option, and keyboard selection runs through the input; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 							<div
 								id={palette.optionIdFor(snippet.id)}
 								role="option"
@@ -215,7 +214,8 @@
 
 		{#if palette.highlightedSnippet && !mobileKeyboardVisible}
 			<div class="snippet-template-preview-shell shrink-0 border-t border-border px-4 py-3">
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- overflow preview is keyboard-scrollable and exposes the complete template; follow-up: INLINE_SNIPPET_EXPANSION.md#a11y-suppression-register -->
+				<!-- The overflow preview is keyboard-scrollable and exposes the complete template. Follow-up: INLINE_SNIPPET_EXPANSION.md#a11y-suppression-register. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<pre
 					role="region"
 					tabindex="0"
