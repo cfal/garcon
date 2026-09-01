@@ -1556,6 +1556,7 @@
 	"sidebar_chats_move_to_top": "Move to top",
 	"sidebar_chats_new_chat": "New Chat",
 	"sidebar_chats_no_chats": "No chats yet",
+	"sidebar_chats_no_chats_hint": "Create your first chat to get started.",
 	"sidebar_chats_no_matching_chats": "No matching chats",
 	"sidebar_chats_pin": "Pin",
 	"sidebar_chats_pinned_insert_position": "Pinned chats are added to",

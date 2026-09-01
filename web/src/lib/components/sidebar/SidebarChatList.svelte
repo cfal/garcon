@@ -1,6 +1,8 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import Search from '@lucide/svelte/icons/search';
+	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
+	import { Button } from '$lib/components/ui/button';
 	import SidebarVirtualSortableChatList from './SidebarVirtualSortableChatList.svelte';
 	import {
 		SidebarChatReorderState,
@@ -32,6 +34,7 @@
 		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
+		onNewChat?: () => void;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
@@ -69,6 +72,7 @@
 		isMobile = false,
 		currentTime,
 		searchFilter,
+		onNewChat,
 		isMultiSelectMode = false,
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -163,6 +167,23 @@
 			</h3>
 			<p class="text-sm text-muted-foreground">{m.sidebar_chats_fetching_chats()}</p>
 		</div>
+	</div>
+{:else if !showChats && !isFiltered}
+	<div class="px-4 py-12 text-center md:py-8">
+		<div
+			class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3"
+		>
+			<MessageSquarePlus class="h-6 w-6 text-muted-foreground" />
+		</div>
+		<h3 class="mb-2 text-base font-medium text-foreground md:mb-1">
+			{m.sidebar_chats_no_chats()}
+		</h3>
+		<p class="text-sm text-muted-foreground">{m.sidebar_chats_no_chats_hint()}</p>
+		{#if onNewChat}
+			<Button variant="outline" size="sm" class="mt-4" onclick={onNewChat}>
+				{m.sidebar_chats_new_chat()}
+			</Button>
+		{/if}
 	</div>
 {:else if !showChats}
 	<div class="px-4 py-12 text-center md:py-8">

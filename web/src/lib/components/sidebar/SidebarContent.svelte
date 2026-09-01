@@ -21,6 +21,7 @@
 		isMobile?: boolean;
 		currentTime: Date;
 		searchFilter: string;
+		onNewChat?: () => void;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
 		displayOptions?: SidebarDisplayOptions;
@@ -57,6 +58,7 @@
 		isMobile = false,
 		currentTime,
 		searchFilter,
+		onNewChat,
 		isMultiSelectMode,
 		isMultiSelected,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -102,6 +104,7 @@
 		{isMobile}
 		{currentTime}
 		{searchFilter}
+		{onNewChat}
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{displayOptions}

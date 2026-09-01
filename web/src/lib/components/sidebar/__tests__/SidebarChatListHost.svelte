@@ -13,6 +13,7 @@
 		chats: ChatSessionRecord[];
 		filteredChats?: ChatSessionRecord[];
 		searchFilter?: string;
+		onNewChat?: () => void;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
 		displayOptions?: SidebarDisplayOptions;
@@ -31,6 +32,7 @@
 		chats,
 		filteredChats = chats,
 		searchFilter = '',
+		onNewChat,
 		selectedChatId = null,
 		isMobile = false,
 		displayOptions = {
@@ -100,6 +102,7 @@
 		{isMobile}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{searchFilter}
+		{onNewChat}
 		{displayOptions}
 		collapsedProjectKeys={effectiveCollapsedKeys}
 		onToggleProjectCollapsed={handleProjectCollapseToggle}

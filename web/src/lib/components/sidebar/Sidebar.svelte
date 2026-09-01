@@ -497,6 +497,7 @@
 			{isMobile}
 			{currentTime}
 			searchFilter={sidebarSearch.activeQuery}
+			{onNewChat}
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
 			{displayOptions}
