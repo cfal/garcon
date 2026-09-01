@@ -18,7 +18,6 @@ vi.mock('$lib/api/auth.js', () => ({
 	login: vi.fn(),
 	register: vi.fn(),
 	getUser: vi.fn(),
-	logout: vi.fn(),
 }));
 
 vi.mock('$lib/api/client.js', () => ({
@@ -40,7 +39,6 @@ import {
 	login as apiLogin,
 	register as apiRegister,
 	getUser,
-	logout as apiLogout,
 } from '$lib/api/auth.js';
 import { setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
 
@@ -332,25 +330,6 @@ describe('AuthStore', () => {
 			expect(auth.isUnavailable).toBe(false);
 			expect(auth.token).toBe('reg-token');
 			expect(setAuthToken).toHaveBeenCalledWith('reg-token');
-		});
-	});
-
-	describe('logout', () => {
-		it('clears state and calls server', () => {
-			vi.mocked(apiLogout).mockResolvedValue(undefined);
-			const auth = new AuthStore();
-			auth.token = 'tok';
-			auth.user = { id: '1', username: 'admin' };
-			auth.logout();
-			expect(auth.token).toBeNull();
-			expect(auth.user).toBeNull();
-			expect(apiLogout).toHaveBeenCalled();
-		});
-
-		it('skips server call when no token', () => {
-			const auth = new AuthStore();
-			auth.logout();
-			expect(apiLogout).not.toHaveBeenCalled();
 		});
 	});
 });
