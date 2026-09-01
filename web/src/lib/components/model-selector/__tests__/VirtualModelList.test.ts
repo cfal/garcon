@@ -57,6 +57,27 @@ describe('VirtualModelList', () => {
 		expect(firstOption.className).toContain('touch-pan-y');
 	});
 
+	it('distinguishes the committed selection from the active option', () => {
+		render(VirtualModelList, {
+			props: {
+				rows: makeRows(50),
+				selectedValue: 'model-0',
+				activeIndex: 1,
+				listId: 'models',
+				ariaLabel: 'Models',
+				onActiveIndexChange: vi.fn(),
+				onSelect: vi.fn(),
+			},
+		});
+
+		const selectedOption = screen.getByRole('option', { name: 'Model 0' });
+		const activeOption = screen.getByRole('option', { name: 'Model 1' });
+
+		expect(selectedOption.getAttribute('aria-selected')).toBe('true');
+		expect(activeOption.getAttribute('aria-selected')).toBe('false');
+		expect(activeOption.className).toContain('bg-accent');
+	});
+
 	it('selects visible rows by click', async () => {
 		const onSelect = vi.fn();
 		render(VirtualModelList, {
