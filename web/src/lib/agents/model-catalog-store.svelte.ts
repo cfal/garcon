@@ -634,7 +634,8 @@ export class ModelCatalogStore {
 		this.version += 1;
 	}
 
-	async refreshIfStale(_ttlMs: number = DEFAULT_TTL_MS): Promise<void> {
+	async refreshIfStale(ttlMs: number = DEFAULT_TTL_MS): Promise<void> {
+		if (!this.isStale(ttlMs)) return;
 		await this.syncWithServer();
 	}
 
