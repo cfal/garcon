@@ -131,15 +131,26 @@ describe('sidebar search interactions', () => {
 				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
 			),
 		);
-		const last = focusable.at(-1);
-		expect(last).toBeTruthy();
-		last?.focus();
+		const responsiveCloseButton = focusable.at(-1);
+		const lastVisible = focusable.at(-2);
+		expect(responsiveCloseButton).toBeTruthy();
+		expect(lastVisible).toBeTruthy();
+		responsiveCloseButton!.hidden = true;
+		lastVisible!.focus();
 
-		await fireEvent.keyDown(last!, { key: 'Tab', bubbles: true });
+		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
 		expect(document.activeElement).toBe(input);
 
 		await fireEvent.keyDown(input, { key: 'Tab', shiftKey: true, bubbles: true });
-		expect(document.activeElement).toBe(last);
+		expect(document.activeElement).toBe(lastVisible);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', bubbles: true });
+		expect(document.activeElement).toBe(input);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true, bubbles: true });
+		expect(document.activeElement).toBe(lastVisible);
 	});
 
 	it('opens a deep virtualized highlighted chat from the query input', async () => {

@@ -96,19 +96,26 @@
 		highlightRevealVersion += 1;
 	}
 
+	function isVisibleFocusableElement(element: HTMLElement): boolean {
+		if (element.hidden) return false;
+		const style = window.getComputedStyle(element);
+		return style.display !== 'none' && style.visibility !== 'hidden';
+	}
+
 	function trapDialogFocus(e: KeyboardEvent): boolean {
 		if (contentRole !== 'dialog' || e.key !== 'Tab' || !dialogRef) return false;
 		const focusable = Array.from(
 			dialogRef.querySelectorAll<HTMLElement>(
 				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
 			),
-		);
+		).filter(isVisibleFocusableElement);
 		if (focusable.length === 0) {
 			e.preventDefault();
 			return true;
 		}
 		const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-		const atBoundary = e.shiftKey ? currentIndex <= 0 : currentIndex === focusable.length - 1;
+		const atBoundary =
+			currentIndex === -1 || (e.shiftKey ? currentIndex === 0 : currentIndex === focusable.length - 1);
 		if (!atBoundary) return false;
 		e.preventDefault();
 		focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
