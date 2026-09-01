@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { runCarryOverMigrationAtStartup } from '../server.ts';
 
 const originalDateNow = Date.now;
@@ -12,6 +13,16 @@ afterEach(() => {
 });
 
 describe('startup carryover migration progress', () => {
+  it('finishes the version ladder before ownership recovery can rewrite the registry', () => {
+    const source = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+    const finishAt = source.indexOf('await workspaceMigrations.finish()');
+    const recoverAt = source.indexOf('await agentOwnership.initialize()');
+
+    expect(finishAt).toBeGreaterThan(-1);
+    expect(recoverAt).toBeGreaterThan(-1);
+    expect(finishAt).toBeLessThan(recoverAt);
+  });
+
   it('logs start, bounded elapsed progress, and completion', async () => {
     let now = 1_000;
     let heartbeat;

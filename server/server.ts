@@ -318,6 +318,8 @@ export async function startServer(): Promise<void> {
       integrations: integrationRegistry,
       ledger: transcriptLedger,
     });
+    // Persists the version before ownership recovery can remove chats and rewrite the migrated registry.
+    await workspaceMigrations.finish();
     await agentOwnership.initialize();
     const carryOverGarbageCollector = new CarryOverGarbageCollector({
       registry: chatRegistry,
@@ -326,7 +328,6 @@ export async function startServer(): Promise<void> {
     });
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
-    await workspaceMigrations.finish();
     // A resumed rollback restores the source workspace version before the
     // ladder opens, so its re-migration skips this the way a first migration
     // does and keeps its rollback window.
