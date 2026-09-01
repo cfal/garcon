@@ -152,7 +152,7 @@ export class WorkspaceShortcutDispatcher {
 			this.#toggleCommandMenu?.();
 			return;
 		}
-		if (matches('open-settings')) {
+		if (matches('open-settings') && !terminalOwnsInput) {
 			event.preventDefault();
 			this.deps.appShell.openSettings();
 			return;
