@@ -13,6 +13,7 @@ export const CUSTOM_TRANSIENT_SOURCES = [
 	'components/chat/PromptComposer.svelte',
 	'components/chat/SlashCommandMenu.svelte',
 	'components/git/GitCommentPopover.svelte',
+	'components/layout/AppShell.svelte',
 	'components/shared/CommandMenu.svelte',
 ] as const;
 

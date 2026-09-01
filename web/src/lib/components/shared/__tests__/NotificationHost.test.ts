@@ -14,6 +14,8 @@ describe('NotificationHost', () => {
 
 		render(NotificationHost, { notifications });
 
+		const region = screen.getByRole('region', { name: 'Notifications' });
+		expect(region.getAttribute('aria-live')).toBeNull();
 		expect(screen.getByRole('alert').textContent).toContain('Delete failed');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));

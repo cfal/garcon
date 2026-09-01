@@ -1321,6 +1321,51 @@ describe('WorkspaceCoordinator', () => {
 		expect(handler).not.toHaveBeenCalled();
 	});
 
+	it('routes chat navigation shortcuts within a main-inert chat list', () => {
+		const { coordinator, transientLayers, appShell, files } = createHarness();
+		const requestNavigateChatBelow = vi.fn();
+		const dispatcher = new WorkspaceShortcutDispatcher({
+			workspace: coordinator,
+			transients: transientLayers,
+			appShell: appShell as never,
+			navigation: {
+				requestNavigateChatAbove: vi.fn(),
+				requestNavigateChatBelow,
+			} as never,
+			files: files as never,
+			localSettings: { globalShortcuts: {} },
+		});
+		const chatList = document.createElement('div');
+		chatList.dataset.workspaceChatList = '';
+		const target = document.createElement('button');
+		chatList.append(target);
+		document.body.append(chatList);
+		const unregister = transientLayers.register({
+			id: 'mobile-chat-list',
+			kind: 'sidebar-overlay',
+			modality: 'main-inert',
+			isOpen: () => true,
+			element: () => chatList,
+			onEscape: () => true,
+			restoreFocus: () => undefined,
+		});
+		target.addEventListener('keydown', (event) => dispatcher.handle(event));
+		const event = new KeyboardEvent('keydown', {
+			key: 'n',
+			ctrlKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		target.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(requestNavigateChatBelow).toHaveBeenCalledOnce();
+		unregister();
+		chatList.remove();
+	});
+
 	it('does not restore focus or recency after a presentation is superseded', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });

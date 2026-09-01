@@ -459,6 +459,13 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
 	});
 
+	it('names permission and thinking controls by purpose and active value', () => {
+		render(PromptComposerTestHost);
+
+		expect(screen.getByRole('button', { name: 'Permission mode: Default' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Thinking effort: Default' })).toBeTruthy();
+	});
+
 	it('keeps the next draft editable but blocks sending during direct admission', async () => {
 		const onsubmit = vi.fn();
 		const { rerender } = render(PromptComposerTestHost, {

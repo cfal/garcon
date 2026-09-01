@@ -90,6 +90,16 @@
 	const activeThinking = $derived(
 		thinkingOptions.find((option) => option.value === selectedThinking) ?? thinkingOptions[0],
 	);
+	const permissionControlLabel = $derived(
+		activePermission
+			? `${m.chat_composer_permission_mode()}: ${activePermission.label}`
+			: m.chat_composer_permission_mode(),
+	);
+	const thinkingControlLabel = $derived(
+		activeThinking
+			? `${m.chat_composer_thinking_effort()}: ${activeThinking.label}`
+			: m.chat_composer_thinking_effort(),
+	);
 	const composerActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [];
 		if (onOpenExpandedEditor) {
@@ -148,6 +158,7 @@
 				<DropdownMenuTrigger
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
 					title={activePermission?.label ?? m.chat_composer_permission_mode()}
+					aria-label={permissionControlLabel}
 				>
 					{#if activePermission}
 						<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
@@ -172,6 +183,7 @@
 					data-rainbow={activeThinking?.rainbow ? 'true' : undefined}
 					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
 					title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
+					aria-label={thinkingControlLabel}
 				>
 					{#if activeThinking}
 						<ComposerModeIcon

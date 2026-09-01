@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
+	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
@@ -31,6 +32,7 @@
 		getSidebarProjectCollapse,
 		getGhCapability,
 		getWorkspaceCoordinator,
+		getTransientLayers,
 		setChatDrafts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -54,6 +56,8 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -65,6 +69,7 @@
 	const projectCollapse = getSidebarProjectCollapse();
 	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
+	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
 	setChatDrafts(chatDrafts);
@@ -72,6 +77,18 @@
 		notifications,
 	});
 	const chatActionDialogs = new ChatActionDialogsState();
+	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
+	const mobileSidebarLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('mobile-sidebar'),
+		kind: 'sidebar-overlay',
+		modality: 'main-inert',
+		onEscape: () => {
+			closeMobileSidebar();
+			return true;
+		},
+		restoreFocus: restoreMobileSidebarFocus,
+	});
 	const chatActionController = new ChatActionController({
 		get chats() {
 			return sessions.orderedChats;
@@ -417,11 +434,31 @@
 	}
 
 	function toggleMobileSidebar() {
-		appShell.setSidebarOpen(!appShell.sidebarOpen);
+		if (appShell.sidebarOpen) {
+			closeMobileSidebar();
+			return;
+		}
+		transientLayers.open('main-inert', () => appShell.setSidebarOpen(true));
 	}
 
 	function closeMobileSidebar() {
 		appShell.setSidebarOpen(false);
+	}
+
+	function captureMobileSidebarFocusReturnTarget(): void {
+		mobileSidebarFocusReturnTarget =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	}
+
+	function restoreMobileSidebarFocus(): void {
+		const target = mobileSidebarFocusReturnTarget;
+		mobileSidebarFocusReturnTarget = null;
+		if (target?.isConnected) target.focus({ preventScroll: true });
+	}
+
+	function handleMobileSidebarCloseAutoFocus(event: Event): void {
+		event.preventDefault();
+		restoreMobileSidebarFocus();
 	}
 
 	function handleMobileChatSelect(chatId: string): void {
@@ -649,24 +686,30 @@
 	class:h-dvh={!isMobile}
 	class:flex-col={isMobile}
 >
-	{#if isMobile && appShell.sidebarOpen}
-		<div class="fixed inset-0 z-40">
-			<button
-				class="absolute inset-0 transient-backdrop"
+	{#if isMobile}
+		<DialogPrimitive.Root
+			open={appShell.sidebarOpen}
+			onOpenChange={(open) => {
+				if (!open) closeMobileSidebar();
+			}}
+		>
+			<DialogPrimitive.Overlay
+				class="fixed inset-0 z-40 transient-backdrop"
 				onclick={closeMobileSidebar}
-				aria-label={m.layout_close_sidebar()}
-			></button>
-			<div
+			/>
+			<DialogPrimitive.Content
 				data-workspace-chat-list
-				role="navigation"
 				aria-label={m.layout_chat_list()}
-				class="absolute inset-y-0 left-0 z-50 w-[85%] max-w-sm bg-card shadow-2xl"
+				class="fixed inset-y-0 left-0 z-50 h-full w-[85%] max-w-sm bg-card shadow-2xl"
+				onOpenAutoFocus={captureMobileSidebarFocusReturnTarget}
+				onCloseAutoFocus={handleMobileSidebarCloseAutoFocus}
 				onfocusin={() => workspace.noteChatListFocus()}
 				onpointerdown={() => workspace.noteChatListFocus()}
+				{@attach mobileSidebarLayer}
 			>
 				{@render sidebarContent(true, handleMobileChatSelect)}
-			</div>
-		</div>
+			</DialogPrimitive.Content>
+		</DialogPrimitive.Root>
 	{/if}
 
 	<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">

@@ -132,9 +132,10 @@ export class WorkspaceShortcutDispatcher {
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
 		const matches = (id: GlobalShortcutId) => this.matchesGlobalShortcut(id, event);
 		const explicitOwner = this.#ownerForTarget(event.target);
-		const modalSurfaceOwnsTarget =
-			explicitOwner?.kind === 'surface' && this.deps.transients.ownsTopModalTarget(event.target);
-		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
+		const modalOwnsTarget =
+			(explicitOwner?.kind === 'surface' || explicitOwner?.kind === 'chat-list') &&
+			this.deps.transients.ownsTopModalTarget(event.target);
+		if (this.deps.transients.makesMainInert && !modalOwnsTarget) {
 			return;
 		}
 		if (this.#isLocallyOwned(event)) return;

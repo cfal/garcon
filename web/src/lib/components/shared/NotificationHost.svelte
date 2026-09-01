@@ -55,7 +55,6 @@
 		class="fixed inset-x-3 top-[calc(env(safe-area-inset-top,0px)+0.75rem)] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:start-[var(--notification-inline-start-desktop)] sm:end-auto sm:w-96"
 		style={notificationStyle}
 		aria-label={m.notifications_region()}
-		aria-live="polite"
 	>
 		{#each visibleNotifications as notification (notification.id)}
 			<div

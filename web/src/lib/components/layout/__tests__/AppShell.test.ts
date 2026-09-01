@@ -7,6 +7,9 @@ import {
 import { reduceWorkspaceLayout } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 import { HOVER_CAPABLE_MEDIA_QUERY } from '$lib/layout/desktop-layout.js';
+import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
+import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -31,6 +34,7 @@ vi.mock('$lib/context', () => ({
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getTransientLayers: () => testContext.current?.transientLayers,
 	getWs: () => testContext.current?.ws,
 	setChatDrafts: chatDraftContext.set,
 }));
@@ -131,6 +135,11 @@ class TestMediaQueryList {
 function installContext(): AppShellBreakpointWorkspace {
 	const workspace = new AppShellBreakpointWorkspace();
 	const noOpSubscription = () => () => undefined;
+	const appShell = new AppShellStore();
+	vi.spyOn(appShell, 'setSidebarOpen');
+	vi.spyOn(appShell, 'requestComposerFocus');
+	vi.spyOn(appShell, 'requestSidebarRecenterToSelected');
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	let selectedChatId: string | null = null;
 	const sessions = {
 		orderedChats: [],
@@ -157,28 +166,13 @@ function installContext(): AppShellBreakpointWorkspace {
 	};
 	testContext.current = {
 		workspace,
+		transientLayers,
 		navigation: {
 			onNavigateChatAboveRequested: noOpSubscription,
 			onNavigateChatBelowRequested: noOpSubscription,
 		},
 		sessions,
-		appShell: {
-			sidebarOpen: false,
-			keyboardHeight: 0,
-			showSettings: false,
-			showScheduledPrompts: false,
-			showSnippets: false,
-			projectBasePath: '',
-			setSidebarOpen: vi.fn(),
-			openNewChatDialog: vi.fn(),
-			requestComposerFocus: vi.fn(),
-			requestSidebarRecenterToSelected: vi.fn(),
-			openScheduledPrompts: vi.fn(),
-			openSettings: vi.fn(),
-			onNewChatRequested: noOpSubscription,
-			onRenameSelectedChatRequested: noOpSubscription,
-			onDeleteSelectedChatRequested: noOpSubscription,
-		},
+		appShell,
 		ws: {
 			isConnected: false,
 			connectionStatus: {
@@ -222,6 +216,7 @@ describe('AppShell responsive workspace binding', () => {
 
 	afterEach(() => {
 		cleanup();
+		document.querySelector('[data-mobile-sidebar-focus-trigger]')?.remove();
 		testContext.current = null;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
@@ -291,14 +286,73 @@ describe('AppShell responsive workspace binding', () => {
 		};
 		appShell.sidebarOpen = true;
 		breakpointMediaQuery.matches = true;
-		render(AppShell);
+		const { container } = render(AppShell);
 
 		await waitFor(() => expect(workspace.enterCalls).toBe(1));
-		const backdrop = screen.getByRole('button', { name: 'Hide sidebar' });
+		await screen.findByRole('dialog', { name: 'Chats' });
+		const backdrop = container.querySelector<HTMLElement>('.transient-backdrop');
+		if (!backdrop) throw new Error('Expected mobile sidebar backdrop');
 		expect(backdrop.classList.contains('transient-backdrop')).toBe(true);
 
+		await fireEvent.pointerDown(backdrop);
 		await fireEvent.click(backdrop);
-		expect(appShell.setSidebarOpen).toHaveBeenCalledWith(false);
+		await waitFor(() => expect(appShell.setSidebarOpen).toHaveBeenCalledWith(false));
+		expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull();
+	});
+
+	it('opens the mobile drawer through the main-inert handoff', async () => {
+		const workspace = installContext();
+		const transientLayers = testContext.current?.transientLayers as TransientLayerRegistry;
+		const open = vi.spyOn(transientLayers, 'open');
+		breakpointMediaQuery.matches = true;
+		render(AppShell);
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open chat drawer' }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Chats' });
+		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
+		expect(transientLayers.hasPendingMainInert).toBe(false);
+		expect(transientLayers.makesMainInert).toBe(true);
+		expect(transientLayers.ownsTopModalTarget(dialog)).toBe(true);
+	});
+
+	it('contains mobile drawer focus, closes on registered Escape, and restores focus', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as AppShellStore;
+		const transientLayers = testContext.current?.transientLayers as TransientLayerRegistry;
+		breakpointMediaQuery.matches = true;
+		render(AppShell);
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		const trigger = document.createElement('button');
+		trigger.dataset.mobileSidebarFocusTrigger = '';
+		trigger.textContent = 'Open chat drawer';
+		document.body.append(trigger);
+		trigger.focus();
+
+		appShell.setSidebarOpen(true);
+		const dialog = await screen.findByRole('dialog', { name: 'Chats' });
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+		expect(transientLayers.makesMainInert).toBe(true);
+
+		trigger.focus();
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+		const focusedElement = document.activeElement;
+		if (!(focusedElement instanceof HTMLElement)) {
+			throw new Error('Expected mobile drawer to own focus');
+		}
+		const escapeEvent = new KeyboardEvent('keydown', {
+			key: 'Escape',
+			bubbles: true,
+			cancelable: true,
+		});
+		expect(transientLayers.handleEscape(escapeEvent)).toBe(true);
+		expect(escapeEvent.defaultPrevented).toBe(true);
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
+		expect(transientLayers.makesMainInert).toBe(false);
+		await waitFor(() => expect(document.activeElement).toBe(trigger));
+		trigger.remove();
 	});
 
 	it('does not render the mobile drawer backdrop on desktop', async () => {
@@ -308,7 +362,7 @@ describe('AppShell responsive workspace binding', () => {
 		render(AppShell);
 
 		await waitFor(() => expect(workspace.exitCalls).toBe(1));
-		expect(screen.queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull();
 	});
 
 	it('keeps chat selection, routing, Chat presentation, and composer focus in AppShell', async () => {
