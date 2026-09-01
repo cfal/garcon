@@ -16,7 +16,7 @@
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 	const newChatShortcut = $derived.by(() => {
-		const binding = getEffectiveGlobalShortcut('new-chat', localSettings.globalShortcuts);
+		const binding = getEffectiveGlobalShortcut('new-chat', localSettings.globalShortcuts ?? {});
 		return binding ? formatGlobalShortcut(binding, isMac) : null;
 	});
 
