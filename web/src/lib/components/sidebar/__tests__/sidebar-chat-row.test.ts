@@ -389,6 +389,25 @@ describe('shared sidebar chat row', () => {
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
+	it('exposes the multi-select row as a keyboard-reachable checkbox', async () => {
+		const onMultiSelectToggle = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isMultiSelectMode: true,
+			isMultiSelected: true,
+			onMultiSelectToggle,
+		});
+
+		const checkbox = screen.getByRole('checkbox', { name: 'Select Shared row chat' });
+		expect(checkbox.tagName).toBe('BUTTON');
+		expect(checkbox.tabIndex).toBe(0);
+		expect(checkbox.getAttribute('aria-checked')).toBe('true');
+		expect(checkbox.querySelector('[role="checkbox"]')).toBeNull();
+
+		await fireEvent.click(checkbox, { shiftKey: true });
+		expect(onMultiSelectToggle).toHaveBeenCalledWith('chat-1', true);
+	});
+
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
