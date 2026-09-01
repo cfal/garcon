@@ -380,6 +380,153 @@ describe('legacy carryover migration', () => {
     ]);
   });
 
+  it('quarantines a linked chat whose manifest is missing', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    const healthyId = '55555555-5555-4555-8555-555555555555';
+    await writeLinkedMaterializedNode({
+      id: healthyId,
+      parentId: null,
+      source: linkedSource('codex', 'gpt'),
+      target: { agentId: 'claude', model: 'opus' },
+      messages: [new UserMessage(TIMESTAMP, 'healthy-linked-user')],
+    });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+      [POST_MIGRATION_CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: healthyId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const registry = await readJson('chats.json');
+    expect(registry.version).toBe(5);
+    expect(registry.sessions[CHAT_ID].carryOverSegments).toEqual([]);
+    expect(registry.sessions[CHAT_ID].carryOverMigrationQuarantine).toMatchObject({
+      errorCode: 'MISSING_CARRYOVER_NODE',
+    });
+    expect(registry.sessions[POST_MIGRATION_CHAT_ID].carryOverMigrationQuarantine).toBeNull();
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    expect(await store.loadAll(registry.sessions[POST_MIGRATION_CHAT_ID].carryOverSegments))
+      .toEqual([
+        expect.objectContaining({ type: 'user-message', content: 'healthy-linked-user' }),
+        expect.objectContaining({ type: 'agent-switch' }),
+      ]);
+  });
+
+  it('fails migration when the linked node store is missing', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration when the linked node store is empty', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), {
+      recursive: true,
+    });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Linked carryover node store is unavailable');
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration when the linked node store is not a directory', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts'), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), 'invalid');
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Linked carryover node store is unavailable');
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration on hard linked-manifest filesystem errors', async () => {
+    const nodeId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(
+      workspaceDir,
+      'carryover-transcripts',
+      'nodes',
+      nodeId,
+      'manifest.json',
+    ), { recursive: true });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: nodeId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toMatchObject({ code: 'EISDIR' });
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('quarantines a linked chat whose page is missing', async () => {
+    const nodeId = '44444444-4444-4444-8444-444444444444';
+    await writeLinkedMaterializedNode({
+      id: nodeId,
+      parentId: null,
+      source: linkedSource('codex', 'gpt'),
+      target: { agentId: 'claude', model: 'opus' },
+      messages: [new UserMessage(TIMESTAMP, 'missing-page-user')],
+    });
+    const pagesDir = path.join(workspaceDir, 'carryover-transcripts', 'nodes', nodeId, 'pages');
+    const [pageFile] = await fs.readdir(pagesDir);
+    if (!pageFile) throw new Error('Linked node fixture did not create a page');
+    await fs.rm(path.join(pagesDir, pageFile));
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: nodeId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    expect((await readJson('chats.json')).sessions[CHAT_ID].carryOverMigrationQuarantine)
+      .toMatchObject({ errorCode: 'MISSING_CARRYOVER_PAGE' });
+  });
+
   it('quarantines malformed chat history without treating it as empty history', async () => {
     await writeLegacyWorkspace({
       segments: [{ agentId: 'codex', model: 'gpt', messages: [{ type: 'invalid' }] }],
@@ -717,6 +864,19 @@ describe('legacy carryover migration', () => {
       messageCount: messages.length,
       pages: encoded.map((page) => page.descriptor),
     }));
+  }
+
+  async function writeLinkedRegistry(sessions) {
+    await Promise.all([
+      fs.writeFile(
+        path.join(workspaceDir, 'chats.json'),
+        JSON.stringify({ version: 4, sessions }),
+      ),
+      fs.writeFile(
+        path.join(workspaceDir, 'agent-ownership-journal.json'),
+        JSON.stringify({ version: 2, ownershipIntents: [], transferCleanup: [] }),
+      ),
+    ]);
   }
 
   function readJson(relativePath) {

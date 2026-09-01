@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -10,6 +10,7 @@ import {
   type ChatMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
+import { encodeCarryOverPages } from '../../../server/chats/carryover-page-codec.js';
 import { rollbackLegacyCarryOverMigration } from '../../../server/chats/chat-carryover-rollback.js';
 import { ChatRegistry } from '../../../server/chats/store.js';
 import { transcriptViewId } from '../../../server/ledger/contracts.js';
@@ -22,6 +23,8 @@ import {
 
 const CHAT_ID = '1786120000000001';
 const POST_MIGRATION_CHAT_ID = '1786120000000002';
+const HEALTHY_LINKED_CHAT_ID = '1786120000000003';
+const HEALTHY_LINKED_NODE_ID = '55555555-5555-4555-8555-555555555555';
 const TIMESTAMP = '2026-08-07T00:00:00.000Z';
 
 describe('carryover bootstrap migration', () => {
@@ -165,6 +168,48 @@ describe('carryover bootstrap migration', () => {
       { prepareWorkspace: writeLegacyWorkspace },
     );
   }, 30_000);
+
+  test('boots after quarantining a chat whose linked manifest is missing', async () => {
+    await withIntegrationFixture(
+      'carryover-missing-linked-manifest',
+      async (fixture) => {
+        const registry = await readJson<RegistryFile>(fixture, 'chats.json');
+        expect(registry.version).toBe(5);
+        expect(registry.sessions[CHAT_ID]).toMatchObject({
+          carryOverSegments: [],
+          carryOverMigrationQuarantine: {
+            errorCode: 'MISSING_CARRYOVER_NODE',
+          },
+        });
+        expect((await fixture.client.listChats()).sessions.map((chat) => chat.id))
+          .toEqual(expect.arrayContaining([CHAT_ID, HEALTHY_LINKED_CHAT_ID]));
+
+        await fixture.restartGarcon();
+
+        expect(await readdir(join(
+          fixture.dirs.workspace,
+          'carryover-transcripts',
+          'nodes',
+        ))).toContain(HEALTHY_LINKED_NODE_ID);
+        expect((await readJson<RegistryFile>(fixture, 'chats.json')).sessions[CHAT_ID])
+          .toMatchObject({
+            carryOverMigrationQuarantine: { errorCode: 'MISSING_CARRYOVER_NODE' },
+          });
+        const healthyHistory = await fixture.client.getMessages(HEALTHY_LINKED_CHAT_ID);
+        expect(healthyHistory.messages.map(({ message }) => renderedIdentity(message))).toEqual([
+          { type: 'user-message', content: 'healthy-linked-user' },
+          {
+            type: 'agent-switch',
+            fromAgentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+            toAgentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+            fromModel: 'legacy-openai-model',
+            toModel: 'legacy-anthropic-model',
+          },
+        ]);
+      },
+      { prepareWorkspace: writeMissingManifestWorkspace },
+    );
+  }, 30_000);
 });
 
 interface RegistryFile {
@@ -177,6 +222,9 @@ interface RegistryFile {
       readonly storedMessageCount: number;
       readonly visibleMessageCount: number;
     }[];
+    readonly carryOverMigrationQuarantine?: {
+      readonly errorCode: string;
+    } | null;
   }>;
 }
 
@@ -254,6 +302,102 @@ async function writeLegacyWorkspace(directories: IntegrationDirectories): Promis
       join(directories.workspace, 'agent-ownership-journal.json'),
       JSON.stringify({ version: 1, intents: [] }),
     ),
+  ]);
+}
+
+async function writeMissingManifestWorkspace(directories: IntegrationDirectories): Promise<void> {
+  const agentA = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
+  const agentB = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
+  const nodeDirectory = join(
+    directories.workspace,
+    'carryover-transcripts',
+    'nodes',
+    HEALTHY_LINKED_NODE_ID,
+  );
+  const messages = [new UserMessage(TIMESTAMP, 'healthy-linked-user')];
+  const encoded = await encodeCarryOverPages(messages);
+  await mkdir(join(nodeDirectory, 'pages'), { recursive: true });
+  await Promise.all(encoded.map((page) => (
+    writeFile(join(nodeDirectory, page.descriptor.file), page.bytes)
+  )));
+  await Promise.all([
+    writeFile(
+      join(directories.workspace, 'workspace-version.json'),
+      JSON.stringify({ version: 3 }),
+    ),
+    writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
+      version: 4,
+      sessions: {
+        [CHAT_ID]: {
+          agentId: agentA,
+          agentSessionId: null,
+          nativeSession: null,
+          agentOwnershipEpoch: 'legacy-openai-epoch',
+          agentSettingsById: {
+            [agentA]: { ownerId: agentA, schemaVersion: 1, values: {} },
+            [agentB]: { ownerId: agentB, schemaVersion: 1, values: {} },
+          },
+          projectPath: directories.project,
+          tags: [],
+          model: 'legacy-openai-model',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          lastReadAt: null,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          carryOverHeadId: '44444444-4444-4444-8444-444444444444',
+          nativeSeedReceipt: null,
+          carryOverMigrationQuarantine: null,
+        },
+        [HEALTHY_LINKED_CHAT_ID]: {
+          agentId: agentB,
+          agentSessionId: null,
+          nativeSession: null,
+          agentOwnershipEpoch: 'legacy-anthropic-epoch',
+          agentSettingsById: {
+            [agentA]: { ownerId: agentA, schemaVersion: 1, values: {} },
+            [agentB]: { ownerId: agentB, schemaVersion: 1, values: {} },
+          },
+          projectPath: directories.project,
+          tags: [],
+          model: 'legacy-anthropic-model',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          lastReadAt: null,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          carryOverHeadId: HEALTHY_LINKED_NODE_ID,
+          nativeSeedReceipt: null,
+          carryOverMigrationQuarantine: null,
+        },
+      },
+    })),
+    writeFile(
+      join(directories.workspace, 'agent-ownership-journal.json'),
+      JSON.stringify({ version: 2, ownershipIntents: [], transferCleanup: [] }),
+    ),
+    writeFile(join(nodeDirectory, 'manifest.json'), JSON.stringify({
+      version: 1,
+      kind: 'materialized',
+      id: HEALTHY_LINKED_NODE_ID,
+      parentId: null,
+      createdAt: TIMESTAMP,
+      source: {
+        agentId: agentA,
+        model: 'legacy-openai-model',
+        nativeSessionId: 'legacy-openai-session',
+        nativeRevision: 'legacy-openai-revision',
+      },
+      boundary: {
+        kind: 'handoff',
+        targetAtCapture: { agentId: agentB, model: 'legacy-anthropic-model' },
+      },
+      seedSanitation: 'not-applicable',
+      messageCount: messages.length,
+      pages: encoded.map((page) => page.descriptor),
+    })),
   ]);
 }
 

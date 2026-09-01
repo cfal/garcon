@@ -29,9 +29,12 @@ export interface LegacyCarryOverSegment {
 }
 
 export class LegacyCarryOverDataError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly code: string | undefined;
+
+  constructor(message: string, options?: ErrorOptions & { readonly code?: string }) {
     super(message, options);
     this.name = 'LegacyCarryOverDataError';
+    this.code = options?.code;
   }
 }
 
@@ -299,8 +302,11 @@ async function readLinkedNode(workspaceDir: string, id: string): Promise<CarryOv
     );
     return parseCarryOverNode(JSON.parse(raw), id);
   } catch (error) {
-    if (isFileSystemError(error)) throw error;
-    throw new LegacyCarryOverDataError(`Invalid linked carryover node ${id}`, { cause: error });
+    if (isFileSystemError(error) && error.code !== 'ENOENT') throw error;
+    throw new LegacyCarryOverDataError(`Invalid linked carryover node ${id}`, {
+      cause: error,
+      ...(isFileSystemError(error) ? { code: 'MISSING_CARRYOVER_NODE' } : {}),
+    });
   }
 }
 
@@ -341,8 +347,11 @@ async function readLinkedMessages(
       ));
     }
   } catch (error) {
-    if (isFileSystemError(error)) throw error;
-    throw new LegacyCarryOverDataError(`Invalid linked carryover pages for ${node.id}`, { cause: error });
+    if (isFileSystemError(error) && error.code !== 'ENOENT') throw error;
+    throw new LegacyCarryOverDataError(`Invalid linked carryover pages for ${node.id}`, {
+      cause: error,
+      ...(isFileSystemError(error) ? { code: 'MISSING_CARRYOVER_PAGE' } : {}),
+    });
   }
   if (messages.length !== node.messageCount) {
     throw new LegacyCarryOverDataError(`Linked carryover message count differs for ${node.id}`);
@@ -378,7 +387,7 @@ function legacyStringValue(value: unknown, field: string): string {
   return value;
 }
 
-function isFileSystemError(error: unknown): boolean {
+function isFileSystemError(error: unknown): error is NodeJS.ErrnoException {
   return Boolean(
     error
     && typeof error === 'object'

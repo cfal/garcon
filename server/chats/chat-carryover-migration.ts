@@ -75,13 +75,20 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const registryPath = path.join(workspaceDir, 'chats.json');
   const carryOverPath = path.join(workspaceDir, LEGACY_CARRYOVER_FILE);
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
+  const registryBytes = await fs.readFile(registryPath);
+  const sourceRegistryV4 = registryVersion === 4 ? parseSourceRegistryV4(registryBytes) : null;
+  if (
+    sourceRegistryV4
+    && Object.values(sourceRegistryV4.sessions).some((entry) => nullableString(entry.carryOverHeadId))
+  ) {
+    await assertLinkedNodeStoreAvailable(workspaceDir);
+  }
   const sourceBytes = await optionalFileSize(carryOverPath)
     + (registryVersion === 4
       ? await directorySize(path.join(workspaceDir, 'carryover-transcripts', 'nodes'))
       : 0);
   await assertMigrationCapacity(workspaceDir, sourceBytes);
-  const [registryBytes, sourceCarryOverSha256, journalBytes] = await Promise.all([
-    fs.readFile(registryPath),
+  const [sourceCarryOverSha256, journalBytes] = await Promise.all([
     digestFile(carryOverPath),
     readOptionalFile(journalPath),
   ]);
@@ -158,7 +165,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
       }
     }
   } else {
-    const sourceRegistry = parseSourceRegistryV4(registryBytes);
+    const sourceRegistry = sourceRegistryV4 ?? parseSourceRegistryV4(registryBytes);
     for (const [chatId, entry] of Object.entries(sourceRegistry.sessions)) {
       try {
         const converted = await convertLinkedHistory({
@@ -527,6 +534,24 @@ async function ensureMigrationDirectories(workspaceDir: string): Promise<void> {
     fs.mkdir(path.join(root, 'quarantine'), { recursive: true, mode: 0o700 }),
     fs.mkdir(path.join(workspaceDir, MIGRATION_BACKUP_DIR), { recursive: true, mode: 0o700 }),
   ]);
+}
+
+async function assertLinkedNodeStoreAvailable(workspaceDir: string): Promise<void> {
+  const nodeStore = path.join(workspaceDir, 'carryover-transcripts', 'nodes');
+  const stats = await fs.stat(nodeStore);
+  if (!stats.isDirectory()) throw new Error('Linked carryover node store is unavailable');
+  let entries: string[];
+  try {
+    entries = await fs.readdir(nodeStore);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+      throw new Error('Linked carryover node store is unavailable', { cause: error });
+    }
+    throw error;
+  }
+  if (entries.length === 0) {
+    throw new Error('Linked carryover node store is unavailable');
+  }
 }
 
 async function archiveLegacyCarryOver(filePath: string, startedAt: string): Promise<void> {
