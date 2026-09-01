@@ -2553,6 +2553,41 @@ describe('ConversationSessionController', () => {
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 	});
 
+	it('uses normal submission for image-only Ctrl+Enter preference while idle', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: false }));
+		deps.agentState.model = 'opus';
+		deps.composerState.images = [new File(['image'], 'capture.png', { type: 'image/png' })];
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-run-image-hotkey',
+			chatId: 'chat-1',
+			turnId: 'turn-image',
+			status: 'accepted',
+			acceptedAt: '2026-08-10T00:00:00.000Z',
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitComposerWithSteerPreference(
+			'chat-1',
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				images: [
+					{
+						data: 'data:image/png;base64,aW1hZ2U=',
+						name: 'capture.png',
+						mimeType: 'image/png',
+					},
+				],
+			}),
+		);
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+	});
+
 	it('rejects unsupported or attachment steering without clearing or queueing', async () => {
 		const unsupported = createDeps(
 			createRunningChat({ agentId: 'amp', model: 'amp-smart', isProcessing: true }),

@@ -315,6 +315,26 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).not.toHaveBeenCalled();
 	});
 
+	it('uses the shared button and keyboard gate for image-only submission', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		const { container } = render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+		const image = new File(['image'], 'capture.png', { type: 'image/png' });
+
+		await fireEvent.change(input, { target: { files: [image] } });
+		const send = screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement;
+		expect(send.disabled).toBe(false);
+
+		await fireEvent.click(send);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+		expect(onsubmit).toHaveBeenCalledTimes(2);
+		expect(onSteerPreferredSubmit).toHaveBeenCalledOnce();
+	});
+
 	it('leaves Ctrl+Enter native when steer preference is disabled', async () => {
 		const onsubmit = vi.fn();
 		const onSteerPreferredSubmit = vi.fn();

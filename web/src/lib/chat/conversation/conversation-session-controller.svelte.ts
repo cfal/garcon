@@ -806,8 +806,9 @@ export class ConversationSessionController {
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		const text = deps.composerState.inputText.trim();
-		if (!text) return 'no-op';
-		if (selected.status !== 'running' || !selected.isProcessing) {
+		const hasAttachments = deps.composerState.images.length > 0;
+		if (!text && !hasAttachments) return 'no-op';
+		if (selected.status !== 'running' || !selected.isProcessing || !text) {
 			return this.submitForChat(chatId);
 		}
 		return submitSteerPreferenceRoute(deps, this.#acceptedInputs, {

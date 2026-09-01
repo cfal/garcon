@@ -68,7 +68,6 @@ export function canSubmitComposer(
 	inputText: string,
 	imageCount: number,
 ): boolean {
-	void imageCount;
 	if (isDisabled) return false;
-	return inputText.trim().length > 0;
+	return inputText.trim().length > 0 || imageCount > 0;
 }
