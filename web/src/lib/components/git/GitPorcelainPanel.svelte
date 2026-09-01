@@ -4,7 +4,6 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
-	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitPorcelainPanelProps {
 		projectPath: string;

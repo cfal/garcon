@@ -12,16 +12,14 @@
 
 	interface ShareChatDialogProps {
 		chatId: string | null;
-		chatTitle: string;
 		onClose: () => void;
 	}
 
-	let { chatId, chatTitle, onClose }: ShareChatDialogProps = $props();
+	let { chatId, onClose }: ShareChatDialogProps = $props();
 
 	let dialogOpen = $derived(chatId !== null);
 	let isLoading = $state(false);
 	let shareUrl = $state<string | null>(null);
-	let shareToken = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let copied = $state(false);
 	let isRevoking = $state(false);
@@ -31,7 +29,6 @@
 	$effect(() => {
 		if (!chatId) {
 			shareUrl = null;
-			shareToken = null;
 			error = null;
 			copied = false;
 			isRevoking = false;
@@ -50,7 +47,6 @@
 			const result = await shareChat(id);
 			if (result.success) {
 				shareUrl = window.location.origin + result.shareUrl;
-				shareToken = result.shareToken;
 			} else {
 				error = m.share_dialog_error();
 			}
@@ -79,7 +75,6 @@
 		try {
 			await revokeShare(chatId);
 			shareUrl = null;
-			shareToken = null;
 			showRevokeConfirm = false;
 			onClose();
 		} catch {

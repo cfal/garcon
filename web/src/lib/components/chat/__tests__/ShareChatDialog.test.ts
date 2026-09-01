@@ -32,7 +32,6 @@ describe('ShareChatDialog', () => {
 		const expectedUrl = `${window.location.origin}/shared/share-token`;
 		render(ShareChatDialog, {
 			chatId: 'chat-1',
-			chatTitle: 'Share target',
 			onClose: vi.fn(),
 		});
 
@@ -53,7 +52,6 @@ describe('ShareChatDialog', () => {
 		vi.mocked(clipboard.copyToClipboard).mockResolvedValue(false);
 		render(ShareChatDialog, {
 			chatId: 'chat-1',
-			chatTitle: 'Share target',
 			onClose: vi.fn(),
 		});
 

@@ -116,9 +116,7 @@
 <ConversationMessage
 	{message}
 	{rowId}
-	index={0}
 	{forkUpToSeq}
-	agentId="claude"
 	{onForkChat}
 	{onGenerateTitleFromMessage}
 	{canForkAtMessageNow}

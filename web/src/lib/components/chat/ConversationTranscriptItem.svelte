@@ -10,7 +10,6 @@
 	} from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type {
 		ConversationFeedRenderItem,
@@ -29,7 +28,6 @@
 	interface Props {
 		item: ConversationFeedRenderItem;
 		renderModel: ConversationFeedRenderModel;
-		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
@@ -52,7 +50,6 @@
 	let {
 		item,
 		renderModel,
-		agentId,
 		showThinking = true,
 		pendingPermissionRequests = [],
 		chatContext = null,
@@ -118,7 +115,6 @@
 			rowId={item.id}
 			awaitingDelivery={item.awaitingDelivery}
 			anchorId={item.ordinal === undefined ? undefined : item.id}
-			index={item.index}
 			forkUpToSeq={item.ordinal}
 			{toolResult}
 			{toolResultRowId}
@@ -127,7 +123,6 @@
 			permissionActionable={permissionActionableFor(message)}
 			{onPermissionDecision}
 			{onExitPlanMode}
-			{agentId}
 			{showThinking}
 			{chatContext}
 			{onForkChat}

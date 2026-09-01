@@ -406,7 +406,6 @@
 						{retention}
 						{itemState}
 						renderModel={projection.renderModel}
-						agentId={agentId}
 						showThinking={localSettings.showThinking}
 						{pendingPermissionRequests}
 						earlierPageState={chatState.pageStates.earlier}

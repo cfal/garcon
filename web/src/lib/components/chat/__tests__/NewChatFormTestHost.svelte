@@ -16,7 +16,6 @@
 	import type { ChatId } from '$shared/chat-id';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';

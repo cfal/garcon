@@ -7,7 +7,6 @@
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
-	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitCommitDetailsHeaderProps {
 		snapshot: GitCommitSnapshotReady;

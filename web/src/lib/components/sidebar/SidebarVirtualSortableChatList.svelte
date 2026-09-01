@@ -8,10 +8,8 @@
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
-		clamp,
 		computeSidebarSeparatorItems,
 		DEFAULT_CHAT_ROW_OVERSCAN,
-		snapCssPixel,
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
 	} from './sidebar-virtual-chat-list';

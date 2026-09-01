@@ -8,7 +8,6 @@
 	import type { ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { TranscriptPageState } from '$lib/chat/transcript/transcript-page-progress.js';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
@@ -27,7 +26,6 @@
 		controller: ConversationFeedVirtualController;
 		retention: ConversationFeedRetentionState;
 		renderModel: ConversationFeedRenderModel;
-		agentId: SessionAgentId | string;
 		showThinking: boolean;
 		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
@@ -51,7 +49,6 @@
 		controller,
 		retention,
 		renderModel,
-		agentId,
 		showThinking,
 		pendingPermissionRequests,
 		chatContext = null,
@@ -101,7 +98,6 @@
 		<ConversationFeedVirtualItem
 			{item}
 			{renderModel}
-			{agentId}
 			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}

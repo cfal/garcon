@@ -7,7 +7,6 @@
 	} from '$lib/chat/tools/tool-display-registry.js';
 	import { resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
-		ToolInlineAction,
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
 	} from '$lib/chat/tools/tool-display-contract.js';

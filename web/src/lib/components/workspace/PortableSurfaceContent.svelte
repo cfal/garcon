@@ -79,7 +79,7 @@
 					{m.workspace_loading_terminal()}
 				</div>{/if}
 		{:then TerminalSurface}
-			<TerminalSurface terminalId={surface.terminalId} host={presentation} {visible} />
+			<TerminalSurface terminalId={surface.terminalId} host={presentation} />
 		{/await}
 	{:else if surface.type === 'terminal-launcher'}
 		{#await terminalLauncherRenderer() then TerminalLauncherSurface}
