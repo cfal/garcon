@@ -55,14 +55,17 @@
 				<label for="username" class="mb-1 block text-sm font-medium text-foreground">
 					{m.auth_login_username()}
 				</label>
-				<Input
-					type="text"
-					id="username"
-					bind:value={username}
-					placeholder={m.auth_login_placeholders_username()}
-					required
-					disabled={isSubmitting}
-				/>
+			<Input
+				type="text"
+				id="username"
+				bind:value={username}
+				placeholder={m.auth_login_placeholders_username()}
+				autocomplete="username"
+				autocapitalize="none"
+				spellcheck="false"
+				required
+				disabled={isSubmitting}
+			/>
 			</div>
 
 			<div>
@@ -70,15 +73,16 @@
 					{m.auth_login_password()}
 				</label>
 				<div class="relative">
-					<Input
-						type={showPassword ? 'text' : 'password'}
-						id="password"
-						bind:value={password}
-						placeholder={m.auth_login_placeholders_password()}
-						required
-						disabled={isSubmitting}
-						class="pr-10"
-					/>
+				<Input
+					type={showPassword ? 'text' : 'password'}
+					id="password"
+					bind:value={password}
+					placeholder={m.auth_login_placeholders_password()}
+					autocomplete="current-password"
+					required
+					disabled={isSubmitting}
+					class="pr-10"
+				/>
 					<Button
 						type="button"
 						variant="ghost"
