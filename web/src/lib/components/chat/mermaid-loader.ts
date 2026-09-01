@@ -31,6 +31,7 @@ async function getMermaid(): Promise<Mermaid> {
 	if (initializedTheme !== theme) {
 		const config: MermaidConfig = {
 			startOnLoad: false,
+			securityLevel: 'strict',
 			theme,
 			fontFamily: 'inherit',
 			suppressErrorRendering: true,
