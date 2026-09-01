@@ -330,7 +330,7 @@ export class MetadataIndex {
       version: METADATA_VERSION,
       chats: Object.fromEntries(this.#metadataByChatId),
     };
-    await writeJsonFileAtomic(this.#metadataPath, snapshot);
+    await writeJsonFileAtomic(this.#metadataPath, snapshot, { mode: 0o600 });
   }
 }
 

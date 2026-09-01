@@ -120,6 +120,14 @@ describe('ChatRegistry', () => {
     expect(registry.getChat(SECOND_CHAT_ID)?.parentChat).toEqual(parentChat);
   });
 
+  it('keeps the registry owner-only after saving', async () => {
+    registry.addChat(newChat());
+    await registry.flush();
+
+    const stats = await fs.stat(path.join(tempDir, 'chats.json'));
+    expect(stats.mode & 0o777).toBe(0o600);
+  });
+
   it('persists and freezes watermark-free delegation parentage', async () => {
     const parentChat = { chatId: CHAT_ID, relation: 'delegation' };
     registry.addChat(newChat({ id: SECOND_CHAT_ID, parentChat }));

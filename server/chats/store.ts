@@ -770,7 +770,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
     const target = this.#sessionsFilePath();
-    await writeJsonFileAtomic(target, registry);
+    await writeJsonFileAtomic(target, registry, { mode: 0o600 });
     this.#registry = registry;
     this.#rebuildAgentSessionIdIndex();
   }

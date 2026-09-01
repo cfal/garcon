@@ -149,6 +149,8 @@ describe('metadata-store', () => {
       const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
       expect(saved.chats['live-chat'].lastMessage).toBe('saved preview');
       expect(saved.chats['live-chat'].source).toBe('live');
+      const stats = await fs.stat(metadataPath);
+      expect(stats.mode & 0o777).toBe(0o600);
     });
   });
 
