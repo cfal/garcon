@@ -40,7 +40,8 @@ export class TerminalTransport {
 		this.#removeMessageConsumer = options.connection.addMessageConsumer((data) => {
 			const message = parseTerminalStreamServerMessage(data);
 			if (!message) return false;
-			if (this.#active) this.#handleMessage(message);
+			if (!this.#active) return false;
+			this.#handleMessage(message);
 			return true;
 		});
 		this.#removeConnectionListener = options.connection.onConnectionChange((connected) => {
