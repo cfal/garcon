@@ -121,7 +121,7 @@
 			<div class="space-y-1.5">
 				<div class="text-xs text-muted-foreground px-1">
 					Pushing <span class="font-medium text-foreground">{currentBranch}</span>
-					{' '}&rarr;{' '}
+					&rarr;
 					<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
 				</div>
 			</div>

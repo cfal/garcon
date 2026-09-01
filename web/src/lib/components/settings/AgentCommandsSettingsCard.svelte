@@ -44,8 +44,7 @@
 				{m.settings_enable_agent_commands()}
 			</label>
 			<div class="mt-0.5 text-xs text-muted-foreground">
-				{m.settings_agent_commands_description()}{' '}
-				<a
+				{m.settings_agent_commands_description()} <a
 					href={GARCON_SKILLS_URL}
 					target="_blank"
 					rel="noreferrer noopener"
