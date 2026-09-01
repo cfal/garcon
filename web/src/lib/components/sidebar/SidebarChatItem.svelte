@@ -194,7 +194,7 @@
 		}
 	}
 
-	// Scroll-to-selected on explicit recenter requests (chat focus).
+	// Scroll-to-selected on explicit chat navigation requests.
 	onMount(() =>
 		appShell.onSidebarRecenterRequested(() => {
 			if (!enableRecenterOnRequest) return;

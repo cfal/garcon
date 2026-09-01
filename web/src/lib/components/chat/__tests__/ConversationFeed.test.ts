@@ -98,6 +98,16 @@ describe('ConversationFeed', () => {
 		});
 	});
 
+	it('does not recenter the sidebar when the message feed receives focus', async () => {
+		const { container } = render(ConversationFeedTestHost);
+		const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]');
+		if (!viewport) throw new Error('Expected the chat feed viewport');
+
+		await fireEvent.focusIn(viewport);
+
+		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();

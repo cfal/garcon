@@ -13,6 +13,7 @@ interface AppShellChatNavigationControllerOptions {
 	navigateToChat(chatId: string): Promise<void>;
 	navigateToBareRoute(): Promise<void>;
 	requestComposerFocus(): void;
+	requestSidebarRecenter(): void;
 	reportOpenError(error: unknown): void;
 	reportDeleteError(error: unknown): void;
 }
@@ -60,7 +61,10 @@ export class AppShellChatNavigationController {
 			if (!this.#options.isLoadingChats && !this.#options.hasChat(chatId)) return;
 			this.#options.setSelectedChatId(chatId);
 			if (options.navigate) await this.#queueChatRoute(chatId, generation);
-			if (this.#isCurrent(generation)) this.#options.requestComposerFocus();
+			if (this.#isCurrent(generation)) {
+				this.#options.requestComposerFocus();
+				this.#options.requestSidebarRecenter();
+			}
 		} catch (error) {
 			if (this.#isCurrent(generation)) this.#options.reportOpenError(error);
 		} finally {
@@ -73,6 +77,7 @@ export class AppShellChatNavigationController {
 		try {
 			this.#options.setSelectedChatId(chatId);
 			await this.#queueChatRoute(chatId, generation);
+			if (this.#isCurrent(generation)) this.#options.requestSidebarRecenter();
 		} catch (error) {
 			if (this.#isCurrent(generation)) this.#options.reportOpenError(error);
 		} finally {

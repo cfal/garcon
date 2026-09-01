@@ -176,6 +176,7 @@
 		navigateToChat: gotoChat,
 		navigateToBareRoute: () => goto('/'),
 		requestComposerFocus: () => appShell.requestComposerFocus(),
+		requestSidebarRecenter: () => appShell.requestSidebarRecenterToSelected(),
 		reportOpenError: (error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		},

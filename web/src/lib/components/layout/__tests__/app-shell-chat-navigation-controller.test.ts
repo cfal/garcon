@@ -22,6 +22,7 @@ function createHarness() {
 	const navigateToChat = vi.fn<(chatId: string) => Promise<void>>(async () => undefined);
 	const navigateToBareRoute = vi.fn<() => Promise<void>>(async () => undefined);
 	const requestComposerFocus = vi.fn();
+	const requestSidebarRecenter = vi.fn();
 	const reportOpenError = vi.fn();
 	const reportDeleteError = vi.fn();
 	const controller = new AppShellChatNavigationController({
@@ -45,6 +46,7 @@ function createHarness() {
 		navigateToChat,
 		navigateToBareRoute,
 		requestComposerFocus,
+		requestSidebarRecenter,
 		reportOpenError,
 		reportDeleteError,
 	});
@@ -56,6 +58,7 @@ function createHarness() {
 		navigateToChat,
 		navigateToBareRoute,
 		requestComposerFocus,
+		requestSidebarRecenter,
 		reportOpenError,
 		reportDeleteError,
 		get routeChatId() {
@@ -97,13 +100,15 @@ describe('AppShellChatNavigationController', () => {
 
 		await synchronizing;
 		expect(harness.controller.pendingChatTarget).toBeNull();
+		expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce();
 	});
 
-	it('still places an external route target in the current window', async () => {
+	it('places and recenters an external route target in the current window', async () => {
 		const harness = createHarness();
 		harness.controller.handleRouteChat('chat-a');
 
 		expect(harness.showChat).toHaveBeenCalledWith('chat-a');
+		await vi.waitFor(() => expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce());
 	});
 
 	it('finishes the newest focused-window route last', async () => {
@@ -133,14 +138,16 @@ describe('AppShellChatNavigationController', () => {
 		expect(harness.routeChatId).toBe('chat-b');
 		expect(harness.selectedChatId).toBe('chat-b');
 		expect(harness.requestComposerFocus).not.toHaveBeenCalled();
+		expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce();
 	});
 
-	it('requests composer focus for explicit Chat placement', async () => {
+	it('requests composer focus and sidebar recenter for explicit Chat placement', async () => {
 		const harness = createHarness();
 
 		await harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
 
 		expect(harness.requestComposerFocus).toHaveBeenCalledOnce();
+		expect(harness.requestSidebarRecenter).toHaveBeenCalledOnce();
 	});
 
 	it('cancels pending Chat selection when the route becomes bare', async () => {
@@ -157,6 +164,7 @@ describe('AppShellChatNavigationController', () => {
 		await selecting;
 		expect(harness.navigateToChat).not.toHaveBeenCalled();
 		expect(harness.requestComposerFocus).not.toHaveBeenCalled();
+		expect(harness.requestSidebarRecenter).not.toHaveBeenCalled();
 	});
 
 	it('does not select a chat deleted while its workspace placement is pending', async () => {

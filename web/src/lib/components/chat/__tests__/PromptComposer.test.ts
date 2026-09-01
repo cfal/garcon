@@ -449,6 +449,16 @@ describe('PromptComposer focus', () => {
 		await expectComposerFocus(textarea);
 	});
 
+	it('does not recenter the sidebar when the composer receives focus', async () => {
+		render(PromptComposerTestHost, { selectedChatId: 'chat-focus-without-recenter' });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await expectComposerFocus(textarea);
+		await fireEvent.focus(textarea);
+
+		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
 	it('keeps the next draft editable but blocks sending during direct admission', async () => {
 		const onsubmit = vi.fn();
 		const { rerender } = render(PromptComposerTestHost, {

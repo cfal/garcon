@@ -19,6 +19,7 @@
 		isFiltered?: boolean;
 		displayOptions?: SidebarDisplayOptions;
 		rowHeight?: number;
+		viewportAttached?: boolean;
 		onRegisterRecenter?: (callback: () => void) => void;
 		onRegisterReorder?: (reorder: SidebarChatReorderState) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
@@ -39,6 +40,7 @@
 			sortMode: 'manual',
 		},
 		rowHeight,
+		viewportAttached = true,
 		onRegisterRecenter,
 		onRegisterReorder,
 		onPersistReorder = () => {},
@@ -112,7 +114,7 @@
 >
 	<SidebarVirtualSortableChatList
 		{rows}
-		{viewportRef}
+		viewportRef={viewportAttached ? viewportRef : null}
 		{selectedChatId}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{isMobile}

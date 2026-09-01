@@ -119,6 +119,10 @@
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
+	let sidebarRecenterRequestCount = $state(0);
+	const unsubscribeSidebarRecenter = appShell.onSidebarRecenterRequested(() => {
+		sidebarRecenterRequestCount += 1;
+	});
 	const notifications = createNotificationsStore();
 	let snippetLoadCount = $state(0);
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
@@ -366,7 +370,10 @@
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
 	setCanonicalWorkspaceLayout();
-	onDestroy(() => chatDrafts.destroy());
+	onDestroy(() => {
+		unsubscribeSidebarRecenter();
+		chatDrafts.destroy();
+	});
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
 		isSurfacePresented: () => true,
@@ -440,6 +447,7 @@
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 <div data-testid="composer-attachment-count">{composer.images.length}</div>
+<div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>
 {#each notifications.items as notification (notification.id)}
 	<div data-testid="notification">{notification.message}</div>
 {/each}

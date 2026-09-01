@@ -840,7 +840,6 @@
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
 						onpaste={(event) => attachmentController.handlePaste(event)}
-						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}

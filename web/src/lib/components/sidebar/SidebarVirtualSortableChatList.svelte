@@ -135,6 +135,7 @@
 		documentElement: Record<string, string>;
 	} | null = null;
 	let separatorPixelRatio = $state(1);
+	let pendingRecenter = $state<string | null>(null);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
 	// Reorder and quick-move only apply to the manual sort order; the
 	// recent-activity sort is derived, so reordering is disabled there.
@@ -142,7 +143,6 @@
 	let dragEnabled = $derived(!isMultiSelectMode);
 	let reorderEnabled = $derived(dragEnabled && displayOptions.sortMode === 'manual');
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
-
 	type SidebarPointDropContext =
 		| { kind: 'outside' }
 		| { kind: 'empty' }
@@ -200,13 +200,15 @@
 			}),
 		);
 	});
-
 	$effect(() => {
 		const element = viewportRef;
 		if (!element) return;
-		return virtual.viewport(element);
+		const cleanup = virtual.viewport(element);
+		return cleanup;
 	});
-
+	$effect(() => {
+		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter)) pendingRecenter = null;
+	});
 	$effect(() => {
 		if (!viewportRef) return;
 		const rowCount = rows.length;
@@ -818,21 +820,19 @@
 		return null;
 	}
 
-	function scrollChatIntoView(chatId: string | null): void {
-		if (!chatId) return;
+	function scrollChatIntoView(chatId: string): boolean {
 		const target = scrollTargetForChat(chatId);
-		if (!target) return;
+		if (!target) return false;
 		if (viewportRef) {
 			const targetEl = mountedElementForScrollTarget(target);
 			if (targetEl) {
-				const viewportRect = viewportRef.getBoundingClientRect();
-				const targetRect = targetEl.getBoundingClientRect();
-				if (targetRect.top >= viewportRect.top && targetRect.bottom <= viewportRect.bottom) return;
+				const viewportBox = viewportRef.getBoundingClientRect();
+				const targetBox = targetEl.getBoundingClientRect();
+				if (targetBox.top >= viewportBox.top && targetBox.bottom <= viewportBox.bottom) return true;
 			}
 		}
-		untrack(() => virtual.scrollToIndex(target.index));
+		return untrack(() => virtual.scrollToIndex(target.index)).kind === 'scheduled';
 	}
-
 	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
 		persistReorderRequest(
 			reorder.moveToBoundary({
@@ -862,7 +862,8 @@
 
 	onMount(() =>
 		appShell.onSidebarRecenterRequested(() => {
-			scrollChatIntoView(selectedChatId);
+			const chatId = selectedChatId;
+			pendingRecenter = chatId && !scrollChatIntoView(chatId) ? chatId : null;
 		}),
 	);
 

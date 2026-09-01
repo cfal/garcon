@@ -318,6 +318,7 @@ describe('AppShell responsive workspace binding', () => {
 		};
 		const appShell = testContext.current?.appShell as {
 			requestComposerFocus: ReturnType<typeof vi.fn>;
+			requestSidebarRecenterToSelected: ReturnType<typeof vi.fn>;
 		};
 		render(AppShell);
 
@@ -327,6 +328,7 @@ describe('AppShell responsive workspace binding', () => {
 		expect(chatNavigation.gotoChat).toHaveBeenCalledWith('chat-test');
 		expect(workspace.showChatCalls).toBe(1);
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
+		expect(appShell.requestSidebarRecenterToSelected).toHaveBeenCalledOnce();
 		expect(chatNavigation.gotoChat).toHaveBeenCalledOnce();
 	});
 

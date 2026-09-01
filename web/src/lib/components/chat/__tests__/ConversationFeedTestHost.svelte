@@ -150,6 +150,10 @@
 	setLocalSettings(localSettings);
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';
+	let sidebarRecenterRequestCount = $state(0);
+	const unsubscribeSidebarRecenter = appShell.onSidebarRecenterRequested(() => {
+		sidebarRecenterRequestCount += 1;
+	});
 	setAppShell(appShell);
 	setModelCatalog(createModelCatalogStore());
 	setChatSessions(createChatSessionsStore());
@@ -166,7 +170,10 @@
 			}),
 		}),
 	);
-	onDestroy(() => localSettings.destroy());
+	onDestroy(() => {
+		unsubscribeSidebarRecenter();
+		localSettings.destroy();
+	});
 </script>
 
 	<ConversationFeed
@@ -191,3 +198,4 @@
 	<button onclick={shrinkTranscriptKeepingTail}>Shrink transcript keeping tail</button>
 	<button onclick={showInterleavedEarlierError}>Show earlier error</button>
 {/if}
+<div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>

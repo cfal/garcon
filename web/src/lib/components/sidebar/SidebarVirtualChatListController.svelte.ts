@@ -3,6 +3,7 @@ import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	virtualItems as selectVirtualItems,
+	type VirtualIndexScrollResult,
 	type VirtualItem,
 	type VirtualListSnapshot,
 	type VirtualMutationAnchor,
@@ -103,8 +104,8 @@ export class SidebarVirtualChatListController {
 		this.#virt.scrollBy(delta);
 	}
 
-	scrollToIndex(index: number): void {
-		this.#virt.scrollToIndex(index, { align: 'center' });
+	scrollToIndex(index: number): VirtualIndexScrollResult {
+		return this.#virt.scrollToIndex(index, { align: 'center' });
 	}
 
 	destroy(): void {

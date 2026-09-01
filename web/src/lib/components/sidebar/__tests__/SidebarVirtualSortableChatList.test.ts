@@ -853,6 +853,57 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
 	});
 
+	it('applies a recenter request after the selected chat row hydrates', async () => {
+		const callbacks: Array<() => void> = [];
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: [],
+			selectedChatId: 'chat-400',
+			rowHeight,
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
+		});
+		await tick();
+
+		for (const callback of callbacks) callback();
+		await tick();
+		expect(screen.getByTestId('virtual-sidebar-viewport').scrollTop).toBe(0);
+
+		await view.rerender({
+			rows: makeRows(500),
+			selectedChatId: 'chat-400',
+			rowHeight,
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
+		});
+		await tick();
+
+		expect(screen.getByTestId('virtual-sidebar-viewport').scrollTop).toBeGreaterThan(
+			rowHeight * 350,
+		);
+	});
+
+	it('retains a recenter request until the virtual viewport binds', async () => {
+		const callbacks: Array<() => void> = [];
+		const props = {
+			rows: makeRows(500),
+			selectedChatId: 'chat-400',
+			rowHeight,
+			viewportAttached: false,
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
+		};
+		const view = render(SidebarVirtualSortableChatListHost, props);
+		await tick();
+
+		for (const callback of callbacks) callback();
+		await tick();
+		expect(screen.getByTestId('virtual-sidebar-viewport').scrollTop).toBe(0);
+
+		await view.rerender({ ...props, viewportAttached: true });
+		await waitFor(() =>
+			expect(screen.getByTestId('virtual-sidebar-viewport').scrollTop).toBeGreaterThan(
+				rowHeight * 350,
+			),
+		);
+	});
+
 	it('scrolls to a collapsed project header when the selected chat row is hidden', async () => {
 		const callbacks: Array<() => void> = [];
 		const rows: SidebarVirtualRow[] = [

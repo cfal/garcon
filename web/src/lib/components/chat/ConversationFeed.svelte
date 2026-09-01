@@ -5,7 +5,6 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import {
 		getLocalSettings,
-		getAppShell,
 		getModelCatalog,
 	} from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -106,7 +105,6 @@
 
 	const chatState = $derived(transcript);
 	const localSettings = getLocalSettings();
-	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
@@ -122,10 +120,6 @@
 			isProcessing,
 		}),
 	);
-
-	function handleMessageFeedFocusIntent() {
-		appShell.requestSidebarRecenterToSelected();
-	}
 
 	let scrollbarPointerY: number | null = null;
 
@@ -453,7 +447,6 @@
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
 		{onscroll}
-		onfocusin={handleMessageFeedFocusIntent}
 		tabindex={-1}
 		role="region"
 		aria-busy={chatState.isLoadingMessages ||
