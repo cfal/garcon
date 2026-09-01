@@ -9,13 +9,14 @@ import { encodeCarryOverPages } from '../carryover-page-codec.ts';
 import { assertMigrationBudget } from '../carryover-migration-budget.ts';
 import {
   finalizeCarryOverMigrationValidation,
-  markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
 } from '../chat-carryover-migration.ts';
 import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
+import { ChatRegistry } from '../store.ts';
 
 const CHAT_ID = '1786077000000001';
+const POST_MIGRATION_CHAT_ID = '1786077000000002';
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
 
 describe('legacy carryover migration', () => {
@@ -511,7 +512,7 @@ describe('legacy carryover migration', () => {
     expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('already-restored');
   });
 
-  it('closes the rollback window before a normal segment can be accepted', async () => {
+  it('refuses rollback after the migrated registry gains a chat', async () => {
     await writeLegacyWorkspace({
       segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
       currentAgentId: 'claude',
@@ -519,13 +520,46 @@ describe('legacy carryover migration', () => {
     });
     await migrateLegacyCarryOverWorkspace(workspaceDir);
     await writeWorkspaceVersion(5);
+    const registry = new ChatRegistry(workspaceDir);
+    await registry.init();
+    registry.addChat({
+      id: POST_MIGRATION_CHAT_ID,
+      agentId: 'claude',
+      model: 'opus',
+      projectPath: '/workspace/project',
+      agentSettingsById: {},
+      parentChat: null,
+    });
+    await registry.flush();
+    const divergedRegistry = await fs.readFile(path.join(workspaceDir, 'chats.json'));
 
-    await markCarryOverMigrationRollbackUnsafe(workspaceDir);
-
-    expect((await readJson('carryover-transcripts/migration-v2.json')).rollbackSafe).toBe(false);
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
-      .rejects.toThrow('unsafe after new-format history was created');
-    expect((await readJson('chats.json')).version).toBe(5);
+      .rejects.toThrow('unsafe after the registry changed');
+
+    expect(await fs.readFile(path.join(workspaceDir, 'chats.json'))).toEqual(divergedRegistry);
+    expect((await readJson('chats.json')).sessions).toHaveProperty(POST_MIGRATION_CHAT_ID);
+  });
+
+  it('allows rollback after a semantics-preserving registry rewrite', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const legacyRegistry = await readJson('chats.json');
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    await writeWorkspaceVersion(5);
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const migratedBytes = await fs.readFile(registryPath);
+    const registry = new ChatRegistry(workspaceDir);
+    await registry.init();
+    await registry.flush();
+    const rewrittenBytes = await fs.readFile(registryPath);
+    expect(rewrittenBytes.equals(migratedBytes)).toBe(false);
+
+    expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('restored');
+
+    expect(await readJson('chats.json')).toEqual(legacyRegistry);
   });
 
   it('removes rollback artifacts after a validated subsequent restart', async () => {
@@ -544,7 +578,7 @@ describe('legacy carryover migration', () => {
     ))).toBe(false);
     expect(await fs.readdir(path.join(workspaceDir, 'migration-backups'))).toEqual([]);
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
-      .rejects.toThrow('unsafe after new-format history was created');
+      .rejects.toThrow('unsafe after the migration validation restart');
   });
 
   it('drops obsolete transfer cleanup whose chat was deleted', async () => {

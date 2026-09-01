@@ -10,6 +10,8 @@ import {
   type ChatMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
+import { rollbackLegacyCarryOverMigration } from '../../../server/chats/chat-carryover-rollback.js';
+import { ChatRegistry } from '../../../server/chats/store.js';
 import { transcriptViewId } from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
 import {
@@ -19,6 +21,7 @@ import {
 } from '../../support/integration-fixture.js';
 
 const CHAT_ID = '1786120000000001';
+const POST_MIGRATION_CHAT_ID = '1786120000000002';
 const TIMESTAMP = '2026-08-07T00:00:00.000Z';
 
 describe('carryover bootstrap migration', () => {
@@ -125,6 +128,38 @@ describe('carryover bootstrap migration', () => {
         });
         expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
           .toMatchObject({ phase: 'complete', rollbackSafe: true });
+        await expectMigratedHistory(fixture);
+      },
+      { prepareWorkspace: writeLegacyWorkspace },
+    );
+  }, 30_000);
+
+  test('refuses rollback between boots after the registry gains a chat', async () => {
+    await withIntegrationFixture(
+      'carryover-rollback-registry-divergence',
+      async (fixture) => {
+        await fixture.restartGarcon({
+          beforeStart: async () => {
+            const registry = new ChatRegistry(fixture.dirs.workspace);
+            await registry.init();
+            registry.addChat({
+              id: POST_MIGRATION_CHAT_ID,
+              agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+              model: 'post-migration-model',
+              projectPath: fixture.dirs.project,
+              agentSettingsById: {},
+              parentChat: null,
+            });
+            await registry.flush();
+
+            await expect(rollbackLegacyCarryOverMigration(fixture.dirs.workspace))
+              .rejects.toThrow('unsafe after the registry changed');
+          },
+        });
+
+        expect((await fixture.client.listChats()).sessions.map((chat) => chat.id)).toEqual(
+          expect.arrayContaining([CHAT_ID, POST_MIGRATION_CHAT_ID]),
+        );
         await expectMigratedHistory(fixture);
       },
       { prepareWorkspace: writeLegacyWorkspace },

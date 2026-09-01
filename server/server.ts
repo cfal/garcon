@@ -92,7 +92,6 @@ import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.j
 import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
-  markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
 } from './chats/chat-carryover-migration.js';
 import {
@@ -240,10 +239,7 @@ export async function startServer(): Promise<void> {
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
-    const carryOver = new CarryOverTranscriptStore({
-      workspaceDir,
-      onSegmentCommitted: () => markCarryOverMigrationRollbackUnsafe(workspaceDir),
-    });
+    const carryOver = new CarryOverTranscriptStore({ workspaceDir });
     await carryOver.initialize();
 
     const integrationHostFactory = new IntegrationHostFactory({

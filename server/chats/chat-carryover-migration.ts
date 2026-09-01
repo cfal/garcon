@@ -31,6 +31,7 @@ import {
   MIGRATION_MARKER_VERSION,
   OWNERSHIP_JOURNAL_FILE,
   assertMarkerSources,
+  carryOverSegmentSummary,
   digest,
   migratedCarryOverPath,
   readMarker,
@@ -200,7 +201,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const segmentCount = migratedSegmentIds.size;
   const targetRegistryBytes = serializeJson(targetRegistry);
   const targetRegistrySha256 = digest(targetRegistryBytes);
-  const segmentSummarySha256 = segmentSummary(sessions);
+  const segmentSummarySha256 = carryOverSegmentSummary(sessions);
   const ready: CarryOverMigrationMarker = {
     ...markerBase,
     phase: 'ready-to-commit',
@@ -231,16 +232,6 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   });
   await archiveLegacyCarryOver(carryOverPath, startedAt);
   return rollbackResumed;
-}
-
-export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string): Promise<void> {
-  const marker = await readMarker(workspaceDir);
-  if (!marker) return;
-  if (marker.phase !== 'complete') {
-    throw new Error('Cannot accept new carryover segments while migration is incomplete');
-  }
-  if (!marker.rollbackSafe) return;
-  await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
 }
 
 export async function finalizeCarryOverMigrationValidation(workspaceDir: string): Promise<void> {
@@ -582,16 +573,6 @@ function parseSourceRegistryV4(bytes: Buffer): {
   return { version: 4, sessions };
 }
 
-function segmentSummary(
-  sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
-): string {
-  const selected = Object.entries(sessions).map(([chatId, entry]) => [
-    chatId,
-    entry.carryOverSegments ?? [],
-  ] as const).sort(([left], [right]) => left.localeCompare(right));
-  return digest(Buffer.from(JSON.stringify(selected)));
-}
-
 function parseTargetRegistry(bytes: Buffer): {
   readonly version: 5;
   readonly sessions: Record<string, Readonly<Record<string, unknown>>>;
@@ -639,7 +620,7 @@ async function validateMigratedRoots(
     for await (const _batch of store.stream({ refs, maxMessagesPerBatch: 256 })) void _batch;
     for (const ref of refs) if (ref.storedMessageCount > 0) ids.add(ref.id);
   }
-  const summary = segmentSummary(sessions);
+  const summary = carryOverSegmentSummary(sessions);
   if (summary !== marker.segmentSummarySha256 || ids.size !== marker.segmentCount) {
     throw new Error('Migrated carryover segment summary does not match its marker');
   }

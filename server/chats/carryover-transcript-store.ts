@@ -106,17 +106,14 @@ export class CarryOverTranscriptStore {
   readonly #degradedSegments = new Set<string>();
   readonly #writerRootCounts = new Map<string, number>();
   readonly #decodePage: typeof decodeCarryOverPage;
-  readonly #onSegmentCommitted: (() => Promise<void>) | null;
   #gcPromise: Promise<void> = Promise.resolve();
   // Serializes writer-root leases with the complete mark-and-delete sweep.
   #rootStatePromise: Promise<void> = Promise.resolve();
-  #segmentCommitPromise: Promise<void> = Promise.resolve();
 
   constructor(options: {
     readonly workspaceDir: string;
     readonly indexCacheSize?: number;
     readonly decodePage?: typeof decodeCarryOverPage;
-    readonly onSegmentCommitted?: () => Promise<void>;
   }) {
     this.#rootDir = path.join(options.workspaceDir, 'carryover-transcripts');
     this.#segmentsDir = path.join(this.#rootDir, 'segments');
@@ -124,7 +121,6 @@ export class CarryOverTranscriptStore {
     this.#trashDir = path.join(this.#rootDir, 'trash');
     this.#indexCacheSize = options.indexCacheSize ?? DEFAULT_INDEX_CACHE_SIZE;
     this.#decodePage = options.decodePage ?? decodeCarryOverPage;
-    this.#onSegmentCommitted = options.onSegmentCommitted ?? null;
   }
 
   async initialize(): Promise<void> {
@@ -545,7 +541,6 @@ export class CarryOverTranscriptStore {
         committed = true;
         this.#indexCache.set(index.id, index);
         await this.#removeEmptyOperationDir(operationId);
-        await this.#recordSegmentCommitted();
       },
       discard: async () => {
         if (released) return;
@@ -589,15 +584,6 @@ export class CarryOverTranscriptStore {
     if (count === undefined) return;
     if (count === 1) this.#writerRootCounts.delete(id);
     else this.#writerRootCounts.set(id, count - 1);
-  }
-
-  #recordSegmentCommitted(): Promise<void> {
-    if (!this.#onSegmentCommitted) return Promise.resolve();
-    const operation = this.#segmentCommitPromise
-      .catch(() => undefined)
-      .then(this.#onSegmentCommitted);
-    this.#segmentCommitPromise = operation.then(() => undefined, () => undefined);
-    return operation;
   }
 
   async #assertIdempotentCollision(

@@ -4,11 +4,13 @@
 // carryover-migration-files.ts.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isRecord } from '../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import {
   LEGACY_CARRYOVER_FILE,
   MIGRATION_MARKER_FILE,
   OWNERSHIP_JOURNAL_FILE,
+  carryOverSegmentSummary,
   digest,
   migratedCarryOverPath,
   readMarker,
@@ -32,7 +34,7 @@ export async function rollbackLegacyCarryOverMigration(
     throw new Error('No completed carryover migration is available to roll back');
   }
   if (marker.phase === 'complete' && !marker.rollbackSafe) {
-    throw new Error('Carryover migration rollback is unsafe after new-format history was created');
+    throw new Error('Carryover migration rollback is unsafe after the migration validation restart');
   }
   return restoreLegacyCarryOverState(workspaceDir, marker);
 }
@@ -86,22 +88,17 @@ async function restoreLegacyCarryOverState(
   }
   const legacyCarryOver = await readRollbackCarryOverSource(workspaceDir, marker);
 
-  // Routine operation rewrites the migrated registry, so byte equality with
-  // the migration output cannot hold; lineage is proven by the migrated
-  // schema version instead, and the source digest still recognises a
-  // half-restored registry.
   const registryPath = path.join(workspaceDir, 'chats.json');
   const currentRegistry = await fs.readFile(registryPath);
   const currentRegistryDigest = digest(currentRegistry);
   if (currentRegistryDigest !== marker.sourceRegistrySha256) {
-    let version: unknown;
-    try {
-      version = (JSON.parse(currentRegistry.toString('utf8')) as { version?: unknown }).version;
-    } catch {
-      throw new Error('Current chat registry does not match the migration or its backup');
-    }
-    if (version !== CHAT_REGISTRY_VERSION) {
-      throw new Error('Current chat registry does not match the migration or its backup');
+    const sessions = parseMigratedRegistrySessions(currentRegistry);
+    if (
+      marker.phase === 'complete'
+      && currentRegistryDigest !== marker.targetRegistrySha256
+      && carryOverSegmentSummary(sessions) !== marker.segmentSummarySha256
+    ) {
+      throw new Error('Carryover migration rollback is unsafe after the registry changed');
     }
   }
 
@@ -123,6 +120,28 @@ async function restoreLegacyCarryOverState(
   await removeMigratedCarryOverArchive(workspaceDir, marker);
   await archiveRollbackMarker(workspaceDir, marker);
   return currentRegistryDigest === marker.sourceRegistrySha256 ? 'already-restored' : 'restored';
+}
+
+function parseMigratedRegistrySessions(
+  bytes: Buffer,
+): Record<string, Readonly<Record<string, unknown>>> {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    throw new Error('Current chat registry does not match the migration or its backup');
+  }
+  if (!isRecord(value) || value.version !== CHAT_REGISTRY_VERSION || !isRecord(value.sessions)) {
+    throw new Error('Current chat registry does not match the migration or its backup');
+  }
+  const sessions: Record<string, Readonly<Record<string, unknown>>> = {};
+  for (const [chatId, entry] of Object.entries(value.sessions)) {
+    if (!isRecord(entry)) {
+      throw new Error('Current chat registry does not match the migration or its backup');
+    }
+    sessions[chatId] = entry;
+  }
+  return sessions;
 }
 
 async function readRollbackCarryOverSource(

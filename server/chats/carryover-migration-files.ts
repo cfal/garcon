@@ -145,6 +145,16 @@ export function registryBackupFile(marker: CarryOverMigrationMarkerBase): string
   return `${MIGRATION_BACKUP_DIR}/chats.v${marker.sourceRegistryVersion}.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
 }
 
+export function carryOverSegmentSummary(
+  sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+): string {
+  const selected = Object.entries(sessions).map(([chatId, entry]) => [
+    chatId,
+    entry.carryOverSegments ?? [],
+  ] as const).sort(([left], [right]) => left.localeCompare(right));
+  return digest(Buffer.from(JSON.stringify(selected)));
+}
+
 export function migratedCarryOverPath(workspaceDir: string, startedAt: string): string {
   const suffix = startedAt.replaceAll(':', '').replaceAll('.', '');
   return path.join(workspaceDir, `chat-carryover.v5.migrated.${suffix}.json`);
