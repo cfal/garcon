@@ -35,6 +35,8 @@ vi.mock('$lib/api/git.js', () => ({
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
 	gitStagePaths: vi.fn(),
+	gitDiscard: vi.fn(),
+	gitDeleteUntracked: vi.fn(),
 	gitInitialCommit: vi.fn(),
 }));
 
@@ -1346,12 +1348,15 @@ describe('GitWorkbenchStore', () => {
 
 		it('stages an entire directory with one path batch', async () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
+			await wb.setTarget(makeTarget('/project'));
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			const result = await wb.staging.stageDirectory('/project', 'src');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'stage');
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		});
 
 		it('unstages an entire directory with one path batch', async () => {
@@ -1362,6 +1367,20 @@ describe('GitWorkbenchStore', () => {
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'unstage');
+		});
+
+		it('refreshes once after discarding a tracked file', async () => {
+			mockedApi.gitDiscard.mockResolvedValue({ success: true });
+			await wb.setTarget(makeTarget('/project'));
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+			wb.staging.requestDiscard('a.ts');
+
+			const result = await wb.staging.confirmDiscard('/project');
+
+			expect(result).toBe(true);
+			expect(mockedApi.gitDiscard).toHaveBeenCalledWith('/project', 'a.ts');
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		});
 	});
 

@@ -108,7 +108,7 @@ export class GitWorkbenchStore {
 			setSelectedFile: (filePath) => {
 				this.treeState.selectedFile = filePath;
 			},
-			refreshAllData: (projectPath) => this.refreshAllData(projectPath),
+			invalidateReviewData: (projectPath) => this.invalidateReviewData(projectPath),
 			refreshFileAfterStage: (projectPath, filePath) =>
 				this.refreshFileAfterStage(projectPath, filePath),
 			refreshAfterGitAction: (projectPath, options) =>
@@ -390,15 +390,9 @@ export class GitWorkbenchStore {
 		this.virtualReview.handleBodyDemand(demand);
 	}
 
-	private refreshAllData(projectPath: string): void {
+	private invalidateReviewData(projectPath: string): void {
 		if (!this.isCurrentTarget(projectPath)) return;
 		this.virtualReview.refreshAllData();
-		if (this.target)
-			void this.refresh({
-				reason: 'manual',
-				preserveSelection: true,
-				preferSelectedFile: true,
-			});
 	}
 
 	setActiveTab(tab: GitDiffTab): void {

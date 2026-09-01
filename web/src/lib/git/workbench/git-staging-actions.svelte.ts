@@ -35,7 +35,7 @@ export interface GitStagingActionsDeps {
 	lineSelection: GitLineSelectionState;
 	findTreeNode: (filePath: string) => GitTreeNode | undefined;
 	setSelectedFile: (filePath: string | null) => void;
-	refreshAllData: (projectPath: string) => void;
+	invalidateReviewData: (projectPath: string) => void;
 	refreshFileAfterStage: (projectPath: string, filePath: string) => Promise<void>;
 	refreshAfterGitAction: (
 		projectPath: string,
@@ -206,7 +206,7 @@ export class GitStagingActions {
 					? await gitDeleteUntracked(projectPath, filePath)
 					: await gitDiscard(projectPath, filePath);
 				if (result.success && this.deps.isCurrentTarget(projectPath)) {
-					this.deps.refreshAllData(projectPath);
+					this.deps.invalidateReviewData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 					const visibleFilePaths = this.deps.visibleFilePaths();
 					if (this.deps.selectedFile() === filePath && !visibleFilePaths.includes(filePath)) {
@@ -330,7 +330,7 @@ export class GitStagingActions {
 			async () => {
 				const result = await gitStagePaths(projectPath, [dirPath], mode);
 				if (result.success && this.deps.isCurrentTarget(projectPath)) {
-					this.deps.refreshAllData(projectPath);
+					this.deps.invalidateReviewData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 				}
 				return result.success ?? false;
