@@ -670,6 +670,7 @@ async function initializeSearchFold(ledger, rows) {
   });
   const controller = new TranscriptSearchController({
     listChatIds: () => [CHAT_ID],
+    hasChat: (chatId) => chatId === CHAT_ID,
     ledger: {
       currentView: (chatId) => ledger.currentView(chatId),
       existingCurrentView: (chatId) => ledger.currentView(chatId),

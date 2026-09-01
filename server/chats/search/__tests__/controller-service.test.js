@@ -193,6 +193,7 @@ describe('TranscriptSearchController with v9 Workers', () => {
     const service = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
     const controller = new TranscriptSearchController({
       listChatIds: () => [...corpus.chats.keys()],
+      hasChat: (chatId) => corpus.chats.has(chatId),
       ledger: corpus.ledger,
       adoption,
       service,
@@ -250,7 +251,8 @@ describe('TranscriptSearchController with v9 Workers', () => {
     const ledger = fakeLedger();
     const firstService = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
     const first = new TranscriptSearchController({
-      listChatIds: () => ['chat-e2e'], ledger, adoption: adoptionFor(ledger),
+      listChatIds: () => ['chat-e2e'], hasChat: (chatId) => chatId === 'chat-e2e',
+      ledger, adoption: adoptionFor(ledger),
       service: firstService, logger: logger(),
     });
     await first.start();
@@ -262,7 +264,8 @@ describe('TranscriptSearchController with v9 Workers', () => {
 
     const secondService = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
     const second = new TranscriptSearchController({
-      listChatIds: () => ['chat-e2e'], ledger, adoption: adoptionFor(ledger),
+      listChatIds: () => ['chat-e2e'], hasChat: (chatId) => chatId === 'chat-e2e',
+      ledger, adoption: adoptionFor(ledger),
       service: secondService, logger: logger(),
     });
     await second.start();
@@ -311,6 +314,7 @@ describe('TranscriptSearchController with v9 Workers', () => {
         });
     const controller = new TranscriptSearchController({
       listChatIds: () => [...chats.keys()],
+      hasChat: (chatId) => chats.has(chatId),
       ledger,
       adoption: adoptionFor(ledger),
       service,
@@ -365,6 +369,7 @@ describe('TranscriptSearchController with v9 Workers', () => {
     };
     const controller = new TranscriptSearchController({
       listChatIds: () => [...chats.keys()],
+      hasChat: (chatId) => chats.has(chatId),
       ledger,
       adoption: adoptionFor(ledger),
       service,

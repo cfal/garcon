@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -168,6 +168,42 @@ describe('TranscriptAdoptionService', () => {
       expect(entry.agentSessionId).toBe('session-2');
     });
   });
+
+  it('rejects an unregistered chat without materializing its ledger', async () => {
+    await withFixture(async ({ adoption, root }) => {
+      await expect(adoption.ensure('missing-chat')).rejects.toThrow(
+        'Cannot adopt transcript for unknown chat missing-chat',
+      );
+      await expect(stat(path.join(root, 'missing-chat'))).rejects.toMatchObject({ code: 'ENOENT' });
+    }, { getChat: () => null });
+  });
+
+  it('does not recreate a deleted ledger when a queued adoption acquires the lock', async () => {
+    let registered = true;
+    let releasePrefix;
+    let announcePrefix;
+    const prefixStarted = new Promise((resolve) => { announcePrefix = resolve; });
+    const prefixGate = new Promise((resolve) => { releasePrefix = resolve; });
+    await withFixture(async ({ adoption, ledger, root }) => {
+      const first = adoption.ensure('chat-1').then(() => null, (error) => error);
+      await prefixStarted;
+      const second = adoption.ensure('chat-1').then(() => null, (error) => error);
+
+      registered = false;
+      ledger.deleteChat('chat-1');
+      releasePrefix([]);
+
+      expect(await first).toMatchObject({ message: 'Chat ownership changed while adopting chat-1' });
+      expect(await second).toMatchObject({ message: 'Cannot adopt transcript for unknown chat chat-1' });
+      await expect(stat(path.join(root, 'chat-1'))).rejects.toMatchObject({ code: 'ENOENT' });
+    }, {
+      getChat: (_chatId, entry) => registered ? entry : null,
+      loadFrozenPrefix: async () => {
+        announcePrefix();
+        return prefixGate;
+      },
+    });
+  });
 });
 
 async function withFixture(run, options = {}) {
@@ -212,7 +248,7 @@ async function withFixture(run, options = {}) {
   const adoption = new TranscriptAdoptionService({
     ledger,
     registry: {
-      getChat: () => entry,
+      getChat: (chatId) => options.getChat ? options.getChat(chatId, entry) : entry,
       updateChat(_chatId, patch) {
         options.beforeUpdate?.();
         updates.push(patch);
@@ -240,6 +276,7 @@ async function withFixture(run, options = {}) {
       adoption,
       entry,
       loadCounts,
+      root,
       updates,
       setCurrent(value) { current = value; },
     });

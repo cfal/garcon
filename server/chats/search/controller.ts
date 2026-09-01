@@ -43,9 +43,10 @@ const LEDGER_UNADOPTED_VIEW_SENTINEL: TranscriptViewId = transcriptViewId('ledge
 
 export interface TranscriptSearchControllerDeps {
   readonly listChatIds: () => readonly string[];
+  readonly hasChat: (chatId: string) => boolean;
   readonly ledger: Pick<
     TranscriptLedgerService,
-    'currentView' | 'existingCurrentView' | 'highWatermark' | 'replayRows' | 'subscribe'
+    'existingCurrentView' | 'highWatermark' | 'replayRows' | 'subscribe'
   >;
   readonly adoption: Pick<TranscriptAdoptionService, 'ensure'>;
   readonly service: TranscriptSearchService;
@@ -220,8 +221,9 @@ export class TranscriptSearchController {
 
   validateResultView(chatId: string, transcriptViewId: string): boolean {
     if (!this.#enabled || this.#closed) return false;
+    if (!this.#deps.hasChat(chatId)) return false;
     try {
-      return this.#deps.ledger.currentView(chatId)?.viewId === transcriptViewId;
+      return this.#deps.ledger.existingCurrentView(chatId)?.viewId === transcriptViewId;
     } catch (error) {
       if (!(error instanceof LedgerFencedError)) throw error;
       return false;
@@ -276,7 +278,7 @@ export class TranscriptSearchController {
         try {
           const signal = this.#enableAbort?.signal ?? this.#lifecycleAbort.signal;
           const adopted = await this.#ingestPacer.pay(() => (
-            this.#deps.listChatIds().includes(chatId)
+            this.#deps.hasChat(chatId)
               ? this.#deps.adoption.ensure(chatId, signal)
               : null
           ));
@@ -289,11 +291,12 @@ export class TranscriptSearchController {
           this.#adoptingChatIds.delete(chatId);
         }
       }
-      const watermark = await this.#ingestPacer.pay(
-        () => this.#deps.ledger.highWatermark(chatId),
-      );
+      const watermark = await this.#ingestPacer.pay(() => {
+        if (!this.#deps.hasChat(chatId)) throw new Error('SEARCH_VIEW_MISMATCH');
+        return this.#deps.ledger.highWatermark(chatId);
+      });
       if (watermark.viewId !== view.viewId) throw new Error('SEARCH_VIEW_MISMATCH');
-      if (!this.#deps.listChatIds().includes(chatId)) {
+      if (!this.#deps.hasChat(chatId)) {
         this.#forgetChat(chatId);
         return null;
       }
@@ -306,7 +309,7 @@ export class TranscriptSearchController {
       this.#indexedViews.delete(chatId);
       this.#ledgerSnapshots.delete(chatId);
       if (isAbortError(error) && (!this.#enabled || this.#closed)) throw error;
-      if (!this.#deps.listChatIds().includes(chatId)) {
+      if (!this.#deps.hasChat(chatId)) {
         this.#forgetChat(chatId);
         return null;
       }
@@ -407,10 +410,14 @@ export class TranscriptSearchController {
   }
 
   async #syncCurrentChat(chatId: string): Promise<void> {
+    if (!this.#deps.hasChat(chatId)) {
+      this.#forgetChat(chatId);
+      return;
+    }
     let view: TranscriptView | null;
     let through: number;
     try {
-      view = this.#deps.ledger.currentView(chatId);
+      view = this.#deps.ledger.existingCurrentView(chatId);
       through = view ? this.#deps.ledger.highWatermark(chatId).ordinal : 0;
       this.#fencedChatIds.delete(chatId);
       if (view) {
@@ -444,6 +451,10 @@ export class TranscriptSearchController {
       targetThrough: through,
       source: (afterOrdinal) => this.#ledgerFrames(chatId, viewId, afterOrdinal, through),
     });
+    if (!this.#deps.hasChat(chatId)) {
+      this.#forgetChat(chatId);
+      return;
+    }
     this.#indexedViews.set(chatId, { viewId, through });
   }
 
@@ -458,6 +469,7 @@ export class TranscriptSearchController {
       let frame: TranscriptSearchSyncFrame;
       try {
         frame = await this.#ingestPacer.pay(() => {
+          if (!this.#deps.hasChat(chatId)) throw new Error('SEARCH_VIEW_MISMATCH');
           const page = this.#deps.ledger.replayRows(
             chatId,
             viewId,
@@ -484,7 +496,7 @@ export class TranscriptSearchController {
 
   async #syncCatalogChat(chatId: string): Promise<void> {
     if (!this.#enabled || this.#closed) return;
-    if (!this.#deps.listChatIds().includes(chatId)) {
+    if (!this.#deps.hasChat(chatId)) {
       this.#forgetChat(chatId);
       await this.#deps.service.deleteChat(chatId);
       return;
@@ -499,6 +511,10 @@ export class TranscriptSearchController {
 
   #onCommit(event: TranscriptCommitEvent): void {
     if (!this.#enabled || this.#closed) return;
+    if (!this.#deps.hasChat(event.chatId)) {
+      this.#forgetChat(event.chatId);
+      return;
+    }
     if (event.type === 'view-replaced') {
       this.#ledgerSnapshots.delete(event.chatId);
       this.#adoptionFailedChatIds.delete(event.chatId);
@@ -515,6 +531,10 @@ export class TranscriptSearchController {
     this.#adoptionFailedChatIds.delete(event.chatId);
     this.#fencedChatIds.delete(event.chatId);
     this.#schedule(event.chatId, 'append', async () => {
+      if (!this.#deps.hasChat(event.chatId)) {
+        this.#forgetChat(event.chatId);
+        return;
+      }
       const first = rows[0]!.ordinal;
       const last = rows.at(-1)!.ordinal;
       try {
@@ -529,6 +549,10 @@ export class TranscriptSearchController {
             yield { rows: searchableRows(fresh), advanceTo: last };
           },
         });
+        if (!this.#deps.hasChat(event.chatId)) {
+          this.#forgetChat(event.chatId);
+          return;
+        }
         this.#indexedViews.set(event.chatId, { viewId: event.viewId, through: last });
       } catch (error) {
         if (!isIndexPositionMismatch(error)) throw error;

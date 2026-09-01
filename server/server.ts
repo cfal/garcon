@@ -458,6 +458,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       listChatIds: () => Object.keys(chatRegistry.listAllChats()),
+      hasChat: (chatId) => chatRegistry.getChat(chatId) !== null,
       logger,
     });
     try {
