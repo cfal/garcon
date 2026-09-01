@@ -67,6 +67,35 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
+	it('exposes the keyboard-highlighted option through combobox semantics', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		const input = await screen.findByRole('combobox');
+		const listbox = screen.getByRole('listbox');
+		const options = screen.getAllByRole('option');
+
+		expect(input.getAttribute('aria-controls')).toBe(listbox.id);
+		expect(input.getAttribute('aria-expanded')).toBe('true');
+		expect(input.getAttribute('aria-activedescendant')).toBe(options[0]?.id);
+
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+		expect(input.getAttribute('aria-activedescendant')).toBe(options[1]?.id);
+		expect(options[1]?.getAttribute('aria-selected')).toBe('true');
+	});
+
+	it('clears the active descendant when filtering returns no commands', async () => {
+		const { component } = render(CommandMenu);
+		component.toggle();
+
+		const input = await screen.findByRole('combobox');
+		await fireEvent.input(input, { target: { value: 'no matching command exists' } });
+
+		expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+		expect(screen.queryByRole('option')).toBeNull();
+	});
+
 	it.each([
 		['History', 'git-history'],
 		['Compare', 'git-compare'],
