@@ -135,7 +135,7 @@ describe('sidebar search interactions', () => {
 		const lastVisible = focusable.at(-2);
 		expect(responsiveCloseButton).toBeTruthy();
 		expect(lastVisible).toBeTruthy();
-		responsiveCloseButton!.hidden = true;
+		responsiveCloseButton!.style.display = 'none';
 		lastVisible!.focus();
 
 		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
