@@ -137,16 +137,10 @@ export class ShareStore implements IShareStore {
 
   async init(): Promise<void> {
     if (this.#index) return;
+    let parsed: unknown;
     try {
       const raw = await fs.readFile(this.#filePath(), 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      if (isRecord(parsed) && parsed.version === SHARE_INDEX_VERSION && isRecord(parsed.shares)) {
-        this.#index = this.#normalizeIndex(parsed.shares);
-      } else if (isRecord(parsed) && isRecord(parsed.shares)) {
-        this.#index = await this.#migrateLegacyShares(parsed.shares);
-      } else {
-        this.#index = createEmptyIndex();
-      }
+      parsed = JSON.parse(raw);
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         this.#index = createEmptyIndex();
@@ -154,6 +148,15 @@ export class ShareStore implements IShareStore {
         logger.warn('share-store: failed to read shared-chats.json:', (err as Error).message);
         this.#index = createEmptyIndex();
       }
+      this.#rebuildIndex();
+      return;
+    }
+    if (isRecord(parsed) && parsed.version === SHARE_INDEX_VERSION && isRecord(parsed.shares)) {
+      this.#index = this.#normalizeIndex(parsed.shares);
+    } else if (isRecord(parsed) && isRecord(parsed.shares)) {
+      this.#index = await this.#migrateLegacyShares(parsed.shares);
+    } else {
+      this.#index = createEmptyIndex();
     }
     this.#rebuildIndex();
   }
@@ -175,8 +178,8 @@ export class ShareStore implements IShareStore {
       index.shares[snapshot.shareToken] = indexEntryFromSnapshot(snapshot);
       await this.#writeSnapshot(snapshot);
     }
+    await writeJsonFileAtomic(this.#filePath(), index);
     this.#index = index;
-    await this.#persist();
     return index;
   }
 

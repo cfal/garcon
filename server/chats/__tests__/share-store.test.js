@@ -115,6 +115,25 @@ describe('ShareStore', () => {
     expect(migrated?.chatId).toBe('legacy-chat');
   });
 
+  it('fails closed when a legacy snapshot cannot be persisted', async () => {
+    const indexPath = path.join(workspaceDir, 'shared-chats.json');
+    const legacyIndex = JSON.stringify({
+      version: 1,
+      shares: {
+        'legacy-token': {
+          shareToken: 'legacy-token',
+          ...sharePartial({ chatId: 'legacy-chat', title: 'Legacy title' }),
+        },
+      },
+    });
+    await fs.writeFile(indexPath, legacyIndex, 'utf8');
+    await fs.writeFile(path.join(workspaceDir, 'shares'), 'not a directory', 'utf8');
+
+    await expect(new ShareStore(workspaceDir).init()).rejects.toThrow();
+
+    expect(await fs.readFile(indexPath, 'utf8')).toBe(legacyIndex);
+  });
+
   it('revokes shares from the index, cache, and snapshot file', async () => {
     const store = new ShareStore(workspaceDir);
     await store.init();
