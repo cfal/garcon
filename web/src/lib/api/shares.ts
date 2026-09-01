@@ -1,6 +1,6 @@
 // API client for chat sharing endpoints.
 
-import { apiGet, apiPost, apiDelete } from './client.js';
+import { apiGet, apiPost, apiDelete, parseApiResponse, publicApiFetch } from './client.js';
 import type {
 	ShareChatResponse,
 	ShareStatusResponse,
@@ -34,9 +34,6 @@ export async function getSharedChat(
 	const params = new URLSearchParams({ token, limit: '200' });
 	if (before !== undefined) params.set('before', String(before));
 	if (version) params.set('version', version);
-	const response = await fetch(`/api/v1/shared?${params.toString()}`);
-	if (!response.ok) {
-		throw new Error(response.status === 404 ? 'Share not found' : 'Failed to load shared chat');
-	}
-	return response.json();
+	const response = await publicApiFetch(`/api/v1/shared?${params.toString()}`);
+	return parseApiResponse<GetSharedChatResponse>(response);
 }

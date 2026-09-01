@@ -1723,6 +1723,8 @@
 	"shared_view_title": "Shared Conversation",
 	"shared_view_not_found": "This shared conversation could not be found or has been revoked.",
 	"shared_view_not_found_title": "Not Found",
+	"shared_view_load_failed": "This shared conversation could not be loaded. Check your connection and try again.",
+	"shared_view_load_failed_title": "Could not load conversation",
 	"shared_view_shared_on": "Shared on {date}",
 	"shared_view_back_to_app": "Back to app",
 	"shared_view_loading": "Loading shared conversation...",

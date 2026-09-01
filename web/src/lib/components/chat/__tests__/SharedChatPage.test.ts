@@ -4,6 +4,7 @@ import SharedChatPageTestHost from './SharedChatPageTestHost.svelte';
 import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
+import { ApiError } from '$lib/api/client';
 
 vi.mock('$lib/api/shares', () => ({
 	getSharedChat: vi.fn(),
@@ -90,6 +91,39 @@ describe('SharedChatPage', () => {
 		expect(screen.getByText('4 of 250 messages')).toBeTruthy();
 		expect(screen.getByText('newest-1').closest('.chat-message')).toBe(newestMessage);
 		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
+	});
+
+	it('renders a missing share as a terminal not-found state', async () => {
+		vi.mocked(sharesApi.getSharedChat).mockRejectedValueOnce(new ApiError(404, 'Not found'));
+
+		render(SharedChatPageTestHost);
+
+		await screen.findByRole('heading', { name: 'Not Found' });
+		expect(
+			screen.getByText('This shared conversation could not be found or has been revoked.'),
+		).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+	});
+
+	it.each([
+		['server failure', new ApiError(500, 'Internal Server Error')],
+		['network failure', new Error('offline')],
+	])('retries the shared view after a %s', async (_label, failure) => {
+		vi.mocked(sharesApi.getSharedChat)
+			.mockRejectedValueOnce(failure)
+			.mockResolvedValueOnce(response(['recovered'], 0, 1, { nextBefore: null }));
+
+		render(SharedChatPageTestHost);
+
+		await screen.findByRole('heading', { name: 'Could not load conversation' });
+		expect(
+			screen.getByText(
+				'This shared conversation could not be loaded. Check your connection and try again.',
+			),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await screen.findByText('recovered');
+		expect(sharesApi.getSharedChat).toHaveBeenCalledTimes(2);
 	});
 
 	it('anchors from the viewport position when an older-page request completes', async () => {

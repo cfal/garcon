@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
+	import { ApiError } from '$lib/api/client.js';
 	import { parseChatMessage } from '$shared/chat-types';
 	import type { ChatMessage } from '$shared/chat-types';
 	import {
@@ -41,13 +42,15 @@
 		message: ChatMessage;
 	}
 
+	type SharedViewError = 'not-found' | 'load-failed';
+
 	let messages = $state<SharedMessageEntry[]>([]);
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
 	let isLoading = $state(true);
 	let isLoadingEarlier = $state(false);
-	let errorMsg = $state<string | null>(null);
+	let loadError = $state<SharedViewError | null>(null);
 	let olderPageError = $state(false);
 	let nextBefore = $state<number | null>(null);
 	let totalMessages = $state(0);
@@ -79,13 +82,16 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
-	onMount(async () => {
+	async function loadSharedSnapshot(): Promise<void> {
 		if (!token) {
-			errorMsg = m.shared_view_not_found();
+			loadError = 'not-found';
 			isLoading = false;
 			return;
 		}
 
+		isLoading = true;
+		loadError = null;
+		let loaded = false;
 		try {
 			const resp = await getSharedChat(token);
 			const snapshot = resp.snapshot;
@@ -96,14 +102,19 @@
 			totalMessages = resp.page.totalMessages;
 			nextBefore = resp.page.nextBefore;
 			snapshotVersion = resp.page.snapshotVersion;
-		} catch {
-			errorMsg = m.shared_view_not_found();
-		} finally {
-			isLoading = false;
-			// Scroll to bottom after messages render so shared links open at the latest message.
-			await tick();
-			window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+			loaded = true;
+		} catch (error) {
+			loadError = error instanceof ApiError && error.status === 404 ? 'not-found' : 'load-failed';
 		}
+		isLoading = false;
+		if (!loaded) return;
+		// Scrolls after rendering so shared links open at the latest message.
+		await tick();
+		window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+	}
+
+	onMount(() => {
+		void loadSharedSnapshot();
 	});
 
 	async function loadEarlier(): Promise<void> {
@@ -208,18 +219,33 @@
 				<Loader2 class="w-5 h-5 animate-spin" />
 				<span>{m.shared_view_loading()}</span>
 			</div>
-		{:else if errorMsg}
+		{:else if loadError}
 			<div class="flex flex-col items-center justify-center py-16 gap-4">
 				<div class="w-16 h-16 bg-muted rounded-full flex items-center justify-center">
 					<AlertTriangle class="w-8 h-8 text-muted-foreground" />
 				</div>
 				<div class="text-center">
 					<h2 class="text-lg font-semibold text-foreground mb-1">
-						{m.shared_view_not_found_title()}
+						{loadError === 'not-found'
+							? m.shared_view_not_found_title()
+							: m.shared_view_load_failed_title()}
 					</h2>
-					<p class="text-sm text-muted-foreground max-w-md">{errorMsg}</p>
+					<p class="text-sm text-muted-foreground max-w-md">
+						{loadError === 'not-found' ? m.shared_view_not_found() : m.shared_view_load_failed()}
+					</p>
 				</div>
-				<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
+				<div class="flex items-center gap-3">
+					{#if loadError === 'load-failed'}
+						<button
+							type="button"
+							class="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+							onclick={loadSharedSnapshot}
+						>
+							{m.common_retry()}
+						</button>
+					{/if}
+					<a href="/" class="text-sm text-primary hover:underline">{m.shared_view_back_to_app()}</a>
+				</div>
 			</div>
 		{:else}
 			<div class="space-y-1">

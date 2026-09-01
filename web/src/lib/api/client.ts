@@ -64,6 +64,12 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 	);
 }
 
+/** Wraps an unauthenticated fetch with the standard configurable timeout. */
+export function publicApiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
+	const { timeoutMs, ...fetchOptions } = options;
+	return globalThis.fetch(url, withTimeout(fetchOptions, timeoutMs));
+}
+
 export class ApiError extends Error {
 	status: number;
 	errorCode?: string;
