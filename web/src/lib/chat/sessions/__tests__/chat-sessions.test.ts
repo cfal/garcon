@@ -274,6 +274,20 @@ describe('ChatSessionsStore', () => {
 		expect(store.selectedChatId).toBeNull();
 	});
 
+	it('deselects a server chat omitted from a replacement snapshot', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({ id: 'selected' }),
+			makeServerSession({ id: 'remaining' }),
+		]);
+		store.setSelectedChatId('selected');
+
+		store.upsertFromServer([makeServerSession({ id: 'remaining' })]);
+
+		expect(store.selectedChatId).toBeNull();
+		expect(store.selectedChat).toBeNull();
+	});
+
 	it('upsertFromServer cleans up startup for server-known chats', () => {
 		const store = new ChatSessionsStore();
 

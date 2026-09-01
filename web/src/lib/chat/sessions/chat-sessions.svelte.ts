@@ -560,6 +560,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		this.byId = nextById;
 		this.order = [...draftOrder, ...nextOrder];
+		if (this.selectedChatId && !nextById[this.selectedChatId]) {
+			this.selectedChatId = null;
+		}
 	}
 
 	createDraft(params: { id: string; projectPath: string; startup: ChatStartupConfig }): void {
