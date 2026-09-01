@@ -457,6 +457,72 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).toHaveBeenCalledOnce();
 	});
 
+	it('blocks picker, paste, and drop attachment admission when submission requires the queue', async () => {
+		const { container } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-queued-attachments',
+			selectedStatus: 'running',
+			requiresQueuedSubmission: true,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+		const image = new File(['image'], 'blocked.png', { type: 'image/png' });
+		const transfer = new DataTransfer();
+		transfer.items.add(image);
+
+		expect(input.disabled).toBe(true);
+		expect(screen.getByRole('button', { name: 'Queue message' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const attachmentAction = screen.getByRole('menuitem', { name: /Add image/ });
+		expect(attachmentAction.hasAttribute('data-disabled')).toBe(true);
+		expect(attachmentAction.textContent).toContain(
+			'Attachments are not supported in queued messages.',
+		);
+
+		await fireEvent.paste(textarea, { clipboardData: transfer });
+		const dropTarget = textarea.closest('[role="region"]');
+		if (!dropTarget) throw new Error('Missing composer drop target');
+		await fireEvent.drop(dropTarget, { dataTransfer: transfer });
+
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('0');
+		expect(screen.getAllByTestId('notification')).toHaveLength(2);
+		expect(screen.getAllByTestId('notification')[0]?.textContent).toBe(
+			'Attachments are not supported in queued messages.',
+		);
+	});
+
+	it('retains existing images but blocks every submit path after the chat enters queue mode', async () => {
+		const onsubmit = vi.fn();
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-queue-transition',
+			selectedStatus: 'running',
+			requiresQueuedSubmission: false,
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const image = new File(['image'], 'retained.png', { type: 'image/png' });
+		const transfer = new DataTransfer();
+		transfer.items.add(image);
+
+		await fireEvent.paste(textarea, { clipboardData: transfer });
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
+
+		await rerender({ requiresQueuedSubmission: true });
+		const blockedSend = screen.getByRole('button', {
+			name: 'Attachments are not supported in queued messages.',
+		}) as HTMLButtonElement;
+		expect(blockedSend.disabled).toBe(true);
+		await fireEvent.click(blockedSend);
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
+
+		await rerender({ requiresQueuedSubmission: false });
+		const sendButton = screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement;
+		expect(sendButton.disabled).toBe(false);
+		await fireEvent.click(sendButton);
+		expect(onsubmit).toHaveBeenCalledOnce();
+	});
+
 	it('retries app-shell focus requests after the selected chat becomes enabled', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';

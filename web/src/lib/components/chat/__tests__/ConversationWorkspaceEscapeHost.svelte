@@ -282,6 +282,7 @@
 		selectedChat.processingPhase = selectedChat.isProcessing ? 'running' : null;
 	}}>Toggle processing</button
 >
+<button type="button" onclick={() => (selectedChat.status = 'draft')}>Set draft status</button>
 {#if showTestLayer}
 	<div
 		bind:this={testLayerElement}

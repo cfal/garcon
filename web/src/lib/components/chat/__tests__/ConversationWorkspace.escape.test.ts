@@ -156,6 +156,17 @@ describe('ConversationWorkspace Escape abort handling', () => {
 		await waitFor(() => expect(screen.getByTestId('queue-can-steer').textContent).toBe('false'));
 	});
 
+	it('uses the submit classifier processing predicate for composer queue mode', async () => {
+		render(ConversationWorkspaceEscapeHost);
+
+		expect(screen.getByTestId('composer-requires-queued-submission').textContent).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Set draft status' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('composer-requires-queued-submission').textContent).toBe('false'),
+		);
+	});
+
 	it('does not abort when an Escape handler already prevented default', async () => {
 		render(ConversationWorkspaceEscapeHost);
 

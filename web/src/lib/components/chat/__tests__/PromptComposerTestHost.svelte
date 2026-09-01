@@ -68,6 +68,7 @@
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		directAdmissionPending?: boolean;
+		requiresQueuedSubmission?: boolean;
 		onsubmit?: () => void;
 		onSteerPreferredSubmit?: () => void;
 		onAbort?: () => void;
@@ -97,6 +98,7 @@
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
 		directAdmissionPending = false,
+		requiresQueuedSubmission: requiresQueuedSubmissionOverride,
 		onsubmit = () => {},
 		onSteerPreferredSubmit = () => {},
 		onAbort = () => {},
@@ -139,6 +141,9 @@
 		amp: 'Amp',
 	};
 	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
+	const requiresQueuedSubmission = $derived(
+		requiresQueuedSubmissionOverride ?? selectedIsProcessing,
+	);
 	const remoteSettingsSnapshot = $derived<RemoteSettingsSnapshot>({
 		version: 1,
 		features: {
@@ -416,6 +421,7 @@
 	{isPresented}
 	{composerEditorOpenRequestId}
 	{directAdmissionPending}
+	{requiresQueuedSubmission}
 	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />

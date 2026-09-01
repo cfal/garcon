@@ -10,6 +10,7 @@ interface PromptComposerAttachmentOptions {
 	get attachmentPickerBlocked(): boolean;
 	get attachmentSupport(): ChatAttachmentSupport;
 	onAttachmentInput(): void;
+	onBlockedAttachmentInput(): void;
 }
 
 export class PromptComposerAttachmentController {
@@ -24,20 +25,22 @@ export class PromptComposerAttachmentController {
 	handleFileChange(event: Event): void {
 		const input = event.target as HTMLInputElement;
 		if (!input.files) return;
-		if (!this.options.attachmentPickerBlocked) {
-			const attachments = Array.from(input.files).filter((file) =>
-				isSupportedChatAttachment(file, this.options.attachmentSupport),
-			);
-			if (attachments.length > 0) {
-				this.options.composer.addImages(attachments, this.options.attachmentSupport);
-			}
+		const attachments = this.#supportedAttachments(input.files);
+		if (attachments.length > 0 && this.options.attachmentPickerBlocked) {
+			this.options.onBlockedAttachmentInput();
+		} else if (attachments.length > 0) {
+			this.options.composer.addImages(attachments, this.options.attachmentSupport);
 		}
 		input.value = '';
 	}
 
 	handleDragOver(event: DragEvent): void {
 		event.preventDefault();
-		if (!this.options.attachmentInputBlocked) this.options.composer.isDragActive = true;
+		if (this.options.attachmentInputBlocked) {
+			this.options.composer.isDragActive = false;
+			return;
+		}
+		this.options.composer.isDragActive = true;
 	}
 
 	handleDragLeave(): void {
@@ -46,20 +49,20 @@ export class PromptComposerAttachmentController {
 
 	handleDrop(event: DragEvent): void {
 		event.preventDefault();
-		if (this.options.attachmentInputBlocked) return;
 		this.options.composer.isDragActive = false;
 		const files = event.dataTransfer?.files;
 		if (!files) return;
-		const attachments = Array.from(files).filter((file) =>
-			isSupportedChatAttachment(file, this.options.attachmentSupport),
-		);
+		const attachments = this.#supportedAttachments(files);
 		if (attachments.length === 0) return;
+		if (this.options.attachmentInputBlocked) {
+			this.options.onBlockedAttachmentInput();
+			return;
+		}
 		this.options.onAttachmentInput();
 		this.options.composer.addImages(attachments, this.options.attachmentSupport);
 	}
 
 	handlePaste(event: ClipboardEvent): void {
-		if (this.options.attachmentInputBlocked) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const images: File[] = [];
@@ -70,9 +73,18 @@ export class PromptComposerAttachmentController {
 				images.push(file);
 			}
 		}
-		if (images.length > 0) {
-			this.options.onAttachmentInput();
-			this.options.composer.addImages(images, this.options.attachmentSupport);
+		if (images.length === 0) return;
+		if (this.options.attachmentInputBlocked) {
+			this.options.onBlockedAttachmentInput();
+			return;
 		}
+		this.options.onAttachmentInput();
+		this.options.composer.addImages(images, this.options.attachmentSupport);
+	}
+
+	#supportedAttachments(files: FileList): File[] {
+		return Array.from(files).filter((file) =>
+			isSupportedChatAttachment(file, this.options.attachmentSupport),
+		);
 	}
 }
