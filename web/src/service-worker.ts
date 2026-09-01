@@ -9,6 +9,7 @@ import {
 	fetchWithTimeout,
 	isManifestPath,
 	precacheAppShell,
+	shouldCacheNavigationResponse,
 	type ServiceWorkerPrecacheManifest,
 } from './service-worker-helpers';
 
@@ -25,7 +26,7 @@ function isPassthrough(url: URL): boolean {
 }
 
 function cacheSuccessfulNavigation(request: Request, response: Response): void {
-	if (!response.ok || response.type !== 'basic') return;
+	if (!shouldCacheNavigationResponse(response)) return;
 	const clone = response.clone();
 	void caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
 }
@@ -80,7 +81,7 @@ self.addEventListener('fetch', (event) => {
 
 	// Static assets: cache-first (they are fingerprinted by Vite).
 	event.respondWith(
-		caches.match(event.request).then((cached) => {
+		caches.open(CACHE_NAME).then((cache) => cache.match(event.request)).then((cached) => {
 			if (cached) return cached;
 			return fetch(event.request).then((response) => {
 				if (response.ok) {
