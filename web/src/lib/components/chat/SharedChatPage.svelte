@@ -301,14 +301,12 @@
 											/>
 										{/if}
 										<CollapsibleBody disclosure={userPresentation?.disclosure}>
-											{#snippet children()}
-												<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
-													<Markdown
-														source={message.content}
-														variant={userPresentation?.style ? 'presented' : 'user'}
-													/>
-												</div>
-											{/snippet}
+											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+												<Markdown
+													source={message.content}
+													variant={userPresentation?.style ? 'presented' : 'user'}
+												/>
+											</div>
 										</CollapsibleBody>
 										{#if message.images && message.images.length > 0}
 											<div class="mt-2 grid grid-cols-2 gap-2">

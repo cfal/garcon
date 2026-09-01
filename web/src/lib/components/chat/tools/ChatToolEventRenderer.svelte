@@ -217,73 +217,71 @@
 						: undefined}
 					onTitleClick={handleTitleClick}
 				>
-					{#snippet children()}
-						{#if displayConfig.contentKind === 'code'}
-							<CodeBlock
-								text={(contentProps.content as string) || ''}
-								lang={(contentProps.language as string) || ''}
-							/>
-						{:else if displayConfig.contentKind === 'diff'}
-							{#if contentProps.diffUnavailable}
-								<ChatToolFileListView
-									files={(contentProps.files as string[]) || []}
-									onFileClick={onFileOpen}
-									title={contentProps.title as string | undefined}
-								/>
-							{:else}
-								<ChatToolDiffView
-									oldContent={(contentProps.oldContent as string) || ''}
-									newContent={(contentProps.newContent as string) || ''}
-									filePath={(contentProps.filePath as string) || ''}
-									showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
-									badge={contentProps.badge as string | undefined}
-									badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
-									onFileClick={contentProps.filePath && onFileOpen
-										? () => onFileOpen?.(contentProps.filePath as string)
-										: undefined}
-								/>
-							{/if}
-						{:else if displayConfig.contentKind === 'markdown'}
-							<ChatToolRichTextView
-								content={(contentProps.content as string) || ''}
-								{projectBasePath}
-								{chatProjectPath}
-								{onFileOpen}
-								{acquireTransientActivity}
-							/>
-						{:else if displayConfig.contentKind === 'fileList'}
+					{#if displayConfig.contentKind === 'code'}
+						<CodeBlock
+							text={(contentProps.content as string) || ''}
+							lang={(contentProps.language as string) || ''}
+						/>
+					{:else if displayConfig.contentKind === 'diff'}
+						{#if contentProps.diffUnavailable}
 							<ChatToolFileListView
 								files={(contentProps.files as string[]) || []}
 								onFileClick={onFileOpen}
 								title={contentProps.title as string | undefined}
 							/>
-						{:else if displayConfig.contentKind === 'text'}
-							<ChatToolPlainTextView
-								content={(contentProps.content as string) || ''}
-								format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
-								language={contentProps.language as string | undefined}
-							/>
-						{:else if displayConfig.contentKind === 'successMessage'}
-							<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M5 13l4 4L19 7"
-									/>
-								</svg>
-								{successMessage}
-							</div>
-						{:else if displayConfig.contentKind === 'todoList'}
-							<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
-						{:else if displayConfig.contentKind === 'task'}
-							<ChatToolPlainTextView
-								content={(contentProps.content as string) || ''}
-								format="plain"
+						{:else}
+							<ChatToolDiffView
+								oldContent={(contentProps.oldContent as string) || ''}
+								newContent={(contentProps.newContent as string) || ''}
+								filePath={(contentProps.filePath as string) || ''}
+								showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
+								badge={contentProps.badge as string | undefined}
+								badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
+								onFileClick={contentProps.filePath && onFileOpen
+									? () => onFileOpen?.(contentProps.filePath as string)
+									: undefined}
 							/>
 						{/if}
-					{/snippet}
+					{:else if displayConfig.contentKind === 'markdown'}
+						<ChatToolRichTextView
+							content={(contentProps.content as string) || ''}
+							{projectBasePath}
+							{chatProjectPath}
+							{onFileOpen}
+							{acquireTransientActivity}
+						/>
+					{:else if displayConfig.contentKind === 'fileList'}
+						<ChatToolFileListView
+							files={(contentProps.files as string[]) || []}
+							onFileClick={onFileOpen}
+							title={contentProps.title as string | undefined}
+						/>
+					{:else if displayConfig.contentKind === 'text'}
+						<ChatToolPlainTextView
+							content={(contentProps.content as string) || ''}
+							format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+							language={contentProps.language as string | undefined}
+						/>
+					{:else if displayConfig.contentKind === 'successMessage'}
+						<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
+							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							{successMessage}
+						</div>
+					{:else if displayConfig.contentKind === 'todoList'}
+						<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
+					{:else if displayConfig.contentKind === 'task'}
+						<ChatToolPlainTextView
+							content={(contentProps.content as string) || ''}
+							format="plain"
+						/>
+					{/if}
 				</ChatToolExpandableEvent>
 			{/if}
 		{/if}

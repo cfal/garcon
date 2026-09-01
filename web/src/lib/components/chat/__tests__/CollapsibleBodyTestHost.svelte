@@ -13,10 +13,8 @@
 </script>
 
 <CollapsibleBody disclosure="collapsed" {expanded} {onExpandedChange}>
-	{#snippet children()}
-		<div class:mt-1={margined}>{content}</div>
-		{#if focusable}
-			<a href="https://example.com">Focusable content</a>
-		{/if}
-	{/snippet}
+	<div class:mt-1={margined}>{content}</div>
+	{#if focusable}
+		<a href="https://example.com">Focusable content</a>
+	{/if}
 </CollapsibleBody>

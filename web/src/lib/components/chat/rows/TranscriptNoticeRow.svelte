@@ -67,17 +67,15 @@
 						? (expanded) => disclosureState.setOpen('notice-body', 'body', expanded, false)
 						: undefined}
 				>
-					{#snippet children()}
-						<div class={['text-sm', message.title && 'mt-1']}>
-							<Markdown
-								source={message.content}
-								variant="presented"
-								fileLinkBasePath={fileLinkBasePath ?? undefined}
-								{onLinkNavigate}
-								{acquireTransientActivity}
-							/>
-						</div>
-					{/snippet}
+					<div class={['text-sm', message.title && 'mt-1']}>
+						<Markdown
+							source={message.content}
+							variant="presented"
+							fileLinkBasePath={fileLinkBasePath ?? undefined}
+							{onLinkNavigate}
+							{acquireTransientActivity}
+						/>
+					</div>
 				</CollapsibleBody>
 			{:else}
 				<div class={['text-sm whitespace-pre-wrap break-words', message.title && 'mt-1']}>

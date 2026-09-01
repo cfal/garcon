@@ -144,17 +144,15 @@
 						? (expanded) => disclosureState.setOpen('notice-body', 'body', expanded, false)
 						: undefined}
 				>
-					{#snippet children()}
-						<div class="pt-2 text-sm">
-							<Markdown
-								source={messageBody}
-								variant="presented"
-								fileLinkBasePath={isOutcome ? (fileLinkBasePath ?? undefined) : undefined}
-								onLinkNavigate={isOutcome ? onLinkNavigate : undefined}
-								{acquireTransientActivity}
-							/>
-						</div>
-					{/snippet}
+					<div class="pt-2 text-sm">
+						<Markdown
+							source={messageBody}
+							variant="presented"
+							fileLinkBasePath={isOutcome ? (fileLinkBasePath ?? undefined) : undefined}
+							onLinkNavigate={isOutcome ? onLinkNavigate : undefined}
+							{acquireTransientActivity}
+						/>
+					</div>
 				</CollapsibleBody>
 			{/snippet}
 		</ChatEventCard>

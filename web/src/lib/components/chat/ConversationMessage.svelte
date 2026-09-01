@@ -512,17 +512,15 @@
 									? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
 									: undefined}
 							>
-								{#snippet children()}
-									<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
-										<Markdown
-											source={asUser.content}
-											variant={userMessagePresentation?.style ? 'presented' : 'user'}
-											fileLinkBasePath={projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-											{acquireTransientActivity}
-										/>
-									</div>
-								{/snippet}
+								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+									<Markdown
+										source={asUser.content}
+										variant={userMessagePresentation?.style ? 'presented' : 'user'}
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+										{acquireTransientActivity}
+									/>
+								</div>
 							</CollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
