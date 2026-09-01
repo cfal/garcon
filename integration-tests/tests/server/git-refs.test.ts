@@ -164,4 +164,18 @@ describe("Git refs HTTP API", () => {
       });
     });
   });
+
+  test("preserves the non-repository API error", async () => {
+    await withIntegrationFixture("git-refs-non-repository", async (fixture) => {
+      const params = new URLSearchParams({ project: fixture.dirs.project });
+      const response = await fetch(
+        `${fixture.garcon.baseUrl}/api/v1/git/refs?${params}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Path is not a Git repository.",
+      });
+    });
+  });
 });

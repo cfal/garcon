@@ -44,6 +44,7 @@ import {
 
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
+const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
@@ -63,7 +64,7 @@ function normalizeRefSearchQuery(query: string | undefined): string | null {
 
 function refPatternsForQuery(query: string): string[] {
   // Keeps opening the selector cheap by avoiding large remote/tag namespaces until search.
-  if (!query) return ['refs/heads'];
+  if (!query) return [LOCAL_BRANCH_REF_PATTERN];
   if (query.startsWith('refs/')) return [`${query}*`];
   if (query.includes('/')) {
     return [
@@ -93,10 +94,22 @@ function gitRefDisplayName(refname: string): Pick<GitRefOption, 'name' | 'kind'>
   return { name: refname, kind: 'other' };
 }
 
-function gitRefSortArgs(sort: GitRefSort): string[] {
-  const prefix = sort.direction === 'desc' ? '-' : '';
+function gitRefSortArgs(
+  sort: GitRefSort,
+  patterns: readonly string[],
+): string[] {
+  const canUseDefaultRefOrder =
+    sort.key === 'name' &&
+    sort.direction === 'asc' &&
+    patterns.length === 1 &&
+    patterns[0] === LOCAL_BRANCH_REF_PATTERN;
+  // Git's full-refname order equals short-name order under this common prefix.
+  // Omitting --sort lets --count stop iteration early.
+  if (canUseDefaultRefOrder) return [];
+
+  const directionPrefix = sort.direction === 'desc' ? '-' : '';
   const primary = sort.key === 'name' ? 'refname:lstrip=2' : 'creatordate';
-  return ['--sort=refname', `--sort=${prefix}${primary}`];
+  return ['--sort=refname', `--sort=${directionPrefix}${primary}`];
 }
 
 function creatorDateIso(value: string | undefined): string | null {
@@ -433,22 +446,34 @@ export function createStatusOperations(agents: GitAgentRunner) {
     sort = DEFAULT_GIT_REF_SORT,
     signal,
   }: GitRefsOptions): Promise<GitRefsResponse> {
-    await assertGitRepository(projectPath, signal);
     const normalizedQuery = normalizeRefSearchQuery(query);
-    if (normalizedQuery === null) return { refs: [] };
+    if (normalizedQuery === null) {
+      await assertGitRepository(projectPath, signal);
+      return { refs: [] };
+    }
 
+    const refPatterns = refPatternsForQuery(normalizedQuery);
     const refArgs = [
       'for-each-ref',
       `--count=${normalizeRefResultLimit(limit)}`,
-      ...gitRefSortArgs(sort),
+      ...gitRefSortArgs(sort, refPatterns),
       '--format=%(refname)%00%(objectname)%00%(creatordate:unix)',
-      ...refPatternsForQuery(normalizedQuery),
+      ...refPatterns,
     ];
-    const [identity, refResult] = await Promise.all([
-      readGitHeadIdentity(projectPath, signal),
-      runGit(projectPath, refArgs, readOnlyGitOptions({ signal })),
-    ]);
-    const refs = refResult.stdout
+    const [repositoryResult, identityResult, refResult] =
+      await Promise.allSettled([
+        assertGitRepository(projectPath, signal),
+        readGitHeadIdentity(projectPath, signal),
+        runGit(projectPath, refArgs, readOnlyGitOptions({ signal })),
+      ]);
+
+    // Preserves repository validation as the canonical failure; failures wait for every command to settle.
+    if (repositoryResult.status === 'rejected') throw repositoryResult.reason;
+    if (identityResult.status === 'rejected') throw identityResult.reason;
+    if (refResult.status === 'rejected') throw refResult.reason;
+
+    const identity = identityResult.value;
+    const refs = refResult.value.stdout
       .split('\n')
       .map((line) => parseGitRefLine(line, identity.currentBranch, identity.head))
       .filter((ref): ref is GitRefOption => Boolean(ref));

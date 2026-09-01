@@ -3968,7 +3968,111 @@ describe("git ref checkout and branch creation", () => {
     }
   });
 
-  it("uses three Git commands and one ref query regardless of branch count", async () => {
+  it("marks matching refs as current while HEAD is detached", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-detached-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["branch", "-M", "main"]);
+      const { stdout: head } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
+      await runGitCommand(projectPath, ["branch", "shared", head.trim()]);
+      await runGitCommand(projectPath, ["tag", "shared", head.trim()]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/shared",
+        head.trim(),
+      ]);
+      await runGitCommand(projectPath, ["checkout", "--detach", head.trim()]);
+
+      const { refs } = await git.getRefs({ projectPath, query: "shared" });
+
+      expect(refs).toHaveLength(3);
+      expect(refs.map((ref) => ref.kind).sort()).toEqual([
+        "local-branch",
+        "remote-branch",
+        "tag",
+      ]);
+      expect(
+        refs.find((ref) => ref.kind === "local-branch")?.isCurrent,
+      ).toBeUndefined();
+      expect(refs.find((ref) => ref.kind === "remote-branch")?.isCurrent).toBe(
+        true,
+      );
+      expect(refs.find((ref) => ref.kind === "tag")?.isCurrent).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves repository validation errors while ref operations run concurrently", async () => {
+    const fixtureRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-validation-"),
+    );
+    const nonRepositoryPath = path.join(fixtureRoot, "non-repository");
+    const repositoryPath = path.join(fixtureRoot, "repository");
+    const missingPath = path.join(fixtureRoot, "missing");
+    const notRepositoryMessage =
+      'Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.';
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await fs.mkdir(nonRepositoryPath);
+      await fs.mkdir(repositoryPath);
+      await initRepoWithCommit(repositoryPath);
+
+      await expect(
+        git.getRefs({ projectPath: nonRepositoryPath }),
+      ).rejects.toThrow(notRepositoryMessage);
+      await expect(
+        git.getRefs({ projectPath: nonRepositoryPath, query: "invalid query" }),
+      ).rejects.toThrow(notRepositoryMessage);
+      await expect(git.getRefs({ projectPath: missingPath })).rejects.toThrow(
+        `Unable to access project directory: ${missingPath}`,
+      );
+      await expect(
+        git.getRefs({ projectPath: path.join(repositoryPath, ".git") }),
+      ).rejects.toThrow(
+        "The target path exists but is not inside a Git working tree.",
+      );
+    } finally {
+      await fs.rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects cleanly when concurrent ref operations are aborted", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-ref-abort-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const controller = new AbortController();
+      const request = git.getRefs({ projectPath, signal: controller.signal });
+      controller.abort();
+
+      await expect(request).rejects.toThrow();
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("streams default branch order and retains explicit sort paths", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-commands-"),
     );
@@ -3979,28 +4083,94 @@ describe("git ref checkout and branch creation", () => {
 
     try {
       await initRepoWithCommit(projectPath);
-      for (const branch of ["alpha", "beta", "gamma", "delta"]) {
+      await runGitCommand(projectPath, ["branch", "-M", "main"]);
+      for (const branch of [
+        "zeta",
+        "alpha/x-y",
+        "alpha/x",
+        "alpha.x",
+        "alpha-x",
+      ]) {
         await runGitCommand(projectPath, ["branch", branch]);
       }
-      const commands = [];
-      const originalSpawn = Bun.spawn;
-      Bun.spawn = (command, options) => {
-        if (command[0] === "git") commands.push(command.slice(1));
-        return originalSpawn(command, options);
-      };
-      try {
-        await git.getRefs({
-          projectPath,
-          sort: { key: "updated", direction: "desc" },
-        });
-      } finally {
-        Bun.spawn = originalSpawn;
+      await runGitCommand(projectPath, ["pack-refs", "--all"]);
+      await runGitCommand(projectPath, ["branch", "alpha-w"]);
+      await runGitCommand(projectPath, ["branch", "alpha/x-w"]);
+
+      async function runCapturedRefQuery(options) {
+        const commands = [];
+        const originalSpawn = Bun.spawn;
+        Bun.spawn = (command, spawnOptions) => {
+          if (command[0] === "git") commands.push(command.slice(1));
+          return originalSpawn(command, spawnOptions);
+        };
+        try {
+          const { refs } = await git.getRefs({ projectPath, ...options });
+          const refCommand = commands.find(
+            ([name]) => name === "for-each-ref",
+          );
+          return { commands, refCommand, refs };
+        } finally {
+          Bun.spawn = originalSpawn;
+        }
       }
 
-      expect(commands).toHaveLength(3);
-      expect(commands.filter(([name]) => name === "for-each-ref")).toHaveLength(
-        1,
+      const defaultQuery = await runCapturedRefQuery({ limit: 4 });
+      expect(defaultQuery.commands).toHaveLength(3);
+      expect(defaultQuery.commands).toContainEqual([
+        "rev-parse",
+        "--is-inside-work-tree",
+      ]);
+      expect(defaultQuery.commands).toContainEqual([
+        "rev-parse",
+        "HEAD",
+        "--symbolic-full-name",
+        "HEAD",
+      ]);
+      expect(
+        defaultQuery.refCommand?.some((argument) =>
+          argument.startsWith("--sort="),
+        ),
+      ).toBe(false);
+      expect(defaultQuery.refs.map((ref) => ref.name)).toEqual([
+        "alpha-w",
+        "alpha-x",
+        "alpha.x",
+        "alpha/x",
+      ]);
+
+      const searchedQuery = await runCapturedRefQuery({ query: "alpha/" });
+      expect(searchedQuery.commands).toHaveLength(3);
+      expect(searchedQuery.refCommand).toContain("--sort=refname");
+      expect(searchedQuery.refCommand).toContain("--sort=refname:lstrip=2");
+      expect(searchedQuery.refs.map((ref) => ref.name)).toEqual([
+        "alpha/x",
+        "alpha/x-w",
+        "alpha/x-y",
+      ]);
+
+      const descendingQuery = await runCapturedRefQuery({
+        limit: 4,
+        sort: { key: "name", direction: "desc" },
+      });
+      expect(descendingQuery.commands).toHaveLength(3);
+      expect(descendingQuery.refCommand).toContain("--sort=refname");
+      expect(descendingQuery.refCommand).toContain(
+        "--sort=-refname:lstrip=2",
       );
+      expect(descendingQuery.refs.map((ref) => ref.name)).toEqual([
+        "zeta",
+        "main",
+        "alpha/x-y",
+        "alpha/x-w",
+      ]);
+
+      const updatedQuery = await runCapturedRefQuery({
+        sort: { key: "updated", direction: "desc" },
+      });
+      expect(updatedQuery.commands).toHaveLength(3);
+      expect(updatedQuery.refCommand).toContain("--sort=refname");
+      expect(updatedQuery.refCommand).toContain("--sort=-creatordate");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
