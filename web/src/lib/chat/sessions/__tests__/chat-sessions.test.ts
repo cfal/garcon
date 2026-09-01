@@ -48,6 +48,32 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['b']).toBeTruthy();
 	});
 
+	it('preserves identity when agent setting keys are reordered', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { nested: { first: true, second: false }, mode: 'auto' },
+				},
+			}),
+		]);
+		const original = store.byId['a'];
+
+		store.upsertFromServer([
+			makeServerSession({
+				agentSettings: {
+					ownerId: 'claude',
+					schemaVersion: 1,
+					values: { mode: 'auto', nested: { second: false, first: true } },
+				},
+			}),
+		]);
+
+		expect(store.byId['a']).toBe(original);
+	});
+
 	it('preserves identity for structurally equal parent references', () => {
 		const store = new ChatSessionsStore();
 		const parentChat = {

@@ -8,6 +8,7 @@ import {
 } from '$shared/chat-modes';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-settings';
+import { stableJsonStringify } from '$shared/json';
 import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
@@ -171,7 +172,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.modelProtocol === b.modelProtocol &&
 		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
-		JSON.stringify(a.agentSettings) === JSON.stringify(b.agentSettings) &&
+		stableJsonStringify(a.agentSettings) === stableJsonStringify(b.agentSettings) &&
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
