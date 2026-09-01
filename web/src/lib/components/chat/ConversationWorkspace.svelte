@@ -27,7 +27,7 @@
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
-	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
+	import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { requiresQueuedSubmission } from '$lib/chat/conversation/submission-classifier.js';
 	import { CurrentConversationPanelTranscript } from '$lib/chat/conversation/current-conversation-panel-transcript.js';
@@ -182,8 +182,11 @@
 				lastOrdinal,
 			});
 			if (applied.status !== 'applied') return false;
-			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
-			if (preview) sessions.patchPreview(chatId, preview.content, preview.timestamp);
+			applyChatMessageBatchActivity(
+				sessions,
+				chatId,
+				messages.map((entry) => entry.message),
+			);
 			return true;
 		},
 	});

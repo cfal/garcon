@@ -44,6 +44,12 @@
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 
+	interface ConversationWorkspaceEscapeHostProps {
+		onPatchActivity?: (chatId: string, timestamp: string) => void;
+	}
+
+	let { onPatchActivity }: ConversationWorkspaceEscapeHostProps = $props();
+
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
 		parentChat: null,
@@ -97,6 +103,7 @@
 		processingPhase: () => selectedChat.processingPhase,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},
+		patchActivity: (chatId: string, timestamp: string) => onPatchActivity?.(chatId, timestamp),
 		patchChat: () => {},
 		patchLastReadAt: () => {},
 		applyStartEntry: () => {},

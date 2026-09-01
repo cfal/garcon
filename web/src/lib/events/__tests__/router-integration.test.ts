@@ -161,6 +161,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			selectedChat,
 			setSelectedChatId: vi.fn(),
 			patchPreview: vi.fn(),
+			patchActivity: vi.fn(),
 			quietRefreshChats: vi.fn(),
 			removeChat: vi.fn(),
 			patchChat: vi.fn(),
@@ -342,6 +343,36 @@ describe('event router integration', () => {
 			[],
 		);
 		expect(stores.sessions.patchPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
+	});
+
+	it('advances activity and read receipts for thinking without replacing the preview', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					transcriptViewId: 'generation-current',
+					firstOrdinal: 2,
+					lastOrdinal: 2,
+					resendCandidates: [],
+					clientRequestId: 'req-thinking',
+					upstreamRequestId: 'cursor-thinking',
+					messages: [
+						rawMessage(2, {
+							type: 'thinking-message',
+							timestamp: TS,
+							content: 'working',
+						}),
+					],
+				},
+			],
+			stores,
+		);
+
+		expect(stores.sessions.patchPreview).not.toHaveBeenCalled();
+		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', TS);
+		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', TS);
 	});
 
 	it('keeps background plan and permission batches isolated from selected-chat ports', () => {

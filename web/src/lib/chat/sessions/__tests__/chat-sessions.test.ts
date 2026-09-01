@@ -344,6 +344,31 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.lastActivityAt).toBe('2026-02-25T12:00:00.000Z');
 	});
 
+	it('patchActivity advances unread activity without replacing preview text', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				preview: { lastMessage: 'Visible answer' },
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T10:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				isUnread: false,
+			}),
+		]);
+
+		store.patchActivity('a', '2026-02-25T12:00:00.000Z');
+		store.patchActivity('a', '2026-02-25T11:00:00.000Z');
+
+		expect(store.byId['a']).toMatchObject({
+			lastMessage: 'Visible answer',
+			lastActivityAt: '2026-02-25T12:00:00.000Z',
+			isUnread: true,
+		});
+	});
+
 	it('patchPreview derives unread state when live activity advances past the read receipt', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({

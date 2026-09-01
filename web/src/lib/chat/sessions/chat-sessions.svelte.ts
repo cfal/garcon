@@ -69,6 +69,7 @@ export interface ChatSessionsPort {
 	upsertServerChat(entry: ChatListEntry): void;
 	removeChat(chatId: string): void;
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
+	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
@@ -684,6 +685,18 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.byId = {
 			...this.byId,
 			[chatId]: { ...chat, lastMessage: content, lastActivityAt, isUnread },
+		};
+	}
+
+	/** Advances live activity without changing the user/assistant preview text. */
+	patchActivity(chatId: string, timestamp: string): void {
+		const chat = this.byId[chatId];
+		if (!chat || (chat.lastActivityAt && timestamp < chat.lastActivityAt)) return;
+		const isUnread = Boolean(!chat.lastReadAt || timestamp > chat.lastReadAt);
+		if (chat.lastActivityAt === timestamp && chat.isUnread === isUnread) return;
+		this.byId = {
+			...this.byId,
+			[chatId]: { ...chat, lastActivityAt: timestamp, isUnread },
 		};
 	}
 

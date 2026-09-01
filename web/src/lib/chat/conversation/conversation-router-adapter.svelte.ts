@@ -27,6 +27,7 @@ export interface ConversationRouterStoreDeps {
 		| 'order'
 		| 'hasChat'
 		| 'patchPreview'
+		| 'patchActivity'
 		| 'patchChat'
 		| 'patchLastReadAt'
 		| 'removeChat'

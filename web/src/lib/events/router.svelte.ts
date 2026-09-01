@@ -23,7 +23,6 @@ import {
 	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
-import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { ActiveTranscriptPort } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
@@ -34,6 +33,7 @@ import {
 } from '$lib/chat/conversation/pending-chat-handoff.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 
 import { untrack } from 'svelte';
@@ -73,6 +73,7 @@ export type EventRouterSessionsStore = Pick<
 	| 'selectedChat'
 	| 'setSelectedChatId'
 	| 'patchPreview'
+	| 'patchActivity'
 	| 'quietRefreshChats'
 	| 'removeChat'
 	| 'patchChat'
@@ -91,9 +92,7 @@ export type EventRouterChatStateStore = Pick<
 	ActiveTranscriptPort,
 	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
 > & {
-	getChatCursor: (
-		chatId: string,
-	) => { transcriptViewId: string; lastOrdinal: number } | null;
+	getChatCursor: (chatId: string) => { transcriptViewId: string; lastOrdinal: number } | null;
 	applyChatMessages: (
 		chatId: string,
 		transcriptViewId: string,
@@ -152,36 +151,6 @@ export interface EventRouterStores {
 	readState: EventRouterReadStateStore;
 	chatPresentations: EventRouterChatPresentations;
 	notifyCompletion: () => void;
-}
-
-function extractFirstLine(text: string): string {
-	if (!text) return '';
-	const nl = text.indexOf('\n');
-	if (nl < 0) return text.trim();
-	return text.slice(0, nl).trim();
-}
-
-// Extracts sidebar preview content from an incoming message batch.
-// Only considers finalized types (not partials) so background chats
-// update on completed messages. Returns null if the batch contains
-// no displayable content.
-export function selectPreviewFromBatch(
-	messages: ChatMessage[],
-): { content: string; timestamp: string } | null {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (
-			msg instanceof AssistantMessage ||
-			msg instanceof UserMessage ||
-			msg instanceof ThinkingMessage
-		) {
-			return {
-				content: extractFirstLine(String(msg.content || '')).slice(0, 200),
-				timestamp: msg.timestamp,
-			};
-		}
-	}
-	return null;
 }
 
 export function createChatMessagesAccumulator(
@@ -481,15 +450,17 @@ export function createEventRouter(
 				if (event.message instanceof ChatMessagesMessage) {
 					const agentMsg = event.message;
 					if (agentMsg.chatId) {
-						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
-						if (preview) {
-							stores.sessions.patchPreview(agentMsg.chatId, preview.content, preview.timestamp);
+						const messages = agentMsg.messages.map((entry) => entry.message);
+						const activityTimestamp = applyChatMessageBatchActivity(
+							stores.sessions,
+							agentMsg.chatId,
+							messages,
+						);
 
-							// Enqueue read receipt for the active chat when visible.
-							const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
-							if (isActiveChat && document.visibilityState === 'visible') {
-								stores.readState.enqueueReadReceipt(agentMsg.chatId, preview.timestamp);
-							}
+						// Enqueue read receipts for all active-chat transcript activity when visible.
+						const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
+						if (isActiveChat && activityTimestamp && document.visibilityState === 'visible') {
+							stores.readState.enqueueReadReceipt(agentMsg.chatId, activityTimestamp);
 						}
 					}
 				}
@@ -510,8 +481,6 @@ export function createEventRouter(
 		});
 	});
 }
-
-export { extractFirstLine as _extractFirstLine };
 
 function messagesOf(msg: ChatMessagesMessage): { chatId: string; messages: ChatMessage[] } {
 	return {
