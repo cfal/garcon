@@ -47,14 +47,10 @@
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
-	let internalCollapsedKeys = $state<ReadonlySet<string>>(new Set<string>());
+	let internalCollapsedKeys = $derived<ReadonlySet<string>>(new Set(collapsedProjectKeys));
 	let effectiveCollapsedKeys = $derived(
 		onToggleProjectCollapsed ? collapsedProjectKeys : internalCollapsedKeys,
 	);
-
-	$effect(() => {
-		internalCollapsedKeys = new Set(collapsedProjectKeys);
-	});
 
 	function handleProjectCollapseToggle(projectKey: string): void {
 		if (onToggleProjectCollapsed) {
