@@ -1,3 +1,4 @@
+import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
@@ -12,6 +13,7 @@ export interface AmpExecutionRequest {
   readonly model: string;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
+  readonly attachments?: readonly AgentAttachment[];
   readonly operation: AgentRuntimeOperation;
   readonly executionAdmission?: AmpExecutionAdmission;
 }

@@ -26,6 +26,7 @@ function createFakeProc() {
   let stderrController;
   let resolveExited;
   let closed = false;
+  const stdinWrites = [];
 
   const stdout = new ReadableStream({
     start(controller) {
@@ -43,8 +44,10 @@ function createFakeProc() {
     stdout,
     stderr,
     stdin: {
-      write() { },
-      end() { },
+      writes: stdinWrites,
+      ended: false,
+      write(value) { stdinWrites.push(value); },
+      end() { this.ended = true; },
     },
     killed: false,
     exited: new Promise((resolve) => {
@@ -118,11 +121,124 @@ describe('AmpCliRuntime lifecycle', () => {
     Bun.spawn = originalSpawn;
   });
 
-  it('rejects explicit generic one-shot effort before spawning Amp', async () => {
-    await expect(runSingleQuery('hello', { cwd: '/proj', thinkingMode: 'high' })).rejects.toThrow(
-      'amp does not support explicit one-shot effort high',
-    );
-    expect(spawnMock).not.toHaveBeenCalled();
+  it('passes current mode and effort flags to one-shot Amp execution', async () => {
+    spawnMock.mockReturnValue(createFakeCommandProc([
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'done' }] },
+      }),
+      JSON.stringify({ type: 'result', is_error: false }),
+      '',
+    ].join('\n')));
+
+    await expect(runSingleQuery('hello', {
+      cwd: '/proj',
+      model: 'high',
+      thinkingMode: 'xhigh',
+    })).resolves.toBe('done');
+    expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining([
+      '--mode', 'high', '--effort', 'xhigh',
+    ]));
+  });
+
+  it('publishes Amp web inputs, suppresses local echoes, and acknowledges steering', async () => {
+    const provider = new AmpCliRuntime();
+    const threadId = 'T-10101010-1010-1010-1010-101010101010';
+    const proc = createFakeProc();
+    const observed = collectOperation('run-web-steer');
+    spawnMock
+      .mockReturnValueOnce(createFakeCommandProc(`${threadId}\n`))
+      .mockReturnValueOnce(proc);
+
+    await provider.startSession({
+      command: 'initial input',
+      chatId: 'chat-web-steer',
+      projectPath: '/proj',
+      model: 'medium',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      attachments: [{
+        kind: 'image',
+        name: 'capture.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,aW1hZ2U=',
+      }],
+      operation: observed.operation,
+    });
+    expect(spawnMock.mock.calls[1][0]).toEqual(expect.arrayContaining([
+      '--stream-json-input', '--mode', 'medium',
+    ]));
+    expect(JSON.parse(proc.stdin.writes[0])).toMatchObject({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'text', text: 'initial input' },
+          {
+            type: 'image',
+            source_path: 'capture.png',
+            source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
+          },
+        ],
+      },
+    });
+
+    proc.pushJson({
+      type: 'user',
+      message: { content: [{ type: 'text', text: 'initial input' }] },
+    });
+    await Promise.resolve();
+    expect(observed.events).toEqual([]);
+
+    const target = provider.captureSteerTarget(threadId);
+    let prepared = false;
+    const steering = provider.steer({
+      chatId: 'chat-web-steer',
+      projectPath: '/proj',
+      agentSessionId: threadId,
+      nativeSession: null,
+      target,
+      input: 'local steer',
+      clientMessageId: 'steer-message-id',
+      prepareDelivery: async () => { prepared = true; },
+    });
+    await Promise.resolve();
+    expect(prepared).toBe(true);
+    expect(JSON.parse(proc.stdin.writes[1])).toMatchObject({
+      type: 'user',
+      request_id: 'steer-message-id',
+      steer: true,
+      message: { content: [{ type: 'text', text: 'local steer' }] },
+    });
+    proc.pushJson({
+      type: 'user',
+      message: { content: [{ type: 'text', text: 'local steer' }] },
+    });
+    await expect(steering).resolves.toEqual({ kind: 'accepted' });
+    expect(observed.events).toEqual([]);
+
+    proc.pushJson({
+      type: 'user',
+      message: { content: [{ type: 'text', text: 'Amp web steering' }] },
+    });
+    await Promise.resolve();
+    expect(observed.events).toHaveLength(1);
+    expect(observed.events[0].rows[0].message).toMatchObject({
+      type: 'user-message',
+      content: 'Amp web steering',
+    });
+
+    proc.pushJson({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: 'updated response' }],
+        stop_reason: 'end_turn',
+      },
+    });
+    await Promise.resolve();
+    expect(observed.events.map((event) => event.type)).toEqual(['rows', 'rows', 'run-ended']);
+    expect(proc.stdin.ended).toBe(true);
+    proc.pushJson({ type: 'result', is_error: false });
+    proc.close(0);
   });
 
   it('resolves startSession on thread init before the turn finishes', async () => {

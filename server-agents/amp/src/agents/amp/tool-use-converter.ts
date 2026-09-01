@@ -105,7 +105,8 @@ export function convertAmpToolUse(ts: string, part: AmpToolUsePart): AmpToolUseR
   const key = canonicalize(rawName);
 
   switch (key) {
-    case 'bash': {
+    case 'bash':
+    case 'shellcommand': {
       const command = firstString([input.cmd, input.command]);
       if (command === undefined) break;
       return new BashToolUseMessage(ts, toolId, command, asString(input.description));

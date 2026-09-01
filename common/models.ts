@@ -32,10 +32,12 @@ export const CODEX_MODELS = {
 
 export const AMP_MODELS = {
   OPTIONS: [
-    { value: 'smart', label: 'Amp Smart', supportsImages: false },
-    { value: 'deep', label: 'Amp Deep', supportsImages: false },
+    { value: 'low', label: 'Amp Low', supportsImages: true },
+    { value: 'medium', label: 'Amp Medium', supportsImages: true },
+    { value: 'high', label: 'Amp High', supportsImages: true },
+    { value: 'ultra', label: 'Amp Ultra', supportsImages: true },
   ] satisfies SharedModelOption[],
-  DEFAULT: 'smart',
+  DEFAULT: 'medium',
 };
 
 export const FACTORY_MODELS = {

@@ -31,8 +31,8 @@ const AMP_DESCRIPTOR = {
   label: 'Amp',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES,
-  supportsImages: false,
+  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'ultra'),
+  supportsImages: true,
   supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: [],
@@ -43,7 +43,9 @@ export default class AmpAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'amp';
   static readonly apiVersion = 5 as const;
   readonly descriptor = AMP_DESCRIPTOR;
-  readonly attachments = null;
+  readonly attachments = {
+    fileMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  } as const;
   readonly execution;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
@@ -59,7 +61,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
-  readonly steering = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly goals = null;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
@@ -72,18 +74,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
 
     this.settings = createVersionedSettings({
       ownerId: 'amp',
-      schemaVersion: 1,
-      defaults: { ampAgentMode: 'smart' },
-      descriptors: [{
-        key: 'ampAgentMode',
-        type: 'enum',
-        label: 'Mode',
-        labelKey: 'mode',
-        options: [
-          { value: 'smart', label: 'Smart', labelKey: 'smart' },
-          { value: 'deep', label: 'Deep', labelKey: 'deep' },
-        ],
-      }],
+      schemaVersion: 2,
+      defaults: {},
+      descriptors: [],
+      migrateValues: async () => ({}),
     });
     const providerExecution = new AmpExecution(runtime, nativeSessions);
     const nativeEvidence = createAmpNativeEvidence(runtime, nativeSessions);
@@ -144,6 +138,10 @@ export default class AmpAgentIntegration implements AgentIntegration {
           );
         }
       },
+    };
+    this.steering = {
+      captureTarget: (request) => runtime.captureSteerTarget(request.agentSessionId),
+      steer: (request) => runtime.steer(request),
     };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),
