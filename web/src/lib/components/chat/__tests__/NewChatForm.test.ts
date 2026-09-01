@@ -176,6 +176,23 @@ describe('NewChatForm', () => {
 		vi.mocked(clientChatId.createClientChatId).mockReturnValue(PROSPECTIVE_CHAT_ID);
 	});
 
+	it('cancels pending reseed focus when unmounted', () => {
+		stubMatchMedia(false);
+		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));
+		const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+		const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+		const view = render(NewChatFormTestHost, { props: { onStartChat: vi.fn() } });
+		const focusTimerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 50);
+
+		expect(focusTimerIndex).toBeGreaterThanOrEqual(0);
+		const focusTimer = setTimeoutSpy.mock.results[focusTimerIndex]?.value;
+		view.unmount();
+
+		expect(clearTimeoutSpy).toHaveBeenCalledWith(focusTimer);
+		setTimeoutSpy.mockRestore();
+		clearTimeoutSpy.mockRestore();
+	});
+
 	it('does not submit on Enter on mobile (Enter inserts a newline)', async () => {
 		stubMatchMedia(true);
 		const onStartChat = vi.fn();

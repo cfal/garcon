@@ -24,10 +24,19 @@
 	let copied = $state(false);
 	let isRevoking = $state(false);
 	let showRevokeConfirm = $state(false);
+	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+	let copyGeneration = 0;
+
+	function clearCopyResetTimer(): void {
+		if (copyResetTimer) clearTimeout(copyResetTimer);
+		copyResetTimer = null;
+	}
 
 	// Triggers share creation when chatId changes.
 	$effect(() => {
 		if (!chatId) {
+			copyGeneration += 1;
+			clearCopyResetTimer();
 			shareUrl = null;
 			error = null;
 			copied = false;
@@ -36,6 +45,10 @@
 			return;
 		}
 		createOrUpdateShare(chatId);
+		return () => {
+			copyGeneration += 1;
+			clearCopyResetTimer();
+		};
 	});
 
 	// Always calls shareChat which creates or updates the snapshot with
@@ -59,13 +72,16 @@
 
 	async function handleCopyLink(event: MouseEvent) {
 		if (!shareUrl) return;
+		const generation = ++copyGeneration;
 		const container = (event.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
 		const didCopy = await copyToClipboard(shareUrl, container);
-		if (!didCopy) return;
+		if (!didCopy || generation !== copyGeneration) return;
 
 		copied = true;
-		setTimeout(() => {
+		clearCopyResetTimer();
+		copyResetTimer = setTimeout(() => {
 			copied = false;
+			copyResetTimer = null;
 		}, 2000);
 	}
 
