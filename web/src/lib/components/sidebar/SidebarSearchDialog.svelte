@@ -78,6 +78,7 @@
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let dialogRef = $state<HTMLDivElement | null>(null);
 	let helpDialogOpen = $state(false);
 	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
@@ -88,7 +89,34 @@
 		onQueryChange(target.value);
 	}
 
+	function moveHighlight(offset: -1 | 1) {
+		if (filteredChats.length === 0) return;
+		const currentIndex = Math.min(Math.max(highlightedIndex, 0), filteredChats.length - 1);
+		onHighlightChange(Math.min(Math.max(currentIndex + offset, 0), filteredChats.length - 1));
+		highlightRevealVersion += 1;
+	}
+
+	function trapDialogFocus(e: KeyboardEvent): boolean {
+		if (contentRole !== 'dialog' || e.key !== 'Tab' || !dialogRef) return false;
+		const focusable = Array.from(
+			dialogRef.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+			),
+		);
+		if (focusable.length === 0) {
+			e.preventDefault();
+			return true;
+		}
+		const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+		const atBoundary = e.shiftKey ? currentIndex <= 0 : currentIndex === focusable.length - 1;
+		if (!atBoundary) return false;
+		e.preventDefault();
+		focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
+		return true;
+	}
+
 	function handleDialogKeydown(e: KeyboardEvent) {
+		if (trapDialogFocus(e)) return;
 		const key = e.key.toLowerCase();
 
 		if ((e.ctrlKey || e.metaKey) && key === 's') {
@@ -98,17 +126,15 @@
 			return;
 		}
 
-		if (e.ctrlKey && key === 'j') {
+		if ((e.target === inputRef && key === 'arrowdown') || (e.ctrlKey && key === 'j')) {
 			e.preventDefault();
-			onHighlightChange(Math.min(highlightedIndex + 1, filteredChats.length - 1));
-			highlightRevealVersion += 1;
+			moveHighlight(1);
 			return;
 		}
 
-		if (e.ctrlKey && key === 'k') {
+		if ((e.target === inputRef && key === 'arrowup') || (e.ctrlKey && key === 'k')) {
 			e.preventDefault();
-			onHighlightChange(Math.max(highlightedIndex - 1, 0));
-			highlightRevealVersion += 1;
+			moveHighlight(-1);
 			return;
 		}
 
@@ -174,6 +200,7 @@
 			onclick={handleContainerClick}
 		>
 			<div
+				bind:this={dialogRef}
 				data-slot="search-dialog-content"
 				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
 				role={contentRole}
