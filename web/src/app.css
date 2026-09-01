@@ -728,13 +728,6 @@
 		margin: 0.5rem 0;
 	}
 
-	/* The typography plugin decorates inline code with literal backticks;
-	   chat inline code already renders as a bordered chip. */
-	.markdown-body :not(pre) > code::before,
-	.markdown-body :not(pre) > code::after {
-		content: none;
-	}
-
 	.markdown-body pre code {
 		background-color: transparent;
 		padding: 0;
@@ -943,6 +936,15 @@
 
 	.markdown-body thead {
 		background-color: hsl(var(--muted));
+	}
+}
+
+/* The typography plugin decorates inline code with literal backticks from the
+   utilities layer; chat inline code already renders as a bordered chip. */
+@layer utilities {
+	.markdown-body :not(pre) > code::before,
+	.markdown-body :not(pre) > code::after {
+		content: none;
 	}
 }
 
