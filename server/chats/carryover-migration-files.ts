@@ -9,6 +9,7 @@ import { syncDirectory, writeJsonFileAtomic } from '../lib/json-file-store.js';
 
 export const MIGRATION_MARKER_VERSION = 2 as const;
 export const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v2.json';
+export const MIGRATION_BACKUP_DIR = 'migration-backups';
 export const LEGACY_CARRYOVER_FILE = 'chat-carryover.json';
 export const OWNERSHIP_JOURNAL_FILE = 'agent-ownership-journal.json';
 
@@ -132,8 +133,16 @@ export function safeMigrationRelativePath(value: string): string {
   return normalized;
 }
 
+export function safeMigrationBackupPath(workspaceDir: string, value: string): string {
+  const relativePath = safeMigrationRelativePath(value);
+  if (!relativePath.startsWith(`${MIGRATION_BACKUP_DIR}${path.sep}`)) {
+    throw new Error(`Migration backup path must be within ${MIGRATION_BACKUP_DIR}`);
+  }
+  return path.join(workspaceDir, relativePath);
+}
+
 export function registryBackupFile(marker: CarryOverMigrationMarkerBase): string {
-  return `migration-backups/chats.v${marker.sourceRegistryVersion}.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
+  return `${MIGRATION_BACKUP_DIR}/chats.v${marker.sourceRegistryVersion}.${marker.sourceRegistrySha256.slice(0, 16)}.json`;
 }
 
 export function migratedCarryOverPath(workspaceDir: string, startedAt: string): string {

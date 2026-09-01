@@ -14,7 +14,7 @@ import {
   readMarker,
   readOptionalFile,
   registryBackupFile,
-  safeMigrationRelativePath,
+  safeMigrationBackupPath,
   writeBytesAtomic,
   writeMarker,
   type CarryOverMigrationMarker,
@@ -72,14 +72,14 @@ async function restoreLegacyCarryOverState(
   workspaceDir: string,
   marker: Extract<CarryOverMigrationMarker, { phase: 'complete' | 'rolling-back' }>,
 ): Promise<'restored' | 'already-restored'> {
-  const registryBackupPath = path.join(workspaceDir, registryBackupFile(marker));
+  const registryBackupPath = safeMigrationBackupPath(workspaceDir, registryBackupFile(marker));
   const registryBackup = await fs.readFile(registryBackupPath);
   if (digest(registryBackup) !== marker.sourceRegistrySha256) {
     throw new Error('Legacy chat-registry backup does not match its migration marker');
   }
-  const journalBackup = await readOptionalFile(path.join(
+  const journalBackup = await readOptionalFile(safeMigrationBackupPath(
     workspaceDir,
-    safeMigrationRelativePath(marker.legacyJournalBackupFile),
+    marker.legacyJournalBackupFile,
   ));
   if (digest(journalBackup) !== marker.sourceJournalSha256) {
     throw new Error('Legacy ownership-journal backup does not match its migration marker');

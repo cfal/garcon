@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -186,6 +187,89 @@ describe('legacy carryover migration', () => {
     expect((await readJson('carryover-transcripts/migration-v2.json')).phase).toBe('complete');
     await expect(fs.stat(path.join(workspaceDir, 'chat-carryover.json')))
       .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('replaces truncated migration backups after an interrupted write', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryBytes = await fs.readFile(path.join(workspaceDir, 'chats.json'));
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    const journalBackupFile = `migration-backups/agent-ownership-journal.v1.${sha256(journalBytes).slice(0, 16)}.json`;
+    const registryBackupFile = `migration-backups/chats.v3.${sha256(registryBytes).slice(0, 16)}.json`;
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile,
+    });
+    await fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, journalBackupFile), journalBytes.subarray(0, 1));
+    await fs.writeFile(path.join(workspaceDir, registryBackupFile), registryBytes.subarray(0, 1));
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const journalBackupPath = path.join(workspaceDir, journalBackupFile);
+    const registryBackupPath = path.join(workspaceDir, registryBackupFile);
+    expect(await fs.readFile(journalBackupPath)).toEqual(journalBytes);
+    expect(await fs.readFile(registryBackupPath)).toEqual(registryBytes);
+    expect((await fs.stat(journalBackupPath)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(registryBackupPath)).mode & 0o777).toBe(0o600);
+    expect((await readJson('carryover-transcripts/migration-v2.json')).phase).toBe('complete');
+  });
+
+  it('rejects marker backup paths outside the migration backup directory', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const registryBytes = await fs.readFile(registryPath);
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile: 'chats.json',
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Migration backup path must be within migration-backups');
+    expect(await fs.readFile(registryPath)).toEqual(registryBytes);
+  });
+
+  it('preserves complete backups when migration sources change', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const registryBytes = await fs.readFile(registryPath);
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    const journalBackupFile = `migration-backups/agent-ownership-journal.v1.${sha256(journalBytes).slice(0, 16)}.json`;
+    const registryBackupFile = `migration-backups/chats.v3.${sha256(registryBytes).slice(0, 16)}.json`;
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile,
+    });
+    await fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true });
+    const registryBackupPath = path.join(workspaceDir, registryBackupFile);
+    await fs.writeFile(path.join(workspaceDir, journalBackupFile), journalBytes);
+    await fs.writeFile(registryBackupPath, registryBytes);
+    await fs.writeFile(registryPath, JSON.stringify({ version: 3, sessions: {} }));
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Carryover migration source changed after migration began');
+    expect(await fs.readFile(registryBackupPath)).toEqual(registryBytes);
   });
 
   it('migrates a draft schema-v4 registry without linked history', async () => {
@@ -538,6 +622,29 @@ describe('legacy carryover migration', () => {
     );
   }
 
+  async function writeInProgressMarker({
+    registryBytes,
+    journalBytes,
+    carryOverBytes,
+    journalBackupFile,
+  }) {
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts'), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, 'carryover-transcripts', 'migration-v2.json'),
+      JSON.stringify({
+        version: 2,
+        phase: 'in-progress',
+        sourceCarryOverSha256: sha256(carryOverBytes),
+        sourceRegistrySha256: sha256(registryBytes),
+        sourceJournalSha256: sha256(journalBytes),
+        legacyJournalBackupFile: journalBackupFile,
+        sourceRegistryVersion: 3,
+        sourceWorkspaceVersion: 3,
+        startedAt: TIMESTAMP,
+      }),
+    );
+  }
+
   async function writeLegacyWorkspace({ segments, currentAgentId, currentModel }) {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 3,
@@ -580,6 +687,10 @@ describe('legacy carryover migration', () => {
 
   function readJson(relativePath) {
     return fs.readFile(path.join(workspaceDir, relativePath), 'utf8').then(JSON.parse);
+  }
+
+  function sha256(bytes) {
+    return crypto.createHash('sha256').update(bytes).digest('hex');
   }
 
   async function markRollingBack() {

@@ -27,6 +27,7 @@ import {
 import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
 import {
   LEGACY_CARRYOVER_FILE,
+  MIGRATION_BACKUP_DIR,
   MIGRATION_MARKER_VERSION,
   OWNERSHIP_JOURNAL_FILE,
   assertMarkerSources,
@@ -35,7 +36,8 @@ import {
   readMarker,
   readOptionalFile,
   registryBackupFile,
-  safeMigrationRelativePath,
+  safeMigrationBackupPath,
+  writeBytesAtomic,
   writeMarker,
   type CarryOverMigrationMarker,
   type CarryOverMigrationMarkerBase,
@@ -91,7 +93,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   if (existingMarker) assertMarkerSources(existingMarker, sourceDigests);
   const startedAt = existingMarker?.startedAt ?? new Date().toISOString();
   const legacyJournalBackupFile = existingMarker?.legacyJournalBackupFile
-    ?? `migration-backups/agent-ownership-journal.v1.${sourceDigests.sourceJournalSha256.slice(0, 16)}.json`;
+    ?? `${MIGRATION_BACKUP_DIR}/agent-ownership-journal.v1.${sourceDigests.sourceJournalSha256.slice(0, 16)}.json`;
   const markerBase: CarryOverMigrationMarkerBase = {
     version: MIGRATION_MARKER_VERSION,
     ...sourceDigests,
@@ -249,11 +251,8 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
     && await targetRegistryHasQuarantine(workspaceDir);
   await Promise.all([
     fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true }),
-    fs.rm(path.join(workspaceDir, registryBackupFile(marker)), { force: true }),
-    fs.rm(path.join(
-      workspaceDir,
-      safeMigrationRelativePath(marker.legacyJournalBackupFile),
-    ), { force: true }),
+    fs.rm(safeMigrationBackupPath(workspaceDir, registryBackupFile(marker)), { force: true }),
+    fs.rm(safeMigrationBackupPath(workspaceDir, marker.legacyJournalBackupFile), { force: true }),
     ...(marker.sourceRegistryVersion === 4 && !retainLinkedSources
       ? [fs.rm(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), {
           recursive: true,
@@ -263,7 +262,7 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
   ]);
   await Promise.all([
     syncDirectory(workspaceDir),
-    syncDirectory(path.join(workspaceDir, 'migration-backups')),
+    syncDirectory(path.join(workspaceDir, MIGRATION_BACKUP_DIR)),
   ]);
 }
 
@@ -287,8 +286,10 @@ async function resumeCommittedMigration(
 
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
   if (marker.phase === 'ready-to-commit') {
-    const relativeBackup = safeMigrationRelativePath(marker.legacyJournalBackupFile);
-    const journalBackup = await readOptionalFile(path.join(workspaceDir, relativeBackup));
+    const journalBackup = await readOptionalFile(safeMigrationBackupPath(
+      workspaceDir,
+      marker.legacyJournalBackupFile,
+    ));
     if (digest(journalBackup) !== marker.sourceJournalSha256) {
       throw new Error('Legacy ownership-journal backup does not match its migration marker');
     }
@@ -533,7 +534,7 @@ async function ensureMigrationDirectories(workspaceDir: string): Promise<void> {
   await fs.chmod(root, 0o700);
   await Promise.all([
     fs.mkdir(path.join(root, 'quarantine'), { recursive: true, mode: 0o700 }),
-    fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true, mode: 0o700 }),
+    fs.mkdir(path.join(workspaceDir, MIGRATION_BACKUP_DIR), { recursive: true, mode: 0o700 }),
   ]);
 }
 
@@ -547,19 +548,8 @@ async function archiveLegacyCarryOver(filePath: string, startedAt: string): Prom
 
 async function writeMigrationBackup(workspaceDir: string, relativePath: string, bytes: Buffer): Promise<void> {
   if (bytes.byteLength === 0) return;
-  const target = path.join(workspaceDir, relativePath);
-  try {
-    await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 }).catch((retryError) => {
-        if ((retryError as NodeJS.ErrnoException).code !== 'EEXIST') throw retryError;
-      });
-    }
-  }
-  const existing = await fs.readFile(target);
-  if (digest(existing) !== digest(bytes)) throw new Error(`Migration backup differs: ${relativePath}`);
+  const target = safeMigrationBackupPath(workspaceDir, relativePath);
+  await writeBytesAtomic(target, bytes, 0o600);
 }
 
 
