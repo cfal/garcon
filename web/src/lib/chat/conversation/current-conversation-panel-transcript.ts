@@ -10,6 +10,7 @@ import {
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { OptimisticUserInput } from '$lib/chat/transcript/optimistic-user-input.js';
+import { echoedClientMessageIds } from '$lib/chat/transcript/transcript-row-projection.js';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
@@ -130,6 +131,11 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 			noticeRevision: this.options.panels.noticeRevisionFor(chatId),
 		});
 		if (result.kind === 'applied') {
+			for (const clientMessageId of echoedClientMessageIds(messages)) {
+				if (this.#optimisticChatIds.get(clientMessageId) === chatId) {
+					this.#optimisticChatIds.delete(clientMessageId);
+				}
+			}
 			return result.localRecoverySurfaceIds.length === 0 ? 'applied' : 'gap-detected';
 		}
 		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
