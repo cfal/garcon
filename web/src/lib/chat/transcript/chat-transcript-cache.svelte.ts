@@ -45,7 +45,6 @@ export interface ChatTranscriptSnapshot {
 }
 
 interface ChatTranscriptEntry extends ChatTranscriptSnapshot {
-	lastAccessedAt: string;
 	lastValidatedAt: string | null;
 }
 
@@ -130,6 +129,7 @@ class ChatTranscriptPersistenceQueue {
 
 export class ChatTranscriptCache {
 	#entries = new SvelteMap<string, ChatTranscriptEntry>();
+	#lastAccessedAt = new Map<string, string>();
 	#storage: LocalChatTranscriptStorage;
 	#limit: number;
 	#maxEntries: number;
@@ -161,11 +161,11 @@ export class ChatTranscriptCache {
 
 	get(chatId: string): ChatTranscriptSnapshot | null {
 		const entry = this.#entries.get(chatId);
-		if (entry) {
-			this.#touch(chatId);
-			return snapshotFromEntry(entry);
-		}
-		return this.hydrate(chatId);
+		return entry ? snapshotFromEntry(entry) : null;
+	}
+
+	markAccessed(chatId: string): void {
+		if (this.#entries.has(chatId)) this.#lastAccessedAt.set(chatId, nowIso());
 	}
 
 	readAppliedCursor(chatId: string): ChatTranscriptAppliedCursor | null {
@@ -191,10 +191,10 @@ export class ChatTranscriptCache {
 			oldestOrdinal: restored.entries[0]?.ordinal ?? 0,
 			nextBeforeOrdinal: restored.nextBeforeOrdinal,
 			stale: restored.stale,
-			lastAccessedAt: nowIso(),
 			lastValidatedAt: null,
 		};
 		this.#entries.set(chatId, entry);
+		this.#lastAccessedAt.set(chatId, nowIso());
 		this.#prune();
 		return snapshotFromEntry(entry);
 	}
@@ -219,10 +219,10 @@ export class ChatTranscriptCache {
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			nextBeforeOrdinal,
 			stale: options.stale ?? false,
-			lastAccessedAt: now,
 			lastValidatedAt: now,
 		};
 		this.#entries.set(chatId, entry);
+		this.#lastAccessedAt.set(chatId, now);
 		this.#persistence.schedule(entry);
 		this.#prune();
 		return snapshotFromEntry(entry);
@@ -276,9 +276,9 @@ export class ChatTranscriptCache {
 				windowed,
 				page.nextBeforeOrdinal,
 			),
-			lastAccessedAt: nowIso(),
 		};
 		this.#entries.set(chatId, next);
+		this.#lastAccessedAt.set(chatId, nowIso());
 		this.#persistence.schedule(next);
 	}
 
@@ -320,9 +320,9 @@ export class ChatTranscriptCache {
 				entry.nextBeforeOrdinal,
 			),
 			stale: false,
-			lastAccessedAt: nowIso(),
 		};
 		this.#entries.set(chatId, next);
+		this.#lastAccessedAt.set(chatId, nowIso());
 		this.#persistence.schedule(next);
 		return { status: 'applied', changed: applied.changed, lastOrdinal: next.lastOrdinal };
 	}
@@ -349,7 +349,11 @@ export class ChatTranscriptCache {
 
 		const memory = [...this.#entries.values()]
 			.filter((entry) => entry.transcriptViewId && entry.lastOrdinal > 0 && !entry.stale)
-			.sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt))
+			.sort((left, right) =>
+				(this.#lastAccessedAt.get(right.chatId) ?? '').localeCompare(
+					this.#lastAccessedAt.get(left.chatId) ?? '',
+				),
+			)
 			.map(
 				(entry): ChatTranscriptCursor => ({
 					chatId: entry.chatId,
@@ -369,6 +373,7 @@ export class ChatTranscriptCache {
 	remove(chatId: string): void {
 		if (!chatId) return;
 		this.#entries.delete(chatId);
+		this.#lastAccessedAt.delete(chatId);
 		this.#storage.remove(chatId);
 		this.#persistence.remove(chatId);
 	}
@@ -405,28 +410,25 @@ export class ChatTranscriptCache {
 			oldestOrdinal: windowed[0]?.ordinal ?? 0,
 			nextBeforeOrdinal: retainedEarlierPageCursor(applied.messages, windowed, null),
 			stale: false,
-			lastAccessedAt: now,
 			lastValidatedAt: now,
 		};
 		this.#entries.set(chatId, entry);
+		this.#lastAccessedAt.set(chatId, now);
 		this.#persistence.schedule(entry);
 		this.#prune();
 		return { status: 'applied', changed: true, lastOrdinal: entry.lastOrdinal };
 	}
 
-	#touch(chatId: string): void {
-		const current = this.#entries.get(chatId);
-		if (!current) return;
-		this.#entries.set(chatId, { ...current, lastAccessedAt: nowIso() });
-	}
-
 	#prune(): void {
 		if (this.#entries.size <= this.#maxEntries) return;
 		const sorted = [...this.#entries.values()].sort((left, right) =>
-			left.lastAccessedAt.localeCompare(right.lastAccessedAt),
+			(this.#lastAccessedAt.get(left.chatId) ?? '').localeCompare(
+				this.#lastAccessedAt.get(right.chatId) ?? '',
+			),
 		);
 		for (const entry of sorted.slice(0, this.#entries.size - this.#maxEntries)) {
 			this.#entries.delete(entry.chatId);
+			this.#lastAccessedAt.delete(entry.chatId);
 		}
 	}
 }

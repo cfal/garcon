@@ -9,6 +9,7 @@ import type { ChatMessage } from '$shared/chat-types';
 import {
 	ChatTranscriptCache,
 	type ChatTranscriptApplyResult,
+	type ChatTranscriptSnapshot,
 } from './chat-transcript-cache.svelte';
 import type {
 	ConversationTranscriptOverlayMutation,
@@ -343,7 +344,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 				);
 			}
 		} else {
-			const restored = this.transcriptCache.get(chatId);
+			const restored = this.#restoreCachedTranscript(chatId);
 			if (!restored || restored.transcriptViewId !== transcriptViewId) return 'gap-detected';
 			this.#invalidatePageLoad();
 			entriesChanged = true;
@@ -470,7 +471,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	}
 
 	installCachedSnapshot(chatId: string): PageApplyResult {
-		const snapshot = this.transcriptCache.get(chatId);
+		const snapshot = this.#restoreCachedTranscript(chatId);
 		if (!snapshot || snapshot.stale) return 'stale';
 		const epoch = this.beginSnapshotLoad();
 		return this.#installSnapshotPage(
@@ -812,7 +813,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			if (target === 'latest') {
 				const latestPage = preferCachedLatestTranscriptPage(
 					page,
-					this.transcriptCache.get(chatId),
+					this.#restoreCachedTranscript(chatId),
 					this.resendCandidates,
 				);
 				return this.#installSnapshotPage(chatId, latestPage, loadEpoch, 'replace') === 'applied'
@@ -885,7 +886,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		if (!chatId) return null;
 		this.drainServerNotices(chatId);
 		// Publishes the bounded cache window atomically; the virtual feed limits mounted row work.
-		const restored = this.transcriptCache.get(chatId);
+		const restored = this.#restoreCachedTranscript(chatId);
 		if (!restored) return null;
 		const retainedMessages = retainTranscriptEntries(restored.messages, 'later');
 		this.entries = retainedMessages;
@@ -898,6 +899,13 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.hasLaterMessages = false;
 		this.loadStatus = retainedMessages.length === 0 ? 'empty' : 'loaded';
 		return { count: retainedMessages.length, stale: restored.stale };
+	}
+
+	#restoreCachedTranscript(chatId: string): ChatTranscriptSnapshot | null {
+		const snapshot = this.transcriptCache.get(chatId);
+		if (!snapshot) return this.transcriptCache.hydrate(chatId);
+		this.transcriptCache.markAccessed(chatId);
+		return snapshot;
 	}
 
 	removeCachedMessages(chatId: string): void {

@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import { LocalChatTranscriptStorage } from '$lib/chat/transcript/chat-transcript-storage.js';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { TranscriptMessage, TranscriptPage } from '$shared/chat-view';
+import ChatTranscriptCacheDerivedReaderTestHost from './ChatTranscriptCacheDerivedReaderTestHost.svelte';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -62,6 +64,8 @@ describe('ChatTranscriptCache', () => {
 		storage.persist('chat-1', [entry(1, 'one')], { transcriptViewId: 'generation-1', nextBeforeOrdinal: null, lastOrdinal: 1 });
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
 
+		expect(cache.get('chat-1')).toBeNull();
+		expect(cache.hydrate('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1]);
 		expect(cache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([1]);
 	});
 
@@ -84,7 +88,7 @@ describe('ChatTranscriptCache', () => {
 		});
 
 		cache.flush();
-		const hydrated = new ChatTranscriptCache({ limit: 50, storage }).get('chat-1');
+		const hydrated = new ChatTranscriptCache({ limit: 50, storage }).hydrate('chat-1');
 		expect(hydrated).toMatchObject({
 			oldestOrdinal: 251,
 			nextBeforeOrdinal: 201,
@@ -220,7 +224,7 @@ describe('ChatTranscriptCache', () => {
 			lastOrdinal: 1,
 		});
 		const cache = new ChatTranscriptCache({ limit: 100, storage });
-		cache.get('chat-1');
+		cache.hydrate('chat-1');
 		cache.markStale('chat-1');
 		storage.markValidated('chat-1');
 
@@ -238,5 +242,42 @@ describe('ChatTranscriptCache', () => {
 		expect(cache.get('chat-1')).toBeNull();
 		expect(cache.get('chat-2')).not.toBeNull();
 		expect(cache.get('chat-3')).not.toBeNull();
+	});
+
+	it('uses explicit access recency when pruning memory entries', () => {
+		vi.useFakeTimers();
+		try {
+			const cache = new ChatTranscriptCache({ limit: 100, maxEntries: 2 });
+			vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
+			cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+			vi.setSystemTime(new Date('2024-01-01T00:00:01.000Z'));
+			cache.replaceFromPage('chat-2', page('generation-2', [entry(1, 'two')]));
+			vi.setSystemTime(new Date('2024-01-01T00:00:02.000Z'));
+			cache.markAccessed('chat-1');
+			vi.setSystemTime(new Date('2024-01-01T00:00:03.000Z'));
+			cache.replaceFromPage('chat-3', page('generation-3', [entry(1, 'three')]));
+
+			expect(cache.get('chat-1')).not.toBeNull();
+			expect(cache.get('chat-2')).toBeNull();
+			expect(cache.get('chat-3')).not.toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('reads reactive entries without mutating cache state during derivation', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat-1', page('generation-1', [entry(1, 'one')]));
+
+		render(ChatTranscriptCacheDerivedReaderTestHost, { cache, chatId: 'chat-1' });
+		expect(screen.getByTestId('cached-last-ordinal').textContent).toBe('1');
+
+		cache.replaceFromPage(
+			'chat-1',
+			page('generation-1', [entry(1, 'one'), entry(2, 'two')]),
+		);
+		await waitFor(() => {
+			expect(screen.getByTestId('cached-last-ordinal').textContent).toBe('2');
+		});
 	});
 });
