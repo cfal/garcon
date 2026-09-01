@@ -42,6 +42,18 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 describe('shared sidebar chat row', () => {
+	it.each([false, true])('exposes the current chat on %s mobile rows', (isMobile) => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			selectedChatId: 'chat-1',
+			isMobile,
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('aria-current')).toBe(
+			'page',
+		);
+	});
+
 	it('keeps standalone desktop rows natively draggable by default', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
@@ -402,6 +414,7 @@ describe('shared sidebar chat row', () => {
 		expect(checkbox.tagName).toBe('BUTTON');
 		expect(checkbox.tabIndex).toBe(0);
 		expect(checkbox.getAttribute('aria-checked')).toBe('true');
+		expect(checkbox.hasAttribute('aria-current')).toBe(false);
 		expect(checkbox.querySelector('[role="checkbox"]')).toBeNull();
 
 		await fireEvent.click(checkbox, { shiftKey: true });

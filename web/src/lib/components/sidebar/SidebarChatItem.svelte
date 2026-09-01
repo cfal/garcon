@@ -312,6 +312,7 @@
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
@@ -353,6 +354,7 @@
 				onclick={handleItemClick}
 				role={isMultiSelectMode ? 'checkbox' : undefined}
 				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
 				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
