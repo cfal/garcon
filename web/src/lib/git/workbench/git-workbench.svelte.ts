@@ -6,7 +6,7 @@ import {
 	type GitWorkbenchSnapshotResponse,
 } from '$lib/api/git.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
-import { GitWorkbenchCommitController } from '$lib/git/commit/workbench-commit-controller.svelte.js';
+import { GitInitialCommitController } from '$lib/git/commit/initial-commit-controller.svelte.js';
 import { GitLineSelectionState } from '$lib/git/review/git-line-selection.svelte.js';
 import { GitReviewDrafts } from '$lib/git/review/git-review-drafts.svelte.js';
 import { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
@@ -20,7 +20,6 @@ import {
 	type GitWorkbenchRefreshOptions,
 	type GitWorkbenchTarget,
 } from '$lib/git/workbench/git-workbench-types.js';
-import { GitWorktrees } from '$lib/git/targets/git-worktrees.svelte.js';
 import { GitVirtualReviewDocumentController } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitReviewBodyDemand } from '$lib/git/review/git-review-body-demand.js';
 import { readGarconDebugFlag } from '$lib/utils/debug-flags.js';
@@ -71,9 +70,8 @@ export class GitWorkbenchStore {
 	private readonly virtualReview: GitVirtualReviewDocumentController;
 	private readonly lineSelection: GitLineSelectionState;
 	private readonly stagingActions: GitStagingActions;
-	private readonly commitController: GitWorkbenchCommitController;
+	private readonly initialCommitController: GitInitialCommitController;
 	private readonly reviewDrafts: GitReviewDrafts;
-	private readonly worktreeController: GitWorktrees;
 	private readonly porcelainController: GitPorcelainState;
 
 	private lastErrorValue = $state<string | null>(null);
@@ -120,15 +118,7 @@ export class GitWorkbenchStore {
 			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
 			runGitMutation: this.runLocalGitMutation,
 		});
-		this.commitController = new GitWorkbenchCommitController({
-			stagedFiles: () => this.treeState.stagedFiles,
-			visibleFilePaths: () => this.treeState.visibleFilePaths,
-			selectedFile: () => this.treeState.selectedFile,
-			setSelectedFile: (filePath) => {
-				this.treeState.selectedFile = filePath;
-			},
-			openFile: (projectPath, filePath) => this.openFile(projectPath, filePath),
-			refreshAllData: (projectPath) => this.refreshAllData(projectPath),
+		this.initialCommitController = new GitInitialCommitController({
 			refreshAfterGitAction: (projectPath, options) =>
 				this.refreshAfterGitAction(projectPath, options),
 			setHasCommits: (hasCommits) => {
@@ -140,9 +130,6 @@ export class GitWorkbenchStore {
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.reviewDrafts = new GitReviewDrafts();
-		this.worktreeController = new GitWorktrees({
-			surfaceError: (message) => this.surfaceError(message),
-		});
 		this.porcelainController = new GitPorcelainState({
 			selectedFile: () => this.treeState.selectedFile,
 			refreshAfterMutation: (projectPath) =>
@@ -176,16 +163,12 @@ export class GitWorkbenchStore {
 		return this.stagingActions;
 	}
 
-	get commit(): GitWorkbenchCommitController {
-		return this.commitController;
+	get initialCommit(): GitInitialCommitController {
+		return this.initialCommitController;
 	}
 
 	get drafts(): GitReviewDrafts {
 		return this.reviewDrafts;
-	}
-
-	get worktree(): GitWorktrees {
-		return this.worktreeController;
 	}
 
 	get projectPath(): string | null {
@@ -721,8 +704,7 @@ export class GitWorkbenchStore {
 		this.lineSelection.reset();
 		this.stagingActions.reset();
 		this.reviewDrafts.reset();
-		this.commitController.resetForTargetChange();
-		this.worktreeController.reset();
+		this.initialCommitController.reset();
 		this.porcelainController.reset();
 		this.lastError = null;
 		this.repositoryError = null;
