@@ -33,6 +33,12 @@ import type {
 } from '$lib/workspace/chat-surface-transfer.js';
 import type { WorkspacePublication } from '$lib/workspace/workspace-commit.js';
 
+export type ConversationPanelSnapshotAdmission = 'deferred' | 'admitted';
+
+export interface ConversationPanelDescriptor extends VisibleChatPresentation {
+	readonly snapshotAdmission: ConversationPanelSnapshotAdmission;
+}
+
 export interface CommittedTranscriptBatch {
 	readonly chatId: string;
 	readonly transcriptViewId: string;
@@ -105,6 +111,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 	#applyingRestoreEpoch: number | null = null;
 	#restoreResumeRequested = false;
 	#destroyed = false;
+	#snapshotAdmission: ConversationPanelSnapshotAdmission;
 
 	readonly transcript: ActiveTranscriptState;
 	readonly lifecycle: ConversationLifecycleState;
@@ -113,11 +120,13 @@ class PanelRegistration implements ConversationPanelRegistration {
 	constructor(
 		readonly surfaceId: ChatViewSurfaceId,
 		readonly chatId: string,
+		snapshotAdmission: ConversationPanelSnapshotAdmission,
 		cache: ChatTranscriptCache,
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
 		overlays: ConversationTranscriptOverlayStore,
 		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
 	) {
+		this.#snapshotAdmission = snapshotAdmission;
 		this.transcript = new ActiveTranscriptState(cache, overlays.forChat(chatId), {
 			onSnapshotResendCandidates,
 		});
@@ -130,6 +139,17 @@ class PanelRegistration implements ConversationPanelRegistration {
 			chatState: this.transcript,
 			getChatId: () => (this.#destroyed ? null : this.chatId),
 		});
+	}
+
+	get snapshotAdmission(): ConversationPanelSnapshotAdmission {
+		return this.#snapshotAdmission;
+	}
+
+	updateSnapshotAdmission(snapshotAdmission: ConversationPanelSnapshotAdmission): boolean {
+		const becameAdmitted =
+			this.#snapshotAdmission === 'deferred' && snapshotAdmission === 'admitted';
+		this.#snapshotAdmission = snapshotAdmission;
+		return becameAdmitted;
 	}
 
 	attachPresentation(port: ConversationPanelPresentationPort): () => void {
@@ -262,7 +282,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#reconnectReplayEpoch = 0;
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
-	#visible = $state.raw<readonly VisibleChatPresentation[]>([]);
+	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
 
 	constructor(
 		private readonly options: {
@@ -283,7 +303,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return this.options.cache;
 	}
 
-	prepareForReconcile(visible: readonly VisibleChatPresentation[]): void {
+	prepareForReconcile(visible: readonly ConversationPanelDescriptor[]): void {
 		const desired = new Map(visible.map((item) => [item.surfaceId, item]));
 		for (const [surfaceId, panel] of this.#panels) {
 			const next = desired.get(surfaceId);
@@ -328,8 +348,9 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		return this.options.overlays.noticeRevisionFor(chatId);
 	}
 
-	reconcile(visible: readonly VisibleChatPresentation[]): void {
+	reconcile(visible: readonly ConversationPanelDescriptor[]): void {
 		const desired = new Map(visible.map((item) => [item.surfaceId, item]));
+		const admittedChatIds = new Set<string>();
 		for (const [surfaceId, panel] of this.#panels) {
 			const next = desired.get(surfaceId);
 			if (next?.chatId === panel.chatId) continue;
@@ -344,13 +365,18 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#panels.delete(surfaceId);
 		}
 		for (const item of visible) {
-			if (this.#panels.has(item.surfaceId)) {
+			const existing = this.#panels.get(item.surfaceId);
+			if (existing) {
+				if (existing.updateSnapshotAdmission(item.snapshotAdmission)) {
+					admittedChatIds.add(item.chatId);
+				}
 				this.#pendingSurfaceTransfers.delete(item.surfaceId);
 				continue;
 			}
 			const panel = new PanelRegistration(
 				item.surfaceId,
 				item.chatId,
+				item.snapshotAdmission,
 				this.options.cache,
 				this.options.lifecycle,
 				this.options.overlays,
@@ -376,6 +402,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				});
 		}
 		this.#visible = [...visible];
+		for (const chatId of admittedChatIds) {
+			void this.loadChatSnapshot(chatId).catch(() => {
+				this.options.cache.markStale(chatId);
+			});
+		}
 	}
 
 	pruneRemovedSurfaces(existingSurfaceIds: ReadonlySet<ChatViewSurfaceId>): void {
@@ -413,6 +444,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	loadChatSnapshot(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<boolean> {
+		if (!this.#hasAdmittedPanel(chatId)) return Promise.resolve(false);
 		const minimumLimit = Math.max(0, Math.floor(options.minimumLimit ?? 0));
 		const pending = this.#snapshotLoads.get(chatId);
 		if (pending) {
@@ -434,8 +466,11 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	async #performChatSnapshotLoad(
 		chatId: string,
 		options: ChatLoadMessagesOptions,
+		retryAfterLoaderRemoval = true,
 	): Promise<boolean> {
-		const loader = this.panelsForChat(chatId)[0];
+		const loader = [...this.#panels.values()].find(
+			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
+		);
 		if (!loader) return false;
 		if (this.options.loadTranscriptSnapshot) {
 			await this.options.loadTranscriptSnapshot(loader.transcript, chatId, options);
@@ -443,13 +478,25 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			await loader.transcript.loadMessages(chatId, options);
 		}
 		const cursor = this.options.cache.readAppliedCursor(chatId);
-		if (!cursor || cursor.stale) return false;
+		if (!cursor || cursor.stale) {
+			const loaderWasRemoved = this.#panels.get(loader.surfaceId) !== loader;
+			if (retryAfterLoaderRemoval && loaderWasRemoved) {
+				return this.#performChatSnapshotLoad(chatId, options, false);
+			}
+			return false;
+		}
 		const currentPanels = this.panelsForChat(chatId);
 		if (currentPanels.length === 0) return false;
 		for (const panel of currentPanels) {
 			if (panel !== loader) panel.transcript.installCachedSnapshot(chatId);
 		}
 		return true;
+	}
+
+	#hasAdmittedPanel(chatId: string): boolean {
+		return [...this.#panels.values()].some(
+			(panel) => panel.chatId === chatId && panel.snapshotAdmission === 'admitted',
+		);
 	}
 
 	visibleChatIds(): readonly string[] {

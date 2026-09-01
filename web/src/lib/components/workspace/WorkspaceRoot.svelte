@@ -40,7 +40,10 @@
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
-	import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+	import {
+		ConversationPanelRegistry,
+		type ConversationPanelDescriptor,
+	} from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 	import type { GitQuickProjectLease } from '$lib/git/surface/git-quick-summary.svelte.js';
 	import {
@@ -123,11 +126,20 @@
 
 	const snapshot = $derived(workspace.layout.snapshot);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
-	const chatPresentations = $derived(
-		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').filter(
-			({ chatId }) =>
-				resolveChatSurfacePresentation(sessions.byId[chatId] ?? null, sessions.isLoadingChats) ===
-				'conversation',
+	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap(
+			(presentation) => {
+				const chat = sessions.byId[presentation.chatId] ?? null;
+				if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
+					return [];
+				}
+				return [
+					{
+						...presentation,
+						snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
+					},
+				];
+			},
 		),
 	);
 	const existingChatSurfaceIds = $derived.by(

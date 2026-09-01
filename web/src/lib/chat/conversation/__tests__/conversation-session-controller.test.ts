@@ -1215,6 +1215,7 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 
 	it('clears transient state without discarding the selected chat draft when project data is absent', () => {

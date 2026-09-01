@@ -226,6 +226,7 @@
 		{
 			surfaceId: CANONICAL_CHAT_SURFACE_ID,
 			chatId: 'chat-1',
+			snapshotAdmission: 'admitted',
 			presentation: 'window-main',
 			windowId: 'window-main',
 		},

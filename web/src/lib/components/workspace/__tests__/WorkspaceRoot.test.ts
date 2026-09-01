@@ -26,9 +26,11 @@ import type {
 	ConversationPanelPresentationPort,
 	ConversationPanelRegistry,
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import type { ChatMessagesRequest } from '$lib/api/chats.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$lib/context', () => ({
 	getAppShell: () => testContext.current?.appShell,
@@ -71,25 +73,17 @@ vi.mock('$lib/api/chats.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats.js')>();
 	return {
 		...actual,
-		getChatMessages: vi.fn(async (request) => ({
-			historyState: { kind: 'complete' as const },
-			chatId: request.chatId,
-			transcriptViewId: `view-${request.chatId}`,
-			messages: [],
-			lastOrdinal: 0,
-			pageOldestOrdinal: 0,
-			pageNewestOrdinal: 0,
-			nextBeforeOrdinal: null,
-			hasMore: false,
-			limit: request.limit ?? 50,
-			resendCandidates: [],
-		})),
+		getChatMessages: chatApiMocks.getChatMessages,
 	};
 });
 
 const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
 
-function chat(id: string, title: string): ChatSessionRecord {
+function chat(
+	id: string,
+	title: string,
+	overrides: Partial<ChatSessionRecord> = {},
+): ChatSessionRecord {
 	return {
 		id,
 		parentChat: null,
@@ -112,9 +106,26 @@ function chat(id: string, title: string): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
-		status: 'draft',
+		status: 'running',
 		agentOwnershipEpoch: null,
 		tags: [],
+		...overrides,
+	};
+}
+
+function emptyChatHistory(request: ChatMessagesRequest) {
+	return {
+		historyState: { kind: 'complete' as const },
+		chatId: request.chatId,
+		transcriptViewId: `view-${request.chatId}`,
+		messages: [],
+		lastOrdinal: 0,
+		pageOldestOrdinal: 0,
+		pageNewestOrdinal: 0,
+		nextBeforeOrdinal: null,
+		hasMore: false,
+		limit: request.limit ?? 50,
+		resendCandidates: [],
 	};
 }
 
@@ -436,6 +447,10 @@ function panelPresentation(
 describe('WorkspaceRoot', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		chatApiMocks.getChatMessages.mockReset();
+		chatApiMocks.getChatMessages.mockImplementation(async (request: ChatMessagesRequest) =>
+			emptyChatHistory(request),
+		);
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
 
@@ -460,6 +475,29 @@ describe('WorkspaceRoot', () => {
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
+	});
+
+	it('renders a draft conversation panel without requesting a server transcript', async () => {
+		installContext();
+		const sessions = testContext.current?.sessions as {
+			selectedChat: ChatSessionRecord | null;
+			byId: Record<string, ChatSessionRecord>;
+		};
+		const draft = chat('chat-a', 'Chat A', {
+			status: 'draft',
+			orderGroup: null,
+			effectiveProjectKey: null,
+			projectIdentityState: 'pending',
+		});
+		sessions.selectedChat = draft;
+		sessions.byId['chat-a'] = draft;
+		chatApiMocks.getChatMessages.mockRejectedValue(new Error('Session not found'));
+
+		renderRoot();
+		await tick();
+
+		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
+		expect(chatApiMocks.getChatMessages).not.toHaveBeenCalled();
 	});
 
 	it('adds Chat actions to the tab context menu', async () => {

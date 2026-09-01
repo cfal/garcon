@@ -7,11 +7,12 @@ import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/convers
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
 import {
 	ConversationPanelRegistry,
+	type ConversationPanelDescriptor,
+	type ConversationPanelSnapshotAdmission,
 	type ConversationPanelPresentationPort,
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
-import type { VisibleChatPresentation } from '$lib/workspace/visible-presentations.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -27,9 +28,10 @@ function candidate(ordinal: number): ResendCandidate {
 function presentation(
 	surfaceId: `chat-view:window-${string}`,
 	chatId: string,
-): VisibleChatPresentation {
+	snapshotAdmission: ConversationPanelSnapshotAdmission = 'admitted',
+): ConversationPanelDescriptor {
 	const windowId = surfaceId.slice('chat-view:'.length) as `window-${string}`;
-	return { surfaceId, chatId, presentation: windowId, windowId };
+	return { surfaceId, chatId, presentation: windowId, windowId, snapshotAdmission };
 }
 
 function fixture(
@@ -233,6 +235,115 @@ describe('ConversationPanelRegistry', () => {
 
 		anchorSurfaceId = 'chat-view:window-missing';
 		expect(registry.composerPanel).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('keeps duplicate draft panels deferred from transcript snapshots', async () => {
+		const loadTranscriptSnapshot = vi.fn(async () => {
+			throw new Error('Draft panels must not request a server transcript');
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', 'deferred'),
+			presentation('chat-view:window-right', 'chat-1', 'deferred'),
+		]);
+		await Promise.resolve();
+
+		expect(registry.panel('chat-view:window-left')).not.toBeNull();
+		expect(registry.panel('chat-view:window-right')).not.toBeNull();
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(false);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('hydrates retained duplicate panels once when their draft becomes admitted', async () => {
+		const loadTranscriptSnapshot = vi.fn(
+			async (transcript, chatId: string, options: ChatLoadMessagesOptions) => {
+				transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
+				transcript.installCachedSnapshot(chatId);
+				expect(options).toEqual({});
+			},
+		);
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		const deferredPresentations = [
+			presentation('chat-view:window-left', 'chat-1', 'deferred'),
+			presentation('chat-view:window-right', 'chat-1', 'deferred'),
+		];
+		registry.reconcile(deferredPresentations);
+		await Promise.resolve();
+		await Promise.resolve();
+		const left = registry.panel('chat-view:window-left');
+		const right = registry.panel('chat-view:window-right');
+		if (!left || !right) throw new Error('Expected duplicate draft panels');
+		left.scroll.setPinnedToBottom(false);
+
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+
+		expect(registry.panel('chat-view:window-left')).toBe(left);
+		expect(registry.panel('chat-view:window-right')).toBe(right);
+		await vi.waitFor(() => {
+			expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+			expect(left.transcript.entries.map((entry) => entry.ordinal)).toEqual([1]);
+			expect(right.transcript.entries.map((entry) => entry.ordinal)).toEqual([1]);
+		});
+		expect(loadTranscriptSnapshot).toHaveBeenCalledWith(left.transcript, 'chat-1', {});
+		expect(left.scroll.isPinnedToBottom).toBe(false);
+		expect(right.scroll.isPinnedToBottom).toBe(true);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('hands admission hydration to a retained duplicate when its loader is removed', async () => {
+		const release = deferred<void>();
+		const loadTranscriptSnapshot = vi.fn(
+			async (transcript, chatId: string, _options: ChatLoadMessagesOptions) => {
+				const epoch = transcript.beginSnapshotLoad();
+				await release.promise;
+				transcript.setFromPage(
+					chatId,
+					{
+						transcriptViewId: 'view-1',
+						messages: [message(1)],
+						lastOrdinal: 1,
+						pageOldestOrdinal: 1,
+						pageNewestOrdinal: 1,
+						nextBeforeOrdinal: null,
+						hasMore: false,
+						resendCandidates: [],
+					},
+					epoch,
+				);
+			},
+		);
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1', 'deferred'),
+			presentation('chat-view:window-right', 'chat-1', 'deferred'),
+		]);
+		await Promise.resolve();
+		const retained = registry.panel('chat-view:window-right');
+		if (!retained) throw new Error('Expected retained draft panel');
+
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledOnce());
+		registry.reconcile([presentation('chat-view:window-right', 'chat-1')]);
+		release.resolve();
+
+		await vi.waitFor(() => {
+			expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(2);
+			expect(retained.transcript.entries.map((entry) => entry.ordinal)).toEqual([1]);
+		});
+		expect(registry.panel('chat-view:window-right')).toBe(retained);
+		expect(loadTranscriptSnapshot.mock.calls.map((call) => call[2])).toEqual([{}, {}]);
 		registry.destroy();
 		cache.flush();
 	});

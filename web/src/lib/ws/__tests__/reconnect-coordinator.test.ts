@@ -417,12 +417,14 @@ describe('ChatReconnectCoordinator', () => {
 			{
 				surfaceId: 'chat-view:window-left',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-left',
 				windowId: 'window-left',
 			},
 			{
 				surfaceId: 'chat-view:window-right',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-right',
 				windowId: 'window-right',
 			},
@@ -471,12 +473,14 @@ describe('ChatReconnectCoordinator', () => {
 			{
 				surfaceId: 'chat-view:window-left',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-left',
 				windowId: 'window-left',
 			},
 			{
 				surfaceId: 'chat-view:window-right',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-right',
 				windowId: 'window-right',
 			},
@@ -590,6 +594,7 @@ describe('ChatReconnectCoordinator', () => {
 			{
 				surfaceId: 'chat-view:window-left',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-left',
 				windowId: 'window-left',
 			},
@@ -1361,6 +1366,7 @@ describe('ChatReconnectCoordinator', () => {
 			{
 				surfaceId: 'chat-view:window-left',
 				chatId: 'chat-1',
+				snapshotAdmission: 'admitted',
 				presentation: 'window-left',
 				windowId: 'window-left',
 			},
@@ -1566,6 +1572,7 @@ describe('ChatReconnectCoordinator', () => {
 				{
 					surfaceId: 'chat-view:window-background',
 					chatId: 'chat-background',
+					snapshotAdmission: 'admitted',
 					presentation: 'window-background',
 					windowId: 'window-background',
 				},
