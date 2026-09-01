@@ -6,7 +6,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
-import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.ts';
 import { KeyedPromiseLock } from '../lib/keyed-lock.ts';
 import {
   ChatNameStore,
@@ -38,12 +38,9 @@ import {
   sanitizeRecentAgentSettings,
 } from './startup-recents.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { createLogger } from '../lib/log.js';
-import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { isRecord } from '../../common/json.js';
 import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
 
-const logger = createLogger('settings:store');
 import type {
   ChatFolder,
   ChatReorderResult,
@@ -304,17 +301,14 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async #readFromDiskWithMigration(): Promise<SanitizedSettingsResult> {
-    try {
-      const raw = await fs.readFile(this.#settingsPath(), 'utf8');
-      const parsed = JSON.parse(raw);
-      return sanitizeProjectSettings(parsed);
-    } catch (error) {
-      if (hasNodeErrorCode(error, 'ENOENT')) {
-        return { settings: createEmpty(), migrated: false };
-      }
-      logger.warn('settings: invalid project-settings.json, using empty settings:', errorMessage(error));
-      return { settings: createEmpty(), migrated: true };
-    }
+    return readJsonStateFile({
+      filePath: this.#settingsPath(),
+      empty: () => ({ settings: createEmpty(), migrated: false }),
+      normalize: (value) => {
+        if (!isRecord(value)) throw new TypeError('Project settings state must be a JSON object');
+        return sanitizeProjectSettings(value);
+      },
+    });
   }
 
   async init(): Promise<ProjectSettings> {

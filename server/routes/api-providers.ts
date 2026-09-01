@@ -5,7 +5,19 @@ import type { RouteMap } from '../lib/http-route-types.js';
 import type { ApiProviderInput, ApiProviderService } from '../api-providers/service.js';
 import type { ApiProviderModelDiscoveryRequest } from '../../common/api-providers.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
-import { errorMessage } from './route-helpers.js';
+import { errorMessage, jsonErrorFromCorruptStateFile } from './route-helpers.js';
+
+function apiProviderError(error: unknown): Response {
+  const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
+  if (corruptStateResponse) return corruptStateResponse;
+  return Response.json({ error: errorMessage(error) }, { status: 400 });
+}
+
+function apiProviderDiscoveryError(error: unknown): Response {
+  const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
+  if (corruptStateResponse) return corruptStateResponse;
+  return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+}
 
 export default function createApiProviderRoutes(
   apiProviders: ApiProviderService,
@@ -17,7 +29,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result, { status: 201 });
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 400 });
+      return apiProviderError(error);
     }
   }
 
@@ -31,7 +43,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result);
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 400 });
+      return apiProviderError(error);
     }
   }
 
@@ -45,7 +57,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 400 });
+      return apiProviderError(error);
     }
   }
 
@@ -53,7 +65,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.test(body));
     } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 400 });
+      return apiProviderError(error);
     }
   }
 
@@ -61,7 +73,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.discoverModels(body));
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return apiProviderDiscoveryError(error);
     }
   }
 

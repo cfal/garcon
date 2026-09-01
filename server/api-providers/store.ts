@@ -4,7 +4,7 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.js';
 import {
   apiProviderTemplate,
   type ApiProviderTemplate,
@@ -20,10 +20,6 @@ import {
 import type { AgentModelOption } from '../../common/agents.js';
 import { getConfigDir } from '../config.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { createLogger } from '../lib/log.js';
-import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
-
-const logger = createLogger('api-providers:store');
 
 const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 const API_PROVIDER_WRITE_LOCK_KEY = 'api-providers';
@@ -266,11 +262,11 @@ function normalizeStoredApiProvider(value: unknown): StoredApiProvider | null {
 
 function normalizeSnapshot(raw: unknown): ApiProviderStoreSnapshot {
   if (!raw || typeof raw !== 'object') {
-    return { version: 1, apiProviders: [] };
+    throw new TypeError('API provider state must be a JSON object');
   }
   const root = raw as Record<string, unknown>;
   if (root.version !== 1 || !Array.isArray(root.apiProviders)) {
-    return { version: 1, apiProviders: [] };
+    throw new TypeError('API provider state must use version 1 with an apiProviders array');
   }
   return {
     version: 1,
@@ -446,14 +442,11 @@ export class ApiProviderStore {
   }
 
   async #read(): Promise<ApiProviderStoreSnapshot> {
-    try {
-      const raw = await fs.readFile(this.filePath, 'utf8');
-      return normalizeSnapshot(JSON.parse(raw));
-    } catch (error: unknown) {
-      if (hasNodeErrorCode(error, 'ENOENT')) return { version: 1, apiProviders: [] };
-      logger.warn('api-providers: invalid api-providers.json, using empty provider list:', errorMessage(error));
-      return { version: 1, apiProviders: [] };
-    }
+    return readJsonStateFile({
+      filePath: this.filePath,
+      empty: () => ({ version: 1, apiProviders: [] }),
+      normalize: normalizeSnapshot,
+    });
   }
 
   async #write(snapshot: ApiProviderStoreSnapshot): Promise<void> {

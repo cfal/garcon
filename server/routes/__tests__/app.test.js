@@ -23,6 +23,7 @@ import {
   SavedSearchAlreadyExistsError,
   SavedSearchNotFoundError,
 } from '../../settings/errors.js';
+import { CorruptStateFileError } from '../../lib/json-file-store.ts';
 
 function remoteSettingsSource(overrides = {}) {
   return {
@@ -1275,6 +1276,26 @@ describe('Telegram token settings API', () => {
     expect(resolveBody.settings.telegram.recipientLinked).toBe(true);
     expect(telegramNotifier.resolveRecipientLink).toHaveBeenCalledWith('abc123', null, 20);
     expect(telegramSettings.completeRecipientLink).toHaveBeenCalled();
+  });
+
+  it('reports corrupt Telegram state as an opaque server error', async () => {
+    const { routes, telegramSettings } = createTelegramRoutes();
+    telegramSettings.beginRecipientLink.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/notifications.json',
+      '/server/config/notifications.json.corrupt-test',
+    ));
+
+    const response = await routes['/api/v1/app/telegram/recipient/link'].POST(
+      makeRequest('http://localhost/api/app/telegram/recipient/link', 'POST', {}),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 
   it('sends test notification to the linked recipient only', async () => {

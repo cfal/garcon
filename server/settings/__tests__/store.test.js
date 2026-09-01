@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
+import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
 import { SettingsStore } from '../store.js';
 
 let tmpDir;
@@ -627,24 +628,17 @@ describe('settings store', () => {
       });
     });
 
-    it('returns empty settings for malformed JSON', async () => {
-      await fs.writeFile(settingsFile(), 'not json{{{', 'utf8');
-      const settings = await store.loadSettings();
-      expect(settings).toEqual({
-        features: {
-          transcriptSearch: { enabled: false },
-          agentCommands: {
-            enabled: true,
-            chatIdDiscovery: true,
-            sendMessage: true,
-          },
-        },
-        ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
-        pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
-        ...startupSettings(),
-        chatFolders: [],
-        savedChatSearches: [],
-      });
+    it('quarantines non-object settings and remains fail-closed', async () => {
+      const corruptBytes = 'null';
+      await fs.writeFile(settingsFile(), corruptBytes, 'utf8');
+
+      await expect(store.loadSettings()).rejects.toBeInstanceOf(CorruptStateFileError);
+
+      const [quarantineName] = (await fs.readdir(tmpDir)).filter((entry) =>
+        entry.startsWith(`project-settings.json${QUARANTINE_INFIX}`));
+      expect(await fs.readFile(path.join(tmpDir, quarantineName), 'utf8')).toBe(corruptBytes);
+      await expect(fs.stat(settingsFile())).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(store.loadSettings()).rejects.toBeInstanceOf(CorruptStateFileError);
     });
 
     it('normalizes invalid execution defaults on load', async () => {
