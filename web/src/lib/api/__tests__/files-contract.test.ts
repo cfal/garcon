@@ -357,4 +357,24 @@ describe('files API contract', () => {
 
 		await expect(browseDirectory('/p')).rejects.toThrow('Invalid directory browse payload');
 	});
+
+	it('browseDirectory preserves structured API errors', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: false,
+					error: 'Authentication required',
+					errorCode: 'AUTH_REQUIRED',
+					retryable: false,
+				},
+				401,
+			),
+		);
+
+		await expect(browseDirectory('/p')).rejects.toMatchObject({
+			status: 401,
+			errorCode: 'AUTH_REQUIRED',
+			retryable: false,
+		});
+	});
 });
