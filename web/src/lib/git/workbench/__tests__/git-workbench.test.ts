@@ -277,6 +277,22 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('snapshot loading', () => {
+		it('cancels a scheduled refresh when the workbench resets', async () => {
+			await wb.setTarget(makeTarget('/project'));
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+			vi.useFakeTimers();
+			try {
+				wb.scheduleRefresh({ reason: 'manual' }, 100);
+				wb.reset();
+
+				await vi.advanceTimersByTimeAsync(100);
+
+				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it('reports initial loading until the first snapshot resolves', async () => {
 			const snapshot = deferred<GitWorkbenchSnapshotResponse>();
 			mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(snapshot.promise);

@@ -258,7 +258,7 @@ export class GitWorkbenchStore {
 	}
 
 	scheduleRefresh(options: GitWorkbenchRefreshOptions, delayMs = 350): void {
-		if (this.scheduledRefresh) clearTimeout(this.scheduledRefresh);
+		this.cancelScheduledRefresh();
 		this.scheduledRefresh = setTimeout(() => {
 			this.scheduledRefresh = null;
 			void this.refresh(options);
@@ -690,6 +690,7 @@ export class GitWorkbenchStore {
 	}
 
 	private resetForTargetChange(): void {
+		this.cancelScheduledRefresh();
 		this.clearLocalGitMutationState();
 		this.clearFreshnessState();
 		this.treeState.reset();
@@ -708,6 +709,12 @@ export class GitWorkbenchStore {
 		this.snapshotLoadAbort?.abort();
 		this.snapshotLoadAbort = null;
 		this.refreshGeneration++;
+	}
+
+	private cancelScheduledRefresh(): void {
+		if (!this.scheduledRefresh) return;
+		clearTimeout(this.scheduledRefresh);
+		this.scheduledRefresh = null;
 	}
 
 	private abortFreshnessCheck(): void {
