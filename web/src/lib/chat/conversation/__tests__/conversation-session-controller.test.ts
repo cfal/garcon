@@ -2497,6 +2497,46 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('uses the target chat transcript view for a background submission', async () => {
+		const foreground = createRunningChat({ id: 'chat-1', isProcessing: true });
+		const background = createRunningChat({ id: 'chat-2', isProcessing: true });
+		const { deps } = createDeps(foreground);
+		deps.sessions.byId['chat-2'] = background;
+		deps.chatState.getCursor.mockReturnValue({
+			transcriptViewId: 'foreground-generation',
+			lastOrdinal: 10,
+		});
+		deps.chatState.getCursorForChat.mockImplementation((chatId) => ({
+			transcriptViewId:
+				chatId === 'chat-2' ? 'background-generation' : 'foreground-generation',
+			lastOrdinal: chatId === 'chat-2' ? 20 : 10,
+		}));
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-background',
+			chatId: 'chat-2',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+			entryId: 'entry-background',
+			control: emptyControl(),
+		});
+
+		await new ConversationSessionController(deps).submitForChat(
+			'chat-2',
+			'background message',
+		);
+
+		expect(deps.chatState.getCursorForChat).toHaveBeenCalledWith('chat-2');
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-2',
+				transcriptViewId: 'background-generation',
+				content: 'background message',
+			}),
+		);
+	});
+
 	it('uses Ctrl+Enter preference to steer an active turn without queueing', async () => {
 		const chat = createRunningChat({ agentId: 'codex', model: 'gpt-5.5', isProcessing: true });
 		const { deps } = createDeps(chat);

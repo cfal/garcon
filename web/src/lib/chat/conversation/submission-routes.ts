@@ -314,7 +314,7 @@ export async function submitRunRoute(
 }
 
 function requireTranscriptView(deps: RouteDeps, chatId: string): string {
-	const transcriptViewId = deps.chatState.getCursor().transcriptViewId;
+	const transcriptViewId = deps.chatState.getCursorForChat(chatId).transcriptViewId;
 	if (!transcriptViewId) throw new Error(`Transcript view is not loaded for ${chatId}`);
 	return transcriptViewId;
 }
