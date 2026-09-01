@@ -640,7 +640,9 @@ function createDeps(chat = createRunningChat()) {
 			]),
 			supportsFork: vi.fn(() => true),
 			supportsForkWhileRunning: vi.fn(() => false),
-			supportsSteering: vi.fn((agentId: string) => agentId === 'claude' || agentId === 'codex'),
+			supportsSteering: vi.fn(
+				(agentId: string) => agentId === 'claude' || agentId === 'codex' || agentId === 'amp',
+			),
 			supportsGoals: vi.fn((agentId: string) => agentId === 'codex'),
 		},
 		getExecutionDefaults: (agentId: string) => ({
@@ -2630,7 +2632,7 @@ describe('ConversationSessionController', () => {
 
 	it('rejects unsupported or attachment steering without clearing or queueing', async () => {
 		const unsupported = createDeps(
-			createRunningChat({ agentId: 'amp', model: 'amp-smart', isProcessing: true }),
+			createRunningChat({ agentId: 'cursor', model: 'auto', isProcessing: true }),
 		);
 		unsupported.deps.composerState.inputText = 'keep this draft';
 		const unsupportedOutcome = await new ConversationSessionController(

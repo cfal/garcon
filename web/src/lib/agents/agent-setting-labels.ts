@@ -16,8 +16,6 @@ const OPTION_LABELS = {
 	automatic: m.chat_composer_agent_setting_automatic,
 	enabled: m.chat_composer_agent_setting_enabled,
 	disabled: m.chat_composer_agent_setting_disabled,
-	smart: m.chat_composer_agent_setting_smart,
-	deep: m.chat_composer_agent_setting_deep,
 } satisfies Record<AgentSettingOptionLabelKey, () => string>;
 
 const OPTION_DESCRIPTIONS = {

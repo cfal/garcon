@@ -85,7 +85,7 @@ describe('ModelCatalogStore', () => {
 									{
 										value: 'high',
 										label: 'High',
-										labelKey: 'deep',
+										labelKey: 'enabled',
 										description: 'Uses extended thinking for every response.',
 										descriptionKey: 'thinkingEnabled',
 									},
@@ -122,7 +122,7 @@ describe('ModelCatalogStore', () => {
 				options: [
 					expect.objectContaining({
 						value: 'high',
-						labelKey: 'deep',
+						labelKey: 'enabled',
 						description: 'Uses extended thinking for every response.',
 						descriptionKey: 'thinkingEnabled',
 					}),

@@ -128,7 +128,7 @@
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
-		amp: [{ value: 'amp-smart', label: 'Amp Smart', supportsImages: true }],
+		amp: [{ value: 'medium', label: 'Amp Medium', supportsImages: true }],
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [
 			{ value: 'chat-model', label: 'Chat Model', supportsImages: true },
 		],

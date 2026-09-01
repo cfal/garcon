@@ -72,7 +72,7 @@
 			label: `Codex Model ${index}`,
 		})),
 	);
-	let ampModels = $derived<ModelOption[]>([{ value: 'amp-smart', label: 'Amp Smart' }]);
+	let ampModels = $derived<ModelOption[]>([{ value: 'medium', label: 'Amp Medium' }]);
 	const directModelsByAgent: Record<string, ModelOption[]> = {
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [
 			{ value: 'chat-model', label: 'Chat Model' },
@@ -118,7 +118,7 @@
 						? ['openai-compatible']
 						: ['anthropic-messages'],
 			defaultModel:
-				agentId === 'codex' ? 'codex-model-0' : agentId === 'amp' ? 'amp-smart' : 'model-0',
+				agentId === 'codex' ? 'codex-model-0' : agentId === 'amp' ? 'medium' : 'model-0',
 		}),
 		getAgentLabel: (agentId: string) =>
 			agentLabelFor(agentId, agentId === 'amp' ? 'Amp' : 'Claude'),

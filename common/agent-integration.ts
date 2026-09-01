@@ -34,8 +34,6 @@ export const AGENT_SETTING_OPTION_LABEL_KEYS = [
   'automatic',
   'enabled',
   'disabled',
-  'smart',
-  'deep',
 ] as const;
 export type AgentSettingOptionLabelKey = (typeof AGENT_SETTING_OPTION_LABEL_KEYS)[number];
 

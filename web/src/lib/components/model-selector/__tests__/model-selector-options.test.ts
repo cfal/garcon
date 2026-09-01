@@ -261,7 +261,7 @@ describe('model selector options', () => {
 
 	it('hides a single native source when it only repeats the agent label', () => {
 		const catalog = makeNativeOnlyCatalog('amp', 'Amp', [
-			{ value: 'amp-smart', label: 'Amp Smart' },
+			{ value: 'medium', label: 'Amp Medium' },
 		]);
 		const sources = buildModelSources(catalog, 'amp');
 

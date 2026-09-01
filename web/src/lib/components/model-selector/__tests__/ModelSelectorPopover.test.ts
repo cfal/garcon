@@ -523,7 +523,7 @@ describe('ModelSelectorPopover', () => {
 			'w-[min(50rem,calc(100vw-1rem))]',
 		);
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
-		expect(within(listbox).getByText('Amp Smart')).toBeTruthy();
+		expect(within(listbox).getByText('Amp Medium')).toBeTruthy();
 	});
 
 	it('shows desktop checkmarks only on committed model rows', async () => {

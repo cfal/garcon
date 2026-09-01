@@ -4,7 +4,7 @@ import type { RecentAgentSetting } from '$shared/settings';
 import { buildModelSelectorRecents } from '../model-selector-recents';
 
 const codexModel: ModelOption = { value: 'gpt-5', label: 'gpt-5' };
-const ampModel: ModelOption = { value: 'amp-smart', label: 'Amp Smart' };
+const ampModel: ModelOption = { value: 'medium', label: 'Amp Medium' };
 const claudeEndpointModel: ModelOption = {
 	value: 'acme-anthropic:sonnet',
 	label: 'Acme: Sonnet',
@@ -117,7 +117,7 @@ describe('model selector recents', () => {
 		const rows = buildModelSelectorRecents(makeCatalog(), [
 			{
 				agentId: 'amp',
-				model: 'amp-smart',
+				model: 'medium',
 				apiProviderId: null,
 				modelEndpointId: null,
 				modelProtocol: null,
@@ -126,13 +126,13 @@ describe('model selector recents', () => {
 
 		expect(rows[0]).toMatchObject({
 			agentId: 'amp',
-			modelValue: 'amp-smart',
-			model: 'amp-smart',
+			modelValue: 'medium',
+			model: 'medium',
 			apiProviderId: null,
 			modelEndpointId: null,
 			modelProtocol: null,
 			sourceLabel: '',
-			displayLabel: 'Amp · Amp Smart',
+			displayLabel: 'Amp · Amp Medium',
 		});
 	});
 

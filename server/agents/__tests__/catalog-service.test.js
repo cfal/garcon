@@ -39,7 +39,7 @@ function createIntegration() {
             {
               value: "high",
               label: "High",
-              labelKey: "deep",
+              labelKey: "enabled",
               description: "Uses extended thinking for every response.",
               descriptionKey: "thinkingEnabled",
             },
@@ -110,7 +110,7 @@ describe("AgentCatalogService", () => {
           options: [
             expect.objectContaining({
               value: "high",
-              labelKey: "deep",
+              labelKey: "enabled",
               description: "Uses extended thinking for every response.",
               descriptionKey: "thinkingEnabled",
             }),
