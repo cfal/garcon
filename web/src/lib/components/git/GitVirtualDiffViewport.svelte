@@ -148,23 +148,6 @@
 		};
 	}
 
-	function virtualKey(value: string | number): string {
-		return `${typeof value}:${String(value)}`;
-	}
-
-	function virtualSource(
-		rowSource: GitVirtualReviewRowSource,
-		lineHeight: number,
-	): { keys: string[]; estimates: number[] } {
-		const keys = new Array<string>(rowSource.rowCount);
-		const estimates = new Array<number>(rowSource.rowCount);
-		for (let index = 0; index < rowSource.rowCount; index += 1) {
-			keys[index] = virtualKey(rowSource.rowKey(index));
-			estimates[index] = rowSource.estimateRowHeight(index, lineHeight);
-		}
-		return { keys, estimates };
-	}
-
 	function currentAnchor(): VirtualMutationAnchor {
 		const position = virtual.viewportPosition;
 		const item = position
@@ -248,7 +231,7 @@
 			}
 
 			if (layoutChanged || measurementKey !== configuredMeasurementKey) {
-				const next = virtualSource(nextSource, lineHeight);
+				const next = nextSource.buildVirtualMeasurements(lineHeight);
 				virtual.apply({
 					kind: layoutChanged ? 'reset-measurements' : 'update',
 					...next,

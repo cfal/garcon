@@ -32,12 +32,18 @@ interface RowSegment {
 	splitIndex?: GitSplitPatchIndex;
 }
 
+export interface GitVirtualReviewMeasurements {
+	keys: string[];
+	estimates: number[];
+}
+
 export interface GitVirtualReviewRowSource {
 	readonly rowCount: number;
 	readonly measurementRevision: string;
 	rowAt(index: number): GitVirtualReviewRow | null;
 	rowKey(index: number): string | number;
 	estimateRowHeight(index: number, lineHeight: number): number;
+	buildVirtualMeasurements(lineHeight: number): GitVirtualReviewMeasurements;
 	fileStart(filePath: string): number | undefined;
 	fileState(filePath: string): 'pending' | 'resolved' | 'terminal';
 	filePathAt(index: number): string | null;
@@ -58,6 +64,7 @@ export function emptyGitVirtualReviewRowSource(): GitVirtualReviewRowSource {
 		rowAt: () => null,
 		rowKey: (index) => index,
 		estimateRowHeight: (_index, lineHeight) => lineHeight,
+		buildVirtualMeasurements: () => ({ keys: [], estimates: [] }),
 		fileStart: () => undefined,
 		fileState: () => 'terminal',
 		filePathAt: () => null,
@@ -89,6 +96,14 @@ export function arrayGitVirtualReviewRowSource(
 				? Math.max(row.estimatedHeight, lineHeight)
 				: row.estimatedHeight;
 		},
+		buildVirtualMeasurements: (lineHeight) => ({
+			keys: rows.map((row) => virtualMeasurementKey(row.id)),
+			estimates: rows.map((row) =>
+				row.kind === 'unified-row' || row.kind === 'split-row'
+					? Math.max(row.estimatedHeight, lineHeight)
+					: row.estimatedHeight,
+			),
+		}),
 		fileStart: (filePath) => starts.get(filePath),
 		fileState: (filePath) => {
 			const fileRows = rows.filter((row) => row.filePath === filePath);
@@ -249,6 +264,50 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		return isHunk ? Math.max(28, lineHeight + 8) : lineHeight;
 	}
 
+	buildVirtualMeasurements(lineHeight: number): GitVirtualReviewMeasurements {
+		const keys = new Array<string>(this.rowCount);
+		const estimates = new Array<number>(this.rowCount);
+		for (const segment of this.segments) {
+			const base = this.fileKeyBases.get(segment.file?.path ?? '') ?? 0;
+			switch (segment.kind) {
+				case 'header':
+					keys[segment.start] = virtualMeasurementKey(base);
+					estimates[segment.start] = 42;
+					break;
+				case 'placeholder':
+					keys[segment.start] = virtualMeasurementKey(base + 1);
+					estimates[segment.start] = Math.max(
+						96,
+						Math.min(720, (segment.file?.estimatedRows ?? 1) * DEFAULT_ROW_HEIGHT),
+					);
+					break;
+				case 'limit':
+					keys[segment.start] = virtualMeasurementKey(base + 1);
+					estimates[segment.start] = 112;
+					break;
+				case 'collection':
+					keys[segment.start] = virtualMeasurementKey(Number.MAX_SAFE_INTEGER);
+					estimates[segment.start] = 112;
+					break;
+				case 'unified':
+				case 'split': {
+					const modeOffset = segment.kind === 'split' ? 100_000 : 100;
+					for (let localIndex = 0; localIndex < segment.count; localIndex += 1) {
+						const index = segment.start + localIndex;
+						keys[index] = virtualMeasurementKey(base + modeOffset + localIndex);
+						const isHunk =
+							segment.kind === 'unified'
+								? segment.body!.patchIndex!.rowKindAt(localIndex) === 'hunk'
+								: splitEntryIsHunk(segment.body!, segment.splitIndex!, localIndex);
+						estimates[index] = isHunk ? Math.max(28, lineHeight + 8) : lineHeight;
+					}
+					break;
+				}
+			}
+		}
+		return { keys, estimates };
+	}
+
 	fileStart(filePath: string): number | undefined {
 		return this.fileStarts.get(filePath);
 	}
@@ -399,6 +458,10 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		this.selectableKeys.set(file.path, keys);
 		return keys;
 	}
+}
+
+export function virtualMeasurementKey(value: string | number): string {
+	return `${typeof value}:${String(value)}`;
 }
 
 function buildMeasurementRevision(

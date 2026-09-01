@@ -4,6 +4,7 @@ import type { BuildVirtualRowsOptions } from '$lib/git/review/git-virtual-review
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import {
 	buildGitVirtualReviewRowSource,
+	virtualMeasurementKey,
 	type GitVirtualReviewRowSource,
 } from '$lib/git/review/git-virtual-review-row-source.js';
 import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
@@ -134,6 +135,44 @@ describe('Git virtual review row source', () => {
 
 		for (const source of representativeSources) {
 			expectEveryRowPresent(source);
+		}
+	});
+
+	it('builds virtual measurements with the same keys and estimates as indexed access', () => {
+		const pending = summary('pending.txt', 4);
+		const limited: GitReviewFileSummary = {
+			...summary('binary.dat', 0),
+			bodyState: 'binary',
+			isBinary: true,
+		};
+		const loaded = summary('loaded.txt', 2);
+		const loadedBody = indexedBody(loaded.path, 2);
+		const collectionOptions = options([pending], {});
+		collectionOptions.summary.collectionLimit = {
+			reason: 'collection-too-many-files',
+			message: 'Only a subset of files is shown.',
+			visibleFiles: 1,
+			totalFilesKnown: 2,
+		};
+		const splitOptions = options([loaded], { [loaded.path]: loadedBody });
+		splitOptions.diffMode = 'split';
+
+		for (const source of [
+			buildGitVirtualReviewRowSource(options([pending], {})),
+			buildGitVirtualReviewRowSource(options([limited], {})),
+			buildGitVirtualReviewRowSource(options([loaded], { [loaded.path]: loadedBody })),
+			buildGitVirtualReviewRowSource(splitOptions),
+			buildGitVirtualReviewRowSource(collectionOptions),
+		]) {
+			const measurements = source.buildVirtualMeasurements(18);
+			expect(measurements.keys).toEqual(
+				Array.from({ length: source.rowCount }, (_, index) =>
+					virtualMeasurementKey(source.rowKey(index)),
+				),
+			);
+			expect(measurements.estimates).toEqual(
+				Array.from({ length: source.rowCount }, (_, index) => source.estimateRowHeight(index, 18)),
+			);
 		}
 	});
 
