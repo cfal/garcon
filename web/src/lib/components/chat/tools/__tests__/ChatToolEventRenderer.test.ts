@@ -87,6 +87,25 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('const a = 2;')).toBeTruthy();
 	});
 
+	it('elides an expanded Edit whose diff exceeds the work budget', () => {
+		const oldContent = Array.from({ length: 501 }, (_, index) => `old-${index}`).join('\n');
+		const newContent = Array.from({ length: 501 }, (_, index) => `new-${index}`).join('\n');
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-large-diff',
+				'/tmp/example.ts',
+				oldContent,
+				newContent,
+			),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Changes are too large to render inline.')).toBeTruthy();
+		expect(screen.queryByText('old-500')).toBeNull();
+	});
+
 	it('delegates controlled disclosure changes to the virtual row owner', async () => {
 		const disclosureState = {
 			open: vi.fn(() => true),
