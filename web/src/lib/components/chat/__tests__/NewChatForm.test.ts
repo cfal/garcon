@@ -7,6 +7,7 @@ import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
 import { parseChatId } from '$shared/chat-id';
+import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -215,6 +216,57 @@ describe('NewChatForm', () => {
 
 		expect(onStartChat).toHaveBeenCalledTimes(1);
 		expect(onStartChat.mock.calls[0]?.[1]).toBe(PROSPECTIVE_CHAT_ID);
+	});
+
+	it('blocks click and Enter after the selected endpoint disappears', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({
+				paths: { recentProjectPaths: ['/workspace/project'] },
+				recentAgentSettings: [
+					{
+						agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+						model: 'chat-model',
+						apiProviderId: 'test-provider',
+						modelEndpointId: 'test_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+		const onStartChat = vi.fn();
+		const view = render(NewChatFormTestHost, {
+			props: {
+				allowDirectChats: true,
+				endpointBackedDirectModel: true,
+				modelsAvailable: true,
+				onStartChat,
+			},
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const messageInput = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(messageInput, { target: { value: 'first line' } });
+		await waitFor(() => {
+			expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(
+				false,
+			);
+		});
+
+		await view.rerender({ catalogVersion: 1, modelsAvailable: false });
+
+		const submit = screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement;
+		await waitFor(() => {
+			expect(screen.getByText('Model unavailable')).toBeTruthy();
+			expect(submit.disabled).toBe(true);
+		});
+		await fireEvent.click(submit);
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
 	it('shows a centered spinner and hides the composer until settings load', async () => {

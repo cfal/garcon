@@ -57,7 +57,7 @@ function makeStartup(): NewChatFormState {
 		setThinkingMode: vi.fn(),
 		setAgentSetting: vi.fn(),
 		selectAgent: vi.fn(),
-		handleModelChange: vi.fn(),
+		selectModel: vi.fn(),
 	} as unknown as NewChatFormState;
 }
 

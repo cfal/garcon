@@ -64,6 +64,7 @@
 	const modelSelectorValue = $derived({
 		agentId: startup.agentId,
 		model: startup.modelValue,
+		...(startup.modelSelectionTarget ?? {}),
 	});
 	const recentSelectorOptions = $derived.by(() =>
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
@@ -84,7 +85,7 @@
 
 	function handleModelChange(next: ModelSelectorChange): void {
 		startup.selectAgent(next.agentId);
-		startup.handleModelChange(next.modelValue);
+		startup.selectModel(next.modelValue, next);
 	}
 </script>
 

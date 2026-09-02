@@ -537,6 +537,7 @@
 	const modelSelectorValue = $derived({
 		agentId: form.agentId,
 		model: form.modelValue,
+		...(form.modelSelectionTarget ?? {}),
 	});
 	const recentSelectorOptions = $derived.by(() =>
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
@@ -549,7 +550,7 @@
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
 		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
-		form.handleModelChange(next.modelValue);
+		form.selectModel(next.modelValue, next);
 	}
 </script>
 

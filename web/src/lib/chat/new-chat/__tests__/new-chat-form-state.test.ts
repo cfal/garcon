@@ -565,7 +565,7 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 		formState.selectAgent('claude');
-		formState.handleModelChange('opus');
+		formState.selectModel('opus');
 		refresh.resolve();
 		await refresh.promise;
 		await Promise.resolve();
@@ -609,7 +609,7 @@ describe('NewChatFormState', () => {
 		);
 
 		await formState.loadSettingsAndModels();
-		formState.handleModelChange('stale_openai:gpt-stale');
+		formState.selectModel('stale_openai:gpt-stale');
 		formState.projectPath = '/valid/path';
 		formState.validationStatus = 'valid';
 		formState.firstMessage = 'Start this task';
@@ -625,10 +625,111 @@ describe('NewChatFormState', () => {
 		expect(formState.canSubmit).toBe(false);
 		expect(formState.buildConfig()).toBeNull();
 
-		formState.handleModelChange('gpt-5.4');
+		formState.selectModel('gpt-5.4');
 		expect(formState.modelSelectionError).toBeNull();
 		expect(formState.canSubmit).toBe(true);
 		expect(formState.buildConfig()?.model).toBe('gpt-5.4');
+	});
+
+	it('blocks a touched direct selection when its sole endpoint disappears', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['direct-openai-compatible'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId === 'direct-openai-compatible' && catalogFresh) return [];
+			return modelsForAgent(agentId);
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'direct-openai-compatible',
+						model: 'glm-5.1',
+						apiProviderId: 'zai',
+						modelEndpointId: 'zai_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.setThinkingMode('low');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.modelSelectionTarget?.modelEndpointId).toBe('zai_openai');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('direct-openai-compatible');
+		expect(formState.modelValue).toBe('zai_openai:glm-5.1');
+		expect(formState.modelSelectionTarget).toMatchObject({
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+			modelProtocol: 'openai-compatible',
+		});
+		expect(formState.modelSelectionError).toBe('Model unavailable');
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+	});
+
+	it('falls back to the live default when the only automatic recent disappears', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['codex'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex' || catalogFresh) return modelsForAgent(agentId);
+			return [
+				{
+					value: 'stale_openai:gpt-stale',
+					label: 'Stale: GPT',
+					rawModel: 'gpt-stale',
+					apiProviderId: 'stale',
+					endpointId: 'stale_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+		expect(formState.modelSelectionError).toBeNull();
 	});
 
 	it('applies eligible startup recents after background catalog discovery', async () => {
@@ -915,7 +1016,7 @@ describe('NewChatFormState', () => {
 		formState.validationStatus = 'valid';
 		formState.firstMessage = 'Start this task';
 		formState.agentId = 'codex';
-		formState.handleModelChange('gpt-5.4');
+		formState.selectModel('gpt-5.4');
 		formState.permissionMode = 'acceptEdits';
 		formState.thinkingMode = 'medium';
 		formState.agentSettingsById = {

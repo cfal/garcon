@@ -24,9 +24,13 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
+	import type { ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 
 	interface Props {
 		allowDirectChats?: boolean;
+		catalogVersion?: number;
+		endpointBackedDirectModel?: boolean;
+		modelsAvailable?: boolean;
 		supportsImages?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
@@ -36,6 +40,9 @@
 
 	let {
 		allowDirectChats = false,
+		catalogVersion = 0,
+		endpointBackedDirectModel = false,
+		modelsAvailable = true,
 		supportsImages = true,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
@@ -87,10 +94,20 @@
 		'codex',
 	];
 
-	function modelForAgent(agentId: string): { value: string; label: string } {
+	function modelForAgent(agentId: string): ModelOption {
 		if (agentId === 'claude') return { value: 'opus', label: 'Opus' };
 		if (agentId === 'codex') return { value: 'gpt-5.4', label: 'GPT-5.4' };
 		if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+			if (endpointBackedDirectModel) {
+				return {
+					value: 'test_openai:chat-model',
+					label: 'Test: Chat Model',
+					rawModel: 'chat-model',
+					apiProviderId: 'test-provider',
+					endpointId: 'test_openai',
+					protocol: 'openai-compatible',
+				};
+			}
 			return { value: 'chat-model', label: 'Chat Model' };
 		}
 		if (agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
@@ -121,7 +138,9 @@
 	);
 
 	setModelCatalog({
-		version: 0,
+		get version() {
+			return catalogVersion;
+		},
 		agentMetadata: {
 			claude: { label: 'Claude' },
 			codex: { label: 'Codex' },
@@ -196,25 +215,36 @@
 			return { ownerId: agentId, schemaVersion: 1, values: { thinking: 'auto' } };
 		},
 		getModels(agentId: string) {
+			if (
+				agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
+				endpointBackedDirectModel &&
+				!modelsAvailable
+			) return [];
 			return [modelForAgent(agentId)];
 		},
 		supportsImages() {
 			return supportsImages;
 		},
-		getModelForSelection(agentId: string, model: string) {
-			const models = [modelForAgent(agentId)];
-			return models.find((entry) => entry.value === model) ?? null;
+		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
+			const models = this.getModels(agentId);
+			return models.find(
+				(entry) =>
+					(endpointId ? entry.endpointId === endpointId : true) &&
+					(entry.value === model || entry.rawModel === model),
+			) ?? null;
 		},
-		selectionFor(_provider: string, model: string) {
+		selectionFor(agentId: string, model: string, endpointId?: string | null) {
+			const selected = this.getModelForSelection(agentId, model, endpointId);
+			if (!selected && endpointId) return null;
 			return {
-				model,
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
+				model: selected?.rawModel ?? model,
+				apiProviderId: selected?.apiProviderId ?? null,
+				modelEndpointId: selected?.endpointId ?? null,
+				modelProtocol: selected?.protocol ?? null,
 			};
 		},
-		selectionValueFor(_provider: string, model: string) {
-			return model;
+		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
+			return this.getModelForSelection(agentId, model, endpointId)?.value ?? model;
 		},
 		refreshIfStale() {
 			return Promise.resolve();

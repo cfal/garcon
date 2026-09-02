@@ -25,8 +25,9 @@ import {
 	normalizeAgentSettings,
 	withAgentSetting,
 } from '$shared/agent-settings';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
 	executionDefaultsForAgent,
 	normalizeSupportedPermissionMode,
@@ -52,6 +53,8 @@ export class NewChatFormState {
 	// Agent and model
 	agentId = $state<SessionAgentId>(DEFAULT_AGENT_ID);
 	selectedModelsByAgent = $state<Record<string, string>>({});
+	#selectedModelTargetsByAgent = $state<Record<string, ResolvedModelSelection>>({});
+	#catalogRefreshCompleted = $state(false);
 
 	// Path
 	projectPath = $state('');
@@ -143,6 +146,7 @@ export class NewChatFormState {
 		return (
 			this.settingsLoaded &&
 			this.#selectableAgentIds.includes(this.agentId) &&
+			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
 			canSubmitNewChat(
 				this.trimmedPath,
@@ -176,11 +180,27 @@ export class NewChatFormState {
 		);
 	}
 
+	get modelSelectionTarget(): ResolvedModelSelection | null {
+		return this.#selectedModelTargetsByAgent[this.agentId] ?? null;
+	}
+
+	get resolvedModelSelection(): ResolvedModelSelection | null {
+		const modelValue = this.modelValue;
+		const endpointId = this.modelSelectionTarget?.modelEndpointId;
+		if (!this.#modelCatalog.getModelForSelection(this.agentId, modelValue, endpointId)) return null;
+		return this.#modelCatalog.selectionFor(this.agentId, modelValue, endpointId);
+	}
+
+	get modelSelectionPending(): boolean {
+		return (
+			!this.resolvedModelSelection &&
+			!this.#catalogRefreshCompleted &&
+			this.#modelCatalog.getModels(this.agentId).length === 0
+		);
+	}
+
 	get modelSelectionError(): string | null {
-		const liveModels = this.#modelCatalog.getModels(this.agentId);
-		if (!liveModels.length || liveModels.some((entry) => entry.value === this.modelValue)) {
-			return null;
-		}
+		if (this.resolvedModelSelection || this.modelSelectionPending) return null;
 		return m.model_selector_unavailable();
 	}
 
@@ -259,28 +279,37 @@ export class NewChatFormState {
 
 	// Model
 
-	handleModelChange(value: string): void {
+	selectModel(value: string, selection?: ResolvedModelSelection): void {
 		this.#startupSelectionAutomatic = false;
-		this.selectedModelsByAgent = {
-			...this.selectedModelsByAgent,
-			[this.agentId]: value,
-		};
+		this.#setModelSelection(
+			this.agentId,
+			value,
+			selection ?? this.#modelCatalog.selectionFor(this.agentId, value),
+		);
+	}
+
+	restoreModelSelection(agentId: SessionAgentId, selection: ResolvedModelSelection): void {
+		this.#setModelSelection(
+			agentId,
+			this.#modelCatalog.selectionValueFor(
+				agentId,
+				selection.model,
+				selection.modelEndpointId,
+			),
+			selection,
+		);
 	}
 
 	/** Replaces only untouched startup selections that are absent from the live catalog. */
 	validateModelAgainstLive(agentId: SessionAgentId): void {
 		const liveModels = this.#modelCatalog.getModels(agentId);
-		if (!liveModels?.length) return;
 		const current = this.selectedModelsByAgent[agentId];
-		if (!current || (
+		const endpointId = this.#selectedModelTargetsByAgent[agentId]?.modelEndpointId;
+		if (
 			this.#startupSelectionAutomatic &&
-			!liveModels.some((entry) => entry.value === current)
-		)) {
-			this.selectedModelsByAgent = {
-				...this.selectedModelsByAgent,
-				[agentId]: liveModels[0].value,
-			};
-		}
+			(!current || !this.#modelCatalog.getModelForSelection(agentId, current, endpointId)) &&
+			liveModels[0]
+		) this.#selectCatalogModel(agentId, liveModels[0]);
 	}
 
 	validateAllModelsAgainstLive(): void {
@@ -323,14 +352,36 @@ export class NewChatFormState {
 		modelEndpointId?: string | null,
 	): void {
 		const liveModels = this.#modelCatalog.getModels(agentId);
-		const selectionValue = this.#modelCatalog.selectionValueFor(agentId, model, modelEndpointId);
-		const resolvedModel = liveModels.some((entry) => entry.value === selectionValue)
-			? selectionValue
-			: (liveModels[0]?.value ?? model);
+		const selected = this.#modelCatalog.getModelForSelection(agentId, model, modelEndpointId);
+		const resolvedModel = selected ?? liveModels[0];
+		if (resolvedModel) {
+			this.#selectCatalogModel(agentId, resolvedModel);
+			return;
+		}
+		this.#setModelSelection(agentId, model, null);
+	}
+
+	#selectCatalogModel(agentId: SessionAgentId, model: ModelOption): void {
+		this.#setModelSelection(
+			agentId,
+			model.value,
+			this.#modelCatalog.selectionFor(agentId, model.value, model.endpointId),
+		);
+	}
+
+	#setModelSelection(
+		agentId: SessionAgentId,
+		modelValue: string,
+		selection: ResolvedModelSelection | null,
+	): void {
 		this.selectedModelsByAgent = {
 			...this.selectedModelsByAgent,
-			[agentId]: resolvedModel,
+			[agentId]: modelValue,
 		};
+		const targets = { ...this.#selectedModelTargetsByAgent };
+		if (selection) targets[agentId] = selection;
+		else delete targets[agentId];
+		this.#selectedModelTargetsByAgent = targets;
 	}
 
 	// Images (delegated to ImageAttachmentState)
@@ -587,7 +638,8 @@ export class NewChatFormState {
 			return null;
 		}
 		this.error = null;
-		const selection = this.#modelCatalog.selectionFor(this.agentId, this.modelValue);
+		const selection = this.resolvedModelSelection;
+		if (!selection) return null;
 
 		return {
 			agentId: this.agentId,
@@ -628,6 +680,7 @@ export class NewChatFormState {
 	/** Loads server settings without blocking the form on live model discovery. */
 	async loadSettingsAndModels(): Promise<void> {
 		this.#startupSelectionAutomatic = true;
+		this.#catalogRefreshCompleted = false;
 		try {
 			const settingsData = await this.#remoteSettings.ensureLoaded();
 			this.#applySettings(settingsData);
@@ -649,6 +702,7 @@ export class NewChatFormState {
 	async #refreshModelsInBackground(): Promise<void> {
 		try {
 			await this.#modelCatalog.refreshIfStale();
+			this.#catalogRefreshCompleted = true;
 			this.#reconcileAgentSettingsWithCatalog();
 			if (this.#startupSelectionAutomatic) {
 				const recent = this.#firstSelectableRecent(this.#startupRecents);
@@ -657,11 +711,15 @@ export class NewChatFormState {
 					: this.#resolveStartupAgent(DEFAULT_AGENT_ID);
 				if (recent) {
 					this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
+				} else {
+					this.applyResolvedModel(this.agentId, this.#modelCatalog.getDefaultModel(this.agentId));
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);
+				this.validateAllModelsAgainstLive();
 				this.#startupSelectionAutomatic = false;
+			} else {
+				this.validateAllModelsAgainstLive();
 			}
-			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to refresh models', err);
 		}
