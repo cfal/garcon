@@ -362,6 +362,52 @@ describe('ChatRegistry', () => {
     }
   });
 
+  it('excludes a rolled-back patch from a queued save for another chat', async () => {
+    registry.addChat(newChat());
+    registry.addChat(newChat({ id: SECOND_CHAT_ID }));
+    await registry.flush();
+    const firstRenameEntered = deferred();
+    const releaseFirstRename = deferred();
+    const originalRename = fs.rename.bind(fs);
+    let targetRenameCount = 0;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(tempDir, 'chats.json')) {
+        targetRenameCount += 1;
+        if (targetRenameCount === 1) {
+          firstRenameEntered.resolve();
+          await releaseFirstRename.promise;
+          throw new Error('disk full');
+        }
+      }
+      return originalRename(source, target);
+    });
+
+    try {
+      const failedUpdate = registry.updateChat(
+        CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      await firstRenameEntered.promise;
+      const successfulUpdate = registry.updateChat(
+        SECOND_CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      releaseFirstRename.resolve();
+      await expect(failedUpdate).rejects.toThrow('disk full');
+      await successfulUpdate;
+    } finally {
+      releaseFirstRename.resolve();
+      rename.mockRestore();
+    }
+
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(CHAT_ID)?.model).toBe('model-a');
+    expect(registry.getChat(SECOND_CHAT_ID)?.model).toBe('model-b');
+  });
+
   it('persists dedicated project-path updates and emits only canonical metadata', async () => {
     registry.addChat(newChat({ nativeSession: nativeSession('test') }));
     const listener = mock(() => undefined);

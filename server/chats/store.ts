@@ -689,17 +689,19 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     };
     const resolved = { id, ...existing };
     if (options.flush) {
-      return this.#flushRegistrySave().then(
+      const restoreIfCurrent = (): void => {
+        if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
+        registry.sessions[id] = previous;
+        this.#advanceChatMutationRevision(id);
+        this.#rebuildAgentSessionIdIndex();
+      };
+      return this.#flushRegistrySave(restoreIfCurrent).then(
         () => {
           emitUpdateEvents();
           return resolved;
         },
         (error: unknown) => {
-          if (this.#chatMutationRevisions.get(id) === mutationRevision) {
-            registry.sessions[id] = previous;
-            this.#advanceChatMutationRevision(id);
-            this.#rebuildAgentSessionIdIndex();
-          }
+          restoreIfCurrent();
           throw error;
         },
       );
@@ -742,14 +744,16 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       existing.nativeSession = update.nativeSession ?? null;
     }
     const mutationRevision = this.#advanceChatMutationRevision(id);
+    const restoreIfCurrent = (): void => {
+      if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
+      existing.projectPath = previousProjectPath;
+      existing.nativeSession = previousNativeSession;
+      this.#advanceChatMutationRevision(id);
+    };
     try {
-      await this.#flushRegistrySave();
+      await this.#flushRegistrySave(restoreIfCurrent);
     } catch (error) {
-      if (this.#chatMutationRevisions.get(id) === mutationRevision) {
-        existing.projectPath = previousProjectPath;
-        existing.nativeSession = previousNativeSession;
-        this.#advanceChatMutationRevision(id);
-      }
+      restoreIfCurrent();
       throw error;
     }
     this.#emitChatProjectPathUpdated({
@@ -790,12 +794,22 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return [chatId, entry];
   }
 
-  async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
+  async saveRegistry(
+    registry: ChatRegistrySnapshot,
+    onWriteFailure?: () => void,
+  ): Promise<void> {
     const target = this.#sessionsFilePath();
-    const snapshot = structuredClone(registry);
     await this.#registryWriteLock.runExclusive(
       target,
-      () => writeJsonFileAtomic(target, snapshot, { mode: 0o600 }),
+      async () => {
+        const snapshot = structuredClone(registry);
+        try {
+          await writeJsonFileAtomic(target, snapshot, { mode: 0o600 });
+        } catch (error) {
+          onWriteFailure?.();
+          throw error;
+        }
+      },
     );
     this.#registry = registry;
     this.#rebuildAgentSessionIdIndex();
@@ -806,12 +820,15 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     await this.#flushRegistrySave();
   }
 
-  async #flushRegistrySave(): Promise<void> {
+  async #flushRegistrySave(onWriteFailure?: () => void): Promise<void> {
     if (this.#pendingSaveTimer) {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
     }
-    await this.saveRegistry(this.#registry || createEmptyRegistry());
+    await this.saveRegistry(
+      this.#registry || createEmptyRegistry(),
+      onWriteFailure,
+    );
   }
 
   #scheduleRegistrySave(): void {
