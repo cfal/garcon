@@ -1298,6 +1298,34 @@ describe('Telegram token settings API', () => {
     });
   });
 
+  it('keeps corrupt Telegram state opaque during token mutations', async () => {
+    const corrupt = () => new CorruptStateFileError(
+      '/server/config/notifications.json',
+      '/server/config/notifications.json.corrupt-test',
+    );
+    const expected = {
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    };
+
+    let fixture = createTelegramRoutes();
+    fixture.telegramSettings.setBotToken.mockRejectedValueOnce(corrupt());
+    parseJsonBody.mockImplementation(() => Promise.resolve({ botToken: 'secret-token' }));
+    let response = await fixture.routes['/api/v1/app/telegram/token'].PUT(
+      makeRequest('http://localhost/api/app/telegram/token', 'PUT', { botToken: 'secret-token' }),
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual(expected);
+
+    fixture = createTelegramRoutes();
+    fixture.telegramSettings.clearBotToken.mockRejectedValueOnce(corrupt());
+    response = await fixture.routes['/api/v1/app/telegram/token'].DELETE();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual(expected);
+  });
+
   it('sends test notification to the linked recipient only', async () => {
     const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
 

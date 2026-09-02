@@ -471,7 +471,8 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromCorruptStateFile(error)
+        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
@@ -486,7 +487,8 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromCorruptStateFile(error)
+        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }
 
