@@ -61,6 +61,33 @@ function context() {
   };
 }
 
+function installFakeTimers() {
+  const timers = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = mock((callback, delay) => {
+    const timer = {
+      callback,
+      delay,
+      fired: false,
+      cleared: false,
+      unref: mock(() => undefined),
+    };
+    timers.push(timer);
+    return timer;
+  });
+  globalThis.clearTimeout = mock((timer) => {
+    timer.cleared = true;
+  });
+  return {
+    timers,
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+  };
+}
+
 describe('AgentHandoffService', () => {
   it('copies a frozen conversational prefix into a target ledger', () => {
     const ledger = {
@@ -369,23 +396,8 @@ describe('AgentHandoffService', () => {
       if (applyCalls <= 4) throw new Error('injected persistent registry failure');
       return applyDecision(...args);
     });
-    const timers = [];
-    const originalSetTimeout = globalThis.setTimeout;
-    const originalClearTimeout = globalThis.clearTimeout;
-    globalThis.setTimeout = mock((callback, delay) => {
-      const timer = {
-        callback,
-        delay,
-        fired: false,
-        cleared: false,
-        unref: mock(() => undefined),
-      };
-      timers.push(timer);
-      return timer;
-    });
-    globalThis.clearTimeout = mock((timer) => {
-      timer.cleared = true;
-    });
+    const fakeTimers = installFakeTimers();
+    const { timers } = fakeTimers;
     const service = createService({
       registry: { getChat: () => current },
       ownership: state.ownership,
@@ -439,8 +451,96 @@ describe('AgentHandoffService', () => {
       rejectOrphan(new Error('test cleanup'));
       await request?.catch(() => undefined);
       await startupRecovery.catch(() => undefined);
-      globalThis.setTimeout = originalSetTimeout;
-      globalThis.clearTimeout = originalClearTimeout;
+      fakeTimers.restore();
+    }
+  });
+
+  it('does not let a disowned producer recovery delete the live recovery', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    let completeCalls = 0;
+    state.ownership.completeHandoff = mock(async () => {
+      completeCalls += 1;
+      calls.push('complete');
+      if (completeCalls > 1) state.setIntent(null);
+    });
+    let markOrphanStarted;
+    const orphanStarted = new Promise((resolve) => {
+      markOrphanStarted = resolve;
+    });
+    let resolveOrphan;
+    const heldOrphan = new Promise((resolve) => {
+      resolveOrphan = resolve;
+    });
+    let reopenCalls = 0;
+    const reopenProducer = mock(async () => {
+      reopenCalls += 1;
+      if (reopenCalls === 1) {
+        markOrphanStarted();
+        await heldOrphan;
+        return;
+      }
+      if (reopenCalls <= 4) throw new Error('injected persistent producer failure');
+      calls.push('reopen');
+    });
+    const fakeTimers = installFakeTimers();
+    const { timers } = fakeTimers;
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+      reopenProducer,
+    });
+    const startupRecovery = service.recoverPendingHandoffs();
+    let request;
+
+    try {
+      await orphanStarted;
+      request = service.createPreparation({
+        chatId: 'chat',
+        clientRequestId: 'request-1',
+        handoff: handoff(),
+        source: current,
+        target: target(),
+        command: 'continue',
+      }).prepare(context());
+      for (let tick = 0; tick < 20 && timers.length < 1; tick += 1) await Promise.resolve();
+      expect(reopenCalls).toBe(2);
+
+      const firstWait = timers[0];
+      expect(firstWait).toBeDefined();
+      firstWait.fired = true;
+      firstWait.callback();
+      for (
+        let tick = 0;
+        tick < 20 && !timers.some((timer) => timer.delay === 50);
+        tick += 1
+      ) await Promise.resolve();
+
+      const secondWait = timers.find((timer) => timer.delay === 50);
+      expect(secondWait).toBeDefined();
+      secondWait.fired = true;
+      secondWait.callback();
+      await expect(request).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+
+      resolveOrphan();
+      await startupRecovery;
+
+      const recoveryTimer = timers.find((timer) =>
+        timer.delay === 25 && !timer.fired && !timer.cleared);
+      expect(recoveryTimer).toBeDefined();
+      recoveryTimer.fired = true;
+      recoveryTimer.callback();
+      for (let tick = 0; tick < 20 && reopenCalls < 5; tick += 1) await Promise.resolve();
+      expect(reopenCalls).toBe(5);
+    } finally {
+      service.shutdown();
+      resolveOrphan();
+      await request?.catch(() => undefined);
+      await startupRecovery.catch(() => undefined);
+      fakeTimers.restore();
     }
   });
 
