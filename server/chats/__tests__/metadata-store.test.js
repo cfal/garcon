@@ -153,7 +153,42 @@ describe('metadata-store', () => {
       expect(stats.mode & 0o777).toBe(0o600);
     });
 
-    it('repairs permissions on existing metadata during init', async () => {
+  });
+
+  describe('identity invalidation', () => {
+    const identity = (overrides = {}) => ({
+      carryOverRevision: 'carry-v1:0',
+      agentOwnershipEpoch: 'owner-1',
+      ...overrides,
+    });
+
+    it('stamps the commit identity on durable append', () => {
+      metadata.updateFromAppendedMessages(chatId, [
+        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'appended' },
+      ], identity());
+
+      expect(metadata.getChatMetadata(chatId).identity).toEqual(identity());
+    });
+
+    it('rebuilds preview text from a replacement transcript view', () => {
+      metadata.updateFromAppendedMessages(chatId, [
+        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'pre-reset tail' },
+      ], identity());
+
+      metadata.replaceFromTranscriptView(chatId, [
+        { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
+        { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
+      ]);
+
+      const meta = metadata.getChatMetadata(chatId);
+      expect(meta.lastMessage).toBe('surviving reply');
+      expect(meta.lastActivity).toBe('2026-01-01T00:01:00Z');
+      expect(meta.identity).toEqual(identity());
+    });
+  });
+
+  describe('init', () => {
+    it('repairs permissions on existing metadata', async () => {
       if (process.platform === 'win32') return;
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify({ version: 1, chats: {} }), { mode: 0o644 });
@@ -190,41 +225,7 @@ describe('metadata-store', () => {
         chmod.mockRestore();
       }
     });
-  });
 
-  describe('identity invalidation', () => {
-    const identity = (overrides = {}) => ({
-      carryOverRevision: 'carry-v1:0',
-      agentOwnershipEpoch: 'owner-1',
-      ...overrides,
-    });
-
-    it('stamps the commit identity on durable append', () => {
-      metadata.updateFromAppendedMessages(chatId, [
-        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'appended' },
-      ], identity());
-
-      expect(metadata.getChatMetadata(chatId).identity).toEqual(identity());
-    });
-
-    it('rebuilds preview text from a replacement transcript view', () => {
-      metadata.updateFromAppendedMessages(chatId, [
-        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'pre-reset tail' },
-      ], identity());
-
-      metadata.replaceFromTranscriptView(chatId, [
-        { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
-        { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
-      ]);
-
-      const meta = metadata.getChatMetadata(chatId);
-      expect(meta.lastMessage).toBe('surviving reply');
-      expect(meta.lastActivity).toBe('2026-01-01T00:01:00Z');
-      expect(meta.identity).toEqual(identity());
-    });
-  });
-
-  describe('init', () => {
     it('loads persisted metadata before agent preview repair', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
