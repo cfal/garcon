@@ -53,6 +53,26 @@ describe('sortChatsByRecencyDesc', () => {
 		]);
 	});
 
+	it('ranks timestamp-less local drafts ahead of server chats', () => {
+		const chats = [
+			makeChat('recent', {
+				status: 'running',
+				lastActivityAt: '2026-03-01T00:00:00.000Z',
+			}),
+			makeChat('draft', { status: 'draft' }),
+			makeChat('older', {
+				status: 'running',
+				lastActivityAt: '2026-01-01T00:00:00.000Z',
+			}),
+		];
+
+		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual([
+			'draft',
+			'recent',
+			'older',
+		]);
+	});
+
 	it('does not mutate the source array', () => {
 		const chats = [
 			makeChat('a', { lastActivityAt: '2026-01-01T00:00:00.000Z' }),

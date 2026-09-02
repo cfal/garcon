@@ -12,6 +12,10 @@ function recencyValue(chat: ChatSessionRecord): number {
 
 /** Comparator ordering chats newest-first by activity, then creation time. */
 export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRecord): number {
+	const aIsDraft = a.status === 'draft';
+	const bIsDraft = b.status === 'draft';
+	// Local drafts have no server timestamps but represent the newest user activity.
+	if (aIsDraft !== bIsDraft) return aIsDraft ? -1 : 1;
 	return recencyValue(b) - recencyValue(a);
 }
 

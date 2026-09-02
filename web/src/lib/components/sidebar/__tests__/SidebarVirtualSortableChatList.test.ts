@@ -433,6 +433,32 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(readVirtualRowOrder()).toEqual(['chat-1', 'chat-3', 'chat-0', 'chat-2']);
 	});
 
+	it('renders a timestamp-less local draft first under recent sort', () => {
+		const chats = [
+			makeChat(0, {
+				status: 'running',
+				lastActivityAt: '2025-09-01T00:00:00.000Z',
+			}),
+			makeChat(1, { createdAt: null, lastActivityAt: null }),
+			makeChat(2, {
+				status: 'running',
+				lastActivityAt: '2025-01-01T00:00:00.000Z',
+			}),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				chatItemLayout: 'default',
+				sortMode: 'recent',
+			},
+		});
+
+		expect(readVirtualRowOrder()).toEqual(['chat-1', 'chat-0', 'chat-2']);
+	});
+
 	it('preserves the given order within groups under manual sort', () => {
 		// Manual mode must not reorder by recency: input order wins within each group.
 		const chats = [
