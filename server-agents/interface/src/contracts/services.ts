@@ -133,7 +133,9 @@ export interface AgentLifecycle {
 
 export interface AgentMigration {
   translateLegacyModel(request: {
-    readonly scope: Extract<AgentLegacySettingsScope, { kind: 'chat' | 'scheduled-prompt' }>;
+    readonly scope: Extract<AgentLegacySettingsScope, {
+      kind: 'chat' | 'scheduled-prompt' | 'recent-agent-setting' | 'handoff'
+    }>;
     readonly model: string;
     readonly signal: AbortSignal;
   }): Promise<string>;
@@ -156,6 +158,8 @@ export interface AgentMigration {
 export type AgentLegacySettingsScope =
   | { readonly kind: 'chat'; readonly recordId: string; readonly selectedAgentId: string }
   | { readonly kind: 'scheduled-prompt'; readonly recordId: string; readonly selectedAgentId: string }
+  | { readonly kind: 'recent-agent-setting'; readonly recordId: string; readonly selectedAgentId: string }
+  | { readonly kind: 'handoff'; readonly recordId: string; readonly selectedAgentId: string }
   | { readonly kind: 'execution-defaults'; readonly recordId: 'global' | string; readonly selectedAgentId: string | null };
 
 export interface AgentSingleQuery {

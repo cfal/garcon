@@ -10,6 +10,7 @@ const LEGACY_MIGRATION_ID = 'agent-integration-v1';
 const SETTINGS_REFRESH_MIGRATION_ID = 'agent-integration-settings-v2';
 const CHAT_SCHEMA_VERSION = 3;
 const CORE_RECORD_PATHS = new Set([
+  'agent-ownership-journal.json',
   'chats.json',
   'project-settings.json',
   'scheduled-prompts.json',
@@ -221,10 +222,16 @@ async function createMigrationTargets(
         signal,
       );
     }
+    const recentAgentSettings = await migrateRecentAgentSettings(
+      integrations,
+      settings.recentAgentSettings,
+      signal,
+    );
     targets.push({
       relativePath: 'project-settings.json',
       value: withoutKeys({
         ...settings,
+        recentAgentSettings,
         executionDefaults: { global: migratedGlobal, byAgent },
       }, [
         'lastPermissionMode',
@@ -233,6 +240,29 @@ async function createMigrationTargets(
         'lastAmpAgentMode',
       ]),
     });
+  }
+
+  if (refreshSettings) {
+    const ownershipJournal = await readJson(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    if (isRecord(ownershipJournal) && Array.isArray(ownershipJournal.ownershipIntents)) {
+      const ownershipIntents: JsonValue[] = [];
+      for (const candidate of ownershipJournal.ownershipIntents) {
+        signal.throwIfAborted();
+        if (!isRecord(candidate) || candidate.kind !== 'handoff') {
+          ownershipIntents.push(candidate as JsonValue);
+          continue;
+        }
+        ownershipIntents.push(await migrateHandoffIntent(
+          integrations,
+          candidate as JsonObject,
+          signal,
+        ));
+      }
+      targets.push({
+        relativePath: 'agent-ownership-journal.json',
+        value: { ...ownershipJournal, ownershipIntents },
+      });
+    }
   }
 
   const scheduled = await readJson(path.join(workspaceDir, 'scheduled-prompts.json'));
@@ -277,6 +307,77 @@ async function createMigrationTargets(
     });
   }
   return targets;
+}
+
+async function migrateRecentAgentSettings(
+  integrations: IntegrationRegistry,
+  raw: JsonValue | undefined,
+  signal: AbortSignal,
+): Promise<JsonValue> {
+  if (!Array.isArray(raw)) return raw ?? [];
+  const result: JsonValue[] = [];
+  for (const [index, candidate] of raw.entries()) {
+    signal.throwIfAborted();
+    if (!isRecord(candidate)) {
+      result.push(candidate as JsonValue);
+      continue;
+    }
+    const agentId = stringValue(asJsonValue(candidate.agentId));
+    const model = stringValue(asJsonValue(candidate.model));
+    const integration = agentId
+      ? integrations.list().find((entry) => entry.descriptor.id === agentId)
+      : null;
+    if (!agentId || model === null || !integration) {
+      result.push(asJsonValue(candidate));
+      continue;
+    }
+    result.push({
+      ...candidate,
+      model: await integration.migration.translateLegacyModel({
+        scope: { kind: 'recent-agent-setting', recordId: String(index), selectedAgentId: agentId },
+        model,
+        signal,
+      }),
+    });
+  }
+  return result;
+}
+
+async function migrateHandoffIntent(
+  integrations: IntegrationRegistry,
+  intent: JsonObject,
+  signal: AbortSignal,
+): Promise<JsonObject> {
+  if (!isRecord(intent.target) || !isRecord(intent.target.execution)) {
+    throw new Error(`Invalid handoff intent ${String(intent.operationId)}`);
+  }
+  const execution = intent.target.execution;
+  const agentId = stringValue(execution.agentId);
+  const model = stringValue(execution.model);
+  if (!agentId || model === null) {
+    throw new Error(`Invalid handoff target ${String(intent.operationId)}`);
+  }
+  const integration = integrations.require(agentId);
+  const migratedSettings = await integration.settings.migrate(
+    parseSettingsEnvelope(agentId, asJsonValue(execution.agentSettings)),
+  );
+  const agentSettings = integration.settings.parse(migratedSettings);
+  assertSettingsOwner(agentId, agentSettings);
+  return {
+    ...intent,
+    target: {
+      ...intent.target,
+      execution: {
+        ...execution,
+        model: await integration.migration.translateLegacyModel({
+          scope: { kind: 'handoff', recordId: String(intent.operationId), selectedAgentId: agentId },
+          model,
+          signal,
+        }),
+        agentSettings: asJsonValue(agentSettings),
+      },
+    },
+  };
 }
 
 async function migrateExecutionDefaults(

@@ -227,6 +227,14 @@ describe('agent integration core-record migration', () => {
         },
       })}\n`),
       fs.writeFile(path.join(workspaceDir, 'project-settings.json'), `${JSON.stringify({
+        recentAgentSettings: [{
+          agentId: 'amp',
+          model: 'smart',
+          apiProviderId: null,
+          modelEndpointId: null,
+          modelProtocol: null,
+          retained: 'recent',
+        }],
         executionDefaults: {
           global: { agentSettingsById: { amp: ampV1 } },
           byAgent: { amp: { agentSettingsById: { amp: ampV1 } } },
@@ -244,6 +252,44 @@ describe('agent integration core-record migration', () => {
           },
         }],
       })}\n`),
+      fs.writeFile(path.join(workspaceDir, 'agent-ownership-journal.json'), `${JSON.stringify({
+        version: 5,
+        ownershipIntents: [{
+          version: 5,
+          operationId: 'handoff-1',
+          clientRequestId: 'request-1',
+          submittedTargetHash: 'a'.repeat(64),
+          kind: 'handoff',
+          chatId: '100',
+          phase: 'commit-decided',
+          source: { agentId: 'claude', agentOwnershipEpoch: 'source-epoch' },
+          target: {
+            execution: {
+              agentId: 'amp',
+              model: 'deep',
+              apiProviderId: null,
+              modelEndpointId: null,
+              modelProtocol: null,
+              permissionMode: 'default',
+              thinkingMode: 'none',
+              agentSettings: ampV1,
+              retained: 'handoff',
+            },
+            agentOwnershipEpoch: 'target-epoch',
+          },
+          watermark: { viewId: 'view-1', ordinal: 0 },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }, {
+          version: 2,
+          operationId: 'delete-1',
+          kind: 'delete',
+          chatId: '200',
+          phase: 'prepared',
+          sourceEpoch: null,
+          releaseReferences: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }],
+      })}\n`),
     ]);
 
     await refreshAgentIntegrationCoreRecords({
@@ -257,12 +303,44 @@ describe('agent integration core-record migration', () => {
       agentSettingsById: { amp: ampV2 },
     });
     const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
+    expect(settings.recentAgentSettings).toEqual([{
+      agentId: 'amp',
+      model: 'medium',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      retained: 'recent',
+    }]);
     expect(settings.executionDefaults.global.agentSettingsById.amp).toEqual(ampV2);
     expect(settings.executionDefaults.byAgent.amp.agentSettingsById.amp).toEqual(ampV2);
     const scheduled = JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'));
     expect(scheduled.prompts[0].target).toMatchObject({
       model: 'medium',
       agentSettingsById: { amp: ampV2 },
+    });
+    const ownership = JSON.parse(await fs.readFile(
+      path.join(workspaceDir, 'agent-ownership-journal.json'),
+      'utf8',
+    ));
+    expect(ownership.ownershipIntents[0]).toMatchObject({
+      submittedTargetHash: 'a'.repeat(64),
+      target: {
+        execution: {
+          model: 'medium',
+          agentSettings: ampV2,
+          retained: 'handoff',
+        },
+      },
+    });
+    expect(ownership.ownershipIntents[1]).toEqual({
+      version: 2,
+      operationId: 'delete-1',
+      kind: 'delete',
+      chatId: '200',
+      phase: 'prepared',
+      sourceEpoch: null,
+      releaseReferences: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
     });
   });
 
