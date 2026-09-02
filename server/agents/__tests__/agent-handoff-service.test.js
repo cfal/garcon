@@ -663,6 +663,31 @@ describe('AgentHandoffService', () => {
     expect(reopenProducer).toHaveBeenCalledOnce();
   });
 
+  it('stops recovery when the intent disappears without applying target ownership', async () => {
+    const intent = persistedIntent();
+    const ownership = {
+      findHandoff: () => null,
+      pendingHandoffs: () => [intent],
+      applyHandoffDecision: mock(async () => {}),
+      completeHandoff: mock(async () => {}),
+    };
+    const reopenProducer = mock(() => {});
+    const fakeTimers = installFakeTimers();
+    const service = createService({ ownership, ledger: ledgerState([]), reopenProducer });
+
+    try {
+      await service.recoverPendingHandoffs();
+
+      expect(ownership.applyHandoffDecision).not.toHaveBeenCalled();
+      expect(ownership.completeHandoff).not.toHaveBeenCalled();
+      expect(reopenProducer).not.toHaveBeenCalled();
+      expect(fakeTimers.timers).toHaveLength(0);
+    } finally {
+      service.shutdown();
+      fakeTimers.restore();
+    }
+  });
+
   it('recovers every durable handoff through the ledger boundary', async () => {
     const current = sourceChat();
     const calls = [];

@@ -454,7 +454,12 @@ export class AgentHandoffService {
           case 'registry':
             if (!this.#hasPendingHandoff(intent)) {
               if (!matchesHandoffTarget(this.deps.registry.getChat(intent.chatId), intent)) {
-                throw new Error('Agent handoff intent disappeared before ownership changed');
+                logger.warn('Pending handoff recovery stopped after its intent disappeared', {
+                  chatId: intent.chatId,
+                  operationId: intent.operationId,
+                });
+                recovery.step = 'fenced';
+                return;
               }
               recovery.step = 'producer';
               break;
