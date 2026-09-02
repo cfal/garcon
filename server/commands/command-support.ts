@@ -24,6 +24,7 @@ import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { UserMessagePresentation } from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ChatStartupPreferences } from '../settings/types.js';
 import type {
   AgentExecutionCommandType,
   ForkedAgentSessionOutcome,
@@ -65,7 +66,7 @@ export interface SettingsDep {
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
-  recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
+  recordChatStartup(defaults: ChatStartupPreferences): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
   removeSessionName(chatId: string): Promise<void>;

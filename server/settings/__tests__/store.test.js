@@ -991,6 +991,40 @@ describe('settings store', () => {
       }]);
     });
 
+    it('maps a chat start agentSettings envelope into per-agent execution defaults', async () => {
+      const envelope = { ownerId: 'codex', schemaVersion: 1, values: { effort: 'high' } };
+      await store.recordChatStartup({
+        origin: 'interactive',
+        agentId: 'codex',
+        projectPath: '/workspace/project-a',
+        model: 'gpt-5.4',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'medium',
+        agentSettings: envelope,
+      });
+
+      expect(store.getExecutionDefaults().byAgent.codex).toEqual({
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'medium',
+        agentSettingsById: { codex: envelope },
+      });
+    });
+
+    it('keeps recordChatStartup best-effort when persistence fails', async () => {
+      await fs.mkdir(settingsFile());
+      try {
+        await store.recordChatStartup({
+          agentId: 'codex',
+          projectPath: '/workspace/project-a',
+          model: 'gpt-5.4',
+        });
+      } finally {
+        await fs.rm(settingsFile(), { recursive: true });
+      }
+
+      expect(store.getRecentAgentSettings()).toEqual([]);
+    });
+
     it('moves duplicate recent targets to the front and caps the list', async () => {
       for (let index = 0; index < 21; index += 1) {
         await store.recordChatStartup({

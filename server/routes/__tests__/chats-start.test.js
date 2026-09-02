@@ -185,7 +185,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('records startup recents before starting the agent session', async () => {
+  it('records startup recents after the agent session starts', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -208,19 +208,19 @@ describe('POST /api/v1/chats/start', () => {
 	    expect(response.status).toBe(202);
 	    expect(body.success).toBe(true);
 	    expect(body.commandType).toBe('chat-start');
-    expect(settings.recordChatStartup).toHaveBeenCalledWith({
+    expect(settings.recordChatStartup).toHaveBeenCalledTimes(1);
+    expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'codex',
-      projectPath,
       model: 'gpt-5.4',
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
       permissionMode: 'acceptEdits',
       thinkingMode: 'medium',
-      agentSettingsById: {
-        codex: { ownerId: 'codex', schemaVersion: 1, values: {} },
-      },
-    });
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+    }));
+    expect(settings.recordChatStartup.mock.invocationCallOrder[0])
+      .toBeGreaterThan(agents.startSession.mock.invocationCallOrder[0]);
 	    expect(agents.startSession).toHaveBeenCalledWith(CHAT_ID, 'hello', expect.objectContaining({
 	      projectPath,
 	      clientRequestId: 'req-start-a',
@@ -236,6 +236,37 @@ describe('POST /api/v1/chats/start', () => {
     );
     expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
     expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
+  });
+
+  it('keeps a successfully started chat when startup preference recording fails', async () => {
+    const chatId = '1783725900000112';
+    const projectPath = path.join(testBasePath, 'project-preference-failure');
+    await fs.mkdir(projectPath, { recursive: true });
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      origin: 'interactive',
+      clientRequestId: 'req-start-preference-failure',
+      clientMessageId: 'msg-start-preference-failure',
+      chatId,
+      agentId: 'codex',
+      projectPath,
+      model: 'gpt-5.4',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'medium',
+      agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      command: 'hello',
+    }));
+    settings.recordChatStartup.mockImplementationOnce(() => Promise.reject(new Error('settings unavailable')));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body.success).toBe(true);
+    expect(testChats.has(chatId)).toBe(true);
+    expect(registry.removeChat).not.toHaveBeenCalled();
+    expect(settings.removeFromAllOrderLists).not.toHaveBeenCalled();
+    expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.failDirectTurn).not.toHaveBeenCalled();
   });
 
   it('accepts a scalar parent ID and records server-authored delegation parentage', async () => {
@@ -300,7 +331,7 @@ describe('POST /api/v1/chats/start', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
-  it('keeps the attempted defaults even when agent startup fails', async () => {
+  it('discards the attempted defaults when agent startup fails', async () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -323,19 +354,7 @@ describe('POST /api/v1/chats/start', () => {
 
     expect(response.status).toBe(500);
     expect(body.error).toBe('Internal server error');
-    expect(settings.recordChatStartup).toHaveBeenCalledWith({
-      agentId: 'claude',
-      projectPath,
-      model: 'opus',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      agentSettingsById: {
-        claude: { ownerId: 'claude', schemaVersion: 1, values: {} },
-      },
-    });
+    expect(settings.recordChatStartup).not.toHaveBeenCalled();
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
     expect(queue.failDirectTurn).toHaveBeenCalledTimes(1);
   });
@@ -410,12 +429,10 @@ describe('POST /api/v1/chats/start', () => {
     expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',
-      agentSettingsById: {
-        claude: {
-          ownerId: 'claude',
-          schemaVersion: 1,
-          values: { vendorOption: 'sometimes' },
-        },
+      agentSettings: {
+        ownerId: 'claude',
+        schemaVersion: 1,
+        values: { vendorOption: 'sometimes' },
       },
     }));
   });
