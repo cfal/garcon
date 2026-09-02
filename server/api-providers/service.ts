@@ -272,6 +272,10 @@ function appendPath(baseUrl: string, suffix: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${suffix.replace(/^\/+/, '')}`;
 }
 
+function hasSameOrigin(left: string, right: string): boolean {
+  return new URL(left).origin === new URL(right).origin;
+}
+
 function openAiModelListUrl(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, '');
   const parsed = new URL(normalized);
@@ -427,14 +431,24 @@ export class ApiProviderService {
     return { success: false, error: `Model discovery is not supported for ${discoveryInput.modelDiscovery}.` };
   }
 
-  #storedApiKeyForDiscovery(input: Pick<ApiProviderModelDiscoveryFlatInput, 'apiProviderId' | 'endpointId' | 'protocol'>): string | undefined {
+  #storedApiKeyForDiscovery(input: Pick<
+    ApiProviderModelDiscoveryFlatInput,
+    'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl'
+  >): string | undefined {
     if (input.endpointId) {
       const resolved = this.deps.store.getEndpoint(input.endpointId);
-      if (resolved?.endpoint.protocol === input.protocol) return resolved.endpoint.apiKey || undefined;
+      if (
+        resolved?.endpoint.protocol === input.protocol &&
+        hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)
+      ) {
+        return resolved.endpoint.apiKey || undefined;
+      }
     }
     if (input.apiProviderId) {
       const apiProvider = this.deps.store.getApiProvider(input.apiProviderId);
-      const endpoint = apiProvider?.endpoints.find((entry) => entry.protocol === input.protocol);
+      const endpoint = apiProvider?.endpoints.find(
+        (entry) => entry.protocol === input.protocol && hasSameOrigin(entry.baseUrl, input.baseUrl),
+      );
       return endpoint?.apiKey || undefined;
     }
     return undefined;

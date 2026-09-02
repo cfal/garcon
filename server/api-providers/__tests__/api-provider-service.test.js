@@ -93,7 +93,7 @@ describe('ApiProviderService', () => {
 
     const discovered = await service.discoverModels({
       protocol: 'openai-compatible',
-      baseUrl: endpoint.baseUrl,
+      baseUrl: 'https://api.acme.test/alternate/v1',
       endpointId: endpoint.id,
       modelDiscovery: 'openai-models',
     });
@@ -102,8 +102,27 @@ describe('ApiProviderService', () => {
       success: true,
       models: [{ value: 'acme/model', label: 'Acme Model' }],
     });
-    expect(fetchMock).toHaveBeenCalledWith('https://api.acme.test/v1/models', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('https://api.acme.test/alternate/v1/models', expect.objectContaining({
       headers: { Authorization: 'Bearer sk-acme-secret' },
+    }));
+  });
+
+  it('does not send stored endpoint API keys to a different origin', async () => {
+    const { service } = await tempService();
+    const created = await service.create(openAiInput());
+    const endpoint = created.endpoints[0];
+    const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+
+    await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      endpointId: endpoint.id,
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://untrusted.example/v1/models', expect.objectContaining({
+      headers: {},
     }));
   });
 
