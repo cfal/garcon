@@ -1,7 +1,7 @@
 // Test-side control of the supervisor's optional reverse proxy. The controller appends
-// directives (hold selected stream frames, release them, or reset an exact active global
-// connection) and waits on proxy observations; both files are atomic JSON snapshots below the
-// fixture proxy directory. Tests synchronize on observed state, never on guessed sleeps.
+// directives (hold selected stream frames or HTTP responses, release them, or reset an exact
+// active global connection) and waits on proxy observations; both files are atomic JSON snapshots
+// below the fixture proxy directory. Tests synchronize on observed state, never on guessed sleeps.
 
 import { join } from 'node:path';
 import type { IntegrationDirectories } from './integration-fixture.js';
@@ -10,8 +10,11 @@ import { readJsonFile, writeJsonAtomic } from './opencode-process-supervisor.js'
 
 interface TransportDirective {
   seq: number;
-  action: 'hold' | 'hold-through-markers' | 'release' | 'reset';
+  action: 'hold' | 'hold-through-markers' | 'release' | 'reset'
+    | 'hold-response' | 'release-response';
   connectionId?: number;
+  responseId?: number;
+  path?: string;
   startMarker?: string;
   endMarker?: string;
 }
@@ -31,10 +34,19 @@ export interface GlobalConnectionObservation {
   closed: boolean;
 }
 
+export interface HeldResponseObservation {
+  id: number;
+  path: string;
+  held: boolean;
+  released: boolean;
+  closed: boolean;
+}
+
 interface TransportObservations {
   appliedSeq: number;
   requests: Array<{ method: string; path: string }>;
   connections: GlobalConnectionObservation[];
+  responses: HeldResponseObservation[];
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -144,6 +156,37 @@ export class OpenCodeTransportController {
         (entry) => entry.id === connectionId && entry.reset,
       ),
       `connection ${connectionId} was never reset`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async holdNextResponse(path: string): Promise<void> {
+    const seq = await this.#append({ action: 'hold-response', path });
+    await this.#waitForObservation(
+      (observations) => observations.appliedSeq >= seq ? observations.appliedSeq : null,
+      `response hold directive ${seq} was never applied`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
+  async waitForResponseHeld(path: string): Promise<number> {
+    const response = await this.#waitForObservation(
+      (observations) => observations.responses.find(
+        (entry) => entry.path === path && entry.held && !entry.released,
+      ),
+      `response for ${path} was never held`,
+      DEFAULT_TIMEOUT_MS,
+    );
+    return response.id;
+  }
+
+  async releaseResponse(responseId: number): Promise<void> {
+    await this.#append({ action: 'release-response', responseId });
+    await this.#waitForObservation(
+      (observations) => observations.responses.find(
+        (entry) => entry.id === responseId && entry.released,
+      ),
+      `response ${responseId} was never released`,
       DEFAULT_TIMEOUT_MS,
     );
   }

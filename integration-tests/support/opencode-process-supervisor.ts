@@ -2,7 +2,8 @@
 // executes this module; it verifies the pinned binary hermetically, records the exact provider
 // process tree, and stops every recorded descendant when a crashed Garcon parent disappears.
 // It optionally reverse-proxies the real server so transport tests can hold selected stream
-// frames or reset the real /global/event socket. It records and signals only PIDs it created.
+// frames or HTTP responses and reset the real /global/event socket. It records and signals only
+// PIDs it created.
 
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
@@ -53,8 +54,11 @@ export interface BackendReadinessProcess {
 
 interface TransportDirective {
   seq: number;
-  action: 'hold' | 'hold-through-markers' | 'release' | 'reset';
+  action: 'hold' | 'hold-through-markers' | 'release' | 'reset'
+    | 'hold-response' | 'release-response';
   connectionId?: number;
+  responseId?: number;
+  path?: string;
   startMarker?: string;
   endMarker?: string;
 }
@@ -74,6 +78,14 @@ interface GlobalConnectionObservation {
   closed: boolean;
 }
 
+interface HeldResponseObservation {
+  id: number;
+  path: string;
+  held: boolean;
+  released: boolean;
+  closed: boolean;
+}
+
 // Live per-connection proxy state; directives act on it immediately instead of waiting for
 // the next upstream chunk.
 interface GlobalConnectionRuntime {
@@ -90,10 +102,16 @@ interface GlobalConnectionRuntime {
   reset(): void;
 }
 
+interface HeldResponseRuntime {
+  observation: HeldResponseObservation;
+  release(): void;
+}
+
 interface TransportObservations {
   appliedSeq: number;
   requests: Array<{ method: string; path: string }>;
   connections: GlobalConnectionObservation[];
+  responses: HeldResponseObservation[];
 }
 
 const MAX_OBSERVED_REQUESTS = 500;
@@ -727,9 +745,17 @@ function startTransportProxy(input: {
   const directivesPath = join(input.proxyDir, 'directives.json');
   const observationsPath = join(input.proxyDir, 'observations.json');
   const backend = new URL(input.backendUrl);
-  const observations: TransportObservations = { appliedSeq: 0, requests: [], connections: [] };
+  const observations: TransportObservations = {
+    appliedSeq: 0,
+    requests: [],
+    connections: [],
+    responses: [],
+  };
   const runtimes = new Map<number, GlobalConnectionRuntime>();
+  const responseRuntimes = new Map<number, HeldResponseRuntime>();
+  const heldResponsePaths = new Set<string>();
   let nextConnectionId = 0;
+  let nextResponseId = 0;
   let lastAppliedSeq = 0;
   let holdArmed = false;
   let observationsDirty = false;
@@ -767,6 +793,10 @@ function startTransportProxy(input: {
       lastAppliedSeq = directive.seq;
       if (directive.action === 'hold') {
         holdArmed = true;
+      } else if (directive.action === 'hold-response' && typeof directive.path === 'string') {
+        heldResponsePaths.add(directive.path);
+      } else if (directive.action === 'release-response') {
+        responseRuntimes.get(directive.responseId ?? -1)?.release();
       } else {
         const runtime = runtimes.get(directive.connectionId ?? -1);
         if (runtime) {
@@ -796,6 +826,7 @@ function startTransportProxy(input: {
 
   return createServer((request, response) => {
     const path = (request.url ?? '/').split('?')[0];
+    const holdResponse = heldResponsePaths.delete(path);
     recordRequest(request.method ?? 'GET', path);
     const upstream = httpRequest({
       hostname: backend.hostname,
@@ -806,7 +837,52 @@ function startTransportProxy(input: {
     }, (backendResponse) => {
       response.writeHead(backendResponse.statusCode ?? 502, backendResponse.headers);
       if (path !== '/global/event') {
-        backendResponse.pipe(response);
+        if (!holdResponse) {
+          backendResponse.pipe(response);
+          return;
+        }
+        const observation: HeldResponseObservation = {
+          id: ++nextResponseId,
+          path,
+          held: true,
+          released: false,
+          closed: false,
+        };
+        observations.responses.push(observation);
+        markObservationsDirty();
+        const buffered: Buffer[] = [];
+        let upstreamEnded = false;
+        const runtime: HeldResponseRuntime = {
+          observation,
+          release() {
+            if (observation.released || observation.closed) return;
+            observation.released = true;
+            for (const chunk of buffered) response.write(chunk);
+            buffered.length = 0;
+            if (upstreamEnded) response.end();
+            markObservationsDirty();
+          },
+        };
+        responseRuntimes.set(observation.id, runtime);
+        backendResponse.on('data', (chunk: Buffer) => {
+          if (observation.closed) return;
+          if (observation.released) response.write(chunk);
+          else buffered.push(chunk);
+        });
+        backendResponse.on('end', () => {
+          upstreamEnded = true;
+          if (observation.released && !observation.closed) response.end();
+        });
+        backendResponse.on('error', () => {
+          observation.closed = true;
+          markObservationsDirty();
+          response.destroy();
+        });
+        response.on('close', () => {
+          observation.closed = true;
+          markObservationsDirty();
+          backendResponse.destroy();
+        });
         return;
       }
 
