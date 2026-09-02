@@ -22,6 +22,7 @@ export type AgentHandoffReplayDisposition =
 
 export function agentHandoffReplayDisposition(input: {
   readonly handoff?: AgentHandoffRequest;
+  readonly currentAgentId?: string;
   readonly currentOwnershipEpoch?: string;
   readonly recordStatus: string;
   readonly isUnpublishedPreScheduleFailure: boolean;
@@ -29,6 +30,7 @@ export function agentHandoffReplayDisposition(input: {
   if (input.isUnpublishedPreScheduleFailure) {
     if (
       input.handoff
+      && input.currentAgentId === input.handoff.target.agentId
       && input.currentOwnershipEpoch !== undefined
       && input.currentOwnershipEpoch !== input.handoff.expectedAgentOwnershipEpoch
     ) {

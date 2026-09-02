@@ -2143,6 +2143,37 @@ describe('ChatCommandService', () => {
     expect(fixture.queue.admitUserInput).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a failed handoff replay after ownership moves to another agent', async () => {
+    const prepare = mock(async () => {
+      throw new Error('prepare failed');
+    });
+    const fixture = makeService({
+      handoffs: {
+        createPreparation: mock(() => ({
+          operation: 'agent-handoff',
+          prepare,
+          compensate: mock(async () => undefined),
+        })),
+      },
+    });
+    const input = handoffRunInput('req-handoff-unrelated-owner');
+
+    await expect(fixture.service.submitRun(input)).rejects.toThrow('prepare failed');
+    fixture.sessions.set(SOURCE_CHAT_ID, {
+      ...fixture.sessions.get(SOURCE_CHAT_ID),
+      agentId: 'pi',
+      agentOwnershipEpoch: 'epoch-2',
+    });
+
+    await expect(fixture.service.submitRun(input)).rejects.toMatchObject({
+      code: 'STALE_CHAT_OWNERSHIP',
+      status: 409,
+    });
+    expect(fixture.handoffs.resolveTarget).toHaveBeenCalledTimes(2);
+    expect(fixture.handoffs.createPreparation).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
   it('applies supported resume overrides to one turn without persisting them', async () => {
     const { service, chats, queue } = makeService();
 

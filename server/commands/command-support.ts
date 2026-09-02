@@ -476,9 +476,11 @@ export class CommandSupport {
         409,
       );
     }
+    const currentChat = this.deps.chats.getChat(input.chatId);
     const replayDisposition = agentHandoffReplayDisposition({
       handoff: input.handoff,
-      currentOwnershipEpoch: this.deps.chats.getChat(input.chatId)?.agentOwnershipEpoch,
+      currentAgentId: currentChat?.agentId,
+      currentOwnershipEpoch: currentChat?.agentOwnershipEpoch,
       recordStatus: existing.status,
       isUnpublishedPreScheduleFailure: existing.status === 'failed'
         && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE
