@@ -28,13 +28,11 @@
 	let {
 		terminalId,
 		host,
-		visible = true,
 		terminals: providedTerminals,
 		workspace: providedWorkspace,
 	}: {
 		terminalId: string;
 		host: WorkspaceWindowId | 'mobile';
-		visible?: boolean;
 		terminals?: TerminalSurfaceRegistryPort;
 		workspace?: TerminalSurfaceWorkspacePort;
 	} = $props();

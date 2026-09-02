@@ -37,7 +37,6 @@
 			label: m.git_changes_commit(),
 			icon: GitCommitHorizontal,
 			onclick: onCommit,
-			disabled: controller.workbench.commit.isCommitting,
 			priority: 0,
 			showLabel: presentation === 'mobile',
 			variant: 'primary',

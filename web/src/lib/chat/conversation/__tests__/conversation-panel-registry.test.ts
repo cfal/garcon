@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssistantMessage } from '$shared/chat-types';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatLoadMessagesOptions } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -666,6 +666,44 @@ describe('ConversationPanelRegistry', () => {
 		const markDelivered = vi.spyOn(registry, 'markOptimisticInputDelivered');
 
 		selected.discardChat('chat-1');
+		selected.markOptimisticUserInputDelivered('input-1');
+
+		expect(markDelivered).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('purges optimistic input ownership when its committed echo arrives', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getSelectedChatId: () => 'chat-1',
+		});
+		selected.upsertOptimisticUserInput({
+			chatId: 'chat-1',
+			clientMessageId: 'input-1',
+			content: 'pending',
+			createdAt: '2026-08-30T00:00:00.000Z',
+			delivery: 'pending',
+		});
+		selected.applyMessages(
+			'chat-1',
+			'view-1',
+			[
+				{
+					ordinal: 2,
+					message: new UserMessage('2026-08-30T00:00:01.000Z', 'pending', undefined, {
+						clientMessageId: 'input-1',
+					}),
+				},
+			],
+			2,
+			2,
+		);
+		const markDelivered = vi.spyOn(registry, 'markOptimisticInputDelivered');
+
 		selected.markOptimisticUserInputDelivered('input-1');
 
 		expect(markDelivered).not.toHaveBeenCalled();

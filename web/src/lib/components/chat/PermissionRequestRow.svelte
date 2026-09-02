@@ -77,10 +77,8 @@
 		if (!selected?.id) return null;
 		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
 	});
-	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
 	const isPending = $derived(!terminal && actionable);
 	const isResolved = $derived(terminal?.state === 'resolved');
-	const isCancelled = $derived(terminal?.state === 'cancelled');
 	const wasAllowed = $derived(isResolved && terminal?.allowed === true);
 
 	type CardVariant = 'info' | 'success' | 'warning' | 'error' | 'neutral';

@@ -145,7 +145,7 @@ describe('ModelCatalogStore', () => {
 					sample: agentEntry('sample', { defaultModel: 'old-model' }),
 				},
 				apiProviderCatalog: [],
-				lastFetchedAt: Date.now(),
+				lastFetchedAt: 0,
 			}),
 		);
 		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(
@@ -212,6 +212,28 @@ describe('ModelCatalogStore', () => {
 		await store.refreshIfStale();
 		await store.refreshIfStale();
 
+		expect(clientApi.apiFetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('skips validation while the catalog is inside the requested TTL', async () => {
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] },
+				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'cached' }) },
+				apiProviderCatalog: [],
+				lastFetchedAt: Date.now(),
+			}),
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(
+			mockResponse(catalogBody([agentEntry('sample')])),
+		);
+		const store = createModelCatalogStore();
+
+		await store.refreshIfStale(60_000);
+		expect(clientApi.apiFetch).not.toHaveBeenCalled();
+
+		await store.refreshIfStale(0);
 		expect(clientApi.apiFetch).toHaveBeenCalledTimes(1);
 	});
 

@@ -71,7 +71,6 @@
 <ConversationTranscriptItem
 	{item}
 	{renderModel}
-	agentId="claude"
 	{pendingPermissionRequests}
 	{onExitPlanMode}
 />

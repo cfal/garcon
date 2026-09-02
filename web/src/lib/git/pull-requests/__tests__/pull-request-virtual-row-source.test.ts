@@ -5,6 +5,7 @@ import { buildPullRequestVirtualRowSource } from '../pull-request-virtual-row-so
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import {
 	buildGitVirtualReviewRowSource,
+	virtualMeasurementKey,
 	type GitVirtualReviewRowSource,
 } from '$lib/git/review/git-virtual-review-row-source.js';
 
@@ -145,6 +146,7 @@ describe('pull request virtual row source', () => {
 			rowAt,
 			rowKey: (index) => base.rowKey(index),
 			estimateRowHeight: (index, lineHeight) => base.estimateRowHeight(index, lineHeight),
+			buildVirtualMeasurements: (lineHeight) => base.buildVirtualMeasurements(lineHeight),
 			fileStart: (filePath) => base.fileStart(filePath),
 			fileState: (filePath) => base.fileState(filePath),
 			filePathAt: (index) => base.filePathAt(index),
@@ -181,6 +183,17 @@ describe('pull request virtual row source', () => {
 			threadId: 'src/app.ts:2',
 			showUnanchoredLabel: false,
 		});
+		const measurements = rowSource.buildVirtualMeasurements(18);
+		expect(measurements.keys).toEqual(
+			Array.from({ length: rowSource.rowCount }, (_, index) =>
+				virtualMeasurementKey(rowSource.rowKey(index)),
+			),
+		);
+		expect(measurements.estimates).toEqual(
+			Array.from({ length: rowSource.rowCount }, (_, index) =>
+				rowSource.estimateRowHeight(index, 18),
+			),
+		);
 		expectEveryRowPresent(rowSource);
 	});
 

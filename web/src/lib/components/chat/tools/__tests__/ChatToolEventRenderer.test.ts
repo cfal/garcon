@@ -87,6 +87,25 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('const a = 2;')).toBeTruthy();
 	});
 
+	it('elides an expanded Edit whose diff exceeds the work budget', () => {
+		const oldContent = Array.from({ length: 501 }, (_, index) => `old-${index}`).join('\n');
+		const newContent = Array.from({ length: 501 }, (_, index) => `new-${index}`).join('\n');
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-large-diff',
+				'/tmp/example.ts',
+				oldContent,
+				newContent,
+			),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Changes are too large to render inline.')).toBeTruthy();
+		expect(screen.queryByText('old-500')).toBeNull();
+	});
+
 	it('delegates controlled disclosure changes to the virtual row owner', async () => {
 		const disclosureState = {
 			open: vi.fn(() => true),
@@ -113,6 +132,39 @@ describe('ChatToolEventRenderer', () => {
 			false,
 			false,
 		);
+	});
+
+	it('exposes separate file-open and disclosure buttons for Edit', async () => {
+		const onFileOpen = vi.fn();
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-accessible',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen,
+		});
+
+		const fileButton = screen.getByRole('button', { name: 'example.ts' });
+		const disclosureButton = screen.getByRole('button', { name: 'Expand' });
+		expect(disclosureButton.tabIndex).toBe(0);
+		expect(disclosureButton.getAttribute('aria-expanded')).toBe('false');
+		expect(disclosureButton.getAttribute('aria-controls')).toBe('tool-body-tool-accessible');
+		expect(disclosureButton.querySelector('button')).toBeNull();
+
+		await fireEvent.click(fileButton);
+		expect(onFileOpen).toHaveBeenCalledWith('/tmp/example.ts', {
+			old_string: 'const a = 1;',
+			new_string: 'const a = 2;',
+		});
+		expect(screen.queryByText('const a = 2;')).toBeNull();
+
+		await fireEvent.click(disclosureButton);
+		expect(screen.getByText('const a = 2;')).toBeTruthy();
+		expect(disclosureButton.getAttribute('aria-expanded')).toBe('true');
 	});
 
 	it('renders streaming Edit without diff as non-expandable single row', () => {

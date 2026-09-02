@@ -445,7 +445,8 @@
 	);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -- container delegates bubbled Escape handling for the sidebar subtree; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
+<!-- The container delegates bubbled Escape handling for the sidebar subtree. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	data-slot="sidebar"
 	class={[
@@ -588,7 +589,7 @@
 				>
 				{#if bulkDelete.confirmation}
 					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
-						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title}
+						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title, index (index)}
 							<li class="truncate">{title}</li>
 						{/each}
 						{#if bulkDelete.confirmation.chatTitles.length > 5}

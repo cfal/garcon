@@ -36,8 +36,9 @@ function normalizedDocument(content: string): Text {
 	return Text.of(content.split(/\r\n?|\n/));
 }
 
-function lineSeparatorFor(content: string): '\n' | '\r\n' {
-	return content.includes('\r\n') ? '\r\n' : '\n';
+function lineSeparatorFor(content: string): '\n' | '\r' | '\r\n' {
+	if (content.includes('\r\n')) return '\r\n';
+	return content.includes('\r') ? '\r' : '\n';
 }
 
 export class CodeEditorController {
@@ -47,7 +48,7 @@ export class CodeEditorController {
 	#languageGeneration = 0;
 	#rendererGeneration = 0;
 	#baselineDocument: Text | null = null;
-	#lineSeparator: '\n' | '\r\n';
+	#lineSeparator: '\n' | '\r' | '\r\n';
 	readonly #handleScroll = (): void => {
 		const view = this.#view;
 		if (view) this.#captureScroll(view);
@@ -287,7 +288,9 @@ export class CodeEditorController {
 
 	#serializeDocument(document: Text): string {
 		const content = document.toString();
-		return this.#lineSeparator === '\r\n' ? content.replaceAll('\n', '\r\n') : content;
+		return this.#lineSeparator === '\n'
+			? content
+			: content.replaceAll('\n', this.#lineSeparator);
 	}
 
 	private async applyLanguage(): Promise<void> {

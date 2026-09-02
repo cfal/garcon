@@ -6,6 +6,7 @@ import {
 	apiDelete,
 	apiPostForm,
 	ApiError,
+	publicApiFetch,
 	getAuthToken,
 	setAuthToken,
 	clearAuthToken,
@@ -222,6 +223,16 @@ describe('API client helpers', () => {
 
 		const [, opts] = fetchMock.mock.calls[0];
 		expect(opts.signal).toBeDefined();
+	});
+
+	it('uses the standard timeout without credentials for public requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		await publicApiFetch('/api/public');
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(opts.signal).toBeDefined();
+		expect(opts.headers).toBeUndefined();
 	});
 
 	it('omits auth header when no token is set', async () => {

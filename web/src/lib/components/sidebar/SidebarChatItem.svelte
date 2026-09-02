@@ -218,7 +218,6 @@
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
 			)}
-			aria-hidden={isSingleLineLayout ? undefined : 'true'}
 			data-slot="sidebar-chat-state-badge"
 		>
 			{#if isPinned}
@@ -226,11 +225,9 @@
 			{:else}
 				<Archive class="size-2.5 text-sidebar-badge-archived-foreground" />
 			{/if}
-			{#if isSingleLineLayout}
-				<span class="sr-only">
-					{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
-				</span>
-			{/if}
+			<span class="sr-only">
+				{isPinned ? m.sidebar_chat_pinned_status() : m.sidebar_chat_archived_status()}
+			</span>
 		</div>
 	{/if}
 {/snippet}
@@ -239,9 +236,6 @@
 	{#if isMultiSelectMode}
 		<div class="flex items-center justify-center w-7 shrink-0" aria-hidden="true">
 			<div
-				role="checkbox"
-				aria-checked={isMultiSelected}
-				aria-label={m.sidebar_select_chat({ name: chatName })}
 				class={cn(
 					'size-4 rounded border-[1.5px] flex items-center justify-center transition-all duration-150',
 					isMultiSelected
@@ -306,12 +300,17 @@
 			)}
 		>
 			<button
+				type="button"
 				class={cn(
 					'flex-1 min-w-0 text-left py-[5px] pr-2 mx-0 my-0 rounded-none hover:bg-sidebar-chat-item-hover-bg active:scale-[0.98] transition-[background-color,color,transform] duration-150 relative flex items-center',
 					isMultiSelectMode ? 'pl-1' : 'pl-[7px]',
 					isSingleLineLayout && 'py-[2px]',
 				)}
 				onclick={handleItemClick}
+				role={isMultiSelectMode ? 'checkbox' : undefined}
+				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
 				{@render chatSummary()}
@@ -350,6 +349,10 @@
 					isMultiSelectMode && isMultiSelected && 'bg-primary/8',
 				)}
 				onclick={handleItemClick}
+				role={isMultiSelectMode ? 'checkbox' : undefined}
+				aria-checked={isMultiSelectMode ? isMultiSelected : undefined}
+				aria-current={!isMultiSelectMode && isSelected ? 'page' : undefined}
+				aria-label={isMultiSelectMode ? m.sidebar_select_chat({ name: chatName }) : undefined}
 			>
 				{@render selectionCheckbox()}
 				{@render chatSummary()}

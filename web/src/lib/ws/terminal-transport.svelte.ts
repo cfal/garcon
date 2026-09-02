@@ -40,7 +40,8 @@ export class TerminalTransport {
 		this.#removeMessageConsumer = options.connection.addMessageConsumer((data) => {
 			const message = parseTerminalStreamServerMessage(data);
 			if (!message) return false;
-			if (this.#active) this.#handleMessage(message);
+			if (!this.#active) return false;
+			this.#handleMessage(message);
 			return true;
 		});
 		this.#removeConnectionListener = options.connection.onConnectionChange((connected) => {
@@ -49,7 +50,12 @@ export class TerminalTransport {
 	}
 
 	connect(): void {
-		if (this.#destroyed || this.#active) return;
+		if (this.#destroyed || (this.#active && this.status !== 'waiting-auth')) return;
+		if (this.#active) {
+			this.#generation += 1;
+			this.#clearReconcileTimer();
+			this.status = 'connecting';
+		}
 		this.#active = true;
 		this.#attempt = 0;
 		this.error = null;

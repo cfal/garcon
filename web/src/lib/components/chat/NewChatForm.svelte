@@ -139,6 +139,7 @@
 
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
+	let textareaFocusTimer: ReturnType<typeof setTimeout> | null = null;
 	let expansionProjectPath = '';
 	let snippetInteractionGeneration = $state(0);
 	const snippetInteractionKey = $derived(
@@ -173,6 +174,7 @@
 	}
 
 	function reseed(): void {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
 		snippetExpansion.cancel();
 		promptRefinement.abort();
 		prospectiveChatId = null;
@@ -181,7 +183,8 @@
 		snippetPalette.reset();
 		form.reseed(prefill);
 		pendingTextareaFocus = true;
-		setTimeout(() => {
+		textareaFocusTimer = setTimeout(() => {
+			textareaFocusTimer = null;
 			if (textareaRef && form.settingsLoaded) {
 				if (prefill) {
 					textareaRef.setSelectionRange(0, 0);
@@ -259,6 +262,7 @@
 	});
 
 	onDestroy(() => {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
 		snippetExpansion.cancel();
 		promptRefinement.destroy();
 		form.revokeAllImageUrls();

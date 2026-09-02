@@ -772,7 +772,6 @@
 
 <ShareChatDialog
 	chatId={chatActionDialogs.shareChatDialog?.chatId ?? null}
-	chatTitle={chatActionDialogs.shareChatDialog?.chatTitle ?? ''}
 	onClose={() => chatActionDialogs.closeShareDialog()}
 />
 

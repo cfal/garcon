@@ -54,21 +54,19 @@
 					? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
 					: undefined}
 			>
-				{#snippet children()}
-					{#if message.format === 'markdown'}
-						<div class="mt-1 text-sm">
-							<Markdown
-								source={message.content}
-								variant="presented"
-								fileLinkBasePath={fileLinkBasePath ?? undefined}
-								{onLinkNavigate}
-								{acquireTransientActivity}
-							/>
-						</div>
-					{:else}
-						<div class="mt-1 whitespace-pre-wrap break-words text-sm">{message.content}</div>
-					{/if}
-				{/snippet}
+				{#if message.format === 'markdown'}
+					<div class="mt-1 text-sm">
+						<Markdown
+							source={message.content}
+							variant="presented"
+							fileLinkBasePath={fileLinkBasePath ?? undefined}
+							{onLinkNavigate}
+							{acquireTransientActivity}
+						/>
+					</div>
+				{:else}
+					<div class="mt-1 whitespace-pre-wrap break-words text-sm">{message.content}</div>
+				{/if}
 			</CollapsibleBody>
 		{/snippet}
 	</ChatEventCard>

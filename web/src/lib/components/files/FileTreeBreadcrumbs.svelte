@@ -127,7 +127,7 @@
 						<Ellipsis class="h-3.5 w-3.5" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start">
-						{#each layout.overflowIndices as overflowIndex}
+						{#each layout.overflowIndices as overflowIndex (overflowIndex)}
 							<DropdownMenuItem
 								aria-label={breadcrumbs[overflowIndex]?.path}
 								title={breadcrumbs[overflowIndex]?.path}

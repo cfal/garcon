@@ -366,7 +366,7 @@
 			</div>
 		{:else}
 			<div data-git-diff-review-row class="grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]">
-				{#each splitCellViews(row.view) as cellView, index}
+				{#each splitCellViews(row.view) as cellView, index (index)}
 					<div
 						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??
 							''}"

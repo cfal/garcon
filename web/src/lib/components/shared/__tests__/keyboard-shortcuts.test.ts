@@ -744,6 +744,27 @@ describe('KeyboardShortcuts', () => {
 		expect(appShell.requestNewChat).not.toHaveBeenCalled();
 	});
 
+	it('leaves Ctrl-Comma to an explicitly targeted terminal surface', () => {
+		const appShell = createMockAppShell();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			focusOwner: 'terminal',
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+		const event = new KeyboardEvent('keydown', {
+			key: ',',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		terminalInput.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(appShell.openSettings).not.toHaveBeenCalled();
+	});
+
 	it('leaves Ctrl-U and Ctrl-D untouched inside a terminal surface', () => {
 		const onPrimaryScroll = vi.fn();
 		render(KeyboardShortcutsHost, {

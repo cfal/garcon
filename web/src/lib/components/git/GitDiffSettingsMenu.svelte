@@ -107,7 +107,7 @@
 						{contextLines} lines
 					</Select.Trigger>
 					<Select.Content>
-						{#each CONTEXT_OPTIONS as n}
+						{#each CONTEXT_OPTIONS as n (n)}
 							<Select.Item value={n} label="{n} lines">{n} lines</Select.Item>
 						{/each}
 					</Select.Content>

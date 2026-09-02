@@ -230,7 +230,6 @@
 		</div>
 
 		<!-- Directory list -->
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox needs focus for arrow-key navigation; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
@@ -328,7 +327,6 @@
 		</div>
 
 		<!-- Directory list -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- listbox needs focus for arrow-key navigation; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 		<div class="overflow-y-auto flex-1" tabindex="0" onkeydown={handleListKeyDown} role="listbox">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">

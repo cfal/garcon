@@ -217,7 +217,7 @@ describe('TerminalTransport', () => {
 		expect(ready).toHaveBeenCalledOnce();
 	});
 
-	it('suspends reconciliation while still consuming late terminal messages', async () => {
+	it('leaves late terminal messages unconsumed while suspended', async () => {
 		connection.setConnected(true);
 		const transport = createTransport();
 		transport.connect();
@@ -231,7 +231,7 @@ describe('TerminalTransport', () => {
 				sequence: 1,
 				data: 'late',
 			}),
-		).toBe(true);
+		).toBe(false);
 		expect(messages).toEqual([]);
 		expect(transport.status).toBe('idle');
 	});
@@ -273,6 +273,52 @@ describe('TerminalTransport', () => {
 		await Promise.resolve();
 		expect(transport.status).toBe('connected');
 		expect(connected).toHaveBeenCalledTimes(2);
+	});
+
+	it('reconciles on authenticated demand while the primary connection remains open', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+
+		connection.receive({
+			type: 'terminal-error',
+			code: 'terminal-auth-expired',
+			message: 'Terminal authorization expired.',
+		});
+		transport.connect();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('connected');
+		expect(connected).toHaveBeenCalledTimes(2);
+		expect(connection.isConnected).toBe(true);
+	});
+
+	it('stays waiting for auth when authorization expires during resumed reconciliation', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+		connection.receive({
+			type: 'terminal-error',
+			code: 'terminal-auth-expired',
+			message: 'Terminal authorization expired.',
+		});
+
+		let resolve!: () => void;
+		connected.mockReturnValueOnce(new Promise<void>((done) => (resolve = done)));
+		transport.connect();
+		connection.receive({
+			type: 'terminal-error',
+			code: 'terminal-auth-expired',
+			message: 'Terminal authorization expired again.',
+		});
+		resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('waiting-auth');
+		expect(transport.error).toBe('Terminal authorization expired again.');
+		expect(ready).toHaveBeenCalledOnce();
 	});
 
 	it('delegates typed terminal messages only after reconciliation', async () => {

@@ -1,5 +1,6 @@
 {
 	"auth_login_errors_invalid_credentials": "Invalid username or password",
+	"auth_login_errors_navigation_failed": "Signed in, but the requested page could not be opened",
 	"auth_password_hide": "Hide password",
 	"auth_password_show": "Show password",
 	"auth_login_errors_required_fields": "All fields required",
@@ -397,6 +398,7 @@
 	"chat_sessions_new_session": "New Session",
 	"chat_tool_display_copy_to_clipboard": "Copy to clipboard",
 	"chat_tool_copy_commands": "Copy commands",
+	"chat_tool_diff_too_large": "Changes are too large to render inline.",
 	"chat_tool_display_jump_to_results": "Jump to results",
 	"chat_tool_agent": "Agent",
 	"chat_tool_analyzing": "analyzing",
@@ -1720,6 +1722,8 @@
 	"shared_view_title": "Shared Conversation",
 	"shared_view_not_found": "This shared conversation could not be found or has been revoked.",
 	"shared_view_not_found_title": "Not Found",
+	"shared_view_load_failed": "This shared conversation could not be loaded. Check your connection and try again.",
+	"shared_view_load_failed_title": "Could not load conversation",
 	"shared_view_shared_on": "Shared on {date}",
 	"shared_view_back_to_app": "Back to app",
 	"shared_view_loading": "Loading shared conversation...",

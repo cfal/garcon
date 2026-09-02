@@ -13,7 +13,6 @@ import type {
 	GitTreeNode,
 	GitWorkbenchSnapshotResponse,
 } from '$lib/api/git.js';
-import { ApiError } from '$lib/api/client.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 // Mock the git API module
@@ -36,13 +35,9 @@ vi.mock('$lib/api/git.js', () => ({
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
 	gitStagePaths: vi.fn(),
-	gitCommitIndex: vi.fn(),
+	gitDiscard: vi.fn(),
+	gitDeleteUntracked: vi.fn(),
 	gitInitialCommit: vi.fn(),
-	generateCommitMessage: vi.fn(),
-	getGitWorktrees: vi.fn(),
-	gitCreateWorktree: vi.fn(),
-	gitRemoveWorktree: vi.fn(),
-	gitRevertCommit: vi.fn(),
 }));
 
 vi.stubGlobal('localStorage', {
@@ -282,6 +277,22 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('snapshot loading', () => {
+		it('cancels a scheduled refresh when the workbench resets', async () => {
+			await wb.setTarget(makeTarget('/project'));
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+			vi.useFakeTimers();
+			try {
+				wb.scheduleRefresh({ reason: 'manual' }, 100);
+				wb.reset();
+
+				await vi.advanceTimersByTimeAsync(100);
+
+				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it('reports initial loading until the first snapshot resolves', async () => {
 			const snapshot = deferred<GitWorkbenchSnapshotResponse>();
 			mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(snapshot.promise);
@@ -735,6 +746,29 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.lastError).toContain('network error');
 			expect(wb.repositoryError).toBeNull();
 			expect(wb.isInitialLoadPending).toBe(false);
+		});
+
+		it('keeps loaded workbench state when a refresh fails', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
+					root: [makeTreeFile('a.ts')],
+					selectedFile: 'a.ts',
+					workbenchFingerprint: 'v1:loaded',
+				}),
+			);
+
+			await wb.setTarget(makeTarget());
+			const loadedSummary = wb.review.summary;
+			mockedApi.getGitWorkbenchSnapshot.mockRejectedValueOnce(new Error('network error'));
+
+			await wb.refresh({ reason: 'manual' });
+
+			expect(wb.files.filePaths).toEqual(['a.ts']);
+			expect(wb.files.selectedFile).toBe('a.ts');
+			expect(wb.review.summary).toBe(loadedSummary);
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:loaded');
+			expect(wb.isExternallyStale).toBe(true);
+			expect(wb.lastError).toContain('network error');
 		});
 	});
 
@@ -1330,12 +1364,15 @@ describe('GitWorkbenchStore', () => {
 
 		it('stages an entire directory with one path batch', async () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
+			await wb.setTarget(makeTarget('/project'));
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			const result = await wb.staging.stageDirectory('/project', 'src');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'stage');
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		});
 
 		it('unstages an entire directory with one path batch', async () => {
@@ -1347,41 +1384,23 @@ describe('GitWorkbenchStore', () => {
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'unstage');
 		});
-	});
 
-	describe('commit workflow', () => {
-		it('commits index and clears message', async () => {
+		it('refreshes once after discarding a tracked file', async () => {
+			mockedApi.gitDiscard.mockResolvedValue({ success: true });
 			await wb.setTarget(makeTarget('/project'));
-			wb.commit.commitMessage = 'feat: add login';
-			mockedApi.gitCommitIndex.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+			wb.staging.requestDiscard('a.ts');
 
-			const result = await wb.commit.commitIndex('/project');
+			const result = await wb.staging.confirmDiscard('/project');
 
 			expect(result).toBe(true);
-			expect(wb.commit.commitMessage).toBe('');
-			expect(wb.commit.isCommitting).toBe(false);
+			expect(mockedApi.gitDiscard).toHaveBeenCalledWith('/project', 'a.ts');
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		});
+	});
 
-		it('does not commit when message is empty', async () => {
-			wb.commit.commitMessage = '';
-
-			const result = await wb.commit.commitIndex('/project');
-
-			expect(result).toBe(false);
-			expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
-		});
-
-		it('surfaces error on commit failure', async () => {
-			wb.commit.commitMessage = 'test';
-			mockedApi.gitCommitIndex.mockRejectedValue(new Error('nothing staged'));
-
-			const result = await wb.commit.commitIndex('/project');
-
-			expect(result).toBe(false);
-			expect(wb.lastError).toContain('nothing staged');
-		});
-
+	describe('initial commit workflow', () => {
 		it('creates initial commit', async () => {
 			await wb.setTarget(makeTarget('/project'));
 			wb.files.hasCommits = false;
@@ -1390,115 +1409,10 @@ describe('GitWorkbenchStore', () => {
 				makeWorkbenchSnapshot({ root: [], hasCommits: true }),
 			);
 
-			const result = await wb.commit.createInitialCommit('/project');
+			const result = await wb.initialCommit.create('/project');
 
 			expect(result).toBe(true);
 			expect(wb.files.hasCommits).toBe(true);
-		});
-
-		it('does not apply a completed commit continuation to a new target', async () => {
-			const commit = deferred<Awaited<ReturnType<typeof gitApi.gitCommitIndex>>>();
-			mockedApi.getGitWorkbenchSnapshot
-				.mockResolvedValueOnce(
-					makeWorkbenchSnapshot({ root: [makeTreeFile('a.ts')], workbenchFingerprint: 'a' }),
-				)
-				.mockResolvedValueOnce(
-					makeWorkbenchSnapshot({ root: [makeTreeFile('b.ts')], workbenchFingerprint: 'b' }),
-				);
-			mockedApi.gitCommitIndex.mockReturnValueOnce(commit.promise);
-
-			await wb.setTarget(makeTarget('/project-a'));
-			wb.commit.commitMessage = 'commit A';
-			const pending = wb.commit.commitIndex('/project-a');
-			await vi.waitFor(() => expect(mockedApi.gitCommitIndex).toHaveBeenCalledTimes(1));
-
-			await wb.setTarget(makeTarget('/project-b'));
-			wb.commit.commitMessage = 'draft B';
-			mockedApi.getGitWorkbenchSnapshot.mockClear();
-			commit.resolve({ success: true });
-
-			await expect(pending).resolves.toBe(true);
-			expect(wb.projectPath).toBe('/project-b');
-			expect(wb.commit.commitMessage).toBe('draft B');
-			expect(wb.files.selectedFile).toBe('b.ts');
-			expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
-		});
-
-		it('generates commit message from staged files', async () => {
-			await wb.setTarget(makeTarget('/project'));
-			wb.files.applyTree([
-				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any);
-			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
-
-			await wb.commit.generateCommitMsg('/project');
-
-			expect(wb.commit.commitMessage).toBe('feat: auto-generated');
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']);
-			expect(wb.commit.isGeneratingMessage).toBe(false);
-		});
-
-		it('does not publish a generated message into a newly selected project', async () => {
-			const generated = deferred<{ message: string }>();
-			mockedApi.generateCommitMessage.mockReturnValueOnce(generated.promise);
-			await wb.setTarget(makeTarget('/project-a'));
-			wb.files.applyTree([
-				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any);
-
-			const generation = wb.commit.generateCommitMsg('/project-a');
-			await vi.waitFor(() =>
-				expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project-a', ['a.ts']),
-			);
-			await wb.setTarget(makeTarget('/project-b'));
-			wb.commit.commitMessage = 'draft B';
-			generated.resolve({ message: 'message for project A' });
-			await generation;
-
-			expect(wb.commit.commitMessage).toBe('draft B');
-			expect(wb.commit.isGeneratingMessage).toBe(false);
-		});
-
-		it('uses the server-returned generated message as-is', async () => {
-			await wb.setTarget(makeTarget('/project'));
-			wb.files.applyTree([
-				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
-				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any);
-			mockedApi.generateCommitMessage.mockResolvedValue({
-				message: 'feature/auth: feat: auto-generated',
-				directoryPrefix: 'feature/auth',
-			});
-
-			await wb.commit.generateCommitMsg('/project');
-
-			expect(wb.commit.commitMessage).toBe('feature/auth: feat: auto-generated');
-			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', [
-				'feature/auth/a.ts',
-				'feature/auth/b.ts',
-			]);
-		});
-
-		it('surfaces error when no staged files for message generation', async () => {
-			wb.files.applyTree([]);
-
-			await wb.commit.generateCommitMsg('/project');
-
-			expect(wb.lastError).toContain('No staged files');
-		});
-
-		it('maps typed commit generation errorCode to localized message', async () => {
-			await wb.setTarget(makeTarget('/project'));
-			wb.files.applyTree([
-				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any);
-			mockedApi.generateCommitMessage.mockRejectedValue(
-				new ApiError(504, 'Timed out', 'commit_message_timeout'),
-			);
-
-			await wb.commit.generateCommitMsg('/project');
-
-			expect(wb.lastError).toContain('timed out');
 		});
 	});
 
@@ -2106,7 +2020,6 @@ describe('GitWorkbenchStore', () => {
 				label: 'subdir',
 				source: 'chat-project',
 			});
-			wb.commit.commitMessage = 'feat: preserve draft';
 			mockedApi.getGitWorkbenchSnapshot.mockClear();
 
 			await wb.setTarget({
@@ -2120,7 +2033,6 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
 			expect(wb.target?.worktreePath).toBe('/repo');
 			expect(wb.files.selectedFile).toBe('a.ts');
-			expect(wb.commit.commitMessage).toBe('feat: preserve draft');
 		});
 
 		it('logs first-load timing when the workbench trace flag is enabled', async () => {
@@ -2158,55 +2070,6 @@ describe('GitWorkbenchStore', () => {
 			);
 		});
 
-		it('preserves commit draft on same-target refresh', async () => {
-			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
-				makeWorkbenchSnapshot({
-					root: [makeTreeFile('a.ts')],
-				}),
-			);
-
-			await wb.setTarget({
-				projectPath: '/project',
-				repoRoot: '/project',
-				worktreePath: '/project',
-				label: 'project',
-				source: 'chat-project',
-			});
-			wb.commit.commitMessage = 'feat: keep draft';
-
-			await wb.setTarget({
-				projectPath: '/project',
-				repoRoot: '/project',
-				worktreePath: '/project',
-				label: 'project',
-				source: 'chat-project',
-			});
-
-			expect(wb.commit.commitMessage).toBe('feat: keep draft');
-		});
-
-		it('clears commit draft when target changes', async () => {
-			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
-
-			await wb.setTarget({
-				projectPath: '/project-a',
-				repoRoot: '/repo',
-				worktreePath: '/project-a',
-				label: 'a',
-				source: 'worktree',
-			});
-			wb.commit.commitMessage = 'feat: old target';
-
-			await wb.setTarget({
-				projectPath: '/project-b',
-				repoRoot: '/repo',
-				worktreePath: '/project-b',
-				label: 'b',
-				source: 'worktree',
-			});
-
-			expect(wb.commit.commitMessage).toBe('');
-		});
 	});
 
 	describe('porcelain inspector', () => {
@@ -2289,29 +2152,15 @@ describe('GitWorkbenchStore', () => {
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 			] as any);
 			wb.files.selectedFile = 'a.ts';
-			wb.commit.commitMessage = 'test';
 			wb.setActiveTab('staged');
 
 			wb.reset();
 
 			expect(wb.files.tree).toEqual([]);
 			expect(wb.files.selectedFile).toBeNull();
-			expect(wb.commit.commitMessage).toBe('');
 			expect(wb.files.hasCommits).toBe(true);
 			expect(wb.lastError).toBeNull();
 			expect(wb.files.activeTab).toBe('unstaged');
-		});
-	});
-
-	describe('error feedback', () => {
-		it('dismissError clears the error', () => {
-			wb.commit.commitMessage = 'test';
-			// Trigger an error manually via the public method
-			mockedApi.gitCommitIndex.mockRejectedValue(new Error('fail'));
-
-			// After error, dismissError should clear
-			wb.dismissError();
-			expect(wb.lastError).toBeNull();
 		});
 	});
 });

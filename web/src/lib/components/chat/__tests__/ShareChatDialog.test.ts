@@ -32,7 +32,6 @@ describe('ShareChatDialog', () => {
 		const expectedUrl = `${window.location.origin}/shared/share-token`;
 		render(ShareChatDialog, {
 			chatId: 'chat-1',
-			chatTitle: 'Share target',
 			onClose: vi.fn(),
 		});
 
@@ -53,7 +52,6 @@ describe('ShareChatDialog', () => {
 		vi.mocked(clipboard.copyToClipboard).mockResolvedValue(false);
 		render(ShareChatDialog, {
 			chatId: 'chat-1',
-			chatTitle: 'Share target',
 			onClose: vi.fn(),
 		});
 
@@ -64,5 +62,27 @@ describe('ShareChatDialog', () => {
 			expect(clipboard.copyToClipboard).toHaveBeenCalledTimes(1);
 		});
 		expect(screen.queryByRole('button', { name: 'Copied!' })).toBeNull();
+	});
+
+	it('clears copied-state cleanup when unmounted', async () => {
+		const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+		const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+		const view = render(ShareChatDialog, {
+			chatId: 'chat-1',
+			onClose: vi.fn(),
+		});
+
+		await screen.findByText(`${window.location.origin}/shared/share-token`);
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
+		await screen.findByRole('button', { name: 'Copied!' });
+		const resetTimerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 2000);
+		expect(resetTimerIndex).toBeGreaterThanOrEqual(0);
+		const resetTimer = setTimeoutSpy.mock.results[resetTimerIndex]?.value;
+
+		view.unmount();
+
+		expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer);
+		setTimeoutSpy.mockRestore();
+		clearTimeoutSpy.mockRestore();
 	});
 });

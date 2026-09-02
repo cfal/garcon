@@ -66,5 +66,4 @@
 	{rows}
 	{pendingPermissionRequests}
 	{onPermissionDecision}
-	agentId="claude"
 />

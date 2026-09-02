@@ -166,7 +166,7 @@
 						<section class="min-w-0 space-y-2" aria-label={m.sidebar_details_carryover_history()}>
 							<h3 class="text-sm font-medium">{m.sidebar_details_carryover_history()}</h3>
 							<ol class="divide-y divide-border border-y border-border">
-								{#each chatDetailsDialog.carryOverSegments as segment}
+								{#each chatDetailsDialog.carryOverSegments as segment (segment.id)}
 									<svelte:boundary>
 										<li class="min-w-0 py-3 text-sm">
 											<div class="min-w-0 break-words font-medium">

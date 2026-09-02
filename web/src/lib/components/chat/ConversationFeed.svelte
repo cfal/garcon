@@ -400,7 +400,6 @@
 						{retention}
 						{itemState}
 						renderModel={projection.renderModel}
-						agentId={agentId}
 						showThinking={localSettings.showThinking}
 						{pendingPermissionRequests}
 						earlierPageState={chatState.pageStates.earlier}
@@ -443,7 +442,6 @@
 			<span class="sr-only">{m.chat_transcript_loading_earlier()}</span>
 		</div>
 	{/if}
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
 		{onscroll}

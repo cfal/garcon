@@ -4,7 +4,6 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
-	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitPorcelainPanelProps {
 		projectPath: string;
@@ -104,7 +103,7 @@
 				{:else}
 					<div class="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
 						<div class="space-y-1">
-							{#each porcelain.conflicts as conflict}
+							{#each porcelain.conflicts as conflict (conflict.path)}
 								<button
 									type="button"
 									class="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left hover:bg-muted {porcelain
@@ -208,7 +207,7 @@
 					<p class="py-3 text-muted-foreground">No stashes</p>
 				{:else}
 					<div class="space-y-1">
-						{#each porcelain.stashes as stash}
+						{#each porcelain.stashes as stash (stash.ref)}
 							<div class="flex items-center gap-2 rounded px-2 py-1 hover:bg-muted">
 								<div class="min-w-0 flex-1">
 									<div class="truncate font-mono text-foreground">{stash.ref}</div>
@@ -273,7 +272,7 @@
 								<p class="py-2 text-muted-foreground">No history</p>
 							{:else}
 								<div class="space-y-1">
-									{#each porcelain.fileHistory.slice(0, 8) as commit}
+									{#each porcelain.fileHistory.slice(0, 8) as commit (commit.hash)}
 										<div class="rounded px-2 py-1 hover:bg-muted">
 											<div class="truncate text-foreground">{commit.subject}</div>
 											<div class="truncate font-mono text-[10px] text-muted-foreground">
@@ -289,7 +288,7 @@
 								Blame {porcelain.blameTruncated ? '(truncated)' : ''}
 							</div>
 							<div class="space-y-1">
-								{#each porcelain.blameLines.slice(0, 12) as line}
+								{#each porcelain.blameLines.slice(0, 12) as line (line.line)}
 									<div
 										class="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded px-2 py-0.5 hover:bg-muted"
 									>
@@ -303,7 +302,7 @@
 				{/if}
 			{:else if porcelain.inspectorView === 'graph'}
 				<div class="space-y-1">
-					{#each porcelain.graphCommits.slice(0, 30) as commit}
+					{#each porcelain.graphCommits.slice(0, 30) as commit (commit.hash)}
 						<div class="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded px-2 py-1 hover:bg-muted">
 							<span class="truncate font-mono text-muted-foreground">{commit.hash.slice(0, 8)}</span
 							>

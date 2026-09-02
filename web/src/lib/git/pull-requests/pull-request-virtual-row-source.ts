@@ -4,7 +4,11 @@ import type {
 	GitVirtualReviewRow,
 	GitVirtualReviewThreadRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
-import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import {
+	virtualMeasurementKey,
+	type GitVirtualReviewMeasurements,
+	type GitVirtualReviewRowSource,
+} from '$lib/git/review/git-virtual-review-row-source.js';
 
 interface BaseRun {
 	kind: 'base';
@@ -103,6 +107,30 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		return run.kind === 'base'
 			? this.baseSource.estimateRowHeight(run.baseStart + localIndex, lineHeight)
 			: (run.rows[localIndex]?.estimatedHeight ?? lineHeight);
+	}
+
+	buildVirtualMeasurements(lineHeight: number): GitVirtualReviewMeasurements {
+		const base = this.baseSource.buildVirtualMeasurements(lineHeight);
+		const keys = new Array<string>(this.rowCount);
+		const estimates = new Array<number>(this.rowCount);
+		for (const run of this.runs) {
+			if (run.kind === 'base') {
+				for (let localIndex = 0; localIndex < run.count; localIndex += 1) {
+					const index = run.start + localIndex;
+					const baseIndex = run.baseStart + localIndex;
+					keys[index] = base.keys[baseIndex];
+					estimates[index] = base.estimates[baseIndex];
+				}
+				continue;
+			}
+			for (let localIndex = 0; localIndex < run.count; localIndex += 1) {
+				const index = run.start + localIndex;
+				const row = run.rows[localIndex];
+				keys[index] = virtualMeasurementKey(row?.id ?? index);
+				estimates[index] = row?.estimatedHeight ?? lineHeight;
+			}
+		}
+		return { keys, estimates };
 	}
 
 	fileStart(filePath: string): number | undefined {

@@ -224,6 +224,7 @@ export async function browseDirectory(
 	const response = await apiFetch(`/api/v1/files/browse?path=${encodeURIComponent(path)}`, {
 		signal,
 	});
+	if (!response.ok) await parseApiResponse<never>(response);
 	const payload = await response.json();
 	if (!Array.isArray(payload)) {
 		throw new Error('Invalid directory browse payload');

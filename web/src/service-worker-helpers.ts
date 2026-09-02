@@ -13,6 +13,14 @@ export function isManifestPath(value: string): boolean {
 	}
 }
 
+export function shouldCacheNavigationResponse(response: Response): boolean {
+	if (!response.ok || response.type !== 'basic') return false;
+	const cacheControl = response.headers.get('Cache-Control');
+	return !cacheControl
+		?.split(',')
+		.some((directive) => directive.trim().toLowerCase() === 'no-store');
+}
+
 export async function precacheAppShell(
 	cache: Cache,
 	manifest: ServiceWorkerPrecacheManifest,

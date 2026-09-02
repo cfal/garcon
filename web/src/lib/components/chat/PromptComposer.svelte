@@ -824,7 +824,6 @@
 				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
-			<!-- svelte-ignore a11y_no_static_element_interactions -- labeled region accepts native file drops; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
 			<div
 				class="relative overflow-hidden bg-transparent focus-within:ring-0"
 				ondragover={(event) => attachmentController.handleDragOver(event)}

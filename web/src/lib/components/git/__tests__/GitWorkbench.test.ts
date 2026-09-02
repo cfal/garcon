@@ -78,8 +78,9 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		isFilePending: () => false,
 		isDirectoryPending: () => false,
 	};
-	const commit = {
-		isCreatingInitialCommit: false,
+	const initialCommit = {
+		isCreating: false,
+		create: vi.fn(),
 	};
 	const drafts = {
 		commentComposer: {
@@ -112,7 +113,7 @@ function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkben
 		review,
 		selection,
 		staging,
-		commit,
+		initialCommit,
 		drafts,
 		porcelain,
 		lastError: null,

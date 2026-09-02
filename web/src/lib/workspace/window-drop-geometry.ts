@@ -53,6 +53,15 @@ export function resolveWorkspaceWindowDropZone(
 }
 
 export function dragLeftWorkspaceWindow(event: DragEvent): boolean {
-	const related = event.relatedTarget as HTMLElement | null;
-	return !related || !(event.currentTarget as HTMLElement).contains(related);
+	const currentTarget = event.currentTarget as HTMLElement;
+	const relatedTarget = event.relatedTarget;
+	if (relatedTarget instanceof Node) return !currentTarget.contains(relatedTarget);
+
+	const rect = currentTarget.getBoundingClientRect();
+	return (
+		event.clientX < rect.left ||
+		event.clientX >= rect.right ||
+		event.clientY < rect.top ||
+		event.clientY >= rect.bottom
+	);
 }

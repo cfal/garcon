@@ -290,13 +290,13 @@
 		{#if remoteStatus?.hasRemote}
 			<div class="flex items-center gap-0.5 text-xs">
 				{#if remoteStatus.ahead > 0}
-					<span class="text-status-success-foreground">{'\u2191'}{remoteStatus.ahead}</span>
+					<span class="text-status-success-foreground">↑{remoteStatus.ahead}</span>
 				{/if}
 				{#if remoteStatus.behind > 0}
-					<span class="text-interactive-accent">{'\u2193'}{remoteStatus.behind}</span>
+					<span class="text-interactive-accent">↓{remoteStatus.behind}</span>
 				{/if}
 				{#if remoteStatus.isUpToDate}
-					<span class="text-muted-foreground">{'\u2713'}</span>
+					<span class="text-muted-foreground">✓</span>
 				{/if}
 			</div>
 		{/if}

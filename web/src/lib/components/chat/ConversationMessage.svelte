@@ -16,10 +16,8 @@
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -71,7 +69,6 @@
 		awaitingDelivery?: boolean;
 		rowId?: string;
 		anchorId?: string;
-		index: number;
 		forkUpToSeq?: number;
 		toolResult?: ToolResultMessage;
 		toolResultRowId?: string;
@@ -83,7 +80,6 @@
 			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
-		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
@@ -104,7 +100,6 @@
 		awaitingDelivery = false,
 		rowId,
 		anchorId,
-		index,
 		forkUpToSeq,
 		toolResult,
 		toolResultRowId,
@@ -113,7 +108,6 @@
 		permissionActionable = false,
 		onPermissionDecision,
 		onExitPlanMode,
-		agentId,
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
@@ -518,17 +512,15 @@
 									? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
 									: undefined}
 							>
-								{#snippet children()}
-									<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
-										<Markdown
-											source={asUser.content}
-											variant={userMessagePresentation?.style ? 'presented' : 'user'}
-											fileLinkBasePath={projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-											{acquireTransientActivity}
-										/>
-									</div>
-								{/snippet}
+								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
+									<Markdown
+										source={asUser.content}
+										variant={userMessagePresentation?.style ? 'presented' : 'user'}
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+										{acquireTransientActivity}
+									/>
+								</div>
 							</CollapsibleBody>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">

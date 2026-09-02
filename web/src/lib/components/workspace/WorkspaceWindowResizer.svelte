@@ -122,7 +122,8 @@
 	onDestroy(() => pointerCleanup?.());
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -- WAI-ARIA window partition is a focusable separator resized via arrow keys; follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register -->
+<!-- The WAI-ARIA window partition is a focusable separator resized via arrow keys. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
 	bind:this={trackElement}
 	class={cn(
@@ -176,7 +177,7 @@
 		)}
 	>
 		<div class={cn('flex gap-0.5', isHorizontal ? 'flex-col' : 'flex-row')}>
-			{#each [0, 1, 2] as _}
+			{#each [0, 1, 2] as _, index (index)}
 				<div class="w-0.5 h-0.5 rounded-full bg-primary/50"></div>
 			{/each}
 		</div>

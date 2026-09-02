@@ -14,6 +14,16 @@ describe('Markdown', () => {
 		expect(code.className).toContain('border-border');
 	});
 
+	it.each([
+		['internal backticks', 'Use `` foo`bar ``.', 'foo`bar'],
+		['multiline content', 'Use `line\nbreak`.', 'line break'],
+		['matching edge spaces', 'Use ` foo `.', 'foo'],
+	])('preserves Marked codespan normalization for %s', (_name, source, expected) => {
+		const { container } = render(Markdown, { source });
+
+		expect(container.querySelector('code')?.textContent).toBe(expected);
+	});
+
 	it('renders links with target="_blank" and rel attributes', () => {
 		render(Markdown, { source: 'Visit [docs](https://example.com).' });
 

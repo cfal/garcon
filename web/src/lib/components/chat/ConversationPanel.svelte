@@ -34,7 +34,6 @@
 	} from '$lib/chat/composer/composer-cap-layout.js';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import { cn } from '$lib/utils/cn';
-	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		surfaceId: ChatViewSurfaceId;

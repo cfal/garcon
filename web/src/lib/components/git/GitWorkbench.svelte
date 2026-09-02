@@ -100,7 +100,7 @@
 	let review = $derived(wb.review);
 	let selection = $derived(wb.selection);
 	let staging = $derived(wb.staging);
-	let commit = $derived(wb.commit);
+	let initialCommit = $derived(wb.initialCommit);
 	let drafts = $derived(wb.drafts);
 	let porcelain = $derived(wb.porcelain);
 	const workspaceShortcuts = getWorkspaceShortcuts();
@@ -180,7 +180,7 @@
 
 	function handleInitialCommit(): void {
 		if (!activeProjectPath) return;
-		commit.createInitialCommit(activeProjectPath);
+		initialCommit.create(activeProjectPath);
 	}
 
 	function handleStageFile(filePath: string): void {
@@ -356,7 +356,7 @@
 
 {#snippet diffTabs()}
 	<div class="flex min-w-0">
-		{#each ['unstaged', 'staged'] as const as tab}
+		{#each ['unstaged', 'staged'] as const as tab (tab)}
 			<button
 				type="button"
 				onclick={() => wb.setActiveTab(tab)}
@@ -552,10 +552,10 @@
 					</div>
 					<button
 						onclick={handleInitialCommit}
-						disabled={commit.isCreatingInitialCommit}
+						disabled={initialCommit.isCreating}
 						class="px-3 py-1 text-xs rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 disabled:opacity-50 transition-all"
 					>
-						{#if commit.isCreatingInitialCommit}
+						{#if initialCommit.isCreating}
 							<LoaderCircle class="w-3 h-3 inline animate-spin mr-1" />
 						{/if}
 						Create initial commit
@@ -565,7 +565,7 @@
 
 			{#if containerPresentation === 'narrow'}
 				<div class="flex shrink-0 border-b border-border" data-git-segmented-navigation>
-					{#each ['files', 'diff'] as const as pane}
+					{#each ['files', 'diff'] as const as pane (pane)}
 						<button
 							type="button"
 							onclick={() => {

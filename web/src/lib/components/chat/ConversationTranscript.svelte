@@ -2,7 +2,6 @@
 	import ConversationTranscriptItem from './ConversationTranscriptItem.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import {
@@ -21,7 +20,6 @@
 
 	interface Props {
 		rows: ChatDisplayRow[];
-		agentId: SessionAgentId | string;
 		showThinking?: boolean;
 		hiddenToolTypes?: HideableToolType[];
 		pendingPermissionRequests?: readonly PendingPermissionRequest[];
@@ -35,7 +33,6 @@
 
 	let {
 		rows,
-		agentId,
 		showThinking = true,
 		hiddenToolTypes = [],
 		pendingPermissionRequests = [],
@@ -56,7 +53,6 @@
 		<ConversationTranscriptItem
 			{item}
 			{renderModel}
-			{agentId}
 			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}

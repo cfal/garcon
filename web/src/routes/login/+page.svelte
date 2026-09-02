@@ -7,6 +7,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
+	import { safeLoginReturnTo } from './login-return-to';
 
 	const auth = getAuth();
 
@@ -17,9 +18,7 @@
 	let showPassword = $state(false);
 
 	function getReturnTo(): string {
-		const raw = page.url.searchParams.get('returnTo');
-		if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
-		return '/';
+		return safeLoginReturnTo(page.url.searchParams.get('returnTo'));
 	}
 
 	async function handleSubmit(e: SubmitEvent) {
@@ -36,7 +35,11 @@
 		if (!result.success) {
 			error = result.error || m.auth_login_errors_invalid_credentials();
 		} else {
-			goto(getReturnTo());
+			try {
+				await goto(getReturnTo());
+			} catch {
+				error = m.auth_login_errors_navigation_failed();
+			}
 		}
 		isSubmitting = false;
 	}

@@ -192,7 +192,7 @@
 		{/if}
 		{#if isSinglePane}
 			<div class="flex shrink-0 border-b border-border" data-git-history-segmented-navigation>
-				{#each ['files', 'diff'] as const as pane}
+				{#each ['files', 'diff'] as const as pane (pane)}
 					<button
 						type="button"
 						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {singlePaneClass(pane)}"

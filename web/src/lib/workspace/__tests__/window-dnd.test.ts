@@ -13,7 +13,7 @@ import {
 function dragEvent(
 	type: string,
 	currentTarget: HTMLElement,
-	options: { clientX?: number; clientY?: number } = {},
+	options: { clientX?: number; clientY?: number; relatedTarget?: EventTarget | null } = {},
 ): DragEvent {
 	const event = new DragEvent(type, {
 		bubbles: true,
@@ -23,6 +23,9 @@ function dragEvent(
 	Object.defineProperties(event, {
 		clientX: { value: options.clientX ?? 0 },
 		clientY: { value: options.clientY ?? 0 },
+		...('relatedTarget' in options
+			? { relatedTarget: { value: options.relatedTarget } }
+			: {}),
 	});
 	Object.defineProperty(event, 'currentTarget', { value: currentTarget });
 	return event;
@@ -236,6 +239,48 @@ describe('WorkspaceWindowDndController', () => {
 			zone: 'center',
 			blockedReason: undefined,
 		});
+	});
+
+	it('keeps the active target when a null dragleave target remains inside the window', () => {
+		const layout = createWorkspaceLayoutStore();
+		const dnd = new WorkspaceWindowDndController(layout);
+		const target = windowElement('window-main');
+		dnd.beginChatDrag('chat-a');
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 50, clientY: 50 }),
+		);
+
+		dnd.handleWindowDragLeave(
+			dragEvent('dragleave', target, {
+				clientX: 50,
+				clientY: 50,
+				relatedTarget: null,
+			}),
+		);
+
+		expect(dnd.activeTarget).toMatchObject({ kind: 'window', windowId: 'window-main' });
+	});
+
+	it('clears the active target when a null dragleave target is outside the window', () => {
+		const layout = createWorkspaceLayoutStore();
+		const dnd = new WorkspaceWindowDndController(layout);
+		const target = windowElement('window-main');
+		dnd.beginChatDrag('chat-a');
+		dnd.handleWindowDragOver(
+			'window-main',
+			dragEvent('dragover', target, { clientX: 50, clientY: 50 }),
+		);
+
+		dnd.handleWindowDragLeave(
+			dragEvent('dragleave', target, {
+				clientX: 110,
+				clientY: 50,
+				relatedTarget: null,
+			}),
+		);
+
+		expect(dnd.activeTarget).toBeNull();
 	});
 
 	it('resolves tab-strip drops to an exact destination index', () => {

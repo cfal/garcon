@@ -178,6 +178,23 @@ describe('CodeEditorController', () => {
 		controller.detach(editedLease);
 	});
 
+	it('preserves lone carriage-return line endings when serializing', () => {
+		const { session, controller } = createController();
+		controller.replaceContentFromDisk('first\rsecond');
+		const lease = controller.attach(parent());
+
+		expect(session.dirty).toBe(false);
+		expect(controller.currentContent()).toBe('first\rsecond');
+
+		controller.detach(lease);
+		session.editorState = EditorState.create({ doc: 'first\nsecond!' });
+		const editedLease = controller.attach(parent());
+
+		expect(session.dirty).toBe(true);
+		expect(controller.currentContent()).toBe('first\rsecond!');
+		controller.detach(editedLease);
+	});
+
 	it('replaces an attached disk document with fresh history and clamped selection', async () => {
 		const { session, controller } = createController();
 		const host = parent();

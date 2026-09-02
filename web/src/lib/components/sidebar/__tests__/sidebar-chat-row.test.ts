@@ -42,6 +42,18 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 describe('shared sidebar chat row', () => {
+	it.each([false, true])('exposes the current chat on %s mobile rows', (isMobile) => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			selectedChatId: 'chat-1',
+			isMobile,
+		});
+
+		expect(screen.getByText('Shared row chat').closest('button')?.getAttribute('aria-current')).toBe(
+			'page',
+		);
+	});
+
 	it('keeps standalone desktop rows natively draggable by default', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
@@ -77,6 +89,7 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
 		const pinnedBadges = document.querySelectorAll('.border-sidebar-badge-pinned-border');
 		expect(pinnedBadges).toHaveLength(1);
+		expect(screen.getByText('Pinned').className).toContain('sr-only');
 		const title = screen.getByText('Shared row chat');
 		expect(title.className).toContain('font-bold');
 		const unreadStatus = screen.getByText('Unread');
@@ -387,6 +400,26 @@ describe('shared sidebar chat row', () => {
 		expect(timestampBadge?.className).not.toContain('mr-6');
 		expect(timestampBadge?.className).not.toContain('group-hover:opacity-0');
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
+	});
+
+	it('exposes the multi-select row as a keyboard-reachable checkbox', async () => {
+		const onMultiSelectToggle = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat({ isUnread: false }),
+			isMultiSelectMode: true,
+			isMultiSelected: true,
+			onMultiSelectToggle,
+		});
+
+		const checkbox = screen.getByRole('checkbox', { name: 'Select Shared row chat' });
+		expect(checkbox.tagName).toBe('BUTTON');
+		expect(checkbox.tabIndex).toBe(0);
+		expect(checkbox.getAttribute('aria-checked')).toBe('true');
+		expect(checkbox.hasAttribute('aria-current')).toBe(false);
+		expect(checkbox.querySelector('[role="checkbox"]')).toBeNull();
+
+		await fireEvent.click(checkbox, { shiftKey: true });
+		expect(onMultiSelectToggle).toHaveBeenCalledWith('chat-1', true);
 	});
 
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {

@@ -14,11 +14,13 @@
 		isArchived?: boolean;
 		isMobile?: boolean;
 		isMultiSelectMode?: boolean;
+		isMultiSelected?: boolean;
 		enableNativeDrag?: boolean;
 		displayOptions?: SidebarDisplayOptions;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
+		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
 		onForkChat?: (sourceChatId: string) => void;
@@ -36,6 +38,7 @@
 		isArchived = false,
 		isMobile = false,
 		isMultiSelectMode = false,
+		isMultiSelected = false,
 		enableNativeDrag = true,
 		displayOptions = {
 			groupByProject: false,
@@ -46,6 +49,7 @@
 		onTagClick,
 		onManageTags,
 		onEnterMultiSelect,
+		onMultiSelectToggle,
 		onMoveToTop,
 		onMoveToBottom,
 		onForkChat = () => {},
@@ -84,6 +88,7 @@
 	{isArchived}
 	{isMobile}
 	{isMultiSelectMode}
+	{isMultiSelected}
 	{enableNativeDrag}
 	{displayOptions}
 	onChatSelect={() => {}}
@@ -97,6 +102,7 @@
 	{onTagClick}
 	{onManageTags}
 	{onEnterMultiSelect}
+	{onMultiSelectToggle}
 	{onMoveToTop}
 	{onMoveToBottom}
 	{onOpenInNewWindow}

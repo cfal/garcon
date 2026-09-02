@@ -262,7 +262,7 @@ describe('TerminalRegistry', () => {
 		expect(transport.status).toBe('connecting');
 	});
 
-	it('does not override waiting-auth while the primary socket is being replaced', async () => {
+	it('reconnects waiting-auth transport after authentication refreshes', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
 			terminals: [metadata('terminal-1', 1)],
@@ -273,8 +273,8 @@ describe('TerminalRegistry', () => {
 
 		registry.authChanged(true);
 
-		expect(transport.connectCount).toBe(1);
-		expect(transport.status).toBe('waiting-auth');
+		expect(transport.connectCount).toBe(2);
+		expect(transport.status).toBe('connecting');
 	});
 
 	it('preserves stream upserts that arrive after a List snapshot starts', async () => {

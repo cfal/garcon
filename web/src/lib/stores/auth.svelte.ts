@@ -6,7 +6,6 @@ import {
 	login as apiLogin,
 	register as apiRegister,
 	getUser,
-	logout as apiLogout,
 	type AuthUser,
 } from '$lib/api/auth.js';
 import { getAuthToken, setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
@@ -188,22 +187,6 @@ export class AuthStore {
 			const message = describeAuthError(err);
 			this.error = message;
 			return { success: false, error: message };
-		}
-	}
-
-	/** Clears local auth state and notifies the server. */
-	logout(): void {
-		const hadToken = !!this.token;
-		if (this.authDisabled) return;
-		this.authMutationVersion += 1;
-		this.token = null;
-		this.user = null;
-		clearAuthToken();
-
-		if (hadToken) {
-			apiLogout().catch((err: unknown) => {
-				console.error('Logout endpoint error:', err);
-			});
 		}
 	}
 }

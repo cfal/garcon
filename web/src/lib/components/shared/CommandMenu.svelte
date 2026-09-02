@@ -40,6 +40,8 @@
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
+	const uid = $props.id();
+	const listId = `${uid}-list`;
 	let focusReturnTarget: HTMLElement | null = null;
 
 	let isOpen = $state(false);
@@ -202,6 +204,11 @@
 	);
 
 	let filteredCommands = $derived(query.trim() ? fuse.search(query).map((r) => r.item) : commands);
+	let selectedCommand = $derived(filteredCommands[selectedIndex]);
+
+	function optionIdFor(commandId: string): string {
+		return `${uid}-command-${commandId}`;
+	}
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
@@ -252,7 +259,7 @@
 			focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
 		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, filteredCommands.length - 1);
+			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			selectedIndex = Math.max(selectedIndex - 1, 0);
@@ -327,6 +334,11 @@
 					placeholder={m.command_placeholder()}
 					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
+					role="combobox"
+					aria-expanded="true"
+					aria-controls={listId}
+					aria-autocomplete="list"
+					aria-activedescendant={selectedCommand ? optionIdFor(selectedCommand.id) : undefined}
 				/>
 				<kbd
 					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
@@ -335,15 +347,16 @@
 				</kbd>
 			</div>
 
-			<div class="max-h-[300px] overflow-y-auto p-2" role="listbox">
+			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
 				{#if filteredCommands.length === 0}
 					<div class="px-4 py-8 text-center text-sm text-muted-foreground">
 						{m.command_no_matching()}
 					</div>
 				{:else}
-					{#each filteredCommands as item, i}
+					{#each filteredCommands as item, i (item.id)}
 						{@const Icon = getCategoryIcon(item.category)}
 						<button
+							id={optionIdFor(item.id)}
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}

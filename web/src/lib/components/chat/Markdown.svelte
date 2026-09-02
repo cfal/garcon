@@ -139,8 +139,8 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			{/if}
 		{/snippet}
 
-		{#snippet codespan({ raw })}
-			<code class={styles.code}>{raw.replace(/`/g, '')}</code>
+		{#snippet codespan({ text })}
+			<code class={styles.code}>{text}</code>
 		{/snippet}
 
 		{#snippet link({ href, title, children })}

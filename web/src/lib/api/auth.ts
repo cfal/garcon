@@ -1,7 +1,7 @@
 // Auth API. Login/register/status use plain fetch (unauthenticated).
-// User and logout require an auth token.
+// The current-user endpoint requires an auth token.
 
-import { apiGet, apiPost, parseApiResponse } from './client.js';
+import { apiGet, parseApiResponse } from './client.js';
 
 const AUTH_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -63,9 +63,4 @@ export async function register(username: string, password: string): Promise<Regi
 /** Fetches the current authenticated user. */
 export async function getUser(): Promise<UserResponse> {
 	return apiGet<UserResponse>('/api/v1/auth/user', { timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
-}
-
-/** Logs out the current session. */
-export async function logout(): Promise<void> {
-	await apiPost<void>('/api/v1/auth/logout');
 }

@@ -9,7 +9,6 @@
 	import { PermissionRequestMessage } from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { TranscriptPageState } from '$lib/chat/transcript/transcript-page-progress.js';
 	import type { ConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -26,7 +25,6 @@
 	interface Props {
 		item: ConversationVirtualFeedItem;
 		renderModel: ConversationFeedRenderModel;
-		agentId: SessionAgentId | string;
 		showThinking: boolean;
 		pendingPermissionRequests: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
@@ -48,7 +46,6 @@
 	let {
 		item,
 		renderModel,
-		agentId,
 		showThinking,
 		pendingPermissionRequests,
 		chatContext = null,
@@ -132,7 +129,6 @@
 		<ConversationTranscriptItem
 			item={item.item}
 			{renderModel}
-			{agentId}
 			{showThinking}
 			{pendingPermissionRequests}
 			{chatContext}

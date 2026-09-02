@@ -74,7 +74,7 @@ describe('sidebar search interactions', () => {
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
 	});
 
-	it('opens the highlighted chat from the query input and respects Ctrl-J selection', async () => {
+	it('opens the highlighted chat from the query input and respects arrow selection', async () => {
 		const onSelectChat = vi.fn();
 
 		render(SidebarSearchDialogHost, {
@@ -89,9 +89,68 @@ describe('sidebar search interactions', () => {
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(onSelectChat).toHaveBeenNthCalledWith(1, 'chat-1');
 
-		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(onSelectChat).toHaveBeenNthCalledWith(2, 'chat-2');
+	});
+
+	it('does not publish an invalid highlight for empty results', async () => {
+		const onHighlightChange = vi.fn();
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [],
+			savedSearches: [],
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange,
+			onClose: vi.fn(),
+		});
+
+		const input = await screen.findByRole('textbox');
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		await fireEvent.keyDown(input, { key: 'j', ctrlKey: true });
+
+		expect(onHighlightChange).not.toHaveBeenCalled();
+	});
+
+	it('keeps Tab focus inside the search dialog', async () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: [],
+		});
+
+		const dialog = await screen.findByRole('dialog');
+		const input = screen.getByRole('textbox');
+		const focusable = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+			),
+		);
+		const responsiveCloseButton = focusable.at(-1);
+		const lastVisible = focusable.at(-2);
+		expect(responsiveCloseButton).toBeTruthy();
+		expect(lastVisible).toBeTruthy();
+		responsiveCloseButton!.style.display = 'none';
+		lastVisible!.focus();
+
+		await fireEvent.keyDown(lastVisible!, { key: 'Tab', bubbles: true });
+		expect(document.activeElement).toBe(input);
+
+		await fireEvent.keyDown(input, { key: 'Tab', shiftKey: true, bubbles: true });
+		expect(document.activeElement).toBe(lastVisible);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', bubbles: true });
+		expect(document.activeElement).toBe(input);
+
+		dialog.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true, bubbles: true });
+		expect(document.activeElement).toBe(lastVisible);
 	});
 
 	it('opens a deep virtualized highlighted chat from the query input', async () => {

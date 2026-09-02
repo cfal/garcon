@@ -143,7 +143,7 @@
 						</span>
 					{/if}
 					{#if projectPath && formattedTimestamp}
-						<span class="shrink-0 font-normal" aria-hidden="true">{'\u2022'}</span>
+						<span class="shrink-0 font-normal" aria-hidden="true">•</span>
 					{/if}
 					{#if formattedTimestamp}
 						<span
