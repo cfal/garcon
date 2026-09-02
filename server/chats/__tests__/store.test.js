@@ -53,6 +53,14 @@ function persistedEntry(overrides = {}) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 async function writeRegistry(sessions, version = 5) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
@@ -250,6 +258,38 @@ describe('ChatRegistry', () => {
     expect(persisted.sessions[CHAT_ID].nativePath).toBeUndefined();
   });
 
+  it('persists overlapping registry saves in invocation order', async () => {
+    registry.addChat(newChat());
+    const firstRenameEntered = deferred();
+    const releaseFirstRename = deferred();
+    const originalRename = fs.rename.bind(fs);
+    let heldFirstRename = false;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (!heldFirstRename && target === path.join(tempDir, 'chats.json')) {
+        heldFirstRename = true;
+        firstRenameEntered.resolve();
+        await releaseFirstRename.promise;
+      }
+      return originalRename(source, target);
+    });
+
+    try {
+      const olderSave = registry.flush();
+      await firstRenameEntered.promise;
+      registry.updateChat(CHAT_ID, { model: 'model-b' });
+      const newerSave = registry.flush();
+      releaseFirstRename.resolve();
+      await Promise.all([olderSave, newerSave]);
+    } finally {
+      releaseFirstRename.resolve();
+      rename.mockRestore();
+    }
+
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(CHAT_ID)?.model).toBe('model-b');
+  });
+
   it('restores immediate patches and defers events when persistence fails', async () => {
     registry.addChat(newChat({ agentSessionId: 'native-1', tags: ['source'] }));
     await registry.updateChat(CHAT_ID, {
@@ -288,6 +328,38 @@ describe('ChatRegistry', () => {
     });
     expect(registry.getChatByAgentSessionId('native-1')?.[0]).toBe(CHAT_ID);
     expect(registry.getChatByAgentSessionId('native-2')).toBeNull();
+  });
+
+  it('does not roll back a newer patch when an earlier save fails', async () => {
+    registry.addChat(newChat());
+    await registry.flush();
+    const firstSaveEntered = deferred();
+    const releaseFirstSave = deferred();
+    const saveRegistry = registry.saveRegistry.bind(registry);
+    let saveCount = 0;
+    registry.saveRegistry = mock(async () => {
+      saveCount += 1;
+      if (saveCount !== 1) return;
+      firstSaveEntered.resolve();
+      await releaseFirstSave.promise;
+      throw new Error('disk full');
+    });
+
+    try {
+      const olderUpdate = registry.updateChat(
+        CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      await firstSaveEntered.promise;
+      await registry.updateChat(CHAT_ID, { model: 'model-c' }, { flush: true });
+      releaseFirstSave.resolve();
+      await expect(olderUpdate).rejects.toThrow('disk full');
+      expect(registry.getChat(CHAT_ID)?.model).toBe('model-c');
+    } finally {
+      releaseFirstSave.resolve();
+      registry.saveRegistry = saveRegistry;
+    }
   });
 
   it('persists dedicated project-path updates and emits only canonical metadata', async () => {
