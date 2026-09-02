@@ -100,7 +100,6 @@ export type SettingsMutation<T> = () => T | Promise<T>;
 // Chat-start records carry startup preferences as unsanitized fields; the
 // store reads only these and ignores the rest of the start command.
 export interface ChatStartupPreferences {
-  origin?: unknown;
   agentId?: unknown;
   projectPath?: unknown;
   model?: unknown;

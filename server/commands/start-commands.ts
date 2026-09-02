@@ -185,8 +185,8 @@ export class StartCommands {
           }
         },
       },
-      dispatch: async (executionAdmission) => {
-        await this.deps.agents.startSession(input.chatId, input.command, {
+      dispatch: (executionAdmission) =>
+        this.deps.agents.startSession(input.chatId, input.command, {
           projectPath: input.projectPath,
           images: input.images.length > 0 ? input.images : undefined,
           clientRequestId: input.clientRequestId,
@@ -194,8 +194,7 @@ export class StartCommands {
           turnId,
           executionAdmission,
           agentSettings: input.agentSettings,
-        });
-      },
+        }),
     });
 
     if (recordsStartupPreferences(input.origin)) {

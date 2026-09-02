@@ -518,13 +518,12 @@ export class ModelCatalogStore {
 		modelEndpointId?: string | null,
 	): ModelOption | null {
 		const models = this.getModels(agentId);
+		if (modelEndpointId === null) {
+			return models.find(
+				(entry) => !entry.endpointId && (entry.value === model || entry.rawModel === model),
+			) ?? null;
+		}
 		if (modelEndpointId !== undefined) {
-			if (modelEndpointId === null) {
-				return models.find(
-					(entry) =>
-						!entry.endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null;
-			}
 			return models.find(
 				(entry) =>
 					entry.endpointId === modelEndpointId &&

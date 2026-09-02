@@ -722,10 +722,8 @@ export class NewChatFormState {
 					this.applyResolvedModel(this.agentId, this.#modelCatalog.getDefaultModel(this.agentId));
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);
-				this.validateAllModelsAgainstLive();
-			} else {
-				this.validateAllModelsAgainstLive();
 			}
+			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to refresh models', err);
 		}
@@ -772,15 +770,9 @@ export class NewChatFormState {
 		for (const recent of recents) {
 			const agentId = recent.agentId as SessionAgentId;
 			if (!selectable.has(agentId)) continue;
-			const modelValue = this.#modelCatalog.selectionValueFor(
-				agentId,
-				recent.model,
-				recent.modelEndpointId,
-			);
-			if (!modelValue) continue;
 			const model = this.#modelCatalog.getModelForSelection(
 				agentId,
-				modelValue,
+				recent.model,
 				recent.modelEndpointId,
 			);
 			if (model) return recent;
