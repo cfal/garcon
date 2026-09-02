@@ -34,7 +34,7 @@ export function agentHandoffReplayDisposition(input: {
       && input.currentOwnershipEpoch !== undefined
       && input.currentOwnershipEpoch !== input.handoff.expectedAgentOwnershipEpoch
     ) {
-      return 'return-duplicate';
+      return 'continue';
     }
     return 'retry';
   }
