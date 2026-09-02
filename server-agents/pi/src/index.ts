@@ -36,7 +36,7 @@ const PI_DESCRIPTOR = {
   label: 'Pi',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'minimal'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
   supportsImages: false,
   supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: true,

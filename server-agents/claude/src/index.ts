@@ -54,7 +54,7 @@ const CLAUDE_DESCRIPTOR = {
   label: 'Claude',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES,
-  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'minimal'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
   supportsImages: true,
   supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: false,

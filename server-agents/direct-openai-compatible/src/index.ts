@@ -30,7 +30,7 @@ const DESCRIPTOR = {
   label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'minimal'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
   supportsImages: true,
   supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: false,

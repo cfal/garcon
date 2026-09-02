@@ -6,7 +6,7 @@ import {
   UserMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
-import { convertAmpToolUse } from './tool-use-converter.js';
+import { convertAmpToolUse, isAmpHousekeepingToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
@@ -107,6 +107,11 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
 
   const createdAt = toIsoString(threadExport.created) || new Date().toISOString();
   const messages: ChatMessage[] = [];
+  const hiddenToolUseIds = new Set(getSortedMessages(threadExport)
+    .flatMap((message) => message.content ?? [])
+    .filter((part) => part.type === 'tool_use' && isAmpHousekeepingToolUse(part))
+    .map((part) => part.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0));
 
   for (const message of getSortedMessages(threadExport)) {
     const converted: ChatMessage[] = [];
@@ -116,6 +121,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
     if (message.role === 'user') {
       for (const part of content) {
         if (part.type !== 'tool_result') continue;
+        if (part.toolUseID && hiddenToolUseIds.has(part.toolUseID)) continue;
         const { content: resultContent, isError } = getToolResultPayload(part);
         converted.push(new ToolResultMessage(timestamp, part.toolUseID || '', resultContent, isError));
       }
@@ -135,6 +141,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
         } else if (part.type === 'text' && part.text?.trim()) {
           converted.push(new AssistantMessage(timestamp, part.text));
         } else if (part.type === 'tool_use') {
+          if (isAmpHousekeepingToolUse(part)) continue;
           converted.push(convertAmpToolUse(timestamp, part));
         }
       }

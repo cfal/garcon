@@ -121,7 +121,7 @@ describe('AmpCliRuntime lifecycle', () => {
     Bun.spawn = originalSpawn;
   });
 
-  it('passes current mode and effort flags to one-shot Amp execution', async () => {
+  it('passes only the current mode to one-shot Amp execution', async () => {
     spawnMock.mockReturnValue(createFakeCommandProc([
       JSON.stringify({
         type: 'assistant',
@@ -137,8 +137,9 @@ describe('AmpCliRuntime lifecycle', () => {
       thinkingMode: 'xhigh',
     })).resolves.toBe('done');
     expect(spawnMock.mock.calls[0][0]).toEqual(expect.arrayContaining([
-      '--mode', 'high', '--effort', 'xhigh',
+      '--mode', 'high',
     ]));
+    expect(spawnMock.mock.calls[0][0]).not.toContain('--effort');
   });
 
   it('publishes Amp web inputs, suppresses local echoes, and acknowledges steering', async () => {
@@ -185,6 +186,30 @@ describe('AmpCliRuntime lifecycle', () => {
     proc.pushJson({
       type: 'user',
       message: { content: [{ type: 'text', text: 'initial input' }] },
+    });
+    await Promise.resolve();
+    expect(observed.events).toEqual([]);
+
+    proc.pushJson({
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'status-1',
+          name: 'shell_command_status',
+          input: { pid: 1234 },
+        }],
+      },
+    });
+    proc.pushJson({
+      type: 'user',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'status-1',
+          content: { running: false },
+        }],
+      },
     });
     await Promise.resolve();
     expect(observed.events).toEqual([]);

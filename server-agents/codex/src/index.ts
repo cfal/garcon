@@ -51,7 +51,7 @@ const CODEX_DESCRIPTOR = {
   label: 'Codex',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'minimal'),
+  supportedThinkingModes: THINKING_MODE_VALUES,
   supportsImages: true,
   supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: false,

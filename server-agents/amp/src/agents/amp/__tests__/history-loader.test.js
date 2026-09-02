@@ -48,6 +48,30 @@ const THREAD_EXPORT_FIXTURE = {
       role: 'assistant',
       messageId: 3,
       content: [
+        {
+          type: 'tool_use',
+          id: 'status-1',
+          name: 'shell_command_status',
+          input: { pid: 1234 },
+          complete: true,
+        },
+      ],
+    },
+    {
+      role: 'user',
+      messageId: 4,
+      content: [
+        {
+          type: 'tool_result',
+          toolUseID: 'status-1',
+          run: { status: 'done', result: { running: false } },
+        },
+      ],
+    },
+    {
+      role: 'assistant',
+      messageId: 5,
+      content: [
         { type: 'text', text: 'final assistant message' },
       ],
       usage: { timestamp: '2026-03-18T01:12:00.000Z' },
@@ -83,7 +107,7 @@ describe('amp history loader', () => {
       { entryId: 'amp-message:1', withinSourceOrdinal: 1 },
       { entryId: 'amp-message:1', withinSourceOrdinal: 2 },
       { entryId: 'amp-message:2', withinSourceOrdinal: 0 },
-      { entryId: 'amp-message:3', withinSourceOrdinal: 0 },
+      { entryId: 'amp-message:5', withinSourceOrdinal: 0 },
     ]);
   });
 });

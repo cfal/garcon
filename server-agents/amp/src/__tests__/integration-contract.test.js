@@ -39,7 +39,7 @@ describe('Amp integration contract', () => {
       'image/webp',
     ]);
     expect(integration.steering).not.toBeNull();
-    expect(integration.descriptor.supportedThinkingModes).toContain('minimal');
+    expect(integration.descriptor.supportedThinkingModes).toEqual(['none']);
     await expect(integration.migration.translateLegacyModel({
       scope: { kind: 'chat', recordId: 'chat-1', selectedAgentId: 'amp' },
       model: 'deep',

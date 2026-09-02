@@ -19,7 +19,7 @@ import {
   UserMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
-import { convertAmpToolUse } from "./tool-use-converter.js";
+import { convertAmpToolUse, isAmpHousekeepingToolUse } from "./tool-use-converter.js";
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { createArtificialNativePath } from '@garcon/server-agent-common/chats/artificial-native-path';
 import type { AmpThreadExport } from "./history-loader.js";
@@ -31,7 +31,6 @@ import {
   type AmpStartedSession,
 } from './runtime-types.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
-import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import { buildAmpUserInput } from './amp-stream-input.js';
 import {
   type AgentLogger,
@@ -65,6 +64,7 @@ interface AmpTurnContext {
   deliveryReservations: number;
   pendingEnd: boolean;
   readonly pendingInputEchoes: AmpPendingInputEcho[];
+  readonly hiddenToolUseIds: Set<string>;
   resolve: (() => void) | null;
   process: ReturnType<typeof Bun.spawn> | null;
 }
@@ -125,7 +125,10 @@ function getUserText(msg: AmpCliMessage): string {
     .join('\n');
 }
 
-function convertAmpMessageToChatMessages(msg: AmpCliMessage): ChatMessage[] {
+function convertAmpMessageToChatMessages(
+  msg: AmpCliMessage,
+  hiddenToolUseIds: Set<string>,
+): ChatMessage[] {
   if (msg.type !== 'assistant') return [];
 
   const chatMessages: ChatMessage[] = [];
@@ -140,9 +143,14 @@ function convertAmpMessageToChatMessages(msg: AmpCliMessage): ChatMessage[] {
       chatMessages.push(new ThinkingMessage(now, part.thinking));
     }
     if (part.type === 'tool_use') {
+      if (isAmpHousekeepingToolUse(part)) {
+        if (part.id) hiddenToolUseIds.add(part.id);
+        continue;
+      }
       chatMessages.push(convertAmpToolUse(now, part));
     }
     if (part.type === 'tool_result') {
+      if (part.tool_use_id && hiddenToolUseIds.delete(part.tool_use_id)) continue;
       chatMessages.push(new ToolResultMessage(now, part.tool_use_id || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
     }
   }
@@ -316,7 +324,6 @@ async function runSingleQuery(
   config: AmpConfig = DEFAULT_CONFIG,
   logger: AgentLogger = SILENT_LOGGER,
 ): Promise<string> {
-  const thinkingMode = normalizeThinkingMode(options.thinkingMode);
   const cwd = typeof options.cwd === 'string' ? options.cwd : undefined;
   const model = typeof options.model === 'string' && options.model ? options.model : 'medium';
   const args = [
@@ -325,7 +332,6 @@ async function runSingleQuery(
     '--stream-json-thinking',
     '--mode',
     model,
-    ...(thinkingMode === 'none' ? [] : ['--effort', thinkingMode]),
     '-x',
   ];
   return withSingleQueryControl(options, async (signal) => {
@@ -389,6 +395,7 @@ function createTurn(operation: AgentRuntimeOperation): AmpTurnContext {
     deliveryReservations: 0,
     pendingEnd: false,
     pendingInputEchoes: [],
+    hiddenToolUseIds: new Set(),
     resolve: null,
     process: null,
   };
@@ -397,19 +404,16 @@ function createTurn(operation: AgentRuntimeOperation): AmpTurnContext {
 function buildContinueArgs(
   threadId: string,
   model: string,
-  thinkingMode: string,
 ): string[] {
-  const args = [
+  return [
     'threads', 'continue', threadId,
     ...AMP_DEFAULT_FLAGS,
     '--dangerously-allow-all',
     '--stream-json-thinking',
     '--stream-json-input',
     '--mode', model || 'medium',
+    '-x',
   ];
-  if (thinkingMode !== 'none') args.push('--effort', thinkingMode);
-  args.push('-x');
-  return args;
 }
 
 class AmpCliRuntime {
@@ -446,7 +450,7 @@ class AmpCliRuntime {
         break;
 
       case 'assistant': {
-        const chatMessages = convertAmpMessageToChatMessages(msg);
+        const chatMessages = convertAmpMessageToChatMessages(msg, turn.hiddenToolUseIds);
         if (chatMessages.length > 0) {
           this.#publishMessages(session, turn, chatMessages);
         }
@@ -478,6 +482,7 @@ class AmpCliRuntime {
           this.#publishMessages(session, turn, [new UserMessage(new Date().toISOString(), text)]);
         }
         const toolResults = content.flatMap((part) => part.type === 'tool_result'
+          && !(part.tool_use_id && turn.hiddenToolUseIds.delete(part.tool_use_id))
           ? [new ToolResultMessage(
               new Date().toISOString(),
               part.tool_use_id || '',
@@ -756,7 +761,7 @@ class AmpCliRuntime {
 
   async startSession(request: AmpStartRequest): Promise<AmpStartedSession> {
     assertAmpExecutionOpen(request);
-    const { command, chatId, projectPath, model, thinkingMode, operation } = request;
+    const { command, chatId, projectPath, model, operation } = request;
     if (!chatId) throw new Error('chatId is required when starting an Amp session');
     const threadId = await createThread({ cwd: projectPath }, this.#config);
     assertAmpExecutionOpen(request);
@@ -774,7 +779,7 @@ class AmpCliRuntime {
     };
     request.onSessionActivated?.(started);
 
-    const args = buildContinueArgs(threadId, model, thinkingMode);
+    const args = buildContinueArgs(threadId, model);
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);
@@ -806,7 +811,6 @@ class AmpCliRuntime {
       chatId,
       projectPath,
       model,
-      thinkingMode,
       operation,
     } = request;
     if (!threadId) throw new Error('Cannot resume without thread ID');
@@ -828,7 +832,7 @@ class AmpCliRuntime {
     session.activeTurn = turn;
     session.lastActivityAt = Date.now();
 
-    const args = buildContinueArgs(threadId, model, thinkingMode);
+    const args = buildContinueArgs(threadId, model);
 
     try {
       if (request.executionAdmission) await markAmpExecutionStarted(request);

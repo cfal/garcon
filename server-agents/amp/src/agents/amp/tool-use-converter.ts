@@ -74,6 +74,10 @@ function canonicalize(raw: string): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
+export function isAmpHousekeepingToolUse(part: AmpToolUsePart): boolean {
+  return typeof part.name === 'string' && canonicalize(part.name) === 'shellcommandstatus';
+}
+
 function firstString(values: unknown[]): string | undefined {
   for (const value of values) {
     const next = asString(value);

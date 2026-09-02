@@ -12,10 +12,6 @@ const presentation = {
 		label: m.thinking_mode_default_label,
 		description: m.thinking_mode_default_description,
 	},
-	minimal: {
-		label: m.thinking_mode_minimal_label,
-		description: m.thinking_mode_minimal_description,
-	},
 	low: {
 		label: m.thinking_mode_low_label,
 		description: m.thinking_mode_low_description,
