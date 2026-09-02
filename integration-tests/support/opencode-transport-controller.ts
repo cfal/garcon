@@ -208,6 +208,16 @@ export class OpenCodeTransportController {
     return (await this.#observations())?.requests ?? [];
   }
 
+  async waitForRequest(method: string, pathPrefix: string): Promise<{ method: string; path: string }> {
+    return this.#waitForObservation(
+      (observations) => observations.requests.find(
+        (request) => request.method === method && request.path.startsWith(pathPrefix),
+      ),
+      `${method} request below ${pathPrefix} was never observed`,
+      DEFAULT_TIMEOUT_MS,
+    );
+  }
+
   async connections(): Promise<GlobalConnectionObservation[]> {
     return (await this.#observations())?.connections ?? [];
   }

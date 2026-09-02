@@ -7,6 +7,7 @@ async function* neverEndingStream() {
 }
 
 function createRuntimeWithClient(client, options = {}) {
+  const close = mock(() => {});
   const createInstance = mock(() => Promise.resolve({
     client: {
       permission: { reply: mock(() => Promise.resolve({})) },
@@ -15,9 +16,10 @@ function createRuntimeWithClient(client, options = {}) {
       },
       ...client,
     },
-    server: { close: mock(() => {}) },
+    server: { close },
   }));
   return {
+    close,
     createInstance,
     runtime: new OpenCodeRuntime({ createInstance, ...options }),
   };
@@ -85,20 +87,325 @@ describe('OpenCodeRuntime fork', () => {
     await expect(outcome).resolves.toEqual({ status: 'fulfilled', value: 'forked-session' });
   });
 
-  it('still cancels a timeout-free native fork from its admission signal', async () => {
-    const fork = mock((_input, options) => new Promise((_resolve, reject) => {
-      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
-    }));
-    const { runtime } = createRuntimeWithClient({ session: { fork } }, { requestTimeoutMs: 5 });
+  it('rejects admission during cold startup without later calling the provider fork', async () => {
+    const startupStarted = deferred();
+    const pendingInstance = deferred();
+    const close = mock(() => {});
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    let startupSignal;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(({ signal }) => {
+        startupSignal = signal;
+        startupStarted.resolve();
+        return pendingInstance.promise;
+      }),
+    });
     const controller = new AbortController();
     const reason = new Error('fork admission cancelled');
-    const pending = runtime.forkSession('source-session', { signal: controller.signal });
+    const outcome = runtime.forkSession('source-session', { signal: controller.signal });
+
+    await startupStarted.promise;
+    controller.abort(reason);
+
+    await expect(Promise.race([
+      outcome.then(() => 'fulfilled', (error) => error),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ])).resolves.toBe(reason);
+    expect(startupSignal.aborted).toBe(false);
+
+    pendingInstance.resolve({
+      client: {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+        session: { fork },
+      },
+      server: { close },
+    });
+    await runtime.shutdown();
+    expect(fork).not.toHaveBeenCalled();
+  });
+
+  it('waits for an admitted native fork and deletes its child after cancellation', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const remove = mock(() => Promise.resolve({ data: true }));
+    const { runtime } = createRuntimeWithClient({
+      session: { fork, delete: remove },
+    }, { requestTimeoutMs: 5 });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.runProtectedNativeFork(() => (
+      runtime.forkSession('source-session', { signal: controller.signal })
+    )).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
 
     await waitForMockCall(fork);
     controller.abort(reason);
+    const beforeForkCompletes = await Promise.race([
+      outcome,
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ]);
+    expect(beforeForkCompletes).toBe('still-pending');
+    expect(fork.mock.calls[0][1].signal.aborted).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
 
-    await expect(pending).rejects.toBe(reason);
-    expect(fork.mock.calls[0][1].signal.aborted).toBe(true);
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+
+    await expect(outcome).resolves.toEqual({ status: 'rejected', error: reason });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+  });
+
+  it('preserves cancellation when the native fork request rejects without a child', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const { runtime } = createRuntimeWithClient({ session: { fork } });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.forkSession('source-session', { signal: controller.signal });
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    pendingFork.reject(new Error('fork transport failed'));
+
+    await expect(outcome).rejects.toBe(reason);
+  });
+
+  it('preserves cancellation when the native fork returns an error without a child', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const { runtime } = createRuntimeWithClient({ session: { fork } });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.forkSession('source-session', { signal: controller.signal });
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    pendingFork.resolve({ error: { message: 'fork rejected' } });
+
+    await expect(outcome).rejects.toBe(reason);
+  });
+
+  it('keeps the endpoint alive through shutdown until a cancelled native fork is cleaned up', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const remove = mock(() => Promise.resolve({ data: true }));
+    const { close, runtime } = createRuntimeWithClient({
+      session: { fork, delete: remove },
+    }, { shutdownStartupGraceMs: 5 });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.runProtectedNativeFork(() => (
+      runtime.forkSession('source-session', { signal: controller.signal })
+    )).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    const shutdown = runtime.shutdown();
+    const beforeForkCompletes = await Promise.race([
+      shutdown.then(() => 'stopped'),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ]);
+    expect(beforeForkCompletes).toBe('still-pending');
+    expect(close).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+
+    await expect(outcome).resolves.toEqual({ status: 'rejected', error: reason });
+    await shutdown;
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds shutdown when a native fork never produces a child id', async () => {
+    const fork = mock(() => new Promise(() => {}));
+    const warn = mock(() => {});
+    const { close, runtime } = createRuntimeWithClient({ session: { fork } }, {
+      shutdownNativeForkGraceMs: 5,
+      logger: { debug() {}, info() {}, warn, error() {} },
+    });
+    const pendingFork = runtime.runProtectedNativeFork(() => runtime.forkSession('source-session'));
+
+    await waitForMockCall(fork);
+    await runtime.shutdown();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'OpenCode shutdown abandoned native session cleanup',
+      { pendingOperations: 1, retainedDeletions: 0, timeoutMs: 5 },
+    );
+    await expect(Promise.race([
+      pendingFork.then(() => 'settled', () => 'settled'),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 10)),
+    ])).resolves.toBe('still-pending');
+  });
+
+  it('warns when shutdown loses a retained child deletion after fast cleanup failure', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const remove = mock(() => Promise.reject(new Error('delete failed')));
+    const warn = mock(() => {});
+    const { close, runtime } = createRuntimeWithClient({
+      session: { fork, delete: remove },
+    }, {
+      logger: { debug() {}, info() {}, warn, error() {} },
+      shutdownNativeForkGraceMs: 100,
+    });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.runProtectedNativeFork(() => (
+      runtime.forkSession('source-session', { signal: controller.signal })
+    ));
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    const shutdown = runtime.shutdown();
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+
+    await expect(outcome).rejects.toBe(reason);
+    await shutdown;
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'OpenCode shutdown abandoned native session cleanup',
+      { pendingOperations: 0, retainedDeletions: 1, timeoutMs: 100 },
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds shutdown around an explicit child deletion still in flight', async () => {
+    const pendingDelete = deferred();
+    const remove = mock(() => pendingDelete.promise);
+    const warn = mock(() => {});
+    const { close, runtime } = createRuntimeWithClient({
+      session: { delete: remove },
+    }, {
+      logger: { debug() {}, info() {}, warn, error() {} },
+      shutdownNativeForkGraceMs: 5,
+    });
+    await runtime.withClientLease(async () => undefined);
+    const discard = runtime.discardSession('forked-session');
+
+    await waitForMockCall(remove);
+    await runtime.shutdown();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'OpenCode shutdown abandoned native session cleanup',
+      { pendingOperations: 1, retainedDeletions: 0, timeoutMs: 5 },
+    );
+
+    pendingDelete.reject(new Error('endpoint closed'));
+    await discard;
+  });
+
+  it('deletes a cancelled late fork through an already-installed replacement endpoint', async () => {
+    const pendingFork = deferred();
+    const termination = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const retiredDelete = mock(() => Promise.reject(new Error('retired endpoint')));
+    const replacementDelete = mock(() => Promise.resolve({ data: true }));
+    let factoryCalls = 0;
+    const createInstance = mock(() => {
+      factoryCalls += 1;
+      return Promise.resolve(factoryCalls === 1
+        ? {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { fork, delete: retiredDelete },
+          },
+          server: { close: mock(() => {}), termination: termination.promise },
+        }
+        : {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { delete: replacementDelete },
+          },
+          server: { close: mock(() => {}) },
+        });
+    });
+    const runtime = new OpenCodeRuntime({ createInstance });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.forkSession('source-session', { signal: controller.signal }).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitForCondition(() => runtime.getClientIfInitialized() === null);
+    await runtime.getClient();
+
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+
+    await expect(outcome).resolves.toEqual({ status: 'rejected', error: reason });
+    await waitForMockCall(replacementDelete);
+    expect(retiredDelete).not.toHaveBeenCalled();
+    expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+    await runtime.shutdown();
+  });
+
+  it('retries a cancelled fork deletion that rejects after endpoint replacement', async () => {
+    const pendingFork = deferred();
+    const pendingDelete = deferred();
+    const termination = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const retiredDelete = mock(() => pendingDelete.promise);
+    const replacementDelete = mock(() => Promise.resolve({ data: true }));
+    let factoryCalls = 0;
+    const createInstance = mock(() => {
+      factoryCalls += 1;
+      return Promise.resolve(factoryCalls === 1
+        ? {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { fork, delete: retiredDelete },
+          },
+          server: { close: mock(() => {}), termination: termination.promise },
+        }
+        : {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { delete: replacementDelete },
+          },
+          server: { close: mock(() => {}) },
+        });
+    });
+    const runtime = new OpenCodeRuntime({ createInstance });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.forkSession('source-session', { signal: controller.signal }).then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+    await waitForMockCall(retiredDelete);
+
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitForCondition(() => runtime.getClientIfInitialized() === null);
+    await runtime.getClient();
+    expect(replacementDelete).not.toHaveBeenCalled();
+
+    pendingDelete.reject(new Error('retired endpoint'));
+
+    await expect(outcome).resolves.toEqual({ status: 'rejected', error: reason });
+    await waitForMockCall(replacementDelete);
+    expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+    await runtime.shutdown();
   });
 
   it('routes native fork requests through the source project directory', async () => {
@@ -202,6 +509,67 @@ describe('OpenCodeRuntime fork', () => {
     expect(payload.permission).toContainEqual({ permission: 'plan_enter', pattern: '*', action: 'deny' });
   });
 
+  it('lets the fork permission update outlive the ordinary request timeout', async () => {
+    const pendingUpdate = deferred();
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => pendingUpdate.promise);
+    const { runtime } = createRuntimeWithClient({ session: { fork, update } }, { requestTimeoutMs: 5 });
+    const outcome = runtime.forkSession('source-session', {
+      permissionMode: 'bypassPermissions',
+    });
+
+    await waitForMockCall(update);
+    await expect(Promise.race([
+      outcome.then(() => 'settled', () => 'settled'),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ])).resolves.toBe('still-pending');
+    expect(update.mock.calls[0][1].signal.aborted).toBe(false);
+
+    pendingUpdate.resolve({ data: { id: 'forked-session' } });
+    await expect(outcome).resolves.toBe('forked-session');
+  });
+
+  it('deletes the child and preserves cancellation during the permission update', async () => {
+    const pendingUpdate = deferred();
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => pendingUpdate.promise);
+    const remove = mock(() => Promise.resolve({ data: true }));
+    const { runtime } = createRuntimeWithClient({ session: { fork, update, delete: remove } });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = runtime.forkSession('source-session', {
+      permissionMode: 'bypassPermissions',
+      signal: controller.signal,
+    });
+
+    await waitForMockCall(update);
+    controller.abort(reason);
+
+    await expect(outcome).rejects.toBe(reason);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+  });
+
+  it('deletes the child when a successful permission update races admission cancellation', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
+    const update = mock(() => {
+      controller.abort(reason);
+      return Promise.resolve({ data: { id: 'forked-session' } });
+    });
+    const remove = mock(() => Promise.resolve({ data: true }));
+    const { runtime } = createRuntimeWithClient({ session: { fork, update, delete: remove } });
+
+    await expect(runtime.forkSession('source-session', {
+      permissionMode: 'bypassPermissions',
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+  });
+
   it('deletes the forked session when the permission update fails', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const update = mock(() => Promise.resolve({ error: { message: 'update rejected' } }));
@@ -280,6 +648,52 @@ describe('OpenCodeRuntime fork', () => {
     await runtime.getClient();
     await waitForCondition(() => replacementDelete.mock.calls.length > 0);
     expect(replacementDelete.mock.calls[0][0]).toMatchObject({ sessionID: 'forked-session' });
+    await runtime.shutdown();
+  });
+
+  it('retains an explicit fork discard and replays it on a replacement endpoint', async () => {
+    const termination = deferred();
+    const deadDelete = mock(() => Promise.reject(new Error('dead endpoint')));
+    const replacementDelete = mock(() => Promise.resolve({ data: true }));
+    let factoryCalls = 0;
+    const createInstance = mock(() => {
+      factoryCalls += 1;
+      return Promise.resolve(factoryCalls === 1
+        ? {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { delete: deadDelete },
+          },
+          server: {
+            close: mock(() => {}),
+            termination: termination.promise,
+          },
+        }
+        : {
+          client: {
+            permission: { reply: mock(() => Promise.resolve({})) },
+            global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+            session: { delete: replacementDelete },
+          },
+          server: { close: mock(() => {}) },
+        });
+    });
+    const runtime = new OpenCodeRuntime({ createInstance });
+
+    await runtime.getClient();
+    await runtime.discardSession('forked-session', '/repo');
+    expect(deadDelete).toHaveBeenCalledTimes(1);
+
+    termination.resolve({ kind: 'exit', code: 1, signal: null });
+    await waitForCondition(() => runtime.getClientIfInitialized() === null);
+    await runtime.getClient();
+    await waitForMockCall(replacementDelete);
+
+    expect(replacementDelete.mock.calls[0][0]).toMatchObject({
+      sessionID: 'forked-session',
+      directory: '/repo',
+    });
     await runtime.shutdown();
   });
 

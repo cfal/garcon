@@ -2,6 +2,7 @@ import {
   AgentIntegrationError,
   type AgentChatReference,
   type AgentNativeFork,
+  type AgentNativeForkOutcome,
   type AgentNativeForkRequest,
 } from '@garcon/server-agent-interface';
 import { retargetNativeSeedReceiptIfPreserved } from '@garcon/common/transcript-seed';
@@ -32,54 +33,63 @@ export function createOpenCodeNativeForking(
   options: OpenCodeForkingOptions,
 ): AgentNativeFork {
   return {
-    async fork(request) {
-      request.admission.signal.throwIfAborted();
-      const sourceSessionId = options.sessionId(request.source);
-      if (!sourceSessionId) {
-        if (request.providerMeta) throw notSettled();
-        return { kind: 'unmaterialized' };
-      }
-      const boundaryMessageId = request.providerMeta
-        ? await resolveExclusiveBoundaryMessageId(options.runtime, request, sourceSessionId)
-        : null;
-      const forkedSessionId = await options.runtime.forkSession(sourceSessionId, {
-        projectPath: request.projectPath,
-        // The forked native session must carry the chat's ruleset; OpenCode's fork
-        // does not inherit it from the source session.
-        permissionMode: request.permissionMode,
-        signal: request.admission.signal,
-        // OpenCode resolves the boundary by exact identity and clones its
-        // chronological prefix.
-        // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/session.ts#L704-L706
-        ...(boundaryMessageId ? { messageId: boundaryMessageId } : {}),
-      });
-      try {
-        return {
-          kind: 'materialized',
-          session: {
-            agentSessionId: forkedSessionId,
-            nativeSession: options.nativeSessions.encode({
-              path: createArtificialNativePath('opencode', forkedSessionId),
-              agentSessionId: forkedSessionId,
-              modelEndpointId: null,
-            }),
-            nativeSeedReceipt: await retargetForkedSeedReceipt(
-              options.runtime,
-              request,
-              forkedSessionId,
-            ),
-          },
-        };
-      } catch (error) {
-        await options.runtime.deleteSession(forkedSessionId).catch(() => undefined);
-        throw error;
-      }
+    fork(request) {
+      return options.runtime.runProtectedNativeFork(() => forkOpenCodeSession(options, request));
     },
     async discard(session, signal) {
       signal.throwIfAborted();
-      await options.runtime.deleteSession(session.agentSessionId, signal);
+      await options.runtime.discardSession(session.agentSessionId);
     },
   };
+}
+
+async function forkOpenCodeSession(
+  options: OpenCodeForkingOptions,
+  request: AgentNativeForkRequest,
+): Promise<AgentNativeForkOutcome> {
+  request.admission.signal.throwIfAborted();
+  const sourceSessionId = options.sessionId(request.source);
+  if (!sourceSessionId) {
+    if (request.providerMeta) throw notSettled();
+    return { kind: 'unmaterialized' };
+  }
+  const boundaryMessageId = request.providerMeta
+    ? await resolveExclusiveBoundaryMessageId(options.runtime, request, sourceSessionId)
+    : null;
+  const forkedSessionId = await options.runtime.forkSession(sourceSessionId, {
+    projectPath: request.projectPath,
+    // The forked native session must carry the chat's ruleset; OpenCode's fork
+    // does not inherit it from the source session.
+    permissionMode: request.permissionMode,
+    signal: request.admission.signal,
+    // OpenCode resolves the boundary by exact identity and clones its
+    // chronological prefix.
+    // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/session.ts#L704-L706
+    ...(boundaryMessageId ? { messageId: boundaryMessageId } : {}),
+  });
+  try {
+    const nativeSeedReceipt = await retargetForkedSeedReceipt(
+      options.runtime,
+      request,
+      forkedSessionId,
+    );
+    request.admission.signal.throwIfAborted();
+    return {
+      kind: 'materialized',
+      session: {
+        agentSessionId: forkedSessionId,
+        nativeSession: options.nativeSessions.encode({
+          path: createArtificialNativePath('opencode', forkedSessionId),
+          agentSessionId: forkedSessionId,
+          modelEndpointId: null,
+        }),
+        nativeSeedReceipt,
+      },
+    };
+  } catch (error) {
+    await options.runtime.discardSession(forkedSessionId, request.projectPath);
+    throw error;
+  }
 }
 
 // Locates the stored message owning the anchor's provider identity; an
@@ -99,7 +109,8 @@ async function resolveExclusiveBoundaryMessageId(
       signal: request.admission.signal,
       throwOnError: true,
     })
-  )).catch((error) => {
+  ), request.admission.signal).catch((error) => {
+    request.admission.signal.throwIfAborted();
     if (error instanceof AgentIntegrationError) throw error;
     throw new AgentIntegrationError(
       'TRANSCRIPT_UNAVAILABLE',
@@ -107,6 +118,7 @@ async function resolveExclusiveBoundaryMessageId(
       true,
     );
   });
+  request.admission.signal.throwIfAborted();
   if (messages.length === 0) throw missingSource();
   const anchorIndex = messages.findIndex((message) => ownsEntry(message, entryId));
   if (anchorIndex < 0) throw notSettled();
@@ -129,7 +141,8 @@ async function retargetForkedSeedReceipt(
       directory: request.projectPath,
       signal: request.admission.signal,
     })
-  ));
+  ), request.admission.signal);
+  request.admission.signal.throwIfAborted();
   return retargetNativeSeedReceiptIfPreserved(receipt, forkedSessionId, forkedMessages);
 }
 

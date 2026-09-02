@@ -1,5 +1,19 @@
 import { describe, expect, it, mock } from 'bun:test';
-import OpenCodeAgentIntegration from '../index.js';
+import OpenCodeAgentIntegration, { createOpenCodeNativeEvidence } from '../index.js';
+import { OpenCodeRuntime } from '../agents/opencode/opencode.js';
+
+async function* neverEndingStream() {
+  yield { payload: { id: 'evt_connected', type: 'server.connected', properties: {} } };
+  await new Promise(() => {});
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function createHost() {
   return {
@@ -78,5 +92,61 @@ describe('OpenCodeAgentIntegration', () => {
         agentSessionId: 'session-1',
       },
     });
+  });
+
+  it('cancels native-history lease acquisition without cancelling shared startup', async () => {
+    const startupStarted = deferred();
+    const pendingInstance = deferred();
+    const get = mock(() => Promise.resolve({ data: { id: 'session-1' } }));
+    const messages = mock(() => Promise.resolve({ data: [] }));
+    let startupSignal;
+    const runtime = new OpenCodeRuntime({
+      createInstance: mock(({ signal }) => {
+        startupSignal = signal;
+        startupStarted.resolve();
+        return pendingInstance.promise;
+      }),
+    });
+    const nativeEvidence = createOpenCodeNativeEvidence(
+      runtime,
+      { encode: mock(() => null), decode: mock(() => ({ agentSessionId: null, path: null })) },
+      (chat) => chat.agentSessionId ?? null,
+    );
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const outcome = nativeEvidence.load({
+      chat: {
+        chatId: 'target-chat',
+        agentId: 'opencode',
+        agentSessionId: 'session-1',
+        projectPath: '/repo',
+        model: '',
+        nativeSession: null,
+        carryOverRevision: '',
+        settings: { ownerId: 'opencode', schemaVersion: 1, values: {} },
+      },
+      signal: controller.signal,
+    });
+
+    await startupStarted.promise;
+    controller.abort(reason);
+
+    await expect(Promise.race([
+      outcome.then(() => 'fulfilled', (error) => error),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ])).resolves.toBe(reason);
+    expect(startupSignal.aborted).toBe(false);
+
+    pendingInstance.resolve({
+      client: {
+        permission: { reply: mock(() => Promise.resolve({})) },
+        global: { event: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
+        session: { get, messages },
+      },
+      server: { close: mock(() => {}) },
+    });
+    await runtime.shutdown();
+    expect(get).not.toHaveBeenCalled();
+    expect(messages).not.toHaveBeenCalled();
   });
 });

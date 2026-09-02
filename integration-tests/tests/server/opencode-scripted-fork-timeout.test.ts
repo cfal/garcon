@@ -9,6 +9,7 @@ import { waitForVisibleResponse } from '../../support/live-agent.js';
 import { OpenCodeTransportController } from '../../support/opencode-transport-controller.js';
 import {
   openCodeNativeSession,
+  scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
@@ -85,6 +86,50 @@ describeOnLinux('scripted OpenCode long-running fork', () => {
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);
+
+  test('finishes replay and deletes the native child when fork-run admission is stopped', async () => {
+    const testEnvironment = requireEnvironment();
+    const prompt = marker('CANCEL_SOURCE_PROMPT');
+    const reply = marker('CANCEL_SOURCE_REPLY');
+    testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
+
+    await withIntegrationFixture('opencode-cancelled-fork', async (fixture) => {
+      const sourceChatId = fixture.newChatId();
+      const sourceTurn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId: sourceChatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await fixture.client.waitForTurnTerminal(sourceChatId, sourceTurn.turnId);
+
+      const sourceNative = await openCodeNativeSession(fixture, sourceChatId);
+      const forkPath = `/session/${encodeURIComponent(sourceNative.agentSessionId)}/fork`;
+      const transport = OpenCodeTransportController.forFixture(fixture.dirs);
+      await transport.holdNextResponse(forkPath);
+      const forkChatId = fixture.newChatId();
+      const outcome = fixture.client.forkRunChat({
+        ...scriptedOpenCodeRunRequest({
+          chatId: forkChatId,
+          command: marker('CANCELLED_FORK_PROMPT'),
+        }),
+        sourceChatId,
+      }).then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (error) => ({ status: 'rejected' as const, error }),
+      );
+      const responseId = await transport.waitForResponseHeld(forkPath);
+
+      const stopping = fixture.garcon.stop();
+      await waitForGarconLog(() => fixture.garcon.logs, 'server: shutting down...');
+      expect((await transport.requests()).some((request) => request.method === 'DELETE')).toBe(false);
+      await transport.releaseResponse(responseId);
+      const deleted = await transport.waitForRequest('DELETE', '/session/');
+      expect(deleted.path).not.toBe(`/session/${encodeURIComponent(sourceNative.agentSessionId)}`);
+      await stopping;
+      expect((await outcome).status).toBe('rejected');
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
 });
 
 function requireEnvironment(): ScriptedOpenCodeTestEnvironment {
@@ -117,4 +162,16 @@ function unroutedWarningSessionIds(lines: readonly string[]): string[] {
     if (match?.[1]) sessionIds.push(match[1]);
   }
   return sessionIds;
+}
+
+async function waitForGarconLog(
+  readLines: () => readonly string[],
+  marker: string,
+): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (readLines().some((line) => line.includes(marker))) return;
+    await Bun.sleep(15);
+  }
+  throw new Error(`Garcon never logged ${marker}.`);
 }

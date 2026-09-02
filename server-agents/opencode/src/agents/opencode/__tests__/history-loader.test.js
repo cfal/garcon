@@ -20,6 +20,16 @@ import { convertOpenCodeEventToChatMessages } from '../event-converter.js';
 let originalError;
 let originalWarn;
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const invalidImportPartCases = [
   ['user text missing', 'user', { type: 'text' }],
   ['user text non-string', 'user', { type: 'text', text: 17 }],
@@ -784,6 +794,50 @@ describe('OpenCode history loader', () => {
     expect(outcomes).toEqual(invalidImportPartCases.map(([label]) => [label, 'rejected']));
     expect(get).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
     expect(messages).toHaveBeenCalledTimes(invalidImportPartCases.length + 3);
+  });
+
+  it('preserves cancellation when the scoped session request rejects', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const pendingGet = deferred();
+    const get = mock((_args, options) => pendingGet.promise);
+    const messages = mock(() => Promise.resolve({ data: [] }));
+    const getClient = mock(() => Promise.resolve({ session: { get, messages } }));
+    const outcome = loadRequiredOpenCodeChatMessages('session-1', getClient, {
+      directory: '/repo',
+      signal: controller.signal,
+    });
+
+    await Promise.resolve();
+    controller.abort(reason);
+    pendingGet.reject(new Error('session transport failed'));
+
+    await expect(outcome).rejects.toBe(reason);
+    expect(get).toHaveBeenCalledWith(
+      { sessionID: 'session-1', directory: '/repo' },
+      { signal: controller.signal },
+    );
+    expect(messages).not.toHaveBeenCalled();
+  });
+
+  it('preserves cancellation when the scoped session request resolves with an error', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const pendingGet = deferred();
+    const get = mock(() => pendingGet.promise);
+    const messages = mock(() => Promise.resolve({ data: [] }));
+    const getClient = mock(() => Promise.resolve({ session: { get, messages } }));
+    const outcome = loadRequiredOpenCodeChatMessages('session-1', getClient, {
+      directory: '/repo',
+      signal: controller.signal,
+    });
+
+    await Promise.resolve();
+    controller.abort(reason);
+    pendingGet.resolve({ error: { message: 'session unavailable' } });
+
+    await expect(outcome).rejects.toBe(reason);
+    expect(messages).not.toHaveBeenCalled();
   });
 
   it('passes directory when loading transcript messages', async () => {

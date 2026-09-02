@@ -182,7 +182,7 @@ function createSessionIdResolver(nativeSessions: NativeSessionCodec) {
   };
 }
 
-function createOpenCodeNativeEvidence(
+export function createOpenCodeNativeEvidence(
   runtime: OpenCodeRuntime,
   nativeSessions: NativeSessionCodec,
   sessionId: (chat: SessionReference) => string | null,
@@ -198,7 +198,7 @@ function createOpenCodeNativeEvidence(
     return runtime.withClientLease((client) => loadMessages(id, async () => client, {
       directory: chat.projectPath,
       signal,
-    }));
+    }), signal);
   };
   return {
     async resolveNativeSession({ chat, signal }) {

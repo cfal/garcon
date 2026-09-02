@@ -52,7 +52,10 @@ export interface OpenCodeMessage {
 
 interface OpenCodeClient {
   session: {
-    get(args: { sessionID: string; directory?: string }): Promise<{ data?: OpenCodeSession | null }>;
+    get(
+      args: { sessionID: string; directory?: string },
+      options?: { signal?: AbortSignal },
+    ): Promise<{ data?: OpenCodeSession | null }>;
     messages(
       args: { sessionID: string; limit?: number; directory?: string },
       options?: { signal?: AbortSignal },
@@ -263,7 +266,16 @@ async function requestScopedOpenCodeStoredMessages(
   const client = await getClient();
   const scope = createOpenCodeRequestScope(options.directory);
   const sessionArgs = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
-  const sessionResult = await client.session.get(sessionArgs);
+  let sessionResult;
+  try {
+    sessionResult = options.signal
+      ? await client.session.get(sessionArgs, { signal: options.signal })
+      : await client.session.get(sessionArgs);
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    throw error;
+  }
+  options.signal?.throwIfAborted();
   if (isOpenCodeNotFoundResult(sessionResult)) {
     return { kind: 'not-found' };
   }
