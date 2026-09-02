@@ -343,7 +343,7 @@ function normalizeGenerationUiThinkingModes(
   raw: JsonValue | undefined,
 ): JsonObject | null {
   if (!isRecord(raw)) return null;
-  const ui: JsonObject = { ...raw };
+  const ui: Record<string, JsonValue> = { ...raw };
   for (const key of GENERATION_UI_SETTING_KEYS) {
     const selection = raw[key];
     if (!isRecord(selection) || !Object.hasOwn(selection, 'thinkingMode')) continue;
@@ -442,7 +442,7 @@ async function migrateExecutionDefaults(
   scope: Parameters<typeof translateSettings>[1],
   signal: AbortSignal,
 ): Promise<JsonObject> {
-  const thinkingMode = scope.selectedAgentId && Object.hasOwn(raw, 'thinkingMode')
+  const thinkingModePatch: JsonObject = scope.selectedAgentId && Object.hasOwn(raw, 'thinkingMode')
     ? {
         thinkingMode: normalizeSupportedThinkingMode(
           raw.thinkingMode,
@@ -452,7 +452,7 @@ async function migrateExecutionDefaults(
     : {};
   return withoutKeys({
     ...raw,
-    ...thinkingMode,
+    ...thinkingModePatch,
     agentSettingsById: await translateSettings(integrations, scope, raw, signal),
   }, ['claudeThinkingMode', 'ampAgentMode']);
 }
