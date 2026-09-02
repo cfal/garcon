@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
-import { errorMessage } from '../lib/errors.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
@@ -79,11 +79,36 @@ async function hasCommitStateRef(projectPath: string, ref: string): Promise<bool
   }
 }
 
+async function hasRebaseOrAmState(projectPath: string): Promise<boolean> {
+  const { stdout } = await runGit(
+    projectPath,
+    [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'rebase-merge',
+      '--git-path',
+      'rebase-apply',
+    ],
+    readOnlyGitOptions(),
+  );
+  for (const statePath of stdout.trimEnd().split('\n')) {
+    try {
+      await fs.access(statePath);
+      return true;
+    } catch (error) {
+      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+    }
+  }
+  return false;
+}
+
 async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
+  // Git continuation states require preserving the complete staged operation.
   for (const ref of WHOLE_INDEX_COMMIT_STATE_REFS) {
     if (await hasCommitStateRef(projectPath, ref)) return true;
   }
-  return false;
+  return hasRebaseOrAmState(projectPath);
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {

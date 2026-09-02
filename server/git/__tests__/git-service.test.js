@@ -547,6 +547,52 @@ describe("selected-file commits", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("completes a conflicted rebase with the resolved index", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-rebase-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "b.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt", "b.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
+
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "main change"]);
+      await runGitCommand(projectPath, ["checkout", "feature"]);
+      await expect(runGitCommand(projectPath, ["rebase", "master"]))
+        .rejects.toThrow("could not apply");
+      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+
+      await git.commit({
+        projectPath,
+        message: "feature change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
+      await runGitCommand(projectPath, ["rebase", "--continue"]);
+      const commitCount = await runGitCommand(projectPath, ["rev-list", "--count", "HEAD"]);
+      expect(commitCount.stdout.trim()).toBe("3");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commit message generation", () => {
