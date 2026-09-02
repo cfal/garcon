@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import {
   FILE_CHANGED_DURING_READ,
+  FILE_TOO_LARGE,
   getFileLockKey,
   getFileRevision,
   readVersionedFile,
@@ -86,6 +87,40 @@ describe('file revision', () => {
 
     expect(result.bytes.toString('utf8')).toBe('first\n');
     expect(result.revision).toBe(await getFileRevision(filePath));
+  });
+
+  it('rejects oversized files before reading their contents', async () => {
+    let readCall = 0;
+    let closeCall = 0;
+    const openFile = async () => ({
+      async stat() {
+        return {
+          dev: 1n,
+          ino: 2n,
+          size: 6n,
+          mtimeNs: 3n,
+          ctimeNs: 4n,
+          isFile: () => true,
+        };
+      },
+      async readFile() {
+        readCall += 1;
+        return Buffer.from('value');
+      },
+      async close() {
+        closeCall += 1;
+      },
+    });
+
+    await expect(
+      readVersionedFile(filePath, { maxBytes: 5, openFile }),
+    ).rejects.toMatchObject({
+      code: FILE_TOO_LARGE,
+      status: 413,
+      retryable: false,
+    });
+    expect(readCall).toBe(0);
+    expect(closeCall).toBe(1);
   });
 
   it('fails with a retryable domain error after repeated unstable reads', async () => {

@@ -8,6 +8,7 @@ import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import {
   FILE_REVISION_HEADER,
+  MAX_FILE_VIEW_BYTES,
   isFileRevision,
   parseFileTreeResponse,
   parseReadTextResponse,
@@ -577,6 +578,27 @@ describe('files route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/png');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(imageBytes);
+  });
+
+  it('rejects oversized text and binary files before buffering them', async () => {
+    const largePath = path.join(projectPath, 'large.bin');
+    await fs.writeFile(largePath, '');
+    await fs.truncate(largePath, MAX_FILE_VIEW_BYTES + 1);
+    const routes = createFilesRoutes({ getChat: () => null });
+
+    for (const routePath of ['text', 'content']) {
+      const url = new URL(
+        `http://localhost/api/v1/files/${routePath}?projectPath=${encodeURIComponent(projectPath)}&path=large.bin`,
+      );
+      const response = await routes[`/api/v1/files/${routePath}`].GET(
+        new Request(url),
+        url,
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(413);
+      expect(body.errorCode).toBe('FILE_TOO_LARGE');
+    }
   });
 
   it('rejects writes through project symlink directories that resolve outside the project root', async () => {

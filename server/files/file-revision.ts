@@ -2,10 +2,14 @@ import { createHash } from 'crypto';
 import { constants, promises as fs, type BigIntStats } from 'fs';
 import { DomainError } from '../lib/domain-error.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
-import type { FileRevision } from '../../common/file-contracts.ts';
+import {
+  MAX_FILE_VIEW_BYTES,
+  type FileRevision,
+} from '../../common/file-contracts.ts';
 
 export const FILE_CHANGED_DURING_READ = 'FILE_CHANGED_DURING_READ';
 export const FILE_PATH_MUST_IDENTIFY_FILE = 'FILE_PATH_MUST_IDENTIFY_FILE';
+export const FILE_TOO_LARGE = 'FILE_TOO_LARGE';
 
 export class FileChangedDuringReadError extends DomainError {
   constructor() {
@@ -31,6 +35,18 @@ export class FilePathMustIdentifyFileError extends DomainError {
   }
 }
 
+export class FileTooLargeError extends DomainError {
+  constructor(maxBytes: number) {
+    super(
+      FILE_TOO_LARGE,
+      `File exceeds the ${maxBytes / (1024 * 1024)} MB viewer limit`,
+      413,
+      false,
+    );
+    this.name = 'FileTooLargeError';
+  }
+}
+
 interface VersionedReadHandle {
   stat(options: { bigint: true }): Promise<BigIntStats>;
   readFile(): Promise<Buffer>;
@@ -39,6 +55,7 @@ interface VersionedReadHandle {
 
 interface VersionedReadOptions {
   maxAttempts?: number;
+  maxBytes?: number;
   openFile?: (filePath: string) => Promise<VersionedReadHandle>;
 }
 
@@ -133,6 +150,7 @@ export async function readVersionedFile(
   options: VersionedReadOptions = {},
 ): Promise<{ bytes: Buffer; revision: FileRevision }> {
   const maxAttempts = options.maxAttempts ?? 3;
+  const maxBytes = options.maxBytes ?? MAX_FILE_VIEW_BYTES;
   const openFile =
     options.openFile ??
     (async (targetPath: string): Promise<VersionedReadHandle> =>
@@ -141,7 +159,9 @@ export async function readVersionedFile(
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const handle = await openFile(filePath);
     try {
-      const before = revisionForFileStat(await handle.stat({ bigint: true }));
+      const beforeStat = await handle.stat({ bigint: true });
+      const before = revisionForFileStat(beforeStat);
+      if (beforeStat.size > BigInt(maxBytes)) throw new FileTooLargeError(maxBytes);
       const bytes = await handle.readFile();
       const after = revisionForFileStat(await handle.stat({ bigint: true }));
       if (before === after) return { bytes, revision: after };
