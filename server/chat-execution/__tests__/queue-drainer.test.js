@@ -51,4 +51,60 @@ describe('QueueDrainer', () => {
     expect(discardPreparedInput).toHaveBeenCalledOnce();
     expect(discardPreparedInput).toHaveBeenCalledWith('chat-1', 'message-1');
   });
+
+  it('does not commit finalization for a turn dropped during shutdown', async () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued input',
+      revision: 1,
+      createdAt: TS,
+      updatedAt: TS,
+      status: 'queued',
+      submission: null,
+    };
+    const settle = mock(() => undefined);
+    const runAgentTurn = mock(async () => undefined);
+    const retireAttempt = mock(() => undefined);
+    let shutdownChecks = 0;
+    const drainer = new QueueDrainer({
+      ownership: {
+        hasSuppression: () => false,
+        hasDirect: () => false,
+        attempt: () => null,
+        installAttempt: () => ({ signal: new AbortController().signal }),
+        beginFinalization: () => ({ settle }),
+        setActiveDrainEntry: mock(() => undefined),
+      },
+      controls: {
+        dequeueNextTurn: mock(async (_chatId, admit) => {
+          const input = { kind: 'user', entry };
+          return { input, control: {}, inserted: admit(input) };
+        }),
+      },
+      turnRunner: {
+        isChatRunning: () => false,
+        runAgentTurn,
+      },
+      getDrainOptions: () => ({}),
+      callbacks: {
+        isShuttingDown: () => {
+          shutdownChecks += 1;
+          return shutdownChecks > 1;
+        },
+        registerQueued: mock(() => true),
+        appendControlReceipt: mock(() => undefined),
+        discardPreparedInput: mock(() => undefined),
+        publishIdle: mock(() => undefined),
+        publishTurnFailed: mock(() => undefined),
+        retireAttempt,
+      },
+    });
+
+    await drainer.run('chat-1');
+
+    expect(settle).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledWith('not-committed');
+    expect(retireAttempt).toHaveBeenCalledOnce();
+    expect(runAgentTurn).not.toHaveBeenCalled();
+  });
 });
