@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { resetServerConfigForTests } from '../../config.ts';
 import { CorruptStateFileError, QUARANTINE_INFIX } from '../../lib/json-file-store.ts';
-import { init, needsSetup } from '../store.ts';
+import {
+  AuthAccountAlreadyConfiguredError,
+  createUser,
+  getUser,
+  init,
+  needsSetup,
+} from '../store.ts';
 
 describe('auth store', () => {
   const originalConfigDir = process.env.GARCON_CONFIG_DIR;
@@ -34,5 +40,23 @@ describe('auth store', () => {
     expect(await fs.readFile(path.join(configDir, quarantineName), 'utf8')).toBe(corruptBytes);
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(needsSetup()).rejects.toBeInstanceOf(CorruptStateFileError);
+  });
+
+  it('allows only one concurrent initial registration', async () => {
+    await init();
+
+    const results = await Promise.allSettled([
+      createUser('owner-a', 'hash-a'),
+      createUser('owner-b', 'hash-b'),
+    ]);
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(AuthAccountAlreadyConfiguredError);
+    expect(await getUser()).toMatchObject({
+      username: fulfilled[0].value.username,
+    });
   });
 });
