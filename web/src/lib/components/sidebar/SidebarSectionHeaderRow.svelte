@@ -33,7 +33,7 @@
 	<button
 		type="button"
 		class={cn(
-			'flex h-full w-full items-center gap-2 px-3 text-left text-[11px] font-semibold text-muted-foreground transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+			'flex h-full w-full items-center gap-2 px-2.5 text-left text-xs font-semibold text-muted-foreground transition-colors hover:bg-sidebar-chat-item-hover-bg hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
 			containsSelectedChat &&
 				'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
 		)}
