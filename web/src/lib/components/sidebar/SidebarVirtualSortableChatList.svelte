@@ -22,7 +22,6 @@
 		mountedVirtualItemAtPoint,
 		pointIsInsideViewport as domPointIsInsideViewport,
 		sidebarScrollTargetForChat,
-		type SidebarScrollTarget,
 	} from './sidebar-chat-list-dom';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
@@ -763,12 +762,8 @@
 		event.stopPropagation();
 	}
 
-	function scrollTargetForChat(chatId: string): SidebarScrollTarget | null {
-		return sidebarScrollTargetForChat(rows, chatId);
-	}
-
 	function scrollChatIntoView(chatId: string): boolean {
-		const target = scrollTargetForChat(chatId);
+		const target = sidebarScrollTargetForChat(rows, chatId);
 		if (!target) return false;
 		if (viewportRef) {
 			const targetEl = domMountedElementForScrollTarget(viewportRef, target);

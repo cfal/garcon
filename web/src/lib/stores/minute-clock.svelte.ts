@@ -3,6 +3,11 @@
 
 const MINUTE_MS = 60_000;
 
+function msUntilNextMinute(nowMs = Date.now()): number {
+	const elapsedInMinute = nowMs % MINUTE_MS;
+	return elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute;
+}
+
 export class MinuteClockStore {
 	currentTime = $state(new Date());
 
@@ -17,7 +22,7 @@ export class MinuteClockStore {
 		this.#timeoutId = setTimeout(() => {
 			this.#refresh();
 			this.#intervalId = setInterval(() => this.#refresh(), MINUTE_MS);
-		}, MinuteClockStore.msUntilNextMinute());
+		}, msUntilNextMinute());
 		document.addEventListener('visibilitychange', this.#visibilityListener);
 	}
 
@@ -33,11 +38,6 @@ export class MinuteClockStore {
 
 	#refresh(): void {
 		this.currentTime = new Date();
-	}
-
-	static msUntilNextMinute(nowMs = Date.now()): number {
-		const elapsedInMinute = nowMs % MINUTE_MS;
-		return elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute;
 	}
 }
 

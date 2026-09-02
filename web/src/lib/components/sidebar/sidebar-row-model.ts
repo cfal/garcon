@@ -63,6 +63,15 @@ export function buildSidebarChatOrderMap(chats: ChatSessionRecord[]): SidebarCha
 
 export type SidebarTimeGroupedPlacement = 'project' | 'inactive' | 'archived';
 
+const SIDEBAR_CHAT_SECTIONS = ['inactive', 'archived'] as const satisfies readonly SidebarChatSection[];
+
+// Each time-based section draws its chat rows from the persisted order list
+// that owns its chats.
+const chatOrderListBySection: Record<SidebarChatSection, PersistedChatOrderGroup> = {
+	inactive: 'normal',
+	archived: 'archived',
+};
+
 // Project-and-time placement: pinned chats stay in their project group,
 // archived chats always move to the archived section regardless of activity,
 // and remaining chats whose last activity is at least three days old move to
@@ -366,14 +375,14 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	}
 
 	if (timeGrouped) {
-		for (const section of ['inactive', 'archived'] as const satisfies readonly SidebarChatSection[]) {
-			const list: PersistedChatOrderGroup = section === 'inactive' ? 'normal' : 'archived';
+		for (const section of SIDEBAR_CHAT_SECTIONS) {
+			const list = chatOrderListBySection[section];
 			appendSidebarChatSection({
 				section,
 				list,
 				orderedChatIds: input.orders[list],
 				byId: displayed.byId[list],
-				placementByChatId: placementByChatId,
+				placementByChatId,
 				collapsedProjectKeys,
 				rows,
 				visibleOrders,
@@ -398,10 +407,9 @@ function appendSidebarChatSection(input: {
 	visibleChatIds: string[];
 	reorderScopesByChatId: Map<string, string[]>;
 }): void {
-	const scopeIds = input.orderedChatIds.filter((chatId) => {
-		const chat = input.byId.get(chatId);
-		return Boolean(chat) && input.placementByChatId.get(chatId) === input.section;
-	});
+	const scopeIds = input.orderedChatIds.filter(
+		(chatId) => input.placementByChatId.get(chatId) === input.section,
+	);
 	if (scopeIds.length === 0) return;
 
 	const key = sidebarSectionKey(input.section);
