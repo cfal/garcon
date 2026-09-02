@@ -805,6 +805,42 @@ describe('ChatExecutionCoordinator', () => {
     await run;
   });
 
+  it('drains input requested while Stop suppression is active', async () => {
+    const first = deferred();
+    const second = deferred();
+    const abort = deferred();
+    let runCount = 0;
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          runCount += 1;
+          return runCount === 1 ? first.promise : second.promise;
+        }),
+        abortSession: mock(() => abort.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const firstRun = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    const stop = coordinator.stopActiveTurn('chat-1');
+    await waitFor(() => fixture.turnRunner.abortSession.mock.calls.length === 1);
+    await coordinator.createChatQueueEntry('chat-1', 'queued while stopping');
+    await coordinator.triggerDrain('chat-1');
+
+    abort.resolve(true);
+    expect((await stop).control.pause).toBeNull();
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+
+    const secondOptions = fixture.turnRunner.runAgentTurn.mock.calls[1][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: secondOptions.turnId });
+    second.resolve();
+    await coordinator.waitForExecutionOwners();
+    first.resolve();
+    await firstRun;
+  });
+
   it('stops a reserved turn before the provider run starts', async () => {
     const fixture = createFixture({
       turnRunner: {
