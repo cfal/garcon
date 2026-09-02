@@ -488,6 +488,7 @@ describe('chats API contract', () => {
 	});
 
 	it('forkRunChat sends POST /api/v1/chats/fork-run', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(
 			jsonResponse(
 				{
@@ -517,6 +518,7 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork-run');
 		expect(opts.method).toBe('POST');
+		expect(timeoutSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(opts.body)).toMatchObject({
 			clientRequestId: 'req-1',
 			clientMessageId: 'msg-1',
@@ -1379,6 +1381,7 @@ describe('chats API contract', () => {
 	}
 
 	it('forkChat sends POST with sourceChatId and chatId', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
 		);
@@ -1389,6 +1392,7 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork');
 		expect(opts.method).toBe('POST');
+		expect(timeoutSpy).not.toHaveBeenCalled();
 		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
 	});
 

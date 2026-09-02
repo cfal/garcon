@@ -245,7 +245,16 @@ export function openCodeEventBelongsToTurn(
   return true;
 }
 
-export function shouldWarnForUnroutedOpenCodeEvent(eventType: string): boolean {
+export function shouldWarnForUnroutedOpenCodeEvent(
+  eventType: string,
+  managedSession: boolean,
+): boolean {
+  // Native fork replays are published before OpenCode returns the child session identity.
+  // https://github.com/anomalyco/opencode/blob/47b6b6f5f4f9b42d2bce7af1c4e5bf6efaf22ba7/packages/opencode/src/session/session.ts#L691-L730
+  if (
+    !managedSession
+    && (eventType === 'message.updated' || eventType === 'message.part.updated')
+  ) return false;
   return eventType === 'message.updated'
     || eventType === 'message.part.updated'
     || eventType === 'message.part.delta'

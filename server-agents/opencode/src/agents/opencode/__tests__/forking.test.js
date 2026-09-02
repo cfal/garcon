@@ -81,8 +81,9 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
   it('forks the whole session without a boundary and encodes the forked session', async () => {
     const fork = mock(() => Promise.resolve({ data: { id: 'forked-session' } }));
     const { forking, nativeSessions } = createForking({ fork });
+    const request = forkRequest();
 
-    const outcome = await forking.fork(forkRequest());
+    const outcome = await forking.fork(request);
 
     expect(outcome.kind).toBe('materialized');
     expect(outcome.session.agentSessionId).toBe('forked-session');
@@ -93,6 +94,23 @@ describe('[TLV5-FORK.01-OPENCODE-UNIT-01] OpenCode native forking facet', () => 
       sessionID: 'source-session',
       directory: '/repo',
     });
+  });
+
+  it('propagates admission cancellation into the native fork request', async () => {
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    let providerSignal;
+    const fork = mock((_input, options) => {
+      providerSignal = options.signal;
+      controller.abort(reason);
+      return Promise.reject(options.signal.reason);
+    });
+    const { forking } = createForking({ fork });
+
+    await expect(forking.fork(forkRequest({
+      admission: { signal: controller.signal, markStarted: () => Promise.resolve() },
+    }))).rejects.toBe(reason);
+    expect(providerSignal.aborted).toBe(true);
   });
 
   it('applies the request permission mode to the forked native session', async () => {

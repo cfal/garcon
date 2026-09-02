@@ -834,9 +834,10 @@ describe('REST chat command routes', () => {
     );
   });
 
-  it('POST /fork-run forks once and schedules the target turn', async () => {
+  it('POST /fork-run disables the Bun idle timeout, forks once, and schedules the target turn', async () => {
     const agent = createRouteAgent();
-    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
+    const server = { timeout: mock(() => undefined) };
+    const { request, response, body } = await callJson(agent.routes['/api/v1/chats/fork-run'].POST, {
       ...agentRunBody({
         clientRequestId: 'req-fork-run-1',
         clientMessageId: 'msg-fork-run-1',
@@ -844,7 +845,7 @@ describe('REST chat command routes', () => {
         chatId: TARGET_CHAT_ID,
         command: 'continue here',
       }),
-    });
+    }, 'POST', server);
     expect(response.status).toBe(202);
     expect(body.commandType).toBe('fork-run');
     expect(body.chatId).toBe(TARGET_CHAT_ID);
@@ -853,6 +854,7 @@ describe('REST chat command routes', () => {
       orderGroup: 'normal',
     });
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
       'continue here',
@@ -912,8 +914,9 @@ describe('REST chat command routes', () => {
     expect(rejected.body).toMatchObject({ error: 'allowHandoffFork must be a boolean' });
   });
 
-  it('POST /fork preserves retryable transcript-persistence refusals', async () => {
+  it('POST /fork disables the Bun idle timeout and preserves retryable refusals', async () => {
     const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
     forkChatFileCopy.mockRejectedValueOnce(new CommandValidationError(
       'TRANSCRIPT_NOT_YET_PERSISTED',
       "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
@@ -921,10 +924,10 @@ describe('REST chat command routes', () => {
       true,
     ));
 
-    const { response, body } = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
+    const { request, response, body } = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
       sourceChatId: CHAT_ID,
       chatId: TARGET_CHAT_ID,
-    });
+    }, 'POST', server);
 
     expect(response.status).toBe(409);
     expect(body).toEqual({
@@ -933,6 +936,7 @@ describe('REST chat command routes', () => {
       errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
       retryable: true,
     });
+    expect(server.timeout).toHaveBeenCalledWith(request, 0);
   });
 
   it('POST /fork carries handoff-fork consent and rejects a non-boolean', async () => {

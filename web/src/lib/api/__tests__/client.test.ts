@@ -235,6 +235,18 @@ describe('API client helpers', () => {
 		expect(opts.headers).toBeUndefined();
 	});
 
+	it('allows callers to disable the default timeout while preserving their signal', async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+		const controller = new AbortController();
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+		await apiGet('/api/long-request', { timeoutMs: null, signal: controller.signal });
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(timeoutSpy).not.toHaveBeenCalled();
+		expect(opts.signal).toBe(controller.signal);
+	});
+
 	it('omits auth header when no token is set', async () => {
 		clearAuthToken();
 		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));

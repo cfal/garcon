@@ -69,7 +69,6 @@ import {
   archivedLogicalCount,
   carryOverRevision,
 } from '../chats/carryover-segments.js';
-
 import type {
   ExecutionSettingsPatchRequest,
   ModelPatchRequest,
@@ -116,6 +115,8 @@ import {
 } from '../chats/title-generator.js';
 
 const logger = createLogger('routes:chats');
+// Bun interprets zero as an unlimited idle window for provider-native forks.
+const FORK_REQUEST_TIMEOUT_SECONDS = 0;
 
 interface RequestTimeoutServer {
   timeout(request: Request, seconds: number): void;
@@ -741,9 +742,16 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkChat(body: unknown): Promise<Response> {
+  async function postForkChat(
+    body: unknown,
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
-      const result = await commands.forkChat(parseCommandRequest(parseForkChatCommandRequest, body));
+      const input = parseCommandRequest(parseForkChatCommandRequest, body);
+      if (isRequestTimeoutServer(server)) server.timeout(request, FORK_REQUEST_TIMEOUT_SECONDS);
+      const result = await commands.forkChat(input);
 
       return Response.json(result);
     } catch (error: unknown) {
@@ -823,9 +831,15 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkRunChat(body: unknown): Promise<Response> {
+  async function postForkRunChat(
+    body: unknown,
+    request: Request,
+    _url: URL,
+    server?: unknown,
+  ): Promise<Response> {
     try {
       const input = parseCommandRequest(parseForkRunCommandRequest, body);
+      if (isRequestTimeoutServer(server)) server.timeout(request, FORK_REQUEST_TIMEOUT_SECONDS);
       const images = validatedCommandAttachments(input.images);
       const result = await commands.submitForkRun({ ...input, images });
 

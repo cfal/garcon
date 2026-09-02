@@ -23,10 +23,11 @@ export function clearAuthToken(): void {
 	removeLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
 }
 
-export type ApiFetchOptions = RequestInit & { timeoutMs?: number };
+export type ApiFetchOptions = RequestInit & { timeoutMs?: number | null };
 
-/** Merges a default timeout signal with any caller-provided signal. */
-function withTimeout(options: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): RequestInit {
+/** Merges a default timeout signal with any caller-provided signal unless disabled. */
+function withTimeout(options: RequestInit, timeoutMs: number | null = DEFAULT_TIMEOUT_MS): RequestInit {
+	if (timeoutMs === null) return options;
 	const timeoutSignal = AbortSignal.timeout(timeoutMs);
 	const callerSignal = options.signal;
 	return {

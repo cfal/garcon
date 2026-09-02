@@ -7,7 +7,7 @@ export class OpenCodeTimeoutError extends Error {
 
 export async function withAbortableTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
-  timeoutMs: number,
+  timeoutMs: number | null,
   label: string,
   callerSignal?: AbortSignal,
 ): Promise<T> {
@@ -30,6 +30,7 @@ export async function withAbortableTimeout<T>(
     return await Promise.race([
       operationResult,
       new Promise<never>((_, reject) => {
+        if (timeoutMs === null) return;
         timeoutHandle = setTimeout(() => {
           const error = new OpenCodeTimeoutError(label, timeoutMs);
           controller.abort(error);

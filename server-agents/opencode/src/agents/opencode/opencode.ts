@@ -1085,7 +1085,7 @@ export class OpenCodeRuntime {
         infoId: typeof info?.id === 'string' ? info.id : null,
         toolMessageId: typeof tool?.messageID === 'string' ? tool.messageID : null,
       };
-      if (shouldWarnForUnroutedOpenCodeEvent(event.type)) {
+      if (shouldWarnForUnroutedOpenCodeEvent(event.type, this.#sessions.has(sessionId))) {
         this.#logger.warn('Ignoring an OpenCode event without an operation identity', details);
       } else {
         this.#logger.debug('Ignoring an OpenCode event without an operation identity', details);
@@ -1148,7 +1148,6 @@ export class OpenCodeRuntime {
   getClientIfInitialized(): any | null {
     return this.#instance?.client ?? null;
   }
-
   async getModels(): Promise<OpenCodeModelOption[]> {
     return this.#models.getModels();
   }
@@ -1163,14 +1162,14 @@ export class OpenCodeRuntime {
   async #runRequest<T>(
     label: string,
     operation: (signal: AbortSignal) => Promise<T>,
-    control: { signal?: AbortSignal; timeoutMs?: number } = {},
+    control: { signal?: AbortSignal; timeoutMs?: number | null } = {},
   ): Promise<T> {
     const generation = this.#instanceGeneration;
     this.#endpointCoordinator.requestStarted();
     try {
       return await withAbortableTimeout(
         operation,
-        control.timeoutMs ?? this.#options.requestTimeoutMs,
+        control.timeoutMs === undefined ? this.#options.requestTimeoutMs : control.timeoutMs,
         label,
         control.signal,
       );
@@ -1191,7 +1190,7 @@ export class OpenCodeRuntime {
     label: string,
     scope: OpenCodeRequestScope,
     operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
-    control: { signal?: AbortSignal; timeoutMs?: number } = {},
+    control: { signal?: AbortSignal; timeoutMs?: number | null } = {},
   ): Promise<T> {
     return this.#runRequest<T>(label, (signal) => operation(signal, scope), control);
   }
@@ -1619,7 +1618,7 @@ export class OpenCodeRuntime {
 
   async forkSession(
     sourceSessionId: string,
-    options: { projectPath?: string | null; messageId?: string; permissionMode?: string } = {},
+    options: { projectPath?: string | null; messageId?: string; permissionMode?: string; signal?: AbortSignal } = {},
   ): Promise<string> {
     // OpenCode persists a manual compaction control before its summary runs, so
     // a whole-tip fork mid-compaction would clone a pending control into the
@@ -1636,7 +1635,7 @@ export class OpenCodeRuntime {
     const forkedSessionId = await this.#endpointCoordinator.forkSession(
       sourceSessionId,
       options,
-      (label, scope, operation) => this.#runScopedSessionRequest(label, scope, operation),
+      (label, scope, operation, control) => this.#runScopedSessionRequest(label, scope, operation, control),
     );
     // Native fork clones only messages: the forked session carries no permission
     // ruleset, so without this the forked chat prompts for everything the source
@@ -1655,6 +1654,7 @@ export class OpenCodeRuntime {
               }, requestScope),
               { signal: requestSignal },
             ),
+            { signal: options.signal },
           );
           throwOpenCodeResultError(result, 'Failed to apply OpenCode fork permission mode');
         });

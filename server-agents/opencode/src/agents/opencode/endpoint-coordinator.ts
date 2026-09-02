@@ -23,12 +23,13 @@ type ScopedSessionRequest = <T>(
   label: string,
   scope: OpenCodeRequestScope,
   operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+  control?: { signal?: AbortSignal; timeoutMs?: number | null },
 ) => Promise<T>;
 
 type OpenCodeRequest = <T>(
   label: string,
   operation: (signal: AbortSignal) => Promise<T>,
-  control?: { signal?: AbortSignal; timeoutMs?: number },
+  control?: { signal?: AbortSignal; timeoutMs?: number | null },
 ) => Promise<T>;
 
 export class OpenCodeEndpointCoordinator {
@@ -95,7 +96,7 @@ export class OpenCodeEndpointCoordinator {
 
   async forkSession(
     sourceSessionId: string,
-    options: { projectPath?: string | null; messageId?: string },
+    options: { projectPath?: string | null; messageId?: string; signal?: AbortSignal },
     runScopedRequest: ScopedSessionRequest,
   ): Promise<string> {
     const sessionID = sourceSessionId.trim();
@@ -111,6 +112,7 @@ export class OpenCodeEndpointCoordinator {
         }, requestScope),
         { signal },
       ),
+      { signal: options.signal, timeoutMs: null },
     ));
     // A source session the provider cannot return has no native fork position;
     // the typed source-level refusal keeps the handoff-fork consent flow

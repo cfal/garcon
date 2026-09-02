@@ -213,7 +213,7 @@ export async function generateChatTitle(
 }
 
 export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params);
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, { timeoutMs: null });
 }
 
 import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
@@ -642,7 +642,7 @@ export interface ForkChatParams {
 
 /** Forks (clones) an existing chat session into a new chat. */
 export async function forkChat(params: ForkChatParams): Promise<ForkChatResponse> {
-	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params);
+	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, { timeoutMs: null });
 }
 
 /** Persists a chat placement within its server-resolved section. */

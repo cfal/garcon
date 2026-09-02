@@ -362,6 +362,65 @@ describe('OpenCode operation routing', () => {
     await runtime.shutdown();
   });
 
+  it('quietly drops fork replay from unknown sessions but warns for managed sessions', async () => {
+    const debugLogs = [];
+    const warnings = [];
+    const { eventStream, runtime } = createRuntime(['session-1'], {
+      logger: {
+        debug(...args) { debugLogs.push(args); },
+        info() {},
+        warn(...args) { warnings.push(args); },
+        error() {},
+      },
+    });
+    const events = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', events),
+    });
+
+    eventStream.push({
+      id: 'event-fork-message',
+      type: 'message.updated',
+      properties: {
+        sessionID: 'forked-session',
+        info: { id: 'message-forked', role: 'user' },
+      },
+    });
+    eventStream.push({
+      id: 'event-fork-part',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'forked-session',
+        part: { id: 'part-forked', messageID: 'message-forked', type: 'text', text: 'copied' },
+      },
+    });
+    await waitFor(() => debugLogs.filter((entry) => (
+      entry[0] === 'Ignoring an OpenCode event without an operation identity'
+    )).length === 2);
+    expect(warnings).toEqual([]);
+
+    eventStream.push({
+      id: 'event-managed-orphan',
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'session-1',
+        part: { id: 'part-orphan', messageID: 'message-orphan', type: 'text', text: 'orphan' },
+      },
+    });
+    await waitFor(() => warnings.length === 1);
+    expect(warnings[0]).toEqual([
+      'Ignoring an OpenCode event without an operation identity',
+      expect.objectContaining({ eventId: 'event-managed-orphan', sessionId: 'session-1' }),
+    ]);
+    expect(events).toEqual([]);
+    eventStream.close();
+    await runtime.shutdown();
+  });
+
   it('[TLV5-PERM.09-OPENCODE-UNIT-01] logs and drops a permission without an operation identity', async () => {
     const warnings = [];
     const { eventStream, runtime } = createRuntime(['session-1'], {

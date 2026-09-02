@@ -6,7 +6,7 @@ async function* neverEndingStream() {
   await new Promise(() => {});
 }
 
-function createRuntimeWithClient(client) {
+function createRuntimeWithClient(client, options = {}) {
   const createInstance = mock(() => Promise.resolve({
     client: {
       permission: { reply: mock(() => Promise.resolve({})) },
@@ -19,7 +19,7 @@ function createRuntimeWithClient(client) {
   }));
   return {
     createInstance,
-    runtime: new OpenCodeRuntime({ createInstance }),
+    runtime: new OpenCodeRuntime({ createInstance, ...options }),
   };
 }
 
@@ -62,6 +62,43 @@ describe('OpenCodeRuntime fork', () => {
     expect(fork).toHaveBeenCalledTimes(1);
     expect(fork.mock.calls[0][0]).toEqual({ sessionID: 'source-session' });
     expect(fork.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('lets a native fork outlive the ordinary OpenCode request timeout', async () => {
+    const pendingFork = deferred();
+    const fork = mock(() => pendingFork.promise);
+    const { runtime } = createRuntimeWithClient({ session: { fork } }, { requestTimeoutMs: 5 });
+    const outcome = runtime.forkSession('source-session').then(
+      (value) => ({ status: 'fulfilled', value }),
+      (error) => ({ status: 'rejected', error }),
+    );
+
+    await waitForMockCall(fork);
+    const beforeRelease = await Promise.race([
+      outcome,
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ]);
+    expect(beforeRelease).toBe('still-pending');
+    expect(fork.mock.calls[0][1].signal.aborted).toBe(false);
+
+    pendingFork.resolve({ data: { id: 'forked-session' } });
+    await expect(outcome).resolves.toEqual({ status: 'fulfilled', value: 'forked-session' });
+  });
+
+  it('still cancels a timeout-free native fork from its admission signal', async () => {
+    const fork = mock((_input, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }));
+    const { runtime } = createRuntimeWithClient({ session: { fork } }, { requestTimeoutMs: 5 });
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const pending = runtime.forkSession('source-session', { signal: controller.signal });
+
+    await waitForMockCall(fork);
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(fork.mock.calls[0][1].signal.aborted).toBe(true);
   });
 
   it('routes native fork requests through the source project directory', async () => {
