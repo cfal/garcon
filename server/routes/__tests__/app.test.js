@@ -680,6 +680,23 @@ describe('PUT /api/app/settings', () => {
     });
   });
 
+  it('reports filesystem write failures as opaque server errors', async () => {
+    ctx.settings.setUiSettings.mockRejectedValueOnce(new Error(
+      "EACCES: permission denied, open '/server/config/.project-settings.json.tmp'",
+    ));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
   it('patches ui settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ fontSize: 14 }));
