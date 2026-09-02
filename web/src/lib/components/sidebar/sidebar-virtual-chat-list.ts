@@ -21,6 +21,28 @@ export interface SidebarVirtualProjectHeaderRow {
 	isCollapsed: boolean;
 }
 
+export type SidebarChatSection = 'inactive' | 'archived';
+
+// Time-based sections group chats across projects; their collapse keys share
+// the project collapse store's key space.
+export function sidebarSectionKey(section: SidebarChatSection): string {
+	return `section:${section}`;
+}
+
+export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
+	sidebarSectionKey('inactive'),
+	sidebarSectionKey('archived'),
+];
+
+export interface SidebarVirtualSectionHeaderRow {
+	type: 'section-header';
+	key: string;
+	section: SidebarChatSection;
+	count: number;
+	chatIds: string[];
+	isCollapsed: boolean;
+}
+
 export interface SidebarVirtualChatRow {
 	type: 'chat';
 	key: string;
@@ -36,7 +58,10 @@ export interface SidebarVirtualChatRow {
 	reorderScopeIds: string[];
 }
 
-export type SidebarVirtualRow = SidebarVirtualProjectHeaderRow | SidebarVirtualChatRow;
+export type SidebarVirtualRow =
+	| SidebarVirtualProjectHeaderRow
+	| SidebarVirtualSectionHeaderRow
+	| SidebarVirtualChatRow;
 
 export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
 
@@ -52,7 +77,9 @@ export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
 	chatItemLayout: SidebarChatItemLayout,
 ): number {
-	if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
+	if (row?.type === 'project-header' || row?.type === 'section-header') {
+		return PROJECT_HEADER_ROW_HEIGHT;
+	}
 	if (chatItemLayout === 'compact') return COMPACT_CHAT_ROW_HEIGHT;
 	if (chatItemLayout === 'single-line') return SINGLE_LINE_CHAT_ROW_HEIGHT;
 	return DESKTOP_CHAT_ROW_HEIGHT;

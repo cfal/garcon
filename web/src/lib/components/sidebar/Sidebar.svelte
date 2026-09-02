@@ -9,6 +9,7 @@
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
 	import {
 		getAppShell,
+		getMinuteClock,
 		getNotifications,
 		getLocalSettings,
 		getReadReceiptOutbox,
@@ -28,8 +29,12 @@
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
 	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
+	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
-	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+	} from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -111,15 +116,15 @@
 
 	const selection = new SidebarChatSelectionState();
 	const bulkDelete = new SidebarBulkDeleteState();
-	const MINUTE_MS = 60_000;
+	const minuteClock = getMinuteClock();
 
 	// Sidebar UI state.
 	let isBulkOperating = $state(false);
-	let currentTime = $state(new Date());
+	let currentTime = $derived(minuteClock.currentTime);
 	let isMarkingAllRead = $state(false);
 	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
-		groupByProject: localSettings.sidebarGroupByProject,
+		grouping: localSettings.sidebarGrouping,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
 		sortMode: localSettings.sidebarSortMode,
@@ -140,48 +145,23 @@
 	let displayedChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
 			displayedChats: sidebarSearch.filteredChats,
-			groupByProject: displayOptions.groupByProject,
+			grouping: displayOptions.grouping,
+			currentTime,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
-	let allProjectKeys = $derived.by(() =>
-		buildSidebarProjectKeys({
+	let allProjectKeys = $derived.by(() => {
+		const projectKeys = buildSidebarProjectKeys({
 			displayedChats: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-		}),
-	);
-
-	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
-		const elapsedInMinute = nowMs % MINUTE_MS;
-		return elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute;
-	}
-
-	// Refreshes relative timestamp labels on minute boundaries.
-	$effect(() => {
-		let intervalId: ReturnType<typeof setInterval> | null = null;
-
-		const refreshCurrentTime = () => {
-			currentTime = new Date();
-		};
-
-		const timeoutId = setTimeout(() => {
-			refreshCurrentTime();
-			intervalId = setInterval(refreshCurrentTime, MINUTE_MS);
-		}, millisecondsUntilNextMinute());
-
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === 'visible') refreshCurrentTime();
-		};
-
-		document.addEventListener('visibilitychange', handleVisibilityChange);
-
-		return () => {
-			clearTimeout(timeoutId);
-			if (intervalId) clearInterval(intervalId);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-		};
+		});
+		// Time-based sections collapse through the same store; their keys stay in
+		// the pruning allowlist regardless of mode so section collapse
+		// preferences survive grouping-mode switches, like project keys do.
+		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
+		return projectKeys;
 	});
 
 	$effect(() => {
@@ -379,12 +359,12 @@
 		}
 	}
 
-	function handleToggleGroupByProject(): void {
-		localSettings.toggle('sidebarGroupByProject');
+	function handleSetChatGrouping(grouping: SidebarChatGrouping): void {
+		localSettings.set('sidebarGrouping', grouping);
 	}
 
 	function handleToggleGroupNestedProjectPaths(): void {
-		if (!localSettings.sidebarGroupByProject) return;
+		if (localSettings.sidebarGrouping === 'none') return;
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 
@@ -460,7 +440,7 @@
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
-			groupByProject={displayOptions.groupByProject}
+			chatGrouping={displayOptions.grouping}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			chatItemLayout={displayOptions.chatItemLayout}
 			sortByRecent={displayOptions.sortMode === 'recent'}
@@ -475,7 +455,7 @@
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
-			onToggleGroupByProject={handleToggleGroupByProject}
+			onSetChatGrouping={handleSetChatGrouping}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onSetChatItemLayout={handleSetChatItemLayout}
 			onToggleSortByRecent={handleToggleSortByRecent}

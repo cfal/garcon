@@ -213,7 +213,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'compact',
 				sortMode: 'manual',
@@ -232,7 +232,7 @@ describe('shared sidebar chat row', () => {
 			session: createChat({ isUnread: false }),
 			isPinned: true,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -292,7 +292,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false }),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -314,7 +314,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false, isProcessing: true }),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -341,7 +341,7 @@ describe('shared sidebar chat row', () => {
 			isPinned: true,
 			isArchived: true,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -359,7 +359,7 @@ describe('shared sidebar chat row', () => {
 			isPinned: true,
 			isMobile: true,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -386,7 +386,7 @@ describe('shared sidebar chat row', () => {
 			session: createChat({ isUnread: false }),
 			isMultiSelectMode: true,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -426,7 +426,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',

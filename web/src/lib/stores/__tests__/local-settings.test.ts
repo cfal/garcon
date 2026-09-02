@@ -16,7 +16,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGroupByProject).toBe(true);
+		expect(store.sidebarGrouping).toBe('project');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('default');
 		expect(store.sidebarSortMode).toBe('manual');
@@ -447,7 +447,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGroupByProject', false);
+		store.set('sidebarGrouping', 'project-and-time');
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarChatItemLayout', 'compact');
 		store.set('showQuickCommitTray', false);
@@ -457,7 +457,7 @@ describe('LocalSettingsStore', () => {
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGroupByProject: false,
+			sidebarGrouping: 'project-and-time',
 			sidebarGroupNestedProjectPaths: true,
 			sidebarChatItemLayout: 'compact',
 			showQuickCommitTray: false,
@@ -481,7 +481,7 @@ describe('LocalSettingsStore', () => {
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
 				overlayBackdropEffects: false,
-				sidebarGroupByProject: true,
+				sidebarGrouping: 'project',
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
 				showQuickCommitTray: false,
@@ -503,7 +503,7 @@ describe('LocalSettingsStore', () => {
 
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
-		expect(secondStore.sidebarGroupByProject).toBe(true);
+		expect(secondStore.sidebarGrouping).toBe('project');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');
 		expect(secondStore.showQuickCommitTray).toBe(false);

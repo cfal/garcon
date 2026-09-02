@@ -31,6 +31,9 @@ export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 
+export const SIDEBAR_CHAT_GROUPING_VALUES = ['none', 'project', 'project-and-time'] as const;
+export type SidebarChatGrouping = (typeof SIDEBAR_CHAT_GROUPING_VALUES)[number];
+
 export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
 export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
 export type FileOpenPlacementPreference = 'same-window' | 'new-window' | 'dialog';
@@ -114,7 +117,7 @@ export interface LocalSettingsSnapshot {
 	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
-	sidebarGroupByProject: boolean;
+	sidebarGrouping: SidebarChatGrouping;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: SidebarChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
@@ -150,7 +153,6 @@ type BooleanLocalSettingKey =
 	| 'steerWithCtrlEnter'
 	| 'chatListAutohide'
 	| 'sidebarVisible'
-	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
@@ -174,7 +176,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGroupByProject: true,
+	sidebarGrouping: 'project',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'default',
 	sidebarSortMode: 'manual',
@@ -250,6 +252,13 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 		: DEFAULTS.sidebarSortMode;
 }
 
+function parseSidebarChatGrouping(value: unknown): SidebarChatGrouping {
+	return typeof value === 'string' &&
+		SIDEBAR_CHAT_GROUPING_VALUES.includes(value as SidebarChatGrouping)
+		? (value as SidebarChatGrouping)
+		: DEFAULTS.sidebarGrouping;
+}
+
 function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
 	return typeof value === 'string' &&
 		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
@@ -306,10 +315,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
-		sidebarGroupByProject: parseBoolean(
-			parsed.sidebarGroupByProject,
-			DEFAULTS.sidebarGroupByProject,
-		),
+		sidebarGrouping: parseSidebarChatGrouping(parsed.sidebarGrouping),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
@@ -392,7 +398,7 @@ export class LocalSettingsStore {
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
-	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
+	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
@@ -489,7 +495,7 @@ export class LocalSettingsStore {
 			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
-			sidebarGroupByProject: this.sidebarGroupByProject,
+			sidebarGrouping: this.sidebarGrouping,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
 			sidebarSortMode: this.sidebarSortMode,
@@ -531,7 +537,7 @@ export class LocalSettingsStore {
 		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
-		this.sidebarGroupByProject = snap.sidebarGroupByProject;
+		this.sidebarGrouping = snap.sidebarGrouping;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
 		this.sidebarSortMode = snap.sidebarSortMode;

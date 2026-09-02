@@ -27,6 +27,7 @@
 		getAppShell,
 		getWs,
 		getLocalSettings,
+		getMinuteClock,
 		getNotifications,
 		getSidebarSearch,
 		getSidebarProjectCollapse,
@@ -67,6 +68,7 @@
 	const notifications = getNotifications();
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
+	const minuteClock = getMinuteClock();
 	const ghCapability = getGhCapability();
 	const workspace = getWorkspaceCoordinator();
 	const transientLayers = getTransientLayers();
@@ -169,7 +171,8 @@
 	const displayedSidebarChatIds = $derived.by(() =>
 		buildSidebarDisplayChatIds({
 			displayedChats: sidebarSearch.filteredChats,
-			groupByProject: localSettings.sidebarGroupByProject,
+			grouping: localSettings.sidebarGrouping,
+			currentTime: minuteClock.currentTime,
 			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),

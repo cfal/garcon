@@ -4,9 +4,21 @@
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
-function recencyValue(chat: ChatSessionRecord): number {
-	if (chat.lastActivityAt) return new Date(chat.lastActivityAt).getTime();
-	if (chat.createdAt) return new Date(chat.createdAt).getTime();
+/**
+ * Canonical activity timestamp for sidebar chat ordering: last activity with
+ * creation-time fallback, so chats without activity still order deterministically.
+ */
+export function chatActivityTimeMs(
+	chat: Pick<ChatSessionRecord, 'lastActivityAt' | 'createdAt'>,
+): number {
+	if (chat.lastActivityAt) {
+		const time = new Date(chat.lastActivityAt).getTime();
+		if (Number.isFinite(time)) return time;
+	}
+	if (chat.createdAt) {
+		const time = new Date(chat.createdAt).getTime();
+		if (Number.isFinite(time)) return time;
+	}
 	return 0;
 }
 
@@ -16,7 +28,7 @@ export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRe
 	const bIsDraft = b.status === 'draft';
 	// Local drafts have no server timestamps but represent the newest user activity.
 	if (aIsDraft !== bIsDraft) return aIsDraft ? -1 : 1;
-	return recencyValue(b) - recencyValue(a);
+	return chatActivityTimeMs(b) - chatActivityTimeMs(a);
 }
 
 /** Returns a new array of chats ordered newest-first. */

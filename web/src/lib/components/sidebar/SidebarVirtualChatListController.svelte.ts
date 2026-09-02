@@ -113,7 +113,9 @@ export class SidebarVirtualChatListController {
 	}
 
 	#estimateRow(row: SidebarVirtualRow, input: SidebarVirtualGeometryUpdate): number {
-		if (row.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
+		if (row.type === 'project-header' || row.type === 'section-header') {
+			return PROJECT_HEADER_ROW_HEIGHT;
+		}
 		if (input.rowHeight !== undefined) return input.rowHeight;
 		return estimateSidebarVirtualRowSize(row, input.chatItemLayout);
 	}

@@ -28,6 +28,7 @@ vi.mock('$lib/context', () => ({
 	getChatSessions: () => testContext.current?.sessions,
 	getGhCapability: () => testContext.current?.ghCapability,
 	getLocalSettings: () => testContext.current?.localSettings,
+	getMinuteClock: () => testContext.current?.minuteClock,
 	getNavigation: () => testContext.current?.navigation,
 	getNotifications: () => testContext.current?.notifications,
 	getSidebarProjectCollapse: () => testContext.current?.projectCollapse,
@@ -183,6 +184,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			},
 		},
 		localSettings: new AppShellLocalSettingsState(),
+		minuteClock: { currentTime: new Date('2025-01-02T00:00:00.000Z') },
 		terminals: { orderedSessions: [] },
 		notifications: {
 			error: vi.fn(),

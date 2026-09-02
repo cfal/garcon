@@ -4,6 +4,7 @@
 	import {
 		setAppShell,
 		setLocalSettings,
+		setMinuteClock,
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
@@ -17,7 +18,10 @@
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+	} from '$lib/stores/local-settings.svelte';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 
 	interface MobileSidebarLifecycleHostProps {
@@ -26,7 +30,7 @@
 		sidebarSearch?: SidebarSearchStore;
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
-		sidebarGroupByProject?: boolean;
+		sidebarGrouping?: SidebarChatGrouping;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: SidebarChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
@@ -38,7 +42,7 @@
 		sidebarSearch,
 		initialOpen = true,
 		autoLoadSavedSearches = true,
-		sidebarGroupByProject = true,
+		sidebarGrouping = 'project',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'default',
 		collapsedProjectKeys = new Set<string>(),
@@ -103,8 +107,8 @@
 		},
 	} as never);
 	setLocalSettings({
-		get sidebarGroupByProject() {
-			return sidebarGroupByProject;
+		get sidebarGrouping() {
+			return sidebarGrouping;
 		},
 		get sidebarGroupNestedProjectPaths() {
 			return sidebarGroupNestedProjectPaths;
@@ -112,19 +116,18 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
-		toggle(key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths') {
-			if (key === 'sidebarGroupByProject') {
-				sidebarGroupByProject = !sidebarGroupByProject;
-				return;
-			}
+		toggle(_key: 'sidebarGroupNestedProjectPaths') {
 			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
-		set(key: 'sidebarChatItemLayout', value: string) {
-			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as SidebarChatItemLayout;
+		set(key: 'sidebarGrouping' | 'sidebarChatItemLayout', value: string) {
+			if (key === 'sidebarGrouping') {
+				sidebarGrouping = value as SidebarChatGrouping;
+				return;
 			}
+			sidebarChatItemLayout = value as SidebarChatItemLayout;
 		},
 	} as never);
+	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
 	setSidebarProjectCollapse({
 		get collapsedProjectKeys() {
 			return collapsedProjectKeys;

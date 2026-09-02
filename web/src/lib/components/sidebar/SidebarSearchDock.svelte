@@ -1,6 +1,9 @@
 <script lang="ts">
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
-	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+	} from '$lib/stores/local-settings.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -9,7 +12,7 @@
 		isLoading: boolean;
 		visibleUnreadCount: number;
 		isMarkingAllRead?: boolean;
-		groupByProject?: boolean;
+		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
@@ -22,7 +25,7 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
-		onToggleGroupByProject?: () => void;
+		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
@@ -39,7 +42,7 @@
 		isLoading,
 		visibleUnreadCount,
 		isMarkingAllRead = false,
-		groupByProject = false,
+		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
 		sortByRecent = false,
@@ -52,7 +55,7 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
-		onToggleGroupByProject,
+		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
 		onToggleSortByRecent,
@@ -76,7 +79,7 @@
 		{isLoading}
 		{visibleUnreadCount}
 		{isMarkingAllRead}
-		{groupByProject}
+		{chatGrouping}
 		{groupNestedProjectPaths}
 		{chatItemLayout}
 		{sortByRecent}
@@ -88,7 +91,7 @@
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
-		{onToggleGroupByProject}
+		{onSetChatGrouping}
 		{onToggleGroupNestedProjectPaths}
 		{onSetChatItemLayout}
 		{onToggleSortByRecent}

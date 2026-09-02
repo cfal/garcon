@@ -493,37 +493,43 @@ describe('sidebar search interactions', () => {
 		expect(items[2]?.textContent).toContain('Mark all as read');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Sort by recent activity' })).toBeTruthy();
 		expect(items[3]?.textContent).toContain('Sort by recent activity');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Group chats by project' })).toBeTruthy();
-		expect(items[4]?.textContent).toContain('Group chats by project');
+		expect(screen.getByRole('menuitemradio', { name: 'No grouping' })).toBeTruthy();
+		expect(items[4]?.textContent).toContain('No grouping');
+		expect(screen.getByRole('menuitemradio', { name: 'Group chats by project' })).toBeTruthy();
+		expect(items[5]?.textContent).toContain('Group chats by project');
+		expect(
+			screen.getByRole('menuitemradio', { name: 'Group chats by project and time' }),
+		).toBeTruthy();
+		expect(items[6]?.textContent).toContain('Group chats by project and time');
 		expect(
 			screen.getByRole('menuitemcheckbox', { name: 'Group nested project paths' }),
 		).toBeTruthy();
-		expect(items[5]?.textContent).toContain('Group nested project paths');
+		expect(items[7]?.textContent).toContain('Group nested project paths');
 		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
-		expect(items[6]?.textContent).toContain('Default');
+		expect(items[8]?.textContent).toContain('Default');
 		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[7]?.textContent).toContain('Compact chat items');
+		expect(items[9]?.textContent).toContain('Compact chat items');
 		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
-		expect(items[8]?.textContent).toContain('Single-line chat items');
-		expect(items[9]?.textContent).toContain('Autohide sidebar');
-		expect(items[10]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[11]?.textContent).toContain('Scheduled prompts');
-		expect(items[12]?.textContent).toContain('Settings');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
+		expect(items[10]?.textContent).toContain('Single-line chat items');
+		expect(items[11]?.textContent).toContain('Autohide sidebar');
+		expect(items[12]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[13]?.textContent).toContain('Scheduled prompts');
+		expect(items[14]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
 		expect(onShowScheduledPrompts).toHaveBeenCalledOnce();
 	});
 
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
-		const onToggleGroupByProject = vi.fn();
+		const onSetChatGrouping = vi.fn();
 		const onToggleGroupNestedProjectPaths = vi.fn();
 		const onSetChatItemLayout = vi.fn();
 		const onToggleSortByRecent = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
-			groupByProject: true,
+			chatGrouping: 'project',
 			groupNestedProjectPaths: true,
 			chatItemLayout: 'compact',
 			sortByRecent: false,
@@ -534,7 +540,7 @@ describe('sidebar search interactions', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
-			onToggleGroupByProject,
+			onSetChatGrouping,
 			onToggleGroupNestedProjectPaths,
 			onSetChatItemLayout,
 			onToggleSortByRecent,
@@ -556,51 +562,68 @@ describe('sidebar search interactions', () => {
 			name: 'Sort by recent activity',
 		});
 		expect(items[1]?.textContent).toContain('Sort by recent activity');
-		const groupByProject = screen.getByRole('menuitemcheckbox', {
+		const noGrouping = screen.getByRole('menuitemradio', { name: 'No grouping' });
+		expect(noGrouping.getAttribute('aria-checked')).toBe('false');
+		expect(items[2]?.textContent).toContain('No grouping');
+		const projectGrouping = screen.getByRole('menuitemradio', {
 			name: 'Group chats by project',
 		});
-		expect(groupByProject.getAttribute('aria-checked')).toBe('true');
-		expect(items[2]?.textContent).toContain('Group chats by project');
+		expect(projectGrouping.getAttribute('aria-checked')).toBe('true');
+		expect(items[3]?.textContent).toContain('Group chats by project');
+		const projectAndTimeGrouping = screen.getByRole('menuitemradio', {
+			name: 'Group chats by project and time',
+		});
+		expect(projectAndTimeGrouping.getAttribute('aria-checked')).toBe('false');
+		expect(items[4]?.textContent).toContain('Group chats by project and time');
 		const groupNestedProjectPaths = screen.getByRole('menuitemcheckbox', {
 			name: 'Group nested project paths',
 		});
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
-		expect(items[3]?.textContent).toContain('Group nested project paths');
+		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe(null);
+		expect(items[5]?.textContent).toContain('Group nested project paths');
 		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
 		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[4]?.textContent).toContain('Default');
+		expect(items[6]?.textContent).toContain('Default');
 		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
-		expect(items[5]?.textContent).toContain('Compact chat items');
+		expect(items[7]?.textContent).toContain('Compact chat items');
 		const singleLineLayout = screen.getByRole('menuitemradio', {
 			name: 'Single-line chat items',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[6]?.textContent).toContain('Single-line chat items');
+		expect(items[8]?.textContent).toContain('Single-line chat items');
 		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
 			name: 'Autohide sidebar',
 		});
 		expect(chatListAutohide.getAttribute('aria-checked')).toBe('true');
-		expect(items[7]?.textContent).toContain('Autohide sidebar');
+		expect(items[9]?.textContent).toContain('Autohide sidebar');
 		const dockOnRight = screen.getByRole('menuitemcheckbox', {
 			name: 'Dock sidebar on the right',
 		});
 		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
-		expect(items[8]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[9]?.textContent).toContain('Scheduled prompts');
-		expect(items[10]?.textContent).toContain('Settings');
+		expect(items[10]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[11]?.textContent).toContain('Scheduled prompts');
+		expect(items[12]?.textContent).toContain('Settings');
 		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
-		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
-		expect(groupByProject.className).toContain('pe-8');
-		expect(groupByProject.className).not.toContain('ps-8');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
+		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
+		expect(projectGrouping.className).toContain('pe-8');
+		expect(projectGrouping.className).not.toContain('ps-8');
 
 		expect(sortByRecent).toBeTruthy();
 
 		await fireEvent.click(singleLineLayout);
 		expect(onSetChatItemLayout).toHaveBeenCalledExactlyOnceWith('single-line');
-		expect(onToggleGroupByProject).not.toHaveBeenCalled();
+		expect(onSetChatGrouping).not.toHaveBeenCalled();
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+
+		const [menuTriggerAgain] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTriggerAgain);
+		const projectAndTimeAgain = await screen.findByRole('menuitemradio', {
+			name: 'Group chats by project and time',
+		});
+		await fireEvent.click(projectAndTimeAgain);
+		expect(onSetChatGrouping).toHaveBeenCalledExactlyOnceWith('project-and-time');
 	});
 
 	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {
@@ -630,13 +653,13 @@ describe('sidebar search interactions', () => {
 		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
 	});
 
-	it('disables nested project grouping when project grouping is off', async () => {
+	it('disables nested project grouping when grouping is off', async () => {
 		const onToggleGroupNestedProjectPaths = vi.fn();
 
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
-			groupByProject: false,
+			chatGrouping: 'none',
 			groupNestedProjectPaths: true,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
@@ -759,7 +782,7 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(4);
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 	});
 
 	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {

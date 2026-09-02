@@ -41,7 +41,7 @@
 		isMultiSelected = false,
 		enableNativeDrag = true,
 		displayOptions = {
-			groupByProject: false,
+			grouping: 'none',
 			groupNestedProjectPaths: false,
 			chatItemLayout: 'default',
 			sortMode: 'manual',

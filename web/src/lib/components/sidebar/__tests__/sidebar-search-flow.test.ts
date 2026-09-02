@@ -115,7 +115,7 @@ describe('sidebar search dialog flow', () => {
 		});
 	});
 
-	it('toggles project grouping from the sidebar actions menu', async () => {
+	it('switches chat grouping from the sidebar actions menu', async () => {
 		render(SidebarHost, {
 			chats: [
 				createChat('chat-a', 'Project B chat', { projectPath: '/tmp/project-b' }),
@@ -129,16 +129,58 @@ describe('sidebar search dialog flow', () => {
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(menuTrigger);
 
-		const groupByProjectItem = await screen.findByRole('menuitemcheckbox', {
+		const projectGrouping = await screen.findByRole('menuitemradio', {
 			name: 'Group chats by project',
 		});
-		expect(groupByProjectItem.getAttribute('aria-checked')).toBe('true');
+		expect(projectGrouping.getAttribute('aria-checked')).toBe('true');
+		const noGrouping = screen.getByRole('menuitemradio', { name: 'No grouping' });
+		expect(noGrouping.getAttribute('aria-checked')).toBe('false');
 
-		await fireEvent.click(groupByProjectItem);
+		await fireEvent.click(noGrouping);
 
 		await waitFor(() => {
 			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
 		});
+	});
+
+	it('groups inactive and archived chats into time sections from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			chats: [
+				createChat('chat-active', 'Active chat', {
+					status: 'running',
+					projectPath: '/tmp/project-a',
+				}),
+				createChat('chat-inactive', 'Inactive chat', {
+					status: 'running',
+					projectPath: '/tmp/project-b',
+					lastActivityAt: '2024-12-20T00:00:00.000Z',
+				}),
+				createChat('chat-archived', 'Archived chat', {
+					status: 'running',
+					projectPath: '/tmp/project-a',
+					isArchived: true,
+				}),
+			],
+			autoLoadSavedSearches: false,
+		});
+
+		expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeNull();
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		const projectAndTime = await screen.findByRole('menuitemradio', {
+			name: 'Group chats by project and time',
+		});
+		expect(projectAndTime.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(projectAndTime);
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-sidebar-section-header="inactive"]')).toBeTruthy();
+		});
+		expect(document.querySelector('[data-sidebar-section-header="archived"]')).toBeTruthy();
+		expect(screen.getByText('Inactive for 3 days')).toBeTruthy();
 	});
 
 	it('toggles nested project grouping from the sidebar actions menu when project grouping is enabled', async () => {

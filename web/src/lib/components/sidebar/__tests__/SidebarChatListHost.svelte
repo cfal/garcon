@@ -36,7 +36,7 @@
 		selectedChatId = null,
 		isMobile = false,
 		displayOptions = {
-			groupByProject: false,
+			grouping: 'none',
 			groupNestedProjectPaths: false,
 			chatItemLayout: 'default',
 			sortMode: 'manual',

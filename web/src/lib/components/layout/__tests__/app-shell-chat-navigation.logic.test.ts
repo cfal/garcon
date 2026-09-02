@@ -40,7 +40,8 @@ describe('resolveAdjacentChatId', () => {
 		const chats = [chat('normal-a'), chat('normal-b'), chat('pinned-c', { isPinned: true })];
 		const displayedChatIds = buildSidebarDisplayChatIds({
 			displayedChats: chats,
-			groupByProject: false,
+			grouping: 'none',
+			currentTime: new Date('2025-06-01T12:00:00.000Z'),
 		});
 
 		expect(displayedChatIds).toEqual(['pinned-c', 'normal-a', 'normal-b']);

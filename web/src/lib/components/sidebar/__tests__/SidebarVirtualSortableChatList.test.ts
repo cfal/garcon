@@ -251,7 +251,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				makeChat(index, { projectPath: `/tmp/project-${index % 20}` }),
 			),
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -277,7 +277,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -304,7 +304,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -326,7 +326,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: true,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -350,7 +350,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: true,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -395,7 +395,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'recent',
@@ -423,7 +423,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'recent',
@@ -449,7 +449,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'recent',
@@ -470,7 +470,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -496,7 +496,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -542,7 +542,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'compact',
 				sortMode: 'manual',
@@ -560,7 +560,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -578,7 +578,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -596,7 +596,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -611,7 +611,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(20),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -627,7 +627,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(60),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -646,7 +646,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(60),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -678,7 +678,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(60),
 			rowHeight: 88,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -698,7 +698,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(60),
 			rowHeight: 88,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -727,7 +727,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: groupedRows(),
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -748,7 +748,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: groupedRows(),
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -772,7 +772,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(60),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -793,7 +793,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(60),
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1080,7 +1080,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(20),
 			rowHeight,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'recent',
@@ -1134,7 +1134,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(500),
 			rowHeight,
 			displayOptions: {
-				groupByProject: false,
+				grouping: 'none',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'recent',
@@ -1470,7 +1470,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			isMobile: true,
 			rowHeight,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',
@@ -1515,7 +1515,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			isMobile: true,
 			rowHeight,
 			displayOptions: {
-				groupByProject: true,
+				grouping: 'project',
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'default',
 				sortMode: 'manual',

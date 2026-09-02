@@ -5,6 +5,7 @@
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
+	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
@@ -13,6 +14,16 @@
 		type SidebarVirtualChatRow,
 		type SidebarVirtualRow,
 	} from './sidebar-virtual-chat-list';
+	import {
+		closestEdgeForRow,
+		mountedChatRowIds as domMountedChatRowIds,
+		mountedElementForScrollTarget as domMountedElementForScrollTarget,
+		mountedRowAtPoint,
+		mountedVirtualItemAtPoint,
+		pointIsInsideViewport as domPointIsInsideViewport,
+		sidebarScrollTargetForChat,
+		type SidebarScrollTarget,
+	} from './sidebar-chat-list-dom';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
@@ -272,40 +283,11 @@
 	}
 
 	function pointIsInsideViewport(clientX: number, clientY: number): boolean {
-		if (!viewportRef) return false;
-		const rect = viewportRef.getBoundingClientRect();
-		return (
-			clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
-		);
+		return Boolean(viewportRef && domPointIsInsideViewport(viewportRef, clientX, clientY));
 	}
 
 	function inputIsInsideViewport(input: Input): boolean {
 		return pointIsInsideViewport(input.clientX, input.clientY);
-	}
-
-	function mountedRowAtPoint(clientX: number, clientY: number): HTMLElement | null {
-		const target = document.elementFromPoint(clientX, clientY);
-		if (!(target instanceof Element)) return null;
-		return target.closest<HTMLElement>('[data-sidebar-virtual-row]');
-	}
-
-	function mountedVirtualItemAtPoint(clientX: number, clientY: number): HTMLElement | null {
-		const target = document.elementFromPoint(clientX, clientY);
-		if (!(target instanceof Element)) return null;
-		return target.closest<HTMLElement>('[data-sidebar-virtual-item]');
-	}
-
-	function mountedChatRowIds(): string[] {
-		const container = viewportRef ?? listEl;
-		if (!container) return [];
-		return Array.from(container.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'))
-			.map((element) => element.dataset.sidebarVirtualRow)
-			.filter((id): id is string => Boolean(id));
-	}
-
-	function closestEdgeForRow(rowEl: HTMLElement, clientY: number): Edge {
-		const rect = rowEl.getBoundingClientRect();
-		return clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
 	}
 
 	function lastValidDropMatches(sourceData: SidebarChatDragData): boolean {
@@ -318,7 +300,7 @@
 
 	function lastValidDropMatchesPreviewedSourcePlacement(sourceData: SidebarChatDragData): boolean {
 		if (!lastValidDropMatches(sourceData) || !lastValidDrop) return false;
-		const mountedOrder = mountedChatRowIds();
+		const mountedOrder = domMountedChatRowIds(viewportRef ?? listEl);
 		const sourceIndex = mountedOrder.indexOf(sourceData.chatId);
 		const targetIndex = mountedOrder.indexOf(lastValidDrop.targetChatId);
 		if (sourceIndex < 0 || targetIndex < 0) return false;
@@ -781,48 +763,15 @@
 		event.stopPropagation();
 	}
 
-	function scrollTargetForChat(
-		chatId: string,
-	): { index: number; chatId?: string; projectKey?: string } | null {
-		const chatIndex = rows.findIndex((row) => row.type === 'chat' && row.chat.id === chatId);
-		if (chatIndex >= 0) return { index: chatIndex, chatId };
-
-		const projectIndex = rows.findIndex(
-			(row) => row.type === 'project-header' && row.chatIds.includes(chatId),
-		);
-		if (projectIndex < 0) return null;
-		const row = rows[projectIndex];
-		if (!row || row.type !== 'project-header') return null;
-		return { index: projectIndex, projectKey: row.projectKey };
-	}
-
-	function mountedElementForScrollTarget(target: {
-		chatId?: string;
-		projectKey?: string;
-	}): HTMLElement | null {
-		if (!viewportRef) return null;
-		if (target.chatId) {
-			return (
-				Array.from(viewportRef.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]')).find(
-					(element) => element.dataset.sidebarVirtualRow === target.chatId,
-				) ?? null
-			);
-		}
-		if (target.projectKey) {
-			return (
-				Array.from(viewportRef.querySelectorAll<HTMLElement>('[data-sidebar-project-key]')).find(
-					(element) => element.dataset.sidebarProjectKey === target.projectKey,
-				) ?? null
-			);
-		}
-		return null;
+	function scrollTargetForChat(chatId: string): SidebarScrollTarget | null {
+		return sidebarScrollTargetForChat(rows, chatId);
 	}
 
 	function scrollChatIntoView(chatId: string): boolean {
 		const target = scrollTargetForChat(chatId);
 		if (!target) return false;
 		if (viewportRef) {
-			const targetEl = mountedElementForScrollTarget(target);
+			const targetEl = domMountedElementForScrollTarget(viewportRef, target);
 			if (targetEl) {
 				const viewportBox = viewportRef.getBoundingClientRect();
 				const targetBox = targetEl.getBoundingClientRect();
@@ -946,6 +895,14 @@
 				>
 					{#if row.type === 'project-header'}
 						<SidebarProjectHeaderRow
+							{row}
+							containsSelectedChat={Boolean(
+								row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
+							)}
+							onToggle={onToggleProjectCollapsed}
+						/>
+					{:else if row.type === 'section-header'}
+						<SidebarSectionHeaderRow
 							{row}
 							containsSelectedChat={Boolean(
 								row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),

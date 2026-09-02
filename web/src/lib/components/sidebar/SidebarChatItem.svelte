@@ -268,7 +268,7 @@
 			{isSelected}
 			{currentTime}
 			showTimestamp={true}
-			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
+			showProjectPath={displayOptions.grouping === 'none' || showProjectPathInGroup}
 			chatItemLayout={displayOptions.chatItemLayout}
 			titleBadge={isSingleLineLayout ? stateBadge : undefined}
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}

@@ -20,17 +20,22 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import Clock from '@lucide/svelte/icons/clock';
+	import History from '@lucide/svelte/icons/history';
+	import List from '@lucide/svelte/icons/list';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
-	import type { SidebarChatItemLayout } from '$lib/stores/local-settings.svelte';
+	import type {
+		SidebarChatGrouping,
+		SidebarChatItemLayout,
+	} from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
 		visibleUnreadCount?: number;
 		isMarkingAllRead?: boolean;
-		groupByProject?: boolean;
+		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
 		sortByRecent?: boolean;
@@ -42,7 +47,7 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
-		onToggleGroupByProject?: () => void;
+		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
 		onToggleSortByRecent?: () => void;
@@ -57,7 +62,7 @@
 		isLoading,
 		visibleUnreadCount = 0,
 		isMarkingAllRead = false,
-		groupByProject = false,
+		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
 		sortByRecent = false,
@@ -69,7 +74,7 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
-		onToggleGroupByProject,
+		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
 		onToggleSortByRecent,
@@ -94,7 +99,7 @@
 	}
 
 	function handleToggleGroupNestedProjectPaths() {
-		if (!groupByProject) return;
+		if (chatGrouping === 'none') return;
 		onToggleGroupNestedProjectPaths?.();
 	}
 
@@ -174,16 +179,32 @@
 					<Clock class="h-3.5 w-3.5" />
 					{m.sidebar_chats_sort_by_recent()}
 				</DropdownMenuCheckboxItem>
-				<DropdownMenuCheckboxItem
-					checked={groupByProject}
-					onCheckedChange={() => onToggleGroupByProject?.()}
-				>
-					<FolderTree class="h-3.5 w-3.5" />
-					{m.settings_sidebar_group_by_project()}
-				</DropdownMenuCheckboxItem>
+				<DropdownMenuSeparator />
+				<DropdownMenuGroup>
+					<DropdownMenuGroupHeading>
+						{m.settings_sidebar_chat_grouping_heading()}
+					</DropdownMenuGroupHeading>
+					<DropdownMenuRadioGroup
+						value={chatGrouping}
+						onValueChange={(grouping) => onSetChatGrouping?.(grouping as SidebarChatGrouping)}
+					>
+						<DropdownMenuRadioItem value="none">
+							<List class="h-3.5 w-3.5" />
+							{m.settings_sidebar_grouping_none()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="project">
+							<FolderTree class="h-3.5 w-3.5" />
+							{m.settings_sidebar_group_by_project()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="project-and-time">
+							<History class="h-3.5 w-3.5" />
+							{m.settings_sidebar_group_by_project_and_time()}
+						</DropdownMenuRadioItem>
+					</DropdownMenuRadioGroup>
+				</DropdownMenuGroup>
 				<DropdownMenuCheckboxItem
 					checked={groupNestedProjectPaths}
-					disabled={!groupByProject}
+					disabled={chatGrouping === 'none'}
 					onCheckedChange={handleToggleGroupNestedProjectPaths}
 				>
 					<FolderTree class="h-3.5 w-3.5" />
