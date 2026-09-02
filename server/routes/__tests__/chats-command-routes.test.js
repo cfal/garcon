@@ -189,7 +189,10 @@ function createRouteAgent(sessionOverrides = {}) {
         if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
-        await input.preparation?.prepare();
+        await input.preparation?.prepare({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+        });
         await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
@@ -205,7 +208,10 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     runInitialInput: mock(async (input) => {
       const reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
-      await input.preparation?.prepare();
+      await input.preparation?.prepare({
+        signal: reservation.executionAdmission.signal,
+        assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+      });
       await queue.registerPendingUserInput(input.command.chatId, input.content, input.options);
       await input.settlement.markScheduled(input.command, input.options.turnId);
       await input.dispatch?.(reservation.executionAdmission);
@@ -854,6 +860,7 @@ describe('REST chat command routes', () => {
       orderGroup: 'normal',
     });
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(forkChatFileCopy.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
     expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
@@ -936,6 +943,7 @@ describe('REST chat command routes', () => {
       errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
       retryable: true,
     });
+    expect(forkChatFileCopy.mock.calls.at(-1)[0].signal).toBe(request.signal);
     expect(server.timeout).toHaveBeenCalledWith(request, 0);
   });
 

@@ -253,7 +253,10 @@ function makeService(overrides = {}) {
         if (control.entries.length > 0 || control.pause) {
           throw new DomainError('SESSION_BUSY', 'Chat execution is blocked by pending control state', 409, true);
         }
-        await input.preparation?.prepare();
+        await input.preparation?.prepare({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+        });
         await queue.admitUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
       } catch (error) {
@@ -284,7 +287,10 @@ function makeService(overrides = {}) {
       let scheduled = false;
       try {
         reservation = queue.reserveDirectTurn(input.command.chatId, input.options);
-        await input.preparation?.prepare();
+        await input.preparation?.prepare({
+          signal: reservation.executionAdmission.signal,
+          assertAdmissionActive: () => reservation.executionAdmission.signal.throwIfAborted(),
+        });
         await queue.admitUserInput(input.command.chatId, input.content, input.options);
         await input.settlement.markScheduled(input.command, input.options.turnId);
         scheduled = true;

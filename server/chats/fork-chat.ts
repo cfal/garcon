@@ -56,6 +56,7 @@ interface ForkChatInput {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
+  signal: AbortSignal;
   upToOrdinal?: number;
   // Consent to a handoff fork when the point cannot be forked natively. Without it the
   // integration's refusal reaches the caller, who asks the user before repeating the request.
@@ -74,6 +75,7 @@ interface ForkChatInput {
     targetChatId: string;
     messageOrdinal?: number;
     providerMeta?: JsonObject | null;
+    signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
   // Reads the forked session's own history so the target feed matches the session it resumes
@@ -82,6 +84,7 @@ interface ForkChatInput {
     targetChatId: string;
     sourceSession: ChatRegistryEntry;
     fork: StartedAgentSession;
+    signal: AbortSignal;
   }) => Promise<LedgerRowDraft[] | null>;
 }
 
@@ -128,6 +131,7 @@ export async function forkChatFileCopy({
   sourceSession,
   sourceChatId,
   targetChatId,
+  signal,
   upToOrdinal,
   allowHandoffFork = false,
   registry,
@@ -139,6 +143,7 @@ export async function forkChatFileCopy({
   discardForkedAgentSession,
   readForkedNativeHistory,
 }: ForkChatInput): Promise<ForkChatFileCopyResult> {
+  signal.throwIfAborted();
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
   const targetEpoch = crypto.randomUUID();
@@ -175,6 +180,7 @@ export async function forkChatFileCopy({
         sourceSession,
         sourceChatId,
         targetChatId,
+        signal,
         ...(upToOrdinal === undefined
           ? {}
           : {
@@ -183,10 +189,18 @@ export async function forkChatFileCopy({
             }),
       });
     } catch (error) {
+      signal.throwIfAborted();
       if (!allowHandoffFork || !isUnsettledForkPoint(error)) throw error;
       forkOutcome = null;
     }
   }
+  const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
+  await throwIfForkCancelled(
+    signal,
+    nativeFork,
+    sourceSession.agentId,
+    discardForkedAgentSession,
+  );
   if (forkOutcome?.kind === 'unmaterialized' && !allowHandoffFork) {
     throw new DomainError(
       'TRANSCRIPT_NOT_YET_PERSISTED',
@@ -195,7 +209,6 @@ export async function forkChatFileCopy({
       true,
     );
   }
-  const nativeFork = forkOutcome?.kind === 'materialized' ? forkOutcome.session : null;
   try {
     validateForkedSeedReceipt(sourceSession, nativeFork);
   } catch (error) {
@@ -229,15 +242,16 @@ export async function forkChatFileCopy({
         targetChatId,
         sourceSession,
         fork: nativeFork,
+        signal,
       });
+      signal.throwIfAborted();
     } catch (error) {
       const cleanupErrors = await discardForkResources(
         nativeFork,
         sourceSession.agentId,
         discardForkedAgentSession,
       );
-      if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
-      throw error;
+      throwForkFailureAfterCleanup(signal, error, cleanupErrors);
     }
   }
   const sessionRow: LedgerRowDraft[] = nativeFork
@@ -360,21 +374,31 @@ export async function forkChatFileCopy({
 
   try {
     await registry.flush();
+    signal.throwIfAborted();
     await registry.updateChat(sourceChatId, {
       nextForkOrdinal: nextForkOrdinal + 1,
     }, { flush: true });
+    signal.throwIfAborted();
     await settings.ensureInNormal(targetChatId);
+    signal.throwIfAborted();
 
     const sourceMeta = metadata.getChatMetadata(sourceChatId);
     if (sourceMeta?.firstMessage) metadata.addNewChatMetadata(targetChatId, sourceMeta.firstMessage);
     await settings.setSessionName(targetChatId, forkTitle);
+    signal.throwIfAborted();
   } catch (error) {
+    const cleanupErrors: unknown[] = [];
     try {
       await rollback();
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], `Failed to create and roll back fork ${targetChatId}`);
+      cleanupErrors.push(rollbackError);
     }
-    throw error;
+    throwForkFailureAfterCleanup(
+      signal,
+      error,
+      cleanupErrors,
+      `Failed to create and roll back fork ${targetChatId}`,
+    );
   }
 
   logger.info('fork created', {
@@ -407,6 +431,44 @@ async function discardForkResources(
   return (await Promise.allSettled(cleanups)).flatMap((result) => (
     result.status === 'rejected' ? [result.reason] : []
   ));
+}
+
+async function throwIfForkCancelled(
+  signal: AbortSignal,
+  nativeFork: StartedAgentSession | null,
+  agentId: string,
+  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>,
+): Promise<void> {
+  if (!signal.aborted) return;
+  const cleanupErrors = await discardForkResources(
+    nativeFork,
+    agentId,
+    discardForkedAgentSession,
+  );
+  try {
+    signal.throwIfAborted();
+  } catch (error) {
+    if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors]);
+    throw error;
+  }
+}
+
+function throwForkFailureAfterCleanup(
+  signal: AbortSignal,
+  error: unknown,
+  cleanupErrors: readonly unknown[],
+  aggregateMessage?: string,
+): never {
+  let primary = error;
+  try {
+    signal.throwIfAborted();
+  } catch (cancellation) {
+    primary = cancellation;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError([primary, ...cleanupErrors], aggregateMessage);
+  }
+  throw primary;
 }
 
 function validateForkedSeedReceipt(

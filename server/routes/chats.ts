@@ -751,7 +751,7 @@ export default function createChatRoutes({
     try {
       const input = parseCommandRequest(parseForkChatCommandRequest, body);
       if (isRequestTimeoutServer(server)) server.timeout(request, FORK_REQUEST_TIMEOUT_SECONDS);
-      const result = await commands.forkChat(input);
+      const result = await commands.forkChat(input, request.signal);
 
       return Response.json(result);
     } catch (error: unknown) {

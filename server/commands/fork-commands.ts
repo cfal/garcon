@@ -32,7 +32,10 @@ export class ForkCommands {
     return this.support.deps;
   }
 
-  async forkChat(input: ForkChatCommandRequest): Promise<ForkChatResponse> {
+  async forkChat(
+    input: ForkChatCommandRequest,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<ForkChatResponse> {
     const normalized = {
       ...input,
       sourceChatId: this.support.requireChatId(input.sourceChatId, 'sourceChatId'),
@@ -40,7 +43,7 @@ export class ForkCommands {
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
       const context = await this.validateFork(normalized);
-      await this.forkChatFromContext(context);
+      await this.forkChatFromContext(context, signal);
       return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
     });
   }
@@ -138,7 +141,7 @@ export class ForkCommands {
         turnId,
       }, 'fork-run', {
         operation: 'fork-run',
-        prepare: async () => {
+        prepare: async ({ signal }) => {
           if (forkAlreadyCreated) return;
           await this.deps.ledger.update(ledger.record.key, {
             forkPreparation: {
@@ -147,7 +150,7 @@ export class ForkCommands {
               sourceNextForkOrdinal: forkContext.sourceNextForkOrdinal,
             },
           });
-          forkResult = await this.forkChatFromContext(forkContext);
+          forkResult = await this.forkChatFromContext(forkContext, signal);
           await this.deps.ledger.update(ledger.record.key, {
             forkPreparation: {
               phase: 'created',
@@ -287,7 +290,10 @@ export class ForkCommands {
     }
   }
 
-  private async forkChatFromContext(context: ForkContext): Promise<ForkChatFileCopyResult> {
+  private async forkChatFromContext(
+    context: ForkContext,
+    signal: AbortSignal,
+  ): Promise<ForkChatFileCopyResult> {
     if (!this.deps.forkChatFileCopy) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
@@ -296,6 +302,7 @@ export class ForkCommands {
       sourceSession: context.sourceSession,
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
+      signal,
       ...(context.upToOrdinal ? { upToOrdinal: context.upToOrdinal } : {}),
       ...(context.allowHandoffFork ? { allowHandoffFork: true } : {}),
       registry: this.deps.chats,

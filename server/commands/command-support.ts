@@ -22,6 +22,7 @@ import {
 import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-id.js';
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { UserMessagePresentation } from '../../common/chat-types.js';
+import type { JsonObject } from '../../common/json.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type {
   AgentExecutionCommandType,
@@ -107,6 +108,7 @@ export type ForkChatFileCopyDep = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
+  signal: AbortSignal;
   upToOrdinal?: number;
   allowHandoffFork?: boolean;
   registry: IChatRegistry;
@@ -119,12 +121,15 @@ export type ForkChatFileCopyDep = (args: {
     sourceChatId: string;
     targetChatId: string;
     messageOrdinal?: number;
+    providerMeta?: JsonObject | null;
+    signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
   readForkedNativeHistory: (args: {
     targetChatId: string;
     sourceSession: ChatRegistryEntry;
     fork: StartedAgentSession;
+    signal: AbortSignal;
   }) => Promise<LedgerRowDraft[] | null>;
 }) => Promise<ForkChatFileCopyResult>;
 
@@ -132,6 +137,7 @@ export type ForkedNativeHistoryReaderDep = (args: {
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
   fork: StartedAgentSession;
+  signal: AbortSignal;
 }) => Promise<LedgerRowDraft[] | null>;
 
 export interface FileMentionResolverDep {

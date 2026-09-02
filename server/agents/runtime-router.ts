@@ -502,6 +502,7 @@ export class AgentRuntimeRouter {
     targetChatId: string;
     messageOrdinal?: number;
     providerMeta?: JsonObject | null;
+    signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null> {
     if (
       args.messageOrdinal !== undefined
@@ -532,7 +533,12 @@ export class AgentRuntimeRouter {
         source,
         selection,
         operation.turnId,
-        {},
+        {
+          executionAdmission: {
+            signal: args.signal,
+            markStarted: async () => {},
+          },
+        },
       );
       const result = await integration.forking.fork({
         chatId: context.chatId,

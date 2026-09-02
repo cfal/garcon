@@ -569,7 +569,7 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
-      readForkedNativeHistory: async ({ targetChatId, sourceSession, fork }) => {
+      readForkedNativeHistory: async ({ targetChatId, sourceSession, fork, signal }) => {
         const integration = integrationRegistry.get(sourceSession.agentId);
         if (!integration?.nativeHistoryImport) return null;
         return importNativeHistoryDrafts({
@@ -581,7 +581,7 @@ export async function startServer(): Promise<void> {
           // The fork target starts with no carryover of its own; its history is the
           // session it resumes from.
           carryOverRevision: carryOver.revision([]),
-          signal: new AbortController().signal,
+          signal,
           now: () => new Date().toISOString(),
         });
       },

@@ -139,9 +139,7 @@ async function forkJsonlAtProviderPoint(
       },
     };
   } catch (error) {
-    if (request.providerMeta || options.transformEntries) {
-      await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
-    }
+    await fs.rm(result.nativePath, { force: true }).catch(() => undefined);
     throw error;
   }
 }

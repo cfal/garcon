@@ -95,6 +95,7 @@ export interface AgentRegistryServiceContract {
     sourceChatId: string;
     targetChatId: string;
     messageOrdinal?: number;
+    signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession(agentId: string, session: StartedAgentSession): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
@@ -298,6 +299,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     sourceChatId: string;
     targetChatId: string;
     messageOrdinal?: number;
+    signal: AbortSignal;
   }) {
     return this.#runtime.forkAgentSession(args);
   }

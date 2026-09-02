@@ -90,6 +90,7 @@ function makeRouter(fork) {
 
 describe('AgentRuntimeRouter forks', () => {
   it('binds a point fork to the selected native prefix', async () => {
+    const controller = new AbortController();
     const fork = mock(async () => ({
       kind: 'materialized',
       session: {
@@ -105,10 +106,12 @@ describe('AgentRuntimeRouter forks', () => {
       targetChatId: 'target-chat',
       messageOrdinal: 1,
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
+      signal: controller.signal,
     });
 
     expect(fork).toHaveBeenCalledWith(expect.objectContaining({
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
+      admission: expect.objectContaining({ signal: controller.signal }),
       source: expect.objectContaining({ chatId: 'source-chat' }),
     }));
     expect(integration.forking).not.toHaveProperty('resolvePoint');

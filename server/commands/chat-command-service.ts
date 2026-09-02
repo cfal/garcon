@@ -77,8 +77,8 @@ export class ChatCommandService {
     return this.#session.submitRun(input);
   }
 
-  forkChat(input: ForkChatCommandRequest) {
-    return this.#fork.forkChat(input);
+  forkChat(input: ForkChatCommandRequest, signal?: AbortSignal) {
+    return this.#fork.forkChat(input, signal);
   }
 
   deleteChat(input: DeleteChatInput) {

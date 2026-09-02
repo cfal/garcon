@@ -299,6 +299,47 @@ describe('createJsonlNativeForking prefix protection', () => {
     })).rejects.toBe(failure);
     expect(await readdir(fixture.root)).toEqual(filesBeforeFork);
   });
+
+  it('removes an untransformed whole-session fork cancelled during receipt verification', async () => {
+    const fixture = await createFixture();
+    const filesBeforeFork = await readdir(fixture.root);
+    const controller = new AbortController();
+    const reason = new Error('fork admission cancelled');
+    const nativeEvidence = {
+      ...fixture.options.nativeEvidence,
+      async load(input: Parameters<AgentNativeEvidenceSource['load']>[0]) {
+        const native = fixture.nativeSessions.decode(input.chat.nativeSession);
+        if (native.path !== fixture.sourcePath) {
+          controller.abort(reason);
+          input.signal.throwIfAborted();
+        }
+        return fixture.options.nativeEvidence.load(input);
+      },
+    } satisfies Pick<AgentNativeEvidenceSource, 'load' | 'resolveNativeSession'>;
+    const forking = createJsonlNativeForking({
+      ...fixture.options,
+      nativeEvidence,
+    });
+    const receipt = createNativeSeedReceipt({
+      agentSessionId: sourceAgentSessionId,
+      placement: 'user-prefix',
+      prefix: 'first',
+    });
+
+    await expect(forking.fork({
+      ...fixture.request,
+      providerMeta: null,
+      admission: {
+        ...fixture.request.admission,
+        signal: controller.signal,
+      },
+      source: {
+        ...fixture.request.source,
+        nativeSeedReceipt: receipt,
+      },
+    })).rejects.toBe(reason);
+    expect(await readdir(fixture.root)).toEqual(filesBeforeFork);
+  });
 });
 
 describe('createJsonlNativeForking empty native prefixes', () => {
