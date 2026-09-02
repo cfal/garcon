@@ -556,6 +556,8 @@ async function dragChatToWindow(
 ): Promise<void> {
   const source = page.locator(`[data-sidebar-virtual-row="${input.chatId}"][draggable="true"]`);
   const target = page.locator(`[data-workspace-window-id="${input.windowId}"]`);
+  // Uses Playwright actionability to wait out menu scroll locks before raw mouse input.
+  await source.hover();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) throw new Error('Missing workspace Chat drag geometry.');
@@ -569,7 +571,6 @@ async function dragChatToWindow(
     targetKind === 'bottom'
       ? targetBox.y + targetBox.height - 12
       : targetBox.y + targetBox.height / 2;
-  await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
   try {
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
@@ -607,6 +608,8 @@ async function dragWorkspaceTabToWindow(
     `[id="${input.sourceWindowId}-tab-${input.surfaceId}"][draggable="true"]`,
   );
   const target = page.locator(`[data-workspace-window-id="${input.targetWindowId}"]`);
+  // Uses Playwright actionability to wait out menu scroll locks before raw mouse input.
+  await source.hover();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) throw new Error('Missing workspace tab drag geometry.');
@@ -618,7 +621,6 @@ async function dragWorkspaceTabToWindow(
       ? targetBox.x + targetBox.width / 2
       : targetBox.x + targetBox.width - 12;
   const targetY = targetBox.y + targetBox.height / 2;
-  await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
   try {
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
