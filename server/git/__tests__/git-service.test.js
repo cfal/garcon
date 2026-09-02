@@ -572,7 +572,6 @@ describe("selected-file commits", () => {
       await expect(runGitCommand(projectPath, ["rebase", "master"]))
         .rejects.toThrow("could not apply");
       await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
-      await runGitCommand(projectPath, ["add", "a.txt"]);
 
       await git.commit({
         projectPath,
@@ -633,6 +632,7 @@ describe("selected-file commits", () => {
           GIT_SEQUENCE_EDITOR: `${JSON.stringify(process.execPath)} ${JSON.stringify(sequenceEditorPath)}`,
         },
       });
+      await fs.access(path.join(projectPath, ".git", "rebase-merge", "amend"));
 
       await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
       await fs.writeFile(path.join(projectPath, "unrelated.txt"), "unrelated\n", "utf-8");
