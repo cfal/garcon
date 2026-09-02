@@ -484,6 +484,28 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
+	it('exposes revision-scoped notice clearing for the selected chat', () => {
+		const { registry, overlays } = fixture({ getSelectedChatId: () => 'chat-1' });
+		const selected = new CurrentConversationPanelTranscript({
+			panels: registry,
+			getSelectedChatId: () => 'chat-1',
+		});
+
+		selected.appendLocalNotice('progress', 'Forking chat...');
+		expect(selected.noticeRevisionForChat('chat-1')).toBe(1);
+		selected.appendLocalNotice('error', 'Failed to fork chat: unavailable');
+
+		selected.clearLocalNoticesForChat('chat-1', 1);
+
+		expect(overlays.forChat('chat-1').notices.map((notice) => notice.content)).toEqual([
+			'Failed to fork chat: unavailable',
+		]);
+
+		selected.clearLocalNoticesForChat('chat-1');
+
+		expect(overlays.forChat('chat-1').notices).toEqual([]);
+	});
+
 	it('retains rendered rows until a replacement snapshot installs atomically', async () => {
 		const replacement = deferred<void>();
 		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {

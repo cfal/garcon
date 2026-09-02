@@ -183,8 +183,12 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		if (chatId) this.options.panels.clearNotices(chatId);
 	}
 
-	clearLocalNoticesForChat(chatId: string): void {
-		this.options.panels.clearNotices(chatId);
+	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void {
+		this.options.panels.clearNotices(chatId, throughRevision);
+	}
+
+	noticeRevisionForChat(chatId: string): number {
+		return this.options.panels.noticeRevisionFor(chatId);
 	}
 
 	upsertOptimisticUserInput(input: OptimisticUserInput): void {
