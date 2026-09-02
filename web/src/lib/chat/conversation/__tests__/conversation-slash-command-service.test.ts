@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { compactChat, forkChat, forkRunChat } from '$lib/api/chats.js';
+import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage } from '$shared/chat-types';
@@ -31,6 +31,7 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 const mockCompactChat = vi.mocked(compactChat);
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
+const mockSelfHandoffRunChat = vi.mocked(selfHandoffRunChat);
 const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
 
 function deferred<T>() {
@@ -143,11 +144,16 @@ function createDeps(chat = createChat()) {
 		}),
 		restoreDraftIfRevision,
 	};
-	const appendLocalNotice = vi.fn();
+	let noticeRevision = 0;
+	const appendLocalNotice = vi.fn((_noticeType: LocalNoticeType, _content: string) => {
+		noticeRevision += 1;
+	});
 	const appendLocalNoticeForChat = vi.fn(
 		(_chatId: string, noticeType: LocalNoticeType, content: string) =>
 			appendLocalNotice(noticeType, content),
 	);
+	const noticeRevisionForChat = vi.fn(() => noticeRevision);
+	const clearLocalNoticesForChat = vi.fn();
 	const sessions = {
 		selectedChatId: chat.id,
 		byId: { [chat.id]: chat },
@@ -181,6 +187,8 @@ function createDeps(chat = createChat()) {
 			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
 			appendLocalNoticeForChat,
+			noticeRevisionForChat,
+			clearLocalNoticesForChat,
 		},
 		composerState,
 		agentState: { model: 'sonnet' },
@@ -207,7 +215,15 @@ function createDeps(chat = createChat()) {
 		confirmHandoffFork: vi.fn().mockResolvedValue(true),
 		scrollToBottom: vi.fn(),
 	} satisfies ConversationSlashCommandDeps;
-	return { deps, composerState, appendLocalNotice, appendLocalNoticeForChat, cursor };
+	return {
+		deps,
+		composerState,
+		appendLocalNotice,
+		appendLocalNoticeForChat,
+		noticeRevisionForChat,
+		clearLocalNoticesForChat,
+		cursor,
+	};
 }
 
 describe('ConversationSlashCommandService', () => {
@@ -1085,6 +1101,150 @@ describe('ConversationSlashCommandService', () => {
 			'error',
 			'Could not confirm whether the fork was created. Check the chat list before trying again.',
 		);
+	});
+
+	it('clears the forking progress notice through its captured revision on success', async () => {
+		const { deps, appendLocalNotice, noticeRevisionForChat, clearLocalNoticesForChat } =
+			createDeps();
+		mockForkRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
+		expect(noticeRevisionForChat).toHaveBeenCalledWith('chat-1');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('keeps the failure notice appended after the forking progress notice', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockForkRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenCalledTimes(2);
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Failed to fork chat: Chat is running',
+		);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the forking progress notice when the handoff fork confirmation is declined', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockForkRunChat.mockRejectedValueOnce(
+			new ApiError(
+				409,
+				'The transcript is not written yet',
+				'TRANSCRIPT_NOT_YET_PERSISTED',
+				undefined,
+				true,
+			),
+		);
+		deps.confirmHandoffFork.mockResolvedValueOnce(false);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenCalledTimes(1);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the forking progress notice after a bare fork settles', async () => {
+		const { deps, clearLocalNoticesForChat } = createDeps();
+		mockForkChat.mockResolvedValueOnce({ success: true, chat: createServerEntry('chat-2') });
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('accepted');
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: 'chat-1',
+			chatId: expect.stringMatching(/^\d+$/),
+		});
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
+	it('clears the handoff progress notice through its captured revision on success', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockSelfHandoffRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitHandoffCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'take over here',
+			[],
+			true,
+		);
+
+		expect(appendLocalNotice).toHaveBeenCalledWith('progress', 'Continuing in a new chat...');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('keeps the handoff failure notice appended after the progress notice', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		mockSelfHandoffRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+
+		const outcome = await new ConversationSlashCommandService(deps).submitHandoffCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'take over here',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('rejected');
+		expect(appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Failed to hand off chat: Chat is running',
+		);
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
 	});
 
 	it('forks without a message and preserves the requested ordinal', async () => {
