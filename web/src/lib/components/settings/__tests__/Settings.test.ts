@@ -139,6 +139,26 @@ describe('Settings', () => {
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.queryByRole('combobox', { name: 'Chat list position' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			const inactivityDuration = screen.getByRole('combobox', {
+				name: 'Inactivity duration',
+			});
+			expect((inactivityDuration as HTMLSelectElement).value).toBe('3-days');
+			expect(screen.getByText('Used when grouping chat items by activity.')).toBeTruthy();
+			for (const label of [
+				'2 days',
+				'3 days',
+				'4 days',
+				'5 days',
+				'1 week',
+				'2 weeks',
+				'1 month',
+				'2 months',
+				'3 months',
+			]) {
+				expect(screen.getByRole('option', { name: label })).toBeTruthy();
+			}
+			await fireEvent.change(inactivityDuration, { target: { value: '2-weeks' } });
+			expect(onLocalSet).toHaveBeenCalledWith('sidebarInactivityDuration', '2-weeks');
 			const alwaysExpandCliMessages = screen.getByRole('switch', {
 				name: 'Always expand CLI messages',
 			});
@@ -211,8 +231,8 @@ describe('Settings', () => {
 			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'same-window');
 			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'same-window');
 			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'same-window');
-			expect(screen.queryByText('Group chats by project')).toBeNull();
-			expect(screen.queryByText('Group nested project paths')).toBeNull();
+			expect(screen.queryByText('Chat grouping')).toBeNull();
+			expect(screen.queryByText('Combine nested paths')).toBeNull();
 			expect(
 				screen.queryByText(
 					'Places chats from nested project folders under the outer project group. Useful for worktrees and monorepos.',

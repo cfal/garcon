@@ -31,8 +31,26 @@ export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 
-export const SIDEBAR_CHAT_GROUPING_VALUES = ['none', 'project', 'project-and-time'] as const;
+export const SIDEBAR_CHAT_GROUPING_VALUES = [
+	'none',
+	'project',
+	'project-and-activity',
+	'activity',
+] as const;
 export type SidebarChatGrouping = (typeof SIDEBAR_CHAT_GROUPING_VALUES)[number];
+
+export const SIDEBAR_INACTIVITY_DURATION_VALUES = [
+	'2-days',
+	'3-days',
+	'4-days',
+	'5-days',
+	'1-week',
+	'2-weeks',
+	'1-month',
+	'2-months',
+	'3-months',
+] as const;
+export type SidebarInactivityDuration = (typeof SIDEBAR_INACTIVITY_DURATION_VALUES)[number];
 
 export const SIDEBAR_CHAT_ITEM_LAYOUT_VALUES = ['default', 'compact', 'single-line'] as const;
 export type SidebarChatItemLayout = (typeof SIDEBAR_CHAT_ITEM_LAYOUT_VALUES)[number];
@@ -118,6 +136,7 @@ export interface LocalSettingsSnapshot {
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGrouping: SidebarChatGrouping;
+	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: SidebarChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
@@ -177,6 +196,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGrouping: 'project',
+	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'default',
 	sidebarSortMode: 'manual',
@@ -259,6 +279,17 @@ function parseSidebarChatGrouping(value: unknown): SidebarChatGrouping {
 		: DEFAULTS.sidebarGrouping;
 }
 
+export function isSidebarInactivityDuration(value: unknown): value is SidebarInactivityDuration {
+	return (
+		typeof value === 'string' &&
+		SIDEBAR_INACTIVITY_DURATION_VALUES.includes(value as SidebarInactivityDuration)
+	);
+}
+
+function parseSidebarInactivityDuration(value: unknown): SidebarInactivityDuration {
+	return isSidebarInactivityDuration(value) ? value : DEFAULTS.sidebarInactivityDuration;
+}
+
 function parseSidebarChatItemLayout(value: unknown): SidebarChatItemLayout {
 	return typeof value === 'string' &&
 		SIDEBAR_CHAT_ITEM_LAYOUT_VALUES.includes(value as SidebarChatItemLayout)
@@ -316,6 +347,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
 		sidebarGrouping: parseSidebarChatGrouping(parsed.sidebarGrouping),
+		sidebarInactivityDuration: parseSidebarInactivityDuration(
+			parsed.sidebarInactivityDuration,
+		),
 		sidebarGroupNestedProjectPaths: parseBoolean(
 			parsed.sidebarGroupNestedProjectPaths,
 			DEFAULTS.sidebarGroupNestedProjectPaths,
@@ -399,6 +433,9 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGrouping = $state<SidebarChatGrouping>(DEFAULTS.sidebarGrouping);
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>(
+		DEFAULTS.sidebarInactivityDuration,
+	);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
@@ -496,6 +533,7 @@ export class LocalSettingsStore {
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGrouping: this.sidebarGrouping,
+			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
 			sidebarSortMode: this.sidebarSortMode,
@@ -538,6 +576,7 @@ export class LocalSettingsStore {
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGrouping = snap.sidebarGrouping;
+		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
 		this.sidebarSortMode = snap.sidebarSortMode;

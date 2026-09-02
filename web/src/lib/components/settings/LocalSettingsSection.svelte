@@ -9,10 +9,13 @@
 	import {
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
+		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		isChatMaxWidth,
 		isFileOpenPlacement,
+		isSidebarInactivityDuration,
 		type ChatMaxWidth,
 		type FileOpenPlacementPreference,
+		type SidebarInactivityDuration,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -51,6 +54,17 @@
 		'new-window': m.settings_file_open_placement_new_window,
 		dialog: m.settings_file_open_placement_dialog,
 	};
+	const sidebarInactivityDurationLabels: Record<SidebarInactivityDuration, () => string> = {
+		'2-days': m.settings_sidebar_inactivity_duration_2_days,
+		'3-days': m.settings_sidebar_inactivity_duration_3_days,
+		'4-days': m.settings_sidebar_inactivity_duration_4_days,
+		'5-days': m.settings_sidebar_inactivity_duration_5_days,
+		'1-week': m.settings_sidebar_inactivity_duration_1_week,
+		'2-weeks': m.settings_sidebar_inactivity_duration_2_weeks,
+		'1-month': m.settings_sidebar_inactivity_duration_1_month,
+		'2-months': m.settings_sidebar_inactivity_duration_2_months,
+		'3-months': m.settings_sidebar_inactivity_duration_3_months,
+	};
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
 	}
@@ -63,6 +77,12 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
+	}
+
+	function setSidebarInactivityDuration(value: string): void {
+		if (isSidebarInactivityDuration(value)) {
+			ls.set('sidebarInactivityDuration', value);
+		}
 	}
 
 	let snippetTriggerDraft = $state(ls.snippetTrigger);
@@ -186,6 +206,30 @@
 				>
 					{#each chatMaxWidthOptions as option (option.value)}
 						<option value={option.value}>{option.label()}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="flex items-center justify-between gap-4 py-2">
+				<div class="min-w-0">
+					<label
+						class="text-sm font-medium text-foreground"
+						for="local-sidebar-inactivity-duration"
+					>
+						{m.settings_sidebar_inactivity_duration()}
+					</label>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_sidebar_inactivity_duration_description()}
+					</p>
+				</div>
+				<select
+					id="local-sidebar-inactivity-duration"
+					class="w-28 shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-base text-foreground sm:pointer-fine:text-sm"
+					value={ls.sidebarInactivityDuration}
+					onchange={(event) =>
+						setSidebarInactivityDuration((event.currentTarget as HTMLSelectElement).value)}
+				>
+					{#each SIDEBAR_INACTIVITY_DURATION_VALUES as duration (duration)}
+						<option value={duration}>{sidebarInactivityDurationLabels[duration]()}</option>
 					{/each}
 				</select>
 			</div>

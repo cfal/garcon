@@ -21,6 +21,7 @@
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
+		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 
@@ -31,6 +32,7 @@
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
 		sidebarGrouping?: SidebarChatGrouping;
+		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: SidebarChatItemLayout;
 		collapsedProjectKeys?: Set<string>;
@@ -43,6 +45,7 @@
 		initialOpen = true,
 		autoLoadSavedSearches = true,
 		sidebarGrouping = 'project',
+		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'default',
 		collapsedProjectKeys = new Set<string>(),
@@ -109,6 +112,9 @@
 	setLocalSettings({
 		get sidebarGrouping() {
 			return sidebarGrouping;
+		},
+		get sidebarInactivityDuration() {
+			return sidebarInactivityDuration;
 		},
 		get sidebarGroupNestedProjectPaths() {
 			return sidebarGroupNestedProjectPaths;

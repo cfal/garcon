@@ -1,16 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
-	buildSidebarDisplayChatIds,
+	buildSidebarDisplayChatIds as buildSidebarDisplayChatIdsBase,
 	buildSidebarProjectKeys,
-	buildSidebarRowModel,
+	buildSidebarRowModel as buildSidebarRowModelBase,
+	sidebarActivitySection,
 	sidebarProjectKey,
-	sidebarTimeGroupedPlacement,
 } from '../sidebar-row-model';
-import { SIDEBAR_INACTIVE_AFTER_MS } from '../chat-inactivity';
+import { SIDEBAR_INACTIVITY_DURATION_MS } from '../chat-inactivity';
+import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const TEST_NOW = new Date('2025-06-01T12:00:00.000Z');
+const TEST_INACTIVITY_DURATION: SidebarInactivityDuration = '3-days';
+
+function buildSidebarRowModel(
+	input: Omit<Parameters<typeof buildSidebarRowModelBase>[0], 'inactivityDuration'> & {
+		inactivityDuration?: SidebarInactivityDuration;
+	},
+) {
+	return buildSidebarRowModelBase({
+		inactivityDuration: TEST_INACTIVITY_DURATION,
+		...input,
+	});
+}
+
+function buildSidebarDisplayChatIds(
+	input: Omit<
+		Parameters<typeof buildSidebarDisplayChatIdsBase>[0],
+		'inactivityDuration' | 'sortMode'
+	> & {
+		inactivityDuration?: SidebarInactivityDuration;
+		sortMode?: 'manual' | 'recent';
+	},
+) {
+	return buildSidebarDisplayChatIdsBase({
+		inactivityDuration: TEST_INACTIVITY_DURATION,
+		sortMode: 'manual',
+		...input,
+	});
+}
 
 function chat(
 	id: string,
@@ -354,10 +383,10 @@ describe('sidebar row model', () => {
 	});
 });
 
-describe('sidebar row model with project-and-time grouping', () => {
+describe('sidebar row model with project activity grouping', () => {
 	const activeActivity = new Date(TEST_NOW.getTime() - 60 * 60 * 1000).toISOString();
 	const inactiveActivity = new Date(
-		TEST_NOW.getTime() - SIDEBAR_INACTIVE_AFTER_MS - 60 * 60 * 1000,
+		TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['3-days'] - 60 * 60 * 1000,
 	).toISOString();
 
 	function timeGroupedChats(): ChatSessionRecord[] {
@@ -389,7 +418,7 @@ describe('sidebar row model with project-and-time grouping', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			grouping: 'project-and-time',
+			grouping: 'project-and-activity',
 			currentTime: TEST_NOW,
 		});
 
@@ -446,40 +475,104 @@ describe('sidebar row model with project-and-time grouping', () => {
 			normal: ['active-p1', 'active-p2', 'inactive-p1', 'inactive-p2'],
 			archived: ['archived-recent-p1', 'archived-old-p2'],
 		});
+		});
+
+	it('groups all chats by activity while preserving persisted order boundaries', () => {
+		const chats = timeGroupedChats();
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			grouping: 'activity',
+			currentTime: TEST_NOW,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'section:active',
+			'pinned-old-p1',
+			'active-p1',
+			'active-p2',
+			'section:inactive',
+			'inactive-p1',
+			'inactive-p2',
+			'section:archived',
+			'archived-recent-p1',
+			'archived-old-p2',
+		]);
+		expect(model.projectKeys).toEqual([]);
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'pinned-old-p1'),
+		).toMatchObject({
+			list: 'pinned',
+			reorderScopeKey: 'pinned:section:active',
+			reorderScopeIds: ['pinned-old-p1'],
+			showProjectPathInGroup: true,
+		});
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'active-p1'),
+		).toMatchObject({
+			list: 'normal',
+			reorderScopeKey: 'normal:section:active',
+			reorderScopeIds: ['active-p1', 'active-p2'],
+			showProjectPathInGroup: true,
+		});
+		expect(model.rows[0]).toMatchObject({
+			type: 'section-header',
+			section: 'active',
+			count: 3,
+			chatIds: ['pinned-old-p1', 'active-p1', 'active-p2'],
+		});
+		expect(model.visibleOrders).toEqual({
+			pinned: ['pinned-old-p1'],
+			normal: ['active-p1', 'active-p2', 'inactive-p1', 'inactive-p2'],
+			archived: ['archived-recent-p1', 'archived-old-p2'],
+		});
 	});
 
-	it('treats chats exactly at the three-day boundary as inactive', () => {
+	it('uses the configured inactivity boundary', () => {
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'boundary',
 					status: 'running',
 					isPinned: false,
 					isArchived: false,
-					lastActivityAt: new Date(TEST_NOW.getTime() - SIDEBAR_INACTIVE_AFTER_MS).toISOString(),
+					lastActivityAt: new Date(
+						TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['2-weeks'],
+					).toISOString(),
 					createdAt: '2025-01-01T00:00:00.000Z',
 				},
 				TEST_NOW,
+				'2-weeks',
 			),
 		).toBe('inactive');
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'just-active',
 					status: 'running',
 					isPinned: false,
 					isArchived: false,
-					lastActivityAt: new Date(TEST_NOW.getTime() - SIDEBAR_INACTIVE_AFTER_MS + 1).toISOString(),
+					lastActivityAt: new Date(
+						TEST_NOW.getTime() - SIDEBAR_INACTIVITY_DURATION_MS['2-weeks'] + 1,
+					).toISOString(),
 					createdAt: '2025-01-01T00:00:00.000Z',
 				},
 				TEST_NOW,
+				'2-weeks',
 			),
-		).toBe('project');
+		).toBe('active');
+	});
+
+	it('uses fixed 30-day elapsed month durations', () => {
+		const dayMs = 24 * 60 * 60 * 1000;
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['1-month']).toBe(30 * dayMs);
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['2-months']).toBe(60 * dayMs);
+		expect(SIDEBAR_INACTIVITY_DURATION_MS['3-months']).toBe(90 * dayMs);
 	});
 
 	it('falls back to creation time and counts missing timestamps as inactive', () => {
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'created-recently',
 					status: 'running',
@@ -489,10 +582,11 @@ describe('sidebar row model with project-and-time grouping', () => {
 					createdAt: activeActivity,
 				},
 				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
 			),
-		).toBe('project');
+		).toBe('active');
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'no-timestamps',
 					status: 'running',
@@ -502,13 +596,14 @@ describe('sidebar row model with project-and-time grouping', () => {
 					createdAt: null,
 				},
 				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
 			),
 		).toBe('inactive');
 	});
 
-	it('keeps timestamp-less local drafts in project groups', () => {
+	it('classifies timestamp-less local drafts as active', () => {
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'local-draft',
 					status: 'draft',
@@ -518,13 +613,14 @@ describe('sidebar row model with project-and-time grouping', () => {
 					createdAt: null,
 				},
 				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
 			),
-		).toBe('project');
+		).toBe('active');
 	});
 
 	it('keeps pinned chats in their project group and archived chats out of the inactive section', () => {
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
 				{
 					id: 'pinned-old',
 					status: 'running',
@@ -534,10 +630,25 @@ describe('sidebar row model with project-and-time grouping', () => {
 					createdAt: '2025-01-01T00:00:00.000Z',
 				},
 				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
 			),
-		).toBe('project');
+		).toBe('active');
 		expect(
-			sidebarTimeGroupedPlacement(
+			sidebarActivitySection(
+				{
+					id: 'pinned-archived-overlap',
+					status: 'running',
+					isPinned: true,
+					isArchived: true,
+					lastActivityAt: inactiveActivity,
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
+			),
+		).toBe('active');
+		expect(
+			sidebarActivitySection(
 				{
 					id: 'archived-old',
 					status: 'running',
@@ -547,6 +658,7 @@ describe('sidebar row model with project-and-time grouping', () => {
 					createdAt: '2025-01-01T00:00:00.000Z',
 				},
 				TEST_NOW,
+				TEST_INACTIVITY_DURATION,
 			),
 		).toBe('archived');
 	});
@@ -559,7 +671,7 @@ describe('sidebar row model with project-and-time grouping', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			grouping: 'project-and-time',
+			grouping: 'project-and-activity',
 			currentTime: TEST_NOW,
 			collapsedProjectKeys: new Set(['section:inactive']),
 		});
@@ -588,7 +700,7 @@ describe('sidebar row model with project-and-time grouping', () => {
 		const model = buildSidebarRowModel({
 			displayedChats: chats,
 			orders: buildSidebarChatOrderMap(chats),
-			grouping: 'project-and-time',
+			grouping: 'project-and-activity',
 			currentTime: TEST_NOW,
 		});
 
@@ -601,12 +713,12 @@ describe('sidebar row model with project-and-time grouping', () => {
 		expect(model.projectKeys).toEqual([sidebarProjectKey('/p1')]);
 	});
 
-	it('builds display chat ids with time sections', () => {
+	it('builds display chat ids with activity sections', () => {
 		const chats = timeGroupedChats();
 		expect(
 			buildSidebarDisplayChatIds({
 				displayedChats: chats,
-				grouping: 'project-and-time',
+				grouping: 'project-and-activity',
 				currentTime: TEST_NOW,
 			}),
 		).toEqual([
@@ -621,7 +733,7 @@ describe('sidebar row model with project-and-time grouping', () => {
 		expect(
 			buildSidebarDisplayChatIds({
 				displayedChats: chats,
-				grouping: 'project-and-time',
+				grouping: 'project-and-activity',
 				currentTime: TEST_NOW,
 				collapsedProjectKeys: new Set(['section:archived']),
 			}),

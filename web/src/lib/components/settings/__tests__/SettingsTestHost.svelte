@@ -60,6 +60,7 @@
 		(key) => onLocalToggle(key),
 	);
 	localSettings.chatMaxWidth = 'none';
+	localSettings.sidebarInactivityDuration = '3-days';
 	localSettings.hiddenToolTypes = [];
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {

@@ -20,6 +20,7 @@
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
+		SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte';
 	import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -32,6 +33,7 @@
 		sidebarSearch?: SidebarSearchStore;
 		autoLoadSavedSearches?: boolean;
 		sidebarGrouping?: SidebarChatGrouping;
+		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: SidebarChatItemLayout;
 		chatListAutohide?: boolean;
@@ -49,6 +51,7 @@
 		sidebarSearch,
 		autoLoadSavedSearches = true,
 		sidebarGrouping = 'project',
+		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'default',
 		chatListAutohide = false,
@@ -103,6 +106,9 @@
 	setLocalSettings({
 		get sidebarGrouping() {
 			return sidebarGrouping;
+		},
+		get sidebarInactivityDuration() {
+			return sidebarInactivityDuration;
 		},
 		get sidebarGroupNestedProjectPaths() {
 			return sidebarGroupNestedProjectPaths;

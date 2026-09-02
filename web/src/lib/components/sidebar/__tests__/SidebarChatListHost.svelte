@@ -2,7 +2,10 @@
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
-	import type { SidebarDisplayOptions } from '../sidebar-display-options';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from '../sidebar-display-options';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
@@ -16,7 +19,7 @@
 		onNewChat?: () => void;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
-		displayOptions?: SidebarDisplayOptions;
+		displayOptions?: Partial<SidebarDisplayOptions>;
 		collapsedProjectKeys?: ReadonlySet<string>;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onQuickMove?: (
@@ -35,18 +38,18 @@
 		onNewChat,
 		selectedChatId = null,
 		isMobile = false,
-		displayOptions = {
-			grouping: 'none',
-			groupNestedProjectPaths: false,
-			chatItemLayout: 'default',
-			sortMode: 'manual',
-		},
+		displayOptions: displayOptionsInput = {},
 		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let displayOptions = $derived({
+		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		grouping: 'none' as const,
+		...displayOptionsInput,
+	});
 	let internalCollapsedKeys = $derived<ReadonlySet<string>>(new Set(collapsedProjectKeys));
 	let effectiveCollapsedKeys = $derived(
 		onToggleProjectCollapsed ? collapsedProjectKeys : internalCollapsedKeys,

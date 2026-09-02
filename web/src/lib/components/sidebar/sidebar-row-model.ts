@@ -1,8 +1,13 @@
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import { chatOrderGroupFor } from '$lib/sidebar/search/chat-order-group.js';
-import type { SidebarChatGrouping } from '$lib/stores/local-settings.svelte';
+import type {
+	SidebarChatGrouping,
+	SidebarInactivityDuration,
+	SidebarSortMode,
+} from '$lib/stores/local-settings.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import { isSidebarChatInactive } from './chat-inactivity';
+import { sortChatsByRecencyDesc } from './chat-recency-sort';
 import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
 import {
 	sidebarSectionKey,
@@ -27,6 +32,7 @@ export interface SidebarRowModelInput {
 	orders: SidebarChatOrderMap;
 	grouping: SidebarChatGrouping;
 	currentTime: Date;
+	inactivityDuration: SidebarInactivityDuration;
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 }
@@ -61,33 +67,39 @@ export function buildSidebarChatOrderMap(chats: ChatSessionRecord[]): SidebarCha
 	return orders;
 }
 
-export type SidebarTimeGroupedPlacement = 'project' | 'inactive' | 'archived';
+const PROJECT_ACTIVITY_SECTIONS = [
+	'inactive',
+	'archived',
+] as const satisfies readonly SidebarChatSection[];
+const ACTIVITY_SECTIONS = [
+	'active',
+	...PROJECT_ACTIVITY_SECTIONS,
+] as const satisfies readonly SidebarChatSection[];
 
-const SIDEBAR_CHAT_SECTIONS = ['inactive', 'archived'] as const satisfies readonly SidebarChatSection[];
-
-// Each time-based section draws its chat rows from the persisted order list
-// that owns its chats.
-const chatOrderListBySection: Record<SidebarChatSection, PersistedChatOrderGroup> = {
-	inactive: 'normal',
-	archived: 'archived',
+// Active keeps pinned and normal orders independent even though both render
+// beneath one section header.
+const chatOrderListsBySection: Record<
+	SidebarChatSection,
+	readonly PersistedChatOrderGroup[]
+> = {
+	active: ['pinned', 'normal'],
+	inactive: ['normal'],
+	archived: ['archived'],
 };
 
-// Project-and-time placement: pinned chats stay in their project group,
-// archived chats always move to the archived section regardless of activity,
-// and remaining chats whose last activity is at least three days old move to
-// the inactive section instead of their project group.
-export function sidebarTimeGroupedPlacement(
+export function sidebarActivitySection(
 	chat: Pick<
 		ChatSessionRecord,
 		'id' | 'status' | 'isPinned' | 'isArchived' | 'lastActivityAt' | 'createdAt'
 	>,
 	now: Date,
-): SidebarTimeGroupedPlacement {
-	if (chat.isPinned) return 'project';
+	duration: SidebarInactivityDuration,
+): SidebarChatSection {
+	if (chat.isPinned) return 'active';
 	if (chat.isArchived) return 'archived';
 	// Local drafts carry no server timestamps yet represent the newest activity.
-	if (chat.status === 'draft') return 'project';
-	return isSidebarChatInactive(chat, now) ? 'inactive' : 'project';
+	if (chat.status === 'draft') return 'active';
+	return isSidebarChatInactive(chat, now, duration) ? 'inactive' : 'active';
 }
 
 interface SidebarProjectGroup {
@@ -269,10 +281,6 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const visibleOrders = emptyOrderMap();
 	const visibleChatIds: string[] = [];
 	const reorderScopesByChatId = new Map<string, string[]>();
-	const grouping = createProjectGroupingContext(
-		input.displayedChats,
-		Boolean(input.groupNestedProjectPaths),
-	);
 	const collapsedProjectKeys = input.collapsedProjectKeys ?? new Set<string>();
 
 	if (input.grouping === 'none') {
@@ -293,15 +301,43 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		return { rows, visibleOrders, visibleChatIds, reorderScopesByChatId, projectKeys: [] };
 	}
 
-	const timeGrouped = input.grouping === 'project-and-time';
-	const placementByChatId = new Map<string, SidebarTimeGroupedPlacement>();
-	if (timeGrouped) {
+	const activityGrouped =
+		input.grouping === 'project-and-activity' || input.grouping === 'activity';
+	const activitySectionByChatId = new Map<string, SidebarChatSection>();
+	if (activityGrouped) {
 		for (const chat of input.displayedChats) {
-			placementByChatId.set(chat.id, sidebarTimeGroupedPlacement(chat, input.currentTime));
+			activitySectionByChatId.set(
+				chat.id,
+				sidebarActivitySection(chat, input.currentTime, input.inactivityDuration),
+			);
 		}
 	}
+
+	if (input.grouping === 'activity') {
+		for (const section of ACTIVITY_SECTIONS) {
+			appendSidebarChatSection({
+				section,
+				lists: chatOrderListsBySection[section],
+				orders: input.orders,
+				byList: displayed.byId,
+				activitySectionByChatId,
+				collapsedProjectKeys,
+				rows,
+				visibleOrders,
+				visibleChatIds,
+				reorderScopesByChatId,
+			});
+		}
+		return { rows, visibleOrders, visibleChatIds, reorderScopesByChatId, projectKeys: [] };
+	}
+
+	const grouping = createProjectGroupingContext(
+		input.displayedChats,
+		Boolean(input.groupNestedProjectPaths),
+	);
+	const projectActivityGrouped = input.grouping === 'project-and-activity';
 	const inProjectGroup = (chat: ChatSessionRecord): boolean =>
-		!timeGrouped || placementByChatId.get(chat.id) === 'project';
+		!projectActivityGrouped || activitySectionByChatId.get(chat.id) === 'active';
 
 	const projectChats = input.displayedChats.filter(inProjectGroup);
 	const projectKeys = projectOrderFromDisplayedChats(projectChats, grouping);
@@ -374,15 +410,14 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		}
 	}
 
-	if (timeGrouped) {
-		for (const section of SIDEBAR_CHAT_SECTIONS) {
-			const list = chatOrderListBySection[section];
+	if (projectActivityGrouped) {
+		for (const section of PROJECT_ACTIVITY_SECTIONS) {
 			appendSidebarChatSection({
 				section,
-				list,
-				orderedChatIds: input.orders[list],
-				byId: displayed.byId[list],
-				placementByChatId,
+				lists: chatOrderListsBySection[section],
+				orders: input.orders,
+				byList: displayed.byId,
+				activitySectionByChatId,
 				collapsedProjectKeys,
 				rows,
 				visibleOrders,
@@ -397,10 +432,10 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 
 function appendSidebarChatSection(input: {
 	section: SidebarChatSection;
-	list: PersistedChatOrderGroup;
-	orderedChatIds: string[];
-	byId: Map<string, ChatSessionRecord>;
-	placementByChatId: Map<string, SidebarTimeGroupedPlacement>;
+	lists: readonly PersistedChatOrderGroup[];
+	orders: SidebarChatOrderMap;
+	byList: Record<PersistedChatOrderGroup, Map<string, ChatSessionRecord>>;
+	activitySectionByChatId: Map<string, SidebarChatSection>;
 	collapsedProjectKeys: ReadonlySet<string>;
 	rows: SidebarVirtualRow[];
 	visibleOrders: SidebarChatOrderMap;
@@ -410,14 +445,14 @@ function appendSidebarChatSection(input: {
 	// Membership comes from the displayed chats so a collapsed section keeps
 	// its header in the reconciled reorder pass, whose orders omit hidden rows.
 	const memberIds: string[] = [];
-	for (const chat of input.byId.values()) {
-		if (input.placementByChatId.get(chat.id) === input.section) memberIds.push(chat.id);
+	for (const list of input.lists) {
+		for (const chat of input.byList[list].values()) {
+			if (input.activitySectionByChatId.get(chat.id) === input.section) {
+				memberIds.push(chat.id);
+			}
+		}
 	}
 	if (memberIds.length === 0) return;
-
-	const scopeIds = input.orderedChatIds.filter(
-		(chatId) => input.placementByChatId.get(chatId) === input.section,
-	);
 
 	const key = sidebarSectionKey(input.section);
 	input.rows.push({
@@ -430,23 +465,28 @@ function appendSidebarChatSection(input: {
 	});
 	if (input.collapsedProjectKeys.has(key)) return;
 
-	for (const chatId of scopeIds) {
-		const chat = input.byId.get(chatId);
-		if (!chat) continue;
-		appendChatRow(
-			input.rows,
-			createChatRow(
-				chat,
-				input.list,
-				`${input.list}:section:${input.section}`,
-				scopeIds,
-				exactProjectGroup(chat.projectPath),
-				true,
-			),
-			input.visibleOrders,
-			input.visibleChatIds,
-			input.reorderScopesByChatId,
+	for (const list of input.lists) {
+		const scopeIds = input.orders[list].filter(
+			(chatId) => input.activitySectionByChatId.get(chatId) === input.section,
 		);
+		for (const chatId of scopeIds) {
+			const chat = input.byList[list].get(chatId);
+			if (!chat) continue;
+			appendChatRow(
+				input.rows,
+				createChatRow(
+					chat,
+					list,
+					`${list}:section:${input.section}`,
+					scopeIds,
+					exactProjectGroup(chat.projectPath),
+					true,
+				),
+				input.visibleOrders,
+				input.visibleChatIds,
+				input.reorderScopesByChatId,
+			);
+		}
 	}
 }
 
@@ -465,15 +505,22 @@ export function buildSidebarDisplayChatIds(input: {
 	displayedChats: ChatSessionRecord[];
 	grouping: SidebarChatGrouping;
 	currentTime: Date;
+	inactivityDuration: SidebarInactivityDuration;
+	sortMode: SidebarSortMode;
 	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 }): string[] {
-	const orders = buildSidebarChatOrderMap(input.displayedChats);
+	const displayedChats =
+		input.sortMode === 'recent'
+			? sortChatsByRecencyDesc(input.displayedChats)
+			: input.displayedChats;
+	const orders = buildSidebarChatOrderMap(displayedChats);
 	return buildSidebarRowModel({
-		displayedChats: input.displayedChats,
+		displayedChats,
 		orders,
 		grouping: input.grouping,
 		currentTime: input.currentTime,
+		inactivityDuration: input.inactivityDuration,
 		groupNestedProjectPaths: input.groupNestedProjectPaths,
 		collapsedProjectKeys: input.collapsedProjectKeys,
 	}).visibleChatIds;

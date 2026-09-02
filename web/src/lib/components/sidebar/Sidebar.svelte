@@ -30,7 +30,10 @@
 	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
-	import type { SidebarDisplayOptions } from './sidebar-display-options';
+	import {
+		sidebarGroupingUsesProjects,
+		type SidebarDisplayOptions,
+	} from './sidebar-display-options';
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
@@ -125,6 +128,7 @@
 	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		grouping: localSettings.sidebarGrouping,
+		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
 		sortMode: localSettings.sidebarSortMode,
@@ -147,6 +151,8 @@
 			displayedChats: sidebarSearch.filteredChats,
 			grouping: displayOptions.grouping,
 			currentTime,
+			inactivityDuration: displayOptions.inactivityDuration,
+			sortMode: displayOptions.sortMode,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
@@ -157,7 +163,7 @@
 			displayedChats: chats,
 			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 		});
-		// Time-based sections collapse through the same store; their keys stay in
+		// Activity sections collapse through the same store; their keys stay in
 		// the pruning allowlist regardless of mode so section collapse
 		// preferences survive grouping-mode switches, like project keys do.
 		projectKeys.push(...SIDEBAR_SECTION_COLLAPSE_KEYS);
@@ -364,7 +370,7 @@
 	}
 
 	function handleToggleGroupNestedProjectPaths(): void {
-		if (localSettings.sidebarGrouping === 'none') return;
+		if (!sidebarGroupingUsesProjects(localSettings.sidebarGrouping)) return;
 		localSettings.toggle('sidebarGroupNestedProjectPaths');
 	}
 

@@ -14,9 +14,16 @@
 	let { row, containsSelectedChat = false, onToggle }: SidebarSectionHeaderRowProps = $props();
 
 	let sectionKey = $derived(sidebarSectionKey(row.section));
-	let label = $derived(
-		row.section === 'inactive' ? m.sidebar_section_inactive() : m.sidebar_section_archived(),
-	);
+	let label = $derived.by(() => {
+		switch (row.section) {
+			case 'active':
+				return m.sidebar_section_active();
+			case 'inactive':
+				return m.sidebar_section_inactive();
+			case 'archived':
+				return m.sidebar_section_archived();
+		}
+	});
 
 	function handleToggle(): void {
 		onToggle?.(sectionKey);

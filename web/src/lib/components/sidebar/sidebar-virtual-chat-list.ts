@@ -21,15 +21,16 @@ export interface SidebarVirtualProjectHeaderRow {
 	isCollapsed: boolean;
 }
 
-export type SidebarChatSection = 'inactive' | 'archived';
+export type SidebarChatSection = 'active' | 'inactive' | 'archived';
 
-// Time-based sections group chats across projects; their collapse keys share
+// Activity sections group chats across projects; their collapse keys share
 // the project collapse store's key space.
 export function sidebarSectionKey(section: SidebarChatSection): string {
 	return `section:${section}`;
 }
 
 export const SIDEBAR_SECTION_COLLAPSE_KEYS: readonly string[] = [
+	sidebarSectionKey('active'),
 	sidebarSectionKey('inactive'),
 	sidebarSectionKey('archived'),
 ];

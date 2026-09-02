@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createLocalSettingsStore, HIDEABLE_TOOL_GROUPS } from '../local-settings.svelte';
+import {
+	createLocalSettingsStore,
+	HIDEABLE_TOOL_GROUPS,
+	SIDEBAR_INACTIVITY_DURATION_VALUES,
+} from '../local-settings.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('LocalSettingsStore', () => {
@@ -17,6 +21,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
 		expect(store.sidebarGrouping).toBe('project');
+		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('default');
 		expect(store.sidebarSortMode).toBe('manual');
@@ -443,11 +448,54 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
+	it('persists every sidebar inactivity duration and rejects malformed values', () => {
+		for (const duration of SIDEBAR_INACTIVITY_DURATION_VALUES) {
+			const store = createLocalSettingsStore();
+			store.set('sidebarInactivityDuration', duration);
+
+			expect(
+				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+			).toMatchObject({ sidebarInactivityDuration: duration });
+
+			const restored = createLocalSettingsStore();
+			expect(restored.sidebarInactivityDuration).toBe(duration);
+			store.destroy();
+			restored.destroy();
+		}
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarInactivityDuration: '6-days' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarInactivityDuration).toBe('3-days');
+		malformed.destroy();
+	});
+
+	it('persists activity grouping and rejects the unused project-and-time token', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarGrouping', 'activity');
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarGrouping).toBe('activity');
+		store.destroy();
+		restored.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
+		);
+		const oldToken = createLocalSettingsStore();
+		expect(oldToken.sidebarGrouping).toBe('project');
+		oldToken.destroy();
+	});
+
 	it('persists max chat width', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGrouping', 'project-and-time');
+		store.set('sidebarGrouping', 'project-and-activity');
+		store.set('sidebarInactivityDuration', '2-weeks');
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarChatItemLayout', 'compact');
 		store.set('showQuickCommitTray', false);
@@ -457,7 +505,8 @@ describe('LocalSettingsStore', () => {
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGrouping: 'project-and-time',
+			sidebarGrouping: 'project-and-activity',
+			sidebarInactivityDuration: '2-weeks',
 			sidebarGroupNestedProjectPaths: true,
 			sidebarChatItemLayout: 'compact',
 			showQuickCommitTray: false,
@@ -482,6 +531,7 @@ describe('LocalSettingsStore', () => {
 				chatMaxWidth: 'small',
 				overlayBackdropEffects: false,
 				sidebarGrouping: 'project',
+				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
 				showQuickCommitTray: false,
@@ -504,6 +554,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.sidebarGrouping).toBe('project');
+		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');
 		expect(secondStore.showQuickCommitTray).toBe(false);

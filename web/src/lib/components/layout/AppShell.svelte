@@ -173,6 +173,8 @@
 			displayedChats: sidebarSearch.filteredChats,
 			grouping: localSettings.sidebarGrouping,
 			currentTime: minuteClock.currentTime,
+			inactivityDuration: localSettings.sidebarInactivityDuration,
+			sortMode: localSettings.sidebarSortMode,
 			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),

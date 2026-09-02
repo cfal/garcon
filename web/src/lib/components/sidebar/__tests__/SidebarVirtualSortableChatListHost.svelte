@@ -7,7 +7,10 @@
 	} from '../sidebar-chat-reorder-state.svelte';
 	import { setAppShell, setModelCatalog, setWorkspaceWindowDnd } from '$lib/context';
 	import type { SidebarVirtualChatRow, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
-	import type { SidebarDisplayOptions } from '../sidebar-display-options';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from '../sidebar-display-options';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
 	import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
@@ -17,7 +20,7 @@
 		selectedChatId?: string | null;
 		isMobile?: boolean;
 		isFiltered?: boolean;
-		displayOptions?: SidebarDisplayOptions;
+		displayOptions?: Partial<SidebarDisplayOptions>;
 		rowHeight?: number;
 		viewportAttached?: boolean;
 		onRegisterRecenter?: (callback: () => void) => void;
@@ -33,12 +36,7 @@
 		selectedChatId = null,
 		isMobile = false,
 		isFiltered = false,
-		displayOptions = {
-			grouping: 'none',
-			groupNestedProjectPaths: false,
-			chatItemLayout: 'default',
-			sortMode: 'manual',
-		},
+		displayOptions: displayOptionsInput = {},
 		rowHeight,
 		viewportAttached = true,
 		onRegisterRecenter,
@@ -50,6 +48,11 @@
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let displayOptions = $derived({
+		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		grouping: 'none' as const,
+		...displayOptionsInput,
+	});
 	function isChatRow(row: SidebarVirtualRow): row is SidebarVirtualChatRow {
 		return row.type === 'chat';
 	}

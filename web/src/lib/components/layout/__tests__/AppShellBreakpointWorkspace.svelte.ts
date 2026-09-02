@@ -9,7 +9,10 @@ import {
 } from '$lib/workspace/canonical-layout';
 import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
-import type { SidebarChatGrouping } from '$lib/stores/local-settings.svelte';
+import type {
+	SidebarChatGrouping,
+	SidebarInactivityDuration,
+} from '$lib/stores/local-settings.svelte';
 
 export class AppShellLocalSettingsState {
 	chatListAutohide = $state(false);
@@ -17,6 +20,7 @@ export class AppShellLocalSettingsState {
 	sidebarWidth = $state(320);
 	reduceMotion = $state(false);
 	sidebarGrouping = $state<SidebarChatGrouping>('none');
+	sidebarInactivityDuration = $state<SidebarInactivityDuration>('3-days');
 	sidebarGroupNestedProjectPaths = $state(false);
 
 	set(): void {}

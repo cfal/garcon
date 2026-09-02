@@ -2,7 +2,10 @@
 	import SidebarChatItem from '../SidebarChatItem.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
-	import type { SidebarDisplayOptions } from '../sidebar-display-options';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 
@@ -16,7 +19,7 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		enableNativeDrag?: boolean;
-		displayOptions?: SidebarDisplayOptions;
+		displayOptions?: Partial<SidebarDisplayOptions>;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
@@ -40,12 +43,7 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		enableNativeDrag = true,
-		displayOptions = {
-			grouping: 'none',
-			groupNestedProjectPaths: false,
-			chatItemLayout: 'default',
-			sortMode: 'manual',
-		},
+		displayOptions: displayOptionsInput = {},
 		onTagClick,
 		onManageTags,
 		onEnterMultiSelect,
@@ -58,6 +56,12 @@
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
+
+	let displayOptions = $derived({
+		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		grouping: 'none' as const,
+		...displayOptionsInput,
+	});
 
 	setAppShell({
 		onSidebarRecenterRequested() {
