@@ -395,6 +395,53 @@ describe("stage path operations", () => {
   });
 });
 
+describe("selected-file commits", () => {
+  it("excludes unrelated staged changes", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-selected-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "new.txt"), "new\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "unrelated.txt"]);
+
+      await git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt", "new.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      const staged = await runGitCommand(projectPath, [
+        "diff",
+        "--cached",
+        "--name-only",
+      ]);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "new.txt"]);
+      expect(staged.stdout.trim()).toBe("unrelated.txt");
+      await expect(git.commit({
+        projectPath,
+        message: "outside change",
+        files: ["../outside.txt"],
+      })).rejects.toThrow("outside the project root");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("commit message generation", () => {
   it("builds the staged diff with one batched pathspec command for normal selections", async () => {
     const calls = [];

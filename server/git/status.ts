@@ -8,6 +8,8 @@ import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { probeWorktreeLayout } from './worktree-layout.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -45,6 +47,7 @@ import {
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
+const selectedFileCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
@@ -54,6 +57,10 @@ type CommitMessageDiffRunner = (
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
   return Math.min(limit, GIT_REF_RESULT_LIMITS.max);
+}
+
+function literalPathspec(file: string): string {
+  return `:(literal)${file}`;
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -433,10 +440,24 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function commit({ projectPath, message, files }: CommitOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     for (const file of files) {
-      await runGit(projectPath, ['add', '--', file]);
+      if (!file) throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot be empty.');
+      if (file.includes('\0')) {
+        throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot contain NUL bytes.');
+      }
+      resolvePathWithinProject(projectPath, file);
     }
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    const layout = await probeWorktreeLayout(projectPath);
+    const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
+    return selectedFileCommitLock.runExclusive(lockKey, async () => {
+      for (const file of files) {
+        await runGit(projectPath, ['add', '--', literalPathspec(file)]);
+      }
+      const { stdout } = await runGit(
+        projectPath,
+        ['commit', '--only', '-m', message, '--', ...files.map(literalPathspec)],
+      );
+      return { success: true, output: stdout };
+    });
   }
 
   async function getRefs({
