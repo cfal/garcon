@@ -41,7 +41,7 @@ const CURSOR_DESCRIPTOR = {
   label: 'Cursor',
   icon: null,
   supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: THINKING_MODE_VALUES,
+  supportedThinkingModes: THINKING_MODE_VALUES.filter((mode) => mode !== 'minimal'),
   supportsImages: false,
   supportsProjectPathUpdate: true,
   requiresNativePathForProjectPathUpdate: false,

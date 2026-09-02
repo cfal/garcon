@@ -132,6 +132,11 @@ export interface AgentLifecycle {
 }
 
 export interface AgentMigration {
+  translateLegacyModel(request: {
+    readonly scope: Extract<AgentLegacySettingsScope, { kind: 'chat' | 'scheduled-prompt' }>;
+    readonly model: string;
+    readonly signal: AbortSignal;
+  }): Promise<string>;
   translateLegacyNativeSession(request: {
     readonly chatId: string;
     readonly projectPath: string;

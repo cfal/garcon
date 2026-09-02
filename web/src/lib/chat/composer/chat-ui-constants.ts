@@ -19,6 +19,12 @@ export const THINKING_MODES: ThinkingModeOption[] = [
 		color: 'text-muted-foreground',
 	},
 	{
+		id: 'minimal',
+		name: 'Minimal',
+		description: 'Minimal reasoning for the fastest response',
+		color: 'text-foreground',
+	},
+	{
 		id: 'low',
 		name: 'Low',
 		description: 'Light reasoning for quick tasks',

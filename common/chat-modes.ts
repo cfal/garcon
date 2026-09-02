@@ -14,6 +14,7 @@ export const DEFAULT_PERMISSION_MODE: PermissionMode = 'default';
 
 export const THINKING_MODE_VALUES = [
   'none',
+  'minimal',
   'low',
   'medium',
   'high',

@@ -8,8 +8,12 @@ import type { PathNativeSessionCodec } from '../native-session/path-native-sessi
 export function createVersion1RecordMigration(options: {
   readonly settings: AgentSettings;
   readonly nativeSessions: PathNativeSessionCodec | null;
+  readonly translateLegacyModel?: (model: string) => string;
 }): AgentMigration {
   return {
+    async translateLegacyModel({ model }) {
+      return options.translateLegacyModel?.(model) ?? model;
+    },
     async translateLegacyNativeSession(request) {
       if (!options.nativeSessions) return null;
       return options.nativeSessions.encode({

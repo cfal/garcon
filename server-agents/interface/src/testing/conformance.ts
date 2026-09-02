@@ -9,7 +9,7 @@ const REQUIRED_FACET_METHODS = {
   catalog: ['snapshot'],
   settings: ['describe', 'defaults', 'parse', 'migrate', 'applyPatch'],
   lifecycle: ['start', 'stop', 'migrateOwnedStorage'],
-  migration: ['translateLegacyNativeSession', 'translateLegacySettings'],
+  migration: ['translateLegacyModel', 'translateLegacyNativeSession', 'translateLegacySettings'],
 } as const;
 
 const NULLABLE_FACET_METHODS = {

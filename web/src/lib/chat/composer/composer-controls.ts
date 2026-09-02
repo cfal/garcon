@@ -75,6 +75,11 @@ const THINKING_ICON_METADATA: Record<
 		toneClass:
 			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
 	},
+	minimal: {
+		iconId: 'thinking-low',
+		toneClass:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
+	},
 	low: {
 		iconId: 'thinking-low',
 		toneClass:

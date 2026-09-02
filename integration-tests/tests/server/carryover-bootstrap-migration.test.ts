@@ -34,7 +34,7 @@ describe('carryover bootstrap migration', () => {
 
         expect(firstRegistry.version).toBe(5);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
-          version: 5,
+          version: 6,
         });
         expect(await readJson<{
           version: number;
@@ -121,7 +121,7 @@ describe('carryover bootstrap migration', () => {
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
           .toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
-          version: 5,
+          version: 6,
         });
         expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
           .toMatchObject({ phase: 'complete', rollbackSafe: true });

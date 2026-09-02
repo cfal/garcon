@@ -55,6 +55,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
       migrateOwnedStorage: lifecycle.migrateOwnedStorage ?? (async () => {}),
     },
     migration: {
+      translateLegacyModel: async ({ model }) => model,
       translateLegacyNativeSession: async () => null,
       translateLegacySettings: async () => null,
     },

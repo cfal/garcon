@@ -11,6 +11,7 @@ describe('thinking mode normalization', () => {
   test('exposes effort-level values', () => {
     expect([...THINKING_MODE_VALUES]).toEqual([
       'none',
+      'minimal',
       'low',
       'medium',
       'high',

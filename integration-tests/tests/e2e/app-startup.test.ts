@@ -14,7 +14,7 @@ describe('Lightpanda SPA startup', () => {
       expect(JSON.parse(await readFile(
         join(fixture.integration.dirs.workspace, 'workspace-version.json'),
         'utf8',
-      ))).toEqual({ version: 5 });
+      ))).toEqual({ version: 6 });
       fixture.assertNoBrowserErrors();
     });
   });

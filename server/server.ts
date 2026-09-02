@@ -60,7 +60,10 @@ import { defaultAgentIntegrations } from './agents/default-agent-integrations.js
 import { IntegrationHostFactory } from './agents/integration-host.js';
 import { IntegrationRegistry } from './agents/integration-registry.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
-import { migrateAgentIntegrationCoreRecords } from './agents/core-record-migration.js';
+import {
+  migrateAgentIntegrationCoreRecords,
+  refreshAgentIntegrationCoreRecords,
+} from './agents/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -278,6 +281,9 @@ export async function startServer(): Promise<void> {
         logger,
       );
     });
+    await workspaceMigrations.run('agent-integration-settings-refresh', () => (
+      refreshAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
+    ));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;

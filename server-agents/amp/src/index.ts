@@ -104,7 +104,15 @@ export default class AmpAgentIntegration implements AgentIntegration {
       requiresStrictModelDiscovery: false,
       generation: { priority: 70, model: AMP_MODELS.DEFAULT },
     });
-    this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });
+    this.migration = createVersion1RecordMigration({
+      settings: this.settings,
+      nativeSessions,
+      translateLegacyModel: (model) => model === 'smart'
+        ? AMP_MODELS.DEFAULT
+        : model === 'deep'
+          ? AMP_MODELS.DEFAULT
+          : model,
+    });
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();

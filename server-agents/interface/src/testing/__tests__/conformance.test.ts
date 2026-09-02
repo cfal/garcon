@@ -49,6 +49,7 @@ const integration = {
   },
   lifecycle: { start: async () => {}, stop: async () => {}, migrateOwnedStorage: async () => {} },
   migration: {
+    translateLegacyModel: async ({ model }) => model,
     translateLegacyNativeSession: async () => null,
     translateLegacySettings: async () => null,
   },
@@ -138,6 +139,7 @@ describe('validateAgentIntegration', () => {
       ['settings', { ...integration.settings, applyPatch: undefined }],
       ['lifecycle', { ...integration.lifecycle, migrateOwnedStorage: undefined }],
       ['migration', { ...integration.migration, translateLegacySettings: undefined }],
+      ['migration', { ...integration.migration, translateLegacyModel: undefined }],
       ['attachments', { fileMimeTypes: ['image/png', 7] }],
       ['auth', { status: undefined }],
       ['auth', { status: async () => ({}), launchLogin: false }],

@@ -1072,6 +1072,8 @@
 	"model_selector_unavailable": "Model unavailable",
 	"thinking_mode_default_label": "Default",
 	"thinking_mode_default_description": "Provider default effort",
+	"thinking_mode_minimal_label": "Minimal",
+	"thinking_mode_minimal_description": "Minimal reasoning for the fastest response",
 	"thinking_mode_low_label": "Low",
 	"thinking_mode_low_description": "Light reasoning for quick tasks",
 	"thinking_mode_medium_label": "Medium",
