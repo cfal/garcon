@@ -191,6 +191,13 @@
 
 	let pendingPointerId: number | null = null;
 
+	function isIsolatedTabCloseEvent(event: Event): boolean {
+		return (
+			event.target instanceof Element &&
+			Boolean(event.target.closest('[data-workspace-window-tab-close]'))
+		);
+	}
+
 	function clearPointerReleaseListeners(): void {
 		document.removeEventListener('pointerup', releaseWindowPointerInteraction, true);
 		document.removeEventListener('pointercancel', cancelWindowPointerInteraction, true);
@@ -198,6 +205,7 @@
 	}
 
 	function beginWindowPointerInteraction(event: PointerEvent): void {
+		if (isIsolatedTabCloseEvent(event)) return;
 		clearPointerReleaseListeners();
 		pendingPointerId = event.pointerId;
 		workspace.beginWindowPointerInteraction(workspaceWindow.id, event.pointerId);
@@ -235,7 +243,11 @@
 	aria-hidden={!isVisible}
 	aria-label={m.workspace_window_region({ title: labelFor(workspaceWindow.tabs.activeId) })}
 	onpointerdowncapture={beginWindowPointerInteraction}
-	onclickcapture={() => workspace.commitWindowPointerInteraction(workspaceWindow.id)}
+	onclickcapture={(event) => {
+		if (!isIsolatedTabCloseEvent(event)) {
+			workspace.commitWindowPointerInteraction(workspaceWindow.id);
+		}
+	}}
 	oncontextmenucapture={() => workspace.commitWindowPointerInteraction(workspaceWindow.id)}
 	ondragover={(event) => dnd.handleWindowDragOver(workspaceWindow.id, event)}
 	ondragleave={(event) => dnd.handleWindowDragLeave(event)}

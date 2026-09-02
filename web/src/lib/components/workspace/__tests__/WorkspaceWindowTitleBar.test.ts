@@ -26,6 +26,7 @@ const {
 	openSingletonAsTab,
 	moveTabToNewWindow,
 	copyToClipboard,
+	notificationError,
 	runtime,
 } = vi.hoisted(() => ({
 	activateWindow: vi.fn(),
@@ -40,6 +41,7 @@ const {
 	openSingletonAsTab: vi.fn(async () => undefined),
 	moveTabToNewWindow: vi.fn(async () => undefined),
 	copyToClipboard: vi.fn(async () => true),
+	notificationError: vi.fn(),
 	runtime: {
 		fullscreenWindowId: null as WorkspaceWindowId | null,
 		desktopRoot: null as DesktopWorkspaceNode | null,
@@ -101,7 +103,7 @@ vi.mock('$lib/context', () => ({
 		},
 		isChatProcessing: (chatId: string) => runtime.processingChatIds.has(chatId),
 	}),
-	getNotifications: () => ({ error: vi.fn() }),
+	getNotifications: () => ({ error: notificationError }),
 	getTerminalRegistry: () => ({
 		get orderedSessions() {
 			return runtime.terminalSessions;
@@ -120,6 +122,16 @@ const gitSurface = {
 	id: 'singleton:git',
 	type: 'singleton',
 	kind: 'git',
+} as const satisfies SurfaceDescriptor;
+const fileSurface = {
+	id: 'file:file-a',
+	type: 'file',
+	fileSessionId: 'file-a',
+} as const satisfies SurfaceDescriptor;
+const terminalSurface = {
+	id: 'terminal:terminal-a',
+	type: 'terminal',
+	terminalId: 'terminal-a',
 } as const satisfies SurfaceDescriptor;
 const otherChatSurface = {
 	id: 'chat-view:window-two',
@@ -216,6 +228,8 @@ function labelFor(surfaceId: string): string {
 	if (surfaceId === chatSurface.id) return 'Chat A';
 	if (surfaceId === otherChatSurface.id) return 'Chat B';
 	if (surfaceId === gitSurface.id) return 'Git';
+	if (surfaceId === fileSurface.id) return 'README.md';
+	if (surfaceId === terminalSurface.id) return 'Tests';
 	return surfaceId;
 }
 
@@ -294,6 +308,201 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.getByRole('tab', { name: 'Git' }).getAttribute('aria-selected')).toBe('true');
 		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('aria-selected')).toBe('false');
 		expect(tablist.closest('header')?.classList.contains('h-10')).toBe(true);
+	});
+
+	it('keeps hover close regions inside the managed tab interaction model', async () => {
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[fileSurface.id]: fileSurface,
+			[terminalSurface.id]: terminalSurface,
+		};
+		const { container } = renderTitleBar(
+			workspaceWindow([chatSurface.id, fileSurface.id, terminalSurface.id], chatSurface.id),
+		);
+
+		const tablist = screen.getByRole('tablist');
+		const tabs = screen.getAllByRole('tab');
+		const fileClose = container.querySelector<HTMLElement>(
+			`[data-workspace-window-tab-close="${fileSurface.id}"]`,
+		)!;
+		const terminalClose = container.querySelector<HTMLElement>(
+			`[data-workspace-window-tab-close="${terminalSurface.id}"]`,
+		)!;
+		expect(terminalClose).toBeTruthy();
+		expect(tablist.querySelectorAll('button')).toHaveLength(tabs.length);
+		expect(tablist.querySelector('[data-workspace-window-tab-close] button')).toBeNull();
+		expect(tabs.filter((tab) => tab.getAttribute('tabindex') === '0')).toEqual([
+			screen.getByRole('tab', { name: 'Chat A' }),
+		]);
+		expect(fileClose.className).toContain('opacity-0');
+		expect(fileClose.className).toContain('pointer-events-none');
+		expect(fileClose.className).toContain(
+			'[@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:opacity-100',
+		);
+		expect(fileClose.className).toContain('group-focus-within/window-tab:opacity-100');
+		expect(fileClose.closest('[role="tab"]')).toBe(screen.getByRole('tab', { name: 'README.md' }));
+
+		const priorFocus = document.createElement('button');
+		priorFocus.textContent = 'Active surface control';
+		document.body.append(priorFocus);
+		try {
+			priorFocus.focus();
+			await fireEvent.pointerDown(fileClose);
+			await fireEvent.click(fileClose);
+
+			expect(closeSurface).toHaveBeenCalledWith(fileSurface.id);
+			expect(focusSurface).not.toHaveBeenCalled();
+			await waitFor(() => expect(document.activeElement).toBe(priorFocus));
+			expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+		} finally {
+			priorFocus.remove();
+		}
+	});
+
+	it('preserves focus and window ownership when an inactive window close region is clicked', async () => {
+		runtime.windowCount = 2;
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[fileSurface.id]: fileSurface,
+		};
+		const priorFocus = document.createElement('button');
+		priorFocus.textContent = 'Current window control';
+		document.body.append(priorFocus);
+		try {
+			const { container } = renderTitleBar(
+				workspaceWindow([chatSurface.id, fileSurface.id], chatSurface.id),
+				false,
+			);
+			priorFocus.focus();
+			const close = container.querySelector<HTMLElement>(
+				`[data-workspace-window-tab-close="${fileSurface.id}"]`,
+			)!;
+
+			await fireEvent.pointerDown(close);
+			expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+			await fireEvent.click(close);
+
+			expect(closeSurface).toHaveBeenCalledWith(fileSurface.id);
+			await waitFor(() => expect(document.activeElement).toBe(priorFocus));
+			expect(activateWindow).not.toHaveBeenCalled();
+			expect(focusSurface).not.toHaveBeenCalled();
+			expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+		} finally {
+			priorFocus.remove();
+		}
+	});
+
+	it('composes touch long-press context-menu and tab focus handlers', async () => {
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[fileSurface.id]: fileSurface,
+		};
+		renderTitleBar(workspaceWindow([chatSurface.id, fileSurface.id], chatSurface.id));
+		const fileTab = screen.getByRole('tab', { name: 'README.md' });
+
+		await fireEvent.pointerDown(fileTab, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+			clientX: 40,
+			clientY: 20,
+		});
+		const closeItem = await screen.findByRole(
+			'menuitem',
+			{ name: m.workspace_close_tab() },
+			{ timeout: 1_000 },
+		);
+		await fireEvent.pointerUp(fileTab, {
+			pointerType: 'touch',
+			pointerId: 1,
+			isPrimary: true,
+		});
+
+		expect(closeItem).toBeTruthy();
+		expect(noteWindowChromeFocus).toHaveBeenCalledWith('window-main', fileSurface.id);
+	});
+
+	it('routes a close-region context click through the tab menu', async () => {
+		runtime.windowCount = 2;
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[fileSurface.id]: fileSurface,
+		};
+		const { container } = renderTitleBar(
+			workspaceWindow([chatSurface.id, fileSurface.id], chatSurface.id),
+			false,
+		);
+		const close = container.querySelector<HTMLElement>(
+			`[data-workspace-window-tab-close="${fileSurface.id}"]`,
+		)!;
+
+		const priorFocus = document.createElement('button');
+		document.body.append(priorFocus);
+		try {
+			priorFocus.focus();
+			await fireEvent.pointerDown(close, { button: 2 });
+			await fireEvent.contextMenu(close, { clientX: 40, clientY: 20 });
+
+			expect(await screen.findByRole('menuitem', { name: m.workspace_close_tab() })).toBeTruthy();
+			expect(closeSurface).not.toHaveBeenCalled();
+			expect(noteWindowChromeFocus).not.toHaveBeenCalled();
+			expect(document.activeElement).toBe(priorFocus);
+		} finally {
+			priorFocus.remove();
+		}
+	});
+
+	it('restores focus when cleanup rejects after removing the closed tab', async () => {
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[terminalSurface.id]: terminalSurface,
+		};
+		const { container } = renderTitleBar(
+			workspaceWindow([chatSurface.id, terminalSurface.id], chatSurface.id),
+			false,
+		);
+		const priorFocus = document.createElement('button');
+		priorFocus.textContent = 'Current window control';
+		document.body.append(priorFocus);
+		try {
+			const terminalTab = screen.getByRole('tab', { name: 'Tests' });
+			closeSurface.mockImplementationOnce(async () => {
+				terminalTab.parentElement?.remove();
+				throw new Error('network lost');
+			});
+			priorFocus.focus();
+			terminalTab.focus();
+
+			await fireEvent.keyDown(terminalTab, { key: 'Delete' });
+
+			await waitFor(() => expect(terminalTab.isConnected).toBe(false));
+			await waitFor(() => expect(document.activeElement).toBe(priorFocus));
+			expect(notificationError).toHaveBeenCalledWith('network lost');
+			expect(container.querySelector('[data-workspace-window-tab-close]')).toBeTruthy();
+		} finally {
+			priorFocus.remove();
+		}
+	});
+
+	it('blocks pointer and Delete close actions when a surface cannot close', async () => {
+		runtime.surfaceCloseBlocked = true;
+		runtime.surfaces = {
+			[chatSurface.id]: chatSurface,
+			[fileSurface.id]: fileSurface,
+		};
+		const { container } = renderTitleBar(
+			workspaceWindow([chatSurface.id, fileSurface.id], chatSurface.id),
+		);
+
+		const close = container.querySelector<HTMLElement>(
+			`[data-workspace-window-tab-close="${fileSurface.id}"]`,
+		)!;
+		const fileTab = screen.getByRole('tab', { name: 'README.md' });
+		expect(close.hasAttribute('data-disabled')).toBe(true);
+		await fireEvent.click(close);
+		await fireEvent.keyDown(fileTab, { key: 'Delete' });
+		expect(closeSurface).not.toHaveBeenCalled();
+		expect(focusSurface).not.toHaveBeenCalled();
 	});
 
 	it('replaces an inactive background Chat tab icon while that Chat is processing', () => {

@@ -7,6 +7,7 @@ export interface WindowTabLayoutInput {
 	gap: number;
 	minimumLabeledWidth?: number;
 	iconWidth?: number;
+	trailingReservedWidths?: ReadonlyMap<string, number>;
 }
 
 export type WindowTabLabelMode = 'full' | 'truncated' | 'icon-only';
@@ -18,6 +19,7 @@ export interface WindowTabPresentation {
 
 export const DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH = 64;
 export const DEFAULT_WINDOW_TAB_ICON_WIDTH = 28;
+export const WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH = 24;
 
 export interface WindowTabCapacityInput {
 	containerWidth: number;
@@ -57,6 +59,7 @@ export function resolveWindowTabPresentation(input: WindowTabLayoutInput): Windo
 		gap,
 		minimumLabeledWidth = DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH,
 		iconWidth = DEFAULT_WINDOW_TAB_ICON_WIDTH,
+		trailingReservedWidths,
 	} = input;
 	if (order.some((surfaceId) => !widths.has(surfaceId))) {
 		return { visibleIds: order, labelMode: 'full' };
@@ -68,7 +71,11 @@ export function resolveWindowTabPresentation(input: WindowTabLayoutInput): Windo
 	if (total <= availableWidth) return { visibleIds: order, labelMode: 'full' };
 
 	const totalGaps = Math.max(0, order.length - 1) * gap;
-	if (order.length * minimumLabeledWidth + totalGaps <= availableWidth) {
+	const minimumLabeledTotal = order.reduce(
+		(sum, surfaceId) => sum + minimumLabeledWidth + (trailingReservedWidths?.get(surfaceId) ?? 0),
+		totalGaps,
+	);
+	if (minimumLabeledTotal <= availableWidth) {
 		return { visibleIds: order, labelMode: 'truncated' };
 	}
 	if (order.length * iconWidth + totalGaps <= availableWidth) {

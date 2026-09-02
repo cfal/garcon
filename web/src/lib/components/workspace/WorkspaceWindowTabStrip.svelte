@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
+	import { mergeProps } from 'bits-ui';
 	import { ContextMenu, ContextMenuTrigger } from '$lib/components/ui/context-menu';
 	import { getChatSessions, getNotifications, getWorkspaceCoordinator } from '$lib/context';
 	import type {
@@ -12,6 +13,7 @@
 	import {
 		resolveWindowTabCapacity,
 		resolveWindowTabPresentation,
+		WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH,
 		type WindowTabLabelMode,
 		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
@@ -20,6 +22,7 @@
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
 	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
+	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -54,6 +57,7 @@
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
+	let closeFocusReturnTarget: HTMLElement | null = null;
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 
@@ -108,6 +112,11 @@
 		return Boolean(surface && surface.type !== 'terminal-launcher');
 	}
 
+	function supportsInlineClose(surfaceId: string): boolean {
+		const surface = workspace.layout.surface(surfaceId);
+		return Boolean(surface && surface.type !== 'terminal-launcher');
+	}
+
 	function recomputeVisibleTabs(): void {
 		if (!tabViewport || !measurementRail) return;
 		const widths = new Map<string, number>();
@@ -131,6 +140,13 @@
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: 2,
+			trailingReservedWidths: new Map(
+				tabs.order.flatMap((surfaceId) =>
+					supportsInlineClose(surfaceId)
+						? [[surfaceId, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH] as const]
+						: [],
+				),
+			),
 		});
 	}
 
@@ -152,6 +168,12 @@
 		else if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
 			onSelect(surfaceId);
+			return;
+		} else if (event.key === 'Delete' && supportsInlineClose(surfaceId)) {
+			event.preventDefault();
+			if (!workspace.isSurfaceCloseBlocked(surfaceId)) {
+				void closeTab(surfaceId, event.currentTarget as HTMLButtonElement);
+			}
 			return;
 		} else return;
 		event.preventDefault();
@@ -189,17 +211,83 @@
 		if (isCurrent) return 'bg-workspace-window-tab-selected text-foreground';
 		return 'bg-workspace-window-tab-selected-inactive text-foreground';
 	}
+
+	function tabFrameClass(mode: WindowTabLabelMode, reservesClose: boolean): string {
+		return cn(
+			'group/window-tab relative flex h-7 min-w-0 items-stretch',
+			mode === 'full' && 'w-max shrink-0',
+			mode === 'truncated' && 'flex-1',
+			mode === 'truncated' && (reservesClose ? 'min-w-[5.5rem]' : 'min-w-16'),
+			mode === 'icon-only' && 'w-7 shrink-0',
+		);
+	}
+
+	function rememberCloseFocusReturnTarget(target: EventTarget | null): void {
+		if (target instanceof HTMLElement && !target.closest('[data-workspace-window-tab-close]')) {
+			closeFocusReturnTarget = target;
+		}
+	}
+
+	function isInlineCloseTarget(target: EventTarget | null, surfaceId: string): boolean {
+		return (
+			target instanceof Element &&
+			target.closest<HTMLElement>('[data-workspace-window-tab-close]')?.dataset
+				.workspaceWindowTabClose === surfaceId
+		);
+	}
+
+	function restoreFocusAfterClose(
+		trigger: HTMLButtonElement,
+		returnTarget: HTMLElement | null,
+	): void {
+		if (trigger.isConnected) return;
+		if (document.activeElement !== trigger && document.activeElement !== document.body) return;
+		if (returnTarget?.isConnected) {
+			returnTarget.focus();
+			return;
+		}
+		if (!isCurrent) return;
+		const activeTab = Array.from(
+			tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+		).find((button) => button.getAttribute('aria-selected') === 'true');
+		activeTab?.focus();
+	}
+
+	async function closeTab(surfaceId: string, trigger: HTMLButtonElement): Promise<void> {
+		const returnTarget = closeFocusReturnTarget;
+		try {
+			await workspace.closeSurface(surfaceId);
+		} catch (error) {
+			notifyFailure(error);
+		} finally {
+			await tick();
+			restoreFocusAfterClose(trigger, returnTarget);
+		}
+	}
 </script>
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
 	{@const dropPosition = measurement ? null : tabDropPosition(surfaceId)}
 	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
+	{@const composedTriggerProps = measurement
+		? triggerProps
+		: mergeProps(triggerProps, {
+				onpointerdown: (event: PointerEvent) => {
+					if (isInlineCloseTarget(event.target, surfaceId)) {
+						event.preventDefault();
+						event.stopPropagation();
+						rememberCloseFocusReturnTarget(document.activeElement);
+						return;
+					}
+					onFocus?.(surfaceId);
+				},
+			})}
 	{@const chatIsProcessing = !measurement && isChatProcessing(surfaceId)}
 	{@const processingStatusId = `${windowId}-tab-${surfaceId}-processing`}
 	{@const isSelected = !measurement && tabs.activeId === surfaceId}
 	{@const showSelectedBackground = isSelected && tabs.order.length > 1}
 	<button
-		{...triggerProps}
+		{...composedTriggerProps}
 		type="button"
 		role={measurement ? undefined : 'tab'}
 		id={measurement ? undefined : `${windowId}-tab-${surfaceId}`}
@@ -207,14 +295,13 @@
 		aria-selected={measurement ? undefined : tabs.activeId === surfaceId}
 		aria-label={measurement ? undefined : labelFor(surfaceId)}
 		aria-describedby={chatIsProcessing ? processingStatusId : undefined}
+		aria-keyshortcuts={!measurement && supportsInlineClose(surfaceId) ? 'Delete' : undefined}
 		tabindex={measurement ? -1 : tabs.activeId === surfaceId ? 0 : -1}
-		data-window-tab-measure-id={measurement ? surfaceId : undefined}
 		data-workspace-tab-label-mode={measurement ? undefined : renderedLabelMode}
 		class={cn(
-			'relative flex h-7 min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs',
+			'relative flex h-7 w-full min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs',
 			'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			renderedLabelMode === 'full' && 'w-max shrink-0 px-2',
-			renderedLabelMode === 'truncated' && 'min-w-16 flex-1 px-2',
+			renderedLabelMode !== 'icon-only' && (supportsInlineClose(surfaceId) ? 'pl-2 pr-8' : 'px-2'),
 			renderedLabelMode === 'icon-only' && 'w-7 shrink-0 justify-center px-0',
 			tabTreatment(isSelected, showSelectedBackground),
 		)}
@@ -226,9 +313,24 @@
 			: undefined}
 		ondrop={!measurement ? (event) => void commitTabDrop(surfaceId, event) : undefined}
 		ondragend={!measurement ? () => dnd.endDrag() : undefined}
-		onclick={measurement ? undefined : () => onSelect(surfaceId)}
-		onfocus={measurement ? undefined : () => onFocus?.(surfaceId)}
-		onpointerdown={measurement ? undefined : () => onFocus?.(surfaceId)}
+		onclick={measurement
+			? undefined
+			: (event) => {
+					if (!isInlineCloseTarget(event.target, surfaceId)) {
+						onSelect(surfaceId);
+						return;
+					}
+					event.stopPropagation();
+					if (!workspace.isSurfaceCloseBlocked(surfaceId)) {
+						void closeTab(surfaceId, event.currentTarget);
+					}
+				}}
+		onfocus={measurement
+			? undefined
+			: (event) => {
+					rememberCloseFocusReturnTarget(event.relatedTarget);
+					onFocus?.(surfaceId);
+				}}
 		onkeydown={measurement ? undefined : (event) => handleKeydown(event, surfaceId)}
 	>
 		{#if dropPosition}
@@ -251,31 +353,48 @@
 				renderedLabelMode === 'icon-only' && 'sr-only',
 			)}>{labelFor(surfaceId)}</span
 		>
+		{#if !measurement && supportsInlineClose(surfaceId) && renderedLabelMode !== 'icon-only'}
+			<span
+				aria-hidden="true"
+				data-workspace-window-tab-close={surfaceId}
+				data-disabled={workspace.isSurfaceCloseBlocked(surfaceId) ? '' : undefined}
+				class="pointer-events-none absolute right-0.5 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-[color,background-color,opacity] group-focus-within/window-tab:pointer-events-auto group-focus-within/window-tab:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover/window-tab:opacity-100 hover:bg-accent hover:text-foreground data-[disabled]:cursor-not-allowed data-[disabled]:text-muted-foreground/40"
+			>
+				<X class="h-3.5 w-3.5" />
+			</span>
+		{/if}
 	</button>
 {/snippet}
 
 {#snippet tab(surfaceId: string, measurement = false)}
-	{#if measurement || !hasContextMenu(surfaceId)}
-		{@render tabButton(surfaceId, measurement, {})}
-	{:else}
-		<ContextMenu>
-			<ContextMenuTrigger>
-				{#snippet child({ props })}
-					{@render tabButton(surfaceId, false, props)}
-				{/snippet}
-			</ContextMenuTrigger>
-			<WorkspaceWindowTabMenu
-				menu={contextMenuPrimitives}
-				{windowId}
-				{tabs}
-				{surfaceId}
-				{hiddenSurfaceIds}
-				{labelFor}
-				{onSelect}
-				{surfaceMenuItems}
-			/>
-		</ContextMenu>
-	{/if}
+	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
+	{@const showInlineClose = supportsInlineClose(surfaceId) && renderedLabelMode !== 'icon-only'}
+	<div
+		class={tabFrameClass(renderedLabelMode, showInlineClose)}
+		data-window-tab-measure-id={measurement ? surfaceId : undefined}
+	>
+		{#if measurement || !hasContextMenu(surfaceId)}
+			{@render tabButton(surfaceId, measurement, {})}
+		{:else}
+			<ContextMenu>
+				<ContextMenuTrigger>
+					{#snippet child({ props })}
+						{@render tabButton(surfaceId, false, props)}
+					{/snippet}
+				</ContextMenuTrigger>
+				<WorkspaceWindowTabMenu
+					menu={contextMenuPrimitives}
+					{windowId}
+					{tabs}
+					{surfaceId}
+					{hiddenSurfaceIds}
+					{labelFor}
+					{onSelect}
+					{surfaceMenuItems}
+				/>
+			</ContextMenu>
+		{/if}
+	</div>
 {/snippet}
 
 <div

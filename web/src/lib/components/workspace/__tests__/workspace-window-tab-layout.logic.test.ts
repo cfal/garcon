@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	resolveWindowTabCapacity,
 	resolveWindowTabPresentation,
+	WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH,
 } from '../workspace-window-tab-layout';
 
 const order = ['chat-view:window-main', 'singleton:git', 'singleton:files', 'terminal:1'];
@@ -45,6 +46,36 @@ describe('resolveWindowTabPresentation', () => {
 				gap: 2,
 			}),
 		).toEqual({ visibleIds: order, labelMode: 'icon-only' });
+	});
+
+	it('reserves close-control width before choosing truncated labels', () => {
+		const trailingReservedWidths = new Map(
+			order.map((surfaceId) => [surfaceId, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH]),
+		);
+
+		expect(
+			resolveWindowTabPresentation({
+				order,
+				activeId: 'singleton:files',
+				pinnedIds: [],
+				availableWidth: 350,
+				widths: new Map(order.map((surfaceId) => [surfaceId, 100])),
+				gap: 2,
+				trailingReservedWidths,
+			}),
+		).toEqual({ visibleIds: order, labelMode: 'icon-only' });
+
+		expect(
+			resolveWindowTabPresentation({
+				order,
+				activeId: 'singleton:files',
+				pinnedIds: [],
+				availableWidth: 360,
+				widths: new Map(order.map((surfaceId) => [surfaceId, 100])),
+				gap: 2,
+				trailingReservedWidths,
+			}),
+		).toEqual({ visibleIds: order, labelMode: 'truncated' });
 	});
 
 	it('keeps pinned and active tabs first when even icons overflow', () => {

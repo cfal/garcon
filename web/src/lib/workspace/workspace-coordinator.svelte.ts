@@ -547,6 +547,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async closeSurface(surfaceId: string): Promise<boolean> {
 		const surface = this.layout.surface(surfaceId);
 		if (!surface || this.isSurfaceCloseBlocked(surfaceId)) return false;
+		const ownedFocus =
+			this.focusOwner.kind !== 'chat-list' && this.focusOwner.surfaceId === surfaceId;
 		this.#reservedSurfaceIds.add(surfaceId);
 		try {
 			if (surface.type === 'singleton' && surface.kind === 'commit') {
@@ -574,6 +576,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			}
 			const sourceWindowId = this.#presentation.windowOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
+			const dialogReturnSurfaceId = wasDialog ? this.#fileDialog.returnSurfaceId : null;
 			let mobileFallbackId: string | null = null;
 			let removalBlocked = false;
 			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
@@ -612,14 +615,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#deps.singletons.disposeSurface(surface.kind);
 			}
 			if (!current) return true;
+			const shouldRestorePresentation = ownedFocus || wasDialog || mobileFallbackId !== null;
+			if (!shouldRestorePresentation) return true;
 			const sourceWindowActive = sourceWindowId
 				? windowNodeById(this.layout.snapshot.desktopRoot, sourceWindowId)?.tabs.activeId
 				: null;
 			const fallbackSurfaceId =
 				mobileFallbackId ??
-				(wasDialog
-					? this.#presentation.eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
-					: null) ??
+				(wasDialog ? this.#presentation.eligibleDesktopReturn(dialogReturnSurfaceId) : null) ??
 				sourceWindowActive ??
 				this.defaultActiveId;
 			this.lastFocusedSurfaceId = fallbackSurfaceId;
