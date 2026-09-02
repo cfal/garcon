@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
 import {
@@ -104,7 +104,7 @@ describe('repeated agent handoff lifecycle', () => {
         },
       });
 
-      await waitForChatOwner(
+      await waitForHandoffRecovery(
         fixture,
         recoverableChatId,
         targetAgent.agentId,
@@ -426,7 +426,7 @@ function recoveryIntent(input: {
   };
 }
 
-async function waitForChatOwner(
+async function waitForHandoffRecovery(
   fixture: IntegrationFixture,
   chatId: string,
   agentId: string,
@@ -441,6 +441,22 @@ async function waitForChatOwner(
       ? true
       : null,
   });
+
+  const deadline = Date.now() + 5_000;
+  const journalPath = join(fixture.dirs.workspace, 'agent-ownership-journal.json');
+  while (true) {
+    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
+      ownershipIntents?: Array<{ chatId?: unknown }>;
+    };
+    if (!Array.isArray(journal.ownershipIntents)) {
+      throw new Error('Agent ownership journal is invalid.');
+    }
+    if (!journal.ownershipIntents.some((intent) => intent.chatId === chatId)) break;
+    if (Date.now() >= deadline) {
+      throw new Error(`Chat ${chatId} did not discharge its handoff recovery fence.`);
+    }
+    await Bun.sleep(20);
+  }
   const served = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
   expect(served).toMatchObject({ agentId, agentOwnershipEpoch });
 }
