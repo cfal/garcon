@@ -62,6 +62,21 @@ describe('ShareStore', () => {
     expect(byChat?.shareToken).toBe(created.shareToken);
   });
 
+  it('stores the share index and snapshots with owner-only permissions', async () => {
+    if (process.platform === 'win32') return;
+    const store = new ShareStore(workspaceDir);
+    await store.init();
+
+    const created = await store.createShare('chat-1', sharePartial());
+
+    const indexMode = (await fs.stat(path.join(workspaceDir, 'shared-chats.json'))).mode & 0o777;
+    const snapshotMode = (await fs.stat(
+      path.join(workspaceDir, 'shares', `${created.shareToken}.json`),
+    )).mode & 0o777;
+    expect(indexMode).toBe(0o600);
+    expect(snapshotMode).toBe(0o600);
+  });
+
   it('updates existing share snapshots without changing the token', async () => {
     const store = new ShareStore(workspaceDir);
     await store.init();
@@ -113,6 +128,11 @@ describe('ShareStore', () => {
     expect(indexRaw.shares['legacy-token'].messages).toBeUndefined();
     expect(snapshotRaw.messages).toHaveLength(1);
     expect(migrated?.chatId).toBe('legacy-chat');
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(path.join(workspaceDir, 'shared-chats.json'))).mode & 0o777).toBe(0o600);
+      expect((await fs.stat(path.join(workspaceDir, 'shares', 'legacy-token.json'))).mode & 0o777)
+        .toBe(0o600);
+    }
   });
 
   it('fails closed when a legacy snapshot cannot be persisted', async () => {

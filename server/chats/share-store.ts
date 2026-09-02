@@ -176,7 +176,7 @@ export class ShareStore implements IShareStore {
       index.shares[snapshot.shareToken] = indexEntryFromSnapshot(snapshot);
       await this.#writeSnapshot(snapshot);
     }
-    await writeJsonFileAtomic(this.#filePath(), index);
+    await writeJsonFileAtomic(this.#filePath(), index, { mode: 0o600 });
     this.#index = index;
     return index;
   }
@@ -191,11 +191,11 @@ export class ShareStore implements IShareStore {
 
   async #persist(): Promise<void> {
     if (!this.#index) return;
-    await writeJsonFileAtomic(this.#filePath(), this.#index);
+    await writeJsonFileAtomic(this.#filePath(), this.#index, { mode: 0o600 });
   }
 
   async #writeSnapshot(snapshot: SharedChatSnapshot): Promise<void> {
-    await writeJsonFileAtomic(this.#snapshotFilePath(snapshot.shareToken), snapshot);
+    await writeJsonFileAtomic(this.#snapshotFilePath(snapshot.shareToken), snapshot, { mode: 0o600 });
   }
 
   #cacheSnapshot(snapshot: SharedChatSnapshot): SharedChatSnapshot {
