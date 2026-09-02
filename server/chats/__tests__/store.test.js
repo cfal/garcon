@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -137,6 +137,19 @@ describe('ChatRegistry', () => {
     await registry.init();
 
     expect((await fs.stat(registryPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it('loads an existing registry when permission repair fails', async () => {
+    if (process.platform === 'win32') return;
+    const registryPath = path.join(tempDir, 'chats.json');
+    await fs.writeFile(registryPath, JSON.stringify({ version: 5, sessions: {} }), { mode: 0o644 });
+    const chmod = spyOn(fs, 'chmod').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
+    try {
+      registry = new ChatRegistry(tempDir);
+      await expect(registry.init()).resolves.toEqual({ version: 5, sessions: {} });
+    } finally {
+      chmod.mockRestore();
+    }
   });
 
   it('persists and freezes watermark-free delegation parentage', async () => {
