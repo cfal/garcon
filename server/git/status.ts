@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import path from 'path';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
@@ -79,28 +80,38 @@ async function hasCommitStateRef(projectPath: string, ref: string): Promise<bool
   }
 }
 
-async function hasRebaseOrAmState(projectPath: string): Promise<boolean> {
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
+}
+
+async function hasRebaseOrAmConflictState(projectPath: string): Promise<boolean> {
   const { stdout } = await runGit(
     projectPath,
     [
       'rev-parse',
-      '--path-format=absolute',
       '--git-path',
-      'rebase-merge',
+      'rebase-merge/stopped-sha',
+      '--git-path',
+      'rebase-merge/amend',
       '--git-path',
       'rebase-apply',
     ],
     readOnlyGitOptions(),
   );
-  for (const statePath of stdout.trimEnd().split('\n')) {
-    try {
-      await fs.access(statePath);
-      return true;
-    } catch (error) {
-      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-    }
-  }
-  return false;
+  const [stoppedPath, amendPath, applyPath] = stdout
+    .trimEnd()
+    .split('\n')
+    .map((statePath) => path.resolve(projectPath, statePath));
+
+  if (await fileExists(applyPath)) return true;
+  // Interactive edit stops permit isolated commits; conflicted stops omit the amend marker.
+  return (await fileExists(stoppedPath)) && !(await fileExists(amendPath));
 }
 
 async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
@@ -108,7 +119,7 @@ async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
   for (const ref of WHOLE_INDEX_COMMIT_STATE_REFS) {
     if (await hasCommitStateRef(projectPath, ref)) return true;
   }
-  return hasRebaseOrAmState(projectPath);
+  return hasRebaseOrAmConflictState(projectPath);
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {

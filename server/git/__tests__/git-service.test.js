@@ -572,6 +572,7 @@ describe("selected-file commits", () => {
       await expect(runGitCommand(projectPath, ["rebase", "master"]))
         .rejects.toThrow("could not apply");
       await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt"]);
 
       await git.commit({
         projectPath,
@@ -589,6 +590,69 @@ describe("selected-file commits", () => {
       await runGitCommand(projectPath, ["rebase", "--continue"]);
       const commitCount = await runGitCommand(projectPath, ["rev-list", "--count", "HEAD"]);
       expect(commitCount.stdout.trim()).toBe("3");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps selected-file isolation at an interactive rebase edit stop", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-rebase-edit-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(path.join(projectPath, "feature.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "feature.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
+
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "main.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "main.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "main change"]);
+      await runGitCommand(projectPath, ["checkout", "feature"]);
+
+      const sequenceEditorPath = path.join(projectPath, ".git", "sequence-editor.cjs");
+      await fs.writeFile(
+        sequenceEditorPath,
+        [
+          "const fs = require('node:fs');",
+          "const todoPath = process.argv.at(-1);",
+          "const todo = fs.readFileSync(todoPath, 'utf8');",
+          "fs.writeFileSync(todoPath, todo.replace(/^pick /m, 'edit '));",
+        ].join("\n"),
+        "utf-8",
+      );
+      await runGitCommand(projectPath, ["rebase", "-i", "master"], {
+        env: {
+          GIT_SEQUENCE_EDITOR: `${JSON.stringify(process.execPath)} ${JSON.stringify(sequenceEditorPath)}`,
+        },
+      });
+
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "unrelated\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "unrelated.txt"]);
+
+      await git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      expect(committed.stdout.trim()).toBe("a.txt");
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(status.stdout.trim()).toBe("A  unrelated.txt");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
