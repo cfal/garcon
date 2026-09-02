@@ -5,9 +5,12 @@ import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { AgentLegacySettingsScope } from '@garcon/server-agent-interface';
 import { isRecord, type JsonObject, type JsonValue } from '@garcon/common/json';
 import type { IntegrationRegistry } from './integration-registry.js';
+import { normalizeSupportedThinkingMode } from '../../common/execution-defaults.js';
+import { GENERATION_UI_SETTING_KEYS } from '../../common/settings.js';
 
 const LEGACY_MIGRATION_ID = 'agent-integration-v1';
 const SETTINGS_REFRESH_MIGRATION_ID = 'agent-integration-settings-v2';
+const EXECUTION_MODE_REFRESH_MIGRATION_ID = 'agent-execution-mode-settings-v1';
 const CHAT_SCHEMA_VERSION = 3;
 const CORE_RECORD_PATHS = new Set([
   'agent-ownership-journal.json',
@@ -45,17 +48,29 @@ export async function refreshAgentIntegrationCoreRecords(options: {
   await migrateCoreRecords(options, 'settings-refresh');
 }
 
+export async function refreshAgentExecutionModeCoreRecords(options: {
+  workspaceDir: string;
+  integrations: IntegrationRegistry;
+  signal?: AbortSignal;
+}): Promise<void> {
+  await migrateCoreRecords(options, 'execution-mode-refresh');
+}
+
 async function migrateCoreRecords(
   options: {
     workspaceDir: string;
     integrations: IntegrationRegistry;
     signal?: AbortSignal;
   },
-  migrationKind: 'legacy' | 'settings-refresh',
+  migrationKind: 'legacy' | 'settings-refresh' | 'execution-mode-refresh',
 ): Promise<void> {
   const signal = options.signal ?? new AbortController().signal;
-  const refreshSettings = migrationKind === 'settings-refresh';
-  const migrationId = refreshSettings ? SETTINGS_REFRESH_MIGRATION_ID : LEGACY_MIGRATION_ID;
+  const refreshSettings = migrationKind !== 'legacy';
+  const migrationId = migrationKind === 'legacy'
+    ? LEGACY_MIGRATION_ID
+    : migrationKind === 'settings-refresh'
+      ? SETTINGS_REFRESH_MIGRATION_ID
+      : EXECUTION_MODE_REFRESH_MIGRATION_ID;
   const journalDir = path.join(options.workspaceDir, 'migration-journals', migrationId);
   await recoverCoreRecordMigration(options.workspaceDir, journalDir, migrationId);
   const targets = await createMigrationTargets(
@@ -164,6 +179,10 @@ async function createMigrationTargets(
         ...value,
         agentId,
         model,
+        thinkingMode: normalizeSupportedThinkingMode(
+          value.thinkingMode,
+          integration.descriptor.supportedThinkingModes,
+        ),
         agentSessionId,
         nativeSession: asJsonValue(nativeSession),
         agentSettingsById,
@@ -227,10 +246,12 @@ async function createMigrationTargets(
       settings.recentAgentSettings,
       signal,
     );
+    const ui = normalizeGenerationUiThinkingModes(integrations, settings.ui);
     targets.push({
       relativePath: 'project-settings.json',
       value: withoutKeys({
         ...settings,
+        ...(ui ? { ui } : {}),
         recentAgentSettings,
         executionDefaults: { global: migratedGlobal, byAgent },
       }, [
@@ -297,7 +318,15 @@ async function createMigrationTargets(
       );
       prompts.push({
         ...candidate,
-        target: withoutKeys({ ...target, model, agentSettingsById }, ['claudeThinkingMode', 'ampAgentMode']),
+        target: withoutKeys({
+          ...target,
+          model,
+          thinkingMode: normalizeSupportedThinkingMode(
+            target.thinkingMode,
+            integration.descriptor.supportedThinkingModes,
+          ),
+          agentSettingsById,
+        }, ['claudeThinkingMode', 'ampAgentMode']),
       });
       changed = true;
     }
@@ -307,6 +336,29 @@ async function createMigrationTargets(
     });
   }
   return targets;
+}
+
+function normalizeGenerationUiThinkingModes(
+  integrations: IntegrationRegistry,
+  raw: JsonValue | undefined,
+): JsonObject | null {
+  if (!isRecord(raw)) return null;
+  const ui: JsonObject = { ...raw };
+  for (const key of GENERATION_UI_SETTING_KEYS) {
+    const selection = raw[key];
+    if (!isRecord(selection) || !Object.hasOwn(selection, 'thinkingMode')) continue;
+    const agentId = stringValue(selection.agentId);
+    const integration = agentId ? integrations.get(agentId) : null;
+    if (!integration) continue;
+    ui[key] = {
+      ...selection,
+      thinkingMode: normalizeSupportedThinkingMode(
+        selection.thinkingMode,
+        integration.descriptor.supportedThinkingModes,
+      ),
+    };
+  }
+  return ui;
 }
 
 async function migrateRecentAgentSettings(
@@ -374,6 +426,10 @@ async function migrateHandoffIntent(
           model,
           signal,
         }),
+        thinkingMode: normalizeSupportedThinkingMode(
+          execution.thinkingMode,
+          integration.descriptor.supportedThinkingModes,
+        ),
         agentSettings: asJsonValue(agentSettings),
       },
     },
@@ -386,8 +442,17 @@ async function migrateExecutionDefaults(
   scope: Parameters<typeof translateSettings>[1],
   signal: AbortSignal,
 ): Promise<JsonObject> {
+  const thinkingMode = scope.selectedAgentId && Object.hasOwn(raw, 'thinkingMode')
+    ? {
+        thinkingMode: normalizeSupportedThinkingMode(
+          raw.thinkingMode,
+          integrations.require(scope.selectedAgentId).descriptor.supportedThinkingModes,
+        ),
+      }
+    : {};
   return withoutKeys({
     ...raw,
+    ...thinkingMode,
     agentSettingsById: await translateSettings(integrations, scope, raw, signal),
   }, ['claudeThinkingMode', 'ampAgentMode']);
 }

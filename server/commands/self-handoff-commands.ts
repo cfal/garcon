@@ -194,7 +194,10 @@ export class SelfHandoffCommands {
         agentSessionId: null,
         nextForkOrdinal: 1,
         permissionMode: source.permissionMode,
-        thinkingMode: source.thinkingMode,
+        thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
+          source.agentId,
+          source.thinkingMode,
+        ),
         agentSettingsById: { ...source.agentSettingsById },
         carryOverSegments: [],
         nativeSeedReceipt: null,

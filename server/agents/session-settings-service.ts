@@ -1,4 +1,4 @@
-import { normalizePermissionMode, normalizeThinkingMode } from '../../common/chat-modes.js';
+import { normalizePermissionMode } from '../../common/chat-modes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -6,6 +6,11 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
+import {
+  isThinkingModeSupported,
+  normalizeSupportedThinkingMode,
+} from '../../common/execution-defaults.js';
+import { DomainError } from '../lib/domain-error.js';
 
 export class AgentSessionSettingsService {
   readonly #lock: KeyedPromiseLock;
@@ -51,7 +56,23 @@ export class AgentSessionSettingsService {
       assertSameApiProviderBoundary(previous, next);
 
       const permissionMode = normalizePermissionMode(patch.permissionMode ?? entry.permissionMode);
-      const thinkingMode = normalizeThinkingMode(patch.thinkingMode ?? entry.thinkingMode);
+      if (
+        patch.thinkingMode !== undefined
+        && !isThinkingModeSupported(
+          patch.thinkingMode,
+          integration.descriptor.supportedThinkingModes,
+        )
+      ) {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${patch.thinkingMode} is not supported by ${entry.agentId}`,
+          422,
+        );
+      }
+      const thinkingMode = normalizeSupportedThinkingMode(
+        patch.thinkingMode ?? entry.thinkingMode,
+        integration.descriptor.supportedThinkingModes,
+      );
       const currentSettings = integration.settings.parse(
         entry.agentSettingsById[entry.agentId] ?? integration.settings.defaults(),
       );

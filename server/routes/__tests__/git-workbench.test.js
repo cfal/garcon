@@ -44,6 +44,8 @@ const ctx = {
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
+    assertExecutionModeSelectionSupported: mock(() => undefined),
+    normalizeThinkingModeForAgent: mock((_agentId, value) => value),
   },
   settings: {
     getUiSettings: mock(() => ({})),

@@ -7,11 +7,12 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 
 const CHAT_ID = '1786120000000002';
 
 describe('agent settings migration', () => {
-  test('boots a v5 workspace after refreshing stale Amp settings and model values', async () => {
+  test('boots a v6 workspace after refreshing stale Amp settings and model values', async () => {
     await withIntegrationFixture(
       'agent-settings-migration',
       async (fixture) => {
@@ -22,6 +23,7 @@ describe('agent settings migration', () => {
         expect(registry.sessions[CHAT_ID]).toMatchObject({
           agentId: 'amp',
           model: 'medium',
+          thinkingMode: 'none',
           agentSettingsById: {
             amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
           },
@@ -29,9 +31,46 @@ describe('agent settings migration', () => {
         expect(JSON.parse(await readFile(
           join(fixture.dirs.workspace, 'workspace-version.json'),
           'utf8',
-        ))).toEqual({ version: 6 });
+        ))).toEqual({ version: CURRENT_WORKSPACE_VERSION });
+
+        await expect(fixture.client.startChat({
+          origin: 'interactive',
+          clientRequestId: randomUUID(),
+          clientMessageId: randomUUID(),
+          chatId: fixture.newChatId(),
+          agentId: 'amp',
+          projectPath: fixture.dirs.project,
+          model: 'medium',
+          permissionMode: 'default',
+          thinkingMode: 'high',
+          agentSettings: { ownerId: 'amp', schemaVersion: 2, values: {} },
+          command: 'generic rejected start',
+        })).rejects.toMatchObject({
+          status: 422,
+          body: { errorCode: 'VALIDATION_FAILED' },
+        });
+
+        await expect(fixture.client.patch('/api/v1/chats/execution-settings', {
+          chatId: CHAT_ID,
+          thinkingMode: 'high',
+        })).rejects.toMatchObject({
+          status: 422,
+          body: { errorCode: 'VALIDATION_FAILED' },
+        });
+
+        await expect(fixture.client.forkRunChat({
+          clientRequestId: randomUUID(),
+          clientMessageId: randomUUID(),
+          sourceChatId: CHAT_ID,
+          chatId: fixture.newChatId(),
+          command: 'generic rejected fork',
+          thinkingMode: 'high',
+        })).rejects.toMatchObject({
+          status: 422,
+          body: { errorCode: 'VALIDATION_FAILED' },
+        });
       },
-      { prepareWorkspace: writeVersion5Workspace },
+      { prepareWorkspace: writeVersion6Workspace },
     );
   }, 30_000);
 
@@ -64,10 +103,27 @@ describe('agent settings migration', () => {
             modelEndpointId: null,
             modelProtocol: null,
           }];
+          projectSettings.executionDefaults.byAgent.amp = {
+            thinkingMode: 'high',
+            agentSettingsById: {
+              amp: {
+                ownerId: 'amp',
+                schemaVersion: 1,
+                values: { ampAgentMode: 'deep' },
+              },
+            },
+          };
+          projectSettings.ui = {
+            ...projectSettings.ui,
+            chatTitle: { agentId: 'amp', model: 'medium', thinkingMode: 'high' },
+            agentSwitchCompaction: { agentId: 'amp', model: 'medium', thinkingMode: 'high' },
+            commitMessage: { agentId: 'amp', model: 'medium', thinkingMode: 'high' },
+            promptRefinement: { agentId: 'amp', model: 'medium', thinkingMode: 'high' },
+          };
           await Promise.all([
             writeFile(
               join(fixture.dirs.workspace, 'workspace-version.json'),
-              JSON.stringify({ version: 5 }),
+              JSON.stringify({ version: 6 }),
             ),
             writeFile(
               join(fixture.dirs.workspace, 'project-settings.json'),
@@ -97,7 +153,7 @@ describe('agent settings migration', () => {
                       modelEndpointId: null,
                       modelProtocol: null,
                       permissionMode: 'default',
-                      thinkingMode: 'none',
+                      thinkingMode: 'high',
                       agentSettings: {
                         ownerId: 'amp',
                         schemaVersion: 1,
@@ -133,6 +189,7 @@ describe('agent settings migration', () => {
       expect(registry.sessions[chatId]).toMatchObject({
         agentId: 'amp',
         model: 'medium',
+        thinkingMode: 'none',
         agentSettingsById: {
           amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
         },
@@ -148,15 +205,33 @@ describe('agent settings migration', () => {
         modelEndpointId: null,
         modelProtocol: null,
       }]);
+      expect(migratedSettings.executionDefaults.byAgent.amp).toMatchObject({
+        thinkingMode: 'none',
+        agentSettingsById: {
+          amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
+        },
+      });
+      for (const selection of [
+        migratedSettings.ui.chatTitle,
+        migratedSettings.ui.agentSwitchCompaction,
+        migratedSettings.ui.commitMessage,
+        migratedSettings.ui.promptRefinement,
+      ]) {
+        expect(selection).toMatchObject({
+          agentId: 'amp',
+          model: 'medium',
+          thinkingMode: 'none',
+        });
+      }
     });
   }, 30_000);
 });
 
-async function writeVersion5Workspace(directories: IntegrationDirectories): Promise<void> {
+async function writeVersion6Workspace(directories: IntegrationDirectories): Promise<void> {
   await Promise.all([
     writeFile(
       join(directories.workspace, 'workspace-version.json'),
-      JSON.stringify({ version: 5 }),
+      JSON.stringify({ version: 6 }),
     ),
     writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
       version: 5,
@@ -184,7 +259,7 @@ async function writeVersion5Workspace(directories: IntegrationDirectories): Prom
           modelProtocol: null,
           lastReadAt: null,
           permissionMode: 'default',
-          thinkingMode: 'none',
+          thinkingMode: 'high',
         },
       },
     })),

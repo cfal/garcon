@@ -446,6 +446,8 @@ function createRouteAgent(sessionOverrides = {}) {
       supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
       supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     })),
+    assertExecutionModeSelectionSupported: mock(() => undefined),
+    normalizeThinkingModeForAgent: mock((_agentId, value) => value),
     runSingleQuery: mock(() => Promise.resolve('title')),
     forkAgentSession: mock(() => Promise.resolve({
       kind: 'materialized',

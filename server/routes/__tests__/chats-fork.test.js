@@ -76,6 +76,8 @@ const chatViews = {
 };
 const agents = {
   startSession: mock(() => undefined),
+  assertExecutionModeSelectionSupported: mock(() => undefined),
+  normalizeThinkingModeForAgent: mock((_agentId, thinkingMode) => thinkingMode ?? 'none'),
   supportsFork: mock(() => true),
   supportsForkAtMessage: mock(() => true),
   supportsForkWhileRunning: mock(() => false),

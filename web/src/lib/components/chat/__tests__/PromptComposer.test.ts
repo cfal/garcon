@@ -466,6 +466,22 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Thinking effort: Default' })).toBeTruthy();
 	});
 
+	it('hides Amp effort across persisted selections and live agent transitions', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedAgentId: 'amp',
+			selectedThinkingMode: 'high',
+			selectableAgents: ['claude', 'amp'],
+		});
+
+		expect(screen.queryByRole('button', { name: /Thinking effort/ })).toBeNull();
+
+		await rerender({ selectedAgentId: 'claude', selectedThinkingMode: 'high' });
+		expect(screen.getByRole('button', { name: 'Thinking effort: High' })).toBeTruthy();
+
+		await rerender({ selectedAgentId: 'amp', selectedThinkingMode: 'high' });
+		expect(screen.queryByRole('button', { name: /Thinking effort/ })).toBeNull();
+	});
+
 	it('keeps the next draft editable but blocks sending during direct admission', async () => {
 		const onsubmit = vi.fn();
 		const { rerender } = render(PromptComposerTestHost, {

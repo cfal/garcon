@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { DomainError } from '../../lib/domain-error.ts';
 import { ScheduledPromptRunLog } from '../run-log.ts';
 import { bunCronRuntime, cronExpressionForUtcInstant, ScheduledPromptScheduler } from '../scheduler.ts';
 import { ScheduledPromptStore } from '../store.ts';
@@ -37,6 +38,54 @@ function recurringDefinition(firstRunAtUtc) {
     },
     target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
     prompt: 'Continue the work',
+  };
+}
+
+function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
+  return {
+    schedule: {
+      type: 'recurring',
+      intervalDays: 1,
+      firstRunAtUtc,
+      endAtUtc: null,
+    },
+    target: {
+      type: 'new-chat',
+      agentId: 'amp',
+      projectPath: process.cwd(),
+      model: 'medium',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'default',
+      thinkingMode,
+      agentSettingsById: {
+        amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
+      },
+      tags: [],
+    },
+    prompt: 'Continue the work',
+  };
+}
+
+function agentCapabilities(supportedThinkingModes = ['none', 'high']) {
+  return {
+    hasAgent() {
+      return true;
+    },
+    assertExecutionModeSelectionSupported(agentId, selection) {
+      if (
+        selection.thinkingMode !== undefined
+        && !supportedThinkingModes.includes(selection.thinkingMode)
+        && !(selection.thinkingMode === 'none' && supportedThinkingModes.length === 0)
+      ) {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+          422,
+        );
+      }
+    },
   };
 }
 
@@ -107,11 +156,7 @@ describe('scheduled prompt scheduler', () => {
           return {};
         },
       },
-      agents: {
-        hasAgent() {
-          return true;
-        },
-      },
+      agents: agentCapabilities(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
@@ -148,11 +193,7 @@ describe('scheduled prompt scheduler', () => {
           return chatId === '123' ? {} : null;
         },
       },
-      agents: {
-        hasAgent() {
-          return true;
-        },
-      },
+      agents: agentCapabilities(),
       cron,
     });
     const invalidations = [];
@@ -194,11 +235,7 @@ describe('scheduled prompt scheduler', () => {
           return chatId === '123' ? {} : null;
         },
       },
-      agents: {
-        hasAgent() {
-          return true;
-        },
-      },
+      agents: agentCapabilities(),
       cron: new FakeCron(),
     });
     const now = new Date('2029-07-10T12:00:45.000Z');
@@ -232,6 +269,50 @@ describe('scheduled prompt scheduler', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('rejects unsupported new-chat effort before create or update persistence', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    const scheduler = new ScheduledPromptScheduler({
+      store,
+      runLog: new ScheduledPromptRunLog(),
+      dispatcher: {
+        async dispatch() {
+          return { message: 'sent' };
+        },
+      },
+      chats: {
+        getChat() {
+          return null;
+        },
+      },
+      agents: agentCapabilities([]),
+      cron: new FakeCron(),
+    });
+
+    await expect(scheduler.create({
+      expectedRevision: 0,
+      scheduledPrompt: newChatDefinition('2030-01-01T09:00:00.000Z', 'high'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(store.revision).toBe(0);
+    expect(store.list()).toEqual([]);
+
+    const created = await scheduler.create({
+      expectedRevision: 0,
+      scheduledPrompt: newChatDefinition('2030-01-01T09:00:00.000Z'),
+    });
+    const scheduledPrompt = created.prompts[0];
+    await expect(scheduler.update({
+      id: scheduledPrompt.id,
+      expectedRevision: created.revision,
+      scheduledPrompt: newChatDefinition('2030-01-02T09:00:00.000Z', 'high'),
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+
+    expect(store.revision).toBe(created.revision);
+    expect(store.get(scheduledPrompt.id)?.target).toMatchObject({ thinkingMode: 'none' });
+    scheduler.stop();
+  });
+
   it('keeps the current cron handle active when an edit conflicts', async () => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);
@@ -251,11 +332,7 @@ describe('scheduled prompt scheduler', () => {
           return {};
         },
       },
-      agents: {
-        hasAgent() {
-          return true;
-        },
-      },
+      agents: agentCapabilities(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
@@ -292,11 +369,7 @@ describe('scheduled prompt scheduler', () => {
           return {};
         },
       },
-      agents: {
-        hasAgent() {
-          return true;
-        },
-      },
+      agents: agentCapabilities(),
       cron,
     });
     await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));

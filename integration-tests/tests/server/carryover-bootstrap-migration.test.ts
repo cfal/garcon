@@ -15,6 +15,7 @@ import { rollbackLegacyCarryOverMigration } from '../../../server/chats/chat-car
 import { ChatRegistry } from '../../../server/chats/store.js';
 import { transcriptViewId } from '../../../server/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
 import {
   type IntegrationDirectories,
   type IntegrationFixture,
@@ -40,7 +41,7 @@ describe('carryover bootstrap migration', () => {
 
         expect(firstRegistry.version).toBe(5);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
-          version: 6,
+          version: CURRENT_WORKSPACE_VERSION,
         });
         expect(await readJson<{
           version: number;
@@ -127,7 +128,7 @@ describe('carryover bootstrap migration', () => {
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
           .toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
-          version: 6,
+          version: CURRENT_WORKSPACE_VERSION,
         });
         expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
           .toMatchObject({ phase: 'complete', rollbackSafe: true });

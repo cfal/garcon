@@ -9,7 +9,10 @@ function makeRouter(overrides = {}) {
   const transcript = createRuntimeTranscriptFixture();
   const run = mock(async () => 'response');
   const integration = {
-    descriptor: { id: 'test' },
+    descriptor: {
+      id: 'test',
+      supportedThinkingModes: overrides.supportedThinkingModes ?? ['none', 'xhigh'],
+    },
     settings: {
       defaults: mock(() => envelope('test', { defaulted: true })),
       parse: mock((input) => input),
@@ -133,6 +136,18 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
       timeoutMs: 110_000,
       signal: controller.signal,
     }));
+  });
+
+  it('normalizes unsupported one-shot thinking through the integration descriptor', async () => {
+    const { router, run } = makeRouter({ supportedThinkingModes: [] });
+
+    await router.runSingleQuery('prompt', {
+      agentId: 'test',
+      model: 'model-a',
+      thinkingMode: 'high',
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ thinkingMode: 'none' }));
   });
 
   it('rejects integrations without the optional one-shot facet', async () => {

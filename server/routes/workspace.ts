@@ -21,6 +21,7 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
+  GENERATION_UI_SETTING_KEYS,
   normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
@@ -290,6 +291,28 @@ export default function createWorkspaceRoutes(
     return null;
   }
 
+  async function assertGenerationThinkingModePatchesSupported(
+    uiPatch: Record<string, unknown>,
+  ): Promise<void> {
+    const selections = GENERATION_UI_SETTING_KEYS.flatMap((key) => {
+      const selection = asPlainObject(uiPatch[key]);
+      return Object.hasOwn(selection, 'thinkingMode') ? [selection] : [];
+    });
+    if (selections.length === 0) return;
+
+    const contexts = await resolveGenerationContextsForSelections(agents, selections);
+    for (const [index, selection] of selections.entries()) {
+      const resolved = resolveEffectiveGenerationUiConfig({
+        persisted: selection,
+        ...contexts[index],
+      });
+      if (!resolved.agentId) continue;
+      agents.assertExecutionModeSelectionSupported(resolved.agentId, {
+        thinkingMode: resolved.thinkingMode,
+      });
+    }
+  }
+
   async function putSessionNameHandler(body: JsonBody): Promise<Response> {
     try {
       const { chatId, title } = asJsonBody(body) as Partial<UpdateChatTitleRequest>;
@@ -346,6 +369,7 @@ export default function createWorkspaceRoutes(
           false,
         );
       }
+      if (uiPatch) await assertGenerationThinkingModePatchesSupported(uiPatch);
       const featurePatch: Partial<RemoteFeatureSettings> = {};
       if (commandsPatch && Object.keys(commandsPatch).length > 0) {
         featurePatch.agentCommands = {

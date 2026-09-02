@@ -54,6 +54,10 @@ import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/err
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import { dispatchListenersSequentially } from './listener-dispatch.js';
+import {
+  isThinkingModeSupported,
+  normalizeSupportedThinkingMode,
+} from '../../common/execution-defaults.js';
 
 const logger = createLogger('agents:registry');
 
@@ -105,6 +109,11 @@ export interface AgentRegistryServiceContract {
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
+  assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly permissionMode?: PermissionMode;
+    readonly thinkingMode?: ThinkingMode;
+  }): void;
+  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode;
   launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
   completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
   getAgentAuthLoginStatus(agentId: string, expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
@@ -225,6 +234,39 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   hasAgent(agentId: string): boolean { return this.#directory.has(agentId); }
+  assertExecutionModeSelectionSupported(agentId: string, selection: {
+    readonly permissionMode?: PermissionMode;
+    readonly thinkingMode?: ThinkingMode;
+  }): void {
+    const descriptor = this.#directory.get(agentId)?.descriptor;
+    if (!descriptor) throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);
+    if (
+      selection.permissionMode !== undefined
+      && !descriptor.supportedPermissionModes.includes(selection.permissionMode)
+    ) {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `Permission mode ${selection.permissionMode} is not supported by ${agentId}`,
+        422,
+      );
+    }
+    if (
+      selection.thinkingMode !== undefined
+      && !isThinkingModeSupported(selection.thinkingMode, descriptor.supportedThinkingModes)
+    ) {
+      throw new DomainError(
+        'VALIDATION_FAILED',
+        `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+        422,
+      );
+    }
+  }
+  normalizeThinkingModeForAgent(agentId: string, value: unknown): ThinkingMode {
+    return normalizeSupportedThinkingMode(
+      value,
+      this.#directory.require(agentId).descriptor.supportedThinkingModes,
+    );
+  }
   supportsAuthLogin(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.launchLogin); }
   supportsAuthLoginCompletion(agentId: string): boolean { return Boolean(this.#directory.get(agentId)?.auth?.completeLogin); }
   supportsFork(agentId: string): boolean { return this.#directory.has(agentId); }

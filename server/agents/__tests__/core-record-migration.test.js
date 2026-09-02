@@ -16,7 +16,11 @@ function envelope(ownerId, values = {}) {
 
 function integration(id, legacyKey, defaultValue, options = {}) {
   return {
-    descriptor: { id },
+    descriptor: {
+      id,
+      supportedPermissionModes: ['default'],
+      supportedThinkingModes: options.supportedThinkingModes ?? ['none', 'high'],
+    },
     settings: {
       parse(input) {
         if (input.ownerId !== id) throw new Error(`wrong owner for ${id}`);
@@ -44,6 +48,7 @@ function integrations(...values) {
   const byId = new Map(values.map((value) => [value.descriptor.id, value]));
   return {
     list: () => [...byId.values()],
+    get: (id) => byId.get(id) ?? null,
     require(id) {
       const value = byId.get(id);
       if (!value) throw new Error(`missing integration ${id}`);
@@ -126,7 +131,7 @@ describe('agent integration core-record migration', () => {
       workspaceDir,
       integrations: integrations(
         integration('claude', 'claudeThinkingMode', 'auto'),
-        integration('amp', 'ampAgentMode', 'smart'),
+        integration('amp', 'ampAgentMode', 'smart', { supportedThinkingModes: [] }),
       ),
     });
 
@@ -204,6 +209,7 @@ describe('agent integration core-record migration', () => {
     const ampV2 = { ownerId: 'amp', schemaVersion: 2, values: {} };
     const amp = integration('amp', 'ampAgentMode', 'smart', {
       translateLegacyModel: (model) => ['smart', 'deep'].includes(model) ? 'medium' : model,
+      supportedThinkingModes: [],
     });
     amp.settings.parse = (input) => {
       if (input.ownerId !== 'amp' || input.schemaVersion !== 2) throw new Error('Invalid settings for amp');
@@ -227,6 +233,12 @@ describe('agent integration core-record migration', () => {
         },
       })}\n`),
       fs.writeFile(path.join(workspaceDir, 'project-settings.json'), `${JSON.stringify({
+        ui: {
+          chatTitle: { agentId: 'amp', thinkingMode: 'high', enabled: true },
+          agentSwitchCompaction: { agentId: 'amp', thinkingMode: 'high', enabled: true },
+          commitMessage: { agentId: 'amp', thinkingMode: 'high', customPrompt: 'Summarize' },
+          promptRefinement: { agentId: 'amp', thinkingMode: 'high', customPrompt: 'Refine' },
+        },
         recentAgentSettings: [{
           agentId: 'amp',
           model: 'smart',
@@ -313,6 +325,10 @@ describe('agent integration core-record migration', () => {
     }]);
     expect(settings.executionDefaults.global.agentSettingsById.amp).toEqual(ampV2);
     expect(settings.executionDefaults.byAgent.amp.agentSettingsById.amp).toEqual(ampV2);
+    for (const selection of Object.values(settings.ui)) {
+      expect(selection).toMatchObject({ agentId: 'amp', thinkingMode: 'none' });
+    }
+    expect(settings.ui.commitMessage.customPrompt).toBe('Summarize');
     const scheduled = JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'));
     expect(scheduled.prompts[0].target).toMatchObject({
       model: 'medium',

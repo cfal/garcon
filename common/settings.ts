@@ -86,6 +86,13 @@ export interface RemoteUiSettings {
   };
 }
 
+export const GENERATION_UI_SETTING_KEYS = [
+  'chatTitle',
+  'agentSwitchCompaction',
+  'commitMessage',
+  'promptRefinement',
+] as const satisfies readonly (keyof RemoteUiSettings)[];
+
 type EffectiveGenerationSelection = {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;

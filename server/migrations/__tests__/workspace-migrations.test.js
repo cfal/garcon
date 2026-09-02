@@ -35,6 +35,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-node-migration', migrate);
     await runner.run('carryover-segment-migration', migrate);
     await runner.run('agent-integration-settings-refresh', migrate);
+    await runner.run('agent-execution-mode-refresh', migrate);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -67,6 +68,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-node-migration', async () => { events.push('carryover-node'); });
     await runner.run('carryover-segment-migration', async () => { events.push('carryover-segment'); });
     await runner.run('agent-integration-settings-refresh', async () => { events.push('settings-refresh'); });
+    await runner.run('agent-execution-mode-refresh', async () => { events.push('execution-mode-refresh'); });
     await runner.finish();
 
     expect(events).toEqual([
@@ -76,6 +78,7 @@ describe('WorkspaceMigrationRunner', () => {
       'carryover-node',
       'carryover-segment',
       'settings-refresh',
+      'execution-mode-refresh',
     ]);
     await expect(fs.stat(queuesDir)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(workspaceDir, 'pending-user-inputs.json'))).rejects.toMatchObject({
@@ -105,10 +108,35 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('carryover-node-migration', cleanup);
     await runner.run('carryover-segment-migration', cleanup);
     await runner.run('agent-integration-settings-refresh', cleanup);
+    await runner.run('agent-execution-mode-refresh', cleanup);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(4);
+    expect(cleanup).toHaveBeenCalledTimes(5);
+    expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
+  });
+
+  it('runs the execution-mode refresh for an existing version 6 workspace', async () => {
+    await fs.writeFile(
+      path.join(workspaceDir, 'workspace-version.json'),
+      JSON.stringify({ version: 6 }),
+      'utf8',
+    );
+    const previous = mock(async () => undefined);
+    const executionModeRefresh = mock(async () => undefined);
+    const runner = await WorkspaceMigrationRunner.open(workspaceDir);
+
+    await runner.run('chat-id-migration', previous);
+    await runner.run('core-record-migration', previous);
+    await runner.run('ephemeral-queue-state-cleanup', previous);
+    await runner.run('carryover-node-migration', previous);
+    await runner.run('carryover-segment-migration', previous);
+    await runner.run('agent-integration-settings-refresh', previous);
+    await runner.run('agent-execution-mode-refresh', executionModeRefresh);
+    await runner.finish();
+
+    expect(previous).not.toHaveBeenCalled();
+    expect(executionModeRefresh).toHaveBeenCalledOnce();
     expect(await readVersion()).toEqual({ version: CURRENT_WORKSPACE_VERSION });
   });
 

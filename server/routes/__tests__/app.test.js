@@ -24,6 +24,7 @@ import {
   SavedSearchNotFoundError,
 } from '../../settings/errors.js';
 import { CorruptStateFileError } from '../../lib/json-file-store.ts';
+import { DomainError } from '../../lib/domain-error.js';
 
 function remoteSettingsSource(overrides = {}) {
   return {
@@ -92,6 +93,7 @@ function createMockCtx() {
       getModels: mock(() => Promise.resolve([])),
       runSingleQuery: mock(() => Promise.resolve('OK')),
       singleQueryRunsToolsWithoutPermission: mock(() => false),
+      assertExecutionModeSelectionSupported: mock(() => undefined),
     },
   };
 }
@@ -142,6 +144,8 @@ describe('PUT /api/app/session-name', () => {
     ctx.agents.getAgentCatalogEntries.mockClear();
     ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     ctx.agents.getModels.mockClear();
+    ctx.agents.assertExecutionModeSelectionSupported.mockClear();
+    ctx.agents.assertExecutionModeSelectionSupported.mockImplementation(() => undefined);
     parseJsonBody.mockClear();
   });
 
@@ -1008,6 +1012,42 @@ describe('PUT /api/app/settings', () => {
       expect(response.status).toBe(400);
       expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
       expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects unsupported generation efforts before mutating settings', async () => {
+    ctx.agents.assertExecutionModeSelectionSupported.mockImplementation((agentId, selection) => {
+      if (agentId === 'amp' && selection.thinkingMode === 'high') {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          'Thinking mode high is not supported by amp',
+          422,
+        );
+      }
+    });
+
+    for (const target of ['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement']) {
+      ctx.settings.setUiSettings.mockClear();
+      ctx.settings.setFeatureSettings.mockClear();
+      ctx.settings.setPathSettings.mockClear();
+      parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+        ui: {
+          [target]: {
+            agentId: 'amp',
+            model: 'medium',
+            thinkingMode: 'high',
+          },
+        },
+      }));
+
+      const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+      const body = await response.json();
+
+      expect(response.status).toBe(422);
+      expect(body.errorCode).toBe('VALIDATION_FAILED');
+      expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+      expect(ctx.settings.setFeatureSettings).not.toHaveBeenCalled();
+      expect(ctx.settings.setPathSettings).not.toHaveBeenCalled();
     }
   });
 

@@ -190,6 +190,37 @@ class TestChatCommandService extends ChatCommandService {
   }
 }
 
+function executionModeMethods({
+  permissionModes = ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
+  thinkingModes = ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+} = {}) {
+  return {
+    assertExecutionModeSelectionSupported: mock((agentId, selection) => {
+      if (selection.permissionMode !== undefined && !permissionModes.includes(selection.permissionMode)) {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `Permission mode ${selection.permissionMode} is not supported by ${agentId}`,
+          422,
+        );
+      }
+      if (
+        selection.thinkingMode !== undefined
+        && !thinkingModes.includes(selection.thinkingMode)
+        && !(selection.thinkingMode === 'none' && thinkingModes.length === 0)
+      ) {
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `Thinking mode ${selection.thinkingMode} is not supported by ${agentId}`,
+          422,
+        );
+      }
+    }),
+    normalizeThinkingModeForAgent: mock((_agentId, value) => (
+      thinkingModes.includes(value) ? value : thinkingModes[0] ?? 'none'
+    )),
+  };
+}
+
 function makeService(overrides = {}) {
   const session = {
     id: SOURCE_CHAT_ID,
@@ -555,6 +586,7 @@ function makeService(overrides = {}) {
       supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
       supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     })),
+    ...executionModeMethods(),
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
   };
@@ -829,6 +861,64 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
+  it('rejects unsupported chat-start thinking modes before persistence', async () => {
+    const { service, chats, ledger, agents } = makeService({
+      agents: {
+        ...executionModeMethods({ permissionModes: ['bypassPermissions'], thinkingModes: [] }),
+      },
+    });
+
+    await expect(service.submitStart({
+      origin: 'interactive',
+      chatId: TARGET_CHAT_ID,
+      agentId: 'amp',
+      projectPath: projectBaseDir,
+      command: 'start without configurable effort',
+      model: 'medium',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'high',
+      agentSettings: agentSettings('amp'),
+      clientRequestId: 'req-start-unsupported-thinking',
+      clientMessageId: 'msg-start-unsupported-thinking',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(
+      ledger,
+      'chat-start',
+      'req-start-unsupported-thinking',
+      TARGET_CHAT_ID,
+    )).toBeNull();
+  });
+
+  it('persists the neutral chat-start value for an agent without thinking modes', async () => {
+    const { service, chats } = makeService({
+      agents: {
+        ...executionModeMethods({ permissionModes: ['bypassPermissions'], thinkingModes: [] }),
+      },
+    });
+
+    await service.submitStart({
+      origin: 'interactive',
+      chatId: TARGET_CHAT_ID,
+      agentId: 'amp',
+      projectPath: projectBaseDir,
+      command: 'start without configurable effort',
+      model: 'medium',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'none',
+      agentSettings: agentSettings('amp'),
+      clientRequestId: 'req-start-neutral-thinking',
+      clientMessageId: 'msg-start-neutral-thinking',
+    });
+
+    expect(chats.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      agentId: 'amp',
+      thinkingMode: 'none',
+    }));
+  });
+
   it('rejects videos when the selected agent does not advertise their MIME type', async () => {
     const unsupported = makeService({
       agents: { supportsFileAttachmentMimeType: mock(() => false) },
@@ -919,6 +1009,67 @@ describe('ChatCommandService', () => {
 
     expect(unsupported.forkChatFileCopy).not.toHaveBeenCalled();
     expect(unsupported.queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unsupported fork-run thinking override before persistence', async () => {
+    const { service, forkChatFileCopy, ledger } = makeService({
+      session: {
+        agentId: 'amp',
+        model: 'medium',
+        thinkingMode: 'none',
+        agentSettingsById: { amp: agentSettings('amp') },
+      },
+      agents: {
+        ...executionModeMethods({ permissionModes: ['bypassPermissions'], thinkingModes: [] }),
+      },
+    });
+
+    await expect(service.submitForkRun({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+      command: 'continue in fork',
+      thinkingMode: 'high',
+      clientRequestId: 'req-fork-unsupported-thinking',
+      clientMessageId: 'msg-fork-unsupported-thinking',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(
+      ledger,
+      'fork-run',
+      'req-fork-unsupported-thinking',
+      TARGET_CHAT_ID,
+    )).toBeNull();
+  });
+
+  it('canonicalizes inherited fork thinking mode without changing routing', async () => {
+    const { service, forkChatFileCopy } = makeService({
+      session: {
+        agentId: 'amp',
+        model: 'medium',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        thinkingMode: 'high',
+        agentSettingsById: { amp: agentSettings('amp') },
+      },
+      agents: {
+        ...executionModeMethods({ permissionModes: ['bypassPermissions'], thinkingModes: [] }),
+      },
+    });
+
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+
+    expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
+      sourceSession: expect.objectContaining({
+        agentId: 'amp',
+        model: 'medium',
+        apiProviderId: null,
+        modelEndpointId: null,
+        modelProtocol: null,
+        thinkingMode: 'none',
+      }),
+    }));
   });
 
   it('rejects a colliding chat ID before accepting a command ledger record', async () => {
@@ -2224,10 +2375,7 @@ describe('ChatCommandService', () => {
   it('rejects unsupported explicit modes before creating a command receipt', async () => {
     const { service, queue, ledger } = makeService({
       agents: {
-        getAgentCatalogEntry: mock(() => Promise.resolve({
-          supportedPermissionModes: ['default'],
-          supportedThinkingModes: ['none'],
-        })),
+        ...executionModeMethods({ permissionModes: ['default'], thinkingModes: ['none'] }),
       },
     });
 
@@ -2246,10 +2394,7 @@ describe('ChatCommandService', () => {
   it('accepts the neutral thinking value when an agent exposes no thinking control', async () => {
     const { service, queue } = makeService({
       agents: {
-        getAgentCatalogEntry: mock(() => Promise.resolve({
-          supportedPermissionModes: ['default'],
-          supportedThinkingModes: [],
-        })),
+        ...executionModeMethods({ permissionModes: ['default'], thinkingModes: [] }),
       },
     });
 

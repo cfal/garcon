@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 
-export const CURRENT_WORKSPACE_VERSION = 6;
+export const CURRENT_WORKSPACE_VERSION = 7;
 
 const WORKSPACE_VERSION_FILE = 'workspace-version.json';
 const FRESH_WORKSPACE_IGNORED_FILES = new Set([
@@ -17,6 +17,7 @@ const MIGRATIONS = [
   { name: 'carryover-node-migration', version: 4 },
   { name: 'carryover-segment-migration', version: 5 },
   { name: 'agent-integration-settings-refresh', version: 6 },
+  { name: 'agent-execution-mode-refresh', version: 7 },
 ] as const;
 
 export type WorkspaceMigrationName = typeof MIGRATIONS[number]['name'];

@@ -63,6 +63,9 @@ export class StartCommands {
     if (!this.deps.agents.hasAgent(input.agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
+      thinkingMode: input.thinkingMode,
+    });
     const parentChatId = input.parentChatId === undefined
       ? null
       : this.support.requireChatId(input.parentChatId, 'parentChatId');

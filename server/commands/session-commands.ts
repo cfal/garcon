@@ -33,7 +33,6 @@ import {
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
-import { isThinkingModeSupported } from '../../common/execution-defaults.js';
 
 const logger = createLogger('commands:session');
 
@@ -157,34 +156,10 @@ export class SessionCommands {
       );
     }
     if (input.permissionMode !== undefined || input.thinkingMode !== undefined) {
-      const catalog = await this.deps.agents.getAgentCatalogEntry(chat.agentId);
-      if (!catalog) {
-        throw new CommandValidationError(
-          'UNSUPPORTED_AGENT',
-          `Unsupported agent: ${chat.agentId}`,
-          422,
-        );
-      }
-      if (
-        input.permissionMode !== undefined
-        && !catalog.supportedPermissionModes.includes(input.permissionMode)
-      ) {
-        throw new CommandValidationError(
-          'VALIDATION_FAILED',
-          `Permission mode ${input.permissionMode} is not supported by ${chat.agentId}`,
-          422,
-        );
-      }
-      if (
-        input.thinkingMode !== undefined
-        && !isThinkingModeSupported(input.thinkingMode, catalog.supportedThinkingModes)
-      ) {
-        throw new CommandValidationError(
-          'VALIDATION_FAILED',
-          `Thinking mode ${input.thinkingMode} is not supported by ${chat.agentId}`,
-          422,
-        );
-      }
+      this.deps.agents.assertExecutionModeSelectionSupported(chat.agentId, {
+        permissionMode: input.permissionMode,
+        thinkingMode: input.thinkingMode,
+      });
     }
 
     const result = await this.support.submitHttpRun(normalizedInput);

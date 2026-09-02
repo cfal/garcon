@@ -22,7 +22,7 @@ import { isRecord } from '../../common/json.js';
 import { isGitRefKind, parseGitRefSort } from '../../common/git-refs.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError, projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
-import { jsonError } from '../lib/http-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
 import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
@@ -393,7 +393,22 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
           ? persistedConfig.customPrompt
           : '';
       const useCommonDirPrefix = persistedConfig.useCommonDirPrefix === true;
-      const thinkingMode = hasOwn(input, 'thinkingMode') && isThinkingMode(input.thinkingMode) ? input.thinkingMode : hasGenerationRoutingOverride(input) ? 'none' : persistedConfig.thinkingMode;
+      const selectedThinkingMode = hasOwn(input, 'thinkingMode') && isThinkingMode(input.thinkingMode)
+        ? input.thinkingMode
+        : hasGenerationRoutingOverride(input)
+          ? 'none'
+          : persistedConfig.thinkingMode;
+      let thinkingMode = selectedThinkingMode;
+      if (agentId) {
+        try {
+          if (hasOwn(input, 'thinkingMode')) {
+            agents.assertExecutionModeSelectionSupported(agentId, { thinkingMode: selectedThinkingMode });
+          }
+          thinkingMode = agents.normalizeThinkingModeForAgent(agentId, selectedThinkingMode);
+        } catch (error) {
+          return jsonErrorFromUnknown(error);
+        }
+      }
 
       const result = await git.generateCommitMessageForFiles({
         projectPath: project,

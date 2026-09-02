@@ -15,9 +15,9 @@ import type { PermissionDecisionPayload } from '../../common/chat-command-contra
 import type { ChatTransientControlAction } from '../../common/chat-transient-feed.js';
 import {
   normalizePermissionMode,
-  normalizeThinkingMode,
   type ThinkingMode,
 } from '../../common/chat-modes.js';
+import { normalizeSupportedThinkingMode } from '../../common/execution-defaults.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -633,7 +633,10 @@ export class AgentRuntimeRouter {
           ? options.cwd
           : process.cwd(),
       model: selection?.model ?? model,
-      thinkingMode: normalizeThinkingMode(options.thinkingMode),
+      thinkingMode: normalizeSupportedThinkingMode(
+        options.thinkingMode,
+        integration.descriptor.supportedThinkingModes,
+      ),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
       settings: integration.settings.parse(
         isAgentSettingsEnvelope(options.agentSettings)
@@ -827,10 +830,9 @@ export class AgentRuntimeRouter {
       normalizePermissionMode(opts.permissionMode ?? entry.permissionMode),
       'default',
     );
-    const thinkingMode = supportedValue(
+    const thinkingMode = normalizeSupportedThinkingMode(
+      opts.thinkingMode ?? entry.thinkingMode,
       integration.descriptor.supportedThinkingModes,
-      normalizeThinkingMode(opts.thinkingMode ?? entry.thinkingMode),
-      'none',
     );
     const settings = integration.settings.parse(
       opts.agentSettings

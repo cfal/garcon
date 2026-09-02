@@ -96,7 +96,10 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       runLog: ScheduledPromptRunLog;
       dispatcher: ScheduledPromptDispatcher;
       chats: Pick<IChatRegistry, 'getChat'>;
-      agents: Pick<AgentRegistryServiceContract, 'hasAgent'>;
+      agents: Pick<
+        AgentRegistryServiceContract,
+        'hasAgent' | 'assertExecutionModeSelectionSupported'
+      >;
       cron?: CronRuntime;
     },
   ) {
@@ -249,6 +252,10 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     if (!this.deps.agents.hasAgent(definition.target.agentId)) {
       throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
     }
+    this.deps.agents.assertExecutionModeSelectionSupported(definition.target.agentId, {
+      permissionMode: definition.target.permissionMode,
+      thinkingMode: definition.target.thinkingMode,
+    });
     try {
       const resolved = await assertRealWithinProjectBase(definition.target.projectPath);
       if (!(await fs.stat(resolved)).isDirectory()) throw new Error('Project path is not a directory');

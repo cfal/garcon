@@ -15,6 +15,7 @@ import {
   type SubmitForkRunInput,
 } from './command-support.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
+import type { ThinkingMode } from '../../common/chat-modes.js';
 
 interface ForkContext {
   sourceChatId: string;
@@ -101,7 +102,10 @@ export class ForkCommands {
     const preparedFork = priorRecord?.forkPreparation;
     const forkAlreadyCreated = preparedFork !== undefined
       && this.deps.chats.getChat(input.chatId) !== null;
-    const forkContext = await this.validateFork(input, { allowExistingTarget: forkAlreadyCreated });
+    const forkContext = await this.validateFork(input, {
+      allowExistingTarget: forkAlreadyCreated,
+      thinkingMode: input.options.thinkingMode,
+    });
     const source = forkContext.sourceSession;
     await this.support.assertAttachmentsSupported({
       agentId: source.agentId,
@@ -176,7 +180,7 @@ export class ForkCommands {
 
   private async validateFork(
     input: ForkChatCommandRequest,
-    options: { allowExistingTarget?: boolean } = {},
+    options: { allowExistingTarget?: boolean; thinkingMode?: ThinkingMode } = {},
   ): Promise<ForkContext> {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
@@ -222,6 +226,9 @@ export class ForkCommands {
         422,
       );
     }
+    this.deps.agents.assertExecutionModeSelectionSupported(sourceSession.agentId, {
+      thinkingMode: options.thinkingMode,
+    });
     if (
       upToOrdinal !== undefined
       && !this.deps.agents.supportsForkAtMessage(sourceSession.agentId)
@@ -252,7 +259,13 @@ export class ForkCommands {
     return {
       sourceChatId,
       targetChatId,
-      sourceSession,
+      sourceSession: {
+        ...sourceSession,
+        thinkingMode: this.deps.agents.normalizeThinkingModeForAgent(
+          sourceSession.agentId,
+          sourceSession.thinkingMode,
+        ),
+      },
       sourceNextForkOrdinal: normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1,
       ...(upToOrdinal ? { upToOrdinal } : {}),
       ...(input.allowHandoffFork ? { allowHandoffFork: true } : {}),

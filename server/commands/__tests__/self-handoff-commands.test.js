@@ -59,6 +59,9 @@ function harness({ source = sourceChat() } = {}) {
         }),
       },
       queue: { ownsExecution: mock(() => false) },
+      agents: {
+        normalizeThinkingModeForAgent: mock((_agentId, value) => value),
+      },
       settings: {
         ensureInNormal: mock(async () => undefined),
         getChatName: mock(() => 'the source chat'),
@@ -143,6 +146,35 @@ describe('self handoff commands', () => {
     expect(source.agentSessionId).toBe('session-a');
     expect(source.agentOwnershipEpoch).toBe('epoch-1');
     expect(source.carryOverSegments).toEqual([{ id: 'seg-old', agentId: 'claude', model: 'opus' }]);
+  });
+
+  it('canonicalizes stale effort without changing continuation routing', async () => {
+    const { commands, added, support } = harness({
+      source: sourceChat({
+        agentId: 'amp',
+        model: 'medium',
+        apiProviderId: 'provider-a',
+        modelEndpointId: 'endpoint-a',
+        modelProtocol: 'openai-compatible',
+        thinkingMode: 'high',
+        agentSettingsById: {
+          amp: { ownerId: 'amp', schemaVersion: 2, values: {} },
+        },
+      }),
+    });
+    support.deps.agents.normalizeThinkingModeForAgent.mockReturnValue('none');
+
+    await commands.submitSelfHandoffRun(request());
+
+    expect(support.deps.agents.normalizeThinkingModeForAgent).toHaveBeenCalledWith('amp', 'high');
+    expect(added[0]).toMatchObject({
+      agentId: 'amp',
+      model: 'medium',
+      apiProviderId: 'provider-a',
+      modelEndpointId: 'endpoint-a',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'none',
+    });
   });
 
   it('submits the prompt as the target chat first turn', async () => {

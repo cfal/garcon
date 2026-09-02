@@ -49,6 +49,7 @@
 		selectedChatId?: string;
 		projectPath?: string;
 		selectedAgentId?: SessionAgentId;
+		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
@@ -79,6 +80,7 @@
 		selectedChatId = 'chat-1',
 		projectPath = '/workspace/project',
 		selectedAgentId = 'claude',
+		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
 		isSubmitting = false,
@@ -207,7 +209,7 @@
 		agentId: selectedAgentId,
 		model: selectedModel,
 		permissionMode: 'default',
-		thinkingMode: 'none',
+		thinkingMode: selectedThinkingMode,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		createdAt: '2026-01-01T00:00:00.000Z',
 		lastActivityAt: '2026-01-01T00:00:00.000Z',
@@ -229,6 +231,7 @@
 
 	$effect(() => {
 		agent.setAgentId(selectedAgentId);
+		agent.setThinkingMode(selectedThinkingMode);
 		agent.setModelSelection({
 			model: selectedModel,
 			apiProviderId: null,
@@ -307,7 +310,8 @@
 			'bypassPermissions',
 			'plan',
 		],
-		getThinkingModes: () => ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+		getThinkingModes: (agentId: string) =>
+			agentId === 'amp' ? [] : ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 		getAgentSettingsDescriptors: () => [],
 		getDefaultAgentSettings: (agentId: string) => ({
 			ownerId: agentId,

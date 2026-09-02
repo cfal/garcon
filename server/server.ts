@@ -62,6 +62,7 @@ import { IntegrationRegistry } from './agents/integration-registry.js';
 import { FileAgentMigrationStore } from './agents/integration-migration-store.js';
 import {
   migrateAgentIntegrationCoreRecords,
+  refreshAgentExecutionModeCoreRecords,
   refreshAgentIntegrationCoreRecords,
 } from './agents/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
@@ -279,6 +280,9 @@ export async function startServer(): Promise<void> {
     });
     await workspaceMigrations.run('agent-integration-settings-refresh', () => (
       refreshAgentIntegrationCoreRecords({ workspaceDir, integrations: integrationRegistry })
+    ));
+    await workspaceMigrations.run('agent-execution-mode-refresh', () => (
+      refreshAgentExecutionModeCoreRecords({ workspaceDir, integrations: integrationRegistry })
     ));
     await chatRegistry.init();
     await settings.init();
