@@ -392,7 +392,7 @@ export default function createWorkspaceRoutes(
           errorCode: error.errorCode,
         }, { status: error.status });
       }
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 
@@ -582,7 +582,7 @@ export default function createWorkspaceRoutes(
       const savedSearches = await settings.getSavedSearches();
       return Response.json({ savedSearches });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 

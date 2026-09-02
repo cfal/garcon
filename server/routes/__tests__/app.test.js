@@ -662,6 +662,24 @@ describe('PUT /api/app/settings', () => {
     parseJsonBody.mockClear();
   });
 
+  it('reports corrupt settings state as an opaque server error', async () => {
+    ctx.settings.setUiSettings.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/project-settings.json',
+      '/server/config/project-settings.json.corrupt-test',
+    ));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+  });
+
   it('patches ui settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { fontSize: 14 } }));
     ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({ fontSize: 14 }));
@@ -1375,6 +1393,23 @@ describe('saved searches API', () => {
 
     expect(response.status).toBe(200);
     expect(body.savedSearches).toEqual(searches);
+  });
+
+  it('reports corrupt settings state as an opaque server error', async () => {
+    ctx.settings.getSavedSearches.mockRejectedValueOnce(new CorruptStateFileError(
+      '/server/config/project-settings.json',
+      '/server/config/project-settings.json.corrupt-test',
+    ));
+
+    const response = await getHandler();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Internal server error',
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 
   it('creates a saved search with valid payload', async () => {
