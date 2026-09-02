@@ -26,7 +26,16 @@ export function agentHandoffReplayDisposition(input: {
   readonly recordStatus: string;
   readonly isUnpublishedPreScheduleFailure: boolean;
 }): AgentHandoffReplayDisposition {
-  if (input.isUnpublishedPreScheduleFailure) return 'retry';
+  if (input.isUnpublishedPreScheduleFailure) {
+    if (
+      input.handoff
+      && input.currentOwnershipEpoch !== undefined
+      && input.currentOwnershipEpoch !== input.handoff.expectedAgentOwnershipEpoch
+    ) {
+      return 'return-duplicate';
+    }
+    return 'retry';
+  }
   if (!input.handoff || input.recordStatus !== 'accepted') return 'continue';
   return input.currentOwnershipEpoch === input.handoff.expectedAgentOwnershipEpoch
     ? 'retry'

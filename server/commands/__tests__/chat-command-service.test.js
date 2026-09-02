@@ -2119,7 +2119,7 @@ describe('ChatCommandService', () => {
     expect(busy.handoffs.createPreparation).not.toHaveBeenCalled();
   });
 
-  it('does not recapture after a committed handoff fails before scheduling', async () => {
+  it('returns a duplicate when a committed handoff fails before scheduling', async () => {
     const fixture = makeService();
     const input = handoffRunInput('req-handoff-committed-failure');
     fixture.queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
@@ -2130,10 +2130,14 @@ describe('ChatCommandService', () => {
       agentOwnershipEpoch: 'epoch-1:handoff',
     });
 
-    await expect(fixture.service.submitRun(input)).rejects.toMatchObject({
-      code: 'STALE_CHAT_OWNERSHIP',
-      status: 409,
+    await expect(fixture.service.submitRun(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      chat: {
+        agentId: 'codex',
+        agentOwnershipEpoch: 'epoch-1:handoff',
+      },
     });
+    expect(fixture.handoffs.resolveTarget).toHaveBeenCalledTimes(1);
     expect(fixture.handoffs.createPreparation).toHaveBeenCalledTimes(1);
     expect(fixture.handoffPreparations[0].prepare).toHaveBeenCalledTimes(1);
     expect(fixture.queue.admitUserInput).toHaveBeenCalledTimes(1);
