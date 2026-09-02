@@ -22,9 +22,20 @@ function createForm(
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
+	const getModels: (agentId: string) => ModelOption[] =
+		catalogOverrides.getModels ?? (() => [{ value: 'gpt-5', label: 'GPT-5' }]);
+	const getModelForSelection = (
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null => getModels(agentId).find(
+		(entry) =>
+			(endpointId ? entry.endpointId === endpointId : true) &&
+			(entry.value === model || entry.rawModel === model),
+	) ?? null;
 	const modelCatalog = {
 		getSelectableAgents: () => selectableAgentIds(),
-		getModels: () => [{ value: 'gpt-5', label: 'GPT-5' }],
+		getModels,
 		getDefaultModel: () => 'gpt-5',
 		getPermissionModes: () => ['default', 'acceptEdits'],
 		getThinkingModes: () => ['none', 'high'],
@@ -34,18 +45,12 @@ function createForm(
 			schemaVersion: 1,
 			values: {},
 		}),
-		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
-			return this.getModels(agentId).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null;
-		},
+		getModelForSelection,
 		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
-			return this.getModelForSelection(agentId, model, endpointId)?.value ?? model;
+			return getModelForSelection(agentId, model, endpointId)?.value ?? model;
 		},
 		selectionFor(agentId: string, model: string, endpointId?: string | null) {
-			const selected = this.getModelForSelection(agentId, model, endpointId);
+			const selected = getModelForSelection(agentId, model, endpointId);
 			if (!selected && endpointId) return null;
 			return {
 				model: selected?.rawModel ?? model,
@@ -54,7 +59,6 @@ function createForm(
 				modelProtocol: selected?.protocol ?? null,
 			};
 		},
-		...catalogOverrides,
 	};
 	const form = new ScheduledPromptFormState(modelCatalog as never, {} as never, sessions as never, {
 		get selectableAgentIds() {

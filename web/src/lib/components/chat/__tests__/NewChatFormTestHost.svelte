@@ -116,6 +116,27 @@
 		return { value: 'anthropic-model', label: 'Anthropic Model' };
 	}
 
+	function modelsForAgent(agentId: string): ModelOption[] {
+		if (
+			agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
+			endpointBackedDirectModel &&
+			!modelsAvailable
+		) return [];
+		return [modelForAgent(agentId)];
+	}
+
+	function modelForSelection(
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null {
+		return modelsForAgent(agentId).find(
+			(entry) =>
+				(endpointId ? entry.endpointId === endpointId : true) &&
+				(entry.value === model || entry.rawModel === model),
+		) ?? null;
+	}
+
 	setSnippets(
 		createSnippetsStore({
 			get: async () => {
@@ -215,26 +236,16 @@
 			return { ownerId: agentId, schemaVersion: 1, values: { thinking: 'auto' } };
 		},
 		getModels(agentId: string) {
-			if (
-				agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
-				endpointBackedDirectModel &&
-				!modelsAvailable
-			) return [];
-			return [modelForAgent(agentId)];
+			return modelsForAgent(agentId);
 		},
 		supportsImages() {
 			return supportsImages;
 		},
 		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
-			const models = this.getModels(agentId);
-			return models.find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null;
+			return modelForSelection(agentId, model, endpointId);
 		},
 		selectionFor(agentId: string, model: string, endpointId?: string | null) {
-			const selected = this.getModelForSelection(agentId, model, endpointId);
+			const selected = modelForSelection(agentId, model, endpointId);
 			if (!selected && endpointId) return null;
 			return {
 				model: selected?.rawModel ?? model,
@@ -244,7 +255,7 @@
 			};
 		},
 		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
-			return this.getModelForSelection(agentId, model, endpointId)?.value ?? model;
+			return modelForSelection(agentId, model, endpointId)?.value ?? model;
 		},
 		refreshIfStale() {
 			return Promise.resolve();
