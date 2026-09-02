@@ -10,6 +10,7 @@ import { GIT_REF_RESULT_LIMITS } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
+import { isExpectedMissingGitResult } from './comparison-errors.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -61,6 +62,25 @@ function normalizeRefResultLimit(limit: number | undefined): number {
 
 function literalPathspec(file: string): string {
   return `:(literal)${file}`;
+}
+
+async function hasCommitStateRef(projectPath: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', ref],
+      readOnlyGitOptions(),
+    );
+    return true;
+  } catch (error) {
+    if (isExpectedMissingGitResult(error)) return false;
+    throw error;
+  }
+}
+
+async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
+  if (await hasCommitStateRef(projectPath, 'MERGE_HEAD')) return true;
+  return hasCommitStateRef(projectPath, 'CHERRY_PICK_HEAD');
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -444,7 +464,14 @@ export function createStatusOperations(agents: GitAgentRunner) {
       if (file.includes('\0')) {
         throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot contain NUL bytes.');
       }
-      resolvePathWithinProject(projectPath, file);
+      try {
+        resolvePathWithinProject(projectPath, file);
+      } catch {
+        throw new GitDomainError(
+          'INVALID_INPUT',
+          'Pathspecs must resolve inside the project root.',
+        );
+      }
     }
     const layout = await probeWorktreeLayout(projectPath);
     const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
@@ -452,9 +479,13 @@ export function createStatusOperations(agents: GitAgentRunner) {
       for (const file of files) {
         await runGit(projectPath, ['add', '--', literalPathspec(file)]);
       }
+      // Merge and cherry-pick continuations require committing the complete index.
+      const commitArgs = await requiresWholeIndexCommit(projectPath)
+        ? ['commit', '-m', message]
+        : ['commit', '--only', '-m', message, '--', ...files.map(literalPathspec)];
       const { stdout } = await runGit(
         projectPath,
-        ['commit', '--only', '-m', message, '--', ...files.map(literalPathspec)],
+        commitArgs,
       );
       return { success: true, output: stdout };
     });

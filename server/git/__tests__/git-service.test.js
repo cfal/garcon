@@ -431,11 +431,56 @@ describe("selected-file commits", () => {
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "new.txt"]);
       expect(staged.stdout.trim()).toBe("unrelated.txt");
-      await expect(git.commit({
+      try {
+        await git.commit({
+          projectPath,
+          message: "outside change",
+          files: ["../outside.txt"],
+        });
+        throw new Error("Expected the outside path to be rejected");
+      } catch (error) {
+        const response = git.toHttpError(error);
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: "Pathspecs must resolve inside the project root.",
+        });
+      }
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("completes a conflicted merge with the resolved index", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-merge-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "feature"]);
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "main"]);
+      await expect(runGitCommand(projectPath, ["merge", "feature"]))
+        .rejects.toThrow("CONFLICT");
+      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+
+      await git.commit({
         projectPath,
-        message: "outside change",
-        files: ["../outside.txt"],
-      })).rejects.toThrow("outside the project root");
+        message: "merge feature",
+        files: ["a.txt"],
+      });
+
+      const parents = await runGitCommand(projectPath, ["show", "-s", "--format=%P", "HEAD"]);
+      expect(parents.stdout.trim().split(" ")).toHaveLength(2);
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
