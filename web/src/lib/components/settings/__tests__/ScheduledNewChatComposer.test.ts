@@ -12,10 +12,12 @@ vi.mock(
 
 const ScheduledNewChatComposer = (await import('../ScheduledNewChatComposer.svelte')).default;
 
-function makeStartup(): NewChatFormState {
+function makeStartup(modelSelectionError: string | null = null): NewChatFormState {
 	return {
 		agentId: 'claude',
 		modelValue: 'opus',
+		modelSelectionTarget: null,
+		modelSelectionError,
 		projectPath: '/workspace/project',
 		projectBasePath: '/workspace',
 		browseStartPath: '/workspace',
@@ -65,12 +67,13 @@ function renderComposer(
 	overrides: {
 		prompt?: string;
 		promptError?: string | null;
+		modelSelectionError?: string | null;
 		selectableAgentIds?: readonly SessionAgentId[];
 	} = {},
 ) {
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
-	const startup = makeStartup();
+	const startup = makeStartup(overrides.modelSelectionError);
 	const modelCatalog = {
 		getSelectableAgents: () => [],
 	} as unknown as ModelCatalogStore;
@@ -135,5 +138,11 @@ describe('ScheduledNewChatComposer', () => {
 
 		expect(onPromptChange).toHaveBeenCalledWith('Review the build');
 		expect(onPromptKeydown).toHaveBeenCalledOnce();
+	});
+
+	it('renders unavailable scheduled model feedback', () => {
+		renderComposer({ modelSelectionError: 'Model unavailable' });
+
+		expect(screen.getByText('Model unavailable')).toBeTruthy();
 	});
 });

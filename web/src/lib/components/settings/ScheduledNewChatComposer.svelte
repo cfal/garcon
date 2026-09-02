@@ -182,6 +182,10 @@
 			onRemove={(tag) => startup.removeTag(tag)}
 			onClose={() => (startup.showTagInput = false)}
 		/>
+
+		{#if startup.modelSelectionError}
+			<p class="text-sm text-destructive">{startup.modelSelectionError}</p>
+		{/if}
 	</div>
 
 	<ScheduledPromptField
