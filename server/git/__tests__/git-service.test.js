@@ -431,20 +431,39 @@ describe("selected-file commits", () => {
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "new.txt"]);
       expect(staged.stdout.trim()).toBe("unrelated.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects paths outside the project root as invalid input", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-outside-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      let rejection;
       try {
         await git.commit({
           projectPath,
           message: "outside change",
           files: ["../outside.txt"],
         });
-        throw new Error("Expected the outside path to be rejected");
       } catch (error) {
-        const response = git.toHttpError(error);
-        expect(response.status).toBe(400);
-        expect(await response.json()).toEqual({
-          error: "Pathspecs must resolve inside the project root.",
-        });
+        rejection = error;
       }
+
+      expect(rejection).toBeInstanceOf(GitDomainError);
+      const response = git.toHttpError(rejection);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Pathspecs must resolve inside the project root.",
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -479,6 +498,49 @@ describe("selected-file commits", () => {
 
       const parents = await runGitCommand(projectPath, ["show", "-s", "--format=%P", "HEAD"]);
       expect(parents.stdout.trim().split(" ")).toHaveLength(2);
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(status.stdout).toBe("");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("completes a conflicted revert with the resolved index", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-revert-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "target\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "b.txt"), "target\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt", "b.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "two-file change"]);
+      const reverted = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+
+      await fs.writeFile(path.join(projectPath, "a.txt"), "later\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "later change"]);
+      await expect(runGitCommand(projectPath, ["revert", reverted.stdout.trim()]))
+        .rejects.toThrow("could not revert");
+      await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
+
+      await git.commit({
+        projectPath,
+        message: "revert two-file change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
       const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
       expect(status.stdout).toBe("");
     } finally {

@@ -48,6 +48,7 @@ import {
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
+const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
 const selectedFileCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
@@ -79,8 +80,10 @@ async function hasCommitStateRef(projectPath: string, ref: string): Promise<bool
 }
 
 async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
-  if (await hasCommitStateRef(projectPath, 'MERGE_HEAD')) return true;
-  return hasCommitStateRef(projectPath, 'CHERRY_PICK_HEAD');
+  for (const ref of WHOLE_INDEX_COMMIT_STATE_REFS) {
+    if (await hasCommitStateRef(projectPath, ref)) return true;
+  }
+  return false;
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -479,7 +482,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
       for (const file of files) {
         await runGit(projectPath, ['add', '--', literalPathspec(file)]);
       }
-      // Merge and cherry-pick continuations require committing the complete index.
       const commitArgs = await requiresWholeIndexCommit(projectPath)
         ? ['commit', '-m', message]
         : ['commit', '--only', '-m', message, '--', ...files.map(literalPathspec)];
