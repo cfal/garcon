@@ -12,6 +12,7 @@
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
+	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
@@ -41,6 +42,7 @@
 		setSidebarSearch,
 		setSidebarProjectCollapse,
 		setAppTitle,
+		setMinuteClock,
 		setGhCapability,
 		setScheduledPrompts,
 		setSnippets,
@@ -142,6 +144,7 @@
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
+	const minuteClock = createMinuteClockStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -185,6 +188,7 @@
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
+	setMinuteClock(minuteClock);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
@@ -391,6 +395,7 @@
 		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
+		minuteClock.destroy();
 		sidebarSearch.destroy();
 		readReceiptOutbox.destroy();
 		chatProcessingReconciler.destroy();

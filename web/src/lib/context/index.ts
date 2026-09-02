@@ -23,6 +23,7 @@ import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
+import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte';
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte';
@@ -59,6 +60,7 @@ export const [getGhCapability, setGhCapability] = createContext<GhCapabilityCont
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
+export const [getMinuteClock, setMinuteClock] = createContext<MinuteClockStore>();
 export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
 export const [getSnippets, setSnippets] = createContext<SnippetsStore>();
 export const [getWorkspaceLayout, setWorkspaceLayout] = createContext<WorkspaceLayoutReader>();
