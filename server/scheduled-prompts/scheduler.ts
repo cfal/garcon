@@ -32,7 +32,7 @@ export interface CronRuntime {
 }
 
 export const bunCronRuntime: CronRuntime = {
-  schedule: (expression, handler) => Bun.cron(expression, handler),
+  schedule: (expression, handler) => Bun.cron(expression, handler, { tz: 'UTC' }),
 };
 
 export function cronExpressionForUtcInstant(iso: string): string {

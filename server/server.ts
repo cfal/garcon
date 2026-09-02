@@ -92,7 +92,6 @@ import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.j
 import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
-  markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
 } from './chats/chat-carryover-migration.js';
 import {
@@ -240,10 +239,7 @@ export async function startServer(): Promise<void> {
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
-    const carryOver = new CarryOverTranscriptStore({
-      workspaceDir,
-      onSegmentCommitted: () => markCarryOverMigrationRollbackUnsafe(workspaceDir),
-    });
+    const carryOver = new CarryOverTranscriptStore({ workspaceDir });
     await carryOver.initialize();
 
     const integrationHostFactory = new IntegrationHostFactory({
@@ -318,6 +314,8 @@ export async function startServer(): Promise<void> {
       integrations: integrationRegistry,
       ledger: transcriptLedger,
     });
+    // Persists the version before ownership recovery can remove chats and rewrite the migrated registry.
+    await workspaceMigrations.finish();
     await agentOwnership.initialize();
     const carryOverGarbageCollector = new CarryOverGarbageCollector({
       registry: chatRegistry,
@@ -326,7 +324,6 @@ export async function startServer(): Promise<void> {
     });
     await carryOverGarbageCollector.initialize();
     chatRegistry.onChatRemoved(() => carryOverGarbageCollector.schedule());
-    await workspaceMigrations.finish();
     // A resumed rollback restores the source workspace version before the
     // ladder opens, so its re-migration skips this the way a first migration
     // does and keeps its rollback window.
@@ -458,6 +455,7 @@ export async function startServer(): Promise<void> {
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
       listChatIds: () => Object.keys(chatRegistry.listAllChats()),
+      hasChat: (chatId) => chatRegistry.getChat(chatId) !== null,
       logger,
     });
     try {

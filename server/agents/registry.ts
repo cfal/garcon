@@ -53,6 +53,7 @@ import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/s
 import { StaleTranscriptViewError, SubmissionConflictError } from '../ledger/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
+import { dispatchListenersSequentially } from './listener-dispatch.js';
 
 const logger = createLogger('agents:registry');
 
@@ -526,7 +527,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   async #onTranscriptCommit(event: TranscriptCommitEvent): Promise<void> {
-    for (const listener of this.#transcriptListeners) await listener(event);
+    await dispatchListenersSequentially(this.#transcriptListeners, [event], (error) => {
+      logger.error('Transcript listener failed', {
+        chatId: event.chatId,
+        event: event.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     if (event.type === 'session') {
       await this.#events.publishSession(event.chatId);
     } else if (event.type === 'run-ended') {

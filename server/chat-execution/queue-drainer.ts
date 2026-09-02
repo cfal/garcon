@@ -129,14 +129,16 @@ export class QueueDrainer {
           ...options,
           executionAdmission: ownership.installAttempt(chatId, attempt),
         };
-        ownership.beginFinalization(chatId, turn.turnId!).settle('committed');
+        const finalization = ownership.beginFinalization(chatId, turn.turnId!);
         if (input.kind === 'user') ownership.setActiveDrainEntry(chatId, input.entry.id);
 
         if (callbacks.isShuttingDown()) {
+          finalization.settle('not-committed');
           callbacks.retireAttempt(chatId, attempt);
           return;
         }
 
+        finalization.settle('committed');
         attempt.markLaunching();
         const shouldContinue = await this.#runEntry(chatId, input, dispatchOptions, attempt);
         if (!shouldContinue) return;

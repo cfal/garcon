@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -149,7 +149,10 @@ describe('metadata-store', () => {
       const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
       expect(saved.chats['live-chat'].lastMessage).toBe('saved preview');
       expect(saved.chats['live-chat'].source).toBe('live');
+      const stats = await fs.stat(metadataPath);
+      expect(stats.mode & 0o777).toBe(0o600);
     });
+
   });
 
   describe('identity invalidation', () => {
@@ -185,6 +188,44 @@ describe('metadata-store', () => {
   });
 
   describe('init', () => {
+    it('repairs permissions on existing metadata', async () => {
+      if (process.platform === 'win32') return;
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify({ version: 1, chats: {} }), { mode: 0o644 });
+      const index = new MetadataIndex(mockRegistry, mockAgents, mockCarryOver, { metadataPath });
+
+      await index.init();
+
+      expect((await fs.stat(metadataPath)).mode & 0o777).toBe(0o600);
+    });
+
+    it('loads existing metadata when permission repair fails', async () => {
+      if (process.platform === 'win32') return;
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        'persisted-chat': {
+          firstMessage: 'first persisted',
+          lastMessage: 'last persisted',
+          createdAt: '2026-01-01T00:00:00Z',
+          lastActivity: '2026-01-02T00:00:00Z',
+          source: 'live',
+        },
+      })), { mode: 0o644 });
+      const chmod = spyOn(fs, 'chmod').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
+      try {
+        const index = new MetadataIndex(
+          makeRegistry({ 'persisted-chat': session() }),
+          mockAgents,
+          mockCarryOver,
+          { metadataPath },
+        );
+        await index.init();
+        expect(index.getChatMetadata('persisted-chat').lastMessage).toBe('last persisted');
+      } finally {
+        chmod.mockRestore();
+      }
+    });
+
     it('loads persisted metadata before agent preview repair', async () => {
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({

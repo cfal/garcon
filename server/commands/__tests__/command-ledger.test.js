@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CommandLedger,
+  GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
   LEDGER_RECORD_LIMIT,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
   SteerIdentityCapacityError,
@@ -63,7 +64,6 @@ describe('CommandLedger', () => {
     expect(await ledger.settleTerminal(accepted.record.key, 'failed')).toMatchObject({
       kind: 'conflict',
     });
-    expect(ledger.isTerminal(accepted.record.key)).toBe(true);
   });
 
   it('updates only records outside blocked statuses', async () => {
@@ -147,30 +147,6 @@ describe('CommandLedger', () => {
       publicTerminalAt: expect.any(String),
       turnResultAvailability: 'available',
     });
-  });
-
-  it('publishes a naturally completed turn when a rejected stop releases its barrier', async () => {
-    const ledger = new CommandLedger();
-    const accepted = await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
-
-    await ledger.settleTerminal(accepted.record.key, 'finished');
-    await ledger.publishDeferredTerminal('chat-1', 'turn-1');
-
-    expect(await ledger.getTurnRecord('chat-1', 'turn-1')).toMatchObject({
-      status: 'finished',
-      publicTerminalAt: expect.any(String),
-    });
-  });
-
-  it('keeps a running turn private when a rejected stop releases its barrier', async () => {
-    const ledger = new CommandLedger();
-    await ledger.accept(acceptedInput({ turnId: 'turn-1' }));
-
-    await ledger.publishDeferredTerminal('chat-1', 'turn-1');
-
-    const record = await ledger.getTurnRecord('chat-1', 'turn-1');
-    expect(record).toMatchObject({ status: 'accepted' });
-    expect(record.publicTerminalAt).toBeUndefined();
   });
 
   it('keeps terminal turns private until chat deletion is committed', async () => {
@@ -340,6 +316,33 @@ describe('CommandLedger', () => {
       turnId: 'turn-retry',
       payload: { chatId: 'chat-1', command: 'x'.repeat(1_024) },
     }))).toMatchObject({ kind: 'accepted', record: { turnId: 'turn-retry' } });
+  });
+
+  it('bounds accepted goal-control receipts with unknown outcomes', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const settlement = new ChatCommandSettlement(ledger);
+    const records = [];
+
+    for (let index = 0; index < 3; index += 1) {
+      const accepted = await ledger.accept(acceptedInput({
+        commandType: 'goal-control',
+        clientRequestId: `request-${index}`,
+        turnId: `turn-${index}`,
+      }));
+      records.push(accepted.record);
+      await settlement.settleGoalControlFailure(
+        accepted.record,
+        new Error('delivery outcome unknown'),
+        true,
+      );
+    }
+
+    expect(await ledger.getRecord(records[0].key)).toBeNull();
+    expect(await ledger.getRecord(records[1].key)).toBeNull();
+    expect(await ledger.getRecord(records[2].key)).toMatchObject({
+      status: 'accepted',
+      errorCode: GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
+    });
   });
 
   it('counts only public terminal records toward the retention limit', async () => {
@@ -587,7 +590,6 @@ describe('CommandLedger', () => {
       clientRequestId: 'owner-request',
       assistantMessages: ['first', 'second'],
     });
-    expect(await ledger.getTurnRecords('chat-1', 'turn-shared')).toHaveLength(3);
     expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-one')))
       .toMatchObject({ assistantMessages: [] });
     expect(await ledger.getRecord(commandLedgerKey('steer', 'chat-1', 'steer-two')))

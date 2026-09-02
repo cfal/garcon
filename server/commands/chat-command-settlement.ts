@@ -1,4 +1,5 @@
 import {
+  GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
   type CommandLedger,
 } from './command-ledger.ts';
@@ -69,7 +70,7 @@ export class ChatCommandSettlement implements CommandSettlementPort {
       status: deliveryAccepted ? 'accepted' : 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: deliveryAccepted
-        ? 'GOAL_CONTROL_OUTCOME_UNKNOWN'
+        ? GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE
         : PRE_SCHEDULE_FAILURE_ERROR_CODE,
     });
   }

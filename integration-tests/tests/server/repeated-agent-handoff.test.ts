@@ -1,13 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
+import { isRecord } from '../../../common/json.js';
 import {
   assistantContents,
   userContents,
 } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
-import type { ConfiguredDirectTestAgent } from '../../support/garcon-client.js';
+import {
+  type ConfiguredDirectTestAgent,
+  GarconApiError,
+} from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -104,7 +108,7 @@ describe('repeated agent handoff lifecycle', () => {
         },
       });
 
-      await waitForChatOwner(
+      await waitForHandoffRecovery(
         fixture,
         recoverableChatId,
         targetAgent.agentId,
@@ -130,14 +134,17 @@ describe('repeated agent handoff lifecycle', () => {
       );
       expect(blockedSearch.results.map((result) => result.chatId)).toEqual([blockedChatId]);
 
-      const request = await runWithAnswer({
+      const held = fixture.fakeProviders.anthropic.holdNext({ model: targetAgent.provider.model });
+      const accepted = await runAfterHandoffRecovery({
         fixture,
-        provider: fixture.fakeProviders.anthropic,
         chatId: recoverableChatId,
         agent: targetAgent,
-        prompt: 'recovered-chat-new-work',
-        answer: 'recovered-chat-answer',
+        content: 'recovered-chat-new-work',
       });
+      const request = await held.received;
+      expect(held.releaseText('recovered-chat-answer')).toBe(true);
+      expect((await fixture.client.waitForTurnTerminal(recoverableChatId, accepted.turnId)).type)
+        .toBe('agent-run-finished');
       expectRequestConversation(request, [
         expectedCarriedInput([
           'recoverable-handoff-source',
@@ -426,7 +433,7 @@ function recoveryIntent(input: {
   };
 }
 
-async function waitForChatOwner(
+async function waitForHandoffRecovery(
   fixture: IntegrationFixture,
   chatId: string,
   agentId: string,
@@ -441,8 +448,55 @@ async function waitForChatOwner(
       ? true
       : null,
   });
+
+  const deadline = Date.now() + 5_000;
+  const journalPath = join(fixture.dirs.workspace, 'agent-ownership-journal.json');
+  while (true) {
+    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
+      ownershipIntents?: Array<{ chatId?: unknown }>;
+    };
+    if (!Array.isArray(journal.ownershipIntents)) {
+      throw new Error('Agent ownership journal is invalid.');
+    }
+    if (!journal.ownershipIntents.some((intent) => intent.chatId === chatId)) break;
+    if (Date.now() >= deadline) {
+      throw new Error(`Chat ${chatId} did not discharge its handoff recovery fence.`);
+    }
+    await Bun.sleep(20);
+  }
   const served = (await fixture.client.listChats()).sessions.find((chat) => chat.id === chatId);
   expect(served).toMatchObject({ agentId, agentOwnershipEpoch });
+}
+
+async function runAfterHandoffRecovery(input: {
+  fixture: IntegrationFixture;
+  chatId: string;
+  agent: ConfiguredDirectTestAgent;
+  content: string;
+}) {
+  const request = {
+    chatId: input.chatId,
+    content: input.content,
+    agent: input.agent,
+    clientRequestId: crypto.randomUUID(),
+    clientMessageId: crypto.randomUUID(),
+  };
+  const deadline = Date.now() + 5_000;
+
+  for (;;) {
+    try {
+      return await input.fixture.client.runDirectChat(request);
+    } catch (error) {
+      const pending = error instanceof GarconApiError
+        && error.status === 409
+        && isRecord(error.body)
+        && error.body.errorCode === 'OWNERSHIP_TRANSFER_PENDING'
+        && error.body.retryable === true;
+      if (!pending || Date.now() >= deadline) throw error;
+    }
+    // Admission remains authoritative because the durable journal rename can precede its in-memory swap.
+    await Bun.sleep(20);
+  }
 }
 
 async function handoffWithAnswer(input: {

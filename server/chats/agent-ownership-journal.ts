@@ -450,7 +450,7 @@ function matchesHandoffSource(
     && current.agentOwnershipEpoch === intent.source.agentOwnershipEpoch;
 }
 
-function matchesHandoffTarget(
+export function matchesHandoffTarget(
   current: ChatRegistryEntry | null,
   intent: AgentHandoffIntent,
 ): boolean {

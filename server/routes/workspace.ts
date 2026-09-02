@@ -11,7 +11,12 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
-import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
+import {
+  asJsonBody,
+  errorMessage,
+  jsonErrorFromCorruptStateFile,
+  type JsonBody,
+} from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
@@ -302,7 +307,7 @@ export default function createWorkspaceRoutes(
       await settings.setSessionName(chatId, trimmed);
       return Response.json({ success: true } satisfies UpdateChatTitleResponse);
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -311,7 +316,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json(snapshot);
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -381,7 +386,7 @@ export default function createWorkspaceRoutes(
           errorCode: error.errorCode,
         }, { status: error.status });
       }
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -464,7 +469,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -479,7 +484,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -507,7 +512,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
     }
   }
 
@@ -534,7 +539,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return jsonErrorFromCorruptStateFile(error) ?? jsonErrorFromUnknown(error, 400);
     }
   }
 
@@ -547,7 +552,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -571,7 +576,7 @@ export default function createWorkspaceRoutes(
       const savedSearches = await settings.getSavedSearches();
       return Response.json({ savedSearches });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

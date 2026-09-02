@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { mkdir, open, rm } from 'node:fs/promises';
+import { mkdir, open, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptSearchStatusResponse } from '../../../common/chat-search.js';
 import {
@@ -73,6 +73,11 @@ describe('transcript search v9 availability', () => {
       } finally {
         db.close();
       }
+      await expect(stat(join(
+        fixture.dirs.workspace,
+        'transcript-ledgers',
+        deletedChatId,
+      ))).rejects.toMatchObject({ code: 'ENOENT' });
     });
   }, 120_000);
 

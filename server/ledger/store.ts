@@ -12,6 +12,7 @@ import {
   parseChatRowContent,
   parseChatRowTitle,
 } from '../../common/chat-row-contracts.js';
+import { createLogger } from '../lib/log.js';
 import {
   decodeLedgerRow,
   cliRowFingerprint,
@@ -63,6 +64,7 @@ import {
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
+const logger = createLogger('ledger:store');
 
 interface ViewRecord {
   readonly view_id: string;
@@ -79,10 +81,9 @@ interface ConnectionEntry {
   nextOrdinal: number;
 }
 
-interface ConnectionCloseAttempt {
-  readonly closed: boolean;
-  readonly failure: Error | null;
-}
+type ConnectionCloseAttempt =
+  | { readonly closed: true; readonly checkpointFailure: Error | null }
+  | { readonly closed: false; readonly failure: Error };
 
 export interface TranscriptLedgerStoreOptions {
   readonly connectionCacheSize?: number;
@@ -706,9 +707,14 @@ export class TranscriptLedgerStore {
 
   #closeConnectionEntry(entry: ConnectionEntry): Error | null {
     const attempt = closeConnection(entry);
-    if (attempt.closed) this.#failedCloseEntries.delete(entry.chatId);
-    else this.#failedCloseEntries.set(entry.chatId, entry);
-    if (attempt.failure) this.#openFailures.set(entry.chatId, attempt.failure);
+    if (attempt.closed) {
+      this.#failedCloseEntries.delete(entry.chatId);
+      // Treats a passive checkpoint failure as housekeeping once the database closes.
+      if (attempt.checkpointFailure) logger.warn('Passive checkpoint failed on ledger close', entry.chatId, attempt.checkpointFailure);
+      return null;
+    }
+    this.#failedCloseEntries.set(entry.chatId, entry);
+    this.#openFailures.set(entry.chatId, attempt.failure);
     return attempt.failure;
   }
 
@@ -961,7 +967,7 @@ function closeConnection(entry: ConnectionEntry): ConnectionCloseAttempt {
   } catch (error) {
     return { closed: false, failure: asError(error) };
   }
-  return { closed: true, failure: checkpointFailure };
+  return { closed: true, checkpointFailure };
 }
 
 function validateChatDirectoryName(chatId: string): void {

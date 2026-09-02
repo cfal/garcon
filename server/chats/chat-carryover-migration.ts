@@ -27,15 +27,18 @@ import {
 import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
 import {
   LEGACY_CARRYOVER_FILE,
+  MIGRATION_BACKUP_DIR,
   MIGRATION_MARKER_VERSION,
   OWNERSHIP_JOURNAL_FILE,
   assertMarkerSources,
+  carryOverSegmentSummary,
   digest,
   migratedCarryOverPath,
   readMarker,
   readOptionalFile,
   registryBackupFile,
-  safeMigrationRelativePath,
+  safeMigrationBackupPath,
+  writeBytesAtomic,
   writeMarker,
   type CarryOverMigrationMarker,
   type CarryOverMigrationMarkerBase,
@@ -72,13 +75,20 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const registryPath = path.join(workspaceDir, 'chats.json');
   const carryOverPath = path.join(workspaceDir, LEGACY_CARRYOVER_FILE);
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
+  const registryBytes = await fs.readFile(registryPath);
+  const sourceRegistryV4 = registryVersion === 4 ? parseSourceRegistryV4(registryBytes) : null;
+  if (
+    sourceRegistryV4
+    && Object.values(sourceRegistryV4.sessions).some((entry) => nullableString(entry.carryOverHeadId))
+  ) {
+    await assertLinkedNodeStoreAvailable(workspaceDir);
+  }
   const sourceBytes = await optionalFileSize(carryOverPath)
     + (registryVersion === 4
       ? await directorySize(path.join(workspaceDir, 'carryover-transcripts', 'nodes'))
       : 0);
   await assertMigrationCapacity(workspaceDir, sourceBytes);
-  const [registryBytes, sourceCarryOverSha256, journalBytes] = await Promise.all([
-    fs.readFile(registryPath),
+  const [sourceCarryOverSha256, journalBytes] = await Promise.all([
     digestFile(carryOverPath),
     readOptionalFile(journalPath),
   ]);
@@ -91,7 +101,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   if (existingMarker) assertMarkerSources(existingMarker, sourceDigests);
   const startedAt = existingMarker?.startedAt ?? new Date().toISOString();
   const legacyJournalBackupFile = existingMarker?.legacyJournalBackupFile
-    ?? `migration-backups/agent-ownership-journal.v1.${sourceDigests.sourceJournalSha256.slice(0, 16)}.json`;
+    ?? `${MIGRATION_BACKUP_DIR}/agent-ownership-journal.v1.${sourceDigests.sourceJournalSha256.slice(0, 16)}.json`;
   const markerBase: CarryOverMigrationMarkerBase = {
     version: MIGRATION_MARKER_VERSION,
     ...sourceDigests,
@@ -155,7 +165,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
       }
     }
   } else {
-    const sourceRegistry = parseSourceRegistryV4(registryBytes);
+    const sourceRegistry = sourceRegistryV4 ?? parseSourceRegistryV4(registryBytes);
     for (const [chatId, entry] of Object.entries(sourceRegistry.sessions)) {
       try {
         const converted = await convertLinkedHistory({
@@ -198,7 +208,7 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   const segmentCount = migratedSegmentIds.size;
   const targetRegistryBytes = serializeJson(targetRegistry);
   const targetRegistrySha256 = digest(targetRegistryBytes);
-  const segmentSummarySha256 = segmentSummary(sessions);
+  const segmentSummarySha256 = carryOverSegmentSummary(sessions);
   const ready: CarryOverMigrationMarker = {
     ...markerBase,
     phase: 'ready-to-commit',
@@ -231,16 +241,6 @@ export async function migrateLegacyCarryOverWorkspace(workspaceDir: string): Pro
   return rollbackResumed;
 }
 
-export async function markCarryOverMigrationRollbackUnsafe(workspaceDir: string): Promise<void> {
-  const marker = await readMarker(workspaceDir);
-  if (!marker) return;
-  if (marker.phase !== 'complete') {
-    throw new Error('Cannot accept new carryover segments while migration is incomplete');
-  }
-  if (!marker.rollbackSafe) return;
-  await writeMarker(workspaceDir, { ...marker, rollbackSafe: false });
-}
-
 export async function finalizeCarryOverMigrationValidation(workspaceDir: string): Promise<void> {
   const marker = await readMarker(workspaceDir);
   if (!marker || marker.phase !== 'complete') return;
@@ -249,11 +249,8 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
     && await targetRegistryHasQuarantine(workspaceDir);
   await Promise.all([
     fs.rm(migratedCarryOverPath(workspaceDir, marker.startedAt), { force: true }),
-    fs.rm(path.join(workspaceDir, registryBackupFile(marker)), { force: true }),
-    fs.rm(path.join(
-      workspaceDir,
-      safeMigrationRelativePath(marker.legacyJournalBackupFile),
-    ), { force: true }),
+    fs.rm(safeMigrationBackupPath(workspaceDir, registryBackupFile(marker)), { force: true }),
+    fs.rm(safeMigrationBackupPath(workspaceDir, marker.legacyJournalBackupFile), { force: true }),
     ...(marker.sourceRegistryVersion === 4 && !retainLinkedSources
       ? [fs.rm(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), {
           recursive: true,
@@ -263,7 +260,7 @@ export async function finalizeCarryOverMigrationValidation(workspaceDir: string)
   ]);
   await Promise.all([
     syncDirectory(workspaceDir),
-    syncDirectory(path.join(workspaceDir, 'migration-backups')),
+    syncDirectory(path.join(workspaceDir, MIGRATION_BACKUP_DIR)),
   ]);
 }
 
@@ -287,8 +284,10 @@ async function resumeCommittedMigration(
 
   const journalPath = path.join(workspaceDir, OWNERSHIP_JOURNAL_FILE);
   if (marker.phase === 'ready-to-commit') {
-    const relativeBackup = safeMigrationRelativePath(marker.legacyJournalBackupFile);
-    const journalBackup = await readOptionalFile(path.join(workspaceDir, relativeBackup));
+    const journalBackup = await readOptionalFile(safeMigrationBackupPath(
+      workspaceDir,
+      marker.legacyJournalBackupFile,
+    ));
     if (digest(journalBackup) !== marker.sourceJournalSha256) {
       throw new Error('Legacy ownership-journal backup does not match its migration marker');
     }
@@ -533,8 +532,26 @@ async function ensureMigrationDirectories(workspaceDir: string): Promise<void> {
   await fs.chmod(root, 0o700);
   await Promise.all([
     fs.mkdir(path.join(root, 'quarantine'), { recursive: true, mode: 0o700 }),
-    fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true, mode: 0o700 }),
+    fs.mkdir(path.join(workspaceDir, MIGRATION_BACKUP_DIR), { recursive: true, mode: 0o700 }),
   ]);
+}
+
+async function assertLinkedNodeStoreAvailable(workspaceDir: string): Promise<void> {
+  const nodeStore = path.join(workspaceDir, 'carryover-transcripts', 'nodes');
+  const stats = await fs.stat(nodeStore);
+  if (!stats.isDirectory()) throw new Error('Linked carryover node store is unavailable');
+  let entries: string[];
+  try {
+    entries = await fs.readdir(nodeStore);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+      throw new Error('Linked carryover node store is unavailable', { cause: error });
+    }
+    throw error;
+  }
+  if (entries.length === 0) {
+    throw new Error('Linked carryover node store is unavailable');
+  }
 }
 
 async function archiveLegacyCarryOver(filePath: string, startedAt: string): Promise<void> {
@@ -547,19 +564,8 @@ async function archiveLegacyCarryOver(filePath: string, startedAt: string): Prom
 
 async function writeMigrationBackup(workspaceDir: string, relativePath: string, bytes: Buffer): Promise<void> {
   if (bytes.byteLength === 0) return;
-  const target = path.join(workspaceDir, relativePath);
-  try {
-    await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-      await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 }).catch((retryError) => {
-        if ((retryError as NodeJS.ErrnoException).code !== 'EEXIST') throw retryError;
-      });
-    }
-  }
-  const existing = await fs.readFile(target);
-  if (digest(existing) !== digest(bytes)) throw new Error(`Migration backup differs: ${relativePath}`);
+  const target = safeMigrationBackupPath(workspaceDir, relativePath);
+  await writeBytesAtomic(target, bytes, 0o600);
 }
 
 
@@ -590,16 +596,6 @@ function parseSourceRegistryV4(bytes: Buffer): {
     sessions[chatId] = entry;
   }
   return { version: 4, sessions };
-}
-
-function segmentSummary(
-  sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
-): string {
-  const selected = Object.entries(sessions).map(([chatId, entry]) => [
-    chatId,
-    entry.carryOverSegments ?? [],
-  ] as const).sort(([left], [right]) => left.localeCompare(right));
-  return digest(Buffer.from(JSON.stringify(selected)));
 }
 
 function parseTargetRegistry(bytes: Buffer): {
@@ -649,7 +645,7 @@ async function validateMigratedRoots(
     for await (const _batch of store.stream({ refs, maxMessagesPerBatch: 256 })) void _batch;
     for (const ref of refs) if (ref.storedMessageCount > 0) ids.add(ref.id);
   }
-  const summary = segmentSummary(sessions);
+  const summary = carryOverSegmentSummary(sessions);
   if (summary !== marker.segmentSummarySha256 || ids.size !== marker.segmentCount) {
     throw new Error('Migrated carryover segment summary does not match its marker');
   }

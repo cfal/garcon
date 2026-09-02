@@ -157,4 +157,37 @@ describe('AgentEventBus', () => {
 
     expect(created).toHaveBeenCalledWith('chat-1');
   });
+
+  it('continues session listener delivery after a listener fails', async () => {
+    const bus = new AgentEventBus();
+    const created = mock(() => undefined);
+    bus.onSessionCreated(() => { throw new Error('listener failed'); });
+    bus.onSessionCreated(created);
+
+    await bus.publishSession('chat-1');
+
+    expect(created).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('continues terminal listener delivery after a listener fails', async () => {
+    const bus = new AgentEventBus();
+    const finished = mock(() => undefined);
+    const failed = mock(() => undefined);
+    bus.onFinished(() => { throw new Error('finished listener failed'); });
+    bus.onFinished(finished);
+    bus.onFailed(() => { throw new Error('failed listener failed'); });
+    bus.onFailed(failed);
+
+    bus.trackTurn('chat-1', operation('turn-1'));
+    await bus.publishRunEnded('chat-1', 'turn-1', runEnded('finished'));
+    bus.trackTurn('chat-1', operation('turn-2'));
+    await bus.publishRunEnded(
+      'chat-1',
+      'turn-2',
+      runEnded('failed', { code: 'FAILED', message: 'failed' }),
+    );
+
+    expect(finished).toHaveBeenCalledTimes(1);
+    expect(failed).toHaveBeenCalledTimes(1);
+  });
 });

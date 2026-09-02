@@ -79,6 +79,7 @@ export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
 export const TURN_RESULT_MESSAGE_LIMIT = 4_096;
 export const TOTAL_TURN_RESULT_MESSAGE_LIMIT = 65_536;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
+export const GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE = 'GOAL_CONTROL_OUTCOME_UNKNOWN';
 
 export class SteerIdentityCapacityError extends Error {
   constructor() {
@@ -109,6 +110,16 @@ const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-move',
   'goal-control',
 ]);
+
+function isGoalControlOutcomeUnknown(record: CommandLedgerRecord): boolean {
+  return record.commandType === 'goal-control'
+    && record.status === 'accepted'
+    && record.errorCode === GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE;
+}
+
+function hasTerminalRetention(record: CommandLedgerRecord): boolean {
+  return TERMINAL_COMMAND_STATUSES.has(record.status) || isGoalControlOutcomeUnknown(record);
+}
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -184,7 +195,6 @@ export class CommandLedger {
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
   readonly #turnOwnerIndex = new Map<string, string>();
-  readonly #turnMembership = new Map<string, Set<string>>();
   readonly #pendingChatDeletions = new Set<string>();
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
@@ -221,14 +231,6 @@ export class CommandLedger {
     if (!key) return null;
     const record = this.#records.get(key);
     return record ? cloneRecord(record) : null;
-  }
-
-  async getTurnRecords(chatId: string, turnId: string): Promise<readonly CommandLedgerRecord[]> {
-    return [...(this.#turnMembership.get(turnIndexKey(chatId, turnId)) ?? [])]
-      .flatMap((key) => {
-        const record = this.#records.get(key);
-        return record ? [cloneRecord(record)] : [];
-      });
   }
 
   async appendAssistantMessages(
@@ -273,18 +275,6 @@ export class CommandLedger {
       }
     }
     record.updatedAt = new Date().toISOString();
-    return cloneRecord(record);
-  }
-
-  async publishDeferredTerminal(
-    chatId: string,
-    turnId: string,
-  ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForTurn(chatId, turnId);
-    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
-    if (TERMINAL_COMMAND_STATUSES.has(record.status)) {
-      return this.markPublicTerminal(chatId, turnId);
-    }
     return cloneRecord(record);
   }
 
@@ -341,12 +331,6 @@ export class CommandLedger {
       if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
       await this.markPublicTerminal(chatId, record.turnId, reason);
     }
-  }
-
-  isTerminal(key: string): boolean {
-    const record = this.#records.get(key);
-    return this.#steerTombstones.has(key)
-      || (record !== undefined && TERMINAL_COMMAND_STATUSES.has(record.status));
   }
 
   unsettledQueueReceiptKeys(chatId: string): ReadonlySet<string> {
@@ -548,7 +532,7 @@ export class CommandLedger {
   #trimRecords(): void {
     const evictable = [...this.#records]
       .filter(([, record]) => (
-        TERMINAL_COMMAND_STATUSES.has(record.status)
+        hasTerminalRetention(record)
         && record.forkPreparation === undefined
         && record.terminalRetentionOrdinal !== undefined
       ))
@@ -585,9 +569,6 @@ export class CommandLedger {
   #indexTurn(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    const members = this.#turnMembership.get(indexKey) ?? new Set<string>();
-    members.add(record.key);
-    this.#turnMembership.set(indexKey, members);
     if (record.commandType === 'steer') return;
     const owner = this.#turnOwnerIndex.get(indexKey);
     if (owner && owner !== record.key) {
@@ -607,9 +588,6 @@ export class CommandLedger {
   #removeTurnIndex(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    const members = this.#turnMembership.get(indexKey);
-    members?.delete(record.key);
-    if (members?.size === 0) this.#turnMembership.delete(indexKey);
     if (this.#turnOwnerIndex.get(indexKey) === record.key) this.#turnOwnerIndex.delete(indexKey);
   }
 
@@ -629,13 +607,13 @@ export class CommandLedger {
   }
 
   #assignTerminalRetentionOrdinal(record: CommandLedgerRecord): void {
-    if (
-      record.terminalRetentionOrdinal !== undefined
-      || !TERMINAL_COMMAND_STATUSES.has(record.status)
-      || (record.turnId && !record.publicTerminalAt && !record.retainedPrivateTerminal)
-    ) {
-      return;
-    }
+    if (record.terminalRetentionOrdinal !== undefined) return;
+    if (!hasTerminalRetention(record)) return;
+    const awaitsTerminalPublication = TERMINAL_COMMAND_STATUSES.has(record.status)
+      && Boolean(record.turnId)
+      && !record.publicTerminalAt
+      && !record.retainedPrivateTerminal;
+    if (awaitsTerminalPublication) return;
     this.#nextTerminalRetentionOrdinal += 1;
     record.terminalRetentionOrdinal = this.#nextTerminalRetentionOrdinal;
   }

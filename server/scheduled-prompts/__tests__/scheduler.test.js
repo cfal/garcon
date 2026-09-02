@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { ScheduledPromptRunLog } from '../run-log.ts';
-import { cronExpressionForUtcInstant, ScheduledPromptScheduler } from '../scheduler.ts';
+import { bunCronRuntime, cronExpressionForUtcInstant, ScheduledPromptScheduler } from '../scheduler.ts';
 import { ScheduledPromptStore } from '../store.ts';
 
 const createdDirs = [];
@@ -68,6 +68,20 @@ describe('scheduled prompt scheduler', () => {
 
   it('builds exact UTC minute expressions', () => {
     expect(cronExpressionForUtcInstant('2030-07-04T13:25:00.000Z')).toBe('25 13 4 7 *');
+  });
+
+  it('evaluates UTC cron expressions in UTC', () => {
+    const originalCron = Bun.cron;
+    const cron = mock(() => ({ stop() {} }));
+    Bun.cron = cron;
+    try {
+      const handler = () => {};
+      bunCronRuntime.schedule('25 13 4 7 *', handler);
+
+      expect(cron).toHaveBeenCalledWith('25 13 4 7 *', handler, { tz: 'UTC' });
+    } finally {
+      Bun.cron = originalCron;
+    }
   });
 
   it('claims before dispatch, advances recurrence, and appends an outcome', async () => {

@@ -6,11 +6,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
-import { writeJsonFileAtomic } from '../lib/json-file-store.ts';
-import { createLogger } from '../lib/log.js';
-import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
-
-const logger = createLogger('auth:store');
+import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.ts';
 
 interface AuthData {
   jwtSecret?: unknown;
@@ -44,18 +40,16 @@ export async function init(): Promise<void> {
 }
 
 async function readFromDisk(filePath = authPath()): Promise<AuthData> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as AuthData;
-    }
-    return {};
-  } catch (error) {
-    if (hasNodeErrorCode(error, 'ENOENT')) return {};
-    logger.warn('auth: invalid auth.json, treating as empty:', errorMessage(error));
-    return {};
-  }
+  return readJsonStateFile({
+    filePath,
+    empty: () => ({}),
+    normalize: (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new TypeError('Auth state must be a JSON object');
+      }
+      return value as AuthData;
+    },
+  });
 }
 
 async function writeToDisk(data: AuthData, filePath = authPath()): Promise<void> {

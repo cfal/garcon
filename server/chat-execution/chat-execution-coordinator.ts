@@ -823,7 +823,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#ownership.notifyOwnersChanged();
     this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
-    if (outcome === 'completed' || drainRequested) await this.triggerDrain(reservation.chatId);
+    if (outcome === 'completed' || drainRequested) {
+      try {
+        await this.triggerDrain(reservation.chatId);
+      } catch (error) {
+        logger.error('queue: direct completion drain error:', error);
+      }
+    }
   }
 
   #requestStop(chatId: string, intent: ChatStopIntent): Promise<ChatStopOutcome> {
@@ -849,6 +855,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     } catch (error) {
       this.#ownership.clearAbortSuppression(chatId);
       this.#ownership.exitManualStop(chatId, { drainStillActive: false });
+      this.#rearmRequestedDrain(chatId);
       throw error;
     }
     let outcome: ChatStopOutcome;
@@ -859,8 +866,15 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.#ownership.exitManualStop(chatId, {
         drainStillActive: drainWasActive && this.#ownership.isDraining(chatId),
       });
+      this.#rearmRequestedDrain(chatId);
     }
     return { outcome, control: await this.readChatExecutionControl(chatId) };
+  }
+
+  #rearmRequestedDrain(chatId: string): void {
+    if (this.#ownership.hasDrainRequest(chatId)) {
+      this.#requestDrain(chatId, 'stop suppression release');
+    }
   }
 
   async #interruptActiveTurn(chatId: string): Promise<ChatStopOutcome> {

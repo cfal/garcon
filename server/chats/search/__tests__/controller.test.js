@@ -89,10 +89,10 @@ function harness(options = {}) {
     } : null;
   };
   const ledger = {
-    currentView: mock(readCurrentView),
-    existingCurrentView: mock((chatId) => (
-      unadoptedChatIds.has(chatId) ? null : readCurrentView(chatId)
-    )),
+    existingCurrentView: mock((chatId) => {
+      if (options.existingCurrentView) return options.existingCurrentView(chatId, chats);
+      return unadoptedChatIds.has(chatId) ? null : readCurrentView(chatId);
+    }),
     highWatermark: mock((chatId) => {
       if (options.highWatermark) return options.highWatermark(chatId, chats);
       const chat = chats.get(chatId);
@@ -189,6 +189,9 @@ function harness(options = {}) {
   };
   const controller = new TranscriptSearchController({
     listChatIds: options.listChatIds ?? (() => [...chats.keys()]),
+    hasChat: options.hasChat ?? ((chatId) => (
+      options.listChatIds ? options.listChatIds().includes(chatId) : chats.has(chatId)
+    )),
     ledger,
     adoption,
     service,
@@ -254,13 +257,13 @@ describe('TranscriptSearchController v9', () => {
     }] });
     await fixture.controller.start();
     await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
-    fixture.ledger.currentView.mockClear();
+    fixture.ledger.existingCurrentView.mockClear();
     fixture.ledger.highWatermark.mockClear();
 
     await fixture.controller.search({ query: 'alpha', allowedChatIds: ['chat-0001'] });
     await fixture.controller.search({ query: 'bravo', allowedChatIds: ['chat-0001'] });
 
-    expect(fixture.ledger.currentView).not.toHaveBeenCalled();
+    expect(fixture.ledger.existingCurrentView).not.toHaveBeenCalled();
     expect(fixture.ledger.highWatermark).not.toHaveBeenCalled();
     expect(fixture.service.search.mock.calls.map(([request]) => request.allowedChats)).toEqual([
       [{ chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 2 }],
@@ -545,6 +548,64 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.close();
   });
 
+  test('does not read a watermark after the chat leaves during its view probe', async () => {
+    const registry = new Set(['chat-0001']);
+    const fixture = harness({
+      listChatIds: () => [...registry],
+      hasChat: (chatId) => registry.has(chatId),
+      existingCurrentView(chatId, chats) {
+        const chat = chats.get(chatId);
+        registry.delete(chatId);
+        return {
+          viewId: chat.viewId,
+          status: 'current',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          contentStartOrdinal: 1,
+        };
+      },
+    });
+
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+
+    expect(fixture.ledger.highWatermark).not.toHaveBeenCalled();
+    expect(fixture.service.syncChat).not.toHaveBeenCalled();
+    expect(fixture.service.markChatUnavailable).not.toHaveBeenCalled();
+    await fixture.controller.close();
+  });
+
+  test('stops paged ledger reads when the chat is deleted between pulls', async () => {
+    const registry = new Set(['chat-0001']);
+    const firstPageRead = deferred();
+    const releaseNextPull = deferred();
+    const rows = Array.from({ length: 700 }, (_, index) => row(index + 1, `body-${index}`));
+    const fixture = harness({
+      chats: [['chat-0001', { viewId: transcriptViewId('view-0001'), rows }]],
+      listChatIds: () => [...registry],
+      hasChat: (chatId) => registry.has(chatId),
+      async syncChat(request, frames) {
+        const source = request.source(request.expectedAfterOrdinal);
+        const first = await source.next();
+        if (!first.done) frames.push(first.value);
+        firstPageRead.resolve();
+        await releaseNextPull.promise;
+        const second = await source.next();
+        if (!second.done) frames.push(second.value);
+      },
+    });
+    await fixture.controller.start();
+    await firstPageRead.promise;
+    expect(fixture.ledger.replayRows).toHaveBeenCalledTimes(1);
+
+    registry.delete('chat-0001');
+    fixture.controller.deleteChat('chat-0001');
+    releaseNextPull.resolve();
+    await waitFor(() => fixture.service.deleteChat.mock.calls.length === 1);
+
+    expect(fixture.ledger.replayRows).toHaveBeenCalledTimes(1);
+    await fixture.controller.close();
+  });
+
   test('[TLV5-SEARCH.01-CORE-01] commits use one ordered append frame', async () => {
     const fixture = harness({ states: [{
       chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
@@ -553,6 +614,7 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.start();
     await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
     fixture.service.syncChat.mockClear();
+    fixture.ledger.existingCurrentView.mockClear();
     fixture.syncCalls.length = 0;
     const appended = row(3, 'suffix');
     fixture.chats.get('chat-0001').rows.push(appended);
@@ -566,6 +628,113 @@ describe('TranscriptSearchController v9', () => {
     expect(fixture.syncCalls[0].frames).toEqual([{
       rows: [expect.objectContaining({ ordinal: 3, body: 'suffix' })], advanceTo: 3,
     }]);
+    await fixture.controller.close();
+  });
+
+  test('ignores commits after a chat leaves the registry', async () => {
+    const registry = new Set(['chat-0001']);
+    const fixture = harness({ listChatIds: () => [...registry] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.service.syncChat.mockClear();
+    fixture.syncCalls.length = 0;
+
+    registry.delete('chat-0001');
+    fixture.listener({
+      type: 'rows',
+      chatId: 'chat-0001',
+      viewId: transcriptViewId('view-0001'),
+      rows: [row(3, 'late suffix')],
+    });
+    await Bun.sleep(10);
+
+    expect(fixture.service.syncChat).not.toHaveBeenCalled();
+    const result = await fixture.controller.search({
+      query: 'late',
+      allowedChatIds: ['chat-0001'],
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([]);
+    expect(result.index.unindexedChatCount).toBe(1);
+    await fixture.controller.close();
+  });
+
+  test('a post-deletion commit cannot resurrect the search snapshot', async () => {
+    const registry = new Set(['chat-0001']);
+    const fixture = harness({ listChatIds: () => [...registry] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+
+    registry.delete('chat-0001');
+    fixture.controller.deleteChat('chat-0001');
+    fixture.listener({
+      type: 'rows',
+      chatId: 'chat-0001',
+      viewId: transcriptViewId('view-0001'),
+      rows: [row(3, 'late suffix')],
+    });
+    await fixture.controller.search({ query: 'late', allowedChatIds: ['chat-0001'] });
+
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([]);
+    await fixture.controller.close();
+  });
+
+  test('validateResultView rejects a deleted chat without a ledger read', async () => {
+    const registry = new Set(['chat-0001']);
+    const fixture = harness({ listChatIds: () => [...registry] });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.ledger.existingCurrentView.mockClear();
+
+    registry.delete('chat-0001');
+    expect(fixture.controller.validateResultView('chat-0001', 'view-0001')).toBe(false);
+    expect(fixture.ledger.existingCurrentView).not.toHaveBeenCalled();
+    await fixture.controller.close();
+  });
+
+  test('does not resync a deferred append fallback after deletion', async () => {
+    const registry = new Set(['chat-0001']);
+    const appendStarted = deferred();
+    const releaseAppend = deferred();
+    let blockAppend = false;
+    const fixture = harness({
+      listChatIds: () => [...registry],
+      hasChat: (chatId) => registry.has(chatId),
+      async syncChat(request, frames) {
+        if (blockAppend && request.mode === 'append') {
+          appendStarted.resolve();
+          await releaseAppend.promise;
+          throw new Error('SEARCH_INDEX_GAP');
+        }
+        for await (const frame of request.source(request.expectedAfterOrdinal)) frames.push(frame);
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.ledger.existingCurrentView.mockClear();
+    fixture.service.syncChat.mockClear();
+    fixture.syncCalls.length = 0;
+
+    blockAppend = true;
+    fixture.listener({
+      type: 'rows',
+      chatId: 'chat-0001',
+      viewId: transcriptViewId('view-0001'),
+      rows: [row(3, 'late suffix')],
+    });
+    await appendStarted.promise;
+    registry.delete('chat-0001');
+    fixture.controller.deleteChat('chat-0001');
+    releaseAppend.resolve();
+    await waitFor(() => fixture.service.deleteChat.mock.calls.length === 1);
+
+    expect(fixture.ledger.existingCurrentView).not.toHaveBeenCalled();
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(1);
+    const result = await fixture.controller.search({
+      query: 'late',
+      allowedChatIds: ['chat-0001'],
+    });
+    expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([]);
+    expect(result.index.unindexedChatCount).toBe(1);
     await fixture.controller.close();
   });
 
@@ -660,7 +829,7 @@ describe('TranscriptSearchController v9', () => {
 
     fencedChats.delete('chat-0001');
     fixture.controller.catalogMayHaveChanged('chat-0001');
-    await waitFor(() => fixture.ledger.existingCurrentView.mock.calls.length >= 3);
+    await waitFor(() => fixture.service.syncChat.mock.calls.length === 2);
     await fixture.controller.close();
 
     expect(fixture.service.syncChat).toHaveBeenCalledTimes(2);

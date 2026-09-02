@@ -42,20 +42,21 @@ export class TranscriptAdoptionService {
     chatId: string,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<TranscriptView> {
+    if (!this.options.registry.getChat(chatId)) throw unknownChatError(chatId);
     const currentView = this.options.ledger.currentView(chatId);
     if (currentView) {
       this.#repairSessionCache(chatId);
       return currentView;
     }
     return this.#locks.runExclusive(chatId, async () => {
+      const entry = this.options.registry.getChat(chatId);
+      if (!entry) throw unknownChatError(chatId);
       const reopened = this.options.ledger.currentView(chatId);
       if (reopened) {
         this.#repairSessionCache(chatId);
         return reopened;
       }
       signal.throwIfAborted();
-      const entry = this.options.registry.getChat(chatId);
-      if (!entry) throw new TypeError(`Cannot adopt transcript for unknown chat ${chatId}`);
       const integration = this.options.integrations.require(entry.agentId);
       const prefix = entry.carryOverMigrationQuarantine
         ? []
@@ -172,6 +173,10 @@ export class TranscriptAdoptionService {
       { provider, phase },
     );
   }
+}
+
+function unknownChatError(chatId: string): TypeError {
+  return new TypeError(`Cannot adopt transcript for unknown chat ${chatId}`);
 }
 
 function quarantineDraft(

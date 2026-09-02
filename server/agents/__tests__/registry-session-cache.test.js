@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -125,6 +125,29 @@ describe('AgentRegistry session cache', () => {
       },
     });
     expect(chats.getChatByAgentSessionId('native-late')?.[0]).toBe(CHAT_ID);
+  });
+
+  it('continues transcript listener delivery after a listener fails', async () => {
+    const registry = createRegistry();
+    const delivered = mock(() => undefined);
+    registry.onTranscriptCommitted(() => { throw new Error('listener failed'); });
+    registry.onTranscriptCommitted(delivered);
+    const viewId = ledger.currentView(CHAT_ID).viewId;
+
+    ledger.appendChatRow({
+      chatId: CHAT_ID,
+      viewId,
+      clientMessageId: 'listener-notice',
+      type: 'notice',
+      content: 'listener isolation',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(delivered).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: CHAT_ID,
+      type: 'rows',
+    }));
   });
 
   it('keeps chat rows and provider errors out of the conversational preview fold', async () => {

@@ -228,6 +228,36 @@ describe('ChatExecutionCoordinator', () => {
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
+  it('preserves a direct-turn failure when the follow-on drain also fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+      turnRunner: { runAgentTurn: mock(async () => { throw new Error('provider failed'); }) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
+    const failures = [];
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
+
+    await expect(coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' }))
+      .rejects.toThrow('provider failed');
+    expect(failures).toEqual(['provider failed']);
+  });
+
+  it('releases direct ownership when the follow-on drain fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
+
+    await expect(coordinator.releaseDirectTurn(reservation)).resolves.toBeUndefined();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
   it('delivers control steering without admitting or cleaning up user input', async () => {
     const providerTarget = { providerTurnId: 'provider-turn-1' };
     const fixture = createFixture({
@@ -803,6 +833,42 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
     first.resolve();
     await run;
+  });
+
+  it('drains input requested while Stop suppression is active', async () => {
+    const first = deferred();
+    const second = deferred();
+    const abort = deferred();
+    let runCount = 0;
+    const fixture = createFixture({
+      turnRunner: {
+        runAgentTurn: mock(() => {
+          runCount += 1;
+          return runCount === 1 ? first.promise : second.promise;
+        }),
+        abortSession: mock(() => abort.promise),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const firstRun = coordinator.runReservedTurn(reservation, 'first', { turnId: 'turn-1' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    const stop = coordinator.stopActiveTurn('chat-1');
+    await waitFor(() => fixture.turnRunner.abortSession.mock.calls.length === 1);
+    await coordinator.createChatQueueEntry('chat-1', 'queued while stopping');
+    await coordinator.triggerDrain('chat-1');
+
+    abort.resolve(true);
+    expect((await stop).control.pause).toBeNull();
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+
+    const secondOptions = fixture.turnRunner.runAgentTurn.mock.calls[1][2];
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: secondOptions.turnId });
+    second.resolve();
+    await coordinator.waitForExecutionOwners();
+    first.resolve();
+    await firstRun;
   });
 
   it('stops a reserved turn before the provider run starts', async () => {

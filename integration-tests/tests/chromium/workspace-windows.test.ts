@@ -544,18 +544,22 @@ async function openFile(page: Page, absolutePath: string): Promise<void> {
   }, absolutePath);
 }
 
+type ChatDropTarget = 'center' | 'right' | 'bottom';
+
 async function dragChatToWindow(
   page: Page,
   input: {
     chatId: string;
     windowId: string;
-    target?: 'center' | 'right' | 'bottom';
+    target?: ChatDropTarget;
     expectedLabel?: string;
     expectBlocked?: boolean;
   },
 ): Promise<void> {
   const source = page.locator(`[data-sidebar-virtual-row="${input.chatId}"][draggable="true"]`);
   const target = page.locator(`[data-workspace-window-id="${input.windowId}"]`);
+  // Uses Playwright actionability to wait out menu scroll locks before raw mouse input.
+  await source.hover();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) throw new Error('Missing workspace Chat drag geometry.');
@@ -569,27 +573,32 @@ async function dragChatToWindow(
     targetKind === 'bottom'
       ? targetBox.y + targetBox.height - 12
       : targetBox.y + targetBox.height / 2;
-  await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
   try {
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
+    // Chromium omits dragover when a dispatch changes the hit-tested element.
+    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
     if (input.expectBlocked) {
       await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
     } else {
-      const expectedLabel =
-        input.expectedLabel ??
-        (targetKind === 'center'
-          ? 'Add as tab'
-          : targetKind === 'right'
-            ? 'Open new window right'
-            : 'Open new window below');
+      const expectedLabel = input.expectedLabel ?? chatDropLabel(targetKind);
       await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
     }
-    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
   } finally {
     await page.mouse.up();
+  }
+}
+
+function chatDropLabel(target: ChatDropTarget): string {
+  switch (target) {
+    case 'center':
+      return 'Add as tab';
+    case 'right':
+      return 'Open new window right';
+    case 'bottom':
+      return 'Open new window below';
   }
 }
 
@@ -607,6 +616,8 @@ async function dragWorkspaceTabToWindow(
     `[id="${input.sourceWindowId}-tab-${input.surfaceId}"][draggable="true"]`,
   );
   const target = page.locator(`[data-workspace-window-id="${input.targetWindowId}"]`);
+  // Uses Playwright actionability to wait out menu scroll locks before raw mouse input.
+  await source.hover();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) throw new Error('Missing workspace tab drag geometry.');
@@ -618,14 +629,14 @@ async function dragWorkspaceTabToWindow(
       ? targetBox.x + targetBox.width / 2
       : targetBox.x + targetBox.width - 12;
   const targetY = targetBox.y + targetBox.height / 2;
-  await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
   try {
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
+    // Chromium omits dragover when a dispatch changes the hit-tested element.
     await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
+    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
   } finally {
     await page.mouse.up();
   }

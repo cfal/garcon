@@ -298,6 +298,11 @@ export class MetadataIndex {
     if (!this.#metadataPath) return result;
     try {
       const raw = await fs.readFile(this.#metadataPath, 'utf8');
+      if (process.platform !== 'win32') {
+        await fs.chmod(this.#metadataPath, 0o600).catch((error) => {
+          logger.warn('metadata: failed to repair chat-metadata.json permissions:', errorMessage(error));
+        });
+      }
       const parsed = JSON.parse(raw);
       const chats = isRecord(parsed) ? parsed.chats : null;
       if (!chats || typeof chats !== 'object' || Array.isArray(chats)) return result;
@@ -330,7 +335,7 @@ export class MetadataIndex {
       version: METADATA_VERSION,
       chats: Object.fromEntries(this.#metadataByChatId),
     };
-    await writeJsonFileAtomic(this.#metadataPath, snapshot);
+    await writeJsonFileAtomic(this.#metadataPath, snapshot, { mode: 0o600 });
   }
 }
 

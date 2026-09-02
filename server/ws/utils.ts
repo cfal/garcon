@@ -6,7 +6,7 @@ type WS = import('bun').ServerWebSocket<unknown>;
 
 function sendWebSocketMessage(ws: WS, payload: string): boolean {
   if (ws.readyState !== OPEN_WS_STATE) return false;
-  return sendWebSocketPayload(ws, payload) > 0;
+  return sendWebSocketPayload(ws, payload) !== 0;
 }
 
 export function sendWebSocketJson(ws: WS, payload: unknown): boolean {

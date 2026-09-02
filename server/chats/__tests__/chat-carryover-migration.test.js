@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,13 +9,14 @@ import { encodeCarryOverPages } from '../carryover-page-codec.ts';
 import { assertMigrationBudget } from '../carryover-migration-budget.ts';
 import {
   finalizeCarryOverMigrationValidation,
-  markCarryOverMigrationRollbackUnsafe,
   migrateLegacyCarryOverWorkspace,
 } from '../chat-carryover-migration.ts';
 import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
+import { ChatRegistry } from '../store.ts';
 
 const CHAT_ID = '1786077000000001';
+const POST_MIGRATION_CHAT_ID = '1786077000000002';
 const TIMESTAMP = '2026-01-01T00:00:00.000Z';
 
 describe('legacy carryover migration', () => {
@@ -188,6 +190,89 @@ describe('legacy carryover migration', () => {
       .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('replaces truncated migration backups after an interrupted write', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryBytes = await fs.readFile(path.join(workspaceDir, 'chats.json'));
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    const journalBackupFile = `migration-backups/agent-ownership-journal.v1.${sha256(journalBytes).slice(0, 16)}.json`;
+    const registryBackupFile = `migration-backups/chats.v3.${sha256(registryBytes).slice(0, 16)}.json`;
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile,
+    });
+    await fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, journalBackupFile), journalBytes.subarray(0, 1));
+    await fs.writeFile(path.join(workspaceDir, registryBackupFile), registryBytes.subarray(0, 1));
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const journalBackupPath = path.join(workspaceDir, journalBackupFile);
+    const registryBackupPath = path.join(workspaceDir, registryBackupFile);
+    expect(await fs.readFile(journalBackupPath)).toEqual(journalBytes);
+    expect(await fs.readFile(registryBackupPath)).toEqual(registryBytes);
+    expect((await fs.stat(journalBackupPath)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(registryBackupPath)).mode & 0o777).toBe(0o600);
+    expect((await readJson('carryover-transcripts/migration-v2.json')).phase).toBe('complete');
+  });
+
+  it('rejects marker backup paths outside the migration backup directory', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const registryBytes = await fs.readFile(registryPath);
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile: 'chats.json',
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Migration backup path must be within migration-backups');
+    expect(await fs.readFile(registryPath)).toEqual(registryBytes);
+  });
+
+  it('preserves complete backups when migration sources change', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const registryBytes = await fs.readFile(registryPath);
+    const journalBytes = await fs.readFile(path.join(workspaceDir, 'agent-ownership-journal.json'));
+    const carryOverBytes = await fs.readFile(path.join(workspaceDir, 'chat-carryover.json'));
+    const journalBackupFile = `migration-backups/agent-ownership-journal.v1.${sha256(journalBytes).slice(0, 16)}.json`;
+    const registryBackupFile = `migration-backups/chats.v3.${sha256(registryBytes).slice(0, 16)}.json`;
+    await writeInProgressMarker({
+      registryBytes,
+      journalBytes,
+      carryOverBytes,
+      journalBackupFile,
+    });
+    await fs.mkdir(path.join(workspaceDir, 'migration-backups'), { recursive: true });
+    const registryBackupPath = path.join(workspaceDir, registryBackupFile);
+    await fs.writeFile(path.join(workspaceDir, journalBackupFile), journalBytes);
+    await fs.writeFile(registryBackupPath, registryBytes);
+    await fs.writeFile(registryPath, JSON.stringify({ version: 3, sessions: {} }));
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Carryover migration source changed after migration began');
+    expect(await fs.readFile(registryBackupPath)).toEqual(registryBytes);
+  });
+
   it('migrates a draft schema-v4 registry without linked history', async () => {
     await fs.writeFile(
       path.join(workspaceDir, 'chats.json'),
@@ -293,6 +378,153 @@ describe('legacy carryover migration', () => {
       }),
       expect.objectContaining({ type: 'user-message', content: 'linked-b-user' }),
     ]);
+  });
+
+  it('quarantines a linked chat whose manifest is missing', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    const healthyId = '55555555-5555-4555-8555-555555555555';
+    await writeLinkedMaterializedNode({
+      id: healthyId,
+      parentId: null,
+      source: linkedSource('codex', 'gpt'),
+      target: { agentId: 'claude', model: 'opus' },
+      messages: [new UserMessage(TIMESTAMP, 'healthy-linked-user')],
+    });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+      [POST_MIGRATION_CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: healthyId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    const registry = await readJson('chats.json');
+    expect(registry.version).toBe(5);
+    expect(registry.sessions[CHAT_ID].carryOverSegments).toEqual([]);
+    expect(registry.sessions[CHAT_ID].carryOverMigrationQuarantine).toMatchObject({
+      errorCode: 'MISSING_CARRYOVER_NODE',
+    });
+    expect(registry.sessions[POST_MIGRATION_CHAT_ID].carryOverMigrationQuarantine).toBeNull();
+    const store = new CarryOverTranscriptStore({ workspaceDir });
+    await store.initialize();
+    expect(await store.loadAll(registry.sessions[POST_MIGRATION_CHAT_ID].carryOverSegments))
+      .toEqual([
+        expect.objectContaining({ type: 'user-message', content: 'healthy-linked-user' }),
+        expect.objectContaining({ type: 'agent-switch' }),
+      ]);
+  });
+
+  it('fails migration when the linked node store is missing', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration when the linked node store is empty', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), {
+      recursive: true,
+    });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Linked carryover node store is unavailable');
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration when the linked node store is not a directory', async () => {
+    const missingId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts'), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, 'carryover-transcripts', 'nodes'), 'invalid');
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: missingId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toThrow('Linked carryover node store is unavailable');
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('fails migration on hard linked-manifest filesystem errors', async () => {
+    const nodeId = '44444444-4444-4444-8444-444444444444';
+    await fs.mkdir(path.join(
+      workspaceDir,
+      'carryover-transcripts',
+      'nodes',
+      nodeId,
+      'manifest.json',
+    ), { recursive: true });
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: nodeId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await expect(migrateLegacyCarryOverWorkspace(workspaceDir))
+      .rejects.toMatchObject({ code: 'EISDIR' });
+    expect((await readJson('chats.json')).version).toBe(4);
+  });
+
+  it('quarantines a linked chat whose page is missing', async () => {
+    const nodeId = '44444444-4444-4444-8444-444444444444';
+    await writeLinkedMaterializedNode({
+      id: nodeId,
+      parentId: null,
+      source: linkedSource('codex', 'gpt'),
+      target: { agentId: 'claude', model: 'opus' },
+      messages: [new UserMessage(TIMESTAMP, 'missing-page-user')],
+    });
+    const pagesDir = path.join(workspaceDir, 'carryover-transcripts', 'nodes', nodeId, 'pages');
+    const [pageFile] = await fs.readdir(pagesDir);
+    if (!pageFile) throw new Error('Linked node fixture did not create a page');
+    await fs.rm(path.join(pagesDir, pageFile));
+    await writeLinkedRegistry({
+      [CHAT_ID]: {
+        ...legacyEntry('claude', 'opus'),
+        carryOverHeadId: nodeId,
+        nativeSeedReceipt: null,
+        carryOverMigrationQuarantine: null,
+      },
+    });
+
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+
+    expect((await readJson('chats.json')).sessions[CHAT_ID].carryOverMigrationQuarantine)
+      .toMatchObject({ errorCode: 'MISSING_CARRYOVER_PAGE' });
   });
 
   it('quarantines malformed chat history without treating it as empty history', async () => {
@@ -427,7 +659,7 @@ describe('legacy carryover migration', () => {
     expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('already-restored');
   });
 
-  it('closes the rollback window before a normal segment can be accepted', async () => {
+  it('refuses rollback after the migrated registry gains a chat', async () => {
     await writeLegacyWorkspace({
       segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
       currentAgentId: 'claude',
@@ -435,13 +667,46 @@ describe('legacy carryover migration', () => {
     });
     await migrateLegacyCarryOverWorkspace(workspaceDir);
     await writeWorkspaceVersion(5);
+    const registry = new ChatRegistry(workspaceDir);
+    await registry.init();
+    registry.addChat({
+      id: POST_MIGRATION_CHAT_ID,
+      agentId: 'claude',
+      model: 'opus',
+      projectPath: '/workspace/project',
+      agentSettingsById: {},
+      parentChat: null,
+    });
+    await registry.flush();
+    const divergedRegistry = await fs.readFile(path.join(workspaceDir, 'chats.json'));
 
-    await markCarryOverMigrationRollbackUnsafe(workspaceDir);
-
-    expect((await readJson('carryover-transcripts/migration-v2.json')).rollbackSafe).toBe(false);
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
-      .rejects.toThrow('unsafe after new-format history was created');
-    expect((await readJson('chats.json')).version).toBe(5);
+      .rejects.toThrow('unsafe after the registry changed');
+
+    expect(await fs.readFile(path.join(workspaceDir, 'chats.json'))).toEqual(divergedRegistry);
+    expect((await readJson('chats.json')).sessions).toHaveProperty(POST_MIGRATION_CHAT_ID);
+  });
+
+  it('allows rollback after a semantics-preserving registry rewrite', async () => {
+    await writeLegacyWorkspace({
+      segments: [segment('codex', 'gpt', [new UserMessage(TIMESTAMP, 'first')])],
+      currentAgentId: 'claude',
+      currentModel: 'opus',
+    });
+    const legacyRegistry = await readJson('chats.json');
+    await migrateLegacyCarryOverWorkspace(workspaceDir);
+    await writeWorkspaceVersion(5);
+    const registryPath = path.join(workspaceDir, 'chats.json');
+    const migratedBytes = await fs.readFile(registryPath);
+    const registry = new ChatRegistry(workspaceDir);
+    await registry.init();
+    await registry.flush();
+    const rewrittenBytes = await fs.readFile(registryPath);
+    expect(rewrittenBytes.equals(migratedBytes)).toBe(false);
+
+    expect(await rollbackLegacyCarryOverMigration(workspaceDir)).toBe('restored');
+
+    expect(await readJson('chats.json')).toEqual(legacyRegistry);
   });
 
   it('removes rollback artifacts after a validated subsequent restart', async () => {
@@ -460,7 +725,7 @@ describe('legacy carryover migration', () => {
     ))).toBe(false);
     expect(await fs.readdir(path.join(workspaceDir, 'migration-backups'))).toEqual([]);
     await expect(rollbackLegacyCarryOverMigration(workspaceDir))
-      .rejects.toThrow('unsafe after new-format history was created');
+      .rejects.toThrow('unsafe after the migration validation restart');
   });
 
   it('drops obsolete transfer cleanup whose chat was deleted', async () => {
@@ -538,6 +803,29 @@ describe('legacy carryover migration', () => {
     );
   }
 
+  async function writeInProgressMarker({
+    registryBytes,
+    journalBytes,
+    carryOverBytes,
+    journalBackupFile,
+  }) {
+    await fs.mkdir(path.join(workspaceDir, 'carryover-transcripts'), { recursive: true });
+    await fs.writeFile(
+      path.join(workspaceDir, 'carryover-transcripts', 'migration-v2.json'),
+      JSON.stringify({
+        version: 2,
+        phase: 'in-progress',
+        sourceCarryOverSha256: sha256(carryOverBytes),
+        sourceRegistrySha256: sha256(registryBytes),
+        sourceJournalSha256: sha256(journalBytes),
+        legacyJournalBackupFile: journalBackupFile,
+        sourceRegistryVersion: 3,
+        sourceWorkspaceVersion: 3,
+        startedAt: TIMESTAMP,
+      }),
+    );
+  }
+
   async function writeLegacyWorkspace({ segments, currentAgentId, currentModel }) {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 3,
@@ -578,8 +866,25 @@ describe('legacy carryover migration', () => {
     }));
   }
 
+  async function writeLinkedRegistry(sessions) {
+    await Promise.all([
+      fs.writeFile(
+        path.join(workspaceDir, 'chats.json'),
+        JSON.stringify({ version: 4, sessions }),
+      ),
+      fs.writeFile(
+        path.join(workspaceDir, 'agent-ownership-journal.json'),
+        JSON.stringify({ version: 2, ownershipIntents: [], transferCleanup: [] }),
+      ),
+    ]);
+  }
+
   function readJson(relativePath) {
     return fs.readFile(path.join(workspaceDir, relativePath), 'utf8').then(JSON.parse);
+  }
+
+  function sha256(bytes) {
+    return crypto.createHash('sha256').update(bytes).digest('hex');
   }
 
   async function markRollingBack() {

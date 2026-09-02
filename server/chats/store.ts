@@ -26,6 +26,7 @@ import {
 import type { AgentName } from "../agents/session-types.js";
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { errorMessage } from '../lib/errors.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
 import { normalizeTags } from '../../common/tags.js';
@@ -454,7 +455,13 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   async init(): Promise<ChatRegistrySnapshot> {
     if (this.#registry) return this.#registry;
     try {
-      const raw = await fs.readFile(this.#sessionsFilePath(), 'utf8');
+      const sessionsFilePath = this.#sessionsFilePath();
+      const raw = await fs.readFile(sessionsFilePath, 'utf8');
+      if (process.platform !== 'win32') {
+        await fs.chmod(sessionsFilePath, 0o600).catch((error) => {
+          logger.warn('sessions: failed to repair chats.json permissions:', errorMessage(error));
+        });
+      }
       const parsed: unknown = JSON.parse(raw);
       if (!isObjectRecord(parsed)) {
         this.#registry = createEmptyRegistry();
@@ -770,7 +777,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
   async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
     const target = this.#sessionsFilePath();
-    await writeJsonFileAtomic(target, registry);
+    await writeJsonFileAtomic(target, registry, { mode: 0o600 });
     this.#registry = registry;
     this.#rebuildAgentSessionIdIndex();
   }
