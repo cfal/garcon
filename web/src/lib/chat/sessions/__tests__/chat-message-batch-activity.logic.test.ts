@@ -111,11 +111,12 @@ describe('selectPreviewFromBatch', () => {
 describe('selectLatestActivityTimestampFromBatch', () => {
 	it('tracks the latest transcript activity independently of preview eligibility', () => {
 		const messages: ChatMessage[] = [
-			new AssistantMessage('2024-01-01T00:00:00Z', 'visible preview'),
-			new ThinkingMessage('2024-01-01T00:00:01Z', 'later thinking'),
+			new ThinkingMessage('2024-01-01T00:00:02Z', 'newer activity'),
+			new AssistantMessage('2024-01-01T00:00:00Z', 'later ordinal with older timestamp'),
+			new ThinkingMessage('2024-01-01T00:00:01Z', 'latest ordinal'),
 		];
 
-		expect(selectLatestActivityTimestampFromBatch(messages)).toBe('2024-01-01T00:00:01Z');
+		expect(selectLatestActivityTimestampFromBatch(messages)).toBe('2024-01-01T00:00:02Z');
 		expect(selectLatestActivityTimestampFromBatch([])).toBeNull();
 	});
 });

@@ -346,6 +346,7 @@ describe('event router integration', () => {
 	});
 
 	it('advances activity and read receipts for thinking without replacing the preview', () => {
+		const newestTimestamp = '2026-05-14T00:00:02.000Z';
 		const stores = createStores();
 		renderRouterWithRawMessages(
 			[
@@ -354,15 +355,20 @@ describe('event router integration', () => {
 					chatId: 'chat-a',
 					transcriptViewId: 'generation-current',
 					firstOrdinal: 2,
-					lastOrdinal: 2,
+					lastOrdinal: 3,
 					resendCandidates: [],
 					clientRequestId: 'req-thinking',
 					upstreamRequestId: 'cursor-thinking',
 					messages: [
 						rawMessage(2, {
 							type: 'thinking-message',
+							timestamp: newestTimestamp,
+							content: 'newer activity',
+						}),
+						rawMessage(3, {
+							type: 'thinking-message',
 							timestamp: TS,
-							content: 'working',
+							content: 'later ordinal with older timestamp',
 						}),
 					],
 				},
@@ -371,8 +377,8 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.sessions.patchPreview).not.toHaveBeenCalled();
-		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', TS);
-		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', TS);
+		expect(stores.sessions.patchActivity).toHaveBeenCalledWith('chat-a', newestTimestamp);
+		expect(stores.readState.enqueueReadReceipt).toHaveBeenCalledWith('chat-a', newestTimestamp);
 	});
 
 	it('keeps background plan and permission batches isolated from selected-chat ports', () => {

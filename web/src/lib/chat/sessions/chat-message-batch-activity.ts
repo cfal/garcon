@@ -31,11 +31,14 @@ export function selectPreviewFromBatch(
 export function selectLatestActivityTimestampFromBatch(
 	messages: readonly ChatMessage[],
 ): string | null {
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const timestamp = messages[index]?.timestamp;
-		if (timestamp) return timestamp;
+	let latestTimestamp: string | null = null;
+	for (const message of messages) {
+		const timestamp = message.timestamp;
+		if (timestamp && (!latestTimestamp || timestamp > latestTimestamp)) {
+			latestTimestamp = timestamp;
+		}
 	}
-	return null;
+	return latestTimestamp;
 }
 
 export function applyChatMessageBatchActivity(
