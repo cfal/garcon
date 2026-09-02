@@ -323,6 +323,31 @@ describe('ComposerSnippetPalette', () => {
 		expect(reopened.selectionEnd).toBe(rawArguments.length);
 	});
 
+	it('keeps the caret at the end when a failed reopen draft equals the default', async () => {
+		render(ComposerSnippetPaletteTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			firstDefaultArguments: 'staged changes',
+			insertionResult: 'failed',
+		});
+		await fireEvent.click(await screen.findByRole('option', { name: /item-0/ }));
+		const input = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(input.selectionStart).toBe(0);
+		expect(input.selectionEnd).toBe('staged changes'.length);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+
+		const reopened = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(reopened.value).toBe('staged changes');
+		await waitFor(() => expect(document.activeElement).toBe(reopened));
+		expect(reopened.selectionStart).toBe('staged changes'.length);
+		expect(reopened.selectionEnd).toBe('staged changes'.length);
+	});
+
 	it('reopens a failed cleared insertion without restoring the saved default', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,

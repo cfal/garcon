@@ -13,6 +13,7 @@
 		open: boolean;
 		snippet: Snippet | null;
 		initialArguments?: string;
+		selectInitialArguments?: boolean;
 		onClose: () => void;
 		onSubmit: (snippet: Snippet, argumentsText: string) => void;
 		onCancelled: () => void;
@@ -23,6 +24,7 @@
 		open,
 		snippet,
 		initialArguments = '',
+		selectInitialArguments = false,
 		onClose,
 		onSubmit,
 		onCancelled,
@@ -85,9 +87,8 @@
 		argumentsRef.focus({ preventScroll: true });
 		const end = argumentsRef.value.length;
 		// Selects a pre-filled default so typing replaces it; an edited retry draft keeps the caret at the end.
-		const isDefaultPrefill =
-			snippet !== null && end > 0 && argumentsRef.value === snippet.defaultArguments;
-		argumentsRef.setSelectionRange(isDefaultPrefill ? 0 : end, end);
+		const selectAll = selectInitialArguments && end > 0;
+		argumentsRef.setSelectionRange(selectAll ? 0 : end, end);
 		return true;
 	}
 

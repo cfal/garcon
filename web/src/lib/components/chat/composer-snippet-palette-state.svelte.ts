@@ -27,6 +27,7 @@ export class ComposerSnippetPaletteState {
 	highlightedSnippetId = $state<string | null>(null);
 	argumentsSnippet = $state<Snippet | null>(null);
 	argumentsDraft = $state('');
+	argumentsDraftIsFreshDefault = $state(false);
 	argumentsDialogOpen = $state(false);
 
 	#filteredSnippets = $derived.by(() => {
@@ -97,6 +98,7 @@ export class ComposerSnippetPaletteState {
 		this.argumentsDialogOpen = false;
 		this.argumentsSnippet = null;
 		this.argumentsDraft = '';
+		this.argumentsDraftIsFreshDefault = false;
 		if (open) this.#options.onOpenChange(false);
 	}
 
@@ -140,6 +142,7 @@ export class ComposerSnippetPaletteState {
 			queueMicrotask(() => {
 				this.argumentsSnippet = snippet;
 				this.argumentsDraft = snippet.defaultArguments;
+				this.argumentsDraftIsFreshDefault = true;
 				this.argumentsDialogOpen = true;
 			});
 			return;
@@ -159,6 +162,7 @@ export class ComposerSnippetPaletteState {
 		this.argumentsDialogOpen = false;
 		this.argumentsSnippet = null;
 		this.argumentsDraft = '';
+		this.argumentsDraftIsFreshDefault = false;
 		this.#options.onCancelled?.();
 	}
 
@@ -197,10 +201,12 @@ export class ComposerSnippetPaletteState {
 		if (result === 'failed' && snippetTemplateUsesArguments(snippet.template)) {
 			this.argumentsSnippet = snippet;
 			this.argumentsDraft = argumentsText;
+			this.argumentsDraftIsFreshDefault = false;
 			this.argumentsDialogOpen = true;
 			return;
 		}
 		this.argumentsSnippet = null;
 		this.argumentsDraft = '';
+		this.argumentsDraftIsFreshDefault = false;
 	}
 }
