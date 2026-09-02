@@ -544,12 +544,14 @@ async function openFile(page: Page, absolutePath: string): Promise<void> {
   }, absolutePath);
 }
 
+type ChatDropTarget = 'center' | 'right' | 'bottom';
+
 async function dragChatToWindow(
   page: Page,
   input: {
     chatId: string;
     windowId: string;
-    target?: 'center' | 'right' | 'bottom';
+    target?: ChatDropTarget;
     expectedLabel?: string;
     expectBlocked?: boolean;
   },
@@ -579,18 +581,23 @@ async function dragChatToWindow(
     if (input.expectBlocked) {
       await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
     } else {
-      const expectedLabel =
-        input.expectedLabel ??
-        (targetKind === 'center'
-          ? 'Add as tab'
-          : targetKind === 'right'
-            ? 'Open new window right'
-            : 'Open new window below');
+      const expectedLabel = input.expectedLabel ?? chatDropLabel(targetKind);
       await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
     }
     await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
   } finally {
     await page.mouse.up();
+  }
+}
+
+function chatDropLabel(target: ChatDropTarget): string {
+  switch (target) {
+    case 'center':
+      return 'Add as tab';
+    case 'right':
+      return 'Open new window right';
+    case 'bottom':
+      return 'Open new window below';
   }
 }
 

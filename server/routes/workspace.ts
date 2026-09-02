@@ -71,6 +71,12 @@ function telegramTokenTestFailedResponse(error: unknown): Response {
   }, { status: 400 });
 }
 
+function workspaceStateErrorResponse(error: unknown, status = 500): Response {
+  const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
+  if (corruptStateResponse) return corruptStateResponse;
+  return Response.json({ success: false, error: errorMessage(error) }, { status });
+}
+
 function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -307,8 +313,7 @@ export default function createWorkspaceRoutes(
       await settings.setSessionName(chatId, trimmed);
       return Response.json({ success: true } satisfies UpdateChatTitleResponse);
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 
@@ -317,8 +322,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json(snapshot);
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 
@@ -471,8 +475,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 
@@ -487,8 +490,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 
@@ -516,8 +518,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return workspaceStateErrorResponse(error, 400);
     }
   }
 
@@ -544,8 +545,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+      return workspaceStateErrorResponse(error, 400);
     }
   }
 
@@ -558,8 +558,7 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
-      return jsonErrorFromCorruptStateFile(error)
-        ?? Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return workspaceStateErrorResponse(error);
     }
   }
 

@@ -148,10 +148,9 @@ export function registryBackupFile(marker: CarryOverMigrationMarkerBase): string
 export function carryOverSegmentSummary(
   sessions: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
 ): string {
-  const selected = Object.entries(sessions).map(([chatId, entry]) => [
-    chatId,
-    entry.carryOverSegments ?? [],
-  ] as const).sort(([left], [right]) => left.localeCompare(right));
+  const selected = Object.entries(sessions)
+    .map(([chatId, entry]) => [chatId, entry.carryOverSegments ?? []] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
   return digest(Buffer.from(JSON.stringify(selected)));
 }
 

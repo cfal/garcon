@@ -607,19 +607,13 @@ export class CommandLedger {
   }
 
   #assignTerminalRetentionOrdinal(record: CommandLedgerRecord): void {
-    const hasTerminalStatus = TERMINAL_COMMAND_STATUSES.has(record.status);
-    if (
-      record.terminalRetentionOrdinal !== undefined
-      || (!hasTerminalStatus && !isGoalControlOutcomeUnknown(record))
-      || (
-        hasTerminalStatus
-        && record.turnId
-        && !record.publicTerminalAt
-        && !record.retainedPrivateTerminal
-      )
-    ) {
-      return;
-    }
+    if (record.terminalRetentionOrdinal !== undefined) return;
+    if (!hasTerminalRetention(record)) return;
+    const awaitsTerminalPublication = TERMINAL_COMMAND_STATUSES.has(record.status)
+      && Boolean(record.turnId)
+      && !record.publicTerminalAt
+      && !record.retainedPrivateTerminal;
+    if (awaitsTerminalPublication) return;
     this.#nextTerminalRetentionOrdinal += 1;
     record.terminalRetentionOrdinal = this.#nextTerminalRetentionOrdinal;
   }

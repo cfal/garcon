@@ -141,13 +141,11 @@ export class ShareStore implements IShareStore {
     try {
       const raw = await fs.readFile(this.#filePath(), 'utf8');
       parsed = JSON.parse(raw);
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        this.#index = createEmptyIndex();
-      } else {
-        logger.warn('share-store: failed to read shared-chats.json:', (err as Error).message);
-        this.#index = createEmptyIndex();
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn('share-store: failed to read shared-chats.json:', (error as Error).message);
       }
+      this.#index = createEmptyIndex();
       this.#rebuildIndex();
       return;
     }
