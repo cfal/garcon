@@ -5,9 +5,10 @@ import type {
 import type { AgentCatalogEntry } from '../../common/agents.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { DirectInputPreparationContext } from '../chat-execution/types.js';
-import type {
-  AgentHandoffIntent,
-  AgentOwnershipJournal,
+import {
+  type AgentHandoffIntent,
+  type AgentOwnershipJournal,
+  matchesHandoffTarget,
 } from '../chats/agent-ownership-journal.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -467,7 +468,9 @@ export class AgentHandoffService {
             break;
           case 'producer':
             await this.deps.reopenProducer(intent.chatId);
-            this.#recoveries.delete(intent.operationId);
+            if (this.#recoveries.get(operationId) === recovery) {
+              this.#recoveries.delete(operationId);
+            }
             await this.#notifyCommitted(intent.chatId);
             return;
         }
@@ -486,6 +489,7 @@ export class AgentHandoffService {
         return;
       }
       if (this.#shutdownController.signal.aborted) return;
+      if (this.#recoveries.get(operationId) !== recovery) return;
       this.#scheduleHandoffRecovery(recovery, retryAttempt);
     }
   }
@@ -595,14 +599,6 @@ function matchesSwitchMarker(
   return marker.detail.fromAgentId === intent.source.agentId
     && marker.detail.toAgentId === intent.target.execution.agentId
     && marker.detail.toModel === (intent.target.execution.model ?? null);
-}
-
-function matchesHandoffTarget(
-  current: ChatRegistryEntry | null | undefined,
-  intent: AgentHandoffIntent,
-): boolean {
-  return current?.agentId === intent.target.execution.agentId
-    && current.agentOwnershipEpoch === intent.target.agentOwnershipEpoch;
 }
 
 async function retryHandoffStep<T>(

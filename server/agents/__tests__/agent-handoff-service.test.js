@@ -336,11 +336,111 @@ describe('AgentHandoffService', () => {
         status: 409,
         retryable: true,
       });
+      service.shutdown();
       expect(registryAttempts).toBe(3);
       expect(state.ownership.findHandoff('chat', 'request-1')).not.toBeNull();
     } finally {
       service.shutdown();
       await preparation.catch(() => undefined);
+    }
+  });
+
+  it('does not let a disowned in-flight recovery replace the request recovery timer', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    const applyDecision = state.ownership.applyHandoffDecision;
+    let applyCalls = 0;
+    let markOrphanStarted;
+    const orphanStarted = new Promise((resolve) => {
+      markOrphanStarted = resolve;
+    });
+    let rejectOrphan;
+    const heldOrphan = new Promise((_, reject) => {
+      rejectOrphan = reject;
+    });
+    state.ownership.applyHandoffDecision = mock(async (...args) => {
+      applyCalls += 1;
+      if (applyCalls === 1) {
+        markOrphanStarted();
+        await heldOrphan;
+      }
+      if (applyCalls <= 4) throw new Error('injected persistent registry failure');
+      return applyDecision(...args);
+    });
+    const timers = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = mock((callback, delay) => {
+      const timer = {
+        callback,
+        delay,
+        fired: false,
+        cleared: false,
+        unref: mock(() => undefined),
+      };
+      timers.push(timer);
+      return timer;
+    });
+    globalThis.clearTimeout = mock((timer) => {
+      timer.cleared = true;
+    });
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+    });
+    const prepare = () => service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    }).prepare(context());
+    const startupRecovery = service.recoverPendingHandoffs();
+    let request;
+
+    try {
+      await orphanStarted;
+      request = prepare();
+      for (let tick = 0; tick < 20 && timers.length < 1; tick += 1) await Promise.resolve();
+      expect(applyCalls).toBe(2);
+
+      rejectOrphan(new Error('injected orphaned recovery failure'));
+      await startupRecovery;
+
+      const firstWait = timers[0];
+      expect(firstWait).toBeDefined();
+      firstWait.fired = true;
+      firstWait.callback();
+      for (
+        let tick = 0;
+        tick < 20 && !timers.some((timer) => timer.delay === 50);
+        tick += 1
+      ) await Promise.resolve();
+
+      const secondWait = timers.find((timer) => timer.delay === 50);
+      expect(secondWait).toBeDefined();
+      secondWait.fired = true;
+      secondWait.callback();
+      await expect(request).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+
+      const recoveryTimer = timers.find((timer) =>
+        timer.delay === 25 && !timer.fired && !timer.cleared);
+      expect(recoveryTimer).toBeDefined();
+      recoveryTimer.fired = true;
+      recoveryTimer.callback();
+      for (let tick = 0; tick < 20 && applyCalls < 5; tick += 1) await Promise.resolve();
+      expect(applyCalls).toBe(5);
+    } finally {
+      service.shutdown();
+      rejectOrphan(new Error('test cleanup'));
+      await request?.catch(() => undefined);
+      await startupRecovery.catch(() => undefined);
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
     }
   });
 
