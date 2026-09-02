@@ -181,6 +181,21 @@ function querySummaryProjectPath(projectPath: string): HTMLElement | null {
 	);
 }
 
+function expectInlineGroupHeaderDivider(header: HTMLElement): void {
+	const label = header.querySelector<HTMLElement>('[data-sidebar-group-header-label]');
+	const divider = header.querySelector<HTMLElement>('[data-sidebar-group-header-divider]');
+	const count = header.querySelector<HTMLElement>('[data-sidebar-group-header-count]');
+	const disclosureIcon = label?.nextElementSibling;
+
+	expect(label).toBeTruthy();
+	expect(disclosureIcon?.tagName.toLowerCase()).toBe('svg');
+	expect(disclosureIcon?.nextElementSibling).toBe(divider);
+	expect(divider?.nextElementSibling).toBe(count);
+	expect(divider?.className).toContain('h-px');
+	expect(divider?.className).toContain('flex-1');
+	expect(header.parentElement?.className ?? '').not.toMatch(/\bborder-b\b/);
+}
+
 function isSidebarViewport(element: HTMLElement): boolean {
 	return (
 		element.dataset.testid === 'virtual-sidebar-viewport' ||
@@ -265,6 +280,32 @@ describe('SidebarVirtualSortableChatList', () => {
 		).toBeGreaterThan(0);
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('places disclosure arrows after group labels and replaces header borders with inline dividers', () => {
+		const sectionHeader: SidebarVirtualRow = {
+			type: 'section-header',
+			key: 'section:inactive',
+			section: 'inactive',
+			count: 3,
+			chatIds: ['chat-1', 'chat-2', 'chat-3'],
+			isCollapsed: true,
+		};
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [makeProjectHeader('/tmp/project-a', 2), sectionHeader],
+		});
+
+		const projectHeader = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-a"]',
+		);
+		const activityHeader = document.querySelector<HTMLElement>(
+			'[data-sidebar-section-header="inactive"]',
+		);
+		if (!projectHeader || !activityHeader) throw new Error('expected both group header types');
+
+		expectInlineGroupHeaderDivider(projectHeader);
+		expectInlineGroupHeaderDivider(activityHeader);
 	});
 
 	it('renders collapsed project groups as header-only virtual rows', () => {
