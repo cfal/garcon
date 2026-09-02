@@ -802,8 +802,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     await this.#registryWriteLock.runExclusive(
       target,
       async () => {
-        const snapshot = structuredClone(registry);
         try {
+          const snapshot = structuredClone(registry);
           await writeJsonFileAtomic(target, snapshot, { mode: 0o600 });
         } catch (error) {
           onWriteFailure?.();
