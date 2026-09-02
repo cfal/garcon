@@ -5,6 +5,7 @@ import type { AgentExecutionCommandType } from './session-types.js';
 import { createLogger } from '../lib/log.js';
 import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
 import type { LedgerRunEndedRow } from '../ledger/contracts.js';
+import { dispatchListenersSequentially } from './listener-dispatch.js';
 
 const logger = createLogger('agents:event-bus');
 
@@ -122,7 +123,7 @@ export class AgentEventBus {
   }
 
   async publishSession(chatId: string): Promise<void> {
-    for (const listener of this.#sessionListeners) await listener(chatId);
+    await this.#dispatch('session', chatId, this.#sessionListeners, chatId);
   }
 
   async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow): Promise<void> {
@@ -133,12 +134,41 @@ export class AgentEventBus {
     if (row.outcome === 'failed') {
       const message = row.error?.message ?? row.error?.code ?? 'Agent run failed';
       const code = row.error?.code ?? 'INTERNAL_ERROR';
-      for (const listener of this.#failedListeners) await listener(chatId, message, code, metadata);
+      await this.#dispatch(
+        'failed terminal',
+        chatId,
+        this.#failedListeners,
+        chatId,
+        message,
+        code,
+        metadata,
+      );
       return;
     }
-    for (const listener of this.#finishedListeners) {
-      await listener(chatId, 0, metadata, row.outcome);
-    }
+    await this.#dispatch(
+      'finished terminal',
+      chatId,
+      this.#finishedListeners,
+      chatId,
+      0,
+      metadata,
+      row.outcome,
+    );
+  }
+
+  async #dispatch<Args extends readonly unknown[]>(
+    event: string,
+    chatId: string,
+    listeners: Iterable<(...args: Args) => void | Promise<void>>,
+    ...args: Args
+  ): Promise<void> {
+    await dispatchListenersSequentially(listeners, args, (error) => {
+      logger.error('Agent event listener failed', {
+        chatId,
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   #setTurn(chatId: string, turn: TurnEventMetadata): void {
