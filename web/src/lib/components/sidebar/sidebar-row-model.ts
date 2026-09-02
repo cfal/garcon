@@ -407,18 +407,25 @@ function appendSidebarChatSection(input: {
 	visibleChatIds: string[];
 	reorderScopesByChatId: Map<string, string[]>;
 }): void {
+	// Membership comes from the displayed chats so a collapsed section keeps
+	// its header in the reconciled reorder pass, whose orders omit hidden rows.
+	const memberIds: string[] = [];
+	for (const chat of input.byId.values()) {
+		if (input.placementByChatId.get(chat.id) === input.section) memberIds.push(chat.id);
+	}
+	if (memberIds.length === 0) return;
+
 	const scopeIds = input.orderedChatIds.filter(
 		(chatId) => input.placementByChatId.get(chatId) === input.section,
 	);
-	if (scopeIds.length === 0) return;
 
 	const key = sidebarSectionKey(input.section);
 	input.rows.push({
 		type: 'section-header',
 		key,
 		section: input.section,
-		count: scopeIds.length,
-		chatIds: scopeIds,
+		count: memberIds.length,
+		chatIds: memberIds,
 		isCollapsed: input.collapsedProjectKeys.has(key),
 	});
 	if (input.collapsedProjectKeys.has(key)) return;

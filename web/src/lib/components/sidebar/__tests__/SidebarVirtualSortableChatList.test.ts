@@ -372,11 +372,12 @@ describe('SidebarVirtualSortableChatList', () => {
 	function readVirtualRowOrder(): string[] {
 		return Array.from(
 			document.querySelectorAll<HTMLElement>(
-				'[data-sidebar-project-header], [data-sidebar-virtual-row]',
+				'[data-sidebar-project-header], [data-sidebar-section-header], [data-sidebar-virtual-row]',
 			),
 		).map(
 			(element) =>
 				element.getAttribute('data-sidebar-project-header') ??
+				element.getAttribute('data-sidebar-section-header') ??
 				element.getAttribute('data-sidebar-virtual-row') ??
 				'',
 		);
@@ -431,6 +432,77 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 
 		expect(readVirtualRowOrder()).toEqual(['chat-1', 'chat-3', 'chat-0', 'chat-2']);
+	});
+
+	it('keeps collapsed time sections expandable across the reconciled reorder pass', async () => {
+		const chats = [
+			makeChat(0, {
+				status: 'running',
+				projectPath: '/tmp/project-a',
+				lastActivityAt: '2024-12-20T00:00:00.000Z',
+			}),
+			makeChat(1, {
+				status: 'running',
+				projectPath: '/tmp/project-b',
+				lastActivityAt: '2024-12-21T00:00:00.000Z',
+			}),
+			makeChat(2, { status: 'running', projectPath: '/tmp/project-a', isArchived: true }),
+		];
+		const displayOptions = {
+			grouping: 'project-and-time',
+			groupNestedProjectPaths: false,
+			chatItemLayout: 'default',
+			sortMode: 'manual',
+		} as const;
+		let collapsedProjectKeys = new Set<string>();
+		const toggleCollapsed = (key: string) => {
+			const next = new Set(collapsedProjectKeys);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			collapsedProjectKeys = next;
+		};
+
+		const view = render(SidebarChatListHost, {
+			chats,
+			displayOptions,
+			collapsedProjectKeys,
+			onToggleProjectCollapsed: toggleCollapsed,
+		});
+
+		const sectionHeader = (section: string): HTMLElement => {
+			const element = document.querySelector<HTMLElement>(
+				`[data-sidebar-section-header="${section}"]`,
+			);
+			if (!element) throw new Error(`missing section header: ${section}`);
+			return element;
+		};
+
+		expect(readVirtualRowOrder()).toEqual([
+			'inactive',
+			'chat-0',
+			'chat-1',
+			'archived',
+			'chat-2',
+		]);
+
+		await fireEvent.click(sectionHeader('inactive'));
+		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived', 'chat-2']);
+
+		await fireEvent.click(sectionHeader('archived'));
+		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived']);
+
+		await fireEvent.click(sectionHeader('inactive'));
+		await fireEvent.click(sectionHeader('archived'));
+		await view.rerender({ chats, displayOptions, collapsedProjectKeys, onToggleProjectCollapsed: toggleCollapsed });
+		expect(readVirtualRowOrder()).toEqual([
+			'inactive',
+			'chat-0',
+			'chat-1',
+			'archived',
+			'chat-2',
+		]);
 	});
 
 	it('renders a timestamp-less local draft first under recent sort', () => {
