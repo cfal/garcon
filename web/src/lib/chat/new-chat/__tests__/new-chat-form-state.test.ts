@@ -574,6 +574,63 @@ describe('NewChatFormState', () => {
 		expect(formState.modelValue).toBe('opus');
 	});
 
+	it('blocks a user-touched endpoint selection that disappears during catalog refresh', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex' || catalogFresh) return modelsForAgent(agentId);
+			return [
+				{
+					value: 'stale_openai:gpt-stale',
+					label: 'Stale: GPT',
+					rawModel: 'gpt-stale',
+					apiProviderId: 'stale',
+					endpointId: 'stale_openai',
+					protocol: 'openai-compatible',
+				},
+			];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.handleModelChange('stale_openai:gpt-stale');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		expect(formState.modelSelectionError).toBe('Model unavailable');
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+
+		formState.handleModelChange('gpt-5.4');
+		expect(formState.modelSelectionError).toBeNull();
+		expect(formState.canSubmit).toBe(true);
+		expect(formState.buildConfig()?.model).toBe('gpt-5.4');
+	});
+
 	it('applies eligible startup recents after background catalog discovery', async () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];

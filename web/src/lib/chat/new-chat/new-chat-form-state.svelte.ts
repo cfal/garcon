@@ -143,6 +143,7 @@ export class NewChatFormState {
 		return (
 			this.settingsLoaded &&
 			this.#selectableAgentIds.includes(this.agentId) &&
+			!this.modelSelectionError &&
 			canSubmitNewChat(
 				this.trimmedPath,
 				this.validationStatus,
@@ -173,6 +174,14 @@ export class NewChatFormState {
 		return (
 			this.selectedModelsByAgent[this.agentId] ?? this.#modelCatalog.getDefaultModel(this.agentId)
 		);
+	}
+
+	get modelSelectionError(): string | null {
+		const liveModels = this.#modelCatalog.getModels(this.agentId);
+		if (!liveModels.length || liveModels.some((entry) => entry.value === this.modelValue)) {
+			return null;
+		}
+		return m.model_selector_unavailable();
 	}
 
 	get agentSettings(): AgentSettingsEnvelope {
@@ -258,12 +267,15 @@ export class NewChatFormState {
 		};
 	}
 
-	/** Validates the selected model against the live model list for an agent. */
+	/** Replaces only untouched startup selections that are absent from the live catalog. */
 	validateModelAgainstLive(agentId: SessionAgentId): void {
 		const liveModels = this.#modelCatalog.getModels(agentId);
 		if (!liveModels?.length) return;
 		const current = this.selectedModelsByAgent[agentId];
-		if (!current || !liveModels.some((entry) => entry.value === current)) {
+		if (!current || (
+			this.#startupSelectionAutomatic &&
+			!liveModels.some((entry) => entry.value === current)
+		)) {
 			this.selectedModelsByAgent = {
 				...this.selectedModelsByAgent,
 				[agentId]: liveModels[0].value,
@@ -557,6 +569,7 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
+		if (this.modelSelectionError) return null;
 		if (!this.trimmedPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;

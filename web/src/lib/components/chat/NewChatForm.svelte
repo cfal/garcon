@@ -542,6 +542,7 @@
 		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
 	);
 	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
+	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
@@ -694,8 +695,8 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				{#if form.error}
-					<p class="text-sm text-destructive">{form.error}</p>
+				{#if displayedFormError}
+					<p class="text-sm text-destructive">{displayedFormError}</p>
 				{/if}
 			</div>
 
