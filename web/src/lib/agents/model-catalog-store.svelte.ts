@@ -1,5 +1,4 @@
 import { apiFetch } from '$lib/api/client.js';
-import { agentLabelFor } from './agent-labels.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -474,7 +473,7 @@ export class ModelCatalogStore {
 	}
 
 	getAgentLabel(id: string): string {
-		return agentLabelFor(id, this.agentMetadata[id]?.label ?? id);
+		return this.agentMetadata[id]?.label ?? id;
 	}
 
 	getModels(agentId: SessionAgentId): ModelOption[] {

@@ -33,6 +33,7 @@ import {
 import type { CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
+import { isThinkingModeSupported } from '../../common/execution-defaults.js';
 
 const logger = createLogger('commands:session');
 
@@ -176,7 +177,7 @@ export class SessionCommands {
       }
       if (
         input.thinkingMode !== undefined
-        && !catalog.supportedThinkingModes.includes(input.thinkingMode)
+        && !isThinkingModeSupported(input.thinkingMode, catalog.supportedThinkingModes)
       ) {
         throw new CommandValidationError(
           'VALIDATION_FAILED',

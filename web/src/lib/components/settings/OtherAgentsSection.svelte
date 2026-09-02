@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { agentLabelFor } from '$lib/agents/agent-labels';
+	import { getModelCatalog } from '$lib/context';
 	import AgentCard from './AgentCard.svelte';
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
@@ -18,6 +18,7 @@
 	];
 
 	let { settingsAuth }: { settingsAuth: SettingsAuthState } = $props();
+	const modelCatalog = getModelCatalog();
 
 	let openByAgent = $state<Record<string, boolean>>({});
 
@@ -39,7 +40,7 @@
 		{#each agents as agent (agent.id)}
 			<AgentCard
 				agentId={agent.id}
-				agentName={agentLabelFor(agent.id)}
+				agentName={modelCatalog.getAgentLabel(agent.id)}
 				auth={settingsAuth.authFor(agent.id)}
 				open={isOpen(agent.id)}
 				onOpenChange={(open) => setOpen(agent.id, open)}

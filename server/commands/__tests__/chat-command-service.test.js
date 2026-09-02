@@ -2243,6 +2243,27 @@ describe('ChatCommandService', () => {
     expect(await readLedgerRecord(ledger, 'agent-run', 'req-unsupported-mode')).toBeNull();
   });
 
+  it('accepts the neutral thinking value when an agent exposes no thinking control', async () => {
+    const { service, queue } = makeService({
+      agents: {
+        getAgentCatalogEntry: mock(() => Promise.resolve({
+          supportedPermissionModes: ['default'],
+          supportedThinkingModes: [],
+        })),
+      },
+    });
+
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-neutral-thinking',
+      clientMessageId: 'msg-neutral-thinking',
+      thinkingMode: 'none',
+    });
+
+    expect(queue.admitUserInput).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a concurrent direct submission before durable input admission', async () => {
     let activeReservation = null;
     let releaseExecution;

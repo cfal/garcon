@@ -24,6 +24,13 @@ export function normalizeSupportedThinkingMode(
   return supported[0] ?? 'none';
 }
 
+export function isThinkingModeSupported(
+  value: ThinkingMode,
+  supported: readonly ThinkingMode[],
+): boolean {
+  return supported.includes(value) || (value === 'none' && supported.length === 0);
+}
+
 export function executionDefaultsForAgent(
   defaults: RemoteExecutionDefaults | null | undefined,
   agentId: string,

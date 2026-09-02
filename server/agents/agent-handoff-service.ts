@@ -22,6 +22,7 @@ import type { CarryOverCompactionInput } from '../chats/carryover-compaction.js'
 import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
 import type { PreparedCarryover } from '../chats/prepared-carryover.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
+import { isThinkingModeSupported } from '../../common/execution-defaults.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -187,7 +188,9 @@ export class AgentHandoffService {
       'none',
     );
     assertSupported(catalog.supportedPermissionModes, permissionMode, 'permission mode');
-    assertSupported(catalog.supportedThinkingModes, thinkingMode, 'reasoning effort');
+    if (!isThinkingModeSupported(thinkingMode, catalog.supportedThinkingModes)) {
+      throwUnsupported(thinkingMode, 'reasoning effort');
+    }
     if (
       input.permissionFallbackPolicy === 'require-explicit-bypass'
       && requested.permissionMode === undefined
@@ -702,12 +705,16 @@ function preferredValue<T extends string>(supported: readonly T[], preferred: T)
 
 function assertSupported(values: readonly string[], value: string, label: string): void {
   if (!values.includes(value)) {
-    throw new DomainError(
-      'VALIDATION_FAILED',
-      `The target agent does not support ${label} ${value}.`,
-      422,
-    );
+    throwUnsupported(value, label);
   }
+}
+
+function throwUnsupported(value: string, label: string): never {
+  throw new DomainError(
+    'VALIDATION_FAILED',
+    `The target agent does not support ${label} ${value}.`,
+    422,
+  );
 }
 
 export function resolvedRunOptions(target: ResolvedAgentHandoffTarget): {

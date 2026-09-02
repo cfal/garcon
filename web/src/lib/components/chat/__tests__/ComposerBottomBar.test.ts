@@ -21,7 +21,15 @@ describe('ComposerBottomBar', () => {
 			],
 			selectedPermission: 'bypassPermissions',
 			onPermissionSelect: vi.fn(),
-			thinkingOptions: [],
+			thinkingOptions: [
+				{
+					value: 'none',
+					label: 'Default',
+					description: 'Provider default effort.',
+					iconId: 'thinking-none',
+					toneClass: '',
+				},
+			],
 			selectedThinking: 'none',
 			onThinkingSelect: vi.fn(),
 			canSend: false,

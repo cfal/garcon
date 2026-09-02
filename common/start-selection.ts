@@ -10,6 +10,7 @@ import {
 } from './chat-modes.js';
 import {
   executionDefaultsForAgent,
+  isThinkingModeSupported,
   normalizeSupportedPermissionMode,
   normalizeSupportedThinkingMode,
 } from './execution-defaults.js';
@@ -275,14 +276,10 @@ function strictThinkingMode(
   agent: AgentCatalogEntry,
   fallback: ThinkingMode,
 ): ThinkingMode {
-  if (agent.supportedThinkingModes.length === 0) {
-    if (requested === undefined || requested === 'none') return 'none';
-    fail('UNSUPPORTED_REASONING_EFFORT', `reasoning effort ${requested} is not supported by agent ${agent.id}`);
-  }
   if (requested === undefined) {
     return normalizeSupportedThinkingMode(fallback, agent.supportedThinkingModes);
   }
-  if (!isThinkingMode(requested) || !agent.supportedThinkingModes.includes(requested)) {
+  if (!isThinkingMode(requested) || !isThinkingModeSupported(requested, agent.supportedThinkingModes)) {
     fail('UNSUPPORTED_REASONING_EFFORT', `reasoning effort ${requested} is not supported by agent ${agent.id}`);
   }
   return requested;

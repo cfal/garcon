@@ -1116,6 +1116,19 @@ describe('AgentHandoffService', () => {
       permissionMode: 'bypassPermissions',
     });
   });
+
+  it('accepts the neutral target thinking value when no thinking mode is configurable', async () => {
+    const current = sourceChat();
+    const service = createService({
+      registry: { getChat: () => current },
+      ...targetResolutionDeps({ thinkingModes: [] }),
+    });
+
+    await expect(service.resolveTarget({
+      chat: current,
+      handoff: handoff(),
+    })).resolves.toMatchObject({ thinkingMode: 'none' });
+  });
 });
 
 function createService(overrides = {}) {
@@ -1251,7 +1264,10 @@ function integration(agentId) {
   };
 }
 
-function targetResolutionDeps({ permissionModes = ['default'] } = {}) {
+function targetResolutionDeps({
+  permissionModes = ['default'],
+  thinkingModes = ['none'],
+} = {}) {
   const integrations = new Map([
     ['source-agent', integration('source-agent')],
     ['target-agent', integration('target-agent')],
@@ -1271,7 +1287,7 @@ function targetResolutionDeps({ permissionModes = ['default'] } = {}) {
     catalog: {
       getAgentCatalogEntry: async () => ({
         supportedPermissionModes: permissionModes,
-        supportedThinkingModes: ['none'],
+        supportedThinkingModes: thinkingModes,
       }),
     },
   };

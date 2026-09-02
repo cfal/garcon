@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   executionDefaultsForAgent,
+  isThinkingModeSupported,
   normalizeSupportedPermissionMode,
   normalizeSupportedThinkingMode,
 } from '../execution-defaults.js';
@@ -39,5 +40,11 @@ describe('execution defaults', () => {
   it('selects the first supported mode when a configured mode is unavailable', () => {
     expect(normalizeSupportedPermissionMode('plan', ['default', 'acceptEdits'])).toBe('default');
     expect(normalizeSupportedThinkingMode('ultra', ['low', 'high'])).toBe('low');
+  });
+
+  it('accepts only the neutral value when reasoning mode is not configurable', () => {
+    expect(isThinkingModeSupported('none', [])).toBe(true);
+    expect(isThinkingModeSupported('high', [])).toBe(false);
+    expect(isThinkingModeSupported('high', ['none', 'high'])).toBe(true);
   });
 });

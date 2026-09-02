@@ -182,7 +182,7 @@
 				</DropdownMenu>
 			{/if}
 
-			{#if thinkingOptions.length > 0}
+			{#if thinkingOptions.length > 1}
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						data-slot="thinking-mode-trigger"
