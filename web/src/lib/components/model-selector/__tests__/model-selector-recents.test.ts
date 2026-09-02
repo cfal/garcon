@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
 import { buildModelSelectorRecents } from '../model-selector-recents';
+import { findModelForSelection, modelValueForSelection } from '../../../../test/model-catalog';
 
 const codexModel: ModelOption = { value: 'gpt-5', label: 'gpt-5' };
 const codexEndpointCollision: ModelOption = {
@@ -42,30 +43,7 @@ function makeCatalog(): ModelCatalogStore {
 		agentId: string,
 		model: string,
 		endpointId?: string | null,
-	): ModelOption | null => {
-		const models = modelsByAgent[agentId] ?? [];
-		if (endpointId !== undefined) {
-			if (endpointId === null) {
-				return (
-					models.find(
-						(entry) =>
-							!entry.endpointId && (entry.value === model || entry.rawModel === model),
-					) ?? null
-				);
-			}
-			return (
-				models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null
-			);
-		}
-		return (
-			models.find((entry) => entry.value === model) ??
-			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
-			null
-		);
-	};
+	): ModelOption | null => findModelForSelection(modelsByAgent[agentId] ?? [], model, endpointId);
 
 	return {
 		getSelectableAgents: () => ['codex', 'claude', 'amp'],
@@ -76,10 +54,8 @@ function makeCatalog(): ModelCatalogStore {
 		},
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getModelForSelection,
-		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = getModelForSelection(agentId, model, endpointId);
-			return selected?.value ?? model;
-		},
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
+			modelValueForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
 		findEndpoint: (endpointId: string) => {
 			if (endpointId !== endpoint.id) return null;
 			return {

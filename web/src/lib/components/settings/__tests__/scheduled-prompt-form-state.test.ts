@@ -8,6 +8,11 @@ import {
 } from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import {
+	findModelForSelection,
+	modelValueForSelection,
+	resolveModelSelection,
+} from '../../../../test/model-catalog';
 
 interface CatalogOverrides {
 	getModels?(agentId: string): ModelOption[];
@@ -28,30 +33,7 @@ function createForm(
 		agentId: string,
 		model: string,
 		endpointId?: string | null,
-	): ModelOption | null => {
-		const models = getModels(agentId);
-		if (endpointId !== undefined) {
-			if (endpointId === null) {
-				return (
-					models.find(
-						(entry) =>
-							!entry.endpointId && (entry.value === model || entry.rawModel === model),
-					) ?? null
-				);
-			}
-			return (
-				models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null
-			);
-		}
-		return (
-			models.find((entry) => entry.value === model) ??
-			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
-			null
-		);
-	};
+	): ModelOption | null => findModelForSelection(getModels(agentId), model, endpointId);
 	const modelCatalog = {
 		getSelectableAgents: () => selectableAgentIds(),
 		getModels,
@@ -66,17 +48,10 @@ function createForm(
 		}),
 		getModelForSelection,
 		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
-			return getModelForSelection(agentId, model, endpointId)?.value ?? model;
+			return modelValueForSelection(getModels(agentId), model, endpointId);
 		},
 		selectionFor(agentId: string, model: string, endpointId?: string | null) {
-			const selected = getModelForSelection(agentId, model, endpointId);
-			if (!selected && endpointId) return null;
-			return {
-				model: selected?.rawModel ?? model,
-				apiProviderId: selected?.apiProviderId ?? null,
-				modelEndpointId: selected?.endpointId ?? null,
-				modelProtocol: selected?.protocol ?? null,
-			};
+			return resolveModelSelection(getModels(agentId), model, endpointId);
 		},
 	};
 	const form = new ScheduledPromptFormState(modelCatalog as never, {} as never, sessions as never, {

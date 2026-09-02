@@ -18,6 +18,11 @@ import {
 	shouldShowSourceLabelForAgent,
 	shouldShowSourcePickerForAgent,
 } from '../model-selector-options';
+import {
+	findModelForSelection,
+	modelValueForSelection,
+	resolveModelSelection,
+} from '../../../../test/model-catalog';
 
 const claudeModels: ModelOption[] = [
 	{ value: 'opus', label: 'Opus', supportsImages: true },
@@ -99,60 +104,12 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getAgentLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
-			const models = modelsByAgent[agentId] ?? [];
-			if (endpointId !== undefined) {
-				if (endpointId === null) {
-					return (
-						models.find(
-							(entry) =>
-								!entry.endpointId && (entry.value === model || entry.rawModel === model),
-						) ?? null
-					);
-				}
-				return (
-					models.find(
-						(entry) =>
-							entry.endpointId === endpointId &&
-							(entry.value === model || entry.rawModel === model),
-					) ?? null
-				);
-			}
-			return (
-				models.find((entry) => entry.value === model) ??
-				models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
-				null
-			);
-		},
-		selectionFor: (agentId: string, model: string) => {
-			const models = modelsByAgent[agentId] ?? [];
-			const selected =
-				models.find((entry) => entry.value === model) ??
-				models.find((entry) => !entry.endpointId && entry.rawModel === model);
-			return {
-				model: selected?.rawModel ?? model,
-				apiProviderId: selected?.apiProviderId ?? null,
-				modelEndpointId: selected?.endpointId ?? null,
-				modelProtocol: selected?.protocol ?? null,
-			};
-		},
-		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const models = modelsByAgent[agentId] ?? [];
-			const selected = endpointId !== undefined
-				? endpointId === null
-					? models.find(
-							(entry) =>
-								!entry.endpointId && (entry.value === model || entry.rawModel === model),
-							)
-						: models.find(
-								(entry) =>
-									entry.endpointId === endpointId &&
-									(entry.value === model || entry.rawModel === model),
-							)
-				: (models.find((entry) => entry.value === model) ??
-					models.find((entry) => !entry.endpointId && entry.rawModel === model));
-			return selected?.value ?? model;
-		},
+		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
+			findModelForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
+		selectionFor: (agentId: string, model: string) =>
+			resolveModelSelection(modelsByAgent[agentId] ?? [], model),
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
+			modelValueForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
 		findEndpoint: (endpointId: string) => {
 			if (endpointId === 'acme-anthropic') {
 				return {

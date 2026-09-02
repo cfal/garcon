@@ -25,6 +25,11 @@
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
 	import type { ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
+	import {
+		findModelForSelection,
+		modelValueForSelection,
+		resolveModelSelection,
+	} from '../../../../test/model-catalog';
 
 	interface Props {
 		allowDirectChats?: boolean;
@@ -130,28 +135,7 @@
 		model: string,
 		endpointId?: string | null,
 	): ModelOption | null {
-		const models = modelsForAgent(agentId);
-		if (endpointId !== undefined) {
-			if (endpointId === null) {
-				return (
-					models.find(
-						(entry) =>
-							!entry.endpointId && (entry.value === model || entry.rawModel === model),
-					) ?? null
-				);
-			}
-			return (
-				models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null
-			);
-		}
-		return (
-			models.find((entry) => entry.value === model) ??
-			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
-			null
-		);
+		return findModelForSelection(modelsForAgent(agentId), model, endpointId);
 	}
 
 	setSnippets(
@@ -262,17 +246,10 @@
 			return modelForSelection(agentId, model, endpointId);
 		},
 		selectionFor(agentId: string, model: string, endpointId?: string | null) {
-			const selected = modelForSelection(agentId, model, endpointId);
-			if (!selected && endpointId) return null;
-			return {
-				model: selected?.rawModel ?? model,
-				apiProviderId: selected?.apiProviderId ?? null,
-				modelEndpointId: selected?.endpointId ?? null,
-				modelProtocol: selected?.protocol ?? null,
-			};
+			return resolveModelSelection(modelsForAgent(agentId), model, endpointId);
 		},
 		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
-			return modelForSelection(agentId, model, endpointId)?.value ?? model;
+			return modelValueForSelection(modelsForAgent(agentId), model, endpointId);
 		},
 		refreshIfStale() {
 			return Promise.resolve();

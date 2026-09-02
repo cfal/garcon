@@ -6,6 +6,11 @@ import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import {
+	findModelForSelection,
+	modelValueForSelection,
+	resolveModelSelection,
+} from '../../../../test/model-catalog';
 
 vi.mock('$lib/api/files', () => ({
 	browseDirectory: vi.fn(),
@@ -190,43 +195,12 @@ const mockModelCatalog = {
 			: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 	),
 	getModels: vi.fn(modelsForAgent),
-	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-		const models = mockModelCatalog.getModels(agentId);
-		if (endpointId !== undefined) {
-			if (endpointId === null) {
-				return (
-					models.find(
-						(entry) =>
-							!entry.endpointId && (entry.value === model || entry.rawModel === model),
-					) ?? null
-				);
-			}
-			return (
-				models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null
-			);
-		}
-		return (
-			models.find((entry) => entry.value === model) ??
-			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
-			null
-		);
-	}),
-	selectionFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-		const selected = mockModelCatalog.getModelForSelection(agentId, model, endpointId);
-		if (!selected && endpointId) return null;
-		return {
-			model: selected?.rawModel ?? model,
-			apiProviderId: selected?.apiProviderId ?? null,
-			modelEndpointId: selected?.endpointId ?? null,
-			modelProtocol: selected?.protocol ?? null,
-		};
-	}),
-	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) => {
-		return mockModelCatalog.getModelForSelection(agentId, model, endpointId)?.value ?? model;
-	}),
+	getModelForSelection: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		findModelForSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
+	selectionFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		resolveModelSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
+	selectionValueFor: vi.fn((agentId: string, model: string, endpointId?: string | null) =>
+		modelValueForSelection(mockModelCatalog.getModels(agentId), model, endpointId)),
 	refreshIfStale: vi.fn().mockResolvedValue(undefined),
 };
 
