@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -21,6 +21,29 @@ function sharePartial(overrides = {}) {
     ],
     ...overrides,
   };
+}
+
+async function writePersistedShareFixture(token = 'persisted-token') {
+  const sharesDirectory = path.join(workspaceDir, 'shares');
+  const indexPath = path.join(workspaceDir, 'shared-chats.json');
+  const snapshotPath = path.join(sharesDirectory, `${token}.json`);
+  const snapshot = { shareToken: token, ...sharePartial() };
+  const indexEntry = {
+    shareToken: token,
+    chatId: snapshot.chatId,
+    title: snapshot.title,
+    agentId: snapshot.agentId,
+    model: snapshot.model,
+    projectPath: snapshot.projectPath,
+    sharedAt: snapshot.sharedAt,
+  };
+  await fs.mkdir(sharesDirectory);
+  await fs.writeFile(indexPath, JSON.stringify({
+    version: 2,
+    shares: { [token]: indexEntry },
+  }));
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot));
+  return { token, sharesDirectory, indexPath, snapshotPath, snapshot };
 }
 
 beforeEach(async () => {
@@ -73,8 +96,50 @@ describe('ShareStore', () => {
     const snapshotMode = (await fs.stat(
       path.join(workspaceDir, 'shares', `${created.shareToken}.json`),
     )).mode & 0o777;
+    const sharesDirectoryMode = (await fs.stat(path.join(workspaceDir, 'shares'))).mode & 0o777;
     expect(indexMode).toBe(0o600);
     expect(snapshotMode).toBe(0o600);
+    expect(sharesDirectoryMode).toBe(0o700);
+  });
+
+  it('repairs permissions on an existing share index, directory, and snapshot', async () => {
+    if (process.platform === 'win32') return;
+    const fixture = await writePersistedShareFixture();
+    await Promise.all([
+      fs.chmod(fixture.sharesDirectory, 0o755),
+      fs.chmod(fixture.indexPath, 0o644),
+      fs.chmod(fixture.snapshotPath, 0o644),
+    ]);
+
+    const store = new ShareStore(workspaceDir);
+    await store.init();
+    const loaded = await store.getShare(fixture.token);
+
+    expect(loaded?.messages).toEqual(fixture.snapshot.messages);
+    expect((await fs.stat(fixture.sharesDirectory)).mode & 0o777).toBe(0o700);
+    expect((await fs.stat(fixture.indexPath)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(fixture.snapshotPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it('loads existing shares when permission repair fails', async () => {
+    if (process.platform === 'win32') return;
+    const fixture = await writePersistedShareFixture();
+    const chmod = spyOn(fs, 'chmod').mockRejectedValue(
+      Object.assign(new Error('denied'), { code: 'EPERM' }),
+    );
+
+    try {
+      const store = new ShareStore(workspaceDir);
+      await store.init();
+      const loaded = await store.getShare(fixture.token);
+
+      expect(loaded?.messages).toEqual(fixture.snapshot.messages);
+      expect(chmod).toHaveBeenCalledWith(fixture.sharesDirectory, 0o700);
+      expect(chmod).toHaveBeenCalledWith(fixture.indexPath, 0o600);
+      expect(chmod).toHaveBeenCalledWith(fixture.snapshotPath, 0o600);
+    } finally {
+      chmod.mockRestore();
+    }
   });
 
   it('updates existing share snapshots without changing the token', async () => {

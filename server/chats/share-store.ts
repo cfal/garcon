@@ -15,6 +15,17 @@ const SHARE_INDEX_VERSION = 2;
 const SHARE_SNAPSHOT_CACHE_LIMIT = 50;
 const SHARE_SNAPSHOT_CACHE_TTL_MS = 10 * 60 * 1000;
 
+async function repairSharePermissions(
+  targetPath: string,
+  mode: number,
+  description: string,
+): Promise<void> {
+  if (process.platform === 'win32') return;
+  await fs.chmod(targetPath, mode).catch((error: unknown) => {
+    logger.warn(`share-store: failed to repair ${description} permissions:`, (error as Error).message);
+  });
+}
+
 type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages'>;
 
 interface ShareStoreIndex {
@@ -137,9 +148,12 @@ export class ShareStore implements IShareStore {
 
   async init(): Promise<void> {
     if (this.#index) return;
+    await fs.mkdir(this.#sharesDir(), { recursive: true, mode: 0o700 });
+    await repairSharePermissions(this.#sharesDir(), 0o700, 'shares directory');
     let parsed: unknown;
     try {
       const raw = await fs.readFile(this.#filePath(), 'utf8');
+      await repairSharePermissions(this.#filePath(), 0o600, 'shared-chats.json');
       parsed = JSON.parse(raw);
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -276,7 +290,9 @@ export class ShareStore implements IShareStore {
     this.#snapshotCache.delete(token);
 
     try {
-      const raw = await fs.readFile(this.#snapshotFilePath(token), 'utf8');
+      const snapshotPath = this.#snapshotFilePath(token);
+      const raw = await fs.readFile(snapshotPath, 'utf8');
+      await repairSharePermissions(snapshotPath, 0o600, 'share snapshot');
       const snapshot = normalizeSnapshot(token, JSON.parse(raw));
       return snapshot ? this.#cacheSnapshot(snapshot) : null;
     } catch (error: unknown) {
