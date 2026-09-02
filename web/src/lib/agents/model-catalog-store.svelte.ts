@@ -7,6 +7,7 @@ import {
 } from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
+import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
 	isAgentSettingLabelKey,
 	isAgentSettingOptionDescriptionKey,
@@ -509,6 +510,8 @@ export class ModelCatalogStore {
 		);
 	}
 
+	// An explicit endpoint scopes the selection; a model no longer exposed by
+	// that endpoint is unresolvable rather than matched against another source.
 	getModelForSelection(
 		agentId: SessionAgentId,
 		model: string,
@@ -516,12 +519,11 @@ export class ModelCatalogStore {
 	): ModelOption | null {
 		const models = this.getModels(agentId);
 		if (modelEndpointId) {
-			const matchedEndpointModel = models.find(
+			return models.find(
 				(entry) =>
 					entry.endpointId === modelEndpointId &&
 					(entry.value === model || entry.rawModel === model),
-			);
-			if (matchedEndpointModel) return matchedEndpointModel;
+			) ?? null;
 		}
 		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
 	}
@@ -588,14 +590,29 @@ export class ModelCatalogStore {
 	selectionFor(
 		agentId: SessionAgentId,
 		model: string,
+	): ResolvedModelSelection;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId: string,
+	): ResolvedModelSelection | null;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId: null | undefined,
+	): ResolvedModelSelection;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
 		modelEndpointId?: string | null,
-	): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	} {
+	): ResolvedModelSelection | null;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): ResolvedModelSelection | null {
 		const selected = this.getModelForSelection(agentId, model, modelEndpointId);
+		if (!selected && modelEndpointId) return null;
 		return {
 			model: selected?.rawModel ?? model,
 			apiProviderId: selected?.apiProviderId ?? null,

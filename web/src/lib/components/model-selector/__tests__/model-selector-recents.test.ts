@@ -136,6 +136,33 @@ describe('model selector recents', () => {
 		});
 	});
 
+	it('omits endpoint recents whose endpoint no longer exposes the model', () => {
+		const rows = buildModelSelectorRecents(makeCatalog(), [
+			{
+				agentId: 'codex',
+				model: 'gpt-5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+			{
+				agentId: 'codex',
+				model: 'gpt-5',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme-anthropic',
+				modelProtocol: 'anthropic-messages',
+			},
+		]);
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			agentId: 'codex',
+			modelValue: 'gpt-5',
+			apiProviderId: null,
+			modelEndpointId: null,
+		});
+	});
+
 	it('omits stale recents and caps the list at twenty rows', () => {
 		const recents: RecentAgentSetting[] = [
 			{

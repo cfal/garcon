@@ -75,7 +75,7 @@ export class NewChatFormState {
 	#modesTouched = false;
 	#executionDefaults: RemoteExecutionDefaults | null = null;
 	#startupRecents: RecentAgentSetting[] = [];
-	#awaitingCatalogStartupSelection = false;
+	#startupSelectionAutomatic = false;
 
 	// Tags
 	chatTags = $state<string[]>([]);
@@ -191,7 +191,7 @@ export class NewChatFormState {
 
 	selectAgent(next: SessionAgentId): void {
 		if (!this.#selectableAgentIds.includes(next)) return;
-		this.#awaitingCatalogStartupSelection = false;
+		this.#startupSelectionAutomatic = false;
 		const changed = this.agentId !== next;
 		this.agentId = next;
 		if (changed && !this.#modesTouched) {
@@ -210,16 +210,19 @@ export class NewChatFormState {
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
+		this.#startupSelectionAutomatic = false;
 		this.permissionMode = normalizeSupportedPermissionMode(mode, this.permissionModes);
 		this.#modesTouched = true;
 	}
 
 	setThinkingMode(mode: ThinkingMode): void {
+		this.#startupSelectionAutomatic = false;
 		this.thinkingMode = normalizeSupportedThinkingMode(mode, this.thinkingModes);
 		this.#modesTouched = true;
 	}
 
 	setAgentSetting(descriptor: AgentSettingDescriptor, value: JsonValue): void {
+		this.#startupSelectionAutomatic = false;
 		this.#configuredAgentSettings.add(this.agentId);
 		this.agentSettingsById = {
 			...this.agentSettingsById,
@@ -248,6 +251,7 @@ export class NewChatFormState {
 	// Model
 
 	handleModelChange(value: string): void {
+		this.#startupSelectionAutomatic = false;
 		this.selectedModelsByAgent = {
 			...this.selectedModelsByAgent,
 			[this.agentId]: value,
@@ -610,7 +614,7 @@ export class NewChatFormState {
 
 	/** Loads server settings without blocking the form on live model discovery. */
 	async loadSettingsAndModels(): Promise<void> {
-		this.#awaitingCatalogStartupSelection = this.#selectableAgentIds.length === 0;
+		this.#startupSelectionAutomatic = true;
 		try {
 			const settingsData = await this.#remoteSettings.ensureLoaded();
 			this.#applySettings(settingsData);
@@ -633,7 +637,7 @@ export class NewChatFormState {
 		try {
 			await this.#modelCatalog.refreshIfStale();
 			this.#reconcileAgentSettingsWithCatalog();
-			if (this.#awaitingCatalogStartupSelection) {
+			if (this.#startupSelectionAutomatic) {
 				const recent = this.#firstSelectableRecent(this.#startupRecents);
 				this.agentId = recent
 					? (recent.agentId as SessionAgentId)
@@ -642,7 +646,7 @@ export class NewChatFormState {
 					this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);
-				this.#awaitingCatalogStartupSelection = false;
+				this.#startupSelectionAutomatic = false;
 			}
 			this.validateAllModelsAgainstLive();
 		} catch (err) {

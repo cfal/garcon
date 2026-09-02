@@ -102,11 +102,10 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
 			const models = modelsByAgent[agentId] ?? [];
 			if (endpointId) {
-				const selected = models.find(
+				return models.find(
 					(entry) =>
 						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				);
-				if (selected) return selected;
+				) ?? null;
 			}
 			return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
 		},
