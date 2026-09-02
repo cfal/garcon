@@ -61,13 +61,6 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		claude: claudeModels,
 		codex: codexModels,
 	};
-	const labelsByAgent: Record<string, string> = {
-		claude: 'Claude',
-		codex: 'Codex',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'Direct (Chat Completions)',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'Direct (Responses)',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'Direct (Anthropic)',
-	};
 	const acmeAnthropicEndpoint = {
 		id: 'acme-anthropic',
 		protocol: 'anthropic-messages' as const,
@@ -103,7 +96,7 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			supportedProtocols: id === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 			defaultModel: id === 'codex' ? 'gpt-5.5' : 'opus',
 		}),
-		getAgentLabel: (id: string) => labelsByAgent[id] ?? id,
+		getAgentLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
@@ -211,11 +204,11 @@ function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
 }
 
 describe('model selector options', () => {
-	it('labels native sources from the agent catalog', () => {
+	it('labels native OAuth sources by product identity', () => {
 		const catalog = makeCatalog();
 
-		expect(nativeSourceLabel('claude', catalog)).toBe('Claude');
-		expect(nativeSourceLabel('codex', catalog)).toBe('Codex');
+		expect(nativeSourceLabel('claude', catalog)).toBe('Claude OAuth');
+		expect(nativeSourceLabel('codex', catalog)).toBe('OpenAI OAuth');
 	});
 
 	it('uses catalog display labels instead of raw cached metadata for agent options', () => {
@@ -227,7 +220,7 @@ describe('model selector options', () => {
 		]);
 	});
 
-	it('groups direct agents first with catalog labels', () => {
+	it('groups direct agents first with fixed order and short labels', () => {
 		const catalog = makeCatalog();
 		const groups = buildAgentGroups(catalog, [
 			DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -240,9 +233,9 @@ describe('model selector options', () => {
 		expect(groups.map((group) => group.id)).toEqual(['direct', 'agents']);
 		expect(groups.map((group) => group.label)).toEqual(['Direct', 'Agents']);
 		expect(groups[0]?.options.map((option) => option.label)).toEqual([
-			'Direct (Chat Completions)',
-			'Direct (Responses)',
-			'Direct (Anthropic)',
+			'Chat Completions',
+			'Responses',
+			'Anthropic',
 		]);
 		expect(groups[1]?.options.map((option) => option.label)).toEqual(['Codex', 'Claude']);
 	});
@@ -261,7 +254,7 @@ describe('model selector options', () => {
 	it('groups native and endpoint-backed models into source options', () => {
 		const sources = buildModelSources(makeCatalog(), 'claude');
 
-		expect(sources.map((source) => source.label)).toEqual(['Claude', 'Acme']);
+		expect(sources.map((source) => source.label)).toEqual(['Claude OAuth', 'Acme']);
 		expect(sources[1].models.map((model) => model.value)).toEqual(['acme-anthropic:acme-sonnet']);
 		expect(sources[1].endpointId).toBe('acme-anthropic');
 	});
@@ -277,13 +270,13 @@ describe('model selector options', () => {
 		expect(shouldShowSourceLabelForAgent(catalog, 'amp', sources[0], sources)).toBe(false);
 	});
 
-	it('collapses a single native source whose label matches the agent', () => {
+	it('keeps a single native source visible when it carries distinct provider meaning', () => {
 		const catalog = makeNativeOnlyCatalog('claude', 'Claude', [{ value: 'opus', label: 'Opus' }]);
 		const sources = buildModelSources(catalog, 'claude');
 
-		expect(sources.map((source) => source.label)).toEqual(['Claude']);
-		expect(shouldShowSourcePickerForAgent(catalog, 'claude', sources)).toBe(false);
-		expect(shouldShowSourceLabelForAgent(catalog, 'claude', sources[0], sources)).toBe(false);
+		expect(sources.map((source) => source.label)).toEqual(['Claude OAuth']);
+		expect(shouldShowSourcePickerForAgent(catalog, 'claude', sources)).toBe(true);
+		expect(shouldShowSourceLabelForAgent(catalog, 'claude', sources[0], sources)).toBe(true);
 	});
 
 	it('disambiguates multiple endpoints under one provider source', () => {

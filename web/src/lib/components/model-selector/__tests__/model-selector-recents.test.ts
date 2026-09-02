@@ -87,7 +87,7 @@ describe('model selector recents', () => {
 			apiProviderId: null,
 			modelEndpointId: null,
 			modelProtocol: null,
-			displayLabel: 'Codex · gpt-5',
+			displayLabel: 'Codex · OpenAI OAuth · gpt-5',
 		});
 	});
 
@@ -167,6 +167,6 @@ describe('model selector recents', () => {
 		const rows = buildModelSelectorRecents(makeCatalog(), recents);
 
 		expect(rows).toHaveLength(20);
-		expect(rows.every((row) => row.displayLabel === 'Codex · gpt-5')).toBe(true);
+		expect(rows.every((row) => row.displayLabel === 'Codex · OpenAI OAuth · gpt-5')).toBe(true);
 	});
 });

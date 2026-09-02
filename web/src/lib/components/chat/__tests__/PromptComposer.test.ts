@@ -939,7 +939,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Codex · GPT-5' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
 	});
 
 	it('hides direct agents and direct recents in a non-direct chat when disabled', async () => {
@@ -979,7 +979,7 @@ describe('PromptComposer focus', () => {
 		).toBeNull();
 		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
 		expect(screen.queryByText('Direct (Chat Completions) · Chat Model')).toBeNull();
-		expect(screen.getByRole('button', { name: 'Codex · GPT-5' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
 	});
 
 	it('shows direct agents in a non-direct chat when enabled', async () => {

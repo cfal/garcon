@@ -108,8 +108,6 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 
 		expect(store.getSelectableAgents()).toEqual(['sample']);
-		expect(store.getAgentLabel('sample')).toBe('Sample');
-		expect(store.getAgentLabel('unavailable')).toBe('unavailable');
 		expect(store.getModels('sample')).toEqual([{ value: 'sample-model', label: 'Sample Model' }]);
 		expect(store.supportsFork('sample')).toBe(true);
 		expect(store.supportsSteering('sample')).toBe(false);

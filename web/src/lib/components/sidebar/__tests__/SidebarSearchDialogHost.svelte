@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-	import { setModelCatalog } from '$lib/context';
 	import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -32,14 +30,6 @@
 	let query = $state('');
 	let highlightedIndex = $state(0);
 	let isOpen = $state(true);
-
-	class TestModelCatalogStore extends ModelCatalogStore {
-		override getAgentLabel(agentId: string): string {
-			return agentId === 'claude' ? 'Claude' : agentId;
-		}
-	}
-
-	setModelCatalog(new TestModelCatalogStore());
 
 	function handleQueryChange(nextQuery: string) {
 		query = nextQuery;

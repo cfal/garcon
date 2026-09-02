@@ -542,9 +542,9 @@ describe('RemoteSettingsSection', () => {
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
 		);
 		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
-		expect(screen.getByRole('button', { name: 'Direct (Chat Completions)' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Direct (Responses)' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Direct (Anthropic)' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat Completions' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Responses' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Anthropic' })).toBeTruthy();
 
 		await fireEvent.click(titleTrigger);
 		await waitFor(() => {

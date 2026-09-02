@@ -1,6 +1,7 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
-import { DIRECT_AGENT_IDS, isDirectAgentId } from '$lib/agents/direct-agents.js';
+import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
+import { DIRECT_AGENT_PRESENTATIONS, isDirectAgentId } from '$lib/agents/direct-agents.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ApiProtocol } from '$shared/api-providers';
 import type {
@@ -32,9 +33,9 @@ export function buildAgentGroups(
 	selectableAgentIds: readonly SessionAgentId[] = modelCatalog.getSelectableAgents(),
 ): AgentSelectorGroup[] {
 	const selectable = new Set(selectableAgentIds);
-	const directOptions = DIRECT_AGENT_IDS.filter((agentId) => selectable.has(agentId)).map((agentId) =>
-		buildAgentOption(modelCatalog, agentId, modelCatalog.getAgentLabel(agentId)),
-	);
+	const directOptions = DIRECT_AGENT_PRESENTATIONS.filter((presentation) =>
+		selectable.has(presentation.id),
+	).map((presentation) => buildAgentOption(modelCatalog, presentation.id, presentation.label()));
 	const agentOptions = selectableAgentIds
 		.filter((agentId) => !isDirectAgentId(agentId))
 		.map((agentId) => buildAgentOption(modelCatalog, agentId, modelCatalog.getAgentLabel(agentId)));
@@ -65,7 +66,7 @@ export function nativeSourceLabel(
 	agentId: SessionAgentId,
 	modelCatalog: ModelCatalogStore,
 ): string {
-	return modelCatalog.getAgentLabel(agentId);
+	return nativeSourceLabelFor(agentId, modelCatalog.getAgentLabel(agentId));
 }
 
 export function buildModelSources(

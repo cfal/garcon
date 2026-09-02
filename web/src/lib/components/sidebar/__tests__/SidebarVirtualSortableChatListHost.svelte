@@ -87,9 +87,6 @@
 	} as never);
 
 	setModelCatalog({
-		getAgentLabel(agentId: string) {
-			return agentId === 'claude' ? 'Claude' : agentId;
-		},
 		supportsFork() {
 			return true;
 		},

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { ScheduledPrompt, ScheduledPromptSchedule } from '$shared/scheduled-prompts';
-import ScheduledPromptRowTestHost from './ScheduledPromptRowTestHost.svelte';
+import ScheduledPromptRow from '../ScheduledPromptRow.svelte';
 
 function makePrompt(schedule: ScheduledPromptSchedule): ScheduledPrompt {
 	return {
@@ -15,7 +15,7 @@ function makePrompt(schedule: ScheduledPromptSchedule): ScheduledPrompt {
 }
 
 function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date) {
-	return render(ScheduledPromptRowTestHost, {
+	return render(ScheduledPromptRow, {
 		scheduledPrompt,
 		currentTime,
 		index: 0,

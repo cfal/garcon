@@ -4,8 +4,9 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
-	import { getModelCatalog } from '$lib/context';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import { cn } from '$lib/utils/cn';
+	import * as m from '$lib/paraglide/messages.js';
 	import ColoredTag from './ColoredTag.svelte';
 
 	interface Props {
@@ -25,7 +26,6 @@
 		onManageTags,
 		class: className,
 	}: Props = $props();
-	const modelCatalog = getModelCatalog();
 
 	const AGENT_TAG_VARIANTS: Record<string, string> = {
 		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
@@ -47,7 +47,7 @@
 	let visibleTags = $derived(tags.slice(0, tagLimit));
 	let overflowCount = $derived(Math.max(0, tags.length - tagLimit));
 	let agentTagVariant = $derived(AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude);
-	let agentTagLabel = $derived(modelCatalog.getAgentLabel(agentId));
+	let agentTagLabel = $derived(agentLabelFor(agentId, agentId || m.agent_claude()));
 
 	function handleTagClick(event: MouseEvent, tag: string): void {
 		event.stopPropagation();

@@ -32,6 +32,7 @@
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -142,9 +143,6 @@
 		claude: 'Claude',
 		codex: 'Codex',
 		amp: 'Amp',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'Direct (Chat Completions)',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'Direct (Responses)',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'Direct (Anthropic)',
 	};
 	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
 	const requiresQueuedSubmission = $derived(
@@ -187,7 +185,7 @@
 	});
 
 	function labelForAgent(agentId: string): string {
-		return agentLabels[agentId] ?? agentId;
+		return agentLabelFor(agentId, agentLabels[agentId] ?? agentId);
 	}
 
 	function modelOptionsFor(agentId: string): ModelOption[] {

@@ -78,7 +78,7 @@ function codexRecent(
 		agentLabel: 'Codex',
 		sourceLabel: 'OpenAI',
 		modelLabel: 'Codex Model 1',
-		displayLabel: 'Codex · Codex Model 1',
+		displayLabel: 'Codex · OpenAI OAuth · Codex Model 1',
 		...overrides,
 	};
 }
@@ -95,9 +95,9 @@ function claudeRecent(
 		modelEndpointId: null,
 		modelProtocol: null,
 		agentLabel: 'Claude',
-		sourceLabel: 'Claude',
+		sourceLabel: 'Claude OAuth',
 		modelLabel: 'Model 0',
-		displayLabel: 'Claude · Model 0',
+		displayLabel: 'Claude · Claude OAuth · Model 0',
 		...overrides,
 	};
 }
@@ -224,15 +224,15 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
-	it('omits effort selection for an agent with no configurable reasoning modes', async () => {
+	it('omits effort selection for an agent that advertises no reasoning modes', async () => {
 		render(ModelSelectorPopoverHost, {
-			value: { agentId: 'cursor', model: 'managed-model', thinkingMode: 'none' },
+			value: { agentId: 'amp', model: 'medium', thinkingMode: 'none' },
 			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
 			includeManagedAgent: true,
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Managed Agent .* Managed Model/ }));
+		await fireEvent.click(screen.getByRole('button', { name: /Amp .* Amp Medium/ }));
 
 		expect(screen.queryByText('Effort')).toBeNull();
 		expect(screen.queryByRole('button', { name: /Default Provider default effort/ })).toBeNull();
@@ -519,7 +519,6 @@ describe('ModelSelectorPopover', () => {
 			value: { agentId: 'claude', model: 'model-0' },
 			mode: { agent: 'select', source: 'select', surface: 'composer' },
 			includeManagedAgent: true,
-			includeEndpointModel: true,
 			onChange: vi.fn(),
 		});
 
@@ -529,7 +528,7 @@ describe('ModelSelectorPopover', () => {
 			'w-[min(50rem,calc(100vw-1rem))]',
 		);
 
-		await fireEvent.click(await screen.findByRole('button', { name: 'Managed Agent' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Amp' }));
 
 		await waitFor(() => {
 			expect(screen.queryByText('Provider')).toBeNull();
@@ -538,7 +537,7 @@ describe('ModelSelectorPopover', () => {
 			'w-[min(50rem,calc(100vw-1rem))]',
 		);
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
-		expect(within(listbox).getByText('Managed Model')).toBeTruthy();
+		expect(within(listbox).getByText('Amp Medium')).toBeTruthy();
 	});
 
 	it('shows desktop checkmarks only on committed model rows', async () => {
@@ -552,10 +551,11 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
 		expect(
-			screen
-				.getAllByRole('button', { name: 'Claude' })
-				.every((button) => button.querySelector('.lucide-check') === null),
-		).toBe(true);
+			screen.getByRole('button', { name: 'Claude' }).querySelector('.lucide-check'),
+		).toBeNull();
+		expect(
+			screen.getByRole('button', { name: 'Claude OAuth' }).querySelector('.lucide-check'),
+		).toBeNull();
 		let listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(buttonForText(listbox, 'Model 0').querySelector('.lucide-check')).toBeTruthy();
 
@@ -581,7 +581,7 @@ describe('ModelSelectorPopover', () => {
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
 			screen
-				.getByRole('button', { name: 'Claude · Model 0' })
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
 				.querySelector('.lucide-check'),
 		).toBeNull();
 
@@ -618,7 +618,7 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
 		await fireEvent.click(
-			screen.getByRole('button', { name: 'Codex · Codex Model 1' }),
+			screen.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
 		);
 
 		expect(onChange).toHaveBeenCalledWith({
@@ -653,12 +653,12 @@ describe('ModelSelectorPopover', () => {
 		expect(
 			recentsButton.compareDocumentPosition(groupHeaders[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Direct (Chat Completions)' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Direct (Responses)' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Direct (Anthropic)' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat Completions' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Responses' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Anthropic' })).toBeTruthy();
 	});
 
-	it('uses catalog labels for direct triggers and grouped options', async () => {
+	it('keeps direct trigger labels qualified while grouped options stay short', async () => {
 		render(ModelSelectorPopoverHost, {
 			value: {
 				agentId: 'direct-openai-responses-compatible',
@@ -674,7 +674,8 @@ describe('ModelSelectorPopover', () => {
 		});
 		await fireEvent.click(trigger);
 
-		expect(await screen.findByRole('button', { name: 'Direct (Responses)' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Responses' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Direct (Responses)' })).toBeNull();
 	});
 
 	it('filters ineligible direct groups and recents', async () => {
@@ -710,10 +711,10 @@ describe('ModelSelectorPopover', () => {
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		const currentRecent = screen.getByRole('button', {
-			name: 'Claude · Model 0',
+			name: 'Claude · Claude OAuth · Model 0',
 		});
 		expect(
-			screen.getByRole('button', { name: 'Codex · Codex Model 1' }),
+			screen.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
 		).toBeTruthy();
 		expect(currentRecent.querySelector('.lucide-check')).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Provider' })).toBeNull();
@@ -820,7 +821,7 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Claude Providers')).toBeTruthy();
 		expect(document.querySelector('[data-slot="model-selector-compact-subtitle"]')).toBeNull();
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
-		const providerButton = screen.getByRole('button', { name: 'Claude' });
+		const providerButton = screen.getByRole('button', { name: 'Claude OAuth' });
 		expect(providerButton.getAttribute('class')).toContain('px-2');
 		expect(providerButton.querySelector('.lucide-check')).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
@@ -852,7 +853,7 @@ describe('ModelSelectorPopover', () => {
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
 		);
 		expect(groupHeaders.map((header) => header.textContent?.trim())).toEqual(['Direct', 'Agents']);
-		expect(screen.getByRole('button', { name: 'Direct (Chat Completions)' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat Completions' })).toBeTruthy();
 	});
 
 	it('renders grouped agents in the compact agent pane', async () => {
@@ -940,7 +941,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(screen.getByText('Recent models')).toBeTruthy();
 		await fireEvent.click(
-			await screen.findByRole('button', { name: 'Codex · Codex Model 1' }),
+			await screen.findByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
 		);
 
 		expect(onChange).toHaveBeenCalledWith(
@@ -971,11 +972,11 @@ describe('ModelSelectorPopover', () => {
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
-			screen.getByRole('button', { name: 'Claude · Model 0' }).getAttribute('class'),
+			screen.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' }).getAttribute('class'),
 		).toContain('px-2');
 		expect(
 			screen
-				.getByRole('button', { name: 'Claude · Model 0' })
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
 				.querySelector('.lucide-check'),
 		).toBeTruthy();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
@@ -985,12 +986,12 @@ describe('ModelSelectorPopover', () => {
 
 		expect(
 			screen
-				.getByRole('button', { name: 'Claude · Model 0' })
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
 				.querySelector('.lucide-check'),
 		).toBeTruthy();
 
 		await fireEvent.click(
-			await screen.findByRole('button', { name: 'Codex · Codex Model 1' }),
+			await screen.findByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' }),
 		);
 
 		expect(onChange).toHaveBeenCalledWith(
@@ -1047,7 +1048,7 @@ describe('ModelSelectorPopover', () => {
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
 			screen
-				.getByRole('button', { name: 'Codex · Codex Model 1' })
+				.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' })
 				.querySelector('.lucide-check'),
 		).toBeTruthy();
 
@@ -1063,7 +1064,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(
 			screen
-				.getByRole('button', { name: 'Codex · Codex Model 1' })
+				.getByRole('button', { name: 'Codex · OpenAI OAuth · Codex Model 1' })
 				.querySelector('.lucide-check'),
 		).toBeTruthy();
 	});

@@ -6,7 +6,7 @@
 	import ArrowRightLeft from '@lucide/svelte/icons/arrow-right-left';
 	import type { AgentSwitchMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import { getModelCatalog } from '$lib/context';
+	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -14,10 +14,9 @@
 	}
 
 	let { message }: Props = $props();
-	const modelCatalog = getModelCatalog();
 
-	const fromLabel = $derived(modelCatalog.getAgentLabel(message.fromAgentId));
-	const toLabel = $derived(modelCatalog.getAgentLabel(message.toAgentId));
+	const fromLabel = $derived(agentLabelFor(message.fromAgentId));
+	const toLabel = $derived(agentLabelFor(message.toAgentId));
 </script>
 
 <ChatEventCard variant="info" compact>

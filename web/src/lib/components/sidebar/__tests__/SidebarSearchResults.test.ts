@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import SidebarSearchResults from './SidebarSearchResultsTestHost.svelte';
+import SidebarSearchResults from '../SidebarSearchResults.svelte';
 import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatSearchResult } from '$shared/chat-search';

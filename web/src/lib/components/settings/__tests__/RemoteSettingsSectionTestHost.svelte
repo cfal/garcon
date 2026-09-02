@@ -3,6 +3,7 @@
 	import { setGhCapability, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestGhCapability } from './gh-capability-test-context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -20,13 +21,6 @@
 		'claude',
 		'codex',
 	];
-	const agentLabels: Record<string, string> = {
-		claude: 'Claude',
-		codex: 'Codex',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'Direct (Chat Completions)',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'Direct (Responses)',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'Direct (Anthropic)',
-	};
 
 	function modelForAgent(agentId: string): { value: string; label: string } {
 		if (agentId === 'codex') return { value: 'gpt-5.4', label: 'GPT-5.4' };
@@ -54,7 +48,7 @@
 		getAgent(agentId: string) {
 			return {
 				id: agentId,
-				label: agentLabels[agentId] ?? agentId,
+				label: agentLabelFor(agentId),
 				description: '',
 				supportsFork: true,
 				supportsUpdateProjectPath: true,
@@ -65,7 +59,7 @@
 			};
 		},
 		getAgentLabel(agentId: string) {
-			return agentLabels[agentId] ?? agentId;
+			return agentLabelFor(agentId);
 		},
 		getDefaultModel(agentId: string) {
 			return modelForAgent(agentId).value;

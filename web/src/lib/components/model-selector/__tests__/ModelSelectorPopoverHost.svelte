@@ -2,6 +2,7 @@
 	import ModelSelectorPopover from '../ModelSelectorPopover.svelte';
 	import { setModelCatalog } from '$lib/context';
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import type { SessionAgentId } from '$lib/types/app.js';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -14,14 +15,7 @@
 		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from '../model-selector-types';
-	import { THINKING_MODE_VALUES, type ThinkingMode } from '$shared/chat-modes';
-
-	interface AgentFixture {
-		label: string;
-		models: ModelOption[];
-		supportedProtocols: ('openai-compatible' | 'anthropic-messages')[];
-		thinkingModes: ThinkingMode[];
-	}
+	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
 
 	interface Props {
 		value: ModelSelectorValue;
@@ -79,30 +73,7 @@
 			label: `Codex Model ${index}`,
 		})),
 	);
-	let agentFixtures = $derived.by<Record<string, AgentFixture>>(() => ({
-		claude: {
-			label: 'Claude',
-			models: claudeModels,
-			supportedProtocols: ['anthropic-messages'],
-			thinkingModes: [...THINKING_MODE_VALUES],
-		},
-		codex: {
-			label: 'Codex',
-			models: codexModels,
-			supportedProtocols: ['openai-compatible'],
-			thinkingModes: [...THINKING_MODE_VALUES],
-		},
-		...(includeManagedAgent
-			? {
-					cursor: {
-						label: 'Managed Agent',
-						models: [{ value: 'managed-model', label: 'Managed Model' }],
-						supportedProtocols: [],
-						thinkingModes: ['none'],
-					},
-				}
-			: {}),
-	}));
+	let ampModels = $derived<ModelOption[]>([{ value: 'medium', label: 'Amp Medium' }]);
 	const directModelsByAgent: Record<string, ModelOption[]> = {
 		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: [
 			{ value: 'chat-model', label: 'Chat Model' },
@@ -114,11 +85,6 @@
 			{ value: 'anthropic-model', label: 'Anthropic Model' },
 		],
 	};
-	const directLabelsByAgent: Record<string, string> = {
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'Direct (Chat Completions)',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'Direct (Responses)',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'Direct (Anthropic)',
-	};
 	let selectableAgents = $derived([
 		...(includeDirectAgents
 			? [
@@ -127,37 +93,38 @@
 					DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 				]
 			: []),
-		...(includeManagedAgent ? ['claude', 'codex', 'cursor'] : ['claude', 'codex']),
+		...(includeManagedAgent ? ['claude', 'codex', 'amp'] : ['claude', 'codex']),
 	] as SessionAgentId[]);
 
 	function modelsFor(agentId: string): ModelOption[] {
-		return agentFixtures[agentId]?.models ?? directModelsByAgent[agentId] ?? [];
+		if (agentId === 'amp') return ampModels;
+		if (agentId === 'codex') return codexModels;
+		return directModelsByAgent[agentId] ?? claudeModels;
 	}
 
 	setModelCatalog({
 		getSelectableAgents: () => selectableAgents,
-		getAgent: (agentId: string) => {
-			const fixture = agentFixtures[agentId];
-			return fixture
-				? {
-						id: agentId,
-						label: fixture.label,
-						description: '',
-						supportsFork: true,
-						supportsUpdateProjectPath: true,
-						supportsImages: true,
-						acceptsApiProviderEndpoints: fixture.supportedProtocols.length > 0,
-						supportedProtocols: fixture.supportedProtocols,
-						defaultModel: fixture.models[0]?.value ?? '',
-					}
-				: null;
-		},
+		getAgent: (agentId: string) => ({
+			id: agentId,
+			label: agentId === 'codex' ? 'Codex' : agentId === 'amp' ? 'Amp' : 'Claude',
+			description: '',
+			supportsFork: agentId !== 'amp',
+			supportsUpdateProjectPath: agentId !== 'amp',
+			supportsImages: agentId !== 'amp',
+			acceptsApiProviderEndpoints: agentId !== 'amp',
+			supportedProtocols:
+				agentId === 'amp'
+					? []
+					: agentId === 'codex'
+						? ['openai-compatible']
+						: ['anthropic-messages'],
+			defaultModel:
+				agentId === 'codex' ? 'codex-model-0' : agentId === 'amp' ? 'medium' : 'model-0',
+		}),
 		getAgentLabel: (agentId: string) =>
-			agentFixtures[agentId]?.label ?? directLabelsByAgent[agentId] ?? agentId,
+			agentLabelFor(agentId, agentId === 'amp' ? 'Amp' : 'Claude'),
 		getModels: (agentId: string) => modelsFor(agentId),
-		getThinkingModes: (agentId: string) =>
-			agentFixtures[agentId]?.thinkingModes ??
-			(directLabelsByAgent[agentId] ? [...THINKING_MODE_VALUES] : []),
+		getThinkingModes: (agentId: string) => (agentId === 'amp' ? [] : [...THINKING_MODE_VALUES]),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
 			modelsFor(agentId).find(
