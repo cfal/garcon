@@ -67,6 +67,14 @@ describe('settings store', () => {
       expect(loaded.chatNames.a).toBe('title a');
     });
 
+    it('writes owner-only settings files', async () => {
+      if (process.platform === 'win32') return;
+
+      await store.saveSettings({ ui: {}, paths: {}, chatNames: {} });
+
+      expect((await fs.stat(settingsFile())).mode & 0o777).toBe(0o600);
+    });
+
     it('strips unknown top-level fields during load', async () => {
       await writeRaw({
         ui: { theme: 'dark' },

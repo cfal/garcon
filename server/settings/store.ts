@@ -297,7 +297,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async #writeToDisk(settings: ProjectSettings): Promise<void> {
-    await writeJsonFileAtomic(this.#settingsPath(), settings);
+    await writeJsonFileAtomic(this.#settingsPath(), settings, { mode: 0o600 });
   }
 
   async #readFromDiskWithMigration(): Promise<SanitizedSettingsResult> {
