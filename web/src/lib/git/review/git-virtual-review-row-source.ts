@@ -84,6 +84,10 @@ export function arrayGitVirtualReviewRowSource(
 				row.kind === 'file-header' ? ([[row.filePath, index]] as const) : [],
 			),
 		);
+	const estimateHeight = (row: GitVirtualReviewRow, lineHeight: number): number =>
+		row.kind === 'unified-row' || row.kind === 'split-row'
+			? Math.max(row.estimatedHeight, lineHeight)
+			: row.estimatedHeight;
 	return {
 		rowCount: rows.length,
 		measurementRevision: JSON.stringify(rows.map((row) => [row.id, row.kind, row.estimatedHeight])),
@@ -92,17 +96,11 @@ export function arrayGitVirtualReviewRowSource(
 		estimateRowHeight: (index, lineHeight) => {
 			const row = rows[index];
 			if (!row) return lineHeight;
-			return row.kind === 'unified-row' || row.kind === 'split-row'
-				? Math.max(row.estimatedHeight, lineHeight)
-				: row.estimatedHeight;
+			return estimateHeight(row, lineHeight);
 		},
 		buildVirtualMeasurements: (lineHeight) => ({
 			keys: rows.map((row) => virtualMeasurementKey(row.id)),
-			estimates: rows.map((row) =>
-				row.kind === 'unified-row' || row.kind === 'split-row'
-					? Math.max(row.estimatedHeight, lineHeight)
-					: row.estimatedHeight,
-			),
+			estimates: rows.map((row) => estimateHeight(row, lineHeight)),
 		}),
 		fileStart: (filePath) => starts.get(filePath),
 		fileState: (filePath) => {

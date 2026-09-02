@@ -91,7 +91,6 @@
 
 		isLoading = true;
 		loadError = null;
-		let loaded = false;
 		try {
 			const resp = await getSharedChat(token);
 			const snapshot = resp.snapshot;
@@ -102,12 +101,12 @@
 			totalMessages = resp.page.totalMessages;
 			nextBefore = resp.page.nextBefore;
 			snapshotVersion = resp.page.snapshotVersion;
-			loaded = true;
 		} catch (error) {
 			loadError = error instanceof ApiError && error.status === 404 ? 'not-found' : 'load-failed';
+			isLoading = false;
+			return;
 		}
 		isLoading = false;
-		if (!loaded) return;
 		// Scrolls after rendering so shared links open at the latest message.
 		await tick();
 		window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
