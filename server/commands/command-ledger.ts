@@ -79,6 +79,7 @@ export const TOTAL_TURN_RESULT_BYTE_LIMIT = 64 * 1024 * 1024;
 export const TURN_RESULT_MESSAGE_LIMIT = 4_096;
 export const TOTAL_TURN_RESULT_MESSAGE_LIMIT = 65_536;
 export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
+export const GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE = 'GOAL_CONTROL_OUTCOME_UNKNOWN';
 
 export class SteerIdentityCapacityError extends Error {
   constructor() {
@@ -109,6 +110,16 @@ const QUEUE_RECEIPT_COMMANDS = new Set([
   'queue-entry-move',
   'goal-control',
 ]);
+
+function isGoalControlOutcomeUnknown(record: CommandLedgerRecord): boolean {
+  return record.commandType === 'goal-control'
+    && record.status === 'accepted'
+    && record.errorCode === GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE;
+}
+
+function hasTerminalRetention(record: CommandLedgerRecord): boolean {
+  return TERMINAL_COMMAND_STATUSES.has(record.status) || isGoalControlOutcomeUnknown(record);
+}
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -521,7 +532,7 @@ export class CommandLedger {
   #trimRecords(): void {
     const evictable = [...this.#records]
       .filter(([, record]) => (
-        TERMINAL_COMMAND_STATUSES.has(record.status)
+        hasTerminalRetention(record)
         && record.forkPreparation === undefined
         && record.terminalRetentionOrdinal !== undefined
       ))
@@ -596,10 +607,16 @@ export class CommandLedger {
   }
 
   #assignTerminalRetentionOrdinal(record: CommandLedgerRecord): void {
+    const hasTerminalStatus = TERMINAL_COMMAND_STATUSES.has(record.status);
     if (
       record.terminalRetentionOrdinal !== undefined
-      || !TERMINAL_COMMAND_STATUSES.has(record.status)
-      || (record.turnId && !record.publicTerminalAt && !record.retainedPrivateTerminal)
+      || (!hasTerminalStatus && !isGoalControlOutcomeUnknown(record))
+      || (
+        hasTerminalStatus
+        && record.turnId
+        && !record.publicTerminalAt
+        && !record.retainedPrivateTerminal
+      )
     ) {
       return;
     }

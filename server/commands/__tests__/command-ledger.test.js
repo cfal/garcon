@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CommandLedger,
+  GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
   LEDGER_RECORD_LIMIT,
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
   SteerIdentityCapacityError,
@@ -315,6 +316,33 @@ describe('CommandLedger', () => {
       turnId: 'turn-retry',
       payload: { chatId: 'chat-1', command: 'x'.repeat(1_024) },
     }))).toMatchObject({ kind: 'accepted', record: { turnId: 'turn-retry' } });
+  });
+
+  it('bounds accepted goal-control receipts with unknown outcomes', async () => {
+    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const settlement = new ChatCommandSettlement(ledger);
+    const records = [];
+
+    for (let index = 0; index < 3; index += 1) {
+      const accepted = await ledger.accept(acceptedInput({
+        commandType: 'goal-control',
+        clientRequestId: `request-${index}`,
+        turnId: `turn-${index}`,
+      }));
+      records.push(accepted.record);
+      await settlement.settleGoalControlFailure(
+        accepted.record,
+        new Error('delivery outcome unknown'),
+        true,
+      );
+    }
+
+    expect(await ledger.getRecord(records[0].key)).toBeNull();
+    expect(await ledger.getRecord(records[1].key)).toBeNull();
+    expect(await ledger.getRecord(records[2].key)).toMatchObject({
+      status: 'accepted',
+      errorCode: GOAL_CONTROL_OUTCOME_UNKNOWN_ERROR_CODE,
+    });
   });
 
   it('counts only public terminal records toward the retention limit', async () => {
