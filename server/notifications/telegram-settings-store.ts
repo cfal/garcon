@@ -189,8 +189,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
       snapshot.telegram.updateOffset = null;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -199,8 +199,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
     await this.#withLock(async () => {
       const snapshot = await this.#read();
       snapshot.telegram = emptySnapshot().telegram;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -215,8 +215,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
       snapshot.telegram.pendingLinkCode = randomBytes(16).toString('hex');
       snapshot.telegram.pendingLinkCreatedAt = new Date().toISOString();
       url = linkUrl(snapshot.telegram.botUsername, snapshot.telegram.pendingLinkCode);
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
     return url ?? '';
@@ -231,8 +231,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
       snapshot.telegram.updateOffset = recipient.nextOffset;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -245,8 +245,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
       snapshot.telegram.chatId = '';
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
@@ -255,8 +255,8 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
     await this.#withLock(async () => {
       const snapshot = await this.#read();
       snapshot.telegram.updateOffset = updateOffset;
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
     this.emit('changed');
   }
