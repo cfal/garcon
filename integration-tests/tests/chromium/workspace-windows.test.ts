@@ -578,13 +578,13 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
+    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
     if (input.expectBlocked) {
       await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
     } else {
       const expectedLabel = input.expectedLabel ?? chatDropLabel(targetKind);
       await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
     }
-    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
   } finally {
     await page.mouse.up();
   }
@@ -633,8 +633,8 @@ async function dragWorkspaceTabToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
     await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
+    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
   } finally {
     await page.mouse.up();
   }
