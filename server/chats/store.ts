@@ -454,7 +454,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   async init(): Promise<ChatRegistrySnapshot> {
     if (this.#registry) return this.#registry;
     try {
-      const raw = await fs.readFile(this.#sessionsFilePath(), 'utf8');
+      const sessionsFilePath = this.#sessionsFilePath();
+      const raw = await fs.readFile(sessionsFilePath, 'utf8');
+      if (process.platform !== 'win32') await fs.chmod(sessionsFilePath, 0o600);
       const parsed: unknown = JSON.parse(raw);
       if (!isObjectRecord(parsed)) {
         this.#registry = createEmptyRegistry();

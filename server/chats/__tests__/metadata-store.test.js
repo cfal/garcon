@@ -152,6 +152,17 @@ describe('metadata-store', () => {
       const stats = await fs.stat(metadataPath);
       expect(stats.mode & 0o777).toBe(0o600);
     });
+
+    it('repairs permissions on existing metadata during init', async () => {
+      if (process.platform === 'win32') return;
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify({ version: 1, chats: {} }), { mode: 0o644 });
+      const index = new MetadataIndex(mockRegistry, mockAgents, mockCarryOver, { metadataPath });
+
+      await index.init();
+
+      expect((await fs.stat(metadataPath)).mode & 0o777).toBe(0o600);
+    });
   });
 
   describe('identity invalidation', () => {
