@@ -191,6 +191,16 @@ describe('workspace chat ID migration', () => {
     expect(snapshot.chatId).toBe(MILLISECONDS_CANONICAL_ID);
     expect(await fs.readFile(path.join(workspaceDir, `queues/${SECONDS_CANONICAL_ID}.queue.json`), 'utf8')).toContain('entries');
     expect(await fs.readFile(path.join(eventsDir, `${MILLISECONDS_CANONICAL_ID}.events.jsonl`), 'utf8')).toBe('{}\n');
+    if (process.platform !== 'win32') {
+      for (const fileName of [
+        'project-settings.json',
+        'chat-metadata.json',
+        'shared-chats.json',
+        'chats.json',
+      ]) {
+        expect((await fs.stat(path.join(workspaceDir, fileName))).mode & 0o777).toBe(0o600);
+      }
+    }
 
     const secondRun = await migrateWorkspaceChatIds(workspaceDir);
     expect(secondRun).toEqual({ migratedChatIds: {}, changedFiles: [] });
