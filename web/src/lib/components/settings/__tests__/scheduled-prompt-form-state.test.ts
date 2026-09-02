@@ -28,11 +28,30 @@ function createForm(
 		agentId: string,
 		model: string,
 		endpointId?: string | null,
-	): ModelOption | null => getModels(agentId).find(
-		(entry) =>
-			(endpointId ? entry.endpointId === endpointId : true) &&
-			(entry.value === model || entry.rawModel === model),
-	) ?? null;
+	): ModelOption | null => {
+		const models = getModels(agentId);
+		if (endpointId !== undefined) {
+			if (endpointId === null) {
+				return (
+					models.find(
+						(entry) =>
+							!entry.endpointId && (entry.value === model || entry.rawModel === model),
+					) ?? null
+				);
+			}
+			return (
+				models.find(
+					(entry) =>
+						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
+				) ?? null
+			);
+		}
+		return (
+			models.find((entry) => entry.value === model) ??
+			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+			null
+		);
+	};
 	const modelCatalog = {
 		getSelectableAgents: () => selectableAgentIds(),
 		getModels,
@@ -243,16 +262,19 @@ describe('ScheduledPromptFormState', () => {
 			finishRefresh = resolve;
 		});
 		const form = createForm(new Set(['123']), () => ['claude', 'codex'], {
-			getModels: () => catalogFresh
-				? [{ value: 'native-model', label: 'Native Model' }]
-				: [{
-						value: 'stale_openai:scheduled-model',
-						label: 'Stale: Scheduled Model',
-						rawModel: 'scheduled-model',
-						apiProviderId: 'stale-provider',
-						endpointId: 'stale_openai',
-						protocol: 'openai-compatible',
-					}],
+			getModels: () =>
+				catalogFresh
+					? [{ value: 'native-model', label: 'Native Model' }]
+					: [
+							{
+								value: 'stale_openai:scheduled-model',
+								label: 'Stale: Scheduled Model',
+								rawModel: 'scheduled-model',
+								apiProviderId: 'stale-provider',
+								endpointId: 'stale_openai',
+								protocol: 'openai-compatible',
+							},
+						],
 		});
 		form.startup.loadSettingsAndModels = vi.fn(async () => {
 			form.startup.settingsLoaded = true;
@@ -288,6 +310,105 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.startup.modelSelectionError).toBe('Model unavailable');
 		expect(form.targetValid).toBe(false);
 		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+	});
+
+	it('blocks a stale native target when only an endpoint exposes the same raw model', async () => {
+		const form = createForm(new Set(['123']), () => ['claude', 'codex'], {
+			getModels: () => [
+				{
+					value: 'live_openai:shared-model',
+					label: 'Live: Shared Model',
+					rawModel: 'shared-model',
+					apiProviderId: 'live-provider',
+					endpointId: 'live_openai',
+					protocol: 'openai-compatible',
+				},
+			],
+		});
+		form.startup.validatePath = vi.fn();
+		const scheduledPrompt = newChatPrompt({
+			type: 'new-chat',
+			agentId: 'codex',
+			projectPath: '/workspace/project',
+			model: 'shared-model',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+			permissionMode: 'acceptEdits',
+			thinkingMode: 'high',
+			agentSettingsById: {},
+			tags: [],
+		});
+
+		await form.initialize(scheduledPrompt);
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+
+		expect(form.startup.agentId).toBe('codex');
+		expect(form.startup.modelSelectionError).toBe('Model unavailable');
+		expect(form.targetValid).toBe(false);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+	});
+
+	it('preserves an unavailable scheduled agent until explicit reselection', async () => {
+		const selectableAgentIds = ['claude', 'codex'] as const;
+		const form = createForm(new Set(['123']), () => selectableAgentIds, {
+			getModels: (agentId) => {
+				if (agentId === 'direct-openai-compatible') {
+					return [
+						{
+							value: 'zai_openai:glm-5.1',
+							label: 'Z.AI: GLM-5.1',
+							rawModel: 'glm-5.1',
+							apiProviderId: 'zai',
+							endpointId: 'zai_openai',
+							protocol: 'openai-compatible',
+						},
+					];
+				}
+				return [{ value: 'gpt-5', label: 'GPT-5' }];
+			},
+		});
+		form.startup.validatePath = vi.fn();
+		const scheduledPrompt = newChatPrompt({
+			type: 'new-chat',
+			agentId: 'direct-openai-compatible',
+			projectPath: '/workspace/project',
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+			modelProtocol: 'openai-compatible',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettingsById: {},
+			tags: [],
+		});
+
+		await form.initialize(scheduledPrompt);
+		form.startup.settingsLoaded = true;
+		form.startup.validationStatus = 'valid';
+		form.startup.reconcileAgentSelection(selectableAgentIds);
+
+		expect(form.startup.agentId).toBe('direct-openai-compatible');
+		expect(form.startup.modelSelectionTarget).toMatchObject({
+			model: 'glm-5.1',
+			apiProviderId: 'zai',
+			modelEndpointId: 'zai_openai',
+		});
+		expect(form.targetValid).toBe(false);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+
+		form.startup.selectAgent('codex');
+		form.startup.selectModel('gpt-5');
+
+		expect(form.targetValid).toBe(true);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))?.target).toMatchObject({
+			type: 'new-chat',
+			agentId: 'codex',
+			model: 'gpt-5',
+			apiProviderId: null,
+			modelEndpointId: null,
+		});
 	});
 
 	it('hydrates and rebuilds new-chat tags when editing a scheduled prompt', async () => {

@@ -101,18 +101,34 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) => {
 			const models = modelsByAgent[agentId] ?? [];
-			if (endpointId) {
-				return models.find(
-					(entry) =>
-						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
-				) ?? null;
+			if (endpointId !== undefined) {
+				if (endpointId === null) {
+					return (
+						models.find(
+							(entry) =>
+								!entry.endpointId && (entry.value === model || entry.rawModel === model),
+						) ?? null
+					);
+				}
+				return (
+					models.find(
+						(entry) =>
+							entry.endpointId === endpointId &&
+							(entry.value === model || entry.rawModel === model),
+					) ?? null
+				);
 			}
-			return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
+			return (
+				models.find((entry) => entry.value === model) ??
+				models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+				null
+			);
 		},
 		selectionFor: (agentId: string, model: string) => {
-			const selected = (modelsByAgent[agentId] ?? []).find(
-				(entry) => entry.value === model || entry.rawModel === model,
-			);
+			const models = modelsByAgent[agentId] ?? [];
+			const selected =
+				models.find((entry) => entry.value === model) ??
+				models.find((entry) => !entry.endpointId && entry.rawModel === model);
 			return {
 				model: selected?.rawModel ?? model,
 				apiProviderId: selected?.apiProviderId ?? null,
@@ -121,11 +137,20 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			};
 		},
 		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = (modelsByAgent[agentId] ?? []).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			);
+			const models = modelsByAgent[agentId] ?? [];
+			const selected = endpointId !== undefined
+				? endpointId === null
+					? models.find(
+							(entry) =>
+								!entry.endpointId && (entry.value === model || entry.rawModel === model),
+							)
+						: models.find(
+								(entry) =>
+									entry.endpointId === endpointId &&
+									(entry.value === model || entry.rawModel === model),
+							)
+				: (models.find((entry) => entry.value === model) ??
+					models.find((entry) => !entry.endpointId && entry.rawModel === model));
 			return selected?.value ?? model;
 		},
 		findEndpoint: (endpointId: string) => {

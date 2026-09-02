@@ -130,8 +130,7 @@ export class ScheduledPromptFormState {
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
-		this.startup.selectAgent(scheduledPrompt.target.agentId);
-		this.startup.restoreModelSelection(scheduledPrompt.target.agentId, {
+		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
 			model: scheduledPrompt.target.model,
 			apiProviderId: scheduledPrompt.target.apiProviderId,
 			modelEndpointId: scheduledPrompt.target.modelEndpointId,

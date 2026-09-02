@@ -102,6 +102,35 @@
 		return directModelsByAgent[agentId] ?? claudeModels;
 	}
 
+	function modelForSelection(
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null {
+		const models = modelsFor(agentId);
+		if (endpointId !== undefined) {
+			if (endpointId === null) {
+				return (
+					models.find(
+						(entry) =>
+							!entry.endpointId && (entry.value === model || entry.rawModel === model),
+					) ?? null
+				);
+			}
+			return (
+				models.find(
+					(entry) =>
+						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
+				) ?? null
+			);
+		}
+		return (
+			models.find((entry) => entry.value === model) ??
+			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+			null
+		);
+	}
+
 	setModelCatalog({
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
@@ -126,16 +155,10 @@
 		getModels: (agentId: string) => modelsFor(agentId),
 		getThinkingModes: (agentId: string) => (agentId === 'amp' ? [] : [...THINKING_MODE_VALUES]),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
-			modelsFor(agentId).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null,
-		selectionFor: (agentId: string, model: string) => {
-			const selected = modelsFor(agentId).find(
-				(entry) => entry.value === model || entry.rawModel === model,
-			);
+		getModelForSelection: modelForSelection,
+		selectionFor: (agentId: string, model: string, endpointId?: string | null) => {
+			const selected = modelForSelection(agentId, model, endpointId);
+			if (!selected && endpointId) return null;
 			return {
 				model: selected?.rawModel ?? model,
 				apiProviderId: selected?.apiProviderId ?? null,
@@ -144,11 +167,7 @@
 			};
 		},
 		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = modelsFor(agentId).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			);
+			const selected = modelForSelection(agentId, model, endpointId);
 			return selected?.value ?? model;
 		},
 		findEndpoint: (endpointId: string) => {

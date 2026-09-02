@@ -436,6 +436,14 @@ describe('ModelCatalogStore', () => {
 							endpointId: 'acme-openai',
 							protocol: 'openai-compatible',
 						},
+						{
+							value: 'acme-openai:retired-native',
+							label: 'Acme: Retired Native',
+							rawModel: 'retired-native',
+							apiProviderId: 'acme',
+							endpointId: 'acme-openai',
+							protocol: 'openai-compatible',
+						},
 					],
 				},
 				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'sol' }) },
@@ -454,6 +462,23 @@ describe('ModelCatalogStore', () => {
 		// silently re-targeting the native model sharing its raw name.
 		expect(store.getModelForSelection('sample', 'luna', 'acme-openai')).toBeNull();
 		expect(store.selectionFor('sample', 'luna', 'acme-openai')).toBeNull();
+		// An unscoped persisted name denotes a native model, not an endpoint
+		// that happens to expose the same raw name.
+		expect(store.getModelForSelection('sample', 'retired-native', null)).toBeNull();
+		expect(
+			store.getModelForSelection('sample', 'acme-openai:retired-native', null),
+		).toBeNull();
+		expect(store.selectionFor('sample', 'retired-native', null)).toEqual({
+			model: 'retired-native',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		});
+		expect(store.selectionFor('sample', 'acme-openai:retired-native')).toMatchObject({
+			model: 'retired-native',
+			apiProviderId: 'acme',
+			modelEndpointId: 'acme-openai',
+		});
 	});
 
 	it('ignores malformed integration ids from persisted data', () => {

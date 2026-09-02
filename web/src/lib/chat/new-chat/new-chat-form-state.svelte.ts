@@ -221,6 +221,10 @@ export class NewChatFormState {
 	selectAgent(next: SessionAgentId): void {
 		if (!this.#selectableAgentIds.includes(next)) return;
 		this.#startupSelectionAutomatic = false;
+		this.#applyAgent(next);
+	}
+
+	#applyAgent(next: SessionAgentId): void {
 		const changed = this.agentId !== next;
 		this.agentId = next;
 		if (changed && !this.#modesTouched) {
@@ -288,7 +292,9 @@ export class NewChatFormState {
 		);
 	}
 
-	restoreModelSelection(agentId: SessionAgentId, selection: ResolvedModelSelection): void {
+	restoreSelection(agentId: SessionAgentId, selection: ResolvedModelSelection): void {
+		this.#startupSelectionAutomatic = false;
+		this.agentId = agentId;
 		this.#setModelSelection(
 			agentId,
 			this.#modelCatalog.selectionValueFor(
@@ -322,6 +328,7 @@ export class NewChatFormState {
 		selectableAgentIds: readonly SessionAgentId[] = this.#selectableAgentIds,
 	): void {
 		if (selectableAgentIds.includes(this.agentId)) return;
+		if (!this.#startupSelectionAutomatic) return;
 
 		const recent = this.#firstSelectableRecent(this.#startupRecents, selectableAgentIds);
 		const nextAgentId = recent
@@ -329,7 +336,7 @@ export class NewChatFormState {
 			: this.#resolveStartupAgent(DEFAULT_AGENT_ID, selectableAgentIds);
 		if (!selectableAgentIds.includes(nextAgentId)) return;
 
-		this.selectAgent(nextAgentId);
+		this.#applyAgent(nextAgentId);
 		if (recent) {
 			this.applyResolvedModel(nextAgentId, recent.model, recent.modelEndpointId);
 		} else {
@@ -716,7 +723,6 @@ export class NewChatFormState {
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);
 				this.validateAllModelsAgainstLive();
-				this.#startupSelectionAutomatic = false;
 			} else {
 				this.validateAllModelsAgainstLive();
 			}

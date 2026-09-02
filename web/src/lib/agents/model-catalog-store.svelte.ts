@@ -510,22 +510,32 @@ export class ModelCatalogStore {
 		);
 	}
 
-	// An explicit endpoint scopes the selection; a model no longer exposed by
-	// that endpoint is unresolvable rather than matched against another source.
+	// Catalog values identify explicit endpoint choices. Raw persisted names
+	// resolve only within their recorded endpoint or the native catalog.
 	getModelForSelection(
 		agentId: SessionAgentId,
 		model: string,
 		modelEndpointId?: string | null,
 	): ModelOption | null {
 		const models = this.getModels(agentId);
-		if (modelEndpointId) {
+		if (modelEndpointId !== undefined) {
+			if (modelEndpointId === null) {
+				return models.find(
+					(entry) =>
+						!entry.endpointId && (entry.value === model || entry.rawModel === model),
+				) ?? null;
+			}
 			return models.find(
 				(entry) =>
 					entry.endpointId === modelEndpointId &&
 					(entry.value === model || entry.rawModel === model),
 			) ?? null;
 		}
-		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
+		return (
+			models.find((entry) => entry.value === model) ??
+			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+			null
+		);
 	}
 
 	supportsCompact(agentId: SessionAgentId): boolean {

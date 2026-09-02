@@ -119,9 +119,9 @@
 	function modelsForAgent(agentId: string): ModelOption[] {
 		if (
 			agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
-			endpointBackedDirectModel &&
-			!modelsAvailable
-		) return [];
+				endpointBackedDirectModel &&
+				!modelsAvailable
+			) return [];
 		return [modelForAgent(agentId)];
 	}
 
@@ -130,11 +130,28 @@
 		model: string,
 		endpointId?: string | null,
 	): ModelOption | null {
-		return modelsForAgent(agentId).find(
-			(entry) =>
-				(endpointId ? entry.endpointId === endpointId : true) &&
-				(entry.value === model || entry.rawModel === model),
-		) ?? null;
+		const models = modelsForAgent(agentId);
+		if (endpointId !== undefined) {
+			if (endpointId === null) {
+				return (
+					models.find(
+						(entry) =>
+							!entry.endpointId && (entry.value === model || entry.rawModel === model),
+					) ?? null
+				);
+			}
+			return (
+				models.find(
+					(entry) =>
+						entry.endpointId === endpointId && (entry.value === model || entry.rawModel === model),
+				) ?? null
+			);
+		}
+		return (
+			models.find((entry) => entry.value === model) ??
+			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+			null
+		);
 	}
 
 	setSnippets(
