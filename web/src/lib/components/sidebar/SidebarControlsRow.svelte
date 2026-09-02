@@ -19,7 +19,6 @@
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
-	import Clock from '@lucide/svelte/icons/clock';
 	import History from '@lucide/svelte/icons/history';
 	import Activity from '@lucide/svelte/icons/activity';
 	import List from '@lucide/svelte/icons/list';
@@ -29,6 +28,7 @@
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
+		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import { sidebarGroupingUsesProjects } from './sidebar-display-options';
@@ -40,7 +40,7 @@
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
-		sortByRecent?: boolean;
+		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
@@ -52,7 +52,7 @@
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
-		onToggleSortByRecent?: () => void;
+		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
@@ -67,7 +67,7 @@
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
-		sortByRecent = false,
+		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
@@ -79,7 +79,7 @@
 		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
-		onToggleSortByRecent,
+		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
 		onApplySidebarMenuSearch,
@@ -175,13 +175,22 @@
 					{m.sidebar_chats_mark_all_read()}
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
-				<DropdownMenuCheckboxItem
-					checked={sortByRecent}
-					onCheckedChange={() => onToggleSortByRecent?.()}
-				>
-					<Clock class="h-3.5 w-3.5" />
-					{m.sidebar_chats_sort_by_recent()}
-				</DropdownMenuCheckboxItem>
+				<DropdownMenuGroup>
+					<DropdownMenuGroupHeading>
+						{m.sidebar_chats_sort_order_heading()}
+					</DropdownMenuGroupHeading>
+					<DropdownMenuRadioGroup
+						value={sortMode}
+						onValueChange={(mode) => onSetSortMode?.(mode as SidebarSortMode)}
+					>
+						<DropdownMenuRadioItem value="manual">
+							{m.sidebar_chats_sort_order_manual()}
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="recent">
+							{m.sidebar_chats_sort_recent_active()}
+						</DropdownMenuRadioItem>
+					</DropdownMenuRadioGroup>
+				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
 					<DropdownMenuGroupHeading>

@@ -491,32 +491,34 @@ describe('sidebar search interactions', () => {
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
 		expect(items[2]?.textContent).toContain('Mark all as read');
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Sort by recent activity' })).toBeTruthy();
-		expect(items[3]?.textContent).toContain('Sort by recent activity');
+		expect(screen.getByRole('menuitemradio', { name: 'Manual' })).toBeTruthy();
+		expect(items[3]?.textContent).toContain('Manual');
+		expect(screen.getByRole('menuitemradio', { name: 'Recent activity' })).toBeTruthy();
+		expect(items[4]?.textContent).toContain('Recent activity');
 		expect(screen.getByRole('menuitemradio', { name: 'No grouping' })).toBeTruthy();
-		expect(items[4]?.textContent).toContain('No grouping');
+		expect(items[5]?.textContent).toContain('No grouping');
 		expect(screen.getByRole('menuitemradio', { name: 'Project' })).toBeTruthy();
-		expect(items[5]?.textContent).toContain('Project');
+		expect(items[6]?.textContent).toContain('Project');
 		expect(
 			screen.getByRole('menuitemradio', { name: 'Project and activity' }),
 		).toBeTruthy();
-		expect(items[6]?.textContent).toContain('Project and activity');
+		expect(items[7]?.textContent).toContain('Project and activity');
 		expect(screen.getByRole('menuitemradio', { name: 'Activity' })).toBeTruthy();
-		expect(items[7]?.textContent).toContain('Activity');
+		expect(items[8]?.textContent).toContain('Activity');
 		expect(
 			screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' }),
 		).toBeTruthy();
-		expect(items[8]?.textContent).toContain('Combine nested paths');
+		expect(items[9]?.textContent).toContain('Combine nested paths');
 		expect(screen.getByRole('menuitemradio', { name: 'Default' })).toBeTruthy();
-		expect(items[9]?.textContent).toContain('Default');
+		expect(items[10]?.textContent).toContain('Default');
 		expect(screen.getByRole('menuitemradio', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[10]?.textContent).toContain('Compact chat items');
+		expect(items[11]?.textContent).toContain('Compact chat items');
 		expect(screen.getByRole('menuitemradio', { name: 'Single-line chat items' })).toBeTruthy();
-		expect(items[11]?.textContent).toContain('Single-line chat items');
-		expect(items[12]?.textContent).toContain('Autohide sidebar');
-		expect(items[13]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[14]?.textContent).toContain('Scheduled prompts');
-		expect(items[15]?.textContent).toContain('Settings');
+		expect(items[12]?.textContent).toContain('Single-line chat items');
+		expect(items[13]?.textContent).toContain('Autohide sidebar');
+		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[15]?.textContent).toContain('Scheduled prompts');
+		expect(items[16]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
@@ -527,14 +529,14 @@ describe('sidebar search interactions', () => {
 		const onSetChatGrouping = vi.fn();
 		const onToggleGroupNestedProjectPaths = vi.fn();
 		const onSetChatItemLayout = vi.fn();
-		const onToggleSortByRecent = vi.fn();
+		const onSetSortMode = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
 			chatGrouping: 'project',
 			groupNestedProjectPaths: true,
 			chatItemLayout: 'compact',
-			sortByRecent: false,
+			sortMode: 'manual',
 			chatListAutohide: true,
 			chatListAutohideAvailable: true,
 			dockOnRight: true,
@@ -545,7 +547,7 @@ describe('sidebar search interactions', () => {
 			onSetChatGrouping,
 			onToggleGroupNestedProjectPaths,
 			onSetChatItemLayout,
-			onToggleSortByRecent,
+			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
@@ -560,62 +562,63 @@ describe('sidebar search interactions', () => {
 			),
 		);
 		expect(items[0]?.textContent).toContain('Mark all as read');
-		const sortByRecent = screen.getByRole('menuitemcheckbox', {
-			name: 'Sort by recent activity',
+		const manualSort = screen.getByRole('menuitemradio', { name: 'Manual' });
+		expect(manualSort.getAttribute('aria-checked')).toBe('true');
+		expect(items[1]?.textContent).toContain('Manual');
+		const recentActivitySort = screen.getByRole('menuitemradio', {
+			name: 'Recent activity',
 		});
-		expect(items[1]?.textContent).toContain('Sort by recent activity');
+		expect(recentActivitySort.getAttribute('aria-checked')).toBe('false');
+		expect(items[2]?.textContent).toContain('Recent activity');
 		const noGrouping = screen.getByRole('menuitemradio', { name: 'No grouping' });
 		expect(noGrouping.getAttribute('aria-checked')).toBe('false');
-		expect(items[2]?.textContent).toContain('No grouping');
+		expect(items[3]?.textContent).toContain('No grouping');
 		const projectGrouping = screen.getByRole('menuitemradio', {
 			name: 'Project',
 		});
 		expect(projectGrouping.getAttribute('aria-checked')).toBe('true');
-		expect(items[3]?.textContent).toContain('Project');
+		expect(items[4]?.textContent).toContain('Project');
 		const projectAndActivityGrouping = screen.getByRole('menuitemradio', {
 			name: 'Project and activity',
 		});
 		expect(projectAndActivityGrouping.getAttribute('aria-checked')).toBe('false');
-		expect(items[4]?.textContent).toContain('Project and activity');
+		expect(items[5]?.textContent).toContain('Project and activity');
 		const activityGrouping = screen.getByRole('menuitemradio', { name: 'Activity' });
 		expect(activityGrouping.getAttribute('aria-checked')).toBe('false');
-		expect(items[5]?.textContent).toContain('Activity');
+		expect(items[6]?.textContent).toContain('Activity');
 		const groupNestedProjectPaths = screen.getByRole('menuitemcheckbox', {
 			name: 'Combine nested paths',
 		});
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
 		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe(null);
-		expect(items[6]?.textContent).toContain('Combine nested paths');
+		expect(items[7]?.textContent).toContain('Combine nested paths');
 		const defaultLayout = screen.getByRole('menuitemradio', { name: 'Default' });
 		expect(defaultLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[7]?.textContent).toContain('Default');
+		expect(items[8]?.textContent).toContain('Default');
 		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact chat items' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
-		expect(items[8]?.textContent).toContain('Compact chat items');
+		expect(items[9]?.textContent).toContain('Compact chat items');
 		const singleLineLayout = screen.getByRole('menuitemradio', {
 			name: 'Single-line chat items',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[9]?.textContent).toContain('Single-line chat items');
+		expect(items[10]?.textContent).toContain('Single-line chat items');
 		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
 			name: 'Autohide sidebar',
 		});
 		expect(chatListAutohide.getAttribute('aria-checked')).toBe('true');
-		expect(items[10]?.textContent).toContain('Autohide sidebar');
+		expect(items[11]?.textContent).toContain('Autohide sidebar');
 		const dockOnRight = screen.getByRole('menuitemcheckbox', {
 			name: 'Dock sidebar on the right',
 		});
 		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
-		expect(items[11]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[12]?.textContent).toContain('Scheduled prompts');
-		expect(items[13]?.textContent).toContain('Settings');
-		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
+		expect(items[12]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[13]?.textContent).toContain('Scheduled prompts');
+		expect(items[14]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(projectGrouping.className).toContain('pe-8');
 		expect(projectGrouping.className).not.toContain('ps-8');
-
-		expect(sortByRecent).toBeTruthy();
 
 		await fireEvent.click(singleLineLayout);
 		expect(onSetChatItemLayout).toHaveBeenCalledExactlyOnceWith('single-line');
@@ -640,17 +643,17 @@ describe('sidebar search interactions', () => {
 		expect(onSetChatGrouping).toHaveBeenCalledTimes(2);
 	});
 
-	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {
-		const onToggleSortByRecent = vi.fn();
+	it('invokes the sort mode handler when a sort order option is selected', async () => {
+		const onSetSortMode = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
-			sortByRecent: false,
+			sortMode: 'manual',
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
-			onToggleSortByRecent,
+			onSetSortMode,
 			onShowScheduledPrompts: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
@@ -658,13 +661,13 @@ describe('sidebar search interactions', () => {
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(mobileTrigger);
 
-		const sortByRecent = await screen.findByRole('menuitemcheckbox', {
-			name: 'Sort by recent activity',
+		const recentActivitySort = await screen.findByRole('menuitemradio', {
+			name: 'Recent activity',
 		});
-		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
+		expect(recentActivitySort.getAttribute('aria-checked')).toBe('false');
 
-		await fireEvent.click(sortByRecent);
-		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
+		await fireEvent.click(recentActivitySort);
+		expect(onSetSortMode).toHaveBeenCalledExactlyOnceWith('recent');
 	});
 
 	it.each(['none', 'activity'] as const)(
@@ -911,80 +914,6 @@ describe('sidebar search interactions', () => {
 			element.getAttribute('data-slot'),
 		);
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
-	});
-
-	it('shows a recent-activity indicator below the controls row when recent sort is active', () => {
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: true,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent: vi.fn(),
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
-		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
-			element.getAttribute('data-slot'),
-		);
-		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-sort-indicator']);
-		expect(screen.getByText('Recent activity')).toBeTruthy();
-	});
-
-	it('hides the recent-activity indicator when recent sort is off', () => {
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: false,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent: vi.fn(),
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		expect(document.querySelector('[data-slot="sidebar-sort-indicator"]')).toBeNull();
-	});
-
-	it('disables recent sort when the indicator is clicked', async () => {
-		const onToggleSortByRecent = vi.fn();
-		render(SidebarSearchDock, {
-			isLoading: false,
-			visibleUnreadCount: 0,
-			sortByRecent: true,
-			sidebarMenuSearches: [],
-			sidebarPillSearches: [],
-			activeQuery: '',
-			onOpenSearchDialog: vi.fn(),
-			onCreateChat: vi.fn(),
-			onApplySidebarMenuSearch: vi.fn(),
-			onApplyPillSearch: vi.fn(),
-			onClearActiveQuery: vi.fn(),
-			onToggleSortByRecent,
-			onShowScheduledPrompts: vi.fn(),
-			onShowSettings: vi.fn(),
-		});
-
-		const indicator = document.querySelector<HTMLButtonElement>(
-			'[data-slot="sidebar-sort-indicator"] button',
-		);
-		expect(indicator).toBeTruthy();
-		await fireEvent.click(indicator!);
-		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
 	});
 
 	it('supports button-based reordering for saved searches', async () => {

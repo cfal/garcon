@@ -37,6 +37,7 @@
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
+		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -378,11 +379,8 @@
 		localSettings.set('sidebarChatItemLayout', layout);
 	}
 
-	function handleToggleSortByRecent(): void {
-		localSettings.set(
-			'sidebarSortMode',
-			localSettings.sidebarSortMode === 'recent' ? 'manual' : 'recent',
-		);
+	function handleSetSortMode(sortMode: SidebarSortMode): void {
+		localSettings.set('sidebarSortMode', sortMode);
 	}
 
 	function handleToggleChatListAutohide(): void {
@@ -449,7 +447,7 @@
 			chatGrouping={displayOptions.grouping}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			chatItemLayout={displayOptions.chatItemLayout}
-			sortByRecent={displayOptions.sortMode === 'recent'}
+			sortMode={displayOptions.sortMode}
 			chatListAutohide={localSettings.chatListAutohide}
 			{chatListAutohideAvailable}
 			dockOnRight={localSettings.chatListDock === 'right'}
@@ -464,7 +462,7 @@
 			onSetChatGrouping={handleSetChatGrouping}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onSetChatItemLayout={handleSetChatItemLayout}
-			onToggleSortByRecent={handleToggleSortByRecent}
+			onSetSortMode={handleSetSortMode}
 			onToggleChatListAutohide={handleToggleChatListAutohide}
 			onSetDockOnRight={handleSetDockOnRight}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
