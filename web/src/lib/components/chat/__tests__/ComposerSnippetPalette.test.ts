@@ -195,7 +195,7 @@ describe('ComposerSnippetPalette', () => {
 		expect(screen.getByTestId('selected-arguments').textContent).toBe(rawArguments);
 	});
 
-	it('prefills saved defaults and places the collapsed caret at the end', async () => {
+	it('prefills saved defaults and selects them for replacement', async () => {
 		render(ComposerSnippetPaletteTestHost, {
 			count: 1,
 			firstTemplate: 'Review {{arguments}}',
@@ -214,7 +214,7 @@ describe('ComposerSnippetPalette', () => {
 		await waitFor(() => expect(document.activeElement).toBe(input));
 		expect(screen.getByTestId('main-inert').textContent).toBe('true');
 		expect(input.value).toBe('staged changes');
-		expect(input.selectionStart).toBe(input.value.length);
+		expect(input.selectionStart).toBe(0);
 		expect(input.selectionEnd).toBe(input.value.length);
 
 		const insert = screen.getByRole('button', { name: 'Insert snippet' });
@@ -318,6 +318,9 @@ describe('ComposerSnippetPalette', () => {
 			name: 'Arguments',
 		})) as HTMLTextAreaElement;
 		expect(reopened.value).toBe(rawArguments);
+		await waitFor(() => expect(document.activeElement).toBe(reopened));
+		expect(reopened.selectionStart).toBe(rawArguments.length);
+		expect(reopened.selectionEnd).toBe(rawArguments.length);
 	});
 
 	it('reopens a failed cleared insertion without restoring the saved default', async () => {

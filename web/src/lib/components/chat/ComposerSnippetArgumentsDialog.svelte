@@ -84,7 +84,10 @@
 		if (!open || !argumentsRef) return false;
 		argumentsRef.focus({ preventScroll: true });
 		const end = argumentsRef.value.length;
-		argumentsRef.setSelectionRange(end, end);
+		// Selects a pre-filled default so typing replaces it; an edited retry draft keeps the caret at the end.
+		const isDefaultPrefill =
+			snippet !== null && end > 0 && argumentsRef.value === snippet.defaultArguments;
+		argumentsRef.setSelectionRange(isDefaultPrefill ? 0 : end, end);
 		return true;
 	}
 
