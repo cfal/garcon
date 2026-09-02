@@ -228,6 +228,36 @@ describe('ChatExecutionCoordinator', () => {
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
+  it('preserves a direct-turn failure when the follow-on drain also fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+      turnRunner: { runAgentTurn: mock(async () => { throw new Error('provider failed'); }) },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
+    const failures = [];
+    coordinator.onTurnFailed((_chatId, message) => failures.push(message));
+
+    await expect(coordinator.runReservedTurn(reservation, 'work', { turnId: 'turn-1' }))
+      .rejects.toThrow('provider failed');
+    expect(failures).toEqual(['provider failed']);
+  });
+
+  it('releases direct ownership when the follow-on drain fails', async () => {
+    const fixture = createFixture({
+      queuedAdmission: () => { throw new Error('transcript failed'); },
+    });
+    coordinator = fixture.coordinator;
+    await coordinator.createChatQueueEntry('chat-1', 'queued');
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    await coordinator.triggerDrain('chat-1');
+
+    await expect(coordinator.releaseDirectTurn(reservation)).resolves.toBeUndefined();
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
   it('delivers control steering without admitting or cleaning up user input', async () => {
     const providerTarget = { providerTurnId: 'provider-turn-1' };
     const fixture = createFixture({

@@ -823,7 +823,13 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#ownership.notifyOwnersChanged();
     this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
-    if (outcome === 'completed' || drainRequested) await this.triggerDrain(reservation.chatId);
+    if (outcome === 'completed' || drainRequested) {
+      try {
+        await this.triggerDrain(reservation.chatId);
+      } catch (error) {
+        logger.error('queue: direct completion drain error:', error);
+      }
+    }
   }
 
   #requestStop(chatId: string, intent: ChatStopIntent): Promise<ChatStopOutcome> {
