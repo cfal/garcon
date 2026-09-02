@@ -184,7 +184,6 @@ export class CommandLedger {
   readonly #steerIdentityLimit: number;
   #steerIdentityCount = 0;
   readonly #turnOwnerIndex = new Map<string, string>();
-  readonly #turnMembership = new Map<string, Set<string>>();
   readonly #pendingChatDeletions = new Set<string>();
   readonly #recordLimit: number;
   readonly #turnResultByteLimit: number;
@@ -221,14 +220,6 @@ export class CommandLedger {
     if (!key) return null;
     const record = this.#records.get(key);
     return record ? cloneRecord(record) : null;
-  }
-
-  async getTurnRecords(chatId: string, turnId: string): Promise<readonly CommandLedgerRecord[]> {
-    return [...(this.#turnMembership.get(turnIndexKey(chatId, turnId)) ?? [])]
-      .flatMap((key) => {
-        const record = this.#records.get(key);
-        return record ? [cloneRecord(record)] : [];
-      });
   }
 
   async appendAssistantMessages(
@@ -273,18 +264,6 @@ export class CommandLedger {
       }
     }
     record.updatedAt = new Date().toISOString();
-    return cloneRecord(record);
-  }
-
-  async publishDeferredTerminal(
-    chatId: string,
-    turnId: string,
-  ): Promise<CommandLedgerRecord | null> {
-    const record = this.#recordForTurn(chatId, turnId);
-    if (!record || record.publicTerminalAt) return record ? cloneRecord(record) : null;
-    if (TERMINAL_COMMAND_STATUSES.has(record.status)) {
-      return this.markPublicTerminal(chatId, turnId);
-    }
     return cloneRecord(record);
   }
 
@@ -341,12 +320,6 @@ export class CommandLedger {
       if (record.chatId !== chatId || !record.turnId || record.publicTerminalAt) continue;
       await this.markPublicTerminal(chatId, record.turnId, reason);
     }
-  }
-
-  isTerminal(key: string): boolean {
-    const record = this.#records.get(key);
-    return this.#steerTombstones.has(key)
-      || (record !== undefined && TERMINAL_COMMAND_STATUSES.has(record.status));
   }
 
   unsettledQueueReceiptKeys(chatId: string): ReadonlySet<string> {
@@ -585,9 +558,6 @@ export class CommandLedger {
   #indexTurn(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    const members = this.#turnMembership.get(indexKey) ?? new Set<string>();
-    members.add(record.key);
-    this.#turnMembership.set(indexKey, members);
     if (record.commandType === 'steer') return;
     const owner = this.#turnOwnerIndex.get(indexKey);
     if (owner && owner !== record.key) {
@@ -607,9 +577,6 @@ export class CommandLedger {
   #removeTurnIndex(record: CommandLedgerRecord): void {
     if (!record.turnId) return;
     const indexKey = turnIndexKey(record.chatId, record.turnId);
-    const members = this.#turnMembership.get(indexKey);
-    members?.delete(record.key);
-    if (members?.size === 0) this.#turnMembership.delete(indexKey);
     if (this.#turnOwnerIndex.get(indexKey) === record.key) this.#turnOwnerIndex.delete(indexKey);
   }
 
