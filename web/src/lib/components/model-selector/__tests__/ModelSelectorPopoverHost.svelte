@@ -15,6 +15,7 @@
 		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from '../model-selector-types';
+	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
 
 	interface Props {
 		value: ModelSelectorValue;
@@ -123,6 +124,7 @@
 		getAgentLabel: (agentId: string) =>
 			agentLabelFor(agentId, agentId === 'amp' ? 'Amp' : 'Claude'),
 		getModels: (agentId: string) => modelsFor(agentId),
+		getThinkingModes: (agentId: string) => (agentId === 'amp' ? [] : [...THINKING_MODE_VALUES]),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
 			modelsFor(agentId).find(

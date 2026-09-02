@@ -9,6 +9,7 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
+	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
 	setGhCapability(getTestGhCapability());
@@ -62,6 +63,9 @@
 		},
 		getDefaultModel(agentId: string) {
 			return modelForAgent(agentId).value;
+		},
+		getThinkingModes() {
+			return THINKING_MODE_VALUES;
 		},
 		getModelForSelection(agentId: string, model: string) {
 			const models = [modelForAgent(agentId)];

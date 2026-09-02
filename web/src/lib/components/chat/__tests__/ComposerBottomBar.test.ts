@@ -5,13 +5,21 @@ import ComposerBottomBar from '../ComposerBottomBar.svelte';
 describe('ComposerBottomBar', () => {
 	afterEach(cleanup);
 
-	it('uses concise accessible names when mode options are unavailable', () => {
+	it('hides controls the agent cannot configure', () => {
 		render(ComposerBottomBar, {
 			canAttachImages: false,
 			attachImagesTooltip: 'Unavailable',
 			onAddImage: vi.fn(),
-			permissionOptions: [],
-			selectedPermission: 'default',
+			permissionOptions: [
+				{
+					value: 'bypassPermissions',
+					label: 'Bypass Permissions',
+					description: 'Runs without permission prompts.',
+					iconId: 'permission-bypass',
+					toneClass: '',
+				},
+			],
+			selectedPermission: 'bypassPermissions',
 			onPermissionSelect: vi.fn(),
 			thinkingOptions: [],
 			selectedThinking: 'none',
@@ -24,7 +32,9 @@ describe('ComposerBottomBar', () => {
 			showSendButton: false,
 		});
 
-		expect(screen.getByRole('button', { name: 'Permission mode' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Thinking effort' })).toBeTruthy();
+		expect(
+			screen.queryByRole('button', { name: 'Permission mode: Bypass Permissions' }),
+		).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Thinking effort' })).toBeNull();
 	});
 });

@@ -154,70 +154,79 @@
 				/>
 			{/if}
 
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
-					title={activePermission?.label ?? m.chat_composer_permission_mode()}
-					aria-label={permissionControlLabel}
-				>
-					{#if activePermission}
-						<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
-					{/if}
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start">
-					{#each permissionOptions as option (option.value)}
-						<DropdownMenuItem onclick={() => onPermissionSelect(option.value)} class="items-start">
-							<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
-							<div class="min-w-0">
-								<div class="font-medium">{option.label}</div>
-								<div class="text-xs text-muted-foreground">{option.description}</div>
-							</div>
-						</DropdownMenuItem>
-					{/each}
-				</DropdownMenuContent>
-			</DropdownMenu>
-
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					data-slot="thinking-mode-trigger"
-					data-rainbow={activeThinking?.rainbow ? 'true' : undefined}
-					class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
-					title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
-					aria-label={thinkingControlLabel}
-				>
-					{#if activeThinking}
-						<ComposerModeIcon
-							iconId={activeThinking.iconId}
-							rainbow={activeThinking.rainbow}
-							class="size-4"
-						/>
-					{/if}
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start">
-					{#each thinkingOptions as option (option.value)}
-						<DropdownMenuItem
-							onclick={() => onThinkingSelect(option.value)}
-							class={option.rainbow ? 'rainbow-ultra-surface items-start' : 'items-start'}
-							data-thinking-mode={option.value}
-							data-rainbow={option.rainbow ? 'true' : undefined}
-						>
-							<ComposerModeIcon
-								iconId={option.iconId}
-								rainbow={option.rainbow}
-								class="mt-0.5 size-4"
-							/>
-							<div class="min-w-0">
-								<div class="font-medium">{option.label}</div>
-								<div
-									class={option.rainbow ? 'text-xs text-white' : 'text-xs text-muted-foreground'}
-								>
-									{option.description}
+			{#if permissionOptions.length > 1}
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
+						title={activePermission?.label ?? m.chat_composer_permission_mode()}
+						aria-label={permissionControlLabel}
+					>
+						{#if activePermission}
+							<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
+						{/if}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start">
+						{#each permissionOptions as option (option.value)}
+							<DropdownMenuItem
+								onclick={() => onPermissionSelect(option.value)}
+								class="items-start"
+							>
+								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
+								<div class="min-w-0">
+									<div class="font-medium">{option.label}</div>
+									<div class="text-xs text-muted-foreground">{option.description}</div>
 								</div>
-							</div>
-						</DropdownMenuItem>
-					{/each}
-				</DropdownMenuContent>
-			</DropdownMenu>
+							</DropdownMenuItem>
+						{/each}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			{/if}
+
+			{#if thinkingOptions.length > 0}
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						data-slot="thinking-mode-trigger"
+						data-rainbow={activeThinking?.rainbow ? 'true' : undefined}
+						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
+						title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
+						aria-label={thinkingControlLabel}
+					>
+						{#if activeThinking}
+							<ComposerModeIcon
+								iconId={activeThinking.iconId}
+								rainbow={activeThinking.rainbow}
+								class="size-4"
+							/>
+						{/if}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start">
+						{#each thinkingOptions as option (option.value)}
+							<DropdownMenuItem
+								onclick={() => onThinkingSelect(option.value)}
+								class={option.rainbow ? 'rainbow-ultra-surface items-start' : 'items-start'}
+								data-thinking-mode={option.value}
+								data-rainbow={option.rainbow ? 'true' : undefined}
+							>
+								<ComposerModeIcon
+									iconId={option.iconId}
+									rainbow={option.rainbow}
+									class="mt-0.5 size-4"
+								/>
+								<div class="min-w-0">
+									<div class="font-medium">{option.label}</div>
+									<div
+										class={option.rainbow
+											? 'text-xs text-white'
+											: 'text-xs text-muted-foreground'}
+									>
+										{option.description}
+									</div>
+								</div>
+							</DropdownMenuItem>
+						{/each}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			{/if}
 
 			{#if agentSettings}
 				{@render agentSettings()}

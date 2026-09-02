@@ -1,4 +1,3 @@
-import { PERMISSION_MODE_VALUES } from '@garcon/common/chat-modes';
 import { AMP_MODELS } from '@garcon/common/models';
 import {
   AgentIntegrationError,
@@ -30,8 +29,8 @@ const AMP_DESCRIPTOR = {
   id: 'amp',
   label: 'Amp',
   icon: null,
-  supportedPermissionModes: PERMISSION_MODE_VALUES.filter((mode) => mode !== 'plan'),
-  supportedThinkingModes: ['none'],
+  supportedPermissionModes: ['bypassPermissions'],
+  supportedThinkingModes: [],
   supportsImages: true,
   supportsProjectPathUpdate: false,
   requiresNativePathForProjectPathUpdate: false,

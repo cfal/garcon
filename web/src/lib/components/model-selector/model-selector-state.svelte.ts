@@ -90,7 +90,9 @@ export class ModelSelectorState {
 	}
 
 	get effortSelectionEnabled(): boolean {
-		return this.mode.effort === 'select';
+		return (
+			this.mode.effort === 'select' && this.modelCatalog.getThinkingModes(this.agentId).length > 0
+		);
 	}
 
 	get thinkingMode(): ThinkingMode {
@@ -99,7 +101,8 @@ export class ModelSelectorState {
 	}
 
 	get thinkingModeOptions() {
-		return buildThinkingModeOptions();
+		const supported = new Set(this.modelCatalog.getThinkingModes(this.agentId));
+		return buildThinkingModeOptions().filter((option) => supported.has(option.id));
 	}
 
 	get selectedThinkingModeLabel(): string {

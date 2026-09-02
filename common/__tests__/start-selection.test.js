@@ -169,6 +169,28 @@ describe('shared start selection', () => {
     );
   });
 
+  test('uses the neutral value for agents without reasoning mode support', () => {
+    const amp = agent({
+      id: 'amp',
+      supportedThinkingModes: [],
+      defaultSettings: { ownerId: 'amp', schemaVersion: 1, values: {} },
+    });
+
+    expect(resolveStartSelection(catalog(amp), settings(), {
+      agentId: 'amp',
+      model: 'gpt-5.4',
+      thinkingMode: 'none',
+    }).thinkingMode).toBe('none');
+    expectCode(
+      () => resolveStartSelection(catalog(amp), settings(), {
+        agentId: 'amp',
+        model: 'gpt-5.4',
+        thinkingMode: 'high',
+      }),
+      'UNSUPPORTED_REASONING_EFFORT',
+    );
+  });
+
   test('requires inherited bypass permission to be explicit', () => {
     expectCode(
       () => resolveStartSelection(catalog(), settings('bypassPermissions'), {

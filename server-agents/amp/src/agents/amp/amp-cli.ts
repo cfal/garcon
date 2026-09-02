@@ -1,6 +1,5 @@
 // Amp CLI transport. Each turn keeps stream-JSON stdin open until the agent
 // settles so Garcon and Amp web steering share the same live operation.
-
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';

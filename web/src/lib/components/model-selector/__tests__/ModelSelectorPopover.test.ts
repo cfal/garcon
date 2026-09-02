@@ -224,6 +224,20 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('omits effort selection for an agent that advertises no reasoning modes', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'amp', model: 'medium', thinkingMode: 'none' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			includeManagedAgent: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Amp .* Amp Medium/ }));
+
+		expect(screen.queryByText('Effort')).toBeNull();
+		expect(screen.queryByRole('button', { name: /Default Provider default effort/ })).toBeNull();
+	});
+
 	it('preserves saved endpoint routing when only effort changes outside the catalog', async () => {
 		const onChange = vi.fn();
 
