@@ -7,6 +7,7 @@ import {
 } from '$lib/utils/local-persistence';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
+import type { ResolvedModelSelection } from '$shared/start-selection';
 import {
 	isAgentSettingLabelKey,
 	isAgentSettingOptionDescriptionKey,
@@ -509,21 +510,31 @@ export class ModelCatalogStore {
 		);
 	}
 
+	// Catalog values identify explicit endpoint choices. Raw persisted names
+	// resolve only within their recorded endpoint or the native catalog.
 	getModelForSelection(
 		agentId: SessionAgentId,
 		model: string,
 		modelEndpointId?: string | null,
 	): ModelOption | null {
 		const models = this.getModels(agentId);
-		if (modelEndpointId) {
-			const matchedEndpointModel = models.find(
+		if (modelEndpointId === null) {
+			return models.find(
+				(entry) => !entry.endpointId && (entry.value === model || entry.rawModel === model),
+			) ?? null;
+		}
+		if (modelEndpointId !== undefined) {
+			return models.find(
 				(entry) =>
 					entry.endpointId === modelEndpointId &&
 					(entry.value === model || entry.rawModel === model),
-			);
-			if (matchedEndpointModel) return matchedEndpointModel;
+			) ?? null;
 		}
-		return models.find((entry) => entry.value === model || entry.rawModel === model) ?? null;
+		return (
+			models.find((entry) => entry.value === model) ??
+			models.find((entry) => !entry.endpointId && entry.rawModel === model) ??
+			null
+		);
 	}
 
 	supportsCompact(agentId: SessionAgentId): boolean {
@@ -588,14 +599,29 @@ export class ModelCatalogStore {
 	selectionFor(
 		agentId: SessionAgentId,
 		model: string,
+	): ResolvedModelSelection;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId: string,
+	): ResolvedModelSelection | null;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId: null | undefined,
+	): ResolvedModelSelection;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
 		modelEndpointId?: string | null,
-	): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	} {
+	): ResolvedModelSelection | null;
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): ResolvedModelSelection | null {
 		const selected = this.getModelForSelection(agentId, model, modelEndpointId);
+		if (!selected && modelEndpointId) return null;
 		return {
 			model: selected?.rawModel ?? model,
 			apiProviderId: selected?.apiProviderId ?? null,

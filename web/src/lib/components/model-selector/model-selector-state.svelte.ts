@@ -71,6 +71,7 @@ export class ModelSelectorState {
 	draftModelValue = $state<string | null>(null);
 	draftThinkingMode = $state<ThinkingMode | null>(null);
 	contentPane = $state<ModelSelectorContentPane>('browse');
+	#draftTargetChanged = false;
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -470,6 +471,7 @@ export class ModelSelectorState {
 		if (!this.isAgentSelectable(agentId)) return;
 		this.showBrowsePane();
 		if (agentId === this.agentId) return;
+		this.#draftTargetChanged = true;
 		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
 		const source = sources.find((entry) => entry.key === currentSourceKey) ?? sources[0] ?? null;
@@ -482,6 +484,7 @@ export class ModelSelectorState {
 	selectSource(sourceKey: string): void {
 		this.showBrowsePane();
 		if (sourceKey === this.sourceKey) return;
+		this.#draftTargetChanged = true;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
 		const modelValue = this.#committedModelValueFor(this.agentId, source?.key ?? null);
 		this.query = '';
@@ -491,6 +494,7 @@ export class ModelSelectorState {
 
 	selectModel(modelValue: string): void {
 		this.showBrowsePane();
+		this.#draftTargetChanged = true;
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
 		if (!this.effortSelectionEnabled) {
@@ -509,6 +513,7 @@ export class ModelSelectorState {
 	selectRecent(recent: ModelSelectorRecentOption): void {
 		if (!this.isAgentSelectable(recent.agentId)) return;
 		if (this.effortSelectionEnabled) {
+			this.#draftTargetChanged = true;
 			this.#setDraftSelection(
 				recent.agentId,
 				recent.modelValue,
@@ -535,7 +540,7 @@ export class ModelSelectorState {
 		const effortOnlyChange =
 			agentId === this.value.agentId &&
 			modelValue === currentModelValue(this.modelCatalog, this.value);
-		if (effortOnlyChange && this.value.modelEndpointId && !next.modelEndpointId) {
+		if (effortOnlyChange && this.value.modelEndpointId && !this.#draftTargetChanged) {
 			next = {
 				...next,
 				model: this.value.model,
@@ -570,6 +575,7 @@ export class ModelSelectorState {
 	}
 
 	#startDraftFromValue(): void {
+		this.#draftTargetChanged = false;
 		const agentId = this.value.agentId;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		this.#setDraftSelection(
@@ -606,6 +612,7 @@ export class ModelSelectorState {
 	}
 
 	#clearDraft(): void {
+		this.#draftTargetChanged = false;
 		this.draftAgentId = null;
 		this.draftModelValue = null;
 		this.activeSourceKey = null;

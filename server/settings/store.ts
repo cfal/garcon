@@ -44,6 +44,7 @@ import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
 import type {
   ChatFolder,
   ChatReorderResult,
+  ChatStartupPreferences,
   ProjectSettings,
   ReorderResult,
   SavedChatSearch,
@@ -439,7 +440,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#startupDefaults.getExecutionDefaults();
   }
 
-  async recordChatStartup(defaults: Record<string, unknown> | null | undefined): Promise<void> {
+  async recordChatStartup(defaults: ChatStartupPreferences | null | undefined): Promise<void> {
     return this.#startupDefaults.recordChatStartup(defaults);
   }
 

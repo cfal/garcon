@@ -32,6 +32,7 @@ export function buildModelSelectorRecents(
 		const agentId = recent.agentId as SessionAgentId;
 		if (!selectable.has(agentId)) continue;
 
+		// Canonicalizes persisted raw names before resolving the displayed model.
 		const modelValue = modelCatalog.selectionValueFor(
 			agentId,
 			recent.model,

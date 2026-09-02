@@ -238,34 +238,108 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.queryByRole('button', { name: /Default Provider default effort/ })).toBeNull();
 	});
 
-	it('preserves saved endpoint routing when only effort changes outside the catalog', async () => {
+	it('preserves a stale endpoint when another endpoint exposes the same model', async () => {
 		const onChange = vi.fn();
 
 		render(ModelSelectorPopoverHost, {
 			value: {
 				agentId: 'claude',
-				model: 'removed-from-catalog',
+				model: 'endpoint-model',
 				apiProviderId: 'custom-provider',
 				modelEndpointId: 'custom-endpoint',
 				modelProtocol: 'anthropic-messages',
 				thinkingMode: 'none',
 			},
 			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			includeEndpointModel: true,
 			onChange,
 		});
 
 		await fireEvent.click(
-			screen.getByRole('button', { name: /Claude .* removed-from-catalog .* Default/ }),
+			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
 
 		await waitFor(() => {
 			expect(onChange).toHaveBeenCalledWith({
 				agentId: 'claude',
-				modelValue: 'removed-from-catalog',
-				model: 'removed-from-catalog',
+				modelValue: 'endpoint-model',
+				model: 'endpoint-model',
 				apiProviderId: 'custom-provider',
 				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'high',
+			});
+		});
+	});
+
+	it('preserves a stale native source when an endpoint exposes the same model', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: {
+				agentId: 'claude',
+				model: 'endpoint-model',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				thinkingMode: 'none',
+			},
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			includeEndpointModel: true,
+			onChange,
+		});
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: 'claude',
+				modelValue: 'endpoint-model',
+				model: 'endpoint-model',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				thinkingMode: 'high',
+			});
+		});
+	});
+
+	it('allows explicitly selecting the live endpoint for a stale model name', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: {
+				agentId: 'claude',
+				model: 'endpoint-model',
+				apiProviderId: 'custom-provider',
+				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'none',
+			},
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			includeEndpointModel: true,
+			onChange,
+		});
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
+		);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
+		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: 'claude',
+				modelValue: 'acme-claude:endpoint-model',
+				model: 'endpoint-model',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme-claude',
 				modelProtocol: 'anthropic-messages',
 				thinkingMode: 'high',
 			});

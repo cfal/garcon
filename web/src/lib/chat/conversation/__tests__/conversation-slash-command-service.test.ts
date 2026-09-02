@@ -189,12 +189,14 @@ function createDeps(chat = createChat()) {
 			setCurrentChatId: vi.fn(),
 		},
 		modelCatalog: {
-			selectionFor: vi.fn((_agentId, model) => ({
-				model,
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			})),
+			selectionFor: vi.fn(
+				(_agentId, model): ReturnType<ConversationSlashCommandDeps['modelCatalog']['selectionFor']> => ({
+					model,
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				}),
+			),
 			supportsFork: vi.fn(() => false),
 			supportsForkWhileRunning: vi.fn(() => false),
 			supportsSteering: vi.fn(() => false),
@@ -949,6 +951,42 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('chat-2');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('preserves stale endpoint routing when a fork model is absent from the catalog', async () => {
+		const chat = createChat({
+			model: 'gpt-stale',
+			apiProviderId: 'stale',
+			modelEndpointId: 'stale_openai',
+			modelProtocol: 'openai-compatible',
+		});
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.selectionFor.mockReturnValueOnce(null);
+		mockForkRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
+			chat: createServerEntry('chat-2'),
+		});
+
+		await new ConversationSlashCommandService(deps).submitForkCommand(
+			chat.id,
+			chat,
+			'continue here',
+			[],
+			true,
+		);
+
+		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
+			model: 'gpt-stale',
+			apiProviderId: 'stale',
+			modelEndpointId: 'stale_openai',
+			modelProtocol: 'openai-compatible',
+		}));
 	});
 
 	it('asks before a fork run falls back and repeats it with the same command identities', async () => {

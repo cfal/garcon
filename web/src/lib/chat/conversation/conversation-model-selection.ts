@@ -1,4 +1,3 @@
-import type { ApiProtocol } from '$shared/api-providers';
 import type { ConversationExecutionSelection } from './conversation-execution-draft-state.svelte.js';
 
 export type ConversationModelSelection = Pick<
@@ -16,12 +15,7 @@ interface ConversationModelSelectionCatalog {
 		agentId: string,
 		model: string,
 		modelEndpointId?: string | null,
-	): {
-		model: string;
-		apiProviderId: string | null;
-		modelEndpointId: string | null;
-		modelProtocol: ApiProtocol | null;
-	};
+	): ConversationModelSelection | null;
 }
 
 export function resolveConversationModelSelection(
@@ -29,9 +23,9 @@ export function resolveConversationModelSelection(
 	catalog: ConversationModelSelectionCatalog,
 ): ConversationModelSelection {
 	const resolved = catalog.selectionFor(source.agentId, source.model, source.modelEndpointId);
-	if (resolved.modelEndpointId || !source.modelEndpointId) return resolved;
+	if (resolved && (resolved.modelEndpointId || !source.modelEndpointId)) return resolved;
 	return {
-		model: resolved.model,
+		model: resolved?.model ?? source.model,
 		apiProviderId: source.apiProviderId,
 		modelEndpointId: source.modelEndpointId,
 		modelProtocol: source.modelProtocol,

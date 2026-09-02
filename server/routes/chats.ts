@@ -46,7 +46,7 @@ import {
 } from '../lib/domain-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
-import type { ChatReorderResult } from '../settings/types.js';
+import type { ChatReorderResult, ChatStartupPreferences } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import {
@@ -144,7 +144,7 @@ interface SettingsDep {
   getChatName(chatId: string): string | null;
   setSessionName(chatId: string, title: string): Promise<unknown>;
   setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean>;
-  recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
+  recordChatStartup(defaults: ChatStartupPreferences): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
   removeSessionName(chatId: string): Promise<void>;

@@ -5,7 +5,6 @@ import type {
 	ModelSelectorValue,
 } from '$lib/components/model-selector/model-selector-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -23,6 +22,7 @@ import type {
 	PromptRefinementUiSettings,
 	RemoteUiSettings,
 } from '$shared/settings';
+import type { ResolvedModelSelection } from '$shared/start-selection';
 
 export type GenerationSettingsKey =
 	| 'chatTitle'
@@ -33,9 +33,23 @@ export type GenerationSettingsKey =
 // Keys whose card owns an on/off switch above the model selector.
 const TOGGLEABLE_KEYS = new Set<GenerationSettingsKey>(['chatTitle', 'agentSwitchCompaction']);
 
+export interface RemoteGenerationSettingsStore {
+	snapshot: RemoteSettingsStore['snapshot'];
+	update: RemoteSettingsStore['update'];
+}
+
+export interface RemoteGenerationSettingsModelCatalog {
+	selectionFor(
+		agentId: SessionAgentId,
+		model: string,
+		modelEndpointId?: string | null,
+	): ResolvedModelSelection | null;
+	selectionValueFor(agentId: SessionAgentId, model: string, modelEndpointId?: string | null): string;
+}
+
 interface RemoteGenerationSettingsCardOptions {
-	remoteSettings: RemoteSettingsStore;
-	modelCatalog: ModelCatalogStore;
+	remoteSettings: RemoteGenerationSettingsStore;
+	modelCatalog: RemoteGenerationSettingsModelCatalog;
 	get settingsKey(): GenerationSettingsKey;
 	get enabledLabel(): string | undefined;
 }
@@ -167,12 +181,18 @@ export class RemoteGenerationSettingsCardState {
 	}
 
 	get configurationKey(): string {
-		const configuration = this.selectionOverride
-			? this.options.modelCatalog.selectionFor(
-					this.provider,
-					this.modelValue,
-					this.modelEndpointId,
-				)
+		const override = this.selectionOverride;
+		const configuration = override
+			? (this.options.modelCatalog.selectionFor(
+					override.agentId,
+					override.model,
+					override.modelEndpointId,
+				) ?? {
+					model: override.model,
+					apiProviderId: override.apiProviderId ?? null,
+					modelEndpointId: override.modelEndpointId ?? null,
+					modelProtocol: override.modelProtocol ?? null,
+				})
 			: {
 					model: this.rawModel,
 					apiProviderId: this.apiProviderId,
@@ -227,7 +247,14 @@ export class RemoteGenerationSettingsCardState {
 			nextProvider,
 			nextModelValue,
 			nextEndpointId,
-		);
+		) ?? {
+			model: typeof overrides.model === 'string' ? overrides.model : (this.rawModel || nextModelValue),
+			apiProviderId:
+				overrides.apiProviderId !== undefined ? overrides.apiProviderId : this.apiProviderId,
+			modelEndpointId: nextEndpointId,
+			modelProtocol:
+				overrides.modelProtocol !== undefined ? overrides.modelProtocol : this.modelProtocol,
+		};
 		return {
 			agentId: nextProvider,
 			model: selection.model,

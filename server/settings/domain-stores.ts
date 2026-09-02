@@ -1,5 +1,6 @@
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
+import { isRecord } from '../../common/json.js';
 
 const logger = createLogger('settings:domain-stores');
 import {
@@ -18,6 +19,7 @@ import {
 import type {
   ChatFolder,
   ChatReorderResult,
+  ChatStartupPreferences,
   ExecutionDefaults,
   ProjectSettings,
   ReorderResult,
@@ -361,35 +363,52 @@ export class StartupDefaultsStore {
     return sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
   }
 
-  async recordChatStartup(defaults: Record<string, unknown> | null | undefined): Promise<void> {
-    return this.#context.mutate(async () => {
-      const settings = this.#context.readSettings();
+  // Startup preferences are advisory: recording happens after a chat already
+  // dispatched, so a persistence failure is logged instead of failing the chat.
+  async recordChatStartup(defaults: ChatStartupPreferences | null | undefined): Promise<void> {
+    try {
+      await this.#context.mutate(async () => {
+        const settings = this.#context.readSettings();
 
-      const recent = sanitizeRecentAgentSetting(defaults);
-      if (recent) {
-        settings.recentAgentSettings = dedupeRecentAgentSettings([
-          recent,
-          ...(settings.recentAgentSettings || []),
-        ]);
-      }
+        const recent = sanitizeRecentAgentSetting(defaults);
+        if (recent) {
+          settings.recentAgentSettings = dedupeRecentAgentSettings([
+            recent,
+            ...(settings.recentAgentSettings || []),
+          ]);
+        }
 
-      settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
+        settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
 
-      const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
-      if (agentId) {
-        const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
-        settings.executionDefaults = {
-          ...current,
-          byAgent: {
-            ...current.byAgent,
-            [agentId]: sanitizeExecutionDefaults(defaults),
-          },
-        };
-      }
+        const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
+        if (agentId) {
+          const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+          // Chat starts carry a single agentSettings envelope for the starting
+          // agent rather than a prebuilt agentSettingsById map.
+          const envelope = isRecord(defaults?.agentSettings) ? defaults.agentSettings : null;
+          settings.executionDefaults = {
+            ...current,
+            byAgent: {
+              ...current.byAgent,
+              [agentId]: sanitizeExecutionDefaults({
+                permissionMode: defaults?.permissionMode,
+                thinkingMode: defaults?.thinkingMode,
+                agentSettingsById: defaults?.agentSettingsById
+                  ?? (envelope ? { [agentId]: envelope } : undefined),
+              }),
+            },
+          };
+        }
 
-      bumpRemoteSettingsVersion(settings);
-      await this.#context.saveAndMaybeEmitRemote(settings, true);
-    });
+        bumpRemoteSettingsVersion(settings);
+        await this.#context.saveAndMaybeEmitRemote(settings, true);
+      });
+    } catch (error: unknown) {
+      logger.warn(
+        'settings: failed to record chat startup preferences:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   async updateExecutionDefaultsForAgent(

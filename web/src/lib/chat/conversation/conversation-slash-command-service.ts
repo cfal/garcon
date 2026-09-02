@@ -4,6 +4,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
+import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import {
 	steerSubmissionRejection,
 	steerSubmissionRejectionNotice,
@@ -113,7 +114,7 @@ interface SlashCommandModelCatalog {
 		apiProviderId: string | null;
 		modelEndpointId: string | null;
 		modelProtocol: ApiProtocol | null;
-	};
+	} | null;
 	supportsFork(agentId: SessionAgentId): boolean;
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean;
 	supportsSteering(agentId: SessionAgentId): boolean;
@@ -682,11 +683,13 @@ export class ConversationSlashCommandService {
 
 		const forkChatId = createClientChatId();
 		const model = sourceChat.model ?? deps.agentState.model;
-		const selection = deps.modelCatalog.selectionFor(
-			sourceChat.agentId,
+		const selection = resolveConversationModelSelection({
+			agentId: sourceChat.agentId,
 			model,
-			sourceChat.modelEndpointId,
-		);
+			apiProviderId: sourceChat.apiProviderId ?? null,
+			modelEndpointId: sourceChat.modelEndpointId ?? null,
+			modelProtocol: sourceChat.modelProtocol ?? null,
+		}, deps.modelCatalog);
 		const submission = this.acceptedInputs.fork({
 			sourceChatId,
 			chatId: forkChatId,

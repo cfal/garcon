@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';
 import { buildModelSelectorRecents } from '../model-selector-recents';
+import { findModelForSelection, modelValueForSelection } from '../../../../test/model-catalog';
 
 const codexModel: ModelOption = { value: 'gpt-5', label: 'gpt-5' };
+const codexEndpointCollision: ModelOption = {
+	value: 'acme-openai:retired-native',
+	label: 'Acme: Retired Native',
+	rawModel: 'retired-native',
+	apiProviderId: 'acme',
+	endpointId: 'acme-openai',
+	protocol: 'openai-compatible',
+};
 const ampModel: ModelOption = { value: 'medium', label: 'Amp Medium' };
 const claudeEndpointModel: ModelOption = {
 	value: 'acme-anthropic:sonnet',
@@ -16,7 +25,7 @@ const claudeEndpointModel: ModelOption = {
 
 function makeCatalog(): ModelCatalogStore {
 	const modelsByAgent: Record<string, ModelOption[]> = {
-		codex: [codexModel],
+		codex: [codexModel, codexEndpointCollision],
 		claude: [claudeEndpointModel],
 		amp: [ampModel],
 	};
@@ -30,6 +39,12 @@ function makeCatalog(): ModelCatalogStore {
 		hasApiKey: true,
 	};
 
+	const getModelForSelection = (
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null => findModelForSelection(modelsByAgent[agentId] ?? [], model, endpointId);
+
 	return {
 		getSelectableAgents: () => ['codex', 'claude', 'amp'],
 		getAgentLabel: (agentId: string) => {
@@ -38,20 +53,9 @@ function makeCatalog(): ModelCatalogStore {
 			return 'Claude';
 		},
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
-			(modelsByAgent[agentId] ?? []).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null,
-		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = (modelsByAgent[agentId] ?? []).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			);
-			return selected?.value ?? model;
-		},
+		getModelForSelection,
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
+			modelValueForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
 		findEndpoint: (endpointId: string) => {
 			if (endpointId !== endpoint.id) return null;
 			return {
@@ -89,6 +93,20 @@ describe('model selector recents', () => {
 			modelProtocol: null,
 			displayLabel: 'Codex · OpenAI OAuth · gpt-5',
 		});
+	});
+
+	it('omits a stale native recent when only an endpoint exposes the raw model', () => {
+		const rows = buildModelSelectorRecents(makeCatalog(), [
+			{
+				agentId: 'codex',
+				model: 'retired-native',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+		]);
+
+		expect(rows).toEqual([]);
 	});
 
 	it('projects endpoint-backed recents without duplicating provider prefixes', () => {
@@ -133,6 +151,33 @@ describe('model selector recents', () => {
 			modelProtocol: null,
 			sourceLabel: '',
 			displayLabel: 'Amp · Amp Medium',
+		});
+	});
+
+	it('omits endpoint recents whose endpoint no longer exposes the model', () => {
+		const rows = buildModelSelectorRecents(makeCatalog(), [
+			{
+				agentId: 'codex',
+				model: 'gpt-5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			},
+			{
+				agentId: 'codex',
+				model: 'gpt-5',
+				apiProviderId: 'acme',
+				modelEndpointId: 'acme-anthropic',
+				modelProtocol: 'anthropic-messages',
+			},
+		]);
+
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			agentId: 'codex',
+			modelValue: 'gpt-5',
+			apiProviderId: null,
+			modelEndpointId: null,
 		});
 	});
 

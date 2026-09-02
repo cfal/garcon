@@ -16,6 +16,11 @@
 		ModelSelectorValue,
 	} from '../model-selector-types';
 	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
+	import {
+		findModelForSelection,
+		modelValueForSelection,
+		resolveModelSelection,
+	} from '../../../../test/model-catalog';
 
 	interface Props {
 		value: ModelSelectorValue;
@@ -102,6 +107,14 @@
 		return directModelsByAgent[agentId] ?? claudeModels;
 	}
 
+	function modelForSelection(
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null {
+		return findModelForSelection(modelsFor(agentId), model, endpointId);
+	}
+
 	setModelCatalog({
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
@@ -126,31 +139,11 @@
 		getModels: (agentId: string) => modelsFor(agentId),
 		getThinkingModes: (agentId: string) => (agentId === 'amp' ? [] : [...THINKING_MODE_VALUES]),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
-			modelsFor(agentId).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			) ?? null,
-		selectionFor: (agentId: string, model: string) => {
-			const selected = modelsFor(agentId).find(
-				(entry) => entry.value === model || entry.rawModel === model,
-			);
-			return {
-				model: selected?.rawModel ?? model,
-				apiProviderId: selected?.apiProviderId ?? null,
-				modelEndpointId: selected?.endpointId ?? null,
-				modelProtocol: selected?.protocol ?? null,
-			};
-		},
-		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) => {
-			const selected = modelsFor(agentId).find(
-				(entry) =>
-					(endpointId ? entry.endpointId === endpointId : true) &&
-					(entry.value === model || entry.rawModel === model),
-			);
-			return selected?.value ?? model;
-		},
+		getModelForSelection: modelForSelection,
+		selectionFor: (agentId: string, model: string, endpointId?: string | null) =>
+			resolveModelSelection(modelsFor(agentId), model, endpointId),
+		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
+			modelValueForSelection(modelsFor(agentId), model, endpointId),
 		findEndpoint: (endpointId: string) => {
 			if (endpointId !== 'acme-claude') return null;
 			const endpoint = {

@@ -420,6 +420,67 @@ describe('ModelCatalogStore', () => {
 		});
 	});
 
+	it('treats an explicit endpoint as a hard constraint when resolving selections', () => {
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify({
+				agentModels: {
+					sample: [
+						{ value: 'sol', label: 'Sol' },
+						{ value: 'luna', label: 'Luna' },
+						{
+							value: 'acme-openai:sonnet',
+							label: 'Acme: Sonnet',
+							rawModel: 'sonnet',
+							apiProviderId: 'acme',
+							endpointId: 'acme-openai',
+							protocol: 'openai-compatible',
+						},
+						{
+							value: 'acme-openai:retired-native',
+							label: 'Acme: Retired Native',
+							rawModel: 'retired-native',
+							apiProviderId: 'acme',
+							endpointId: 'acme-openai',
+							protocol: 'openai-compatible',
+						},
+					],
+				},
+				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'sol' }) },
+				apiProviderCatalog: [],
+				lastFetchedAt: Date.now(),
+			}),
+		);
+
+		const store = createModelCatalogStore();
+
+		expect(store.getModelForSelection('sample', 'luna')?.value).toBe('luna');
+		expect(store.getModelForSelection('sample', 'sonnet', 'acme-openai')?.value).toBe(
+			'acme-openai:sonnet',
+		);
+		// A model the endpoint no longer exposes stays unresolvable instead of
+		// silently re-targeting the native model sharing its raw name.
+		expect(store.getModelForSelection('sample', 'luna', 'acme-openai')).toBeNull();
+		expect(store.selectionFor('sample', 'luna', 'acme-openai')).toBeNull();
+		// An unscoped persisted name denotes a native model, not an endpoint
+		// that happens to expose the same raw name.
+		expect(store.getModelForSelection('sample', 'retired-native', null)).toBeNull();
+		expect(
+			store.getModelForSelection('sample', 'acme-openai:retired-native', null),
+		).toBeNull();
+		expect(store.selectionFor('sample', 'retired-native', null)).toEqual({
+			model: 'retired-native',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		});
+		expect(store.selectionFor('sample', 'acme-openai:retired-native')).toMatchObject({
+			model: 'retired-native',
+			apiProviderId: 'acme',
+			modelEndpointId: 'acme-openai',
+		});
+	});
+
 	it('ignores malformed integration ids from persisted data', () => {
 		localStorage.setItem(
 			STORAGE_KEY,

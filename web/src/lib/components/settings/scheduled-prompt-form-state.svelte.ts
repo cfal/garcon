@@ -92,7 +92,7 @@ export class ScheduledPromptFormState {
 			this.startup.settingsLoaded &&
 			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
-			Boolean(this.startup.modelValue)
+			this.startup.resolvedModelSelection !== null
 		);
 	}
 
@@ -130,12 +130,12 @@ export class ScheduledPromptFormState {
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
-		this.startup.selectAgent(scheduledPrompt.target.agentId);
-		this.startup.applyResolvedModel(
-			scheduledPrompt.target.agentId,
-			scheduledPrompt.target.model,
-			scheduledPrompt.target.modelEndpointId,
-		);
+		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
+			model: scheduledPrompt.target.model,
+			apiProviderId: scheduledPrompt.target.apiProviderId,
+			modelEndpointId: scheduledPrompt.target.modelEndpointId,
+			modelProtocol: scheduledPrompt.target.modelProtocol,
+		});
 		this.startup.projectPath = scheduledPrompt.target.projectPath;
 		this.startup.setPermissionMode(scheduledPrompt.target.permissionMode);
 		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
@@ -160,7 +160,8 @@ export class ScheduledPromptFormState {
 				prompt: this.prompt.trim(),
 			};
 		}
-		const selection = this.modelCatalog.selectionFor(this.startup.agentId, this.startup.modelValue);
+		const selection = this.startup.resolvedModelSelection;
+		if (!selection) return null;
 		return {
 			schedule,
 			target: {

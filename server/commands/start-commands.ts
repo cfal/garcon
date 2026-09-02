@@ -172,19 +172,6 @@ export class StartCommands {
               : { chatId: input.parentChatId, relation: 'delegation' },
           });
           this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
-          if (recordsStartupPreferences(input.origin)) {
-            await this.deps.settings.recordChatStartup({
-              agentId: input.agentId,
-              projectPath: input.projectPath,
-              model: input.model,
-              apiProviderId: input.apiProviderId,
-              modelEndpointId: input.modelEndpointId,
-              modelProtocol: input.modelProtocol,
-              permissionMode: input.permissionMode,
-              thinkingMode: input.thinkingMode,
-              agentSettingsById: { [input.agentId]: input.agentSettings },
-            });
-          }
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
         },
@@ -201,16 +188,25 @@ export class StartCommands {
           }
         },
       },
-      dispatch: (executionAdmission) => this.deps.agents.startSession(input.chatId, input.command, {
-        projectPath: input.projectPath,
-        images: input.images.length > 0 ? input.images : undefined,
-        clientRequestId: input.clientRequestId,
-        clientMessageId: input.clientMessageId,
-        turnId,
-        executionAdmission,
-        agentSettings: input.agentSettings,
-      }),
+      dispatch: (executionAdmission) =>
+        this.deps.agents.startSession(input.chatId, input.command, {
+          projectPath: input.projectPath,
+          images: input.images.length > 0 ? input.images : undefined,
+          clientRequestId: input.clientRequestId,
+          clientMessageId: input.clientMessageId,
+          turnId,
+          executionAdmission,
+          agentSettings: input.agentSettings,
+        }),
     });
+
+    if (recordsStartupPreferences(input.origin)) {
+      try {
+        await this.deps.settings.recordChatStartup(input);
+      } catch (error: unknown) {
+        logger.warn('commands: failed to record startup preferences:', error);
+      }
+    }
 
     void maybeGenerateChatTitle({
       chatId: input.chatId,
