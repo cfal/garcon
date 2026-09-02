@@ -306,6 +306,163 @@ describe('AgentHandoffService', () => {
     expect(deposit).not.toHaveBeenCalled();
   });
 
+  it('bounds request-path roll-forward and leaves the decision for background recovery', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    let registryAttempts = 0;
+    state.ownership.applyHandoffDecision = mock(async () => {
+      registryAttempts += 1;
+      throw new Error('injected persistent registry failure');
+    });
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+    });
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    }).prepare(context());
+
+    try {
+      await expect(preparation).rejects.toMatchObject({
+        code: 'OWNERSHIP_TRANSFER_PENDING',
+        status: 409,
+        retryable: true,
+      });
+      expect(registryAttempts).toBe(3);
+      expect(state.ownership.findHandoff('chat', 'request-1')).not.toBeNull();
+    } finally {
+      service.shutdown();
+      await preparation.catch(() => undefined);
+    }
+  });
+
+  it('resumes background recovery at producer reopen after the journal is discharged', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    let reopenAttempts = 0;
+    let resolveRecovery;
+    const recovered = new Promise((resolve) => {
+      resolveRecovery = resolve;
+    });
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+      reopenProducer: () => {
+        reopenAttempts += 1;
+        if (reopenAttempts <= 3) throw new Error('injected persistent producer failure');
+        calls.push('reopen');
+        resolveRecovery();
+      },
+    });
+    const preparation = service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    }).prepare(context());
+
+    try {
+      await expect(preparation).rejects.toMatchObject({
+        code: 'OWNERSHIP_TRANSFER_PENDING',
+        retryable: true,
+      });
+      expect(state.ownership.findHandoff('chat', 'request-1')).toBeNull();
+      await recovered;
+      expect(reopenAttempts).toBe(4);
+      expect(calls.filter((call) => call === 'complete')).toHaveLength(1);
+    } finally {
+      service.shutdown();
+      await preparation.catch(() => undefined);
+    }
+  });
+
+  it('treats a retry-dispatched journal intent as complete in armed background recovery', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    state.setIntent(persistedIntent());
+    let completeAttempts = 0;
+    state.ownership.completeHandoff = mock(async () => {
+      completeAttempts += 1;
+      if (completeAttempts <= 3) throw new Error('injected persistent journal failure');
+      if (!state.ownership.findHandoff('chat', 'request-1')) {
+        throw new Error('journal intent already removed');
+      }
+      calls.push('complete');
+      state.setIntent(null);
+    });
+    let reopenAttempts = 0;
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger: ledgerState(calls),
+      reopenProducer: () => {
+        reopenAttempts += 1;
+      },
+    });
+    const prepare = () => service.createPreparation({
+      chatId: 'chat',
+      clientRequestId: 'request-1',
+      handoff: handoff(),
+      source: current,
+      target: target(),
+      command: 'continue',
+    }).prepare(context());
+    const first = prepare();
+
+    try {
+      await expect(first).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
+      await expect(prepare()).resolves.toBeUndefined();
+      await Bun.sleep(75);
+      expect(completeAttempts).toBe(4);
+      expect(reopenAttempts).toBe(1);
+    } finally {
+      service.shutdown();
+      await first.catch(() => undefined);
+    }
+  });
+
+  it('skips registry recovery when another actor already applied and discharged the intent', async () => {
+    const intent = persistedIntent();
+    const current = {
+      ...sourceChat(),
+      agentId: intent.target.execution.agentId,
+      agentOwnershipEpoch: intent.target.agentOwnershipEpoch,
+    };
+    const ownership = {
+      findHandoff: () => null,
+      pendingHandoffs: () => [intent],
+      applyHandoffDecision: mock(async () => {}),
+      completeHandoff: mock(async () => {}),
+    };
+    const reopenProducer = mock(() => {});
+    const service = createService({
+      registry: { getChat: () => current },
+      ownership,
+      ledger: ledgerState([]),
+      reopenProducer,
+    });
+
+    await service.recoverPendingHandoffs();
+
+    expect(ownership.applyHandoffDecision).not.toHaveBeenCalled();
+    expect(ownership.completeHandoff).not.toHaveBeenCalled();
+    expect(reopenProducer).toHaveBeenCalledOnce();
+  });
+
   it('recovers every durable handoff through the ledger boundary', async () => {
     const current = sourceChat();
     const calls = [];
@@ -336,6 +493,8 @@ describe('AgentHandoffService', () => {
       markSecondRecovered = resolve;
     });
     const ownership = {
+      findHandoff: (chatId, clientRequestId) => [first, second].find((intent) =>
+        intent.chatId === chatId && intent.clientRequestId === clientRequestId) ?? null,
       pendingHandoffs: () => [first, second],
       applyHandoffDecision: mock(async (operationId) => {
         if (operationId === first.operationId) await secondStarted;
@@ -363,6 +522,8 @@ describe('AgentHandoffService', () => {
     let firstAttempts = 0;
     const completed = [];
     const ownership = {
+      findHandoff: (chatId, clientRequestId) => [first, second].find((intent) =>
+        intent.chatId === chatId && intent.clientRequestId === clientRequestId) ?? null,
       pendingHandoffs: () => [first, second],
       applyHandoffDecision: mock(async (operationId) => {
         if (operationId !== first.operationId) return;
@@ -394,6 +555,7 @@ describe('AgentHandoffService', () => {
     const intent = persistedIntent();
     let attempts = 0;
     const ownership = {
+      findHandoff: () => intent,
       pendingHandoffs: () => [intent],
       applyHandoffDecision: mock(async () => {
         attempts += 1;
@@ -435,6 +597,7 @@ describe('AgentHandoffService', () => {
     const intent = persistedIntent();
     let attempts = 0;
     const ownership = {
+      findHandoff: () => intent,
       pendingHandoffs: () => [intent],
       applyHandoffDecision: mock(async () => {
         attempts += 1;
@@ -482,6 +645,7 @@ describe('AgentHandoffService', () => {
       rejectAttempt = reject;
     });
     const ownership = {
+      findHandoff: () => intent,
       pendingHandoffs: () => [intent],
       applyHandoffDecision: mock(async () => {
         attempts += 1;
