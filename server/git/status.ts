@@ -52,12 +52,21 @@ const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
 const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
-const selectedFileCommitLock = new KeyedPromiseLock();
+const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
   options?: { disableOptionalLocks?: boolean },
 ) => Promise<{ stdout: string }>;
+
+async function runWithRepositoryCommitLock<T>(
+  projectPath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const layout = await probeWorktreeLayout(projectPath);
+  const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
+  return repositoryCommitLock.runExclusive(lockKey, operation);
+}
 
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
@@ -510,19 +519,22 @@ export function createStatusOperations(agents: GitAgentRunner) {
         );
       }
     }
-    const layout = await probeWorktreeLayout(projectPath);
-    const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
-    return selectedFileCommitLock.runExclusive(lockKey, async () => {
+    return runWithRepositoryCommitLock(projectPath, async () => {
       if (!(await requiresWholeIndexCommit(projectPath))) {
-        const stdout = await commitSelectedFiles(projectPath, message, files);
-        return { success: true, output: stdout, commitScope: 'selected-files' };
+        const result = await commitSelectedFiles(projectPath, message, files);
+        return { success: true, ...result, commitScope: 'selected-files' };
       }
 
       for (const file of files) {
         await runGit(projectPath, ['add', '--', literalGitPathspec(file)]);
       }
       const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-      return { success: true, output: stdout, commitScope: 'whole-index' };
+      return {
+        success: true,
+        output: stdout,
+        commitScope: 'whole-index',
+        indexSynchronized: true,
+      };
     });
   }
 
@@ -879,8 +891,10 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    return runWithRepositoryCommitLock(projectPath, async () => {
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
+      return { success: true, output: stdout };
+    });
   }
 
   function pathspecStdin(paths: string[]): string {

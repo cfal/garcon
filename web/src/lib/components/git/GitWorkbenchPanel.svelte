@@ -158,7 +158,9 @@
 				class="flex items-center gap-2 border-b border-status-info-border bg-status-info/10 px-3 py-1.5 text-xs text-status-info-foreground"
 			>
 				<Info class="h-3.5 w-3.5 shrink-0" />
-				<span class="min-w-0 flex-1 truncate">{repository.lastNotice}</span>
+				<span class="min-w-0 flex-1 truncate" title={repository.lastNotice}>
+					{repository.lastNotice}
+				</span>
 				<button
 					type="button"
 					class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"

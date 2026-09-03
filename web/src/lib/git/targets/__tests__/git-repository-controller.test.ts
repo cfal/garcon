@@ -34,6 +34,7 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	git_changes_added: () => 'Added',
 	git_changes_deleted: () => 'Deleted',
 	git_changes_untracked: () => 'Untracked',
+	git_changes_index_sync_failed_notice: () => 'Commit succeeded, but the Git index was not synchronized.',
 	git_changes_whole_index_commit_notice: () => 'Committed the full staged index.',
 }));
 
@@ -269,7 +270,9 @@ describe('GitRepositoryController', () => {
 		it('surfaces whole-index continuation commits', async () => {
 			vi.mocked(gitCommit).mockResolvedValue({
 				success: true,
+				output: 'committed',
 				commitScope: 'whole-index',
+				indexSynchronized: true,
 			});
 			controller.commitMessage = 'resolve conflict';
 			controller.selectedFiles = new Set(['a.txt']);
@@ -277,6 +280,29 @@ describe('GitRepositoryController', () => {
 			await controller.handleCommit('/project');
 
 			expect(controller.lastNotice).toBe('Committed the full staged index.');
+		});
+
+		it('surfaces selected-file index synchronization failures', async () => {
+			vi.useFakeTimers();
+			try {
+				vi.mocked(gitCommit).mockResolvedValue({
+					success: true,
+					output: 'committed',
+					commitScope: 'selected-files',
+					indexSynchronized: false,
+				});
+				controller.commitMessage = 'selected change';
+				controller.selectedFiles = new Set(['a.txt']);
+
+				await controller.handleCommit('/project');
+				await vi.advanceTimersByTimeAsync(6000);
+
+				expect(controller.lastNotice).toBe(
+					'Commit succeeded, but the Git index was not synchronized.',
+				);
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it('gives repeated whole-index commit notices a fresh timeout', async () => {
@@ -314,7 +340,12 @@ describe('GitRepositoryController', () => {
 
 	describe('handleCommit', () => {
 		it('commits selected files and resets on success', async () => {
-			vi.mocked(gitCommit).mockResolvedValue({ success: true });
+			vi.mocked(gitCommit).mockResolvedValue({
+				success: true,
+				output: 'committed',
+				commitScope: 'selected-files',
+				indexSynchronized: true,
+			});
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: 'main',
 				hasCommits: true,

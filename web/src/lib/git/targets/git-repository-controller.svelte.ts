@@ -133,12 +133,16 @@ export class GitRepositoryController {
 	}
 
 	surfaceNotice(message: string): void {
-		this.dismissNotice();
-		this.lastNotice = message;
+		this.surfacePersistentNotice(message);
 		this.noticeTimer = setTimeout(() => {
 			this.lastNotice = null;
 			this.noticeTimer = null;
 		}, 6000);
+	}
+
+	surfacePersistentNotice(message: string): void {
+		this.dismissNotice();
+		this.lastNotice = message;
 	}
 
 	dismissNotice(): void {
@@ -365,7 +369,9 @@ export class GitRepositoryController {
 			if (data.success) {
 				this.commitMessage = '';
 				this.selectedFiles = new Set();
-				if (data.commitScope === 'whole-index') {
+				if (!data.indexSynchronized) {
+					this.surfacePersistentNotice(m.git_changes_index_sync_failed_notice());
+				} else if (data.commitScope === 'whole-index') {
 					this.surfaceNotice(m.git_changes_whole_index_commit_notice());
 				} else {
 					this.dismissNotice();

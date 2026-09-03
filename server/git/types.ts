@@ -251,6 +251,7 @@ export interface GitCommitResult {
   success: true;
   output: string;
   commitScope: 'selected-files' | 'whole-index';
+  indexSynchronized: boolean;
 }
 
 export interface GitRefsOptions extends ProjectOptions {

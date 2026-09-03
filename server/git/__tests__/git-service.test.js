@@ -195,6 +195,19 @@ async function initRepoWithCommit(projectPath) {
   await runGitCommand(projectPath, ["commit", "-m", "initial"]);
 }
 
+async function waitForPath(filePath) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    try {
+      await fs.access(filePath);
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await Bun.sleep(10);
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 async function initRepoWithLinkedFeature(projectPath, linkedPath) {
   await initRepoWithCommit(projectPath);
   await runGitCommand(projectPath, [
@@ -409,6 +422,7 @@ describe("selected-file commits", () => {
       await initRepoWithCommit(projectPath);
       await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
       await fs.writeFile(path.join(projectPath, "new.txt"), "new\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "HEAD"), "untracked\n", "utf-8");
       await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
 
@@ -423,6 +437,7 @@ describe("selected-file commits", () => {
         "--format=",
         "--name-only",
         "HEAD",
+        "--",
       ]);
       const staged = await runGitCommand(projectPath, [
         "diff",
@@ -430,6 +445,7 @@ describe("selected-file commits", () => {
         "--name-only",
       ]);
       expect(result.commitScope).toBe("selected-files");
+      expect(result.indexSynchronized).toBe(true);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "new.txt"]);
       expect(staged.stdout.trim()).toBe("unrelated.txt");
     } finally {
@@ -478,7 +494,7 @@ describe("selected-file commits", () => {
     }
   });
 
-  it("does not report a durable commit as failed when the real index is locked", async () => {
+  it("reports a durable commit with failed index synchronization", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-locked-index-commit-"),
     );
@@ -500,6 +516,7 @@ describe("selected-file commits", () => {
       })).resolves.toMatchObject({
         success: true,
         commitScope: "selected-files",
+        indexSynchronized: false,
       });
 
       const committed = await runGitCommand(projectPath, ["show", "HEAD:a.txt"]);
@@ -508,7 +525,7 @@ describe("selected-file commits", () => {
       await fs.rm(indexLockPath, { force: true });
       await fs.rm(projectPath, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 20_000);
 
   it("removes stale temporary index files before committing", async () => {
     const projectPath = await fs.mkdtemp(
@@ -622,6 +639,108 @@ describe("selected-file commits", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("synchronizes unselected paths added by a pre-commit hook", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-hook-added-path-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "extra.txt"), "hooked\n", "utf-8");
+      const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
+      await fs.writeFile(hookPath, "#!/bin/sh\ngit add -- extra.txt\n", "utf-8");
+      await fs.chmod(hookPath, 0o755);
+
+      const result = await git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(result.indexSynchronized).toBe(true);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "extra.txt"]);
+      expect(status.stdout).toBe("");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes whole-index commits behind selected-file synchronization", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-serialized-index-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const selectedHookPath = path.join(projectPath, ".selected-hook-entered");
+    const realHookPath = path.join(projectPath, ".real-hook-entered");
+    const releaseHookPath = path.join(projectPath, ".release-hook");
+    let selectedCommit;
+    let indexCommitOutcome;
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      const hookPath = path.join(projectPath, ".git", "hooks", "post-commit");
+      await fs.writeFile(
+        hookPath,
+        [
+          "#!/bin/sh",
+          "case \"$GIT_INDEX_FILE\" in",
+          "  *.garcon-index-*) touch .selected-hook-entered ;;",
+          "  *) touch .real-hook-entered ;;",
+          "esac",
+          "while [ ! -f .release-hook ]; do sleep 0.01; done",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      await fs.chmod(hookPath, 0o755);
+
+      selectedCommit = git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      });
+      await waitForPath(selectedHookPath);
+      indexCommitOutcome = git.commitIndex({
+        projectPath,
+        message: "stale index",
+      }).then(
+        (result) => ({ status: "fulfilled", result }),
+        (error) => ({ status: "rejected", error }),
+      );
+
+      await Bun.sleep(500);
+      await expect(fs.access(realHookPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await fs.writeFile(releaseHookPath, "released\n", "utf-8");
+      await selectedCommit;
+      const outcome = await indexCommitOutcome;
+      expect(outcome.status).toBe("rejected");
+      expect(outcome.error?.message).toMatch(/nothing (?:added )?to commit/);
+
+      const log = await runGitCommand(projectPath, ["log", "--format=%s"]);
+      expect(log.stdout.trim().split("\n")).toEqual(["selected change", "initial"]);
+    } finally {
+      await fs.writeFile(releaseHookPath, "released\n", "utf-8").catch(() => undefined);
+      await Promise.allSettled([selectedCommit, indexCommitOutcome].filter(Boolean));
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it("rejects paths outside the project root as invalid input", async () => {
     const projectPath = await fs.mkdtemp(
