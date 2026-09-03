@@ -582,11 +582,13 @@ export class TranscriptLedgerStore {
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
-      if (!lstatSync(directory).isDirectory()) continue;
-      this.closeChat(name);
-      this.#openFailures.delete(name);
-      this.#failureFences.delete(name);
-      rmSync(directory, { recursive: true, force: true });
+      const isDirectory = lstatSync(directory).isDirectory();
+      if (isDirectory) {
+        this.closeChat(name);
+        this.#openFailures.delete(name);
+        this.#failureFences.delete(name);
+      }
+      rmSync(directory, { recursive: isDirectory, force: true });
       removed.push(name);
     }
     return removed;

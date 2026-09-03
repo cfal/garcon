@@ -1549,6 +1549,20 @@ describe('TranscriptLedgerStore', () => {
     expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
   });
 
+  it('removes unregistered symlinks without touching their targets', async () => {
+    const outsideDirectory = `${root}-orphan-target`;
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, path.join(root, 'orphan-link'), 'dir');
+
+    try {
+      expect(store.removeUnregisteredChatDirectories(new Set())).toEqual(['orphan-link']);
+      await expect(fs.lstat(path.join(root, 'orphan-link'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.stat(outsideDirectory)).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('carries the agent switch boundary through a reload', () => {
     const view = store.initializeCurrentView('chat-one', {
       contentStartOrdinal: 1,
