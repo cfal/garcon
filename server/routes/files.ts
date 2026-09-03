@@ -58,6 +58,7 @@ const logger = createLogger('routes:files');
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
 const FILE_TREE_CONTAINMENT_CONCURRENCY = 16;
+const ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE = 'Upload too large. Maximum request size is 30MB.';
 const FILE_LIST_SKIP_NAMES = new Set([
   'node_modules',
   'dist',
@@ -156,6 +157,33 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
     hasNodeErrorCode(error, 'EACCES') ||
     hasNodeErrorCode(error, 'EPERM')
   );
+}
+
+async function readAttachmentFormData(request: Request): Promise<FormData> {
+  if (!request.body) return request.formData();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      totalBytes += next.value.byteLength;
+      if (totalBytes > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new AttachmentValidationError(ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE, 413);
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = Buffer.concat(chunks, totalBytes);
+  const contentType = request.headers.get('content-type');
+  return new Response(body, {
+    headers: contentType ? { 'content-type': contentType } : undefined,
+  }).formData();
 }
 
 async function resolveFileTreeHomeDirectory(
@@ -590,13 +618,10 @@ export default function createFilesRoutes(
         Number.isFinite(contentLength) &&
         contentLength > MAX_ATTACHMENT_UPLOAD_BODY_BYTES
       ) {
-        return Response.json(
-          { error: 'Upload too large. Maximum request size is 30MB.' },
-          { status: 413 },
-        );
+        throw new AttachmentValidationError(ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE, 413);
       }
 
-      const formData = await request.formData();
+      const formData = await readAttachmentFormData(request);
       const entries = [
         ...formData.getAll('attachments'),
         ...formData.getAll('images'),

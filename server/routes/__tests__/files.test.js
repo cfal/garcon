@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
+import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
 import {
   FILE_REVISION_HEADER,
   MAX_FILE_VIEW_BYTES,
@@ -1003,5 +1004,36 @@ describe('files route', () => {
       size: 'video-bytes'.length,
     });
     expect(body.attachments[0].data).toStartWith('data:video/mp4;base64,');
+  });
+
+  it('rejects oversized streamed attachment bodies without Content-Length', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const chunk = new Uint8Array(1024 * 1024);
+    let bytesSent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (bytesSent > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        bytesSent += chunk.byteLength;
+      },
+    });
+    const url = new URL('http://localhost/api/v1/files/upload-attachments');
+    const request = new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=test' },
+      body,
+      duplex: 'half',
+    });
+
+    expect(request.headers.has('content-length')).toBe(false);
+    const response = await routes['/api/v1/files/upload-attachments'].POST(request, url);
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      error: 'Upload too large. Maximum request size is 30MB.',
+    });
   });
 });
