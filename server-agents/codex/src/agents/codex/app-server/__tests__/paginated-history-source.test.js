@@ -46,6 +46,14 @@ function onePage(data) {
 
 describe('PaginatedCodexHistorySource', () => {
   it('hydrates turn shells and item pages while preserving provider-global item order', async () => {
+    const providerPrefix = [
+      '<garcon-preambles version="1" application="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">',
+      'private instructions',
+      '</garcon-preambles>',
+      '',
+      '',
+    ].join('\n');
+    const providerPrompt = `${providerPrefix}hello`;
     const turnPages = new Map([
       ['first', {
         data: [turn('turn-1', 1_753_056_000), turn('turn-2', 1_753_056_001)],
@@ -62,7 +70,12 @@ describe('PaginatedCodexHistorySource', () => {
       ['first', {
         data: [
           entry('turn-1', {
-            type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'hello' }],
+            type: 'userMessage',
+            id: 'user-1',
+            content: [
+              { type: 'text', text: providerPrefix },
+              { type: 'text', text: 'hello' },
+            ],
           }),
           entry('turn-2', {
             type: 'commandExecution', id: 'command-1', command: "/bin/zsh -lc 'pwd'", cwd: '/repo',
@@ -100,7 +113,7 @@ describe('PaginatedCodexHistorySource', () => {
       'assistant-message',
     ]);
     expect(messages.map((message) => message.content ?? message.command)).toEqual([
-      'hello',
+      providerPrompt,
       'pwd',
       { raw: '/repo' },
       'late answer',
@@ -116,6 +129,9 @@ describe('PaginatedCodexHistorySource', () => {
     ]);
     expect(getNativeMessageSource(messages[0])).toEqual({ entryId: 'turn:turn-1:item:user-1' });
     expect(getNativeMessageSource(messages[1])).toEqual({ entryId: 'turn:turn-2:item:command-1' });
+    expect(getNativeMessageSource(messages[2])).toEqual({ entryId: 'turn:turn-2:item:command-1' });
+    expect(messages[0]).toMatchObject({ type: 'user-message', content: providerPrompt });
+    expect(messages[1]).toMatchObject({ type: 'bash-tool-use', command: 'pwd' });
     expect(messages[4].timestamp).toBe(profile.createdAt);
     expect(shutdown).toHaveBeenCalledTimes(1);
   });

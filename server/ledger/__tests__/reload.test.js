@@ -315,6 +315,114 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('reconstructs preamble notices while keeping bodies out of the replacement view', async () => {
+    await withReload(async ({ ledger, reload, integration }) => {
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
+      const application = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: ledger.currentView('chat-1').viewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-boundary-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-1',
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [{
+          message: new UserMessage(TS, `${application.providerPrefix}visible boundary prompt`),
+        }];
+      };
+
+      await reload.reload('chat-1');
+
+      const rows = ledger.currentRows('chat-1');
+      expect(rows.slice(-2)).toMatchObject([
+        {
+          kind: 'notice',
+          message: 'Preambles applied',
+          detail: {
+            type: 'preamble-application',
+            preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+          },
+        },
+        {
+          kind: 'user-input',
+          detail: {
+            message: { content: 'visible boundary prompt' },
+            preambleBoundary: boundary,
+          },
+        },
+      ]);
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+    });
+  });
+
+  it('rejects missing preamble evidence without cutting over', async () => {
+    await withReload(async ({ ledger, reload, oldViewId }) => {
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: oldViewId,
+        message: new UserMessage(TS, 'visible boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-missing-input',
+        steer: false,
+        preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
+        preambles: [{
+          id: 'preamble-1',
+          title: 'Repository rules',
+          content: 'private preamble body',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+
+      await expect(reload.reload('chat-1')).rejects.toMatchObject({
+        code: 'PREAMBLE_ENVELOPE_MISMATCH',
+      });
+      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
+      expect(ledger.conversationMessages('chat-1').at(-1)?.content)
+        .toBe('visible boundary prompt');
+    });
+  });
+
+  it('durably clears a stale zero-match boundary proof before native cutover', async () => {
+    await withReload(async ({ ledger, reload, entry, integration, registryUpdates }) => {
+      const boundary = { kind: 'fork', ownershipEpoch: 'ownership-1' };
+      ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: ledger.currentView('chat-1').viewId,
+        message: new UserMessage(TS, 'zero-match boundary prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-zero-match-input',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [],
+      });
+      entry.pendingPreambleBoundary = boundary;
+      integration.nativeHistoryImport.load = async function* load() {
+        expect(entry.pendingPreambleBoundary).toBeNull();
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+      };
+
+      await reload.reload('chat-1');
+
+      expect(registryUpdates).toContainEqual({
+        patch: { pendingPreambleBoundary: null },
+        options: { flush: true },
+      });
+      expect(entry.pendingPreambleBoundary).toBeNull();
+    });
+  });
+
   it('[TLV5-ADOPT.06-CORE-UNIT-01] carries the quarantine notice through reload while dropping ordinary notices', async () => {
     const quarantineDetail = {
       type: 'carryover-migration-quarantine',
@@ -530,9 +638,13 @@ async function withReload(run, options = {}) {
       return { entries: this.queueEntries, controlEntries: [] };
     },
   };
+  const registryUpdates = [];
   const registry = {
     getChat: () => entry,
-    updateChat: (_chatId, patch) => Object.assign(entry, patch),
+    updateChat: (_chatId, patch, updateOptions) => {
+      registryUpdates.push({ patch, options: updateOptions });
+      return Object.assign(entry, patch);
+    },
   };
   const integrations = {
     get: () => integration,
@@ -570,6 +682,8 @@ async function withReload(run, options = {}) {
       replacementLease,
       execution,
       integration,
+      entry,
+      registryUpdates,
       oldViewId: old.viewId,
       chatMutationLock,
     });

@@ -3,9 +3,16 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import { loadClaudeChatMessages } from '../history-loader.js';
 import { getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { CLAUDE_STEERING_PROMPT_PREFIX } from '../user-input.js';
+
+const PREAMBLE_PREFIX = createPreamblePrefix({
+  viewId: 'view-native-history',
+  clientMessageId: 'message-native-history',
+  contents: ['Synthetic Claude instructions.'],
+}).prefix;
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-load-test-'));
@@ -19,6 +26,23 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('Claude strict history import', () => {
+  it('preserves a framed preamble and visible prompt exactly', async () => {
+    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
+    const entry = JSON.stringify({
+      sessionId: 'session-prefix',
+      type: 'user',
+      uuid: 'user-prefix',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: prompt }] },
+    });
+
+    await withTempJsonl([entry], async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
+    });
+  });
+
   it('[TLV5-ADOPT.07-CLAUDE-UNIT-01] rejects incomplete records and recognized content payloads before retry', async () => {
     const invalidEntry = JSON.stringify({ sessionId: 'session-1', type: 'user' });
     await withTempJsonl([invalidEntry], async (filePath) => {

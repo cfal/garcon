@@ -1,6 +1,6 @@
 import { AssistantMessage, ErrorMessage } from '@garcon/common/chat-types';
 import type {
-  AgentGoalControlHandoff,
+  AgentGoalControlRequest,
   AgentLogger,
 } from '@garcon/server-agent-interface';
 import type { CodexGoalCommand } from '../goal-command.js';
@@ -243,9 +243,10 @@ export class RuntimeGoalCoordinator {
 
   async submitGoalControl(
     request: CodexResumeRequest,
-    beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void> = async (handoff) => {
+    beforeDelivery: AgentGoalControlRequest['beforeDelivery'] = async (handoff) => {
       handoff.validate();
       handoff.commit();
+      return { providerPrefix: '' };
     },
   ): Promise<boolean> {
     const session = this.#port.sessions.get(request.agentSessionId);
@@ -276,7 +277,7 @@ export class RuntimeGoalCoordinator {
         };
         let committed = false;
         validate();
-        await beforeDelivery({
+        const preparation = await beforeDelivery({
           validate,
           commit: () => {
             committed = true;
@@ -286,7 +287,11 @@ export class RuntimeGoalCoordinator {
         if (hasTerminalPendingFinish(session) || isTerminalSessionStatus(session.status)) {
           throw new Error(session.pendingFinish?.failedMessage ?? 'Codex session ended before goal control delivery');
         }
-        await this.deliverReservedGoalControl(session, request, operation);
+        await this.deliverReservedGoalControl(
+          session,
+          applyGoalControlProviderPrefix(request, preparation.providerPrefix),
+          operation,
+        );
         if (session.activeTurnId && session.pendingFinish && !session.pendingFinish.failedMessage && !session.pendingFinish.aborted) {
           session.pendingFinish = null;
         }
@@ -323,7 +328,7 @@ export class RuntimeGoalCoordinator {
     const attachments = await writeAttachmentsToTempFiles(request.images);
     this.#retainAttachmentCleanup(session, attachments.cleanup);
     const command = goalObjectiveWithAttachmentPaths(request.command, [], attachments.filePaths);
-    const input = buildUserInput(command, attachments.imagePaths);
+    const input = buildUserInput(command, attachments.imagePaths, undefined, request.providerPrefix);
     const startParams = buildTurnStartParams({
       threadId: session.threadId,
       command,
@@ -333,6 +338,7 @@ export class RuntimeGoalCoordinator {
       permissionMode: request.permissionMode,
       thinkingMode: request.thinkingMode,
       clientMessageId: request.clientMessageId,
+      providerPrefix: request.providerPrefix,
     });
     let turnId = session.activeTurnId;
     let transitions = 0;
@@ -585,4 +591,21 @@ export class RuntimeGoalCoordinator {
   #releaseIgnoredGoalClear(session: RunningCodexSession): void {
     if (session.ignoredGoalClears > 0) session.ignoredGoalClears -= 1;
   }
+}
+
+function applyGoalControlProviderPrefix(
+  request: CodexResumeRequest,
+  providerPrefix: string,
+): CodexResumeRequest {
+  if (!providerPrefix) return request;
+  const command = request.codexGoalCommand;
+  if (!command) return { ...request, providerPrefix };
+  if (!('objective' in command) || typeof command.objective !== 'string') return request;
+  const prefixed = { ...command, objective: `${providerPrefix}${command.objective}` };
+  return {
+    ...request,
+    command: prefixed.objective,
+    codexGoalCommand: prefixed,
+    providerPrefix: '',
+  };
 }

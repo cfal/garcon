@@ -49,9 +49,10 @@ describe('AgentRegistry session cache', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  function createRegistry(adoption = {
-    ensure: () => Promise.reject(new Error('unused')),
-  }) {
+  function createRegistry(
+    adoption = { ensure: () => Promise.reject(new Error('unused')) },
+    preambles = { resolve: () => [] },
+  ) {
     return new AgentRegistry({
       registry: chats,
       integrations: {
@@ -65,8 +66,162 @@ describe('AgentRegistry session cache', () => {
       ledger,
       adoption,
       hasPendingOwnershipTransfer: () => false,
+      preambles,
     });
   }
+
+  function armBoundary(ownershipEpoch, kind = 'new-chat') {
+    chats.updateChat(CHAT_ID, {
+      agentOwnershipEpoch: ownershipEpoch,
+      pendingPreambleBoundary: { kind, ownershipEpoch },
+    });
+  }
+
+  function definition(id, title, content) {
+    return {
+      id,
+      title,
+      content,
+      scope: { type: 'global' },
+      createdAt: AT,
+      updatedAt: AT,
+    };
+  }
+
+  function admit(registry, clientMessageId, commandType = 'agent-run') {
+    return registry.admitInput(
+      CHAT_ID,
+      new UserMessage(AT, `message-${clientMessageId}`),
+      {
+        clientRequestId: `request-${clientMessageId}`,
+        clientMessageId,
+        transcriptViewId: ledger.currentView(CHAT_ID).viewId,
+        turnId: `turn-${clientMessageId}`,
+        commandType,
+      },
+    );
+  }
+
+  it('consumes a pending boundary with the current ordered preambles', async () => {
+    armBoundary('epoch-current');
+    const resolve = mock(() => [
+      definition('preamble-a', 'First', 'first body'),
+      definition('preamble-b', 'Second', 'second body'),
+    ]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve },
+    );
+
+    await expect(admit(registry, 'boundary-current')).resolves.toEqual({ inserted: true });
+
+    expect(resolve).toHaveBeenCalledWith('/repo');
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    const rows = ledger.currentRows(CHAT_ID);
+    expect(rows.map((row) => row.kind)).toEqual(['notice', 'user-input']);
+    expect(rows[0].detail).toEqual({
+      type: 'preamble-application',
+      preambles: [
+        { id: 'preamble-a', title: 'First' },
+        { id: 'preamble-b', title: 'Second' },
+      ],
+    });
+    expect(rows[1].detail.preambleBoundary).toEqual({
+      kind: 'new-chat',
+      ownershipEpoch: 'epoch-current',
+    });
+    expect(ledger.takePreparedInput(CHAT_ID, 'boundary-current').providerPrefix).toContain(
+      'first body\n\nsecond body',
+    );
+  });
+
+  it('consumes a zero-match boundary and does not apply later catalog changes', async () => {
+    armBoundary('epoch-empty');
+    let resolved = [];
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve: () => resolved },
+    );
+
+    await admit(registry, 'empty-first');
+    resolved = [definition('preamble-later', 'Later', 'later body')];
+    await admit(registry, 'empty-second');
+
+    const rows = ledger.currentRows(CHAT_ID);
+    expect(rows.map((row) => row.kind)).toEqual(['user-input', 'user-input']);
+    expect(rows[0].detail.preambleBoundary).toEqual({
+      kind: 'new-chat',
+      ownershipEpoch: 'epoch-empty',
+    });
+    expect(rows[1].detail.preambleBoundary).toBeNull();
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+  });
+
+  it('repairs a stale pending boundary from its authoritative ledger proof', async () => {
+    const boundary = { kind: 'fork', ownershipEpoch: 'epoch-stale' };
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId: ledger.currentView(CHAT_ID).viewId,
+      message: new UserMessage(AT, 'already committed'),
+      attachments: [],
+      clientMessageId: 'proof-existing',
+      steer: false,
+      preambleBoundary: boundary,
+      preambles: [],
+    });
+    armBoundary('epoch-stale', 'fork');
+    const resolve = mock(() => [definition('preamble-stale', 'Stale', 'must not apply')]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve },
+    );
+
+    await admit(registry, 'after-stale-proof');
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    expect(ledger.currentRows(CHAT_ID).at(-1).detail.preambleBoundary).toBeNull();
+  });
+
+  it('does not let an older proof consume a newer ownership epoch', async () => {
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId: ledger.currentView(CHAT_ID).viewId,
+      message: new UserMessage(AT, 'old proof'),
+      attachments: [],
+      clientMessageId: 'proof-old',
+      steer: false,
+      preambleBoundary: { kind: 'agent-switch', ownershipEpoch: 'epoch-old' },
+      preambles: [],
+    });
+    armBoundary('epoch-new', 'agent-switch');
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve: () => [definition('preamble-new', 'New', 'new body')] },
+    );
+
+    await admit(registry, 'new-epoch');
+
+    expect(ledger.currentRows(CHAT_ID).at(-1).detail.preambleBoundary).toEqual({
+      kind: 'agent-switch',
+      ownershipEpoch: 'epoch-new',
+    });
+  });
+
+  it('excludes duplicate submissions from boundary application', async () => {
+    armBoundary('epoch-steer');
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve: () => [definition('preamble-one', 'One', 'one body')] },
+    );
+
+    await admit(registry, 'duplicate-boundary');
+    armBoundary('epoch-steer');
+    await expect(admit(registry, 'duplicate-boundary')).resolves.toEqual({ inserted: false });
+
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    expect(ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice')).toHaveLength(1);
+  });
 
   it('updates the execution cache before an accepted session publish returns', () => {
     const registry = createRegistry();

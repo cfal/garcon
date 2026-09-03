@@ -5,6 +5,10 @@ import type { AgentChatEntry } from '../agents/session-types.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { LedgerRow, LedgerRowDraft } from './contracts.js';
 import { importedDrafts, type ImportedRow } from './imported-drafts.js';
+import {
+  sanitizeRecordedPreamblePrefixes,
+  type PreambleHistoryEvidence,
+} from './preamble-history.js';
 
 export type LedgerSessionDetail = Extract<LedgerRow, { readonly kind: 'session' }>['detail'];
 
@@ -18,6 +22,7 @@ export interface NativeHistorySeedInput {
   readonly carryOverRevision: string;
   readonly signal: AbortSignal;
   readonly now: () => string;
+  readonly preambleEvidence?: readonly PreambleHistoryEvidence[];
 }
 
 // Reads a session's native history as ledger drafts. Reload and native fork both rebuild a feed
@@ -32,6 +37,7 @@ export async function importNativeHistoryDrafts({
   carryOverRevision,
   signal,
   now,
+  preambleEvidence = [],
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
   const imported: ImportedRow[] = [];
   const chat = toAgentChatReference(
@@ -64,12 +70,25 @@ export async function importNativeHistoryDrafts({
       false,
     );
   }
+  const preambles = sanitizeRecordedPreamblePrefixes({
+    messages: sanitized.messages,
+    evidence: preambleEvidence,
+  });
+  if (preambles.kind === 'mismatch') {
+    throw new DomainError(
+      'PREAMBLE_ENVELOPE_MISMATCH',
+      'The native transcript preamble envelope does not match this chat.',
+      422,
+      false,
+    );
+  }
   // Sanitizing rewrites a seed prompt in place and never changes the count, so each message
   // keeps the provider identity it arrived with.
   return importedDrafts(
-    sanitized.messages.map((message, index) => ({
+    preambles.messages.map(({ message, application }, index) => ({
       message,
       providerMeta: imported[index]!.providerMeta,
+      ...(application ? { preambleApplication: application } : {}),
     })),
     now,
   );

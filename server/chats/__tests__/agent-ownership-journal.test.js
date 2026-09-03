@@ -180,6 +180,10 @@ describe('AgentOwnershipJournal', () => {
     expect(updated).toMatchObject({
       agentId: 'target-agent',
       agentOwnershipEpoch: 'target-epoch',
+      pendingPreambleBoundary: {
+        kind: 'agent-switch',
+        ownershipEpoch: 'target-epoch',
+      },
       agentSessionId: null,
       nativeSession: null,
       nativeSeedReceipt: null,

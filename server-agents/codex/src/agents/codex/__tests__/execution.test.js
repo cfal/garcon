@@ -110,6 +110,7 @@ function startRequest(overrides = {}) {
       markStarted: mock(() => undefined),
     },
     prompt: 'hello',
+    providerPrefix: '',
     attachments: [],
     carriedContext: null,
     ...overrides,
@@ -253,6 +254,31 @@ describe('CodexExecution', () => {
       format: 'v3-xml',
       codeUnitLength: prefix.length,
     });
+  });
+
+  it('parses a goal before applying the provider preamble to its objective', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
+
+    await execution.start(startRequest({
+      prompt: '/goal ship the migration',
+      providerPrefix,
+    }), () => {});
+
+    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      command: `${providerPrefix}ship the migration`,
+      providerPrefix: '',
+      codexGoalCommand: {
+        kind: 'set',
+        objective: `${providerPrefix}ship the migration`,
+      },
+    }));
   });
 
   it('rejects goal controls that cannot start a new thread', async () => {

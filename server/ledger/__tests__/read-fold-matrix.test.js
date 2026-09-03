@@ -210,6 +210,98 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
+  it('keeps preamble applications visible but outside every conversational fold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-preamble-fold-matrix-'));
+    const store = new TranscriptLedgerStore(root, {
+      createViewId: () => VIEW_ID,
+      now: () => AT,
+    });
+    const ledger = new TranscriptLedgerService(store, { now: () => AT });
+    try {
+      const view = ledger.initializeChat(CHAT_ID);
+      const composition = ledger.appendInputAndCompose({
+        chatId: CHAT_ID,
+        viewId: view.viewId,
+        message: new UserMessage(AT, 'visible prompt'),
+        attachments: [],
+        clientMessageId: 'preamble-input',
+        steer: false,
+        preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
+        preambles: [{
+          id: 'preamble-1',
+          title: 'Repository conventions',
+          content: 'private body sentinel',
+          scope: {
+            type: 'project-paths',
+            rules: [{ projectPath: '/private/project/path', includeNested: true }],
+          },
+          createdAt: AT,
+          updatedAt: AT,
+        }],
+      });
+      const rows = ledger.currentRows(CHAT_ID);
+
+      expect(composition.providerPrefix).toContain('private body sentinel');
+      expect(rows.map((row) => [row.ordinal, row.kind])).toEqual([
+        [1, 'notice'],
+        [2, 'user-input'],
+      ]);
+      expect(JSON.stringify(rows)).not.toContain('private body sentinel');
+      expect(JSON.stringify(rows)).not.toContain('/private/project/path');
+      expect(ledgerRowsToTranscriptMessages(rows)).toEqual([
+        {
+          ordinal: 1,
+          message: new TranscriptNoticeMessage(AT, 'Preambles applied', {
+            type: 'preamble-application',
+            preambles: [{ id: 'preamble-1', title: 'Repository conventions' }],
+          }),
+        },
+        {
+          ordinal: 2,
+          message: new UserMessage(
+            AT,
+            'visible prompt',
+            undefined,
+            { clientMessageId: 'preamble-input' },
+          ),
+        },
+      ]);
+      expect(ledger.conversationMessages(CHAT_ID).map(conversationalText)).toEqual([
+        'visible prompt',
+      ]);
+      expect(ledger.resendCandidates(CHAT_ID).map(({ content }) => content)).toEqual([
+        'visible prompt',
+      ]);
+      expect(frozenConversationDrafts(rows).map((row) => [row.kind, frozenDraftText(row)]))
+        .toEqual([
+          ['notice', 'Preambles applied'],
+          ['user-input', 'visible prompt'],
+        ]);
+      expect((await initializeSearchFold(ledger, rows)).map((row) => row.body)).toEqual([
+        'visible prompt',
+      ]);
+      expect(foldRowsForExport(rows).map((entry) => [entry.ordinal, entry.category])).toEqual([
+        [1, 'diagnostics'],
+        [2, 'conversation'],
+      ]);
+
+      const metadataUpdates = [];
+      const fanout = createTranscriptEventFanout({
+        chatExists: () => true,
+        schedule: (_chatId, task) => task(),
+        broadcast: () => undefined,
+        updateMetadata: (_chatId, messages) => metadataUpdates.push(...messages),
+        replaceMetadata: () => undefined,
+        resendCandidates: () => [],
+      });
+      fanout({ type: 'rows', chatId: CHAT_ID, viewId: VIEW_ID, rows });
+      expect(metadataUpdates.map(conversationalText)).toEqual(['visible prompt']);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('[TLV5-CHAT-ID-DISCOVERY.02-CORE-MATRIX-01] keeps discovery notices out of conversational folds', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-chat-id-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {

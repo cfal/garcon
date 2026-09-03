@@ -1264,9 +1264,24 @@ describe('ChatCommandService', () => {
     expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
     expect(settings.recordChatStartup).toHaveBeenCalledTimes(1);
     const [
-      { id: interactiveId, ...interactive },
-      { id: cliId, ...cliEntry },
-      { id: scheduledId, ...scheduledEntry },
+      {
+        id: interactiveId,
+        agentOwnershipEpoch: interactiveEpoch,
+        pendingPreambleBoundary: interactiveBoundary,
+        ...interactive
+      },
+      {
+        id: cliId,
+        agentOwnershipEpoch: cliEpoch,
+        pendingPreambleBoundary: cliBoundary,
+        ...cliEntry
+      },
+      {
+        id: scheduledId,
+        agentOwnershipEpoch: scheduledEpoch,
+        pendingPreambleBoundary: scheduledBoundary,
+        ...scheduledEntry
+      },
     ] =
       chats.addChat.mock.calls.map(([entry]) => entry);
     expect(interactiveId).toBe(TARGET_CHAT_ID);
@@ -1274,6 +1289,9 @@ describe('ChatCommandService', () => {
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(cliEntry).toEqual(interactive);
     expect(scheduledEntry).toEqual(interactive);
+    expect(interactiveBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: interactiveEpoch });
+    expect(cliBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: cliEpoch });
+    expect(scheduledBoundary).toEqual({ kind: 'new-chat', ownershipEpoch: scheduledEpoch });
     expect(interactive.parentChat).toBeNull();
     expect(interactive.thinkingMode).toBe('ultra');
     expect(interactive.tags).toEqual(['qa', 'review-needed']);

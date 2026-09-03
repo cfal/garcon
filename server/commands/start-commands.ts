@@ -8,6 +8,7 @@ import {
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import { createLogger } from '../lib/log.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -156,6 +157,7 @@ export class StartCommands {
           this.deps.chats.addChat({
             id: input.chatId,
             agentId: input.agentId,
+            ...createPreambleBoundaryBinding('new-chat'),
             nativeSession: null,
             projectPath: input.projectPath,
             tags: input.tags,

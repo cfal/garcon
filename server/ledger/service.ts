@@ -35,6 +35,7 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+import type { PendingPreambleBoundary, Preamble } from '../../common/preambles.js';
 import { isConversationalLedgerRow, transcriptViewId } from './contracts.js';
 import {
   canonicalizeGarconProducerRows,
@@ -268,6 +269,8 @@ export class TranscriptLedgerService {
     readonly clientMessageId: string | null;
     readonly steer: boolean;
     readonly excludedOrdinals?: ReadonlySet<number>;
+    readonly preambleBoundary?: PendingPreambleBoundary | null;
+    readonly preambles?: readonly Preamble[];
   }): InputComposition {
     const composition = this.#store.appendInputAndCompose(input.chatId, {
       viewId: input.viewId,
@@ -277,15 +280,19 @@ export class TranscriptLedgerService {
         message: input.message,
         attachments: input.attachments,
         steer: input.steer,
+        preambleBoundary: null,
+        preamblePrefixReceipt: null,
       },
       excludedOrdinals: input.excludedOrdinals,
+      preambleBoundary: input.preambleBoundary ?? null,
+      preambles: input.preambles ?? [],
     });
     if (composition.inserted) {
       this.#notify({
         type: 'rows',
         chatId: input.chatId,
         viewId: input.viewId,
-        rows: [composition.input],
+        rows: composition.committedRows,
       });
     }
     if (input.clientMessageId) {
@@ -294,6 +301,10 @@ export class TranscriptLedgerService {
       else this.#preparedInputs.delete(key);
     }
     return composition;
+  }
+
+  hasPreambleBoundaryProof(chatId: string, boundary: PendingPreambleBoundary): boolean {
+    return this.#store.hasPreambleBoundaryProof(chatId, boundary);
   }
 
   takePreparedInput(chatId: string, clientMessageId: string | null | undefined): InputComposition | null {

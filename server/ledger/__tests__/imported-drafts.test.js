@@ -165,6 +165,8 @@ describe('imported transcript drafts', () => {
         message: user,
         attachments: [],
         steer: false,
+        preambleBoundary: null,
+        preamblePrefixReceipt: null,
       },
       providerMeta: null,
     }]);
@@ -189,6 +191,8 @@ describe('frozen transcript drafts', () => {
           message: user,
           attachments: [],
           steer: false,
+          preambleBoundary: null,
+          preamblePrefixReceipt: null,
         },
         providerMeta: null,
       },

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type {
   ForkedAgentSessionOutcome,
@@ -12,7 +11,12 @@ import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { LedgerRow, LedgerRowDraft } from '../ledger/contracts.js';
 import { isPresentationOnlyProviderRow } from '../ledger/contracts.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
+import {
+  collectPreambleHistoryEvidence,
+  type PreambleHistoryEvidence,
+} from '../ledger/preamble-history.js';
 import type { JsonObject } from '../../common/json.js';
+import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 
 const logger = createLogger('chats:fork');
 
@@ -85,6 +89,7 @@ interface ForkChatInput {
     sourceSession: ChatRegistryEntry;
     fork: StartedAgentSession;
     signal: AbortSignal;
+    preambleEvidence: readonly PreambleHistoryEvidence[];
   }) => Promise<LedgerRowDraft[] | null>;
 }
 
@@ -146,7 +151,6 @@ export async function forkChatFileCopy({
   signal.throwIfAborted();
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
-  const targetEpoch = crypto.randomUUID();
   const sourceView = ledger.currentView(sourceChatId);
   if (!sourceView) {
     throw new DomainError('TRANSCRIPT_UNAVAILABLE', 'Source transcript is unavailable', 422);
@@ -238,11 +242,15 @@ export async function forkChatFileCopy({
   let nativeSeed: LedgerRowDraft[] | null = null;
   if (nativeFork) {
     try {
+      const preambleEvidence = collectPreambleHistoryEvidence(
+        sourceRows.filter((row) => row.ordinal >= sourceView.contentStartOrdinal),
+      );
       nativeSeed = await readForkedNativeHistory({
         targetChatId,
         sourceSession,
         fork: nativeFork,
         signal,
+        preambleEvidence,
       });
       signal.throwIfAborted();
     } catch (error) {
@@ -299,7 +307,7 @@ export async function forkChatFileCopy({
       modelProtocol: sourceSession.modelProtocol ?? null,
       projectPath: sourceSession.projectPath,
       nativeSession: nativeFork?.nativeSession ?? null,
-      agentOwnershipEpoch: targetEpoch,
+      ...createPreambleBoundaryBinding('fork'),
       tags: [...sourceSession.tags],
       agentSessionId: nativeFork?.agentSessionId ?? null,
       nextForkOrdinal: 1,

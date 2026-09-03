@@ -12,6 +12,8 @@ import {
   isCliRowFormat,
 } from '../../common/cli-presentation.js';
 import { parseNativeSeedReceipt } from '../../common/transcript-seed.js';
+import { normalizePendingPreambleBoundary } from '../../common/preambles.js';
+import { parsePreamblePrefixReceipt } from '../../common/preamble-prefix.js';
 import type {
   AgentEstablishedSession,
   AgentPermissionLifecycle,
@@ -242,7 +244,30 @@ function parseUserInput(value: unknown): LedgerUserInputDetail {
     };
   });
   if (typeof detail.steer !== 'boolean') throw new TypeError('Stored steer flag is invalid');
-  return { clientMessageId, message, attachments, steer: detail.steer };
+  const preambleBoundary = detail.preambleBoundary === undefined || detail.preambleBoundary === null
+    ? null
+    : normalizePendingPreambleBoundary(detail.preambleBoundary);
+  const preamblePrefixReceipt = detail.preamblePrefixReceipt === undefined
+    || detail.preamblePrefixReceipt === null
+    ? null
+    : parsePreamblePrefixReceipt(detail.preamblePrefixReceipt);
+  if (detail.preambleBoundary != null && !preambleBoundary) {
+    throw new TypeError('Stored preamble boundary proof is invalid');
+  }
+  if (detail.preamblePrefixReceipt != null && !preamblePrefixReceipt) {
+    throw new TypeError('Stored preamble prefix receipt is invalid');
+  }
+  if (preamblePrefixReceipt && !preambleBoundary) {
+    throw new TypeError('Stored preamble receipt has no boundary proof');
+  }
+  return {
+    clientMessageId,
+    message,
+    attachments,
+    steer: detail.steer,
+    preambleBoundary,
+    preamblePrefixReceipt,
+  };
 }
 
 function parseAgentSwitch(value: unknown): LedgerAgentSwitchDetail {

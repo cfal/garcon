@@ -100,6 +100,7 @@ type PreparedPrompt =
   | {
       readonly dispatch: true;
       readonly prompt: string;
+      readonly providerPrefix: string;
       readonly attachments: ReturnType<typeof attachments>;
       readonly excludedOrdinals: ReadonlySet<number>;
       readonly viewId: TranscriptViewId;
@@ -196,6 +197,7 @@ export class AgentRuntimeRouter {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
         prompt: prepared.prompt,
+        providerPrefix: prepared.providerPrefix,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       });
@@ -248,6 +250,7 @@ export class AgentRuntimeRouter {
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.prompt,
+        providerPrefix: prepared.providerPrefix,
         attachments: prepared.attachments,
       });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -337,6 +340,7 @@ export class AgentRuntimeRouter {
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
+      providerPrefix: '',
       attachments: attachments(opts.images),
       beforeDelivery: async (handoff) => {
         await beforeDelivery(this.#goalRunHandoff({
@@ -347,7 +351,8 @@ export class AgentRuntimeRouter {
           nextTurn: operationMetadata(operation),
           downstream: handoff,
         }));
-        this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
+        const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
+        return { providerPrefix: composition?.providerPrefix ?? '' };
       },
     });
   }
@@ -392,6 +397,7 @@ export class AgentRuntimeRouter {
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
+        providerPrefix: '',
         attachments: [],
       };
       const handle = await compaction.compact(request);
@@ -714,6 +720,7 @@ export class AgentRuntimeRouter {
     return {
       dispatch: true,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
+      providerPrefix: composition?.providerPrefix ?? '',
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
       viewId,

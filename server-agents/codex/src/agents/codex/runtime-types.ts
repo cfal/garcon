@@ -31,6 +31,7 @@ export interface CodexExecutionRequest {
   readonly clientMessageId?: string;
   readonly executionAdmission?: CodexExecutionAdmission;
   readonly command: string;
+  readonly providerPrefix: string;
   readonly codexGoalCommand?: CodexGoalCommand;
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;

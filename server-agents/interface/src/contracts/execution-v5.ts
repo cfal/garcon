@@ -24,6 +24,7 @@ export interface AgentExecutionContextV5 {
 
 export interface AgentStartRequestV5 extends AgentExecutionContextV5 {
   readonly prompt: string;
+  readonly providerPrefix: string;
   readonly attachments: readonly AgentAttachment[];
   readonly carriedContext: CarriedContext | null;
 }
@@ -32,6 +33,7 @@ export interface AgentResumeRequestV5 extends AgentExecutionContextV5 {
   readonly agentSessionId: string;
   readonly nativeSession: AgentNativeSessionRef | null;
   readonly prompt: string;
+  readonly providerPrefix: string;
   readonly attachments: readonly AgentAttachment[];
 }
 

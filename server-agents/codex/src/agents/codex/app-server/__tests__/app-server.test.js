@@ -85,6 +85,7 @@ function makeRequest(overrides = {}) {
     model: 'gpt-5.4-codex',
     permissionMode: 'default',
     thinkingMode: 'medium',
+    providerPrefix: '',
     ...overrides,
   };
   if (request.operation) return request;
@@ -5166,6 +5167,7 @@ describe('CodexAppServerRuntime', () => {
 
   it('reconciles goal control through the delivered payload and native history loader', async () => {
     const content = 'Preserve goal control & literal markup <exactly>';
+    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
     const nativePath = path.join(tmpDir, 'goal-control.jsonl');
     let fake;
     fake = new FakeClient({
@@ -5178,7 +5180,10 @@ describe('CodexAppServerRuntime', () => {
         return { goal: makeGoal(threadId, params.objective) };
       },
       steerTurn: async ({ expectedTurnId, input }) => {
-        const deliveredText = input.find((item) => item.type === 'text')?.text;
+        const deliveredText = input
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .join('');
         await fs.writeFile(nativePath, `${JSON.stringify({
           type: 'event_msg',
           timestamp: '2026-06-01T00:00:00.100Z',
@@ -5202,12 +5207,13 @@ describe('CodexAppServerRuntime', () => {
     }), async (handoff) => {
       handoff.validate();
       handoff.commit();
+      return { providerPrefix };
     })).resolves.toBe(true);
 
     // The goal-control steer delivers its text to the running goal client and
     // the client persists it to native history.
     expect(await loadCodexChatMessages(nativePath)).toMatchObject([
-      { type: 'user-message', content },
+      { type: 'user-message', content: `${providerPrefix}${content}` },
     ]);
   });
 

@@ -105,6 +105,7 @@ import {
   SnippetProjectPathService,
   SnippetService,
 } from './snippets/service.js';
+import { initializePreambleService } from './preambles/setup.js';
 import {
   importNativeHistoryDrafts,
   ledgerRowsToMessages,
@@ -388,6 +389,8 @@ export async function startServer(): Promise<void> {
       transcriptLedger,
       transcriptAdoption,
     );
+    const preambles = await initializePreambleService(workspaceDir);
+
     agentRegistry = new AgentRegistry({
       registry: chatRegistry,
       integrations: integrationRegistry,
@@ -425,6 +428,7 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
       ledger: transcriptLedger,
       adoption: transcriptAdoption,
+      preambles,
     });
 
     await chatRegistry.reconcileSessions((session, chatId) =>
@@ -577,7 +581,13 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentionsInCommand },
       forkChatFileCopy,
-      readForkedNativeHistory: async ({ targetChatId, sourceSession, fork, signal }) => {
+      readForkedNativeHistory: async ({
+        targetChatId,
+        sourceSession,
+        fork,
+        signal,
+        preambleEvidence,
+      }) => {
         const integration = integrationRegistry.get(sourceSession.agentId);
         if (!integration?.nativeHistoryImport) return null;
         return importNativeHistoryDrafts({
@@ -591,6 +601,7 @@ export async function startServer(): Promise<void> {
           carryOverRevision: carryOver.revision([]),
           signal,
           now: () => new Date().toISOString(),
+          preambleEvidence,
         });
       },
       transcripts: transcriptLedger,
@@ -687,6 +698,7 @@ export async function startServer(): Promise<void> {
         telegramSettings,
         scheduledPrompts,
         snippets,
+        preambles,
         searchIndex: chatSearch,
       }),
       startScheduledPrompts: () => scheduledPrompts.start(),
@@ -717,6 +729,7 @@ export async function startServer(): Promise<void> {
       lastSelectedChat,
       scheduledPrompts,
       snippets,
+      preambles,
       terminals: terminalManager,
       searchIndex: chatSearch,
       transcriptSearchSettings,

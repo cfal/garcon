@@ -1,4 +1,18 @@
 import { parseChatId } from './chat-id.js';
+import {
+  PREAMBLE_MAX_COUNT,
+  normalizePreambleTitle,
+} from './preambles.js';
+
+export type AppliedPreambleReference = {
+  readonly id: string;
+  readonly title: string;
+};
+
+export interface PreambleApplicationNoticeDetail {
+  readonly type: 'preamble-application';
+  readonly preambles: readonly AppliedPreambleReference[];
+}
 
 export interface CarryoverMigrationQuarantineNoticeDetail {
   readonly type: 'carryover-migration-quarantine';
@@ -60,6 +74,7 @@ export interface InterAgentMessageReceivedNoticeDetail {
 export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
+  | PreambleApplicationNoticeDetail
   | CarryoverMigrationQuarantineNoticeDetail
   | HandoffSummaryNoticeDetail
   | ChatIdDisclosureNoticeDetail
@@ -77,6 +92,25 @@ export function isCarryoverMigrationQuarantineNoticeDetail(
     && detail.artifactId.length > 0
     && typeof detail.errorCode === 'string'
     && detail.errorCode.length > 0;
+}
+
+export function isPreambleApplicationNoticeDetail(
+  value: unknown,
+): value is PreambleApplicationNoticeDetail {
+  if (!hasType(value, 'preamble-application')) return false;
+  const preambles = (value as Record<string, unknown>).preambles;
+  if (!Array.isArray(preambles) || preambles.length < 1 || preambles.length > PREAMBLE_MAX_COUNT) {
+    return false;
+  }
+  const ids = new Set<string>();
+  return preambles.every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const raw = entry as Record<string, unknown>;
+    const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+    if (!id || ids.has(id) || normalizePreambleTitle(raw.title) === null) return false;
+    ids.add(id);
+    return Object.keys(raw).every((key) => key === 'id' || key === 'title');
+  });
 }
 
 export function isHandoffSummaryNoticeDetail(
@@ -147,6 +181,15 @@ function hasType(value: unknown, type: string): boolean {
 }
 
 export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (isPreambleApplicationNoticeDetail(value)) {
+    return {
+      type: value.type,
+      preambles: value.preambles.map((preamble) => ({
+        id: preamble.id.trim(),
+        title: normalizePreambleTitle(preamble.title)!,
+      })),
+    };
+  }
   if (isCarryoverMigrationQuarantineNoticeDetail(value)) {
     return {
       type: value.type,

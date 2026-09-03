@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
 
+import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import {
   cursorAcpStoreDbPath,
   cursorStoreDbPath,
@@ -15,6 +16,12 @@ import {
 } from '../history-loader.js';
 
 let tempRoot;
+
+const PREAMBLE_PREFIX = createPreamblePrefix({
+  viewId: 'view-native-history',
+  clientMessageId: 'message-native-history',
+  contents: ['Synthetic Cursor instructions.'],
+}).prefix;
 
 describe('Cursor history loader', () => {
   beforeEach(async () => {
@@ -52,6 +59,26 @@ describe('Cursor history loader', () => {
   it('raises a clear error when the Cursor store is missing', async () => {
     await expect(loadImportableCursorChatMessagesBySessionId('missing-session', '/tmp/project', tempRoot))
       .rejects.toThrow('Cursor transcript database not found');
+  });
+
+  it('preserves a framed preamble inside Cursor user-query wrappers exactly', () => {
+    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
+    const messages = normalizeCursorBlobs([{
+      id: 'user-prefix',
+      rowid: 1,
+      sequence: 1,
+      content: {
+        role: 'user',
+        timestamp: '2026-05-22T01:00:00.000Z',
+        content: [{
+          type: 'text',
+          text: `<timestamp>Friday, May 22, 2026, 9:31 AM (UTC)</timestamp>\n<user_query>\n${prompt}\n</user_query>`,
+        }],
+      },
+    }]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
   });
 
   it('normalizes Cursor blobs into canonical chat messages', () => {

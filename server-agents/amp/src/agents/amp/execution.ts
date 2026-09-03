@@ -41,7 +41,7 @@ export class AmpExecution implements AgentRuntimeExecution {
       model: request.model,
       permissionMode: request.permissionMode,
       attachments: request.attachments,
-      command: `${seed}${request.prompt}`,
+      command: `${seed}${request.providerPrefix}${request.prompt}`,
       operation: runtimeOperation(request.runId, publish),
       onSessionActivated: (session) => void establish(session),
       executionAdmission: {
@@ -62,7 +62,7 @@ export class AmpExecution implements AgentRuntimeExecution {
       model: request.model,
       permissionMode: request.permissionMode,
       attachments: request.attachments,
-      command: request.prompt,
+      command: `${request.providerPrefix}${request.prompt}`,
       agentSessionId: request.agentSessionId,
       operation: runtimeOperation(request.runId, publish),
       executionAdmission: {

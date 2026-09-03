@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { appendFile } from 'node:fs/promises';
+import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import { FILE_CONTEXT_SEPARATOR } from '../../shared/file-mention-context.js';
 import {
@@ -12,6 +13,12 @@ import {
 } from './session-store-fixture.js';
 
 const SESSION_ID = '10000000-0000-4000-8000-000000000001';
+
+const PREAMBLE_PREFIX = createPreamblePrefix({
+  viewId: 'view-native-history',
+  clientMessageId: 'message-native-history',
+  contents: ['Synthetic Direct instructions.'],
+}).prefix;
 
 afterEach(removeTestDirectSessionStores);
 
@@ -29,12 +36,12 @@ function chat(nativeSession: AgentChatReference['nativeSession']): AgentChatRefe
   };
 }
 
-async function createSession() {
+async function createSession(content = `visible request${FILE_CONTEXT_SEPARATOR}expanded file contents`) {
   const sessions = createTestDirectSessionStore();
   await sessions.create({
     sessionId: SESSION_ID,
     runId: 'run-1',
-    content: `visible request${FILE_CONTEXT_SEPARATOR}expanded file contents`,
+    content,
     attachments: [{
       kind: 'image',
       data: 'data:image/png;base64,YWJj',
@@ -51,6 +58,22 @@ async function createSession() {
 }
 
 describe('Direct native session facets', () => {
+  test('preserves a framed preamble and visible prompt exactly', async () => {
+    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
+    const sessions = await createSession(prompt);
+    const importer = createDirectNativeHistoryImport(sessions);
+    const batches = [];
+
+    for await (const batch of importer.load({
+      chat: chat(sessions.nativeReference(SESSION_ID)),
+      signal: new AbortController().signal,
+    })) {
+      batches.push(...batch);
+    }
+
+    expect(batches[0]?.message).toMatchObject({ type: 'user-message', content: prompt });
+  });
+
   test('resolves and describes only the exact durable native session', async () => {
     const sessions = await createSession();
     const access = createDirectNativeSessionAccess(sessions);

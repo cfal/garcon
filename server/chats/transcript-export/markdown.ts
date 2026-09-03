@@ -9,6 +9,7 @@ import {
   transcriptExportEntryToolId,
   transcriptExportEntryType,
   transcriptExportEntryCliPresentation,
+  transcriptExportEntryPreambles,
 } from './values.js';
 
 export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentModel): string {
@@ -26,11 +27,15 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
 
   for (const entry of model.entries) {
     const type = transcriptExportEntryType(entry);
+    const preambles = transcriptExportEntryPreambles(entry);
     const presentation = transcriptExportEntryCliPresentation(entry);
     const presentationLabel = presentation === null
       ? ''
       : ` — CLI${presentation.style ? ` ${presentation.style}` : ''}${presentation.title ? `: ${singleLine(presentation.title)}` : ''}`;
-    lines.push(`## [${entry.ordinal}] ${entryLabel(type)}${presentationLabel}`, '');
+    lines.push(
+      `## [${entry.ordinal}] ${preambles ? 'Preambles applied' : entryLabel(type)}${presentationLabel}`,
+      '',
+    );
 
     const content = transcriptExportEntryText(entry);
     if (content !== null) lines.push(content, '');

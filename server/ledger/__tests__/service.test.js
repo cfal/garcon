@@ -838,6 +838,47 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
+  it('publishes an applied-preamble notice and boundary input as one ordered commit event', async () => {
+    await withService(async ({ ledger }) => {
+      const view = ledger.initializeChat('chat-1');
+      const notifications = [];
+      ledger.subscribe((event) => notifications.push(event));
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'epoch-one' };
+
+      const composition = ledger.appendInputAndCompose({
+        chatId: 'chat-1',
+        viewId: view.viewId,
+        message: new UserMessage(TS, 'Visible prompt'),
+        attachments: [],
+        clientMessageId: 'message-1',
+        steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-a',
+          title: 'Repository conventions',
+          content: 'PRIVATE-PREAMBLE-BODY',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
+      });
+
+      expect(notifications).toEqual([]);
+      await tick();
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toMatchObject({
+        type: 'rows',
+        rows: [
+          { ordinal: 1, kind: 'notice', message: 'Preambles applied' },
+          { ordinal: 2, kind: 'user-input' },
+        ],
+      });
+      expect(composition.providerPrefix).toContain('PRIVATE-PREAMBLE-BODY');
+      expect(JSON.stringify(notifications[0])).not.toContain('PRIVATE-PREAMBLE-BODY');
+      expect(ledger.hasPreambleBoundaryProof('chat-1', boundary)).toBe(true);
+    });
+  });
+
   it('does not retain a prepared composition for a duplicate committed input', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');

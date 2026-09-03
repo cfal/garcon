@@ -238,14 +238,17 @@ function prepareStartRequest(
     );
   }
   const carriedContext = request.carriedContext?.prefix ?? null;
+  const outboundGoal = prefaceGoalObjective(goal, request.providerPrefix);
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
-    command: goal?.objective ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
+    command: goalObjective(outboundGoal)
+      ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
+    providerPrefix: outboundGoal ? '' : request.providerPrefix,
     images: request.attachments,
     ...configuration,
-    ...(goal ? { codexGoalCommand: goal } : {}),
-    ...(goal && carriedContext ? { codexSeedContext: carriedContext } : {}),
+    ...(outboundGoal ? { codexGoalCommand: outboundGoal } : {}),
+    ...(outboundGoal && carriedContext ? { codexSeedContext: carriedContext } : {}),
   };
 }
 
@@ -256,15 +259,17 @@ function prepareResumeRequest(
   publish: AgentRuntimePublisher,
 ): CodexResumeRequest {
   const goal = parseCodexGoalCommand(request.prompt);
+  const outboundGoal = prefaceGoalObjective(goal, request.providerPrefix);
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
     agentSessionId: request.agentSessionId,
-    command: goalObjective(goal) ?? request.prompt,
+    command: goalObjective(outboundGoal) ?? request.prompt,
+    providerPrefix: outboundGoal ? '' : request.providerPrefix,
     images: request.attachments,
     nativePath: nativeSessions.decode(request.nativeSession).path,
     ...configuration,
-    ...(goal ? { codexGoalCommand: goal } : {}),
+    ...(outboundGoal ? { codexGoalCommand: outboundGoal } : {}),
   };
 }
 
@@ -272,4 +277,14 @@ function goalObjective(goal: CodexGoalCommand | null): string | null {
   return goal && 'objective' in goal && typeof goal.objective === 'string'
     ? goal.objective
     : null;
+}
+
+function prefaceGoalObjective(
+  goal: CodexGoalCommand | null,
+  providerPrefix: string,
+): CodexGoalCommand | null {
+  if (!goal || !providerPrefix || !('objective' in goal) || typeof goal.objective !== 'string') {
+    return goal;
+  }
+  return { ...goal, objective: `${providerPrefix}${goal.objective}` };
 }

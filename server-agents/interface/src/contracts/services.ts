@@ -108,12 +108,18 @@ export interface AgentGoals {
 }
 
 export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
-  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
+  readonly beforeDelivery: (
+    handoff: AgentGoalControlHandoff,
+  ) => Promise<AgentGoalControlPreparation>;
 }
 
 export interface AgentGoalControlHandoff {
   validate(): void;
   commit(): void;
+}
+
+export interface AgentGoalControlPreparation {
+  readonly providerPrefix: string;
 }
 
 // Native, in-place context compaction. A provider that implements this rewrites

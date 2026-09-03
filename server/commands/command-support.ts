@@ -45,6 +45,7 @@ import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import type { LedgerRowDraft } from '../ledger/contracts.js';
+import type { PreambleHistoryEvidence } from '../ledger/preamble-history.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import {
   CommandExecutionControlError,
@@ -106,6 +107,14 @@ export type AgentRegistryDep = Pick<
   | 'prepareProjectPathUpdate'
 >;
 
+export type ForkedNativeHistoryReaderDep = (args: {
+  targetChatId: string;
+  sourceSession: ChatRegistryEntry;
+  fork: StartedAgentSession;
+  signal: AbortSignal;
+  preambleEvidence: readonly PreambleHistoryEvidence[];
+}) => Promise<LedgerRowDraft[] | null>;
+
 export type ForkChatFileCopyDep = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
@@ -127,20 +136,8 @@ export type ForkChatFileCopyDep = (args: {
     signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
-  readForkedNativeHistory: (args: {
-    targetChatId: string;
-    sourceSession: ChatRegistryEntry;
-    fork: StartedAgentSession;
-    signal: AbortSignal;
-  }) => Promise<LedgerRowDraft[] | null>;
+  readForkedNativeHistory: ForkedNativeHistoryReaderDep;
 }) => Promise<ForkChatFileCopyResult>;
-
-export type ForkedNativeHistoryReaderDep = (args: {
-  targetChatId: string;
-  sourceSession: ChatRegistryEntry;
-  fork: StartedAgentSession;
-  signal: AbortSignal;
-}) => Promise<LedgerRowDraft[] | null>;
 
 export interface FileMentionResolverDep {
   resolve(command: string, projectPath: string): Promise<string>;

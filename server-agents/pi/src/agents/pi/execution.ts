@@ -37,7 +37,7 @@ export class PiExecution implements AgentRuntimeExecution {
     };
     const result = await this.runtime.startSession({
       ...executionFields(request),
-      command: `${seed}${request.prompt}`,
+      command: `${seed}${request.providerPrefix}${request.prompt}`,
       images: request.attachments,
       operation: runtimeOperation(request.runId, publish),
       onSessionActivated: (session) => void establish(session),
@@ -52,7 +52,7 @@ export class PiExecution implements AgentRuntimeExecution {
     await this.runtime.runTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
-      command: request.prompt,
+      command: `${request.providerPrefix}${request.prompt}`,
       images: request.attachments,
       nativePath: this.nativeSessions.decode(request.nativeSession).path,
       operation: runtimeOperation(request.runId, publish),

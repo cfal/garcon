@@ -18,6 +18,7 @@ import {
 import type {
   AppendChatRowRequest,
   AppendChatRowResult,
+  AppendInputRequest,
   InputComposition,
   LedgerCliRowNoticeRow,
   LedgerCheckpoint,
@@ -55,6 +56,11 @@ import {
   runQuery,
   runTransaction,
 } from './sqlite-operations.js';
+import type { PendingPreambleBoundary } from '../../common/preambles.js';
+import {
+  hasPreambleBoundaryProof as queryPreambleBoundaryProof,
+  preparePreambleInput,
+} from './preamble-application.js';
 
 const LEDGER_SCHEMA_VERSION = 1;
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
@@ -96,14 +102,6 @@ export interface InitializeViewInput {
 export interface StageViewInput extends InitializeViewInput {
   readonly viewId: TranscriptViewId;
 }
-
-export interface AppendInputRequest {
-  readonly viewId: TranscriptViewId;
-  readonly at: string;
-  readonly detail: LedgerUserInputDetail;
-  readonly excludedOrdinals?: ReadonlySet<number>;
-}
-
 export class TranscriptLedgerStore {
   readonly #rootDirectory: string;
   readonly #cacheSize: number;
@@ -184,14 +182,6 @@ export class TranscriptLedgerStore {
   }
 
   appendInputAndCompose(chatId: string, request: AppendInputRequest): InputComposition {
-    validateInputDetail(request.detail);
-    const draft: LedgerRowDraft = {
-      kind: 'user-input',
-      at: request.at,
-      detail: request.detail,
-      providerMeta: null,
-    };
-    const encoded = { draft, ...encodeLedgerDraft(draft) };
     return this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, request.viewId);
       const existing = request.detail.clientMessageId
@@ -202,24 +192,47 @@ export class TranscriptLedgerStore {
             || submissionFingerprint(existing.detail) !== submissionFingerprint(request.detail)) {
           throw new SubmissionConflictError(request.detail.clientMessageId!);
         }
-        return { input: existing, prompt: [], inserted: false };
+        return {
+          input: existing,
+          committedRows: [],
+          prompt: [],
+          providerPrefix: '',
+          inserted: false,
+        };
       }
 
-      const ordinal = entry.nextOrdinal;
-      const [materialized] = materializeRows(
-        request.viewId,
-        [encoded],
-        ordinal,
-      );
-      const input = materialized as LedgerUserInputRow;
+      const prepared = preparePreambleInput({
+        viewId: request.viewId,
+        at: request.at,
+        detail: request.detail,
+        boundary: request.preambleBoundary,
+        preambles: request.preambles,
+      });
+      const encoded = encodeDrafts(prepared.drafts);
+      const firstOrdinal = entry.nextOrdinal;
+      const committedRows = materializeRows(request.viewId, encoded, firstOrdinal);
+      const input = committedRows[committedRows.length - 1] as LedgerUserInputRow;
       const prompt = runTransaction(entry.db, () => {
-        insertEncodedRows(entry.db, request.viewId, [encoded], ordinal);
-        return request.detail.steer
+        insertEncodedRows(entry.db, request.viewId, encoded, firstOrdinal);
+        return prepared.detail.steer
           ? [input]
           : this.#composePrompt(entry, request.viewId, input, request.excludedOrdinals);
       });
-      entry.nextOrdinal += 1;
-      return { input, prompt, inserted: true };
+      entry.nextOrdinal += committedRows.length;
+      return {
+        input,
+        committedRows,
+        prompt,
+        providerPrefix: prepared.providerPrefix,
+        inserted: true,
+      };
+    });
+  }
+
+  hasPreambleBoundaryProof(chatId: string, boundary: PendingPreambleBoundary): boolean {
+    return this.#read(chatId, (entry) => {
+      const current = this.#requireCurrent(entry);
+      return queryPreambleBoundaryProof(entry.db, current.viewId, boundary);
     });
   }
 
@@ -976,15 +989,6 @@ function validateChatDirectoryName(chatId: string): void {
 function validateContentStartOrdinal(value: number, rowCount: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value > rowCount + 1) {
     throw new TypeError('Content-start ordinal must address the view or its append boundary');
-  }
-}
-
-function validateInputDetail(detail: LedgerUserInputDetail): void {
-  if (detail.clientMessageId !== null && detail.clientMessageId.length === 0) {
-    throw new TypeError('Client message ID must be non-empty');
-  }
-  if (!detail.message || detail.message.type !== 'user-message') {
-    throw new TypeError('Input detail requires a user message');
   }
 }
 

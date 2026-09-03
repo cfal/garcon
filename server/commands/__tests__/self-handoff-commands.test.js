@@ -43,6 +43,7 @@ function harness({ source = sourceChat() } = {}) {
           return true;
         }),
         removeChat: mock(async (id) => chats.delete(id)),
+        flush: mock(async () => undefined),
       },
       ledger: {
         getRecord: mock(async () => undefined),
@@ -131,6 +132,10 @@ describe('self handoff commands', () => {
       ordinal: 4,
     });
     expect(target.agentOwnershipEpoch).not.toBe('epoch-1');
+    expect(target.pendingPreambleBoundary).toEqual({
+      kind: 'continuation',
+      ownershipEpoch: target.agentOwnershipEpoch,
+    });
     expect(support.deps.handoffs.seedContinuationLedger).toHaveBeenCalledWith({
       sourceChatId: SOURCE_ID,
       targetChatId: TARGET_ID,

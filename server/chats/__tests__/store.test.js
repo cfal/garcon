@@ -48,6 +48,7 @@ function persistedEntry(overrides = {}) {
     carryOverSegments: [],
     nativeSeedReceipt: null,
     carryOverMigrationQuarantine: null,
+    pendingPreambleBoundary: null,
     parentChat: null,
     ...overrides,
   };
