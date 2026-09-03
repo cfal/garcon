@@ -437,6 +437,47 @@ describe("selected-file commits", () => {
     }
   });
 
+  it("serializes concurrent selected-file commits", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-concurrent-selected-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "first\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "b.txt"), "second\n", "utf-8");
+      const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
+      await fs.writeFile(hookPath, "#!/bin/sh\nsleep 0.2\n", "utf-8");
+      await fs.chmod(hookPath, 0o755);
+
+      await Promise.all([
+        git.commit({ projectPath, message: "first change", files: ["a.txt"] }),
+        git.commit({ projectPath, message: "second change", files: ["b.txt"] }),
+      ]);
+
+      const { stdout } = await runGitCommand(projectPath, ["log", "-2", "--format=%H"]);
+      const commits = await Promise.all(stdout.trim().split("\n").map(async (commit) => {
+        const result = await runGitCommand(projectPath, [
+          "show",
+          "--format=%s",
+          "--name-only",
+          commit,
+        ]);
+        return result.stdout.trim().split("\n").filter(Boolean);
+      }));
+      expect(commits.sort((left, right) => left[0].localeCompare(right[0]))).toEqual([
+        ["first change", "a.txt"],
+        ["second change", "b.txt"],
+      ]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("does not report a durable commit as failed when the real index is locked", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-locked-index-commit-"),

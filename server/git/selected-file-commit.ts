@@ -90,6 +90,7 @@ export async function commitSelectedFiles(
   const pathspecs = files.map(literalGitPathspec);
   const pathspecInput = encodePathspecs(pathspecs);
   const temporaryIndexPath = await createTemporaryGitIndex(projectPath);
+  // Post-commit hooks inherit this isolated index; their index writes are discarded.
   const temporaryIndexOptions = { env: { GIT_INDEX_FILE: temporaryIndexPath } };
   try {
     await runGitWithStdin(
