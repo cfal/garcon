@@ -83,6 +83,21 @@ describe("Chromium New Chat composer layout", () => {
         expect(
           dialogBoxAtPhoneWidth.x + dialogBoxAtPhoneWidth.width,
         ).toBeLessThanOrEqual(362);
+        // The dialog clips horizontal overflow; the form must fit inside the
+        // dialog instead of relying on the clip to hide it.
+        expect(
+          await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+        ).toBe(true);
+
+        markPhase("checking content containment at 360px width");
+        await fixture.page.setViewportSize({ width: 360, height: 844 });
+        const dialogBoxAt360 = await bounds(dialog);
+        expect(dialogBoxAt360.x).toBeGreaterThanOrEqual(16);
+        expect(dialogBoxAt360.x + dialogBoxAt360.width).toBeLessThanOrEqual(344);
+        expect(
+          await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+        ).toBe(true);
+        await fixture.page.setViewportSize({ width: 390, height: 844 });
 
         markPhase("checking responsive composer actions");
         await bottomBar
