@@ -8,6 +8,7 @@ import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/na
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { SSEEvent } from './sse-events.js';
+import { normalizeOpenCodeToolResultContent } from './tool-result-converter.js';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import type { OpenCodeTurnContext } from './turn-events.js';
 
@@ -66,7 +67,7 @@ export function convertOpenCodeEventToChatMessages(
           chatMessages.push(new ToolResultMessage(
             now,
             toolUse.toolId,
-            normalizeToolResultContent(part.state.output),
+            normalizeOpenCodeToolResultContent(part.tool, part.state),
             false,
           ));
         } else if (part.state?.status === 'error') {

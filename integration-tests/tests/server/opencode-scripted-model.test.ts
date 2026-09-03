@@ -514,6 +514,21 @@ describeOnLinux('OpenCode against a scripted model', () => {
         expect(messagesOfType(transcript.messages, 'external-tool-use')).toEqual([
           expect.objectContaining({ name: 'skill', namespace: 'opencode' }),
         ]);
+        const globResult = transcript.messages.find(
+          (entry) => entry.message.type === 'tool-result' && entry.message.toolId === 'call_builtin_glob',
+        );
+        expect(globResult?.message.content).toEqual({
+          filenames: [filePath],
+          numFiles: 1,
+        });
+        const grepResult = transcript.messages.find(
+          (entry) => entry.message.type === 'tool-result' && entry.message.toolId === 'call_builtin_grep',
+        );
+        expect(grepResult?.message.content).toEqual({
+          filenames: [filePath],
+          numFiles: 1,
+          totalMatches: 1,
+        });
         expect(JSON.stringify(messagesOfType(transcript.messages, 'tool-result')))
           .toContain(webMarker);
         expect(await readFile(filePath, 'utf8')).toBe('updated\n');

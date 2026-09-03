@@ -850,4 +850,66 @@ describe('OpenCode history loader', () => {
 
     expect(messages).toHaveBeenCalledWith({ sessionID: 'session-1', directory: '/repo' });
   });
+
+  it('normalizes stored glob and grep results to structured counts', async () => {
+    const getClient = mock(() => Promise.resolve({
+      session: {
+        messages: mock(() => Promise.resolve({
+          data: [
+            {
+              info: { role: 'assistant', time: { created: '2026-07-04T00:00:00.000Z' } },
+              parts: [
+                {
+                  type: 'tool',
+                  tool: 'glob',
+                  callID: 'tool-glob',
+                  state: {
+                    status: 'completed',
+                    input: { pattern: '**/*.ts' },
+                    output: '/repo/src/a.ts\n/repo/src/b.ts',
+                    metadata: { count: 2, truncated: false },
+                  },
+                },
+                {
+                  type: 'tool',
+                  tool: 'grep',
+                  callID: 'tool-grep',
+                  state: {
+                    status: 'completed',
+                    input: { pattern: 'updated' },
+                    output: [
+                      'Found 2 matches',
+                      '/repo/src/a.ts:',
+                      '  Line 1: updated',
+                      '/repo/src/b.ts:',
+                      '  Line 4: updated',
+                    ].join('\n'),
+                    metadata: { matches: 2, truncated: false },
+                  },
+                },
+              ],
+            },
+          ],
+        })),
+      },
+    }));
+
+    const messages = await loadOpenCodeChatMessages('session-1', getClient);
+
+    const globResult = messages.find(
+      (message) => message instanceof ToolResultMessage && message.toolId === 'tool-glob',
+    );
+    expect(globResult?.content).toEqual({
+      filenames: ['/repo/src/a.ts', '/repo/src/b.ts'],
+      numFiles: 2,
+    });
+    const grepResult = messages.find(
+      (message) => message instanceof ToolResultMessage && message.toolId === 'tool-grep',
+    );
+    expect(grepResult?.content).toEqual({
+      filenames: ['/repo/src/a.ts', '/repo/src/b.ts'],
+      numFiles: 2,
+      totalMatches: 2,
+    });
+  });
 });
