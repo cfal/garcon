@@ -18,7 +18,10 @@ export const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
-export function denialResponseForRequest(method: string): unknown {
+export function denialResponseForRequest(method: string, params?: Record<string, unknown>): unknown {
+  if (method === 'item/commandExecution/requestApproval' && params?.kind === 'writeStdin') {
+    return { decision: 'cancel' };
+  }
   if (method === 'item/commandExecution/requestApproval') return { decision: 'decline' };
   if (method === 'item/fileChange/requestApproval') return { decision: 'decline' };
   if (method === 'item/permissions/requestApproval') return { permissions: {}, scope: 'turn' };

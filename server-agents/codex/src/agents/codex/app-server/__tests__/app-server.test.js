@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, ExecToolUseMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
+import { buildApprovalMessage, buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import {
   CodexAppServerClient,
   CodexAppServerRpcError,
@@ -1757,6 +1757,63 @@ describe('Codex app-server approvals', () => {
     expect(buildApprovalResponse(pending, { allow: true })).toEqual({ decision: 'accept' });
     expect(buildApprovalResponse(pending, { allow: true, alwaysAllow: true })).toEqual({ decision: 'acceptForSession' });
     expect(buildApprovalResponse(pending, { allow: false })).toEqual({ decision: 'decline' });
+  });
+
+  it('uses approval identity for command and write-stdin reviews', () => {
+    const command = createPendingApproval('chat-1', {
+      id: 'command-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        approvalId: 'zsh-review',
+        command: 'printf ready',
+      },
+    });
+    const writeStdin = createPendingApproval('chat-1', {
+      id: 'stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        approvalId: 'stdin-approval',
+        kind: 'writeStdin',
+        reason: 'Send confirmation',
+      },
+    });
+
+    expect(buildApprovalMessage(command).requestedTool).toMatchObject({
+      type: 'bash-tool-use',
+      toolId: 'zsh-review',
+      command: 'printf ready',
+    });
+    expect(buildApprovalMessage(writeStdin).requestedTool).toMatchObject({
+      type: 'write-stdin-tool-use',
+      toolId: 'stdin-approval',
+      input: { itemId: 'parent-command', reason: 'Send confirmation' },
+    });
+    expect(buildApprovalResponse(writeStdin, { allow: true, alwaysAllow: true }))
+      .toEqual({ decision: 'accept' });
+    expect(buildApprovalResponse(writeStdin, { allow: false }))
+      .toEqual({ decision: 'cancel' });
+  });
+
+  it('rejects write-stdin reviews without distinct approval identity', () => {
+    const pending = createPendingApproval('chat-1', {
+      id: 'stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'parent-command',
+        kind: 'writeStdin',
+      },
+    });
+
+    expect(() => buildApprovalMessage(pending)).toThrow('requires approvalId and itemId');
+    expect(() => buildApprovalResponse(pending, { allow: true })).toThrow('requires approvalId');
   });
 
   it('maps permission grants and denials', () => {
@@ -6886,6 +6943,129 @@ describe('CodexAppServerRuntime', () => {
 
     expect(fake.respond).toHaveBeenCalledWith(7, { decision: 'accept' });
     expect(permissionEvents(published.events)).toHaveLength(1);
+  });
+
+  it('keeps write-stdin reviews distinct when they share a parent command', async () => {
+    const nativePath = path.join(tmpDir, 'stdin-approval-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+
+    for (const [requestId, approvalId] of [['stdin-request-a', 'stdin-approval-a'], ['stdin-request-b', 'stdin-approval-b']]) {
+      fake.emit('serverRequest', {
+        id: requestId,
+        method: 'item/commandExecution/requestApproval',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'parent-command',
+          approvalId,
+          kind: 'writeStdin',
+        },
+      });
+    }
+
+    const requests = permissionEvents(published.events).filter(
+      (event) => event.lifecycle.kind === 'requested',
+    );
+    expect(requests.map((event) => event.lifecycle.requestedTool.toolId)).toEqual([
+      'stdin-approval-a',
+      'stdin-approval-b',
+    ]);
+    await requests[0].decision.respond({ allow: true, alwaysAllow: true });
+    await requests[1].decision.respond({ allow: false });
+    expect(fake.respond.mock.calls).toEqual([
+      ['stdin-request-a', { decision: 'accept' }],
+      ['stdin-request-b', { decision: 'cancel' }],
+    ]);
+  });
+
+  it('expires only the matching client request after external resolution', async () => {
+    const paths = [
+      path.join(tmpDir, 'approval-client-a.jsonl'),
+      path.join(tmpDir, 'approval-client-b.jsonl'),
+    ];
+    const clients = paths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index + 1}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const operations = [collectOperation('chat-1', 'run-a'), collectOperation('chat-2', 'run-b')];
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: operations[0].operation }));
+    await provider.startSession(makeRequest({ chatId: 'chat-2', operation: operations[1].operation }));
+
+    clients.forEach((client, index) => client.emit('serverRequest', {
+      id: 'shared-request-id',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: `thread-${index + 1}`,
+        turnId: `turn-${index + 1}`,
+        itemId: `command-${index + 1}`,
+        command: 'printf ready',
+      },
+    }));
+    clients[0].emit('notification', {
+      method: 'serverRequest/resolved',
+      params: { threadId: 'thread-1', requestId: 'shared-request-id' },
+    });
+
+    expect(permissionEvents(operations[0].events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested', 'expired']);
+    expect(permissionEvents(operations[1].events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+    const first = permissionEvents(operations[0].events)[0];
+    await expect(first.decision.respond({ allow: true }))
+      .rejects.toThrow('no longer pending');
+    const second = permissionEvents(operations[1].events)[0];
+    await second.decision.respond({ allow: true });
+    expect(clients[0].respond).not.toHaveBeenCalled();
+    expect(clients[1].respond).toHaveBeenCalledWith('shared-request-id', { decision: 'accept' });
+  });
+
+  it('ignores external resolution after a local response', async () => {
+    const nativePath = path.join(tmpDir, 'resolved-after-response.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+    await provider.startSession(makeRequest({ operation: published.operation }));
+    fake.emit('serverRequest', {
+      id: 81,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'command-1', command: 'ls' },
+    });
+    const request = permissionEvents(published.events)[0];
+    await request.decision.respond({ allow: true });
+    fake.emit('notification', {
+      method: 'serverRequest/resolved',
+      params: { threadId: 'thread-1', requestId: 81 },
+    });
+
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+    expect(fake.respond).toHaveBeenCalledTimes(1);
   });
 
   it('[TLV5-PERM.09-CODEX-UNIT-01] denies and logs an approval without a concrete turn route', async () => {

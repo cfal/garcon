@@ -5,6 +5,7 @@ import {
   PermissionCancelledMessage,
   PermissionRequestMessage,
   RequestPermissionsToolUseMessage,
+  WriteStdinToolUseMessage,
 } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { publishPermissionCancelled, type CodexOperation } from './operation-routes.js';
@@ -17,6 +18,16 @@ export interface CodexPendingApproval {
   method: string;
   params: Record<string, unknown>;
 }
+
+export type CodexTrackedApproval<TClient extends object> = CodexPendingApproval & {
+  client: TClient;
+  operation: CodexOperation;
+};
+
+export type CodexPendingApprovalRegistry<TClient extends object> = Map<
+  TClient,
+  Map<JsonRpcId, CodexTrackedApproval<TClient>>
+>;
 
 export function isApprovalRequest(request: JsonRpcServerRequest): boolean {
   return [
@@ -40,11 +51,27 @@ export function createPendingApproval(chatId: string, request: JsonRpcServerRequ
 
 export function buildApprovalMessage(pending: CodexPendingApproval): PermissionRequestMessage {
   const now = new Date().toISOString();
-  const toolId = stringField(pending.params.itemId)
-    || stringField(pending.params.callId)
-    || pending.permissionOccurrenceId;
 
   if (pending.method === 'item/commandExecution/requestApproval') {
+    const kind = commandApprovalKind(pending);
+    const approvalId = stringField(pending.params.approvalId);
+    const itemId = stringField(pending.params.itemId);
+    if (kind === 'writeStdin') {
+      if (!approvalId || !itemId) {
+        throw new TypeError('Codex write-stdin approval requires approvalId and itemId');
+      }
+      const reason = stringField(pending.params.reason);
+      return new PermissionRequestMessage(
+        now,
+        pending.permissionOccurrenceId,
+        new WriteStdinToolUseMessage(now, approvalId, {
+          itemId,
+          ...(reason ? { reason } : {}),
+        }),
+      );
+    }
+
+    const toolId = approvalId || itemId || pending.permissionOccurrenceId;
     const command = stringField(pending.params.command)
       || networkApprovalLabel(pending.params.networkApprovalContext)
       || stringField(pending.params.reason)
@@ -57,6 +84,9 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
   }
 
   if (pending.method === 'execCommandApproval') {
+    const toolId = stringField(pending.params.callId)
+      || stringField(pending.params.itemId)
+      || pending.permissionOccurrenceId;
     const command = Array.isArray(pending.params.command)
       ? pending.params.command.map(String).join(' ')
       : stringField(pending.params.reason) || 'Command approval requested';
@@ -68,6 +98,9 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
   }
 
   if (pending.method === 'item/fileChange/requestApproval' || pending.method === 'applyPatchApproval') {
+    const toolId = stringField(pending.params.itemId)
+      || stringField(pending.params.callId)
+      || pending.permissionOccurrenceId;
     return new PermissionRequestMessage(
       now,
       pending.permissionOccurrenceId,
@@ -75,6 +108,9 @@ export function buildApprovalMessage(pending: CodexPendingApproval): PermissionR
     );
   }
 
+  const toolId = stringField(pending.params.itemId)
+    || stringField(pending.params.callId)
+    || pending.permissionOccurrenceId;
   return new PermissionRequestMessage(
     now,
     pending.permissionOccurrenceId,
@@ -92,6 +128,12 @@ export function buildApprovalResponse(
   decision: { allow: boolean; alwaysAllow?: boolean },
 ): unknown {
   if (pending.method === 'item/commandExecution/requestApproval') {
+    if (commandApprovalKind(pending) === 'writeStdin') {
+      if (!stringField(pending.params.approvalId)) {
+        throw new TypeError('Codex write-stdin approval requires approvalId');
+      }
+      return { decision: decision.allow ? 'accept' : 'cancel' };
+    }
     return { decision: commandDecision(decision) };
   }
 
@@ -113,6 +155,31 @@ export function buildApprovalResponse(
   return {};
 }
 
+export function addPendingApproval<TClient extends object>(
+  pending: CodexPendingApprovalRegistry<TClient>,
+  approval: CodexTrackedApproval<TClient>,
+): boolean {
+  const byRequestId = pending.get(approval.client) ?? new Map();
+  if (byRequestId.has(approval.requestId)) return false;
+  byRequestId.set(approval.requestId, approval);
+  pending.set(approval.client, byRequestId);
+  return true;
+}
+
+export function takePendingApproval<TClient extends object>(
+  pending: CodexPendingApprovalRegistry<TClient>,
+  client: TClient,
+  requestId: JsonRpcId,
+  expected?: CodexTrackedApproval<TClient>,
+): CodexTrackedApproval<TClient> | null {
+  const byRequestId = pending.get(client);
+  const approval = byRequestId?.get(requestId);
+  if (!approval || (expected && approval !== expected)) return null;
+  byRequestId?.delete(requestId);
+  if (byRequestId?.size === 0) pending.delete(client);
+  return approval;
+}
+
 function commandDecision(decision: { allow: boolean; alwaysAllow?: boolean }): string {
   if (!decision.allow) return 'decline';
   return decision.alwaysAllow ? 'acceptForSession' : 'accept';
@@ -126,6 +193,10 @@ function fileChangeDecision(decision: { allow: boolean; alwaysAllow?: boolean })
 function historicalReviewDecision(decision: { allow: boolean; alwaysAllow?: boolean }): string {
   if (!decision.allow) return 'denied';
   return decision.alwaysAllow ? 'approved_for_session' : 'approved';
+}
+
+function commandApprovalKind(pending: CodexPendingApproval): 'command' | 'writeStdin' {
+  return pending.params.kind === 'writeStdin' ? 'writeStdin' : 'command';
 }
 
 function grantedPermissionProfile(raw: unknown): Record<string, unknown> {
@@ -156,13 +227,14 @@ function stringField(value: unknown): string | undefined {
 // through that operation rather than batched behind whichever one happens to be current.
 export function cancelPendingApprovals(
   logger: AgentLogger,
-  pending: Set<CodexPendingApproval & { client: object; operation: CodexOperation }>,
+  pending: CodexPendingApprovalRegistry<object>,
   client: object,
   reason: 'cancelled' | 'session-complete' | 'aborted',
 ): void {
-  for (const approval of [...pending]) {
-    if (approval.client !== client) continue;
-    pending.delete(approval);
+  const byRequestId = pending.get(client);
+  if (!byRequestId) return;
+  pending.delete(client);
+  for (const approval of byRequestId.values()) {
     publishPermissionCancelled(
       logger,
       approval.chatId,

@@ -706,6 +706,11 @@ export interface ErrorNotification {
   error: CodexTurnError;
 }
 
+export interface ServerRequestResolvedNotification {
+  threadId: string;
+  requestId: JsonRpcId;
+}
+
 export interface CommandExecutionRequestApprovalParams {
   threadId: string;
   turnId: string;

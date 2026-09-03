@@ -1,8 +1,9 @@
-import { AssistantMessage, ErrorMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { AssistantMessage, ErrorMessage, PermissionExpiredMessage, type ChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import {
   publishFailed,
   publishFinished,
+  publishPermissionExpired,
   publishPermissionRequested,
   publishRows,
   type CodexOperation,
@@ -25,7 +26,17 @@ import {
   type CodexStartRequest,
 } from '../runtime-types.js';
 import type { PermissionMode } from '@garcon/common/chat-modes';
-import { buildApprovalMessage, buildApprovalResponse, cancelPendingApprovals, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
+import {
+  addPendingApproval,
+  buildApprovalMessage,
+  buildApprovalResponse,
+  cancelPendingApprovals,
+  createPendingApproval,
+  isApprovalRequest,
+  takePendingApproval,
+  type CodexPendingApprovalRegistry,
+  type CodexTrackedApproval,
+} from './approvals.js';
 import {
   CodexAppServerClient,
   type CodexAppServerClientOptions,
@@ -45,6 +56,7 @@ import type {
   ThreadGoalUpdatedNotification,
   ThreadGoalSetResponse,
   RawResponseItemCompletedNotification,
+  ServerRequestResolvedNotification,
   TurnCompletedNotification,
   TurnStartedNotification,
 } from './protocol.js';
@@ -117,9 +129,7 @@ export class CodexAppServerRuntime {
     session: RunningCodexSession;
     turnId: string;
   }>();
-  #pendingApprovals = new Set<
-    CodexPendingApproval & { client: CodexAppServerClient; operation: CodexOperation }
-  >();
+  #pendingApprovals: CodexPendingApprovalRegistry<CodexAppServerClient> = new Map();
   #bufferingClients = new Set<CodexAppServerClient>();
   #bufferedClientEvents = new Map<CodexAppServerClient, BufferedClientEvent[]>();
   #clientShutdowns = new Set<Promise<void>>();
@@ -894,14 +904,15 @@ export class CodexAppServerRuntime {
   }
 
   async #resolvePermission(
-    pending: CodexPendingApproval & { client: CodexAppServerClient; operation: CodexOperation },
+    pending: CodexTrackedApproval<CodexAppServerClient>,
     decision: { allow: boolean; alwaysAllow?: boolean },
   ): Promise<void> {
-    if (!this.#pendingApprovals.has(pending)) {
+    if (this.#pendingApprovals.get(pending.client)?.get(pending.requestId) !== pending) {
       throw new Error('Codex permission occurrence is no longer pending');
     }
-    pending.client.respond(pending.requestId, buildApprovalResponse(pending, decision));
-    this.#pendingApprovals.delete(pending);
+    const response = buildApprovalResponse(pending, decision);
+    pending.client.respond(pending.requestId, response);
+    takePendingApproval(this.#pendingApprovals, pending.client, pending.requestId, pending);
   }
 
   updateSessionSettings(agentSessionId: string, patch: { readonly permissionMode?: PermissionMode }): void {
@@ -1191,7 +1202,27 @@ export class CodexAppServerRuntime {
       case 'error':
         this.#handleErrorNotification(client, notification.params as ErrorNotification);
         break;
+      case 'serverRequest/resolved':
+        this.#handleServerRequestResolved(
+          client,
+          notification.params as ServerRequestResolvedNotification,
+        );
+        break;
     }
+  }
+
+  #handleServerRequestResolved(
+    client: CodexAppServerClient,
+    params: ServerRequestResolvedNotification,
+  ): void {
+    const pending = takePendingApproval(this.#pendingApprovals, client, params.requestId);
+    if (!pending) return;
+    publishPermissionExpired(
+      this.#logger,
+      pending.chatId,
+      new PermissionExpiredMessage(new Date().toISOString(), pending.permissionOccurrenceId),
+      pending.operation,
+    );
   }
 
   #handleTurnStarted(client: CodexAppServerClient, params: TurnStartedNotification): void {
@@ -1559,7 +1590,16 @@ export class CodexAppServerRuntime {
         nativeTurnId,
         method: request.method,
       });
-      client.respond(request.id, denialResponseForRequest(request.method));
+      client.respond(request.id, denialResponseForRequest(request.method, params));
+      return;
+    }
+    if (this.#sessions.get(session.threadId) !== session || !isActiveSessionStatus(session.status)) {
+      this.#logger.warn('Denied a Codex approval request from an inactive source', {
+        threadId,
+        nativeTurnId,
+        method: request.method,
+      });
+      client.respond(request.id, denialResponseForRequest(request.method, params));
       return;
     }
 
@@ -1568,12 +1608,31 @@ export class CodexAppServerRuntime {
       client,
       operation,
     };
+    let message;
+    try {
+      message = buildApprovalMessage(pending);
+    } catch {
+      this.#logger.warn('Denied an invalid Codex approval request', {
+        threadId,
+        nativeTurnId,
+        method: request.method,
+      });
+      client.respond(request.id, denialResponseForRequest(request.method, params));
+      return;
+    }
     if (session.permissionMode === 'manualBypass') {
       client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
       return;
     }
-    this.#pendingApprovals.add(pending);
-    const message = buildApprovalMessage(pending);
+    if (!addPendingApproval(this.#pendingApprovals, pending)) {
+      this.#logger.warn('Denied a duplicate Codex approval request ID', {
+        threadId,
+        nativeTurnId,
+        method: request.method,
+      });
+      client.respond(request.id, denialResponseForRequest(request.method, params));
+      return;
+    }
     publishPermissionRequested(
       this.#logger,
       session.chatId,
