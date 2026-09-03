@@ -1563,6 +1563,14 @@ describe('TranscriptLedgerStore', () => {
     }
   });
 
+  it('leaves non-directory files in the ledger root untouched', async () => {
+    const filePath = path.join(root, 'orphan-file');
+    await fs.writeFile(filePath, 'not a chat directory');
+
+    expect(store.removeUnregisteredChatDirectories(new Set())).toEqual([]);
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe('not a chat directory');
+  });
+
   it('carries the agent switch boundary through a reload', () => {
     const view = store.initializeCurrentView('chat-one', {
       contentStartOrdinal: 1,

@@ -1,12 +1,6 @@
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
-import {
-  chmodSync,
-  lstatSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
+import { chmodSync, lstatSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   parseChatRowContent,
@@ -582,7 +576,9 @@ export class TranscriptLedgerStore {
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
-      const isDirectory = lstatSync(directory).isDirectory();
+      const stats = lstatSync(directory);
+      const isDirectory = stats.isDirectory();
+      if (!isDirectory && !stats.isSymbolicLink()) continue;
       if (isDirectory) {
         this.closeChat(name);
         this.#openFailures.delete(name);
