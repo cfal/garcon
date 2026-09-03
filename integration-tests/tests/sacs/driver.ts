@@ -53,8 +53,14 @@ export interface SacsLegacyHistoryImportFacet {
   ): Promise<SacsPreparedHistorySource>;
 }
 
-export interface SacsNativeForkingFacet {
+interface SacsWholeThreadNativeForkingFacet {
   readonly kind: 'native-forking';
+  readonly pointForks: false;
+}
+
+interface SacsPointNativeForkingFacet {
+  readonly kind: 'native-forking';
+  readonly pointForks: true;
   // Removes every native history entry containing the marker, so a ledger row
   // rendered from one of them no longer has a provider-native fork position.
   unsettle(
@@ -63,6 +69,10 @@ export interface SacsNativeForkingFacet {
     marker: string,
   ): Promise<void>;
 }
+
+export type SacsNativeForkingFacet =
+  | SacsWholeThreadNativeForkingFacet
+  | SacsPointNativeForkingFacet;
 
 export interface SacsHeldTurn {
   readonly requested: Promise<unknown>;
