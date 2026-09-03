@@ -426,6 +426,7 @@ export class ApiProviderService {
 
   async discoverModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderModelDiscoveryInput(input);
+    if (flat.modelDiscovery === 'ollama-tags') return testOllamaTags(flat);
     const storedCredential = flat.apiKey ? null : this.#storedApiKeyForDiscovery(flat);
     if (storedCredential?.hasKeyForDifferentOrigin) {
       return {
@@ -434,7 +435,6 @@ export class ApiProviderService {
       };
     }
     const discoveryInput = { ...flat, apiKey: flat.apiKey ?? storedCredential?.apiKey };
-    if (discoveryInput.modelDiscovery === 'ollama-tags') return testOllamaTags(discoveryInput);
     if (discoveryInput.modelDiscovery === 'anthropic-models') return testAnthropicModels(discoveryInput);
     if (discoveryInput.modelDiscovery === 'openai-models' || discoveryInput.modelDiscovery === 'openrouter-models') {
       return testOpenAiModels(discoveryInput);
