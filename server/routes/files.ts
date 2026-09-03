@@ -161,25 +161,17 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
 
 async function readAttachmentFormData(request: Request): Promise<FormData> {
   if (!request.body) return request.formData();
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
   let totalBytes = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      totalBytes += next.value.byteLength;
+  const body = request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      totalBytes += chunk.byteLength;
       if (totalBytes > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
         throw new AttachmentValidationError(ATTACHMENT_UPLOAD_TOO_LARGE_MESSAGE, 413);
       }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
+      controller.enqueue(chunk);
+    },
+  }));
 
-  const body = Buffer.concat(chunks, totalBytes);
   const contentType = request.headers.get('content-type');
   return new Response(body, {
     headers: contentType ? { 'content-type': contentType } : undefined,
