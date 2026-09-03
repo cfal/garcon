@@ -425,6 +425,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #registryWriteLock = new KeyedPromiseLock();
   #chatMutationRevisions = new Map<string, number>();
+  #nextChatMutationRevision = 0;
   #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
   #saveDelayMs: number;
@@ -780,7 +781,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if (!entry) return false;
     this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
-    this.#advanceChatMutationRevision(id);
+    this.#chatMutationRevisions.delete(id);
     this.#emitChatRemoved(id, reason);
     this.#scheduleRegistrySave();
     return true;
@@ -852,7 +853,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   }
 
   #advanceChatMutationRevision(id: string): number {
-    const revision = (this.#chatMutationRevisions.get(id) ?? 0) + 1;
+    const revision = ++this.#nextChatMutationRevision;
     this.#chatMutationRevisions.set(id, revision);
     return revision;
   }

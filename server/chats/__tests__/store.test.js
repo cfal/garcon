@@ -363,6 +363,38 @@ describe('ChatRegistry', () => {
     }
   });
 
+  it('does not roll back a replacement chat after its id is reused', async () => {
+    registry.addChat(newChat());
+    await registry.flush();
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    const saveEntered = deferred();
+    const releaseSave = deferred();
+    const saveRegistry = registry.saveRegistry.bind(registry);
+    registry.saveRegistry = mock(async () => {
+      saveEntered.resolve();
+      await releaseSave.promise;
+      throw new Error('disk full');
+    });
+
+    try {
+      const failedUpdate = registry.updateChat(
+        CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      await saveEntered.promise;
+      expect(registry.removeChat(CHAT_ID)).toBe(true);
+      expect(registry.addChat(newChat({ model: 'model-c' }))).toBe(true);
+      releaseSave.resolve();
+      await expect(failedUpdate).rejects.toThrow('disk full');
+      expect(registry.getChat(CHAT_ID)?.model).toBe('model-c');
+    } finally {
+      releaseSave.resolve();
+      registry.saveRegistry = saveRegistry;
+    }
+  });
+
   it('excludes a rolled-back patch from a queued save for another chat', async () => {
     registry.addChat(newChat());
     registry.addChat(newChat({ id: SECOND_CHAT_ID }));
