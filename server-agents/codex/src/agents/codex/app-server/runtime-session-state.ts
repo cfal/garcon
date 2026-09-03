@@ -12,6 +12,7 @@ import type {
   JsonRpcServerRequest,
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
+import type { CodexThreadSettingsTarget } from './request-builders.js';
 
 export type RunningStatus = (
   'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted'
@@ -30,6 +31,13 @@ export type GoalCommandOptions = {
 interface TurnStartWaiter {
   resolve: (turnId: string) => void;
   reject: (error: Error) => void;
+}
+
+export interface ThreadSettingsWaiter {
+  readonly target: CodexThreadSettingsTarget;
+  readonly timeout: ReturnType<typeof setTimeout>;
+  resolve(): void;
+  reject(error: Error): void;
 }
 
 export class TurnStartWaitCancelledError extends Error {}
@@ -71,11 +79,16 @@ export interface RunningCodexSession {
   turnRoutes: Map<string, CodexOperation>;
   terminalTurnIds: Set<string>;
   superseded: boolean;
+  confirmedThreadSettings: CodexThreadSettingsTarget;
+  pendingThreadSettings: ThreadSettingsWaiter | null;
+  threadSettingsUpdateChain: Promise<void>;
+  configurationFenced: boolean;
 }
 
 export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
+  settingsUpdateTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
   nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;

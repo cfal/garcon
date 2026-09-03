@@ -605,6 +605,10 @@ export interface ThreadStartResponse {
   modelProvider: string;
   serviceTier: string | null;
   cwd: string;
+  approvalPolicy?: unknown;
+  approvalsReviewer?: string;
+  reasoningEffort?: string | null;
+  sandbox?: CodexThreadSettingsSandboxPolicy;
 }
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
@@ -709,6 +713,43 @@ export interface ErrorNotification {
 export interface ServerRequestResolvedNotification {
   threadId: string;
   requestId: JsonRpcId;
+}
+
+export type CodexThreadSettingsSandboxPolicy =
+  | { readonly type: 'dangerFullAccess' }
+  | {
+      readonly type: 'workspaceWrite';
+      readonly writableRoots?: readonly string[];
+      readonly networkAccess?: boolean;
+      readonly excludeTmpdirEnvVar?: boolean;
+      readonly excludeSlashTmp?: boolean;
+    }
+  | { readonly type: string; readonly [key: string]: unknown };
+
+export interface ThreadSettingsUpdateParams {
+  readonly threadId: string;
+  readonly model: string;
+  readonly approvalPolicy: 'never' | 'on-request';
+  readonly approvalsReviewer: 'user';
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly effort?: string;
+}
+
+export interface CodexThreadSettings {
+  readonly cwd: string;
+  readonly approvalPolicy: unknown;
+  readonly approvalsReviewer: string;
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly model: string;
+  readonly modelProvider: string;
+  readonly serviceTier: string | null;
+  readonly effort: string | null;
+  readonly [key: string]: unknown;
+}
+
+export interface ThreadSettingsUpdatedNotification {
+  readonly threadId: string;
+  readonly threadSettings: CodexThreadSettings;
 }
 
 export interface CommandExecutionRequestApprovalParams {

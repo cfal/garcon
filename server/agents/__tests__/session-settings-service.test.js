@@ -47,7 +47,7 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat };
+  return { service, updateChat, entry, integration };
 }
 
 describe('AgentSessionSettingsService', () => {
@@ -83,5 +83,54 @@ describe('AgentSessionSettingsService', () => {
       }),
       { flush: true },
     );
+  });
+
+  it('passes complete next and previous configurations before persistence', async () => {
+    const { service, updateChat, entry, integration } = makeService('high');
+    entry.agentSessionId = 'session-1';
+    integration.descriptor.supportedThinkingModes = ['none', 'low', 'medium', 'high'];
+    const apply = mock(async () => undefined);
+    integration.sessionConfiguration = { apply };
+
+    await service.updateSessionSettings('chat-1', {
+      model: 'large',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'medium',
+    });
+
+    expect(apply).toHaveBeenCalledWith(
+      'session-1',
+      {
+        model: 'large',
+        permissionMode: 'manualBypass',
+        thinkingMode: 'medium',
+        settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
+        endpoint: null,
+      },
+      {
+        model: 'medium',
+        permissionMode: 'bypassPermissions',
+        thinkingMode: 'high',
+        settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
+        endpoint: null,
+      },
+    );
+    expect(apply.mock.invocationCallOrder[0]).toBeLessThan(
+      updateChat.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not persist when the live configuration update rejects', async () => {
+    const { service, updateChat, entry, integration } = makeService('high');
+    entry.agentSessionId = 'session-1';
+    integration.descriptor.supportedThinkingModes = ['none', 'low', 'medium', 'high'];
+    integration.sessionConfiguration = {
+      apply: mock(async () => { throw new Error('provider rejected settings'); }),
+    };
+
+    await expect(service.updateSessionSettings('chat-1', {
+      thinkingMode: 'medium',
+    })).rejects.toThrow('provider rejected settings');
+    expect(updateChat).not.toHaveBeenCalled();
   });
 });

@@ -38,7 +38,11 @@ export interface AgentRunningSession {
 }
 
 export interface AgentSessionConfigurationUpdates {
-  apply(agentSessionId: string, configuration: AgentSessionConfiguration): Promise<void>;
+  apply(
+    agentSessionId: string,
+    configuration: AgentSessionConfiguration,
+    previousConfiguration: AgentSessionConfiguration,
+  ): Promise<void>;
 }
 
 export interface AgentProjectPathUpdates {

@@ -22,6 +22,7 @@ import type {
   ThreadTurnsListResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
+  ThreadSettingsUpdateParams,
   CodexThreadGoalStatus,
   ThreadUnsubscribeResponse,
   TurnStartResponse,
@@ -218,6 +219,10 @@ export class CodexAppServerClient extends EventEmitter {
 
   forkThread(params: Record<string, unknown>): Promise<ThreadForkResponse> {
     return this.request<ThreadForkResponse>('thread/fork', params);
+  }
+
+  updateThreadSettings(params: ThreadSettingsUpdateParams): Promise<Record<string, never>> {
+    return this.request<Record<string, never>>('thread/settings/update', params);
   }
 
   setThreadGoal(

@@ -128,8 +128,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     });
     const execution = new CodexExecution(host, runtime, nativeSessions, config);
     this.sessionConfiguration = {
-      apply: (agentSessionId, configuration) => (
-        execution.applySessionConfiguration(agentSessionId, configuration)
+      apply: (agentSessionId, configuration, previousConfiguration) => (
+        execution.applySessionConfiguration(agentSessionId, configuration, previousConfiguration)
       ),
     };
     const nativeEvidence = createCodexNativeEvidence(runtime, nativeSessions, logger);

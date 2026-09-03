@@ -6,6 +6,11 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type { ThreadInjectItemsParams } from './protocol.js';
+import type {
+  CodexThreadSettings,
+  CodexThreadSettingsSandboxPolicy,
+  ThreadSettingsUpdateParams,
+} from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
 
 // Matches a leading "/<name>" skill token with optional trailing arguments,
@@ -25,6 +30,15 @@ export type CodexApprovalPolicy = 'never' | 'on-request';
 interface CodexSandboxSettings {
   sandbox: CodexSandboxMode;
   approvalPolicy: CodexApprovalPolicy;
+}
+
+export interface CodexThreadSettingsTarget {
+  readonly model: string;
+  readonly effort: string | null;
+  readonly approvalPolicy: CodexApprovalPolicy;
+  readonly approvalsReviewer: 'user';
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly permissionMode: PermissionMode;
 }
 
 const CODEX_SANDBOX: Record<string, CodexSandboxSettings> = {
@@ -52,6 +66,104 @@ const MIME_EXTENSIONS: Record<string, string> = {
 export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandboxSettings {
   const effectivePermissionMode = permissionMode === 'plan' ? 'default' : permissionMode;
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
+}
+
+export function codexThreadSettingsTarget(configuration: {
+  readonly model: string;
+  readonly permissionMode: PermissionMode;
+  readonly thinkingMode: ThinkingMode;
+}): CodexThreadSettingsTarget {
+  const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
+  return {
+    model: configuration.model,
+    effort: mapThinkingModeToCodexEffort(configuration.thinkingMode, configuration.model) ?? null,
+    approvalPolicy,
+    approvalsReviewer: 'user',
+    sandboxPolicy: sandbox === 'danger-full-access'
+      ? { type: 'dangerFullAccess' }
+      : {
+          type: 'workspaceWrite',
+          writableRoots: [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+    permissionMode: configuration.permissionMode,
+  };
+}
+
+export function buildThreadSettingsUpdateParams(
+  threadId: string,
+  target: CodexThreadSettingsTarget,
+): ThreadSettingsUpdateParams {
+  return {
+    threadId,
+    model: target.model,
+    approvalPolicy: target.approvalPolicy,
+    approvalsReviewer: target.approvalsReviewer,
+    sandboxPolicy: target.sandboxPolicy,
+    ...(target.effort ? { effort: target.effort } : {}),
+  };
+}
+
+export function threadSettingsMatch(
+  settings: CodexThreadSettingsTarget,
+  target: CodexThreadSettingsTarget,
+): boolean {
+  return settings.model === target.model
+    && settings.effort === target.effort
+    && settings.approvalPolicy === target.approvalPolicy
+    && settings.approvalsReviewer === target.approvalsReviewer
+    && sandboxPolicyMatches(settings.sandboxPolicy, target.sandboxPolicy);
+}
+
+export function threadSettingsTargetFromSnapshot(
+  settings: CodexThreadSettings,
+  currentPermissionMode: PermissionMode,
+): CodexThreadSettingsTarget {
+  const permissionMode = permissionModeFromSettings(settings, currentPermissionMode);
+  return {
+    model: settings.model,
+    effort: settings.effort,
+    approvalPolicy: settings.approvalPolicy === 'on-request' ? 'on-request' : 'never',
+    approvalsReviewer: 'user',
+    sandboxPolicy: normalizeSandboxPolicy(settings.sandboxPolicy),
+    permissionMode,
+  };
+}
+
+function permissionModeFromSettings(
+  settings: CodexThreadSettings,
+  current: PermissionMode,
+): PermissionMode {
+  if (settings.sandboxPolicy.type === 'dangerFullAccess') return 'bypassPermissions';
+  if (settings.approvalPolicy === 'on-request') return 'manualBypass';
+  return current === 'manualBypass' || current === 'bypassPermissions' ? 'default' : current;
+}
+
+function normalizeSandboxPolicy(
+  sandboxPolicy: CodexThreadSettingsSandboxPolicy,
+): CodexThreadSettingsSandboxPolicy {
+  if (sandboxPolicy.type === 'dangerFullAccess') return { type: 'dangerFullAccess' };
+  if (sandboxPolicy.type !== 'workspaceWrite') return sandboxPolicy;
+  return {
+    type: 'workspaceWrite',
+    writableRoots: [],
+    networkAccess: sandboxPolicy.networkAccess ?? false,
+    excludeTmpdirEnvVar: sandboxPolicy.excludeTmpdirEnvVar ?? false,
+    excludeSlashTmp: sandboxPolicy.excludeSlashTmp ?? false,
+  };
+}
+
+function sandboxPolicyMatches(
+  left: CodexThreadSettingsSandboxPolicy,
+  right: CodexThreadSettingsSandboxPolicy,
+): boolean {
+  if (left.type !== right.type) return false;
+  if (left.type !== 'workspaceWrite' || right.type !== 'workspaceWrite') return true;
+  return (left.networkAccess ?? false) === (right.networkAccess ?? false)
+    && (left.excludeTmpdirEnvVar ?? false) === (right.excludeTmpdirEnvVar ?? false)
+    && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
 }
 
 // Preserves xhigh compatibility for older models while allowing GPT-5.6 to use

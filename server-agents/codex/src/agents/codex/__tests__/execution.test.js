@@ -481,4 +481,70 @@ describe('CodexExecution', () => {
     );
     expect(JSON.stringify(host.logger.warn.mock.calls)).not.toContain(delayedContent);
   });
+
+  it('forwards supported configuration changes only while the session is active', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'medium',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: null,
+    };
+    const next = {
+      ...previous,
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    };
+
+    await execution.applySessionConfiguration('thread-1', next, previous);
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+
+    runtime.isRunning.mockReturnValue(true);
+    await execution.applySessionConfiguration('thread-1', next, previous);
+    expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    });
+  });
+
+  it('rejects live endpoint replacement and concrete reasoning-effort clearing', async () => {
+    const runtime = createRuntime();
+    runtime.isRunning.mockReturnValue(true);
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const previous = {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      settings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+      endpoint: {
+        apiProviderId: 'provider-1',
+        endpointId: 'endpoint-1',
+        protocol: 'openai-compatible',
+      },
+    };
+
+    await expect(execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      endpoint: { ...previous.endpoint, endpointId: 'endpoint-2' },
+    }, previous)).rejects.toMatchObject({ code: 'INVALID_ENDPOINT' });
+    await expect(execution.applySessionConfiguration('thread-1', {
+      ...previous,
+      thinkingMode: 'none',
+    }, previous)).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
+  });
 });

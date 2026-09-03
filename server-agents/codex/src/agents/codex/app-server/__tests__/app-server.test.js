@@ -20,8 +20,10 @@ import { InMemoryChatExecutionControlRepository } from '../../../../../../../ser
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
+  buildThreadSettingsUpdateParams,
   buildThreadStartParams,
   buildTurnStartParams,
+  codexThreadSettingsTarget,
   mapThinkingModeToCodexEffort,
 } from '../request-builders.ts';
 
@@ -226,6 +228,7 @@ class FakeClient extends EventEmitter {
     this.startThread = mock(script.startThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.resumeThread = mock(script.resumeThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.forkThread = mock(script.forkThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
+    this.updateThreadSettings = mock(script.updateThreadSettings ?? (async () => ({})));
     this.setThreadGoal = mock(script.setThreadGoal ?? (async (threadId, params) => ({
       goal: makeGoal(threadId, params.objective ?? 'Ship the feature', params.status ?? 'active'),
     })));
@@ -433,6 +436,49 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         cursor: null,
         limit: 100,
         sortDirection: 'asc',
+      },
+    }));
+  });
+
+  it('sends a combined thread settings update', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/settings/update') return {};
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await client.connect();
+    await expect(client.updateThreadSettings({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    })).resolves.toEqual({});
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/settings/update',
+      params: {
+        threadId: 'thread-1',
+        model: 'gpt-5.4-mini',
+        effort: 'high',
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
       },
     }));
   });
@@ -874,6 +920,40 @@ describe('Codex app-server request builders', () => {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
+  });
+
+  it('builds one complete subsequent-turn settings update', () => {
+    const target = codexThreadSettingsTarget({
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    });
+
+    expect(buildThreadSettingsUpdateParams('thread-1', target)).toEqual({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
+    expect(buildThreadSettingsUpdateParams('thread-1', codexThreadSettingsTarget({
+      model: 'gpt-5.4-mini',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'none',
+    }))).toEqual({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
   });
 
   it('uses max effort for GPT-5.6 turn params', () => {
@@ -1878,6 +1958,75 @@ describe('CodexAppServerRuntime', () => {
       () => true,
       new InMemoryChatExecutionControlRepository('server-instance-test'),
     );
+  }
+
+  function makeThreadSettings(overrides = {}) {
+    return {
+      cwd: '/repo',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['/repo'],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+      activePermissionProfile: null,
+      model: 'gpt-5.4-codex',
+      modelProvider: 'openai',
+      serviceTier: null,
+      effort: 'medium',
+      summary: 'auto',
+      collaborationMode: null,
+      multiAgentMode: 'explicitRequestOnly',
+      personality: null,
+      ...overrides,
+    };
+  }
+
+  async function startSettingsSession(runtimeOptions = {}) {
+    const nativePath = path.join(tmpDir, 'settings-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'workspaceWrite' },
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      ...runtimeOptions,
+    });
+    const published = collectOperation();
+    const started = await provider.startSession(makeRequest({ operation: published.operation }));
+    return { fake, provider, published, started };
+  }
+
+  function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
+    fake.emit('notification', {
+      method: 'thread/settings/updated',
+      params: {
+        threadId,
+        threadSettings: makeThreadSettings(overrides),
+      },
+    });
   }
 
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
@@ -7641,28 +7790,276 @@ describe('CodexAppServerRuntime', () => {
     expect(permissionEvents(published.events)).toEqual([]);
   });
 
-  it('applies live manual bypass updates to app-server approvals', async () => {
-    const nativePath = path.join(tmpDir, 'manual-bypass-updated-thread.jsonl');
-    const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
-      startTurn: async () => {
-        await fs.writeFile(nativePath, '{}\n');
-        return { turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } };
+  it('confirms combined settings when notification precedes the RPC response', async () => {
+    const { fake, provider, published, started } = await startSettingsSession();
+    const response = createDeferred();
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, {
+        model: 'gpt-5.4-mini',
+        effort: 'high',
+        approvalPolicy: 'on-request',
+      });
+      await response.promise;
+      return {};
+    });
+    let settled = false;
+
+    const update = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    }).finally(() => { settled = true; });
+    await Promise.resolve();
+
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
       },
     });
-    const provider = createRuntime({ createClient: () => fake });
-    const published = collectOperation();
+    expect(settled).toBe(false);
+    response.resolve();
+    await update;
 
-    const started = await provider.startSession(makeRequest({ operation: published.operation }));
-    provider.updateSessionSettings(started.agentSessionId, { permissionMode: 'manualBypass' });
-    fake.emit('serverRequest', {
-      id: 10,
-      method: 'item/commandExecution/requestApproval',
-      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-1', command: 'ls' },
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'high',
+    });
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: makeGoal('thread-1', 'Continue automatically'),
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'automatic-turn',
+        item: {
+          type: 'agentMessage',
+          id: 'automatic-result',
+          text: 'continued with confirmed settings',
+          phase: null,
+          memoryCitation: null,
+        },
+      },
     });
 
-    expect(fake.respond).toHaveBeenCalledWith(10, { decision: 'accept' });
-    expect(permissionEvents(published.events)).toEqual([]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(publishedMessages(published.events).at(-1)?.content)
+      .toBe('continued with confirmed settings');
+  });
+
+  it('ignores wrong-source, wrong-thread, and stale settings snapshots', async () => {
+    const paths = [
+      path.join(tmpDir, 'settings-source-a.jsonl'),
+      path.join(tmpDir, 'settings-source-b.jsonl'),
+    ];
+    const clients = paths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: `thread-${index + 1}`,
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let nextClient = 0;
+    const provider = createRuntime({
+      createClient: () => clients[nextClient++],
+      materializationTimeoutMs: 20,
+    });
+    await provider.startSession(makeRequest({ chatId: 'chat-1' }));
+    await provider.startSession(makeRequest({ chatId: 'chat-2' }));
+    let settled = false;
+    const update = provider.updateSessionSettings('thread-1', {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    }).finally(() => { settled = true; });
+    await Promise.resolve();
+
+    emitThreadSettings(clients[1], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-1');
+    emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-2');
+    emitThreadSettings(clients[0]);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' });
+    await update;
+    expect(settled).toBe(true);
+  });
+
+  it('serializes settings updates for one app-server source', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    const first = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    const second = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'bypassPermissions',
+      thinkingMode: 'low',
+    });
+    await Promise.resolve();
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
+
+    emitThreadSettings(fake, { model: 'gpt-5.4-mini', effort: 'high' });
+    await first;
+    await Promise.resolve();
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(2);
+
+    emitThreadSettings(fake, {
+      model: 'gpt-5.4-mini',
+      effort: 'low',
+      sandboxPolicy: { type: 'dangerFullAccess' },
+    });
+    await second;
+  });
+
+  it('changes approval behavior only after settings confirmation', async () => {
+    const { fake, provider, published, started } = await startSettingsSession();
+    const update = provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'medium',
+    });
+    await Promise.resolve();
+
+    fake.emit('serverRequest', {
+      id: 'before-confirmation',
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-before', command: 'ls' },
+    });
+    expect(fake.respond).not.toHaveBeenCalled();
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+
+    emitThreadSettings(fake, { approvalPolicy: 'on-request' });
+    await update;
+    fake.emit('serverRequest', {
+      id: 'after-confirmation',
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'cmd-after', command: 'pwd' },
+    });
+
+    expect(fake.respond).toHaveBeenCalledWith('after-confirmation', { decision: 'accept' });
+    expect(permissionEvents(published.events).map((event) => event.lifecycle.kind))
+      .toEqual(['requested']);
+  });
+
+  it('rejects RPC failure and source exit while settings are pending', async () => {
+    const first = await startSettingsSession();
+    first.fake.updateThreadSettings.mockRejectedValue(new Error('settings rejected'));
+    await expect(first.provider.updateSessionSettings(first.started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    })).rejects.toThrow('settings rejected');
+
+    const secondPath = path.join(tmpDir, 'settings-exit-thread.jsonl');
+    const secondFake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-exit', path: secondPath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        reasoningEffort: 'medium',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(secondPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-exit', status: 'inProgress' }) };
+      },
+      updateThreadSettings: () => new Promise(() => {}),
+    });
+    const secondProvider = createRuntime({
+      createClient: () => secondFake,
+      materializationTimeoutMs: 20,
+    });
+    await secondProvider.startSession(makeRequest({ chatId: 'chat-exit' }));
+    const pending = secondProvider.updateSessionSettings('thread-exit', {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    });
+    await Promise.resolve();
+    secondFake.emit('exit', 0);
+
+    await expect(pending).rejects.toThrow('retired before settings were confirmed');
+    expect(secondProvider.isRunning('thread-exit')).toBe(false);
+  });
+
+  it('fences automatic turns after an ambiguous settings timeout', async () => {
+    const { fake, provider, published, started } = await startSettingsSession({
+      settingsUpdateTimeoutMs: 5,
+    });
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: makeGoal('thread-1', 'Continue automatically'),
+      },
+    });
+
+    await expect(provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-mini',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    })).rejects.toMatchObject({ code: 'TIMEOUT' });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'automatic-after-timeout', status: 'inProgress' }),
+      },
+    });
+    await Promise.resolve();
+
+    expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'automatic-after-timeout');
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(failureMessages(published.events)).toContain(
+      'Codex automatic turn blocked after an ambiguous settings update',
+    );
   });
 
   it('does not re-emit the submitted prompt when app-server echoes userMessage items', async () => {
