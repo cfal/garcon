@@ -241,34 +241,58 @@ export class SpaDriver {
     );
   }
 
+  async recentActivitySortActive(): Promise<boolean> {
+    return this.#page.evaluate(() => {
+      try {
+        const snapshot = JSON.parse(window.localStorage.getItem('pref_local_settings') ?? '{}') as {
+          sidebarSortMode?: string;
+        };
+        return snapshot.sidebarSortMode === 'recent';
+      } catch {
+        return false;
+      }
+    });
+  }
+
   async setRecentActivitySort(enabled: boolean): Promise<void> {
-    const isActive = await this.#page.evaluate(
-      () => document.querySelector('[data-slot="sidebar-sort-indicator"]') !== null,
-    );
+    const isActive = await this.recentActivitySortActive();
     if (isActive !== enabled) {
       await this.clickButton('More actions');
       await this.#page.waitForFunction(
-        () =>
-          [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].some(
+        (expected) =>
+          [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].some(
             (element) =>
               (element.getAttribute('aria-label') || element.textContent?.trim()) ===
-              'Sort by recent activity',
+              (expected ? 'Recent activity' : 'Manual'),
           ),
         { timeout: 20_000 },
+        enabled,
       );
-      await this.#page.evaluate(() => {
-        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(
-          (element) =>
-            (element.getAttribute('aria-label') || element.textContent?.trim()) ===
-            'Sort by recent activity',
-        );
-        if (!item) throw new Error('Missing Sort by recent activity menu item.');
-        item.click();
-      });
+      await this.#page.evaluate(
+        (expected) => {
+          const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
+            (element) =>
+              (element.getAttribute('aria-label') || element.textContent?.trim()) ===
+              (expected ? 'Recent activity' : 'Manual'),
+          );
+          if (!item) {
+            throw new Error(`Missing ${expected ? 'Recent activity' : 'Manual'} sort menu item.`);
+          }
+          item.click();
+        },
+        enabled,
+      );
     }
     await this.#page.waitForFunction(
-      (expected) =>
-        (document.querySelector('[data-slot="sidebar-sort-indicator"]') !== null) === expected,
+      (expected) => {
+        try {
+          const raw = window.localStorage.getItem('pref_local_settings') ?? '{}';
+          const snapshot = JSON.parse(raw) as { sidebarSortMode?: string };
+          return snapshot.sidebarSortMode === (expected ? 'recent' : 'manual');
+        } catch {
+          return false;
+        }
+      },
       { timeout: 20_000 },
       enabled,
     );

@@ -76,6 +76,8 @@ interface SlashCommandChatState {
 		noticeType: LocalNoticeType,
 		content: string,
 	): void;
+	noticeRevisionForChat(chatId: string): number;
+	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void;
 }
 
 export interface ConversationForkSource {
@@ -573,55 +575,62 @@ export class ConversationSlashCommandService {
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
 		deps.chatState.appendLocalNotice('progress', m.chat_notice_handing_off_chat());
+		// Clearing through this revision on settle removes the progress notice while
+		// keeping any error notice the failure paths append after it.
+		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
 		deps.chatState.isUserScrolledUp = false;
 		const clearedRevision = clearComposer
 			? deps.composerState.clearAfterSubmit(sourceChatId)
 			: null;
 
-		let imagePayload: ChatImage[] = [];
-		if (images.length > 0) {
+		try {
+			let imagePayload: ChatImage[] = [];
+			if (images.length > 0) {
+				try {
+					imagePayload = await prepareChatImages(images);
+				} catch (error) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					);
+					return 'rejected';
+				}
+			}
+
+			const submission = this.acceptedInputs.selfHandoff({
+				sourceChatId,
+				chatId: createClientChatId(),
+				command: message.trim(),
+				...(imagePayload.length > 0 ? { images: imagePayload } : {}),
+			});
 			try {
-				imagePayload = await prepareChatImages(images);
+				const response = await submission.submit();
+				deps.sessions.upsertServerChat(response.chat);
+				deps.sessions.setSelectedChatId(response.chat.id);
+				deps.navigation.navigateToChat?.(response.chat.id);
+				if (response.status === 'accepted') {
+					deps.lifecycle.beginTurn(response.chat.id);
+				}
+				return 'accepted';
 			} catch (error) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				// An ambiguous transport outcome may have already created the target and
+				// started its turn. Restoring the composer and calling it a failure
+				// invites a resubmission that would produce a second continuation.
+				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+				if (!outcomeUnknown) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					outcomeUnknown
+						? m.chat_notice_handoff_outcome_unconfirmed()
+						: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
 				);
-				return 'rejected';
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			}
-		}
-
-		const submission = this.acceptedInputs.selfHandoff({
-			sourceChatId,
-			chatId: createClientChatId(),
-			command: message.trim(),
-			...(imagePayload.length > 0 ? { images: imagePayload } : {}),
-		});
-		try {
-			const response = await submission.submit();
-			deps.sessions.upsertServerChat(response.chat);
-			deps.sessions.setSelectedChatId(response.chat.id);
-			deps.navigation.navigateToChat?.(response.chat.id);
-			if (response.status === 'accepted') {
-				deps.lifecycle.beginTurn(response.chat.id);
-			}
-			return 'accepted';
-		} catch (error) {
-			// An ambiguous transport outcome may have already created the target and
-			// started its turn. Restoring the composer and calling it a failure
-			// invites a resubmission that would produce a second continuation.
-			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				outcomeUnknown
-					? m.chat_notice_handoff_outcome_unconfirmed()
-					: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
-			);
-			return outcomeUnknown ? 'unknown' : 'rejected';
+		} finally {
+			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
 		}
 	}
 
@@ -653,81 +662,88 @@ export class ConversationSlashCommandService {
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
 		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
+		// Clearing through this revision on settle removes the progress notice while
+		// keeping any error notice the failure paths append after it.
+		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
 		deps.chatState.isUserScrolledUp = false;
 		const clearedRevision = clearComposer
 			? deps.composerState.clearAfterSubmit(sourceChatId)
 			: null;
 
-		if (!message.trim()) {
-			return this.#submitForkOnlyCommand(
-				sourceChatId,
-				previousText,
-				previousImages,
-				clearedRevision,
-			);
-		}
+		try {
+			if (!message.trim()) {
+				return await this.#submitForkOnlyCommand(
+					sourceChatId,
+					previousText,
+					previousImages,
+					clearedRevision,
+				);
+			}
 
-		let imagePayload: ChatImage[] = [];
-		if (images.length > 0) {
+			let imagePayload: ChatImage[] = [];
+			if (images.length > 0) {
+				try {
+					imagePayload = await prepareChatImages(images);
+				} catch (error) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					);
+					return 'rejected';
+				}
+			}
+
+			const forkChatId = createClientChatId();
+			const model = sourceChat.model ?? deps.agentState.model;
+			const selection = resolveConversationModelSelection({
+				agentId: sourceChat.agentId,
+				model,
+				apiProviderId: sourceChat.apiProviderId ?? null,
+				modelEndpointId: sourceChat.modelEndpointId ?? null,
+				modelProtocol: sourceChat.modelProtocol ?? null,
+			}, deps.modelCatalog);
+			const submission = this.acceptedInputs.fork({
+				sourceChatId,
+				chatId: forkChatId,
+				command: message.trim(),
+				permissionMode: sourceChat.permissionMode,
+				thinkingMode: sourceChat.thinkingMode,
+				agentSettings: sourceChat.agentSettings,
+				images: imagePayload.length > 0 ? imagePayload : undefined,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
 			try {
-				imagePayload = await prepareChatImages(images);
+				const response = await this.#submitForkRunWithConfirmation(submission);
+				if (!response) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+					return 'rejected';
+				}
+				deps.sessions.upsertServerChat(response.chat);
+				deps.sessions.setSelectedChatId(response.chat.id);
+				deps.navigation.navigateToChat?.(response.chat.id);
+				if (response.status === 'accepted') {
+					deps.lifecycle.beginTurn(response.chat.id);
+				}
+				return 'accepted';
 			} catch (error) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+				if (!outcomeUnknown) {
+					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+					outcomeUnknown
+						? m.chat_notice_fork_outcome_unconfirmed()
+						: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 				);
-				return 'rejected';
+				return outcomeUnknown ? 'unknown' : 'rejected';
 			}
-		}
-
-		const forkChatId = createClientChatId();
-		const model = sourceChat.model ?? deps.agentState.model;
-		const selection = resolveConversationModelSelection({
-			agentId: sourceChat.agentId,
-			model,
-			apiProviderId: sourceChat.apiProviderId ?? null,
-			modelEndpointId: sourceChat.modelEndpointId ?? null,
-			modelProtocol: sourceChat.modelProtocol ?? null,
-		}, deps.modelCatalog);
-		const submission = this.acceptedInputs.fork({
-			sourceChatId,
-			chatId: forkChatId,
-			command: message.trim(),
-			permissionMode: sourceChat.permissionMode,
-			thinkingMode: sourceChat.thinkingMode,
-			agentSettings: sourceChat.agentSettings,
-			images: imagePayload.length > 0 ? imagePayload : undefined,
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		try {
-			const response = await this.#submitForkRunWithConfirmation(submission);
-			if (!response) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-				return 'rejected';
-			}
-			deps.sessions.upsertServerChat(response.chat);
-			deps.sessions.setSelectedChatId(response.chat.id);
-			deps.navigation.navigateToChat?.(response.chat.id);
-			if (response.status === 'accepted') {
-				deps.lifecycle.beginTurn(response.chat.id);
-			}
-			return 'accepted';
-		} catch (error) {
-			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				outcomeUnknown
-					? m.chat_notice_fork_outcome_unconfirmed()
-					: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
-			return outcomeUnknown ? 'unknown' : 'rejected';
+		} finally {
+			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
 		}
 	}
 

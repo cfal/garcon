@@ -511,6 +511,76 @@ describe('ConversationMessage chat rows', () => {
 		expect(screen.getByText('Long CLI content').closest('.collapsible-body-collapsed')).toBeNull();
 	});
 
+	it('collapses overflowing ordinary user messages automatically', async () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(AT, '## Long user prompt\n\nPreserve **all details**.'),
+		});
+
+		const button = screen.getByRole('button', { name: 'Show more' });
+		expect(button.getAttribute('aria-expanded')).toBe('false');
+		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
+			'collapsible-body-collapsed',
+		);
+		expect(container.querySelector('[data-user-message-presentation]')).toBeNull();
+		expect(screen.getByText('Long user prompt').tagName).toBe('H2');
+		expect(screen.getByText('all details').tagName).toBe('STRONG');
+
+		await fireEvent.click(button);
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('leaves short ordinary user messages without a disclosure', async () => {
+		collapsibleLayout.contentHeight = 80;
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'Short user prompt'),
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+			expect(container.querySelector('.collapsible-body-truncated')).toBeNull();
+		});
+	});
+
+	it('keeps ordinary user messages collapsed when CLI messages are always expanded', () => {
+		render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'Long ordinary user prompt'),
+			alwaysExpandCliMessages: true,
+		});
+
+		expect(screen.getByRole('button', { name: 'Show more' }).getAttribute('aria-expanded')).toBe(
+			'false',
+		);
+	});
+
+	it('preserves ordinary user expansion across remounts', async () => {
+		const itemState = new ConversationFeedItemState();
+		const disclosureState = itemState.disclosurePort('user-row-1');
+		const message = new UserMessage(AT, 'Long ordinary user prompt');
+		const first = render(ConversationMessageHost, { message, disclosureState });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		first.unmount();
+
+		render(ConversationMessageHost, { message, disclosureState });
+		expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+			'true',
+		);
+	});
+
+	it('keeps styled CLI user messages expanded unless they opt into collapse', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new UserMessage(AT, 'Long presented user prompt', undefined, undefined, {
+				origin: 'cli',
+				style: 'info',
+			}),
+		});
+
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+		expect(container.querySelector('.collapsible-body-collapsed')).toBeNull();
+	});
+
 	it('collapses styleless CLI user messages without changing the bubble style', async () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage(AT, 'Long user content', undefined, undefined, {

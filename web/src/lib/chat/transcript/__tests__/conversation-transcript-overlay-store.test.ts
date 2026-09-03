@@ -77,6 +77,38 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(view.resendCandidates).toEqual([candidate(3)]);
 	});
 
+	it('clears notices through a captured revision while keeping later ones', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.appendLocalNotice('chat-1', 'progress', 'forking');
+		const capturedRevision = overlays.noticeRevisionFor('chat-1');
+		overlays.appendLocalNotice('chat-1', 'error', 'failed');
+
+		const mutation = overlays.clearNoticesThrough('chat-1', capturedRevision);
+
+		expect(mutation.feedStructureChanged).toBe(true);
+		expect(overlays.forChat('chat-1').notices.map((notice) => notice.content)).toEqual([
+			'failed',
+		]);
+
+		overlays.clearNoticesThrough('chat-1');
+
+		expect(overlays.forChat('chat-1').notices).toEqual([]);
+	});
+
+	it('keeps notice revisions monotonic across transcript replacement', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.appendLocalNotice('chat-1', 'progress', 'forking');
+		const capturedRevision = overlays.noticeRevisionFor('chat-1');
+		overlays.resetForTranscriptReplacement('chat-1');
+		overlays.appendLocalNotice('chat-1', 'error', 'failed');
+
+		overlays.clearNoticesThrough('chat-1', capturedRevision);
+
+		expect(overlays.forChat('chat-1').notices.map((notice) => notice.content)).toEqual([
+			'failed',
+		]);
+	});
+
 	it('preserves stable resend exclusions until their candidate departs', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 		overlays.replaceResendCandidates('chat-1', [candidate(1), candidate(2)]);

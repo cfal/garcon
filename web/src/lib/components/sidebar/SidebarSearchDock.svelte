@@ -3,9 +3,9 @@
 	import type {
 		SidebarChatGrouping,
 		SidebarChatItemLayout,
+		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
-	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarSearchDockProps {
@@ -15,7 +15,7 @@
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
-		sortByRecent?: boolean;
+		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
 		dockOnRight?: boolean;
@@ -28,7 +28,7 @@
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: SidebarChatItemLayout) => void;
-		onToggleSortByRecent?: () => void;
+		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
@@ -45,7 +45,7 @@
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
-		sortByRecent = false,
+		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		dockOnRight = false,
@@ -58,7 +58,7 @@
 		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
-		onToggleSortByRecent,
+		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
 		onApplySidebarMenuSearch,
@@ -69,9 +69,9 @@
 	}: SidebarSearchDockProps = $props();
 
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
-	// The controls row drops its own bottom border whenever another element
-	// (sort indicator or search context) renders directly beneath it.
-	let hasContentBelowControls = $derived(sortByRecent || hasSearchContext);
+	// The controls row drops its own bottom border whenever the search context
+	// renders directly beneath it.
+	let hasContentBelowControls = $derived(hasSearchContext);
 </script>
 
 <div data-slot="sidebar-search-dock">
@@ -82,7 +82,7 @@
 		{chatGrouping}
 		{groupNestedProjectPaths}
 		{chatItemLayout}
-		{sortByRecent}
+		{sortMode}
 		{chatListAutohide}
 		{chatListAutohideAvailable}
 		{dockOnRight}
@@ -94,14 +94,13 @@
 		{onSetChatGrouping}
 		{onToggleGroupNestedProjectPaths}
 		{onSetChatItemLayout}
-		{onToggleSortByRecent}
+		{onSetSortMode}
 		{onToggleChatListAutohide}
 		{onSetDockOnRight}
 		{onApplySidebarMenuSearch}
 		{onShowScheduledPrompts}
 		{onShowSettings}
 	/>
-	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />
 	<SidebarSearchContext
 		hasAdjacentControlsRow={true}
 		{sidebarPillSearches}

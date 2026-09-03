@@ -254,6 +254,7 @@
 	open={palette.argumentsDialogOpen}
 	snippet={palette.argumentsSnippet}
 	initialArguments={palette.argumentsDraft}
+	selectInitialArguments={palette.argumentsDraftIsFreshDefault}
 	onClose={() => palette.closeArguments()}
 	onSubmit={(snippet, argumentsText) => palette.submitArguments(snippet, argumentsText)}
 	onCancelled={() => palette.settleArgumentsCancel()}

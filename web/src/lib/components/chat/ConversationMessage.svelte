@@ -41,6 +41,7 @@
 	import CollapsibleBody from './rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
@@ -155,6 +156,10 @@
 
 	const asUser = $derived(message instanceof UserMessage ? message : null);
 	const userMessagePresentation = $derived(asUser?.presentation ?? null);
+	const userMessageDisclosure = $derived(userMessageBodyDisclosure(userMessagePresentation));
+	const userMessageDisclosureKind = $derived<'user-body' | 'cli-body'>(
+		userMessagePresentation ? 'cli-body' : 'user-body',
+	);
 	const userMessageSurfaceClass = $derived(
 		userMessagePresentation?.style
 			? cliPresentationSurfaceClass(userMessagePresentation.style)
@@ -505,11 +510,13 @@
 								/>
 							{/if}
 							<CollapsibleBody
-								disclosure={userMessagePresentation?.disclosure}
-								alwaysExpanded={localSettings.alwaysExpandCliMessages}
-								expanded={disclosureState?.open('cli-body', 'body', false)}
+								disclosure={userMessageDisclosure}
+								alwaysExpanded={Boolean(userMessagePresentation) &&
+									localSettings.alwaysExpandCliMessages}
+								expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
 								onExpandedChange={disclosureState
-									? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
+									? (expanded) =>
+											disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
 									: undefined}
 							>
 								<div class={userMessagePresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
