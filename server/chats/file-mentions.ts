@@ -96,7 +96,7 @@ async function openExistingFile(
 		if (!realPath || !isWithinRoot(realProjectPath, realPath)) continue;
 		const handle = await fs.open(
 			realPath,
-			constants.O_RDONLY | constants.O_NOFOLLOW,
+			constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
 		).catch(() => null);
 		if (!handle) continue;
 		let accepted = false;

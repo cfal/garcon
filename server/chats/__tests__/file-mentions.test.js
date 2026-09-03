@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
-import { promises as fs } from 'fs';
+import { constants, promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -68,6 +68,32 @@ describe('resolveFileMentionsInCommand', () => {
 
     expect(resolved).toBe('read @secret-link.txt');
     expect(resolved).not.toContain('do not include');
+  });
+
+  it.skipIf(process.platform === 'win32')('ignores named pipes without blocking', async () => {
+    const fifoPath = path.join(projectPath, 'blocked.pipe');
+    const mkfifo = Bun.spawn(['mkfifo', fifoPath], { stdout: 'ignore', stderr: 'ignore' });
+    expect(await mkfifo.exited).toBe(0);
+
+    const resolution = resolveFileMentionsInCommand('read @blocked.pipe', projectPath);
+    let timeout;
+    const completedPromptly = await Promise.race([
+      resolution.then(() => true),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve(false), 250);
+      }),
+    ]);
+    clearTimeout(timeout);
+    if (!completedPromptly) {
+      const writer = await fs.open(
+        fifoPath,
+        constants.O_WRONLY | constants.O_NONBLOCK,
+      ).catch(() => null);
+      await writer?.close();
+    }
+
+    expect(await resolution).toBe('read @blocked.pipe');
+    expect(completedPromptly).toBe(true);
   });
 
   it('rejects a directory replacement between resolution and open', async () => {
