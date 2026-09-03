@@ -40,6 +40,20 @@ afterEach(async () => {
 });
 
 describe('TranscriptLedgerStore', () => {
+  it('rejects pre-created symlink directories for chat ledgers', async () => {
+    const outsideDirectory = `${root}-outside`;
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, path.join(root, 'redirected'), 'dir');
+
+    try {
+      expect(() => store.currentView('redirected')).toThrow(LedgerFencedError);
+      await expect(fs.access(path.join(outsideDirectory, 'ledger.sqlite')))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('[TLV5-SEARCH.11-STORE-01] probes existing views without materializing a missing ledger', async () => {
     const missingPath = path.join(root, 'never-opened', 'ledger.sqlite');
     expect(store.existingCurrentView('never-opened')).toBeNull();
