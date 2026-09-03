@@ -316,6 +316,9 @@ function createRpcClientFixture(responder, options = {}) {
   const sendServerRequest = (id, method, params) => {
     controller.enqueue(encoder.encode(`${JSON.stringify({ id, method, params })}\n`));
   };
+  const sendNotification = (method, params) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ method, params })}\n`));
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -347,7 +350,7 @@ function createRpcClientFixture(responder, options = {}) {
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
     shutdownGraceMs: options.shutdownGraceMs,
   });
-  return { client, writes, spawn, proc, finishExit, sendResult, sendServerRequest };
+  return { client, writes, spawn, proc, finishExit, sendResult, sendServerRequest, sendNotification };
 }
 
 const initializeResponse = {
@@ -385,6 +388,27 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 
     expect(proc.stdin.end).toHaveBeenCalledTimes(1);
     expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps reading messages after a notification handler throws', async () => {
+    const { client, sendNotification } = createRpcClientFixture(() => initializeResponse);
+    const warnings = [];
+    const delivered = [];
+    client.on('warning', (message) => warnings.push(message));
+    client.on('notification', (notification) => {
+      delivered.push(notification.method);
+      if (notification.method === 'first') throw new Error('handler exploded');
+    });
+    await client.connect();
+
+    sendNotification('first', { threadId: 'thread-1' });
+    sendNotification('second', { threadId: 'thread-1' });
+    await waitForCondition(() => delivered.length === 2);
+
+    expect(delivered).toEqual(['first', 'second']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('handler failed');
+    await client.shutdown();
   });
 
   it('requests full paginated turns with the typed app-server contract', async () => {

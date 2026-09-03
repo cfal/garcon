@@ -436,7 +436,15 @@ export class CodexAppServerClient extends EventEmitter {
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          if (line.trim()) this.#handleLine(line.trim());
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            this.#handleLine(trimmed);
+          } catch (error) {
+            // One throwing handler must not abandon the read loop and leave
+            // the writer deaf until its turn timeouts expire.
+            this.emit('warning', `Codex app-server message handler failed: ${(error as Error).message}`);
+          }
         }
       }
     } catch (error) {
