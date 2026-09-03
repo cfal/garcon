@@ -272,6 +272,9 @@ function createRpcClientFixture(responder, options = {}) {
   const sendResult = (id, result) => {
     controller.enqueue(encoder.encode(`${JSON.stringify({ id, result })}\n`));
   };
+  const sendServerRequest = (id, method, params) => {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ id, method, params })}\n`));
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -303,7 +306,7 @@ function createRpcClientFixture(responder, options = {}) {
     resolveCli: async () => ({ command: '/tmp/codex', source: 'bundled' }),
     shutdownGraceMs: options.shutdownGraceMs,
   });
-  return { client, writes, spawn, proc, finishExit, sendResult };
+  return { client, writes, spawn, proc, finishExit, sendResult, sendServerRequest };
 }
 
 const initializeResponse = {
@@ -377,6 +380,142 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
         itemsView: 'full',
       },
     }));
+  });
+
+  it('requests and validates paginated thread items', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/items/list') {
+        return {
+          data: [{
+            turnId: 'turn-history',
+            item: {
+              type: 'functionCallOutput',
+              id: 'result-1',
+              name: 'lookup',
+              namespace: 'tools',
+              output: [{ type: 'input_text', text: 'history result' }],
+            },
+          }],
+          nextCursor: 'next-item-page',
+          backwardsCursor: null,
+        };
+      }
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.listThreadItems({
+      threadId: 'thread-1',
+      cursor: null,
+      limit: 100,
+      sortDirection: 'asc',
+    })).resolves.toEqual({
+      data: [{
+        turnId: 'turn-history',
+        item: {
+          type: 'functionCallOutput',
+          id: 'result-1',
+          name: 'lookup',
+          namespace: 'tools',
+          output: [{ type: 'input_text', text: 'history result' }],
+        },
+      }],
+      nextCursor: 'next-item-page',
+      backwardsCursor: null,
+    });
+    await client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/items/list',
+      params: {
+        threadId: 'thread-1',
+        cursor: null,
+        limit: 100,
+        sortDirection: 'asc',
+      },
+    }));
+  });
+
+  it('accepts 0.153 collaboration and error shapes in paginated turns', async () => {
+    const { client } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      return {
+        data: [makeTurn({
+          error: {
+            message: 'Blocked by policy',
+            codexErrorInfo: 'misalignmentPolicyViolation',
+            additionalDetails: null,
+            misalignment: {
+              errorType: 'policy_mismatch',
+              detailedExplanation: 'The request conflicts with policy.',
+              steer: { message: 'Continue without the restricted action.' },
+            },
+          },
+          items: [
+            {
+              type: 'collabAgentToolCall',
+              id: 'collab-1',
+              tool: 'followupTask',
+              status: 'interrupted',
+              senderThreadId: 'thread-1',
+              receiverThreadIds: ['thread-2'],
+              prompt: 'Continue review',
+              model: null,
+              reasoningEffort: null,
+              agentsStates: {},
+            },
+            {
+              type: 'subAgentActivity',
+              id: 'activity-1',
+              kind: 'completed',
+              agentThreadId: 'thread-2',
+              agentPath: '/root/reviewer',
+            },
+          ],
+        })],
+        nextCursor: null,
+        backwardsCursor: null,
+      };
+    });
+
+    await expect(client.listThreadTurns({
+      threadId: 'thread-1',
+      sortDirection: 'asc',
+      itemsView: 'full',
+    })).resolves.toMatchObject({
+      data: [{
+        error: { codexErrorInfo: 'misalignmentPolicyViolation' },
+        items: [
+          { tool: 'followupTask', status: 'interrupted' },
+          { kind: 'completed' },
+        ],
+      }],
+    });
+    await client.shutdown();
+  });
+
+  it('preserves string JSON-RPC ids on server requests and responses', async () => {
+    const fixture = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+    const request = new Promise((resolve) => fixture.client.once('serverRequest', resolve));
+    await fixture.client.connect();
+
+    fixture.sendServerRequest('approval-request-1', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      startedAtMs: 1_700_000_000_000,
+    });
+
+    await expect(request).resolves.toMatchObject({ id: 'approval-request-1' });
+    fixture.client.respond('approval-request-1', { decision: 'accept' });
+    expect(fixture.writes).toContainEqual({
+      id: 'approval-request-1',
+      result: { decision: 'accept' },
+    });
+    await fixture.client.shutdown();
   });
 
     it('rejects unknown paginated public item discriminators', async () => {
@@ -1232,6 +1371,70 @@ describe('Codex app-server converter', () => {
       'mcp-tool-use',
       'tool-result',
     ]);
+  });
+
+  it('maps function call output items to one standalone result', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'functionCallOutput',
+      id: 'function-result-1',
+      name: 'lookup',
+      namespace: 'tools',
+      output: [{ type: 'input_text', text: 'result text' }],
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[0]).toMatchObject({
+      toolId: 'function-result-1',
+      content: { items: [{ type: 'input_text', text: 'result text' }] },
+      isError: false,
+    });
+  });
+
+  it('maps all 0.153 collaboration tools and interrupted results', () => {
+    const expectedActions = {
+      sendMessage: 'send_message',
+      followupTask: 'followup_task',
+      interruptAgent: 'interrupt_agent',
+      listAgents: 'list_agents',
+    };
+
+    for (const [tool, action] of Object.entries(expectedActions)) {
+      const messages = convertCodexAppServerItem({
+        type: 'collabAgentToolCall',
+        id: `collab-${tool}`,
+        tool,
+        status: 'interrupted',
+        senderThreadId: 'root-thread',
+        receiverThreadIds: [],
+        prompt: null,
+        model: null,
+        reasoningEffort: null,
+        agentsStates: {},
+      }, '2026-02-21T10:00:00.000Z');
+
+      expect(messages[0]).toMatchObject({ action });
+      expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
+    }
+  });
+
+  it('maps completed subagent activity to completed status', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'subAgentActivity',
+      id: 'activity-completed-1',
+      kind: 'completed',
+      agentThreadId: 'worker-thread-1',
+      agentPath: '/root/reviewer',
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'completed' } },
+      },
+    });
   });
 
   it('maps Codex subagent dynamic tool calls to explicit tool-use messages', () => {

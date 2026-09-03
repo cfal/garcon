@@ -1,9 +1,10 @@
 import { EventEmitter } from 'events';
 import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
-import { parseThreadTurnsListResponse } from './protocol.js';
+import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
 import type {
   InitializeResponse,
   JsonRpcFailure,
+  JsonRpcId,
   JsonRpcNotification,
   JsonRpcServerRequest,
   JsonRpcSuccess,
@@ -15,6 +16,8 @@ import type {
   ThreadInjectItemsParams,
   ThreadInjectItemsResponse,
   ThreadLoadedListResponse,
+  ThreadItemsListParams,
+  ThreadItemsListResponse,
   ThreadTurnsListParams,
   ThreadTurnsListResponse,
   ThreadResumeResponse,
@@ -197,11 +200,11 @@ export class CodexAppServerClient extends EventEmitter {
     this.#write(params === undefined ? { method } : { method, params });
   }
 
-  respond(id: number, result: unknown): void {
+  respond(id: JsonRpcId, result: unknown): void {
     this.#write({ id, result });
   }
 
-  reject(id: number, code: number, message: string): void {
+  reject(id: JsonRpcId, code: number, message: string): void {
     this.#write({ id, error: { code, message } });
   }
 
@@ -250,6 +253,11 @@ export class CodexAppServerClient extends EventEmitter {
   async listThreadTurns(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
     const response = await this.request<unknown>('thread/turns/list', params);
     return parseThreadTurnsListResponse(response);
+  }
+
+  async listThreadItems(params: ThreadItemsListParams): Promise<ThreadItemsListResponse> {
+    const response = await this.request<unknown>('thread/items/list', params);
+    return parseThreadItemsListResponse(response);
   }
 
   loadedThreads(): Promise<ThreadLoadedListResponse> {
@@ -445,7 +453,7 @@ export class CodexAppServerClient extends EventEmitter {
 
     if (typeof obj.id === 'number' && 'result' in obj) {
       const success = message as JsonRpcSuccess;
-      const pending = this.#clearPendingRequest(success.id);
+      const pending = this.#clearPendingRequest(obj.id);
       if (!pending) {
         this.emit('warning', `Ignoring late Codex app-server response: ${success.id}`);
         return;
@@ -456,7 +464,7 @@ export class CodexAppServerClient extends EventEmitter {
 
     if (typeof obj.id === 'number' && 'error' in obj) {
       const failure = message as JsonRpcFailure;
-      const pending = this.#clearPendingRequest(failure.id);
+      const pending = this.#clearPendingRequest(obj.id);
       if (!pending) {
         this.emit('warning', `Ignoring late Codex app-server response: ${failure.id}`);
         return;
@@ -469,7 +477,7 @@ export class CodexAppServerClient extends EventEmitter {
       return;
     }
 
-    if (typeof obj.id === 'number' && typeof obj.method === 'string') {
+    if ((typeof obj.id === 'number' || typeof obj.id === 'string') && typeof obj.method === 'string') {
       this.emit('serverRequest', message as JsonRpcServerRequest);
       return;
     }

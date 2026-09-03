@@ -8,11 +8,11 @@ import {
 } from '@garcon/common/chat-types';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { publishPermissionCancelled, type CodexOperation } from './operation-routes.js';
-import type { JsonRpcServerRequest } from './protocol.js';
+import type { JsonRpcId, JsonRpcServerRequest } from './protocol.js';
 
 export interface CodexPendingApproval {
   permissionOccurrenceId: string;
-  requestId: number;
+  requestId: JsonRpcId;
   chatId: string;
   method: string;
   params: Record<string, unknown>;

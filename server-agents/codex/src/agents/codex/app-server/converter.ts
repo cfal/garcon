@@ -100,6 +100,13 @@ export function convertCodexAppServerItem(
       return convertWebSearch(item, timestamp);
     case 'dynamicToolCall':
       return convertDynamicToolCall(item, timestamp);
+    case 'functionCallOutput':
+      return [new ToolResultMessage(
+        timestamp,
+        item.id,
+        normalizeToolResultContent(item.output),
+        false,
+      )];
     case 'collabAgentToolCall':
       return convertCollabAgentToolCall(item, timestamp);
     case 'subAgentActivity':
@@ -335,6 +342,10 @@ function collabAction(tool: CodexCollabAgentTool): CodexSubagentAction {
     case 'resumeAgent': return 'resume_agent';
     case 'wait': return 'wait_agent';
     case 'closeAgent': return 'close_agent';
+    case 'sendMessage': return 'send_message';
+    case 'followupTask': return 'followup_task';
+    case 'interruptAgent': return 'interrupt_agent';
+    case 'listAgents': return 'list_agents';
   }
 }
 
