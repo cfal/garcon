@@ -7433,9 +7433,8 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(second.events).map((message) => message.content)).toContain(
       'current from turn B',
     );
-    expect(permissionEvents(first.events).map(
-      (event) => event.lifecycle.requestedTool?.command,
-    )).toContain('approval-a');
+    expect(permissionEvents(first.events)).toEqual([]);
+    expect(fake.respond).toHaveBeenCalledWith(81, { decision: 'decline' });
     expect(permissionEvents(second.events).map(
       (event) => event.lifecycle.requestedTool?.command,
     )).toContain('approval-b');
@@ -7521,6 +7520,221 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).some(
       (message) => message.content === 'after retirement',
     )).toBe(false);
+  });
+
+  it('reactivates a retained source for the next turn without replacing old turn routes', async () => {
+    const nativePath = path.join(tmpDir, 'reactivated-source.jsonl');
+    let turnNumber = 0;
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+
+    for (const [turnId, itemId, text] of [
+      ['turn-1', 'late-old-item', 'late old output'],
+      ['turn-2', 'current-item', 'current output'],
+    ]) {
+      fake.emit('notification', {
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId,
+          item: { type: 'agentMessage', id: itemId, text, phase: null, memoryCitation: null },
+        },
+      });
+    }
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.connect).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(publishedMessages(first.events).map((message) => message.content))
+      .toContain('late old output');
+    expect(publishedMessages(second.events).map((message) => message.content))
+      .toContain('current output');
+
+    fake.emit('serverRequest', {
+      id: 'old-turn-approval',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'old-command',
+        command: 'printf old',
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledWith('old-turn-approval', { decision: 'decline' });
+    expect(permissionEvents(second.events)).toEqual([]);
+  });
+
+  it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
+    const nativePath = path.join(tmpDir, 'interrupted-writer.jsonl');
+    let turnNumber = 0;
+    const interruptAcknowledgement = createDeferred();
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        turnNumber += 1;
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
+      },
+      interruptTurn: async () => {
+        await interruptAcknowledgement.promise;
+        return {};
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    const aborting = provider.abort(started.agentSessionId);
+    const resumed = provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+    await Bun.sleep(0);
+
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+
+    interruptAcknowledgement.resolve();
+    await expect(aborting).resolves.toBe(true);
+    await resumed;
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'turn-1', status: 'interrupted' }),
+      },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('rejects genuinely concurrent same-thread use without opening a second writer', async () => {
+    const nativePath = path.join(tmpDir, 'concurrent-writer.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const createClient = mock(() => fake);
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    await expect(provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }))).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fake.resumeThread).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('retires an incompatible retained writer before resuming it in a new process', async () => {
+    const nativePath = path.join(tmpDir, 'replaced-writer.jsonl');
+    const oldClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => {
+        expect(oldClient.shutdown).toHaveBeenCalledTimes(1);
+        return {
+          thread: makeThread({ id: 'thread-1', path: nativePath }),
+          model: 'gpt-5.4-codex',
+          modelProvider: 'custom-openai',
+          serviceTier: null,
+          cwd: '/repo',
+        };
+      },
+      startTurn: async () => ({
+        turn: makeTurn({ id: 'turn-2', status: 'inProgress' }),
+      }),
+    });
+    const clients = [oldClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    oldClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      codexConfig: { config: { model_provider: 'custom-openai' } },
+      operation: second.operation,
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
   });
 
   it('retires the previous same-chat source only after replacement activation succeeds', async () => {
@@ -7870,6 +8084,99 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(publishedMessages(published.events).at(-1)?.content)
       .toBe('continued with confirmed settings');
+  });
+
+  it('updates a retained idle source while preserving provider-default effort', async () => {
+    const { fake, provider, started } = await startSettingsSession();
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(provider.hasSource('thread-1')).toBe(true);
+    fake.updateThreadSettings.mockImplementation(async () => {
+      emitThreadSettings(fake, {
+        approvalPolicy: 'on-request',
+        effort: 'medium',
+      });
+      return {};
+    });
+
+    await provider.updateSessionSettings(started.agentSessionId, {
+      model: 'gpt-5.4-codex',
+      permissionMode: 'manualBypass',
+      thinkingMode: 'none',
+    });
+
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      model: 'gpt-5.4-codex',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    });
+  });
+
+  it('confirms requested effort before starting an automatic goal turn', async () => {
+    const nativePath = path.join(tmpDir, 'goal-effort-thread.jsonl');
+    const calls = [];
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({
+          id: 'thread-1',
+          path: nativePath,
+          model: 'gpt-5.4-codex',
+          reasoningEffort: 'medium',
+        }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandbox: { type: 'workspaceWrite' },
+        reasoningEffort: 'medium',
+      }),
+      updateThreadSettings: async () => {
+        calls.push('settings');
+        emitThreadSettings(fake, { effort: 'high' });
+        return {};
+      },
+      setThreadGoal: async (threadId, params) => {
+        calls.push('goal');
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }),
+          },
+        }));
+        return { goal: makeGoal(threadId, params.objective, 'active') };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+
+    await provider.startSession(makeRequest({
+      thinkingMode: 'high',
+      codexGoalCommand: { kind: 'set', objective: 'Continue automatically' },
+    }));
+
+    expect(calls).toEqual(['settings', 'goal']);
+    expect(fake.updateThreadSettings).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      effort: 'high',
+    }));
   });
 
   it('ignores wrong-source, wrong-thread, and stale settings snapshots', async () => {

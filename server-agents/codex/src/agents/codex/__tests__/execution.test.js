@@ -64,6 +64,7 @@ function createRuntime(host = createHost()) {
   runtime.compact = mock(async (request) => { capture(request); });
   runtime.abort = mock(async () => false);
   runtime.isRunning = mock(() => false);
+  runtime.hasSource = mock(() => false);
   runtime.getRunningSessions = mock(() => []);
   runtime.updateSessionSettings = mock(() => undefined);
   runtime.resolvePermission = mock(async () => undefined);
@@ -482,7 +483,7 @@ describe('CodexExecution', () => {
     expect(JSON.stringify(host.logger.warn.mock.calls)).not.toContain(delayedContent);
   });
 
-  it('forwards supported configuration changes only while the session is active', async () => {
+  it('forwards supported configuration changes while the provider source is live', async () => {
     const runtime = createRuntime();
     const execution = new CodexExecution(
       createHost(),
@@ -507,7 +508,7 @@ describe('CodexExecution', () => {
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(runtime.updateSessionSettings).not.toHaveBeenCalled();
 
-    runtime.isRunning.mockReturnValue(true);
+    runtime.hasSource.mockReturnValue(true);
     await execution.applySessionConfiguration('thread-1', next, previous);
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('thread-1', {
       model: 'gpt-5.4-mini',
@@ -519,6 +520,7 @@ describe('CodexExecution', () => {
   it('rejects live endpoint replacement and concrete reasoning-effort clearing', async () => {
     const runtime = createRuntime();
     runtime.isRunning.mockReturnValue(true);
+    runtime.hasSource.mockReturnValue(true);
     const execution = new CodexExecution(
       createHost(),
       runtime,

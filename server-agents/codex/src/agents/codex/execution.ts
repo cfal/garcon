@@ -127,18 +127,19 @@ export class CodexExecution implements AgentRuntimeExecution {
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
     previousConfiguration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[2],
   ): Promise<void> {
-    if (!this.runtime.isRunning(agentSessionId)) return;
-    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
-      throw new AgentIntegrationError(
-        'INVALID_ENDPOINT',
-        'Cannot change the Codex endpoint while a session is running',
-        false,
-      );
-    }
     if (previousConfiguration.thinkingMode !== 'none' && configuration.thinkingMode === 'none') {
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
         'Codex cannot clear a concrete reasoning effort on an established session',
+        false,
+      );
+    }
+    if (!this.runtime.hasSource(agentSessionId)) return;
+    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
+      if (!this.runtime.isRunning(agentSessionId)) return;
+      throw new AgentIntegrationError(
+        'INVALID_ENDPOINT',
+        'Cannot change the Codex endpoint while a session is running',
         false,
       );
     }

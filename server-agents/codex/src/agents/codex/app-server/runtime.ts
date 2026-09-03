@@ -1,4 +1,5 @@
 import { AssistantMessage, ErrorMessage, PermissionExpiredMessage, type ChatMessage } from '@garcon/common/chat-types';
+import { createHash } from 'node:crypto';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import {
   publishFailed,
@@ -668,12 +669,14 @@ export class CodexAppServerRuntime {
         nativePath: started.thread.path,
         codexHome: initialized.codexHome || null,
         client,
+        runtimeIdentity: codexSourceRuntimeIdentity(request),
         confirmedThreadSettings: this.#initialThreadSettings(request, started),
         operation,
       });
       activeSession = session;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
+      await this.#ensureGoalEffort(session, request);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       await this.#startRequestedTurn(client, session, request, operation);
@@ -707,23 +710,15 @@ export class CodexAppServerRuntime {
   async runTurn(request: CodexResumeRequest): Promise<void> {
     assertCodexExecutionOpen(request);
     const operation = request.operation;
-    const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
+    let bufferedClient: CodexAppServerClient | null = null;
 
     try {
-      const initialized = await client.connect();
-      assertCodexExecutionOpen(request);
-      const resumed = await client.resumeThread(buildThreadResumeParams(request));
-      const session = this.#activateSession({
-        chatId: request.chatId,
-        threadId: resumed.thread.id,
-        nativePath: resumed.thread.path ?? request.nativePath ?? null,
-        codexHome: initialized.codexHome || null,
-        client,
-        confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
-        operation,
-      });
+      const activation = await this.#resumeSession(request, operation);
+      const session = activation.session;
+      const client = session.client;
       activeSession = session;
+      if (activation.buffered) bufferedClient = client;
       session.activeDeliveryReservations += 1;
       try {
         if (this.#sessions.get(session.threadId) !== session) {
@@ -734,6 +729,7 @@ export class CodexAppServerRuntime {
           if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
             throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
+          await this.#ensureGoalEffort(session, request);
           if (request.executionAdmission) await markCodexExecutionStarted(request);
           if (!request.codexGoalCommand) {
             if (session.managesGoalLifecycle) {
@@ -766,23 +762,24 @@ export class CodexAppServerRuntime {
         this.#flushPendingFinish(session);
       }
     } catch (error) {
-      const message = humanizeCodexAppServerError(error);
+      const activationFailure = error instanceof CodexSessionActivationFailure ? error : null;
+      const originalError = activationFailure?.originalError ?? error;
+      const message = humanizeCodexAppServerError(originalError);
       const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
-        this.#discardBufferedClientEvents(client);
+        if (bufferedClient) this.#discardBufferedClientEvents(bufferedClient);
         this.#finishSession(
           activeSession,
           admissionClosed ? { aborted: true } : { failedMessage: message },
           operation,
         );
       } else {
-        this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
           publishFailed(this.#logger, request.chatId, message, operation);
         }
-        await this.#shutdownClient(client);
       }
-      throw error;
+      if (activationFailure) await activationFailure.shutdown;
+      throw originalError;
     }
   }
 
@@ -798,45 +795,39 @@ export class CodexAppServerRuntime {
     }
 
     const operation = request.operation;
-    const client = this.#newClient(request, true);
     let activeSession: RunningCodexSession | null = null;
+    let bufferedClient: CodexAppServerClient | null = null;
 
     try {
-      const initialized = await client.connect();
-      assertCodexExecutionOpen(request);
-      const resumed = await client.resumeThread(buildThreadResumeParams(request));
-      const session = this.#activateSession({
-        chatId: request.chatId,
-        threadId: resumed.thread.id,
-        nativePath: resumed.thread.path ?? request.nativePath ?? null,
-        codexHome: initialized.codexHome || null,
-        client,
-        confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
-        operation,
-      });
+      const activation = await this.#resumeSession(request, operation);
+      const session = activation.session;
+      const client = session.client;
       activeSession = session;
+      if (activation.buffered) bufferedClient = client;
       session.turnItems.markManualCompaction();
-      this.#releaseBufferedClientEvents(client);
+      if (bufferedClient) this.#releaseBufferedClientEvents(bufferedClient);
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       session.nextTurnOperation = operation;
-      await client.compactThread(resumed.thread.id);
+      await client.compactThread(session.threadId);
     } catch (error) {
-      const message = humanizeCodexAppServerError(error);
+      const activationFailure = error instanceof CodexSessionActivationFailure ? error : null;
+      const originalError = activationFailure?.originalError ?? error;
+      const message = humanizeCodexAppServerError(originalError);
       const admissionClosed = request.executionAdmission?.signal.aborted === true;
       if (activeSession) {
+        if (bufferedClient) this.#discardBufferedClientEvents(bufferedClient);
         this.#finishSession(
           activeSession,
           admissionClosed ? { aborted: true } : { failedMessage: message },
           operation,
         );
       } else {
-        this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
           publishFailed(this.#logger, request.chatId, message, operation);
         }
-        await this.#shutdownClient(client);
       }
-      throw error;
+      if (activationFailure) await activationFailure.shutdown;
+      throw originalError;
     }
   }
 
@@ -850,26 +841,34 @@ export class CodexAppServerRuntime {
       this.#finishSession(session, { aborted: true });
       return true;
     }
-    if (session.status === 'interrupting') return true;
+    if (session.status === 'interrupting') {
+      return session.interruptAcknowledgement ?? true;
+    }
     // Set before awaiting because the RPC response and turn/completed can arrive in one stdout read.
     session.status = 'interrupting';
-    try {
-      await session.client.interruptTurn(session.threadId, turnId);
-    } catch (error) {
-      if (this.#sessions.get(agentSessionId) === session && session.status === 'interrupting') session.status = 'running';
-      this.#logger.warn('Codex turn interruption failed', {
-        turnId,
-        error: error instanceof Error ? error.message : String(error),
+    const acknowledgement = session.client.interruptTurn(session.threadId, turnId)
+      .then(() => true)
+      .catch((error) => {
+        if (this.#sessions.get(agentSessionId) === session && session.status === 'interrupting') {
+          session.status = 'running';
+        }
+        this.#logger.warn('Codex turn interruption failed', {
+          turnId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
       });
-      return false;
-    }
-    if (this.#sessions.get(agentSessionId) !== session) return true;
-    return true;
+    session.interruptAcknowledgement = acknowledgement;
+    return acknowledgement;
   }
 
   isRunning(agentSessionId: string): boolean {
     const status = this.#sessions.get(agentSessionId)?.status;
     return status !== undefined && isActiveSessionStatus(status);
+  }
+
+  hasSource(agentSessionId: string): boolean {
+    return this.#sourceForThread(agentSessionId) !== null;
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {
@@ -932,7 +931,7 @@ export class CodexAppServerRuntime {
     agentSessionId: string,
     configuration: Pick<AgentSessionConfiguration, 'model' | 'permissionMode' | 'thinkingMode'>,
   ): Promise<void> {
-    const session = this.#sessions.get(agentSessionId);
+    const session = this.#sourceForThread(agentSessionId);
     if (!session) return Promise.resolve();
     const target = codexThreadSettingsTarget(configuration);
     const update = session.threadSettingsUpdateChain.then(() => (
@@ -946,7 +945,7 @@ export class CodexAppServerRuntime {
     session: RunningCodexSession,
     target: CodexThreadSettingsTarget,
   ): Promise<void> {
-    if (this.#sessions.get(session.threadId) !== session) return;
+    if (this.#sources.get(session.client) !== session) return;
     if (session.configurationFenced) {
       throw new AgentIntegrationError(
         'INVALID_SETTINGS',
@@ -994,6 +993,29 @@ export class CodexAppServerRuntime {
         session.pendingThreadSettings = null;
       }
     }
+  }
+
+  async #ensureGoalEffort(
+    session: RunningCodexSession,
+    request: CodexStartRequest | CodexResumeRequest,
+  ): Promise<void> {
+    if (!request.codexGoalCommand) return;
+    const requested = codexThreadSettingsTarget(request);
+    if (!requested.effort || session.confirmedThreadSettings.effort === requested.effort) return;
+    await this.#applyThreadSettings(session, {
+      ...session.confirmedThreadSettings,
+      effort: requested.effort,
+      permissionMode: requested.permissionMode,
+    });
+  }
+
+  #sourceForThread(threadId: string): RunningCodexSession | null {
+    const active = this.#sessions.get(threadId);
+    if (active) return active;
+    for (const source of this.#sources.values()) {
+      if (source.threadId === threadId && !source.superseded) return source;
+    }
+    return null;
   }
 
   startPurgeTimer(): void {
@@ -1148,6 +1170,7 @@ export class CodexAppServerRuntime {
     nativePath: string | null;
     codexHome: string | null;
     client: CodexAppServerClient;
+    runtimeIdentity: string;
     confirmedThreadSettings: CodexThreadSettingsTarget;
     operation: CodexOperation;
   }): RunningCodexSession {
@@ -1160,6 +1183,7 @@ export class CodexAppServerRuntime {
       nativePath: args.nativePath,
       codexHome: args.codexHome,
       client: args.client,
+      runtimeIdentity: args.runtimeIdentity,
       activeTurnId: null,
       status: 'running',
       permissionMode: args.confirmedThreadSettings.permissionMode,
@@ -1181,6 +1205,8 @@ export class CodexAppServerRuntime {
       activeDeliveryReservations: 0,
       pendingFinish: null,
       pendingFinishOperation: null,
+      interruptAcknowledgement: null,
+      terminalWaiters: new Set(),
       liveCodeModeResultToolIds: new Map(),
       turnItems: new CodexTurnItemLedger((turnId, messages) => (
         publishRows(this.#logger, args.chatId, messages, turnRoutes.get(turnId))
@@ -1205,12 +1231,207 @@ export class CodexAppServerRuntime {
       this.#sessions.get(args.threadId),
     ]);
     for (const previous of previousSources) {
-      if (previous) this.#supersedeSource(previous);
+      if (previous) void this.#supersedeSource(previous);
     }
     this.#sessions.set(args.threadId, session);
     this.#sources.set(args.client, session);
     this.#latestSourceByChat.set(args.chatId, session);
     return session;
+  }
+
+  async #resumeSession(
+    request: CodexResumeRequest,
+    operation: CodexOperation,
+  ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
+    const runtimeIdentity = codexSourceRuntimeIdentity(request);
+    const retained = this.#latestSourceByChat.get(request.chatId);
+    const matchingPath = !retained?.nativePath
+      || !request.nativePath
+      || retained.nativePath === request.nativePath;
+    const reusableRuntime = Boolean(
+      retained
+      && !retained.configurationFenced
+      && !retained.pendingThreadSettings
+      && retained.runtimeIdentity === runtimeIdentity
+      && matchingPath,
+    );
+    let interruptedWriterReady = false;
+    if (
+      retained
+      && retained.threadId === request.agentSessionId
+      && !retained.superseded
+      && isActiveSessionStatus(retained.status)
+    ) {
+      if (retained.status === 'interrupting' && reusableRuntime) {
+        const acknowledgement = retained.interruptAcknowledgement;
+        if (!acknowledgement) {
+          throw new AgentIntegrationError(
+            'SESSION_BUSY',
+            'Codex thread interruption has not established a replacement-turn barrier',
+            true,
+          );
+        }
+        interruptedWriterReady = await this.#waitForInterruptAcknowledgement(acknowledgement, request);
+        if (!interruptedWriterReady) {
+          throw new AgentIntegrationError(
+            'SESSION_BUSY',
+            'Codex turn interruption failed before the next turn could start',
+            true,
+          );
+        }
+      } else if (retained.status === 'interrupting' || retained.status === 'completing') {
+        await this.#waitForSourceTerminal(retained, request);
+      } else {
+        throw new AgentIntegrationError(
+          'SESSION_BUSY',
+          'Codex thread already has an active turn',
+          true,
+        );
+      }
+      assertCodexExecutionOpen(request);
+    }
+    if (
+      retained
+      && this.#latestSourceByChat.get(request.chatId) === retained
+      && retained.threadId === request.agentSessionId
+      && !retained.superseded
+      && !retained.configurationFenced
+      && !retained.pendingThreadSettings
+      && (isTerminalSessionStatus(retained.status) || (
+        retained.status === 'interrupting' && interruptedWriterReady
+      ))
+      && retained.runtimeIdentity === runtimeIdentity
+      && matchingPath
+    ) {
+      return {
+        session: this.#reactivateSession(retained, request, operation),
+        buffered: false,
+      };
+    }
+
+    if (
+      retained
+      && retained.threadId === request.agentSessionId
+      && isTerminalSessionStatus(retained.status)
+    ) {
+      await this.#supersedeSource(retained);
+    }
+
+    const client = this.#newClient(request, true);
+    try {
+      const initialized = await client.connect();
+      assertCodexExecutionOpen(request);
+      const resumed = await client.resumeThread(buildThreadResumeParams(request));
+      return {
+        session: this.#activateSession({
+          chatId: request.chatId,
+          threadId: resumed.thread.id,
+          nativePath: resumed.thread.path ?? request.nativePath ?? null,
+          codexHome: initialized.codexHome || null,
+          client,
+          runtimeIdentity,
+          confirmedThreadSettings: this.#initialThreadSettings(request, resumed),
+          operation,
+        }),
+        buffered: true,
+      };
+    } catch (error) {
+      this.#discardBufferedClientEvents(client);
+      throw new CodexSessionActivationFailure(error, this.#shutdownClient(client));
+    }
+  }
+
+  #reactivateSession(
+    session: RunningCodexSession,
+    request: CodexResumeRequest,
+    operation: CodexOperation,
+  ): RunningCodexSession {
+    session.nativePath = request.nativePath ?? session.nativePath;
+    session.activeTurnId = null;
+    session.status = 'running';
+    session.startedAt = new Date().toISOString();
+    session.cleanupAttachments = undefined;
+    session.goal = null;
+    session.managesGoalLifecycle = false;
+    session.completedGoalTurn = false;
+    session.ignoredGoalClears = 0;
+    session.activeInputChain = Promise.resolve();
+    session.activeDeliveryReservations = 0;
+    session.pendingFinish = null;
+    session.pendingFinishOperation = null;
+    session.interruptAcknowledgement = null;
+    session.terminalWaiters.clear();
+    session.liveCodeModeResultToolIds.clear();
+    session.capacityRetryCount = 0;
+    session.turnAttemptGeneration += 1;
+    session.pendingCapacityFailure = null;
+    session.sourceOperation = operation;
+    session.nextTurnOperation = operation;
+    session.goalOperation = null;
+    session.lastTurnOperation = null;
+    session.threadSettingsUpdateChain = Promise.resolve();
+    this.#sessions.set(session.threadId, session);
+    return session;
+  }
+
+  async #waitForSourceTerminal(
+    session: RunningCodexSession,
+    request: CodexResumeRequest,
+  ): Promise<void> {
+    const signal = request.executionAdmission?.signal;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        session.terminalWaiters.delete(onTerminal);
+        signal?.removeEventListener('abort', onAbort);
+        action();
+      };
+      const onTerminal = () => settle(resolve);
+      const onAbort = () => settle(() => {
+        try {
+          signal?.throwIfAborted();
+          reject(new Error('Codex execution admission closed'));
+        } catch (error) {
+          reject(error);
+        }
+      });
+      session.terminalWaiters.add(onTerminal);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+  }
+
+  async #waitForInterruptAcknowledgement(
+    acknowledgement: Promise<boolean>,
+    request: CodexResumeRequest,
+  ): Promise<boolean> {
+    const signal = request.executionAdmission?.signal;
+    if (!signal) return acknowledgement;
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const settle = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        action();
+      };
+      const onAbort = () => settle(() => {
+        try {
+          signal.throwIfAborted();
+          reject(new Error('Codex execution admission closed'));
+        } catch (error) {
+          reject(error);
+        }
+      });
+      acknowledgement.then(
+        (acknowledged) => settle(() => resolve(acknowledged)),
+        (error) => settle(() => reject(error)),
+      );
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
   }
 
   #initialThreadSettings(
@@ -1353,7 +1574,6 @@ export class CodexAppServerRuntime {
     if (!waiter || !threadSettingsMatch(confirmed, waiter.target)) return;
     clearTimeout(waiter.timeout);
     session.pendingThreadSettings = null;
-    session.confirmedThreadSettings = waiter.target;
     session.permissionMode = waiter.target.permissionMode;
     waiter.resolve();
   }
@@ -1755,7 +1975,11 @@ export class CodexAppServerRuntime {
       client.respond(request.id, denialResponseForRequest(request.method, params));
       return;
     }
-    if (this.#sessions.get(session.threadId) !== session || !isActiveSessionStatus(session.status)) {
+    if (
+      this.#sessions.get(session.threadId) !== session
+      || !isActiveSessionStatus(session.status)
+      || session.activeTurnId !== nativeTurnId
+    ) {
       this.#logger.warn('Denied a Codex approval request from an inactive source', {
         threadId,
         nativeTurnId,
@@ -1835,6 +2059,7 @@ export class CodexAppServerRuntime {
     this.#sessions.delete(session.threadId);
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
+    session.interruptAcknowledgement = null;
     cancelPendingApprovals(
       this.#logger,
       this.#pendingApprovals,
@@ -1861,6 +2086,7 @@ export class CodexAppServerRuntime {
     } else if (!opts.aborted || opts.emitFinishedOnAbort) {
       this.#publishFinishedOnce(session, operation);
     }
+    for (const resolve of [...session.terminalWaiters]) resolve();
 
   }
 
@@ -1917,6 +2143,8 @@ export class CodexAppServerRuntime {
       this.#latestSourceByChat.delete(session.chatId);
     }
     session.turnRoutes.clear();
+    session.interruptAcknowledgement = null;
+    for (const resolve of [...session.terminalWaiters]) resolve();
     session.nextTurnOperation = null;
     session.goalOperation = null;
     const settingsWaiter = session.pendingThreadSettings;
@@ -1928,13 +2156,43 @@ export class CodexAppServerRuntime {
     cancelPendingApprovals(this.#logger, this.#pendingApprovals, client, 'cancelled');
   }
 
-  #supersedeSource(session: RunningCodexSession): void {
-    if (session.superseded) return;
+  #supersedeSource(session: RunningCodexSession): Promise<void> {
+    if (session.superseded) return this.#shutdownClient(session.client);
     session.superseded = true;
     cancelTurnStartWaiters(session, 'Codex session was superseded');
     this.#retireSource(session.client);
     void session.cleanupAttachments?.();
-    void this.#shutdownClient(session.client);
+    return this.#shutdownClient(session.client);
   }
 
+}
+
+class CodexSessionActivationFailure extends Error {
+  constructor(
+    readonly originalError: unknown,
+    readonly shutdown: Promise<void>,
+  ) {
+    super('Codex session activation failed');
+  }
+}
+
+function codexSourceRuntimeIdentity(
+  request: Pick<CodexStartRequest, 'envOverrides' | 'codexConfig'>,
+): string {
+  const source = stableStringify({
+    env: buildCodexEnv(request.envOverrides, request.codexConfig) ?? null,
+    config: request.codexConfig?.config ?? null,
+  });
+  return createHash('sha256').update(source).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
 }

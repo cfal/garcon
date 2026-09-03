@@ -111,7 +111,7 @@ export function threadSettingsMatch(
   target: CodexThreadSettingsTarget,
 ): boolean {
   return settings.model === target.model
-    && settings.effort === target.effort
+    && (target.effort === null || settings.effort === target.effort)
     && settings.approvalPolicy === target.approvalPolicy
     && settings.approvalsReviewer === target.approvalsReviewer
     && sandboxPolicyMatches(settings.sandboxPolicy, target.sandboxPolicy);

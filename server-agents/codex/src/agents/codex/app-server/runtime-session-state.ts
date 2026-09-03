@@ -52,6 +52,7 @@ export interface RunningCodexSession {
   nativePath: string | null;
   codexHome: string | null;
   client: CodexAppServerClient;
+  runtimeIdentity: string;
   activeTurnId: string | null;
   status: RunningStatus;
   permissionMode: PermissionMode;
@@ -67,6 +68,8 @@ export interface RunningCodexSession {
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
   pendingFinishOperation: CodexOperation | null;
+  interruptAcknowledgement: Promise<boolean> | null;
+  terminalWaiters: Set<() => void>;
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
