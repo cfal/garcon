@@ -3,8 +3,6 @@ import crypto from 'node:crypto';
 import {
   chmodSync,
   lstatSync,
-  mkdirSync,
-  realpathSync,
   readdirSync,
   rmSync,
   statSync,
@@ -15,7 +13,6 @@ import {
   parseChatRowTitle,
 } from '../../common/chat-row-contracts.js';
 import { createLogger } from '../lib/log.js';
-import { hasNodeErrorCode } from '../lib/errors.js';
 import {
   decodeLedgerRow,
   cliRowFingerprint,
@@ -41,6 +38,7 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './directories.js';
 import {
   isLedgerCliRowNoticeRow,
   isPresentationOnlyProviderRow,
@@ -124,8 +122,7 @@ export class TranscriptLedgerStore {
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
-    mkdirSync(rootDirectory, { recursive: true, mode: 0o700 });
-    this.#rootDirectory = realpathSync(rootDirectory);
+    this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
     this.#cacheSize = options.connectionCacheSize ?? DEFAULT_CONNECTION_CACHE_SIZE;
     if (!Number.isSafeInteger(this.#cacheSize) || this.#cacheSize < 1) {
       throw new TypeError('Ledger connection cache size must be a positive integer');
@@ -825,7 +822,7 @@ function openConnection(
   chatId: string,
   synchronous: 'NORMAL' | 'FULL',
 ): ConnectionEntry {
-  const directory = ensureChatDirectory(rootDirectory, chatId);
+  const directory = ensureLedgerChatDirectory(rootDirectory, chatId);
   const databasePath = path.join(directory, 'ledger.sqlite');
   const existed = (statSizeIfExists(databasePath) ?? 0) > 0;
   const db = new Database(databasePath);
@@ -846,25 +843,6 @@ function openConnection(
     db.close();
     throw error;
   }
-}
-
-function ensureChatDirectory(rootDirectory: string, chatId: string): string {
-  const directory = path.join(rootDirectory, chatId);
-  try {
-    mkdirSync(directory, { mode: 0o700 });
-  } catch (error) {
-    if (!hasNodeErrorCode(error, 'EEXIST')) throw error;
-  }
-  const stats = lstatSync(directory);
-  if (!stats.isDirectory() || stats.isSymbolicLink()) {
-    throw new Error(`Transcript ledger path is not a directory: ${directory}`);
-  }
-  const canonicalDirectory = realpathSync(directory);
-  if (path.dirname(canonicalDirectory) !== rootDirectory) {
-    throw new Error(`Transcript ledger path escapes its root: ${directory}`);
-  }
-  chmodSync(canonicalDirectory, 0o700);
-  return canonicalDirectory;
 }
 
 function configureConnection(db: Database, synchronous: 'NORMAL' | 'FULL'): void {
