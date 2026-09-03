@@ -154,7 +154,7 @@ export async function readVersionedFile(
   const openFile =
     options.openFile ??
     (async (targetPath: string): Promise<VersionedReadHandle> =>
-      fs.open(targetPath, 'r'));
+      fs.open(targetPath, constants.O_RDONLY | constants.O_NONBLOCK));
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const handle = await openFile(filePath);

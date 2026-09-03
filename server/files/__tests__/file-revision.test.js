@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { promises as fs } from 'fs';
+import { constants, promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import {
   FILE_CHANGED_DURING_READ,
+  FILE_PATH_MUST_IDENTIFY_FILE,
   FILE_TOO_LARGE,
   getFileLockKey,
   getFileRevision,
@@ -87,6 +88,39 @@ describe('file revision', () => {
 
     expect(result.bytes.toString('utf8')).toBe('first\n');
     expect(result.revision).toBe(await getFileRevision(filePath));
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects named pipes without blocking', async () => {
+    const fifoPath = path.join(directory, 'blocked.pipe');
+    const mkfifo = Bun.spawn(['mkfifo', fifoPath], { stdout: 'ignore', stderr: 'ignore' });
+    expect(await mkfifo.exited).toBe(0);
+
+    const read = readVersionedFile(fifoPath);
+    let timeout;
+    const completedPromptly = await Promise.race([
+      read.then(
+        () => true,
+        () => true,
+      ),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve(false), 250);
+      }),
+    ]);
+    clearTimeout(timeout);
+    if (!completedPromptly) {
+      const writer = await fs.open(
+        fifoPath,
+        constants.O_WRONLY | constants.O_NONBLOCK,
+      ).catch(() => null);
+      await writer?.close();
+    }
+
+    await expect(read).rejects.toMatchObject({
+      code: FILE_PATH_MUST_IDENTIFY_FILE,
+      status: 400,
+      retryable: false,
+    });
+    expect(completedPromptly).toBe(true);
   });
 
   it('rejects oversized files before reading their contents', async () => {
