@@ -89,6 +89,9 @@ export interface RunningCodexSession {
   pendingThreadSettings: ThreadSettingsWaiter | null;
   threadSettingsUpdateChain: Promise<void>;
   configurationFenced: boolean;
+  // Wall-clock stamp taken when the session finishes while its source stays
+  // retained; drives the idle reclamation sweep for retained writers.
+  idleSince: number | null;
 }
 
 export interface CodexAppServerRuntimeOptions {
@@ -98,6 +101,7 @@ export interface CodexAppServerRuntimeOptions {
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
   nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;
+  retainedSourceIdlePurge?: { intervalMs?: number; maxIdleMs?: number };
   logger?: AgentLogger;
   skillDiscovery?: CodexSkillDiscovery;
   cleanupOwnedGoalAttachments?: typeof cleanupOwnedGoalAttachments;

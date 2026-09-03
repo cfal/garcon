@@ -14,6 +14,7 @@ import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexR
 import { waitForMaterializedThread } from '../durability.ts';
 import { cleanupOwnedGoalAttachments, materializeGoalDraft } from '../goal-files.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
+import { isRetainedSourceInUse } from '../runtime-support.ts';
 import { loadCodexChatMessages } from '../../history-loader.ts';
 import { ChatExecutionCoordinator } from '../../../../../../../server/chat-execution/chat-execution-coordinator.ts';
 import { InMemoryChatExecutionControlRepository } from '../../../../../../../server/chat-execution/chat-execution-control-repository.ts';
@@ -141,6 +142,29 @@ async function waitForMissingPath(targetPath) {
     if (Date.now() >= deadline) throw new Error(`Path was not removed: ${targetPath}`);
     await Bun.sleep(5);
   }
+}
+
+async function waitForCondition(condition) {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error('Condition was not met before the deadline');
+    await Bun.sleep(5);
+  }
+}
+
+function usageSession(overrides = {}) {
+  return {
+    threadId: 'thread-1',
+    status: 'completed',
+    interruptAcknowledgement: null,
+    pendingThreadSettings: null,
+    turnStartWaiters: new Set(),
+    activeDeliveryReservations: 0,
+    managesGoalLifecycle: false,
+    activeTurnId: null,
+    goal: null,
+    ...overrides,
+  };
 }
 
 function emitCapacityFailure(client, turnId) {
@@ -7762,6 +7786,118 @@ describe('CodexAppServerRuntime', () => {
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
     expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires an idle retained source and resumes the thread in a fresh process', async () => {
+    const nativePath = path.join(tmpDir, 'idle-retired-source.jsonl');
+    const firstClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const replacementClient = new FakeClient({
+      resumeThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => ({ turn: makeTurn({ id: 'turn-2', status: 'inProgress' }) }),
+    });
+    const clients = [firstClient, replacementClient];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({
+      createClient,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    firstClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    provider.startPurgeTimer();
+    await waitForCondition(() => firstClient.shutdown.mock.calls.length > 0);
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: started.agentSessionId,
+      nativePath,
+      operation: second.operation,
+    }));
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(replacementClient.resumeThread).toHaveBeenCalledTimes(1);
+    expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an active session writer out of the idle retained-source sweep', async () => {
+    const nativePath = path.join(tmpDir, 'active-source-sweep.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({ operation: first.operation }));
+
+    provider.startPurgeTimer();
+    await Bun.sleep(30);
+
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+  });
+
+  it('marks a quiescent terminal retained source as reclaimable', () => {
+    expect(isRetainedSourceInUse(usageSession(), new Map())).toBe(false);
+  });
+
+  it('keeps a retained source in use while it is the active writer for its thread', () => {
+    const session = usageSession();
+    expect(isRetainedSourceInUse(session, new Map([['thread-1', session]]))).toBe(true);
+  });
+
+  it.each([
+    ['its status is still active', { status: 'interrupting' }],
+    ['an interrupt acknowledgement is pending', { interruptAcknowledgement: Promise.resolve(true) }],
+    ['a settings confirmation is pending', {
+      pendingThreadSettings: { target: {}, timeout: null, resolve() {}, reject() {} },
+    }],
+    ['a turn start waiter is registered', (session) => {
+      session.turnStartWaiters.add({ resolve() {}, reject() {} });
+    }],
+    ['a delivery is reserved', { activeDeliveryReservations: 1 }],
+    ['a goal continuation is active', { managesGoalLifecycle: true, activeTurnId: 'turn-goal' }],
+  ])('keeps a retained source in use while %s', (_label, mutate) => {
+    const session = usageSession();
+    if (typeof mutate === 'function') mutate(session);
+    else Object.assign(session, mutate);
+    expect(isRetainedSourceInUse(session, new Map())).toBe(true);
   });
 
   it('retires the previous same-chat source only after replacement activation succeeds', async () => {

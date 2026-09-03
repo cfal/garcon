@@ -122,6 +122,7 @@ import {
   isActiveSessionStatus,
   isActiveTurnConflictError,
   isCapacityError,
+  isRetainedSourceInUse,
   isTerminalSessionStatus,
   isUtilityOverload,
   MAX_CAPACITY_RETRIES,
@@ -170,6 +171,10 @@ export class CodexAppServerRuntime {
       void this.#shutdownClient(session.client);
     },
   }, { maxIdleMs: 0 });
+  // Terminal sources stay retained for late routing and writer reuse, so they
+  // need their own sweep; without it every chat ever served pins one idle
+  // app-server process for the lifetime of the server.
+  #retainedSourcePurger: IdleSessionPurger<RunningCodexSession>;
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
@@ -179,6 +184,16 @@ export class CodexAppServerRuntime {
       .slice(0, MAX_CAPACITY_RETRIES);
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
     this.#nativePathDiscoveryRefresh = new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
+    this.#retainedSourcePurger = new IdleSessionPurger<RunningCodexSession>({
+      sessions: () => [...this.#sources.values()]
+        .map((session): [string, RunningCodexSession] => [session.threadId, session]),
+      isRunning: (session) => isRetainedSourceInUse(session, this.#sessions),
+      // An unstamped source never finished and must never be idle-reclaimed.
+      lastActivityAt: (session) => session.idleSince ?? Number.MAX_SAFE_INTEGER,
+      purge: (_client, session) => {
+        void this.#supersedeSource(session);
+      },
+    }, options.retainedSourceIdlePurge);
     this.#logger = options.logger ?? NOOP_LOGGER;
     this.#cleanupOwnedGoalAttachments = options.cleanupOwnedGoalAttachments ?? cleanupOwnedGoalAttachments;
     this.#history = new CodexHistoryService({
@@ -1017,10 +1032,12 @@ export class CodexAppServerRuntime {
 
   startPurgeTimer(): void {
     this.#idlePurger.start();
+    this.#retainedSourcePurger.start();
   }
 
   async shutdown(): Promise<void> {
     this.#idlePurger.stop();
+    this.#retainedSourcePurger.stop();
     const sessions = [...new Set(this.#sources.values())];
     for (const session of sessions) {
       cancelTurnStartWaiters(session, 'Codex runtime shut down');
@@ -1185,6 +1202,7 @@ export class CodexAppServerRuntime {
       status: 'running',
       permissionMode: args.confirmedThreadSettings.permissionMode,
       startedAt: new Date().toISOString(),
+      idleSince: null,
       turnStartWaiters: new Set(),
       goal: null,
       managesGoalLifecycle: false,
@@ -1348,6 +1366,7 @@ export class CodexAppServerRuntime {
     session.activeTurnId = null;
     session.status = 'running';
     session.startedAt = new Date().toISOString();
+    session.idleSince = null;
     session.cleanupAttachments = undefined;
     void previousAttachmentCleanup?.();
     session.goal = null;
@@ -2056,6 +2075,7 @@ export class CodexAppServerRuntime {
     }
 
     this.#sessions.delete(session.threadId);
+    session.idleSince = Date.now();
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
     session.interruptAcknowledgement = null;
