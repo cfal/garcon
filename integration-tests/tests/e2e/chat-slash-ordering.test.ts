@@ -60,7 +60,7 @@ describe('Lightpanda chat slash ordering', () => {
       await app.waitForLocalNotice(
         'Moved this chat to the top of its section in Manual order.',
       );
-      expect(await fixture.page.$('[data-slot="sidebar-sort-indicator"]')).not.toBeNull();
+      expect(await app.recentActivitySortActive()).toBe(true);
       manualOrder = (await fixture.integration.client.listChats()).sessions
         .filter((chat) => chat.orderGroup === 'normal')
         .map((chat) => chat.id);
