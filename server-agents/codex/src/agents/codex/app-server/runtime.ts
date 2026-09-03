@@ -2079,6 +2079,12 @@ export class CodexAppServerRuntime {
     this.#threadListCaches.clear();
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
     session.interruptAcknowledgement = null;
+    // A finished session no longer drives the goal loop; leaving this state
+    // set would pin its retained source out of the idle sweep forever.
+    session.activeTurnId = null;
+    session.goal = null;
+    session.managesGoalLifecycle = false;
+    session.completedGoalTurn = false;
     cancelPendingApprovals(
       this.#logger,
       this.#pendingApprovals,

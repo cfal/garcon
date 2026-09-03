@@ -7865,6 +7865,49 @@ describe('CodexAppServerRuntime', () => {
     expect(replacementClient.startTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('reclaims a retained goal source whose loop ended while its goal stayed active', async () => {
+    const nativePath = path.join(tmpDir, 'idle-goal-source.jsonl');
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt-5.4-codex',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn-1', status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        }));
+        return { goal: makeGoal(threadId, params.objective ?? 'Long-running work', 'active') };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      retainedSourceIdlePurge: { intervalMs: 5, maxIdleMs: 0 },
+    });
+    const first = collectOperation('chat-1', 'run-a');
+    await provider.startSession(makeRequest({
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      operation: first.operation,
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-1', status: 'interrupted' }) },
+    });
+
+    provider.startPurgeTimer();
+    await waitForCondition(() => fake.shutdown.mock.calls.length > 0);
+  });
+
   it('keeps an active session writer out of the idle retained-source sweep', async () => {
     const nativePath = path.join(tmpDir, 'active-source-sweep.jsonl');
     const fake = new FakeClient({
