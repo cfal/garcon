@@ -694,6 +694,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         registry.sessions[id] = previous;
         this.#advanceChatMutationRevision(id);
         this.#rebuildAgentSessionIdIndex();
+        this.#scheduleRegistrySave();
       };
       return this.#flushRegistrySave(restoreIfCurrent).then(
         () => {
@@ -749,6 +750,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       existing.projectPath = previousProjectPath;
       existing.nativeSession = previousNativeSession;
       this.#advanceChatMutationRevision(id);
+      this.#scheduleRegistrySave();
     };
     try {
       await this.#flushRegistrySave(restoreIfCurrent);
@@ -803,8 +805,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       target,
       async () => {
         try {
-          const snapshot = structuredClone(registry);
-          await writeJsonFileAtomic(target, snapshot, { mode: 0o600 });
+          await writeJsonFileAtomic(target, registry, { mode: 0o600 });
         } catch (error) {
           onWriteFailure?.();
           throw error;

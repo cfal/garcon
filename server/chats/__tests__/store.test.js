@@ -319,6 +319,7 @@ describe('ChatRegistry', () => {
     expect(tagsUpdated).not.toHaveBeenCalled();
 
     registry.saveRegistry = saveRegistry;
+    await registry.flush();
     registry = new ChatRegistry(tempDir);
     await registry.init();
     expect(registry.getChat(CHAT_ID)).toMatchObject({
@@ -406,6 +407,64 @@ describe('ChatRegistry', () => {
     await registry.init();
     expect(registry.getChat(CHAT_ID)?.model).toBe('model-a');
     expect(registry.getChat(SECOND_CHAT_ID)?.model).toBe('model-b');
+  });
+
+  it('re-persists a rollback after another queued save captured the patch', async () => {
+    registry.addChat(newChat());
+    registry.addChat(newChat({ id: SECOND_CHAT_ID }));
+    await registry.flush();
+    const firstRenameEntered = deferred();
+    const releaseFirstRename = deferred();
+    const rollbackPersisted = deferred();
+    const originalRename = fs.rename.bind(fs);
+    const originalSetTimeout = globalThis.setTimeout;
+    let targetRenameCount = 0;
+    const timeout = spyOn(globalThis, 'setTimeout').mockImplementation(
+      (callback, _delay, ...args) => originalSetTimeout(callback, 0, ...args),
+    );
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(tempDir, 'chats.json')) {
+        targetRenameCount += 1;
+        if (targetRenameCount === 1) {
+          firstRenameEntered.resolve();
+          await releaseFirstRename.promise;
+        } else if (targetRenameCount === 3) {
+          throw new Error('disk full');
+        } else if (targetRenameCount === 4) {
+          rollbackPersisted.resolve();
+        }
+      }
+      return originalRename(source, target);
+    });
+
+    try {
+      const blocker = registry.flush();
+      await firstRenameEntered.promise;
+      const firstUpdate = registry.updateChat(
+        CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      const failedUpdate = registry.updateChat(
+        SECOND_CHAT_ID,
+        { model: 'model-b' },
+        { flush: true },
+      );
+      releaseFirstRename.resolve();
+      await blocker;
+      await firstUpdate;
+      await expect(failedUpdate).rejects.toThrow('disk full');
+      await rollbackPersisted.promise;
+    } finally {
+      releaseFirstRename.resolve();
+      timeout.mockRestore();
+      rename.mockRestore();
+    }
+
+    expect(registry.getChat(SECOND_CHAT_ID)?.model).toBe('model-a');
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.getChat(SECOND_CHAT_ID)?.model).toBe('model-a');
   });
 
   it('persists dedicated project-path updates and emits only canonical metadata', async () => {
