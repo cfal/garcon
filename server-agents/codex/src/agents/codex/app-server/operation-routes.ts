@@ -1,5 +1,6 @@
 import {
   PermissionCancelledMessage,
+  PermissionExpiredMessage,
   PermissionRequestMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
@@ -75,6 +76,22 @@ export function publishPermissionCancelled(
       kind: 'cancelled',
       permissionOccurrenceId: message.permissionOccurrenceId,
       reason: message.reason ?? null,
+    },
+  }));
+}
+
+export function publishPermissionExpired(
+  logger: AgentLogger,
+  chatId: string,
+  message: PermissionExpiredMessage,
+  operation: CodexOperation | undefined,
+): void {
+  publish(logger, chatId, operation, (runId) => ({
+    type: 'permission',
+    runId,
+    lifecycle: {
+      kind: 'expired',
+      permissionOccurrenceId: message.permissionOccurrenceId,
     },
   }));
 }

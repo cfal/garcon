@@ -125,9 +125,28 @@ export class CodexExecution implements AgentRuntimeExecution {
   async applySessionConfiguration(
     agentSessionId: string,
     configuration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[1],
+    previousConfiguration: Parameters<import('@garcon/server-agent-interface').AgentSessionConfigurationUpdates['apply']>[2],
   ): Promise<void> {
-    this.runtime.updateSessionSettings(agentSessionId, {
+    if (previousConfiguration.thinkingMode !== 'none' && configuration.thinkingMode === 'none') {
+      throw new AgentIntegrationError(
+        'INVALID_SETTINGS',
+        'Codex cannot clear a concrete reasoning effort on an established session',
+        false,
+      );
+    }
+    if (!this.runtime.hasSource(agentSessionId)) return;
+    if (!sameEndpoint(configuration.endpoint, previousConfiguration.endpoint)) {
+      if (!this.runtime.isRunning(agentSessionId)) return;
+      throw new AgentIntegrationError(
+        'INVALID_ENDPOINT',
+        'Cannot change the Codex endpoint while a session is running',
+        false,
+      );
+    }
+    await this.runtime.updateSessionSettings(agentSessionId, {
+      model: configuration.model,
       permissionMode: configuration.permissionMode,
+      thinkingMode: configuration.thinkingMode,
     });
   }
 
@@ -168,6 +187,16 @@ export class CodexExecution implements AgentRuntimeExecution {
       codexConfig: runtime.codexConfig,
     };
   }
+}
+
+function sameEndpoint(
+  left: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
+  right: import('@garcon/common/agent-execution').AgentEndpointSelection | null,
+): boolean {
+  if (!left || !right) return left === right;
+  return left.apiProviderId === right.apiProviderId
+    && left.endpointId === right.endpointId
+    && left.protocol === right.protocol;
 }
 
 function executionFields(

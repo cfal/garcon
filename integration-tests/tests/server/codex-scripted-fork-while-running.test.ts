@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import {
   codexAssistantMessage,
@@ -65,14 +67,25 @@ describe('scripted Codex fork while running', () => {
         expect(messagesOfType(wholeFork.messages, 'assistant-message')
           .some((message) => message.content.includes(reply))).toBe(false);
 
-        // Carryover remains complete even when native-fidelity forking cannot
-        // resolve an in-flight provider position.
+        // A point inside the running turn names an in-progress turn, which the
+        // app-server refuses; without consent that surfaces as the typed refusal
+        // instead of a quiet session-less fork.
         const streamedForkId = fixture.newChatId();
+        await expectForkRefusal(fixture.client.forkChat({
+          sourceChatId,
+          chatId: streamedForkId,
+          upToOrdinal: streamedBash.ordinal,
+          transcriptViewId: streamedBash.transcriptViewId,
+        }), 'TRANSCRIPT_NOT_YET_PERSISTED');
+
+        // Carryover remains complete when the user consents to a handoff fork at
+        // the same in-flight provider position.
         await fixture.client.forkChat({
           sourceChatId,
           chatId: streamedForkId,
           upToOrdinal: streamedBash.ordinal,
           transcriptViewId: streamedBash.transcriptViewId,
+          allowHandoffFork: true,
         });
         const streamedFork = await fixture.client.getMessages(streamedForkId);
         expect(userContents(streamedFork.messages)).toEqual([prompt]);
@@ -104,6 +117,9 @@ describe('scripted Codex fork while running', () => {
         transcriptViewId: streamedBash.transcriptViewId,
       }), 'STALE_TRANSCRIPT_VIEW');
 
+      // The settled turn forks natively at turn granularity: the app-server keeps the
+      // whole turn named by the anchor, so the reply lands in the fork even though the
+      // anchor row itself is the bash call.
       const recoveredForkId = fixture.newChatId();
       await fixture.client.forkChat({
         sourceChatId,
@@ -116,7 +132,11 @@ describe('scripted Codex fork while running', () => {
       expect(messagesOfType(recovered.messages, 'bash-tool-use')
         .some((message) => message.command === command)).toBe(true);
       expect(messagesOfType(recovered.messages, 'assistant-message')
-        .some((message) => message.content.includes(reply))).toBe(false);
+        .some((message) => message.content.includes(reply))).toBe(true);
+      const registry = JSON.parse(
+        await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'),
+      ) as { sessions: Record<string, { agentSessionId?: string | null }> };
+      expect(typeof registry.sessions[recoveredForkId]?.agentSessionId).toBe('string');
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
@@ -144,7 +164,7 @@ async function waitForBash(
 
 async function expectForkRefusal(
   promise: Promise<unknown>,
-  errorCode: 'STALE_TRANSCRIPT_VIEW',
+  errorCode: 'STALE_TRANSCRIPT_VIEW' | 'TRANSCRIPT_NOT_YET_PERSISTED',
 ): Promise<void> {
   let failure: unknown;
   try {

@@ -114,6 +114,7 @@ describe('Codex producer routing', () => {
       const controlName = 'stale-source-approval.request.json';
       await writeFile(join(controlDirectory, controlName), JSON.stringify({
         target: 'started',
+        nativeTurn: 'interrupted',
         requestId: 7_001,
         command: staleCommand,
       }));
@@ -341,6 +342,7 @@ describe('Codex producer routing', () => {
       const acknowledgementControl = 'stale-source-ack.request.json';
       await writeFile(join(controlDirectory, staleControl), JSON.stringify({
         target: 'started',
+        nativeTurn: 'interrupted',
         content: staleContent,
       }));
 
@@ -348,6 +350,7 @@ describe('Codex producer routing', () => {
         await waitForPath(join(controlDirectory, `${staleControl}.sent`));
         await writeFile(join(controlDirectory, acknowledgementControl), JSON.stringify({
           target: 'started',
+          nativeTurn: 'interrupted',
           requestId: 7_002,
           command: acknowledgementCommand,
         }));
@@ -363,7 +366,7 @@ describe('Codex producer routing', () => {
         });
 
         await writeFile(join(controlDirectory, currentControl), JSON.stringify({
-          target: 'resumed',
+          target: 'started',
           content: currentContent,
         }));
         await waitForPath(join(controlDirectory, `${currentControl}.sent`));

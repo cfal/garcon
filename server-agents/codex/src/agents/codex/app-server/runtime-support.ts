@@ -18,7 +18,10 @@ export const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
-export function denialResponseForRequest(method: string): unknown {
+export function denialResponseForRequest(method: string, params?: Record<string, unknown>): unknown {
+  if (method === 'item/commandExecution/requestApproval' && params?.kind === 'writeStdin') {
+    return { decision: 'cancel' };
+  }
   if (method === 'item/commandExecution/requestApproval') return { decision: 'decline' };
   if (method === 'item/fileChange/requestApproval') return { decision: 'decline' };
   if (method === 'item/permissions/requestApproval') return { permissions: {}, scope: 'turn' };
@@ -85,9 +88,41 @@ export function isActiveSessionStatus(status: RunningStatus): boolean {
   return status === 'running' || status === 'interrupting' || status === 'completing';
 }
 
-export function hasActiveGoalContinuation(session: RunningCodexSession): boolean {
+export function hasActiveGoalContinuation(
+  session: Pick<RunningCodexSession, 'managesGoalLifecycle' | 'activeTurnId' | 'goal'>,
+): boolean {
   return session.managesGoalLifecycle
     && Boolean(session.activeTurnId || session.goal?.status === 'active');
+}
+
+export type RetainedSourceUsage = Pick<
+  RunningCodexSession,
+  | 'threadId'
+  | 'status'
+  | 'interruptAcknowledgement'
+  | 'pendingThreadSettings'
+  | 'turnStartWaiters'
+  | 'activeDeliveryReservations'
+  | 'managesGoalLifecycle'
+  | 'activeTurnId'
+  | 'goal'
+>;
+
+// A retained source is safe for the idle sweep to retire only once every
+// admission handshake (interrupt ack, turn start, settings confirmation) and
+// in-flight delivery has settled; otherwise the sweep would yank a writer the
+// runtime is actively re-arming or delivering through.
+export function isRetainedSourceInUse(
+  session: RetainedSourceUsage,
+  sessions: ReadonlyMap<string, RetainedSourceUsage>,
+): boolean {
+  return sessions.get(session.threadId) === session
+    || isActiveSessionStatus(session.status)
+    || hasActiveGoalContinuation(session)
+    || session.interruptAcknowledgement !== null
+    || session.pendingThreadSettings !== null
+    || session.turnStartWaiters.size > 0
+    || session.activeDeliveryReservations > 0;
 }
 
 export function delay(ms: number): Promise<void> {

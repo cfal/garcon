@@ -1,5 +1,5 @@
 import type { ServerWsMessage } from '../../../common/ws-events.js';
-import { access, appendFile } from 'node:fs/promises';
+import { access, appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { assistantContents, messagesOfType } from '../../support/chat-assertions.js';
@@ -142,7 +142,7 @@ describe('scripted Codex interrupt lifecycle', () => {
     });
   });
 
-  test('imports a long native tool tail before exactly one final assistant message', async () => {
+  test('imports a long legacy native tool tail before exactly one final assistant message', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
     const prompt = marker('NATIVE_TAIL_PROMPT');
@@ -170,6 +170,7 @@ describe('scripted Codex interrupt lifecycle', () => {
       });
 
       const nativePath = await waitForNativeSessionPath(fixture.dirs, chatId);
+      await rewriteHistoryModeAsLegacy(nativePath);
       await appendNativeToolTail(nativePath, { finalReply, toolMarker, toolCount });
       await reloadFromNativeHistory(fixture, chatId);
 
@@ -273,6 +274,22 @@ async function appendNativeOnlyTool(nativePath: string, markerText: string): Pro
     }),
     '',
   ].join('\n'));
+}
+
+async function rewriteHistoryModeAsLegacy(nativePath: string): Promise<void> {
+  const lines = (await readFile(nativePath, 'utf8')).split('\n');
+  const metadataIndex = lines.findIndex((line) => line.trim());
+  const metadata = JSON.parse(lines[metadataIndex]!) as {
+    type?: unknown;
+    payload?: Record<string, unknown>;
+  };
+  if (metadata.type !== 'session_meta' || !metadata.payload) {
+    throw new Error('Codex transcript has no session metadata');
+  }
+  const payload: Record<string, unknown> = { ...metadata.payload, history_mode: 'legacy' };
+  delete payload.history_base;
+  lines[metadataIndex] = JSON.stringify({ ...metadata, payload });
+  await writeFile(nativePath, lines.join('\n'));
 }
 
 async function appendNativeToolTail(

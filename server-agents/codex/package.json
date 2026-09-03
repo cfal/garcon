@@ -9,7 +9,7 @@
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
     "@garcon/server-agent-interface": "workspace:*",
-    "@openai/codex": "0.149.0",
+    "@openai/codex": "0.153.0",
     "acorn": "^8.18.0",
     "bun-pty": "^0.4.10",
     "shell-quote": "^1.10.0"

@@ -35,6 +35,15 @@ function messageToolId(message: ChatMessage): string | null {
   return 'toolId' in message ? nonEmptyString(message.toolId) : null;
 }
 
+// Extracts the turn id from a `turn:<turnId>:...` source identity, or null when the entry never
+// carried one. Fork boundaries are turn-granular, so an identity without a turn cannot fork.
+export function codexTurnIdFromEntryId(entryId: unknown): string | null {
+  const value = nonEmptyString(entryId);
+  if (!value) return null;
+  const match = /^turn:([^:]+):/.exec(value);
+  return match ? match[1]! : null;
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

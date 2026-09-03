@@ -96,11 +96,15 @@ function parseFinalAnswer(text: string): {
 export function convertCodexSubagentActivity(
   timestamp: string,
   toolId: string,
-  kind: 'started' | 'interacted' | 'interrupted',
+  kind: 'started' | 'interacted' | 'interrupted' | 'completed',
   agentThreadId: string,
   agentPath: string,
 ): CodexSubagentToolUseMessage {
-  const status: CodexSubagentStatus = kind === 'interrupted' ? 'interrupted' : 'running';
+  const status: CodexSubagentStatus = kind === 'interrupted'
+    ? 'interrupted'
+    : kind === 'completed'
+      ? 'completed'
+      : 'running';
   return new CodexSubagentToolUseMessage(timestamp, toolId, 'agent_status', {
     target: agentPath,
     threadId: agentThreadId,
