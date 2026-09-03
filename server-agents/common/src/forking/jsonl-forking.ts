@@ -216,7 +216,7 @@ function missingNativeSource(): AgentIntegrationError {
   );
 }
 
-function missingNativePoint(): AgentIntegrationError {
+export function missingNativePoint(): AgentIntegrationError {
   return new AgentIntegrationError(
     'TRANSCRIPT_UNAVAILABLE',
     'The selected ledger row has no provider-native fork position',

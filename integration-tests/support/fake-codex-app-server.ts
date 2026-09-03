@@ -463,7 +463,23 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
       ...metadata,
       payload: { ...metadata.payload, id: targetThreadId },
     });
-    writeFileSync(targetPath, lines.join('\n'));
+    const lastTurnId = typeof params?.lastTurnId === 'string' ? params.lastTurnId : null;
+    let targetContent: string | null;
+    if (lastTurnId) {
+      const cutoff = forkCutoffThroughTurn(lines, lastTurnId);
+      targetContent = cutoff === null ? null : `${lines.slice(0, cutoff).join('\n')}\n`;
+    } else {
+      targetContent = lines.join('\n');
+    }
+    if (targetContent === null) {
+      // Mirrors the app-server's INVALID_REQUEST for a turn native history does not hold.
+      process.stdout.write(`${JSON.stringify({
+        id,
+        error: { code: -32600, message: `turn not found: ${lastTurnId}` },
+      })}\n`);
+      return;
+    }
+    writeFileSync(targetPath, targetContent);
     write(id, {
       thread: { id: targetThreadId, path: targetPath },
       model: typeof params?.model === 'string' ? params.model : 'gpt',
@@ -480,6 +496,33 @@ function forkJsonlThread(id: number, params: Record<string, unknown> | undefined
       },
     })}\n`);
   }
+}
+
+// Exclusive line count that keeps every entry through the named turn, using the same user-message
+// turn boundaries as paginatedHistoryForThread.
+function forkCutoffThroughTurn(lines: string[], lastTurnId: string): number | null {
+  let currentTurnId: string | null = null;
+  let cutoff: number | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.trim()) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const payload = recordValue(entry.payload);
+    if (entry.type === 'response_item' && payload?.type === 'message' && payload.role === 'user') {
+      const nextTurnId = responseItemTurnId(payload) ?? `turn-${index}`;
+      if (currentTurnId === lastTurnId && nextTurnId !== lastTurnId) return cutoff;
+      currentTurnId = nextTurnId;
+    } else if (!currentTurnId && entry.type !== 'session_meta') {
+      currentTurnId = `turn-${index}`;
+    }
+    if (currentTurnId === lastTurnId) cutoff = index + 1;
+  }
+  return currentTurnId === lastTurnId ? cutoff : null;
 }
 
 function write(id: number, result: unknown): void {

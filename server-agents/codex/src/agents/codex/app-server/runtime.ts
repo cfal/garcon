@@ -542,6 +542,7 @@ export class CodexAppServerRuntime {
         model: sourceSession.model,
         projectPath: sourceSession.projectPath,
         codexConfig: args.codexConfig,
+        lastTurnId: args.lastTurnId,
       }));
       await this.#unsubscribeBestEffort(client, forked.thread.id);
       const nativePath = await waitForMaterializedThread(forked.thread, {

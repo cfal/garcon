@@ -195,7 +195,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       createTargetPath: createCodexForkTargetPath,
       createRewriteEntry: createCodexForkTranscriptRewriter,
       allowUnmaterializedWholeSession: true,
-      forkWholeSession: (request) => forkWholeCodexSession(
+      forkWholeSession: (request) => forkCodexNativeSession(
         request,
         host,
         runtime,
@@ -229,12 +229,20 @@ export default class CodexAgentIntegration implements AgentIntegration {
           signal: request.signal,
         });
       },
-      forkPaginatedWhole: (request) => forkWholeCodexSession(
+      forkPaginatedWhole: (request) => forkCodexNativeSession(
         request,
         host,
         runtime,
         nativeSessions,
         config,
+      ),
+      forkPaginatedPoint: (request, lastTurnId) => forkCodexNativeSession(
+        request,
+        host,
+        runtime,
+        nativeSessions,
+        config,
+        lastTurnId,
       ),
     });
     this.endpoints = {
@@ -293,12 +301,13 @@ export default class CodexAgentIntegration implements AgentIntegration {
   }
 }
 
-async function forkWholeCodexSession(
+async function forkCodexNativeSession(
   request: AgentNativeForkRequest,
   host: AgentHost,
   runtime: CodexAppServerRuntime,
   nativeSessions: ReturnType<typeof createPathNativeSessionCodec>,
   config: CodexConfig,
+  lastTurnId?: string,
 ) {
   const source = nativeSessions.decode(request.source.nativeSession);
   const endpoint = await resolveAgentEndpoint(host, request.endpoint, request.admission.signal);
@@ -322,6 +331,7 @@ async function forkWholeCodexSession(
       },
       envOverrides: buildCodexHostEnvironment(config),
       codexConfig: endpointRuntime?.codexConfig,
+      lastTurnId: lastTurnId ?? null,
     });
   } catch (error) {
     // A never-persisted thread cannot fork natively; the JSONL path resolves it

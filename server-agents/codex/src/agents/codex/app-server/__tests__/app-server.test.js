@@ -1092,6 +1092,25 @@ describe('Codex app-server request builders', () => {
     });
   });
 
+  it('includes the fork turn boundary only when a point fork names one', () => {
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+    })).not.toHaveProperty('lastTurnId');
+
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+      lastTurnId: 'turn-1',
+    })).toMatchObject({ lastTurnId: 'turn-1' });
+
+    expect(buildThreadForkParams({
+      agentSessionId: 'thread-1',
+      projectPath: '/repo',
+      lastTurnId: null,
+    })).not.toHaveProperty('lastTurnId');
+  });
+
   it('builds turn/start input and thinking effort', () => {
     const params = buildTurnStartParams({
       threadId: 'thread-1',
@@ -6839,6 +6858,37 @@ describe('CodexAppServerRuntime', () => {
     }));
     expect(operationClient.unsubscribeThread).toHaveBeenCalledWith('forked-thread');
     expect(operationClient.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the fork turn boundary to thread/fork for a point fork', async () => {
+    const nativePath = path.join(tmpDir, 'point-forked-thread.jsonl');
+    const forkParams = [];
+    const operationClient = new FakeClient({
+      forkThread: async (params) => {
+        forkParams.push(params);
+        await fs.writeFile(nativePath, '{}\n');
+        return { thread: makeThread({ id: 'point-forked-thread', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+      },
+      unsubscribeThread: async () => ({ status: 'unsubscribed' }),
+    });
+    const provider = createRuntime({
+      createClient: () => operationClient,
+      materializationTimeoutMs: 20,
+    });
+
+    const forked = await provider.forkSession({
+      sourceSession: {
+        provider: 'codex',
+        agentSessionId: 'thread-1',
+        nativePath: null,
+        model: 'gpt-5.4-codex',
+        projectPath: '/repo',
+      },
+      lastTurnId: 'turn-1',
+    });
+
+    expect(forked).toEqual({ agentSessionId: 'point-forked-thread', nativePath });
+    expect(forkParams[0]).toMatchObject({ threadId: 'thread-1', lastTurnId: 'turn-1' });
   });
 
   it('clears thread/list native path caches when a session finishes', async () => {
