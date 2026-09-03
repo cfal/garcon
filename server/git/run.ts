@@ -1,6 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
+import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -159,9 +159,8 @@ export async function runGit(
         'stdout',
         options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES,
       )),
-      captureOutput(readGitOutput(
+      captureOutput(readTextStreamPrefix(
         proc.stderr,
-        'stderr',
         options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
       )),
       proc.exited,
@@ -260,9 +259,8 @@ export async function runGitWithStdin(
         'stdout',
         options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES,
       )),
-      captureOutput(readGitOutput(
+      captureOutput(readTextStreamPrefix(
         proc.stderr,
-        'stderr',
         options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
       )),
       proc.exited,

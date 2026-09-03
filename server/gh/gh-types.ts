@@ -105,6 +105,7 @@ export interface GhCommandOptions {
   signal?: AbortSignal;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface GhCommandResult {

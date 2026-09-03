@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
+import { readTextStreamPrefix, readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
 import type { GhCommandOptions, GhCommandResult, GhProcessError } from './gh-types.js';
 
 const GH_DEFAULT_TIMEOUT_MS = 30_000;
@@ -70,6 +70,7 @@ export async function runGh(
       stdout: 'pipe',
       stderr: 'pipe',
       signal,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
     });
   } catch (error) {
     // Bun throws synchronously when the executable is missing.
@@ -100,9 +101,8 @@ export async function runGh(
       'stdout',
       options.maxStdoutBytes ?? GH_DEFAULT_MAX_STDOUT_BYTES,
     )),
-    captureOutput(readGhOutput(
+    captureOutput(readTextStreamPrefix(
       proc.stderr,
-      'stderr',
       options.maxStderrBytes ?? GH_DEFAULT_MAX_STDERR_BYTES,
     )),
     proc.exited,

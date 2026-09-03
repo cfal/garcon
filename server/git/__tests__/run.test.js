@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   assertGitRepository,
   GitOutputLimitError,
@@ -66,23 +69,50 @@ describe('runGit', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
-  it('stops oversized stderr without retrying the process', async () => {
+  it('drains and truncates oversized stderr without failing a successful command', async () => {
     const kill = mock(() => undefined);
     spawnMock.mockImplementation(() => ({
       stdout: textStream('output'),
       stderr: textStream('diagnostic over limit'),
-      exited: Promise.resolve(1),
+      exited: Promise.resolve(0),
       kill,
     }));
 
     await expect(
       runGit('/repo', ['status'], { maxStderrBytes: 5 }),
-    ).rejects.toMatchObject({
-      stream: 'stderr',
-      maxBytes: 5,
+    ).resolves.toEqual({
+      stdout: 'output',
+      stderr: 'diagn',
     });
-    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('enforces limits while draining real subprocess pipes', async () => {
+    Bun.spawn = originalSpawn;
+    const commandDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-fake-git-'));
+    const fakeGitPath = path.join(commandDirectory, 'git');
+    await fs.writeFile(fakeGitPath, `#!/usr/bin/env bun
+const output = 'x'.repeat(4 * 1024 * 1024);
+const stream = process.argv.includes('stderr-overflow') ? process.stderr : process.stdout;
+stream.write(output);
+`, { mode: 0o755 });
+    const commandPath = `${commandDirectory}${path.delimiter}${process.env.PATH ?? ''}`;
+
+    try {
+      await expect(runGit(process.cwd(), ['stdout-overflow'], {
+        env: { PATH: commandPath },
+        maxStdoutBytes: 1024,
+        timeoutMs: 5_000,
+      })).rejects.toMatchObject({ stream: 'stdout', maxBytes: 1024 });
+      await expect(runGit(process.cwd(), ['stderr-overflow'], {
+        env: { PATH: commandPath },
+        maxStderrBytes: 1024,
+        timeoutMs: 5_000,
+      })).resolves.toEqual({ stdout: '', stderr: 'x'.repeat(1024) });
+    } finally {
+      await fs.rm(commandDirectory, { recursive: true, force: true });
+    }
   });
 
   it('captures stdout and enforces limits for stdin commands', async () => {
