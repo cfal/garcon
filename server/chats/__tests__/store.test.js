@@ -472,7 +472,9 @@ describe('ChatRegistry', () => {
           firstModel === 'model-b' &&
           secondModel === 'model-a'
         ) {
+          await originalRename(source, target);
           rollbackPersisted.resolve();
+          return;
         } else {
           throw new Error('disk full');
         }
