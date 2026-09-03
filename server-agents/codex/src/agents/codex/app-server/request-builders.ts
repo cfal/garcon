@@ -41,6 +41,15 @@ export interface CodexThreadSettingsTarget {
   readonly permissionMode: PermissionMode;
 }
 
+export interface CodexConfirmedThreadSettings {
+  readonly model: string;
+  readonly effort: string | null;
+  readonly approvalPolicy: unknown;
+  readonly approvalsReviewer: string;
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly permissionMode: PermissionMode;
+}
+
 const CODEX_SANDBOX: Record<string, CodexSandboxSettings> = {
   default: { sandbox: 'workspace-write', approvalPolicy: 'never' },
   acceptEdits: { sandbox: 'workspace-write', approvalPolicy: 'never' },
@@ -107,7 +116,7 @@ export function buildThreadSettingsUpdateParams(
 }
 
 export function threadSettingsMatch(
-  settings: CodexThreadSettingsTarget,
+  settings: CodexConfirmedThreadSettings,
   target: CodexThreadSettingsTarget,
 ): boolean {
   return settings.model === target.model
@@ -120,13 +129,13 @@ export function threadSettingsMatch(
 export function threadSettingsTargetFromSnapshot(
   settings: CodexThreadSettings,
   currentPermissionMode: PermissionMode,
-): CodexThreadSettingsTarget {
+): CodexConfirmedThreadSettings {
   const permissionMode = permissionModeFromSettings(settings, currentPermissionMode);
   return {
     model: settings.model,
     effort: settings.effort,
-    approvalPolicy: settings.approvalPolicy === 'on-request' ? 'on-request' : 'never',
-    approvalsReviewer: 'user',
+    approvalPolicy: settings.approvalPolicy,
+    approvalsReviewer: settings.approvalsReviewer,
     sandboxPolicy: normalizeSandboxPolicy(settings.sandboxPolicy),
     permissionMode,
   };

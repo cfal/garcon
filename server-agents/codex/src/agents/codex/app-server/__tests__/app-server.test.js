@@ -130,6 +130,19 @@ function makeTurn(overrides = {}) {
   };
 }
 
+async function waitForMissingPath(targetPath) {
+  const deadline = Date.now() + 1_000;
+  for (;;) {
+    try {
+      await fs.access(targetPath);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) throw new Error(`Path was not removed: ${targetPath}`);
+    await Bun.sleep(5);
+  }
+}
+
 function emitCapacityFailure(client, turnId) {
   const error = {
     message: 'Selected model is at capacity. Please try a different model.',
@@ -7596,6 +7609,7 @@ describe('CodexAppServerRuntime', () => {
   it('waits for interrupt acknowledgement before reusing the writer without awaiting its terminal event', async () => {
     const nativePath = path.join(tmpDir, 'interrupted-writer.jsonl');
     let turnNumber = 0;
+    let firstAttachmentPath;
     const interruptAcknowledgement = createDeferred();
     const fake = new FakeClient({
       startThread: async () => ({
@@ -7605,7 +7619,10 @@ describe('CodexAppServerRuntime', () => {
         serviceTier: null,
         cwd: '/repo',
       }),
-      startTurn: async () => {
+      startTurn: async (params) => {
+        if (turnNumber === 0) {
+          firstAttachmentPath = params.input.find((item) => item.type === 'localImage')?.path;
+        }
         turnNumber += 1;
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
@@ -7620,7 +7637,16 @@ describe('CodexAppServerRuntime', () => {
     const first = collectOperation('chat-1', 'run-a');
     const second = collectOperation('chat-1', 'run-b');
 
-    const started = await provider.startSession(makeRequest({ operation: first.operation }));
+    const started = await provider.startSession(makeRequest({
+      operation: first.operation,
+      images: [{
+        name: 'first.png',
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,Zmlyc3Q=',
+      }],
+    }));
+    expect(firstAttachmentPath).toBeDefined();
+    await expect(fs.access(firstAttachmentPath)).resolves.toBeNull();
     const aborting = provider.abort(started.agentSessionId);
     const resumed = provider.runTurn(makeRequest({
       agentSessionId: started.agentSessionId,
@@ -7640,6 +7666,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
     expect(fake.shutdown).not.toHaveBeenCalled();
     expect(provider.isRunning('thread-1')).toBe(true);
+    await waitForMissingPath(path.dirname(firstAttachmentPath));
 
     fake.emit('notification', {
       method: 'turn/completed',
@@ -8221,6 +8248,30 @@ describe('CodexAppServerRuntime', () => {
     emitThreadSettings(clients[1], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-1');
     emitThreadSettings(clients[0], { model: 'gpt-5.4-mini', effort: 'high' }, 'thread-2');
     emitThreadSettings(clients[0]);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: 'untrusted',
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalPolicy: { reject: { sandbox: true } },
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitThreadSettings(clients[0], {
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      approvalsReviewer: 'auto_review',
+    });
     await Promise.resolve();
     expect(settled).toBe(false);
 

@@ -80,6 +80,7 @@ import {
   codexThreadSettingsTarget,
   threadSettingsMatch,
   threadSettingsTargetFromSnapshot,
+  type CodexConfirmedThreadSettings,
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
 import { CodexSkillDiscovery, type CodexSkillRef } from '../slash-command-discovery.js';
@@ -1002,11 +1003,7 @@ export class CodexAppServerRuntime {
     if (!request.codexGoalCommand) return;
     const requested = codexThreadSettingsTarget(request);
     if (!requested.effort || session.confirmedThreadSettings.effort === requested.effort) return;
-    await this.#applyThreadSettings(session, {
-      ...session.confirmedThreadSettings,
-      effort: requested.effort,
-      permissionMode: requested.permissionMode,
-    });
+    await this.#applyThreadSettings(session, requested);
   }
 
   #sourceForThread(threadId: string): RunningCodexSession | null {
@@ -1171,7 +1168,7 @@ export class CodexAppServerRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     runtimeIdentity: string;
-    confirmedThreadSettings: CodexThreadSettingsTarget;
+    confirmedThreadSettings: CodexConfirmedThreadSettings;
     operation: CodexOperation;
   }): RunningCodexSession {
     // Keyed by Codex's own turn id so an event it labels later still names the run that asked
@@ -1346,11 +1343,13 @@ export class CodexAppServerRuntime {
     request: CodexResumeRequest,
     operation: CodexOperation,
   ): RunningCodexSession {
+    const previousAttachmentCleanup = session.cleanupAttachments;
     session.nativePath = request.nativePath ?? session.nativePath;
     session.activeTurnId = null;
     session.status = 'running';
     session.startedAt = new Date().toISOString();
     session.cleanupAttachments = undefined;
+    void previousAttachmentCleanup?.();
     session.goal = null;
     session.managesGoalLifecycle = false;
     session.completedGoalTurn = false;
@@ -1437,7 +1436,7 @@ export class CodexAppServerRuntime {
   #initialThreadSettings(
     request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
     response: ThreadStartResponse,
-  ): CodexThreadSettingsTarget {
+  ): CodexConfirmedThreadSettings {
     const requested = codexThreadSettingsTarget(request);
     const model = response.model || response.thread.model || requested.model;
     const responseEffort = response.reasoningEffort !== undefined

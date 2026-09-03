@@ -12,7 +12,10 @@ import type {
   JsonRpcServerRequest,
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
-import type { CodexThreadSettingsTarget } from './request-builders.js';
+import type {
+  CodexConfirmedThreadSettings,
+  CodexThreadSettingsTarget,
+} from './request-builders.js';
 
 export type RunningStatus = (
   'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted'
@@ -82,7 +85,7 @@ export interface RunningCodexSession {
   turnRoutes: Map<string, CodexOperation>;
   terminalTurnIds: Set<string>;
   superseded: boolean;
-  confirmedThreadSettings: CodexThreadSettingsTarget;
+  confirmedThreadSettings: CodexConfirmedThreadSettings;
   pendingThreadSettings: ThreadSettingsWaiter | null;
   threadSettingsUpdateChain: Promise<void>;
   configurationFenced: boolean;
