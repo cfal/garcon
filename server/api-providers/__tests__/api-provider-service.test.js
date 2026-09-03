@@ -147,6 +147,45 @@ describe('ApiProviderService', () => {
     }));
   });
 
+  it('discovers models after changing the origin of a keyless endpoint', async () => {
+    const { service } = await tempService();
+    const created = await service.create(openAiInput({
+      endpoint: {
+        baseUrl: 'http://localhost:11434/v1',
+        apiKey: '',
+        modelDiscovery: 'ollama-tags',
+      },
+    }));
+    const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({
+      models: [{ name: 'qwen3' }],
+    }), { status: 200 })));
+    globalThis.fetch = fetchMock;
+
+    const endpointResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      endpointId: created.endpoints[0].id,
+      modelDiscovery: 'ollama-tags',
+    });
+    const providerResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://192.168.1.5:11434/v1',
+      apiProviderId: created.id,
+      modelDiscovery: 'ollama-tags',
+    });
+
+    expect(endpointResult).toEqual({
+      success: true,
+      models: [{ value: 'qwen3', label: 'qwen3 (local)', isLocal: true }],
+    });
+    expect(providerResult).toEqual(endpointResult);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.1.5:11434/api/tags',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('discovers models from bare-array OpenAI-compatible responses', async () => {
     const { service } = await tempService();
     globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify([

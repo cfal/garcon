@@ -453,7 +453,7 @@ export class ApiProviderService {
         if (hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)) {
           return { apiKey: resolved.endpoint.apiKey || undefined, originMismatch: false };
         }
-        originMismatch = true;
+        if (resolved.endpoint.apiKey) originMismatch = true;
       }
     }
     if (input.apiProviderId) {
@@ -465,7 +465,7 @@ export class ApiProviderService {
         (entry) => hasSameOrigin(entry.baseUrl, input.baseUrl),
       );
       if (endpoint) return { apiKey: endpoint.apiKey || undefined, originMismatch: false };
-      if (protocolEndpoints?.length) originMismatch = true;
+      if (protocolEndpoints?.some((entry) => entry.apiKey)) originMismatch = true;
     }
     return { originMismatch };
   }
