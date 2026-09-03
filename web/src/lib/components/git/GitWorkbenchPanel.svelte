@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
-	import Info from '@lucide/svelte/icons/info';
 	import X from '@lucide/svelte/icons/x';
 	import type { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -147,25 +146,6 @@
 						repository.dismissError();
 						wb.dismissError();
 					}}
-				>
-					<X class="h-3.5 w-3.5" />
-				</button>
-			</div>
-		{/if}
-
-		{#if repository.lastNotice}
-			<div
-				class="flex items-center gap-2 border-b border-status-info-border bg-status-info/10 px-3 py-1.5 text-xs text-status-info-foreground"
-			>
-				<Info class="h-3.5 w-3.5 shrink-0" />
-				<span class="min-w-0 flex-1 truncate" title={repository.lastNotice}>
-					{repository.lastNotice}
-				</span>
-				<button
-					type="button"
-					class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					aria-label={m.notifications_dismiss()}
-					onclick={() => repository.dismissNotice()}
 				>
 					<X class="h-3.5 w-3.5" />
 				</button>

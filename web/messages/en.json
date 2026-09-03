@@ -559,8 +559,6 @@
 	"git_changes_commit_files": "Commit {count} file(s)",
 	"git_changes_commit_staged": "Commit staged changes",
 	"git_changes_committing": "Committing...",
-	"git_changes_index_sync_failed_notice": "The commit succeeded, but the Git index could not be synchronized. Unstage the committed files before committing staged changes.",
-	"git_changes_whole_index_commit_notice": "Committed the full staged index to complete the in-progress merge, rebase, cherry-pick, or revert.",
 	"git_changes_create_initial_commit": "Create Initial Commit",
 	"git_changes_creating_initial_commit": "Creating Initial Commit...",
 	"git_changes_deleted": "Deleted",

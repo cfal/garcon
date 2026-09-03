@@ -57,12 +57,10 @@ export class GitRepositoryController {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
-	lastNotice = $state<string | null>(null);
 	private contextGeneration = 0;
 	private projectPath: string | null = null;
 	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
-	private noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly branchSelector: GitBranchSelectorState;
 	private readonly surfaceId: string;
 
@@ -130,25 +128,6 @@ export class GitRepositoryController {
 
 	dismissError(): void {
 		this.lastError = null;
-	}
-
-	surfaceNotice(message: string): void {
-		this.surfacePersistentNotice(message);
-		this.noticeTimer = setTimeout(() => {
-			this.lastNotice = null;
-			this.noticeTimer = null;
-		}, 6000);
-	}
-
-	surfacePersistentNotice(message: string): void {
-		this.dismissNotice();
-		this.lastNotice = message;
-	}
-
-	dismissNotice(): void {
-		if (this.noticeTimer) clearTimeout(this.noticeTimer);
-		this.noticeTimer = null;
-		this.lastNotice = null;
 	}
 
 	async fetchGitStatus(projectPath: string): Promise<void> {
@@ -251,7 +230,6 @@ export class GitRepositoryController {
 		this.showPushModal = false;
 		this.pushRemotes = [];
 		this.lastError = null;
-		this.dismissNotice();
 		this.isLoading = false;
 		this.isCommitting = false;
 		this.isCreatingInitialCommit = false;
@@ -369,13 +347,6 @@ export class GitRepositoryController {
 			if (data.success) {
 				this.commitMessage = '';
 				this.selectedFiles = new Set();
-				if (!data.indexSynchronized) {
-					this.surfacePersistentNotice(m.git_changes_index_sync_failed_notice());
-				} else if (data.commitScope === 'whole-index') {
-					this.surfaceNotice(m.git_changes_whole_index_commit_notice());
-				} else {
-					this.dismissNotice();
-				}
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);
 				return true;
