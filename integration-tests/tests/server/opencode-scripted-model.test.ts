@@ -514,17 +514,17 @@ describeOnLinux('OpenCode against a scripted model', () => {
         expect(messagesOfType(transcript.messages, 'external-tool-use')).toEqual([
           expect.objectContaining({ name: 'skill', namespace: 'opencode' }),
         ]);
-        const globResult = transcript.messages.find(
-          (entry) => entry.message.type === 'tool-result' && entry.message.toolId === 'call_builtin_glob',
+        const globResult = messagesOfType(transcript.messages, 'tool-result').find(
+          (message) => message.toolId === 'call_builtin_glob',
         );
-        expect(globResult?.message.content).toEqual({
+        expect(globResult?.content).toEqual({
           filenames: [filePath],
           numFiles: 1,
         });
-        const grepResult = transcript.messages.find(
-          (entry) => entry.message.type === 'tool-result' && entry.message.toolId === 'call_builtin_grep',
+        const grepResult = messagesOfType(transcript.messages, 'tool-result').find(
+          (message) => message.toolId === 'call_builtin_grep',
         );
-        expect(grepResult?.message.content).toEqual({
+        expect(grepResult?.content).toEqual({
           filenames: [filePath],
           numFiles: 1,
           totalMatches: 1,
