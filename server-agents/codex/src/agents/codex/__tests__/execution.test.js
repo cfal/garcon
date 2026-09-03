@@ -281,6 +281,31 @@ describe('CodexExecution', () => {
     }));
   });
 
+  it('persists carried context before the provider preamble on an ordinary start', async () => {
+    const runtime = createRuntime();
+    const execution = new CodexExecution(
+      createHost(),
+      runtime,
+      createPathNativeSessionCodec('codex'),
+      createConfig(),
+    );
+    const carriedPrefix = renderCarriedContext([
+      new UserMessage('2026-07-19T00:00:00.000Z', 'earlier'),
+    ]).prefix;
+    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
+
+    await execution.start(startRequest({
+      prompt: 'continue',
+      carriedContext: { prefix: carriedPrefix },
+      providerPrefix,
+    }), () => {});
+
+    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      command: `${carriedPrefix}${providerPrefix}continue`,
+      providerPrefix: '',
+    }));
+  });
+
   it('rejects goal controls that cannot start a new thread', async () => {
     const publish = () => {};
     const execution = new CodexExecution(

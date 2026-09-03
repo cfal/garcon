@@ -101,7 +101,7 @@ describe('preamble native-history sanitation', () => {
     expect(result.messages[0].application).toEqual(evidence[0]);
   });
 
-  it('fails closed for unknown, changed, reused, or missing native evidence', () => {
+  it('fails closed for unknown, changed, or reused native evidence', () => {
     const evidence = collectPreambleHistoryEvidence(rowGroup());
     const applied = application();
     const unknown = application('message-two');
@@ -112,12 +112,19 @@ describe('preamble native-history sanitation', () => {
         new UserMessage(AT, `${applied.prefix}Visible prompt`),
         new UserMessage(AT, `${applied.prefix}Visible prompt again`),
       ],
-      [new UserMessage(AT, 'Visible prompt without a prefix')],
     ];
 
     for (const messages of cases) {
       expect(sanitizeRecordedPreamblePrefixes({ messages, evidence }).kind).toBe('mismatch');
     }
+  });
+
+  it('allows ledger evidence with no native occurrence after a pre-dispatch crash', () => {
+    const message = new UserMessage(AT, 'Earlier visible prompt');
+    expect(sanitizeRecordedPreamblePrefixes({
+      messages: [message],
+      evidence: collectPreambleHistoryEvidence(rowGroup()),
+    })).toEqual({ kind: 'sanitized', messages: [{ message }] });
   });
 
   it('leaves ordinary messages unchanged when there is no evidence', () => {

@@ -600,7 +600,9 @@ function applyGoalControlProviderPrefix(
   if (!providerPrefix) return request;
   const command = request.codexGoalCommand;
   if (!command) return { ...request, providerPrefix };
-  if (!('objective' in command) || typeof command.objective !== 'string') return request;
+  if (!('objective' in command) || typeof command.objective !== 'string') {
+    throw new Error('Codex control-only goal input cannot carry a provider prefix');
+  }
   const prefixed = { ...command, objective: `${providerPrefix}${command.objective}` };
   return {
     ...request,

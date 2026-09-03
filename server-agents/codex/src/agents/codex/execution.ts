@@ -239,12 +239,15 @@ function prepareStartRequest(
   }
   const carriedContext = request.carriedContext?.prefix ?? null;
   const outboundGoal = prefaceGoalObjective(goal, request.providerPrefix);
+  const carriesPrefixInCommand = Boolean(carriedContext) && !outboundGoal;
   return {
     ...executionFields(request),
     operation: codexOperation(request, publish),
     command: goalObjective(outboundGoal)
-      ?? (carriedContext ? `${carriedContext}${request.prompt}` : request.prompt),
-    providerPrefix: outboundGoal ? '' : request.providerPrefix,
+      ?? (carriedContext
+        ? `${carriedContext}${request.providerPrefix}${request.prompt}`
+        : request.prompt),
+    providerPrefix: outboundGoal || carriesPrefixInCommand ? '' : request.providerPrefix,
     images: request.attachments,
     ...configuration,
     ...(outboundGoal ? { codexGoalCommand: outboundGoal } : {}),

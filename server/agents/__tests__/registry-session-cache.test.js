@@ -52,15 +52,16 @@ describe('AgentRegistry session cache', () => {
   function createRegistry(
     adoption = { ensure: () => Promise.reject(new Error('unused')) },
     preambles = { resolve: () => [] },
+    integrations = {
+      has: () => false,
+      get: () => null,
+      require: () => { throw new Error('unused'); },
+      list: () => [],
+    },
   ) {
     return new AgentRegistry({
       registry: chats,
-      integrations: {
-        has: () => false,
-        get: () => null,
-        require: () => { throw new Error('unused'); },
-        list: () => [],
-      },
+      integrations,
       endpointResolver: {},
       getCarryOverRevision: () => 'carry-1',
       ledger,
@@ -88,10 +89,17 @@ describe('AgentRegistry session cache', () => {
     };
   }
 
-  function admit(registry, clientMessageId, commandType = 'agent-run') {
-    return registry.admitInput(
+  function admit(
+    registry,
+    clientMessageId,
+    commandType = 'agent-run',
+    content = `message-${clientMessageId}`,
+    queued = false,
+  ) {
+    const method = queued ? 'admitQueuedInput' : 'admitInput';
+    return registry[method](
       CHAT_ID,
-      new UserMessage(AT, `message-${clientMessageId}`),
+      new UserMessage(AT, content),
       {
         clientRequestId: `request-${clientMessageId}`,
         clientMessageId,
@@ -222,6 +230,52 @@ describe('AgentRegistry session cache', () => {
     expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
     expect(ledger.currentRows(CHAT_ID).filter((row) => row.kind === 'notice')).toHaveLength(1);
   });
+
+  for (const queued of [false, true]) {
+    it(`defers a fork boundary for ${queued ? 'queued' : 'direct'} control-only goal input`, async () => {
+      armBoundary('epoch-goal-control', 'fork');
+      const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+      const classifyInput = mock((prompt) => (
+        prompt === '/goal' ? 'control-only' : 'provider-prompt'
+      ));
+      const integrations = {
+        has: () => true,
+        get: () => ({ goals: { classifyInput } }),
+        require: () => { throw new Error('unused'); },
+        list: () => [],
+      };
+      const registry = createRegistry(
+        { ensure: async () => ledger.currentView(CHAT_ID) },
+        { resolve },
+        integrations,
+      );
+
+      await admit(registry, 'goal-control', 'agent-run', '/goal', queued);
+
+      expect(classifyInput).toHaveBeenCalledWith('/goal');
+      expect(resolve).not.toHaveBeenCalled();
+      expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+        kind: 'fork',
+        ownershipEpoch: 'epoch-goal-control',
+      });
+      expect(ledger.currentRows(CHAT_ID)).toEqual([
+        expect.objectContaining({
+          kind: 'user-input',
+          detail: expect.objectContaining({ preambleBoundary: null }),
+        }),
+      ]);
+
+      await admit(registry, 'provider-prompt', 'agent-run', 'continue', queued);
+
+      expect(resolve).toHaveBeenCalledWith('/repo');
+      expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
+        'user-input',
+        'notice',
+        'user-input',
+      ]);
+    });
+  }
 
   it('updates the execution cache before an accepted session publish returns', () => {
     const registry = createRegistry();

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
-import { parseCodexGoalCommand } from '../goal-command.js';
+import {
+  classifyCodexGoalInput,
+  parseCodexGoalCommand,
+} from '../goal-command.js';
 
 describe('parseCodexGoalCommand', () => {
   it('parses and trims a Codex goal objective', () => {
@@ -41,5 +44,31 @@ describe('parseCodexGoalCommand', () => {
   it('does not match similar or non-leading text', () => {
     expect(parseCodexGoalCommand('/goals ship')).toBeNull();
     expect(parseCodexGoalCommand('please /goal ship')).toBeNull();
+  });
+});
+
+describe('classifyCodexGoalInput', () => {
+  it('defers preambles for goal controls that deliver no new provider prompt', () => {
+    for (const command of [
+      '/goal',
+      '/goal clear',
+      '/goal pause',
+      '/goal resume',
+      '/goal edit',
+      '/goal replace',
+    ]) {
+      expect(classifyCodexGoalInput(command)).toBe('control-only');
+    }
+  });
+
+  it('allows preambles for ordinary prompts and goal objectives', () => {
+    for (const command of [
+      'continue the task',
+      '/goal ship the feature',
+      '/goal edit ship more carefully',
+      '/goal replace ship a different feature',
+    ]) {
+      expect(classifyCodexGoalInput(command)).toBe('provider-prompt');
+    }
   });
 });

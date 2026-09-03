@@ -95,9 +95,6 @@ export function sanitizeRecordedPreamblePrefixes(input: {
       application: evidence,
     });
   }
-  if (used.size !== input.evidence.length) {
-    return { kind: 'mismatch', reason: 'recorded preamble application is missing from native history' };
-  }
   return { kind: 'sanitized', messages };
 }
 

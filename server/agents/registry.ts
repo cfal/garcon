@@ -544,7 +544,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): { readonly inserted: boolean } {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const pending = options.commandType === 'steer'
+    const goalInputDelivery = this.#directory.get(session.agentId)?.goals?.classifyInput(
+      message.content,
+    ) ?? 'provider-prompt';
+    const pending = options.commandType === 'steer' || goalInputDelivery === 'control-only'
       ? null
       : session.pendingPreambleBoundary ?? null;
     const alreadyConsumed = pending

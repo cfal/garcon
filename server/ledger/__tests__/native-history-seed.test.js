@@ -132,7 +132,7 @@ describe('native history ledger seed', () => {
     expect(JSON.stringify(drafts)).not.toContain('private preamble body');
   });
 
-  it('fails closed when receipt-bearing native evidence is absent or changed', async () => {
+  it('allows receipt-bearing ledger evidence absent from native history after a pre-dispatch crash', async () => {
     const application = createPreamblePrefix({
       viewId: 'view-1',
       clientMessageId: 'message-1',
@@ -150,7 +150,27 @@ describe('native history ledger seed', () => {
       async *load() {
         yield [{ message: new UserMessage(AT, 'visible prompt') }];
       },
-    }))).rejects.toMatchObject({ code: 'PREAMBLE_ENVELOPE_MISMATCH' });
+    }))).resolves.toMatchObject([{
+      kind: 'user-input',
+      detail: {
+        message: { content: 'visible prompt' },
+        preambleBoundary: null,
+        preamblePrefixReceipt: null,
+      },
+    }]);
+  });
+
+  it('fails closed when a receipt-bearing native prefix was changed', async () => {
+    const application = createPreamblePrefix({
+      viewId: 'view-1',
+      clientMessageId: 'message-1',
+      contents: ['private preamble body'],
+    });
+    const preambleEvidence = [{
+      receipt: application.receipt,
+      boundary: { kind: 'fork', ownershipEpoch: 'ownership-1' },
+      preambles: [{ id: 'preamble-1', title: 'Repository rules' }],
+    }];
 
     await expect(importNativeHistoryDrafts(seedInput({
       receipt: null,

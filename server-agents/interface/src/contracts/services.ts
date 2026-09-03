@@ -104,8 +104,11 @@ export type AgentSteerResult =
     };
 
 export interface AgentGoals {
+  classifyInput(prompt: string): AgentGoalInputDelivery;
   submitControl(request: AgentGoalControlRequest): Promise<boolean>;
 }
+
+export type AgentGoalInputDelivery = 'provider-prompt' | 'control-only';
 
 export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
   readonly beforeDelivery: (

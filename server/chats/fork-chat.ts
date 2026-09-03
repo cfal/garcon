@@ -17,6 +17,7 @@ import {
 } from '../ledger/preamble-history.js';
 import type { JsonObject } from '../../common/json.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
+import { isPreambleApplicationNoticeDetail } from '../../common/transcript-notice-details.js';
 
 const logger = createLogger('chats:fork');
 
@@ -168,6 +169,14 @@ export async function forkChatFileCopy({
   }
   const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
   const sourceRows = ledger.rowsThrough(sourceChatId, selectedWatermark);
+  const selectedRow = sourceRows.at(-1);
+  if (selectedRow?.kind === 'notice' && isPreambleApplicationNoticeDetail(selectedRow.detail)) {
+    throw new DomainError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Fork message cannot split a preamble application from its user input',
+      422,
+    );
+  }
   const anchor = nativeForkAnchor(sourceRows, sourceView.contentStartOrdinal);
   // Whether the anchor is forkable is the integration's call, so the request is delegated with
   // whatever identity that row carries, including none. Only the owning integration knows what
