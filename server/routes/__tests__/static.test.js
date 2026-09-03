@@ -110,7 +110,9 @@ describe('filesystem static paths', () => {
     await fs.mkdir(buildPath, { recursive: true });
     await fs.writeFile(assetPath, 'asset\n', 'utf8');
 
-    await expect(resolveStaticFilePath('/asset.txt', buildPath)).resolves.toBe(assetPath);
+    await expect(resolveStaticFilePath('/asset.txt', buildPath)).resolves.toBe(
+      await fs.realpath(assetPath),
+    );
   });
 });
 
