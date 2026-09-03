@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
-import type { AgentLegacySettingsScope } from '@garcon/server-agent-interface';
+import type { AgentIntegration, AgentLegacySettingsScope } from '@garcon/server-agent-interface';
 import { isRecord, type JsonObject, type JsonValue } from '@garcon/common/json';
 import type { IntegrationRegistry } from './integration-registry.js';
 import { normalizeSupportedThinkingMode } from '../../common/execution-defaults.js';
@@ -144,7 +144,30 @@ async function createMigrationTargets(
       if (!isRecord(value)) throw new Error(`Invalid chat registry entry for ${chatId}`);
       const agentId = stringValue(value.agentId) ?? stringValue(value.provider);
       if (!agentId) throw new Error(`Chat ${chatId} has no integration ID`);
-      const integration = integrations.require(agentId);
+      const integration = integrations.get(agentId);
+      if (!integration) {
+        logger.warn(
+          `Unknown agent integration "${agentId}" in saved chat "${chatId}"; preserving the record.`,
+        );
+        const agentSettingsById = await migrateInstalledChatSettingsBestEffort(
+          integrations,
+          chatId,
+          agentId,
+          value.agentSettingsById,
+          signal,
+        );
+        // Preserves legacy fields through this migration ladder; completed ladders do not rerun automatically.
+        sessions[chatId] = {
+          ...value,
+          agentId,
+          agentSessionId: stringValue(value.agentSessionId)
+            ?? stringValue(value.providerSessionId),
+          nativeSession: value.nativeSession ?? null,
+          agentSettingsById,
+          agentOwnershipEpoch: stringValue(value.agentOwnershipEpoch) ?? crypto.randomUUID(),
+        };
+        continue;
+      }
       const projectPath = stringValue(value.projectPath) ?? '';
       const model = await integration.migration.translateLegacyModel({
         scope: { kind: 'chat', recordId: chatId, selectedAgentId: agentId },
@@ -306,7 +329,22 @@ async function createMigrationTargets(
       }
       const agentId = stringValue(target.agentId);
       if (!agentId) throw new Error(`Scheduled prompt ${String(candidate.id)} has no integration ID`);
-      const integration = integrations.require(agentId);
+      const integration = integrations.get(agentId);
+      if (!integration) {
+        logger.warn(
+          `Unknown agent integration "${agentId}" in scheduled prompt "${String(candidate.id)}"; preserving the record.`,
+        );
+        if (isRecord(target.agentSettingsById)) {
+          prompts.push(candidate);
+        } else {
+          prompts.push({
+            ...candidate,
+            target: { ...target, agentSettingsById: {} },
+          });
+          changed = true;
+        }
+        continue;
+      }
       const model = await integration.migration.translateLegacyModel({
         scope: { kind: 'scheduled-prompt', recordId: String(candidate.id), selectedAgentId: agentId },
         model: stringValue(target.model) ?? '',
@@ -411,7 +449,13 @@ async function migrateHandoffIntent(
   if (!agentId || model === null) {
     throw new Error(`Invalid handoff target ${String(intent.operationId)}`);
   }
-  const integration = integrations.require(agentId);
+  const integration = integrations.get(agentId);
+  if (!integration) {
+    logger.warn(
+      `Unknown agent integration "${agentId}" in handoff intent "${String(intent.operationId)}"; preserving the record.`,
+    );
+    return intent;
+  }
   const migratedSettings = await integration.settings.migrate(
     parseSettingsEnvelope(agentId, asJsonValue(execution.agentSettings)),
   );
@@ -486,10 +530,7 @@ async function translateSettings(
     const translated = await integration.migration.translateLegacySettings({ scope, legacyValues, signal });
     const existing = result[agentId];
     if (existing) {
-      const migrated = await integration.settings.migrate(parseSettingsEnvelope(agentId, existing));
-      const parsed = integration.settings.parse(migrated);
-      assertSettingsOwner(agentId, parsed);
-      result[agentId] = asJsonValue(parsed);
+      result[agentId] = await migrateSettingsEnvelope(integration, agentId, existing);
       continue;
     }
     if (!translated) continue;
@@ -498,6 +539,49 @@ async function translateSettings(
     result[agentId] = asJsonValue(parsed);
   }
   return result;
+}
+
+async function migrateInstalledChatSettingsBestEffort(
+  integrations: IntegrationRegistry,
+  chatId: string,
+  unknownAgentId: string,
+  rawSettingsById: JsonValue | undefined,
+  signal: AbortSignal,
+): Promise<JsonObject> {
+  if (!isRecord(rawSettingsById)) return {};
+  const result: Record<string, JsonValue> = {};
+  for (const [agentId, value] of Object.entries(rawSettingsById)) {
+    result[agentId] = asJsonValue(value);
+  }
+  for (const integration of integrations.list()) {
+    signal.throwIfAborted();
+    const agentId = integration.descriptor.id;
+    if (!Object.hasOwn(rawSettingsById, agentId)) continue;
+    try {
+      result[agentId] = await migrateSettingsEnvelope(
+        integration,
+        agentId,
+        asJsonValue(rawSettingsById[agentId]),
+      );
+    } catch (error) {
+      logger.warn(
+        `Failed to migrate settings for installed agent integration "${agentId}" in saved chat "${chatId}" owned by unknown integration "${unknownAgentId}"; preserving the original envelope.`,
+        error,
+      );
+    }
+  }
+  return result;
+}
+
+async function migrateSettingsEnvelope(
+  integration: AgentIntegration,
+  agentId: string,
+  existing: JsonValue,
+): Promise<JsonValue> {
+  const migrated = await integration.settings.migrate(parseSettingsEnvelope(agentId, existing));
+  const parsed = integration.settings.parse(migrated);
+  assertSettingsOwner(agentId, parsed);
+  return asJsonValue(parsed);
 }
 
 function parseSettingsEnvelope(agentId: string, value: JsonValue): AgentSettingsEnvelope {
