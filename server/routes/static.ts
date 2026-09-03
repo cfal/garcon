@@ -1,4 +1,5 @@
 import path from 'path';
+import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import { jsonError } from '../lib/http-error.js';
@@ -57,6 +58,37 @@ function notFoundResponse(): Response {
   return jsonError('Not found', 404);
 }
 
+function isWithinDirectory(directory: string, target: string): boolean {
+  const relative = path.relative(directory, target);
+  return relative === '' || (
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+export async function resolveStaticFilePath(
+  pathname: string,
+  distDirectory: string,
+): Promise<string | null> {
+  const distPath = path.resolve(distDirectory);
+  const strippedPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  const candidatePath = path.resolve(distPath, strippedPath);
+  if (!isWithinDirectory(distPath, candidatePath)) return null;
+
+  try {
+    const [realDistPath, realCandidatePath] = await Promise.all([
+      fs.realpath(distPath),
+      fs.realpath(candidatePath),
+    ]);
+    if (!isWithinDirectory(realDistPath, realCandidatePath)) return null;
+    if (!(await fs.stat(realCandidatePath)).isFile()) return null;
+    return realCandidatePath;
+  } catch {
+    return null;
+  }
+}
+
 const noauthServePathname: StaticPathHandler = (function() {
   const isEmbedded = Bun.embeddedFiles.length > 0;
   if (isEmbedded) {
@@ -94,21 +126,11 @@ const noauthServePathname: StaticPathHandler = (function() {
     // Serves from web/build/ (SvelteKit adapter-static output).
     const filesystemDistDir = path.join(serverRoot, 'web', 'build') + path.sep;
 
-    function getDistPathForRequest(pathname: string, distDirectory = filesystemDistDir): string | null {
-      const normalizedDistDir = distDirectory.endsWith(path.sep) ? distDirectory : `${distDirectory}${path.sep}`;
-      const strippedPath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
-      const resolvedPath = path.resolve(path.join(distDirectory, strippedPath));
-      if (!resolvedPath.startsWith(normalizedDistDir)) {
-        return null;
-      }
-      return resolvedPath;
-    }
-
     return async function noauthServePathnameFilesystem(pathname: string): Promise<Response> {
       if (typeof pathname !== 'string' || pathname.length === 0) {
         return notFoundResponse();
       }
-      const fsPath = getDistPathForRequest(pathname, filesystemDistDir);
+      const fsPath = await resolveStaticFilePath(pathname, filesystemDistDir);
       if (!fsPath) return notFoundResponse();
       const file = Bun.file(fsPath);
       const exists = await file.exists();

@@ -377,8 +377,8 @@ export class ApiProviderStore {
         }],
       };
       snapshot.apiProviders.push(apiProvider);
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
       return apiProvider;
     });
   }
@@ -417,8 +417,8 @@ export class ApiProviderStore {
         applyApiKeyPatch(endpoint, input.endpoint);
       }
 
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
       return apiProvider;
     });
   }
@@ -432,8 +432,8 @@ export class ApiProviderStore {
         throw new Error(`API provider is used by existing chats: ${id}`);
       }
       snapshot.apiProviders = snapshot.apiProviders.filter((entry) => entry.id !== id);
-      this.#snapshot = snapshot;
       await this.#write(snapshot);
+      this.#snapshot = snapshot;
     });
   }
 

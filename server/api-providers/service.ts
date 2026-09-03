@@ -42,6 +42,11 @@ interface ApiProviderModelDiscoveryFlatInput {
   modelDiscovery: ModelDiscoveryKind;
 }
 
+interface StoredDiscoveryCredentialResult {
+  apiKey?: string;
+  hasKeyForDifferentOrigin: boolean;
+}
+
 export interface ApiProviderServiceDeps {
   store: ApiProviderStore;
   isApiProviderReferenced(apiProviderId: string): boolean;
@@ -272,6 +277,10 @@ function appendPath(baseUrl: string, suffix: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${suffix.replace(/^\/+/, '')}`;
 }
 
+function hasSameOrigin(left: string, right: string): boolean {
+  return new URL(left).origin === new URL(right).origin;
+}
+
 function openAiModelListUrl(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, '');
   const parsed = new URL(normalized);
@@ -417,9 +426,15 @@ export class ApiProviderService {
 
   async discoverModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderModelDiscoveryInput(input);
-    const apiKey = flat.apiKey ?? this.#storedApiKeyForDiscovery(flat);
-    const discoveryInput = { ...flat, apiKey };
-    if (discoveryInput.modelDiscovery === 'ollama-tags') return testOllamaTags(discoveryInput);
+    if (flat.modelDiscovery === 'ollama-tags') return testOllamaTags(flat);
+    const storedCredential = flat.apiKey ? null : this.#storedApiKeyForDiscovery(flat);
+    if (storedCredential?.hasKeyForDifferentOrigin) {
+      return {
+        success: false,
+        error: 'Enter the API key for this base URL before fetching models.',
+      };
+    }
+    const discoveryInput = { ...flat, apiKey: flat.apiKey ?? storedCredential?.apiKey };
     if (discoveryInput.modelDiscovery === 'anthropic-models') return testAnthropicModels(discoveryInput);
     if (discoveryInput.modelDiscovery === 'openai-models' || discoveryInput.modelDiscovery === 'openrouter-models') {
       return testOpenAiModels(discoveryInput);
@@ -427,16 +442,41 @@ export class ApiProviderService {
     return { success: false, error: `Model discovery is not supported for ${discoveryInput.modelDiscovery}.` };
   }
 
-  #storedApiKeyForDiscovery(input: Pick<ApiProviderModelDiscoveryFlatInput, 'apiProviderId' | 'endpointId' | 'protocol'>): string | undefined {
+  #storedApiKeyForDiscovery(input: Pick<
+    ApiProviderModelDiscoveryFlatInput,
+    'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl'
+  >): StoredDiscoveryCredentialResult {
+    let hasKeyForDifferentOrigin = false;
     if (input.endpointId) {
       const resolved = this.deps.store.getEndpoint(input.endpointId);
-      if (resolved?.endpoint.protocol === input.protocol) return resolved.endpoint.apiKey || undefined;
+      if (resolved?.endpoint.protocol === input.protocol) {
+        if (hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)) {
+          return {
+            apiKey: resolved.endpoint.apiKey || undefined,
+            hasKeyForDifferentOrigin: false,
+          };
+        }
+        if (resolved.endpoint.apiKey) hasKeyForDifferentOrigin = true;
+      }
     }
     if (input.apiProviderId) {
       const apiProvider = this.deps.store.getApiProvider(input.apiProviderId);
-      const endpoint = apiProvider?.endpoints.find((entry) => entry.protocol === input.protocol);
-      return endpoint?.apiKey || undefined;
+      const protocolEndpoints = apiProvider?.endpoints.filter(
+        (entry) => entry.protocol === input.protocol,
+      );
+      const endpoint = protocolEndpoints?.find(
+        (entry) => hasSameOrigin(entry.baseUrl, input.baseUrl),
+      );
+      if (endpoint) {
+        return {
+          apiKey: endpoint.apiKey || undefined,
+          hasKeyForDifferentOrigin: false,
+        };
+      }
+      if (protocolEndpoints?.some((entry) => entry.apiKey)) {
+        hasKeyForDifferentOrigin = true;
+      }
     }
-    return undefined;
+    return { hasKeyForDifferentOrigin };
   }
 }

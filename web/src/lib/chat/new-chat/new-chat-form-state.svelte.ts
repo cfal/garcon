@@ -306,16 +306,12 @@ export class NewChatFormState {
 		);
 	}
 
-	/** Replaces only untouched startup selections that are absent from the live catalog. */
+	/** Fills a live selection only for agents with no stored selection; never replaces a shown one. */
 	validateModelAgainstLive(agentId: SessionAgentId): void {
+		// An empty stored value is an unresolved empty catalog default, not a shown selection.
+		if (this.selectedModelsByAgent[agentId]) return;
 		const liveModels = this.#modelCatalog.getModels(agentId);
-		const current = this.selectedModelsByAgent[agentId];
-		const endpointId = this.#selectedModelTargetsByAgent[agentId]?.modelEndpointId;
-		if (
-			this.#startupSelectionAutomatic &&
-			(!current || !this.#modelCatalog.getModelForSelection(agentId, current, endpointId)) &&
-			liveModels[0]
-		) this.#selectCatalogModel(agentId, liveModels[0]);
+		if (liveModels[0]) this.#selectCatalogModel(agentId, liveModels[0]);
 	}
 
 	validateAllModelsAgainstLive(): void {
@@ -713,12 +709,13 @@ export class NewChatFormState {
 			this.#reconcileAgentSettingsWithCatalog();
 			if (this.#startupSelectionAutomatic) {
 				const recent = this.#firstSelectableRecent(this.#startupRecents);
-				this.agentId = recent
-					? (recent.agentId as SessionAgentId)
-					: this.#resolveStartupAgent(DEFAULT_AGENT_ID);
 				if (recent) {
+					this.agentId = recent.agentId as SessionAgentId;
 					this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
-				} else {
+				} else if (!this.selectedModelsByAgent[this.agentId]) {
+					// Keeps an already-shown selection untouched so a vanished recent surfaces
+					// as modelSelectionError instead of silently swapping to the default model.
+					this.agentId = this.#resolveStartupAgent(DEFAULT_AGENT_ID);
 					this.applyResolvedModel(this.agentId, this.#modelCatalog.getDefaultModel(this.agentId));
 				}
 				this.#applyExecutionDefaultsForAgent(this.agentId);

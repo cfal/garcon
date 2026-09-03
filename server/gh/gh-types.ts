@@ -103,6 +103,9 @@ export interface PullRequestDetail {
 export interface GhCommandOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  maxStdoutBytes?: number;
+  maxStderrBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface GhCommandResult {

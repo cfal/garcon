@@ -1,13 +1,18 @@
 import { promises as fs } from 'fs';
+import path from 'path';
 import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
-import { errorMessage } from '../lib/errors.js';
+import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
-import { chunkGitPathspecs } from './pathspecs.js';
+import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { probeWorktreeLayout } from './worktree-layout.js';
+import { isExpectedMissingGitResult } from './comparison-errors.js';
+import { commitSelectedFiles } from './selected-file-commit.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -17,6 +22,7 @@ import type {
   CommitOptions,
   FileOptions,
   GitAgentRunner,
+  GitCommitResult,
   GitRefOption,
   GitRefsResponse,
   GitRefsOptions,
@@ -45,15 +51,82 @@ import {
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 const LOCAL_BRANCH_REF_PATTERN = 'refs/heads';
+const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
+const repositoryCommitLock = new KeyedPromiseLock();
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
   options?: { disableOptionalLocks?: boolean },
 ) => Promise<{ stdout: string }>;
 
+async function runWithRepositoryCommitLock<T>(
+  projectPath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const layout = await probeWorktreeLayout(projectPath);
+  const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
+  return repositoryCommitLock.runExclusive(lockKey, operation);
+}
+
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
   return Math.min(limit, GIT_REF_RESULT_LIMITS.max);
+}
+
+async function hasCommitStateRef(projectPath: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', ref],
+      readOnlyGitOptions(),
+    );
+    return true;
+  } catch (error) {
+    if (isExpectedMissingGitResult(error)) return false;
+    throw error;
+  }
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
+}
+
+async function hasRebaseOrAmConflictState(projectPath: string): Promise<boolean> {
+  const { stdout } = await runGit(
+    projectPath,
+    [
+      'rev-parse',
+      '--git-path',
+      'rebase-merge/stopped-sha',
+      '--git-path',
+      'rebase-merge/amend',
+      '--git-path',
+      'rebase-apply',
+    ],
+    readOnlyGitOptions(),
+  );
+  const [stoppedPath, amendPath, applyPath] = stdout
+    .trimEnd()
+    .split('\n')
+    .map((statePath) => path.resolve(projectPath, statePath));
+
+  if (await fileExists(applyPath)) return true;
+  // Interactive edit stops permit isolated commits; conflicted stops omit the amend marker.
+  return (await fileExists(stoppedPath)) && !(await fileExists(amendPath));
+}
+
+async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
+  // Git continuation states require preserving the complete staged operation.
+  for (const ref of WHOLE_INDEX_COMMIT_STATE_REFS) {
+    if (await hasCommitStateRef(projectPath, ref)) return true;
+  }
+  return hasRebaseOrAmConflictState(projectPath);
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -430,13 +503,39 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout, message: 'Initial commit created successfully' };
   }
 
-  async function commit({ projectPath, message, files }: CommitOptions): Promise<unknown> {
+  async function commit({ projectPath, message, files }: CommitOptions): Promise<GitCommitResult> {
     await assertGitRepository(projectPath);
     for (const file of files) {
-      await runGit(projectPath, ['add', '--', file]);
+      if (!file) throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot be empty.');
+      if (file.includes('\0')) {
+        throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot contain NUL bytes.');
+      }
+      try {
+        resolvePathWithinProject(projectPath, file);
+      } catch {
+        throw new GitDomainError(
+          'INVALID_INPUT',
+          'Pathspecs must resolve inside the project root.',
+        );
+      }
     }
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    return runWithRepositoryCommitLock(projectPath, async () => {
+      if (!(await requiresWholeIndexCommit(projectPath))) {
+        const result = await commitSelectedFiles(projectPath, message, files);
+        return { success: true, ...result, commitScope: 'selected-files' };
+      }
+
+      for (const file of files) {
+        await runGit(projectPath, ['add', '--', literalGitPathspec(file)]);
+      }
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
+      return {
+        success: true,
+        output: stdout,
+        commitScope: 'whole-index',
+        indexSynchronized: true,
+      };
+    });
   }
 
   async function getRefs({
@@ -792,8 +891,10 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   async function commitIndex({ projectPath, message }: CommitIndexOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
-    const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-    return { success: true, output: stdout };
+    return runWithRepositoryCommitLock(projectPath, async () => {
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
+      return { success: true, output: stdout };
+    });
   }
 
   function pathspecStdin(paths: string[]): string {

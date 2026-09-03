@@ -40,6 +40,46 @@ afterEach(async () => {
 });
 
 describe('TranscriptLedgerStore', () => {
+  it('recreates a ledger root removed after store construction', async () => {
+    await fs.rm(root, { recursive: true, force: true });
+
+    const current = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    expect(store.currentView('chat-one')).toEqual(current);
+  });
+
+  it('rejects a ledger root redirected after store construction', async () => {
+    const outsideDirectory = `${root}-outside`;
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, root, 'dir');
+
+    try {
+      expect(() => store.currentView('redirected')).toThrow(LedgerFencedError);
+      await expect(fs.access(path.join(outsideDirectory, 'redirected', 'ledger.sqlite')))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects pre-created symlink directories for chat ledgers', async () => {
+    const outsideDirectory = `${root}-outside`;
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, path.join(root, 'redirected'), 'dir');
+
+    try {
+      expect(() => store.currentView('redirected')).toThrow(LedgerFencedError);
+      await expect(fs.access(path.join(outsideDirectory, 'ledger.sqlite')))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('[TLV5-SEARCH.11-STORE-01] probes existing views without materializing a missing ledger', async () => {
     const missingPath = path.join(root, 'never-opened', 'ledger.sqlite');
     expect(store.existingCurrentView('never-opened')).toBeNull();
@@ -1533,6 +1573,28 @@ describe('TranscriptLedgerStore', () => {
       .toEqual(['orphan-chat']);
     expect(store.currentView('registered-chat')?.viewId).toBe('registered-view');
     expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
+  });
+
+  it('removes unregistered symlinks without touching their targets', async () => {
+    const outsideDirectory = `${root}-orphan-target`;
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, path.join(root, 'orphan-link'), 'dir');
+
+    try {
+      expect(store.removeUnregisteredChatDirectories(new Set())).toEqual(['orphan-link']);
+      await expect(fs.lstat(path.join(root, 'orphan-link'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.stat(outsideDirectory)).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves non-directory files in the ledger root untouched', async () => {
+    const filePath = path.join(root, 'orphan-file');
+    await fs.writeFile(filePath, 'not a chat directory');
+
+    expect(store.removeUnregisteredChatDirectories(new Set())).toEqual([]);
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe('not a chat directory');
   });
 
   it('carries the agent switch boundary through a reload', () => {

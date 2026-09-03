@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,6 +79,32 @@ describe('ApiProviderStore', () => {
     expect(redacted.endpoints[0].hasApiKey).toBe(true);
     expect('apiKey' in redacted.endpoints[0]).toBe(false);
     expect('headers' in redacted.endpoints[0]).toBe(false);
+  });
+
+  it('does not publish provider mutations that fail to persist', async () => {
+    const store = await tempStore();
+    await store.init();
+    const rename = spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk full'));
+
+    try {
+      await expect(store.createApiProvider({
+        templateId: 'custom',
+        label: 'Example',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'sk-secret',
+        capabilities: { chatCompletions: true, responses: false },
+        defaultModel: 'example',
+        models: [{ value: 'example', label: 'Example' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      })).rejects.toThrow('disk full');
+    } finally {
+      rename.mockRestore();
+    }
+
+    expect(store.list()).toEqual([]);
+    expect(store.redactedList()).toEqual([]);
   });
 
   it('allows blank API keys for local Ollama templates', async () => {

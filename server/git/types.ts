@@ -22,6 +22,8 @@ export interface GitCommandOptions {
   timeoutMs?: number;
   disableOptionalLocks?: boolean;
   maxStdoutBytes?: number;
+  maxStderrBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface GitCommandTrace {
@@ -243,6 +245,13 @@ export interface FileOptions extends ProjectOptions {
 export interface CommitOptions extends ProjectOptions {
   message: string;
   files: string[];
+}
+
+export interface GitCommitResult {
+  success: true;
+  output: string;
+  commitScope: 'selected-files' | 'whole-index';
+  indexSynchronized: boolean;
 }
 
 export interface GitRefsOptions extends ProjectOptions {
@@ -910,7 +919,7 @@ export interface GitService {
   getDiff(options: FileOptions): Promise<unknown>;
   getFileWithDiff(options: FileOptions): Promise<unknown>;
   initialCommit(options: ProjectOptions): Promise<unknown>;
-  commit(options: CommitOptions): Promise<unknown>;
+  commit(options: CommitOptions): Promise<GitCommitResult>;
   getBranches(options: ProjectOptions): Promise<unknown>;
   getRefs(options: GitRefsOptions): Promise<GitRefsResponse>;
   checkout(options: CheckoutOptions): Promise<unknown>;

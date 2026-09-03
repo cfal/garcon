@@ -296,7 +296,7 @@ async function runTrackedBatch(
       ];
     }
     const file = files[0];
-    if (error instanceof GitOutputLimitError) {
+    if (error instanceof GitOutputLimitError && error.stream === 'stdout') {
       return [limitedPatchFileBody(
         file.path,
         file.bodyFingerprint,

@@ -27,6 +27,7 @@ import type { AgentName } from "../agents/session-types.js";
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { errorMessage } from '../lib/errors.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
 import { normalizeTags } from '../../common/tags.js';
@@ -41,6 +42,10 @@ const logger = createLogger('chats:store');
 export const CHAT_REGISTRY_VERSION = 5;
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
 const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
+
+interface ChatRegistryOptions {
+  saveDelayMs?: number;
+}
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
   'nativeSession',
@@ -418,12 +423,17 @@ function isJsonValue(value: unknown): value is JsonValue {
 export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  #registryWriteLock = new KeyedPromiseLock();
+  #chatMutationRevisions = new Map<string, number>();
+  #nextChatMutationRevision = 0;
   #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
+  #saveDelayMs: number;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, options: ChatRegistryOptions = {}) {
     super();
     this.#workspaceDir = workspaceDir;
+    this.#saveDelayMs = options.saveDelayMs ?? REGISTRY_SAVE_DEBOUNCE_MS;
   }
 
   #emitChatAdded(id: string): void { this.emit('chat-added', id); }
@@ -534,6 +544,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
 
       session.nativeSession = resolved;
+      this.#advanceChatMutationRevision(chatId);
       dirty = true;
     }
 
@@ -620,6 +631,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       carryOverMigrationQuarantine: normalizedQuarantine,
       parentChat: normalizedParentChat,
     };
+    this.#advanceChatMutationRevision(chatId);
     this.#setAgentSessionIdIndex(chatId, agentSessionId);
     this.#emitChatAdded(chatId);
     this.#scheduleRegistrySave();
@@ -669,6 +681,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const previousAgentSessionId = existing.agentSessionId;
     const previousTags = existing.tags;
     Object.assign(existing, normalizedPatch);
+    const mutationRevision = this.#advanceChatMutationRevision(id);
     if ('agentSessionId' in normalizedPatch && existing.agentSessionId !== previousAgentSessionId) {
       this.#unsetAgentSessionIdIndex(id, previousAgentSessionId);
       this.#setAgentSessionIdIndex(id, existing.agentSessionId);
@@ -683,14 +696,20 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     };
     const resolved = { id, ...existing };
     if (options.flush) {
-      return this.#flushRegistrySave().then(
+      const restoreIfCurrent = (): void => {
+        if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
+        registry.sessions[id] = previous;
+        this.#advanceChatMutationRevision(id);
+        this.#rebuildAgentSessionIdIndex();
+        this.#scheduleRegistrySave();
+      };
+      return this.#flushRegistrySave(restoreIfCurrent).then(
         () => {
           emitUpdateEvents();
           return resolved;
         },
         (error: unknown) => {
-          registry.sessions[id] = previous;
-          this.#rebuildAgentSessionIdIndex();
+          restoreIfCurrent();
           throw error;
         },
       );
@@ -706,6 +725,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const nextTags = normalizeTags([...existing.tags, ...tags]);
     if (isDeepStrictEqual(nextTags, existing.tags)) return { id, ...existing };
     existing.tags = nextTags;
+    this.#advanceChatMutationRevision(id);
     this.#emitChatTagsUpdated(id);
     this.#scheduleRegistrySave();
     return { id, ...existing };
@@ -731,11 +751,18 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       }
       existing.nativeSession = update.nativeSession ?? null;
     }
-    try {
-      await this.#flushRegistrySave();
-    } catch (error) {
+    const mutationRevision = this.#advanceChatMutationRevision(id);
+    const restoreIfCurrent = (): void => {
+      if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
       existing.projectPath = previousProjectPath;
       existing.nativeSession = previousNativeSession;
+      this.#advanceChatMutationRevision(id);
+      this.#scheduleRegistrySave();
+    };
+    try {
+      await this.#flushRegistrySave(restoreIfCurrent);
+    } catch (error) {
+      restoreIfCurrent();
       throw error;
     }
     this.#emitChatProjectPathUpdated({
@@ -754,6 +781,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     if (!entry) return false;
     this.#unsetAgentSessionIdIndex(id, entry.agentSessionId);
     delete registry.sessions[id];
+    this.#chatMutationRevisions.delete(id);
     this.#emitChatRemoved(id, reason);
     this.#scheduleRegistrySave();
     return true;
@@ -775,9 +803,22 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return [chatId, entry];
   }
 
-  async saveRegistry(registry: ChatRegistrySnapshot): Promise<void> {
+  async saveRegistry(
+    registry: ChatRegistrySnapshot,
+    onWriteFailure?: () => void,
+  ): Promise<void> {
     const target = this.#sessionsFilePath();
-    await writeJsonFileAtomic(target, registry, { mode: 0o600 });
+    await this.#registryWriteLock.runExclusive(
+      target,
+      async () => {
+        try {
+          await writeJsonFileAtomic(target, registry, { mode: 0o600 });
+        } catch (error) {
+          onWriteFailure?.();
+          throw error;
+        }
+      },
+    );
     this.#registry = registry;
     this.#rebuildAgentSessionIdIndex();
   }
@@ -787,12 +828,15 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     await this.#flushRegistrySave();
   }
 
-  async #flushRegistrySave(): Promise<void> {
+  async #flushRegistrySave(onWriteFailure?: () => void): Promise<void> {
     if (this.#pendingSaveTimer) {
       clearTimeout(this.#pendingSaveTimer);
       this.#pendingSaveTimer = null;
     }
-    await this.saveRegistry(this.#registry || createEmptyRegistry());
+    await this.saveRegistry(
+      this.#registry || createEmptyRegistry(),
+      onWriteFailure,
+    );
   }
 
   #scheduleRegistrySave(): void {
@@ -805,7 +849,13 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
         logger.warn('sessions: failed to persist registry:', error.message);
       });
-    }, REGISTRY_SAVE_DEBOUNCE_MS);
+    }, this.#saveDelayMs);
+  }
+
+  #advanceChatMutationRevision(id: string): number {
+    const revision = ++this.#nextChatMutationRevision;
+    this.#chatMutationRevisions.set(id, revision);
+    return revision;
   }
 
   #rebuildAgentSessionIdIndex(): void {

@@ -1,12 +1,6 @@
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
-import {
-  chmodSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
+import { chmodSync, lstatSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   parseChatRowContent,
@@ -38,6 +32,7 @@ import type {
   TranscriptViewId,
   TranscriptWatermark,
 } from './contracts.js';
+import { ensureLedgerChatDirectory, ensureLedgerRootDirectory } from './directories.js';
 import {
   isLedgerCliRowNoticeRow,
   isPresentationOnlyProviderRow,
@@ -121,7 +116,7 @@ export class TranscriptLedgerStore {
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
-    this.#rootDirectory = rootDirectory;
+    this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
     this.#cacheSize = options.connectionCacheSize ?? DEFAULT_CONNECTION_CACHE_SIZE;
     if (!Number.isSafeInteger(this.#cacheSize) || this.#cacheSize < 1) {
       throw new TypeError('Ledger connection cache size must be a positive integer');
@@ -130,7 +125,6 @@ export class TranscriptLedgerStore {
       ?? (() => transcriptViewId(crypto.randomUUID()));
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#synchronous = options.synchronous ?? 'NORMAL';
-    mkdirSync(this.#rootDirectory, { recursive: true, mode: 0o700 });
   }
 
   currentView(chatId: string): TranscriptView | null {
@@ -582,11 +576,15 @@ export class TranscriptLedgerStore {
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
-      if (!statSync(directory).isDirectory()) continue;
-      this.closeChat(name);
-      this.#openFailures.delete(name);
-      this.#failureFences.delete(name);
-      rmSync(directory, { recursive: true, force: true });
+      const stats = lstatSync(directory);
+      const isDirectory = stats.isDirectory();
+      if (!isDirectory && !stats.isSymbolicLink()) continue;
+      if (isDirectory) {
+        this.closeChat(name);
+        this.#openFailures.delete(name);
+        this.#failureFences.delete(name);
+      }
+      rmSync(directory, { recursive: isDirectory, force: true });
       removed.push(name);
     }
     return removed;
@@ -822,8 +820,7 @@ function openConnection(
   chatId: string,
   synchronous: 'NORMAL' | 'FULL',
 ): ConnectionEntry {
-  const directory = path.join(rootDirectory, chatId);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const directory = ensureLedgerChatDirectory(rootDirectory, chatId);
   const databasePath = path.join(directory, 'ledger.sqlite');
   const existed = (statSizeIfExists(databasePath) ?? 0) > 0;
   const db = new Database(databasePath);

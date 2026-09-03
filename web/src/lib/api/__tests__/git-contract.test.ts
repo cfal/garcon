@@ -96,11 +96,23 @@ describe('git API contract', () => {
 	});
 
 	it('gitCommit sends POST with project, message, files', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				output: 'committed',
+				commitScope: 'selected-files',
+				indexSynchronized: false,
+			}),
+		);
 
 		const result = await gitCommit('/project', 'fix bug', ['a.txt', 'b.txt']);
 
-		expect(result.success).toBe(true);
+		expect(result).toEqual({
+			success: true,
+			output: 'committed',
+			commitScope: 'selected-files',
+			indexSynchronized: false,
+		});
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/commit');
 		expect(opts.method).toBe('POST');

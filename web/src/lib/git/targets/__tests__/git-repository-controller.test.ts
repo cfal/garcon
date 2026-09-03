@@ -268,7 +268,12 @@ describe('GitRepositoryController', () => {
 
 	describe('handleCommit', () => {
 		it('commits selected files and resets on success', async () => {
-			vi.mocked(gitCommit).mockResolvedValue({ success: true });
+			vi.mocked(gitCommit).mockResolvedValue({
+				success: true,
+				output: 'committed',
+				commitScope: 'selected-files',
+				indexSynchronized: true,
+			});
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: 'main',
 				hasCommits: true,
