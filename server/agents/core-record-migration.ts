@@ -7,11 +7,13 @@ import { isRecord, type JsonObject, type JsonValue } from '@garcon/common/json';
 import type { IntegrationRegistry } from './integration-registry.js';
 import { normalizeSupportedThinkingMode } from '../../common/execution-defaults.js';
 import { GENERATION_UI_SETTING_KEYS } from '../../common/settings.js';
+import { createLogger } from '../lib/log.js';
 
 const LEGACY_MIGRATION_ID = 'agent-integration-v1';
 const SETTINGS_REFRESH_MIGRATION_ID = 'agent-integration-settings-v2';
 const EXECUTION_MODE_REFRESH_MIGRATION_ID = 'agent-execution-mode-settings-v1';
 const CHAT_SCHEMA_VERSION = 3;
+const logger = createLogger('agents:core-record-migration');
 const CORE_RECORD_PATHS = new Set([
   'agent-ownership-journal.json',
   'chats.json',
@@ -442,11 +444,19 @@ async function migrateExecutionDefaults(
   scope: Parameters<typeof translateSettings>[1],
   signal: AbortSignal,
 ): Promise<JsonObject> {
-  const thinkingModePatch: JsonObject = scope.selectedAgentId && Object.hasOwn(raw, 'thinkingMode')
+  const selectedIntegration = scope.selectedAgentId
+    ? integrations.get(scope.selectedAgentId)
+    : null;
+  if (scope.selectedAgentId && !selectedIntegration) {
+    logger.warn(
+      `Unknown agent integration "${scope.selectedAgentId}" in saved execution defaults; preserving its settings.`,
+    );
+  }
+  const thinkingModePatch: JsonObject = selectedIntegration && Object.hasOwn(raw, 'thinkingMode')
     ? {
         thinkingMode: normalizeSupportedThinkingMode(
           raw.thinkingMode,
-          integrations.require(scope.selectedAgentId).descriptor.supportedThinkingModes,
+          selectedIntegration.descriptor.supportedThinkingModes,
         ),
       }
     : {};

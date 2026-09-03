@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   migrateAgentIntegrationCoreRecords,
+  refreshAgentExecutionModeCoreRecords,
   refreshAgentIntegrationCoreRecords,
 } from '../core-record-migration.js';
 
@@ -358,6 +359,53 @@ describe('agent integration core-record migration', () => {
       releaseReferences: [],
       createdAt: '2026-01-01T00:00:00.000Z',
     });
+  });
+
+  it('preserves execution defaults for integrations that are no longer installed', async () => {
+    const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const removedSettings = envelope('removed-agent', { mode: 'custom' });
+    await fs.writeFile(path.join(workspaceDir, 'project-settings.json'), `${JSON.stringify({
+      lastAgentId: 'legacy-agent',
+      lastThinkingMode: 'high',
+      executionDefaults: {
+        global: {},
+        byAgent: {
+          'removed-agent': {
+            permissionMode: 'default',
+            thinkingMode: 'high',
+            agentSettingsById: { 'removed-agent': removedSettings },
+          },
+        },
+      },
+    })}\n`);
+
+    try {
+      await refreshAgentExecutionModeCoreRecords({
+        workspaceDir,
+        integrations: integrations(integration('claude', 'claudeThinkingMode', 'auto')),
+      });
+
+      const settings = JSON.parse(await fs.readFile(path.join(workspaceDir, 'project-settings.json'), 'utf8'));
+      expect(settings.executionDefaults.byAgent['removed-agent']).toMatchObject({
+        permissionMode: 'default',
+        thinkingMode: 'high',
+        agentSettingsById: { 'removed-agent': removedSettings },
+      });
+      expect(settings.executionDefaults.byAgent['legacy-agent']).toMatchObject({
+        thinkingMode: 'high',
+      });
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "removed-agent" in saved execution defaults; preserving its settings.',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        '[agents:core-record-migration]',
+        'Unknown agent integration "legacy-agent" in saved execution defaults; preserving its settings.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('discards a prepared journal before loading core records', async () => {
