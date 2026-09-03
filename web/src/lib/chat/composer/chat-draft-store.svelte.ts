@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { ChatDraftAppendResult } from './chat-draft-append.js';
+import type { ChatDraftAppendOptions, ChatDraftAppendResult } from './chat-draft-append.js';
 import {
 	chatDraftStorageKey,
 	getLocalStorageItem,
@@ -95,11 +95,15 @@ export class ChatDraftStore {
 		return revision;
 	}
 
-	appendBlock(chatId: string, block: string): ChatDraftAppendResult {
+	appendBlock(
+		chatId: string,
+		block: string,
+		options?: ChatDraftAppendOptions,
+	): ChatDraftAppendResult {
 		if (!chatId || !block.trim()) return 'unavailable';
 		this.load(chatId);
 		const current = this.view(chatId);
-		if (current.text.includes(block)) return 'duplicate';
+		if (!options?.allowDuplicate && current.text.includes(block)) return 'duplicate';
 		let separator = '\n\n';
 		if (current.text.length === 0 || current.text.endsWith('\n\n')) separator = '';
 		else if (current.text.endsWith('\n')) separator = '\n';

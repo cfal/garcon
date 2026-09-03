@@ -188,6 +188,19 @@ describe('ComposerState', () => {
 		expect(composer.draftAppendRequest?.requestId).toBe(2);
 	});
 
+	it('appends repeated identical blocks when duplicates are allowed', () => {
+		const { composer } = createComposer('chat-1');
+
+		expect(composer.appendDraftBlock('chat-1', 'quoted', { allowDuplicate: true })).toBe(
+			'appended',
+		);
+		expect(composer.appendDraftBlock('chat-1', 'quoted', { allowDuplicate: true })).toBe(
+			'appended',
+		);
+		expect(composer.inputText).toBe('quoted\n\nquoted');
+		expect(composer.draftAppendRequest?.requestId).toBe(2);
+	});
+
 	it('reports unavailable when no chat is active', () => {
 		const { composer } = createComposer(null);
 		expect(composer.appendDraftBlock('', 'Review block')).toBe('unavailable');
