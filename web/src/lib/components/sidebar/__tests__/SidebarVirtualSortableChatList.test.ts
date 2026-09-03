@@ -480,11 +480,13 @@ describe('SidebarVirtualSortableChatList', () => {
 			makeChat(0, {
 				status: 'running',
 				projectPath: '/tmp/project-a',
+				createdAt: '2024-12-20T00:00:00.000Z',
 				lastActivityAt: '2024-12-20T00:00:00.000Z',
 			}),
 			makeChat(1, {
 				status: 'running',
 				projectPath: '/tmp/project-b',
+				createdAt: '2024-12-21T00:00:00.000Z',
 				lastActivityAt: '2024-12-21T00:00:00.000Z',
 			}),
 			makeChat(2, { status: 'running', projectPath: '/tmp/project-a', isArchived: true }),
@@ -563,6 +565,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			makeChat(2, {
 				status: 'running',
 				projectPath: '/tmp/inactive-project',
+				createdAt: '2024-12-20T00:00:00.000Z',
 				lastActivityAt: '2024-12-20T00:00:00.000Z',
 			}),
 			makeChat(3, {

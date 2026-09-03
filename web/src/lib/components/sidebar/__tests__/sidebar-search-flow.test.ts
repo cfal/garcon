@@ -153,6 +153,7 @@ describe('sidebar search dialog flow', () => {
 				createChat('chat-inactive', 'Inactive chat', {
 					status: 'running',
 					projectPath: '/tmp/project-b',
+					createdAt: '2024-12-20T00:00:00.000Z',
 					lastActivityAt: '2024-12-20T00:00:00.000Z',
 				}),
 				createChat('chat-archived', 'Archived chat', {
@@ -201,6 +202,7 @@ describe('sidebar search dialog flow', () => {
 			createChat('chat-recent', 'Recently active chat', {
 				status: 'running',
 				projectPath: '/tmp/project-a',
+				createdAt: '2024-12-27T00:00:00.000Z',
 				lastActivityAt: '2024-12-27T00:00:00.000Z',
 			}),
 		];

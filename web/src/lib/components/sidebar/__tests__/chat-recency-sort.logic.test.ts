@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import { sortChatsByRecencyDesc } from '../chat-recency-sort';
+import { isSidebarChatInactive } from '../chat-inactivity';
+import { chatActivityTimeMs, sortChatsByRecencyDesc } from '../chat-recency-sort';
+
+// 16-digit Unix-microsecond chat ids as minted by the browser clock.
+function chatIdAt(epochMs: number): string {
+	return String(BigInt(epochMs) * 1000n).padStart(16, '0');
+}
 
 function makeChat(id: string, activity: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -83,5 +89,68 @@ describe('sortChatsByRecencyDesc', () => {
 		sortChatsByRecencyDesc(chats);
 
 		expect(chats.map((c) => c.id)).toEqual(originalOrder);
+	});
+
+	it('orders a timestamp-less chat by the creation time embedded in its id', () => {
+		const chats = [
+			makeChat(chatIdAt(Date.UTC(2026, 8, 3, 9, 0)), {}),
+			makeChat('older', { lastActivityAt: '2026-08-01T00:00:00.000Z' }),
+			makeChat('newer', { lastActivityAt: '2026-09-10T00:00:00.000Z' }),
+		];
+
+		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual([
+			'newer',
+			chatIdAt(Date.UTC(2026, 8, 3, 9, 0)),
+			'older',
+		]);
+	});
+
+	it('keeps a chat above clock-inverted server timestamps via its id', () => {
+		const chats = [
+			// Server clock stepped backward: projected activity predates every
+			// other chat, but the id still carries the browser creation time.
+			makeChat(chatIdAt(Date.UTC(2026, 8, 3, 9, 0)), {
+				createdAt: '2026-01-01T00:00:00.000Z',
+				lastActivityAt: '2026-01-01T00:00:00.000Z',
+			}),
+			makeChat('older', { lastActivityAt: '2026-08-01T00:00:00.000Z' }),
+		];
+
+		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual([
+			chatIdAt(Date.UTC(2026, 8, 3, 9, 0)),
+			'older',
+		]);
+	});
+
+	it('returns zero when no timestamp source is parsable', () => {
+		expect(chatActivityTimeMs(makeChat('legacy-id', {}))).toBe(0);
+	});
+
+	it('ignores a shaped but invalid chat id instead of throwing', () => {
+		const chats = [makeChat('0000000000000000', {}), makeChat('9100000000000000', {})];
+		expect(() => sortChatsByRecencyDesc(chats)).not.toThrow();
+		expect(chatActivityTimeMs(makeChat('0000000000000000', {}))).toBe(0);
+	});
+
+	it('orders by creation time when it postdates the recorded activity', () => {
+		const chats = [
+			makeChat('a', { createdAt: '2026-03-01T00:00:00.000Z', lastActivityAt: '2026-01-01T00:00:00.000Z' }),
+			makeChat('b', { createdAt: '2026-01-01T00:00:00.000Z', lastActivityAt: '2026-02-01T00:00:00.000Z' }),
+		];
+
+		expect(sortChatsByRecencyDesc(chats).map((chat) => chat.id)).toEqual(['a', 'b']);
+	});
+});
+
+describe('isSidebarChatInactive', () => {
+	it('classifies timestamp-less chats by the creation time embedded in their id', () => {
+		const now = new Date('2026-09-03T12:00:00.000Z');
+
+		expect(
+			isSidebarChatInactive(makeChat(chatIdAt(Date.UTC(2026, 8, 3, 9, 0)), {}), now, '3-days'),
+		).toBe(false);
+		expect(
+			isSidebarChatInactive(makeChat(chatIdAt(Date.UTC(2026, 7, 1, 9, 0)), {}), now, '3-days'),
+		).toBe(true);
 	});
 });

@@ -19,12 +19,12 @@ export const SIDEBAR_INACTIVITY_DURATION_MS: Record<SidebarInactivityDuration, n
 };
 
 /**
- * Reports whether a chat's last activity (or creation, when it never had
- * activity) is at least the configured duration before `now`. Chats without
- * parsable timestamps count as inactive.
+ * Reports whether the newest of a chat's activity, creation, and id-embedded
+ * timestamps is at least the configured duration before `now`. Chats without
+ * any parsable timestamp source or chat id count as inactive.
  */
 export function isSidebarChatInactive(
-	chat: Pick<ChatSessionRecord, 'lastActivityAt' | 'createdAt'>,
+	chat: Pick<ChatSessionRecord, 'id' | 'lastActivityAt' | 'createdAt'>,
 	now: Date,
 	duration: SidebarInactivityDuration,
 ): boolean {

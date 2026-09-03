@@ -220,6 +220,13 @@ describe('NewChatFormState', () => {
 			'direct-openai-compatible',
 		]);
 		mockModelCatalog.getModels.mockImplementation(modelsForAgent);
+		mockModelCatalog.getDefaultModel.mockImplementation((agentId: string) => {
+			if (agentId === 'claude') return 'opus';
+			if (agentId === 'codex') return 'gpt-5.4';
+			if (agentId === 'direct-anthropic-compatible') return 'acme_anthropic:acme-sonnet';
+			if (agentId === 'direct-openai-compatible') return 'zai_openai:glm-5.1';
+			return '';
+		});
 		mockModelCatalog.refreshIfStale.mockResolvedValue(undefined);
 		selectableAgentIds = [
 			'claude',
@@ -699,7 +706,7 @@ describe('NewChatFormState', () => {
 		expect(formState.buildConfig()).toBeNull();
 	});
 
-	it('falls back to the live default when the only automatic recent disappears', async () => {
+	it('blocks a displayed automatic selection when its recent disappears after refresh', async () => {
 		const refresh = deferred<void>();
 		let catalogFresh = false;
 		selectableAgentIds = ['codex'];
@@ -736,6 +743,9 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
 
 		refresh.resolve();
 		await refresh.promise;
@@ -743,7 +753,43 @@ describe('NewChatFormState', () => {
 		await Promise.resolve();
 
 		expect(formState.agentId).toBe('codex');
-		expect(formState.modelValue).toBe('gpt-5.4');
+		expect(formState.modelValue).toBe('stale_openai:gpt-stale');
+		expect(formState.modelSelectionError).not.toBeNull();
+		expect(formState.canSubmit).toBe(false);
+		expect(formState.buildConfig()).toBeNull();
+	});
+
+	it('adopts the default agent when discovery finds no usable recent', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-stale',
+						apiProviderId: 'stale',
+						modelEndpointId: 'stale_openai',
+						modelProtocol: 'openai-compatible',
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('opus');
+
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('claude');
+		expect(formState.modelValue).toBe('opus');
 		expect(formState.modelSelectionError).toBeNull();
 	});
 
@@ -780,6 +826,118 @@ describe('NewChatFormState', () => {
 
 		expect(formState.agentId).toBe('codex');
 		expect(formState.modelValue).toBe('gpt-5.4');
+	});
+
+	it('applies a discovered recent even when the prompt was typed first', async () => {
+		const refresh = deferred<void>();
+		selectableAgentIds = [];
+		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		formState.projectPath = '/valid/path';
+		formState.validationStatus = 'valid';
+		formState.firstMessage = 'Start this task';
+
+		selectableAgentIds = ['claude', 'codex'];
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.agentId).toBe('codex');
+		expect(formState.modelValue).toBe('gpt-5.4');
+		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it('adopts a live model after discovery when the empty default was stored', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['opencode'];
+		mockModelCatalog.getModels.mockImplementation(() =>
+			catalogFresh ? [{ value: 'glm-5.1', label: 'GLM-5.1' }] : [],
+		);
+		mockModelCatalog.getDefaultModel.mockImplementation(() => '');
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('');
+		expect(formState.modelSelectionPending).toBe(true);
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.modelValue).toBe('glm-5.1');
+		expect(formState.modelSelectionError).toBeNull();
+	});
+
+	it('blocks a preserved native selection when only an endpoint exposes the same model', async () => {
+		const refresh = deferred<void>();
+		let catalogFresh = false;
+		selectableAgentIds = ['codex'];
+		mockModelCatalog.getModels.mockImplementation((agentId: string) => {
+			if (agentId !== 'codex') return modelsForAgent(agentId);
+			return catalogFresh
+				? [
+						{
+							value: 'live_openai:gpt-shared',
+							label: 'Live: GPT Shared',
+							rawModel: 'gpt-shared',
+							apiProviderId: 'live-provider',
+							endpointId: 'live_openai',
+							protocol: 'openai-compatible',
+						},
+					]
+				: [{ value: 'gpt-shared', label: 'GPT Shared' }];
+		});
+		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
+			await refresh.promise;
+			catalogFresh = true;
+		});
+		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			makeSnapshot({
+				recentAgentSettings: [
+					{
+						agentId: 'codex',
+						model: 'gpt-shared',
+						apiProviderId: null,
+						modelEndpointId: null,
+						modelProtocol: null,
+					},
+				],
+			}),
+		);
+
+		await formState.loadSettingsAndModels();
+		expect(formState.modelValue).toBe('gpt-shared');
+
+		refresh.resolve();
+		await refresh.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(formState.modelValue).toBe('gpt-shared');
+		expect(formState.modelSelectionTarget?.modelEndpointId).toBeNull();
+		expect(formState.modelSelectionError).not.toBeNull();
+		expect(formState.buildConfig()).toBeNull();
 	});
 
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
