@@ -412,7 +412,7 @@ describe("selected-file commits", () => {
       await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
 
-      await git.commit({
+      const result = await git.commit({
         projectPath,
         message: "selected change",
         files: ["a.txt", "new.txt"],
@@ -429,8 +429,76 @@ describe("selected-file commits", () => {
         "--cached",
         "--name-only",
       ]);
+      expect(result.commitScope).toBe("selected-files");
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "new.txt"]);
       expect(staged.stdout.trim()).toBe("unrelated.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report a durable commit as failed when the real index is locked", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-locked-index-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+    const indexLockPath = path.join(projectPath, ".git", "index.lock");
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(indexLockPath, "locked\n", "utf-8");
+
+      await expect(git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      })).resolves.toMatchObject({
+        success: true,
+        commitScope: "selected-files",
+      });
+
+      const committed = await runGitCommand(projectPath, ["show", "HEAD:a.txt"]);
+      expect(committed.stdout).toBe("selected\n");
+    } finally {
+      await fs.rm(indexLockPath, { force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it("removes stale temporary index files before committing", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-stale-index-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      const staleIndexPath = path.join(projectPath, ".git", ".garcon-index-stale");
+      const staleLockPath = `${staleIndexPath}.lock`;
+      await fs.writeFile(staleIndexPath, "stale\n", "utf-8");
+      await fs.writeFile(staleLockPath, "stale\n", "utf-8");
+      const staleTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      await Promise.all([
+        fs.utimes(staleIndexPath, staleTime, staleTime),
+        fs.utimes(staleLockPath, staleTime, staleTime),
+      ]);
+
+      await git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      });
+
+      await expect(fs.access(staleIndexPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(fs.access(staleLockPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -568,13 +636,14 @@ describe("selected-file commits", () => {
         .rejects.toThrow("CONFLICT");
       await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
 
-      await git.commit({
+      const result = await git.commit({
         projectPath,
         message: "merge feature",
         files: ["a.txt"],
       });
 
       const parents = await runGitCommand(projectPath, ["show", "-s", "--format=%P", "HEAD"]);
+      expect(result.commitScope).toBe("whole-index");
       expect(parents.stdout.trim().split(" ")).toHaveLength(2);
       const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
       expect(status.stdout).toBe("");

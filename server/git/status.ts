@@ -22,6 +22,7 @@ import type {
   CommitOptions,
   FileOptions,
   GitAgentRunner,
+  GitCommitResult,
   GitRefOption,
   GitRefsResponse,
   GitRefsOptions,
@@ -493,7 +494,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout, message: 'Initial commit created successfully' };
   }
 
-  async function commit({ projectPath, message, files }: CommitOptions): Promise<unknown> {
+  async function commit({ projectPath, message, files }: CommitOptions): Promise<GitCommitResult> {
     await assertGitRepository(projectPath);
     for (const file of files) {
       if (!file) throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot be empty.');
@@ -514,14 +515,14 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return selectedFileCommitLock.runExclusive(lockKey, async () => {
       if (!(await requiresWholeIndexCommit(projectPath))) {
         const stdout = await commitSelectedFiles(projectPath, message, files);
-        return { success: true, output: stdout };
+        return { success: true, output: stdout, commitScope: 'selected-files' };
       }
 
       for (const file of files) {
         await runGit(projectPath, ['add', '--', literalGitPathspec(file)]);
       }
       const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
-      return { success: true, output: stdout };
+      return { success: true, output: stdout, commitScope: 'whole-index' };
     });
   }
 

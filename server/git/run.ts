@@ -227,7 +227,7 @@ export async function runGitWithStdin(
   args: string[],
   input: string,
   options: GitCommandOptions = {},
-): Promise<void> {
+): Promise<GitCommandResult> {
   for (let attempt = 0; ; attempt++) {
     const abortState = createGitAbortState(options);
     let proc: Bun.Subprocess<Blob, 'pipe', 'pipe'>;
@@ -248,21 +248,22 @@ export async function runGitWithStdin(
       proc.kill();
     };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
-    const [stderr, exitCode] = await Promise.all([
+    const [stdout, stderr, exitCode] = await Promise.all([
+      streamText(proc.stdout).catch(() => ''),
       streamText(proc.stderr).catch(() => ''),
       proc.exited,
     ]).finally(() => {
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
     });
-    if (exitCode === 0) return;
+    if (exitCode === 0) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       await sleep(GIT_LOCK_RETRY_DELAY_MS);
       continue;
     }
 
-    throw makeGitProcessError(args, exitCode, '', stderr, {
+    throw makeGitProcessError(args, exitCode, stdout, stderr, {
       timedOut: abortState.timedOut(),
       aborted: abortState.aborted(),
     });

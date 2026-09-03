@@ -246,6 +246,12 @@ export interface CommitOptions extends ProjectOptions {
   files: string[];
 }
 
+export interface GitCommitResult {
+  success: true;
+  output: string;
+  commitScope: 'selected-files' | 'whole-index';
+}
+
 export interface GitRefsOptions extends ProjectOptions {
   query?: string;
   limit?: number;
@@ -911,7 +917,7 @@ export interface GitService {
   getDiff(options: FileOptions): Promise<unknown>;
   getFileWithDiff(options: FileOptions): Promise<unknown>;
   initialCommit(options: ProjectOptions): Promise<unknown>;
-  commit(options: CommitOptions): Promise<unknown>;
+  commit(options: CommitOptions): Promise<GitCommitResult>;
   getBranches(options: ProjectOptions): Promise<unknown>;
   getRefs(options: GitRefsOptions): Promise<GitRefsResponse>;
   checkout(options: CheckoutOptions): Promise<unknown>;

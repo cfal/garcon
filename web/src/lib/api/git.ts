@@ -427,6 +427,7 @@ interface SuccessResponse {
 	error?: string;
 	details?: string;
 	worktreePath?: string;
+	commitScope?: 'selected-files' | 'whole-index';
 }
 
 export interface GenerateCommitMessageResponse {
