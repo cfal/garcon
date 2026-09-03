@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { assertGitRepository, GitOutputLimitError, runGit } from '../run.js';
+import {
+  assertGitRepository,
+  GitOutputLimitError,
+  runGit,
+  runGitWithStdin,
+} from '../run.js';
 
 function textStream(value) {
   return new ReadableStream({
@@ -59,6 +64,41 @@ describe('runGit', () => {
     ).rejects.toBeInstanceOf(GitOutputLimitError);
     expect(kill).toHaveBeenCalledTimes(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops oversized stderr without retrying the process', async () => {
+    const kill = mock(() => undefined);
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream('output'),
+      stderr: textStream('diagnostic over limit'),
+      exited: Promise.resolve(1),
+      kill,
+    }));
+
+    await expect(
+      runGit('/repo', ['status'], { maxStderrBytes: 5 }),
+    ).rejects.toMatchObject({
+      stream: 'stderr',
+      maxBytes: 5,
+    });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures stdout and enforces limits for stdin commands', async () => {
+    spawnMock.mockImplementation(() => ({
+      stdout: textStream('committed\n'),
+      stderr: textStream(''),
+      exited: Promise.resolve(0),
+      kill: mock(() => undefined),
+    }));
+
+    await expect(
+      runGitWithStdin('/repo', ['commit'], 'paths\0', { maxStdoutBytes: 5 }),
+    ).rejects.toMatchObject({
+      stream: 'stdout',
+      maxBytes: 5,
+    });
   });
 
   it('kills an active process and preserves caller abort metadata', async () => {

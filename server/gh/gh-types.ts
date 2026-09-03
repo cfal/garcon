@@ -103,6 +103,8 @@ export interface PullRequestDetail {
 export interface GhCommandOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  maxStdoutBytes?: number;
+  maxStderrBytes?: number;
 }
 
 export interface GhCommandResult {

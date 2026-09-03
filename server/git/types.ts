@@ -22,6 +22,7 @@ export interface GitCommandOptions {
   timeoutMs?: number;
   disableOptionalLocks?: boolean;
   maxStdoutBytes?: number;
+  maxStderrBytes?: number;
   env?: NodeJS.ProcessEnv;
 }
 

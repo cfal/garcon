@@ -1,5 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
+import { readTextStreamWithLimit } from '../lib/bounded-text-stream.js';
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -9,6 +10,8 @@ import type {
 
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
+const GIT_DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
+const GIT_DEFAULT_MAX_STDERR_BYTES = 2 * 1024 * 1024;
 
 export function gitCommandEnv(options: GitCommandOptions): NodeJS.ProcessEnv | undefined {
   if (!options.disableOptionalLocks && !options.env) return undefined;
@@ -34,39 +37,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function streamText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
-  return stream ? new Response(stream).text() : Promise.resolve('');
-}
-
 export class GitOutputLimitError extends Error {
-  constructor(readonly maxBytes: number) {
-    super(`Git output exceeded the ${maxBytes} byte limit.`);
+  constructor(
+    readonly stream: 'stdout' | 'stderr',
+    readonly maxBytes: number,
+  ) {
+    super(`Git ${stream} exceeded the ${maxBytes} byte limit.`);
     this.name = 'GitOutputLimitError';
   }
 }
 
-async function streamTextWithLimit(
+function readGitOutput(
   stream: ReadableStream<Uint8Array> | null,
+  streamName: 'stdout' | 'stderr',
   maxBytes: number,
 ): Promise<string> {
-  if (!stream) return '';
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
-  let byteCount = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      byteCount += next.value.byteLength;
-      if (byteCount > maxBytes) throw new GitOutputLimitError(maxBytes);
-      chunks.push(decoder.decode(next.value, { stream: true }));
-    }
-    chunks.push(decoder.decode());
-    return chunks.join('');
-  } finally {
-    reader.releaseLock();
-  }
+  return readTextStreamWithLimit(
+    stream,
+    maxBytes,
+    () => new GitOutputLimitError(streamName, maxBytes),
+  );
 }
 
 function createGitAbortState(options: GitCommandOptions): {
@@ -155,18 +145,25 @@ export async function runGit(
     };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
     let outputLimitError: GitOutputLimitError | null = null;
-    const [stdout, stderr, exitCode] = await Promise.all([
-      (options.maxStdoutBytes === undefined
-        ? streamText(proc.stdout)
-        : streamTextWithLimit(proc.stdout, options.maxStdoutBytes)
-      ).catch((error) => {
+    const captureOutput = (output: Promise<string>): Promise<string> =>
+      output.catch((error) => {
         if (error instanceof GitOutputLimitError) {
-          outputLimitError = error;
+          outputLimitError ??= error;
           proc.kill();
         }
         return '';
-      }),
-      streamText(proc.stderr).catch(() => ''),
+      });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      captureOutput(readGitOutput(
+        proc.stdout,
+        'stdout',
+        options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES,
+      )),
+      captureOutput(readGitOutput(
+        proc.stderr,
+        'stderr',
+        options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
+      )),
       proc.exited,
     ]).finally(() => {
       abortState.signal?.removeEventListener('abort', abortListener);
@@ -248,14 +245,32 @@ export async function runGitWithStdin(
       proc.kill();
     };
     abortState.signal?.addEventListener('abort', abortListener, { once: true });
+    let outputLimitError: GitOutputLimitError | null = null;
+    const captureOutput = (output: Promise<string>): Promise<string> =>
+      output.catch((error) => {
+        if (error instanceof GitOutputLimitError) {
+          outputLimitError ??= error;
+          proc.kill();
+        }
+        return '';
+      });
     const [stdout, stderr, exitCode] = await Promise.all([
-      streamText(proc.stdout).catch(() => ''),
-      streamText(proc.stderr).catch(() => ''),
+      captureOutput(readGitOutput(
+        proc.stdout,
+        'stdout',
+        options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES,
+      )),
+      captureOutput(readGitOutput(
+        proc.stderr,
+        'stderr',
+        options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
+      )),
       proc.exited,
     ]).finally(() => {
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
     });
+    if (outputLimitError) throw outputLimitError;
     if (exitCode === 0) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
