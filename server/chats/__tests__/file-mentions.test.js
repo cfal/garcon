@@ -70,6 +70,33 @@ describe('resolveFileMentionsInCommand', () => {
     expect(resolved).not.toContain('do not include');
   });
 
+  it('rejects a directory replacement between resolution and open', async () => {
+    const sourceDirectory = path.join(projectPath, 'src');
+    const originalDirectory = path.join(projectPath, 'original-src');
+    const outsideDirectory = path.join(path.dirname(projectPath), 'outside-src');
+    await fs.mkdir(outsideDirectory);
+    await fs.writeFile(path.join(outsideDirectory, 'main.ts'), 'do not include\n', 'utf8');
+    const originalOpen = fs.open.bind(fs);
+    let replaced = false;
+    const open = spyOn(fs, 'open').mockImplementation(async (filePath, ...args) => {
+      if (!replaced && filePath === path.join(sourceDirectory, 'main.ts')) {
+        replaced = true;
+        await fs.rename(sourceDirectory, originalDirectory);
+        await fs.symlink(outsideDirectory, sourceDirectory, 'dir');
+      }
+      return originalOpen(filePath, ...args);
+    });
+
+    try {
+      const resolved = await resolveFileMentionsInCommand('read @src/main.ts', projectPath);
+
+      expect(resolved).toBe('read @src/main.ts');
+      expect(resolved).not.toContain('do not include');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   it('strips resolved context back to the user-authored prompt', async () => {
     const resolved = await resolveFileMentionsInCommand('read @src/main.ts', projectPath);
 

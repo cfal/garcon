@@ -1,4 +1,5 @@
-import { promises as fs } from 'fs';
+import { constants, promises as fs, type Stats } from 'fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'path';
 import { FILE_CONTEXT_SEPARATOR, stripResolvedFileMentionContext } from '../agents/shared/file-mention-context.js';
 
@@ -74,14 +75,45 @@ function pathCandidates(inputPath: string): string[] {
 	return candidates;
 }
 
-async function resolveExistingFile(projectPath: string, realProjectPath: string, inputPath: string): Promise<string | null> {
+interface OpenedMentionFile {
+	filePath: string;
+	handle: FileHandle;
+}
+
+function isSameFile(left: Stats, right: Stats): boolean {
+	return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function openExistingFile(
+	projectPath: string,
+	realProjectPath: string,
+	inputPath: string,
+): Promise<OpenedMentionFile | null> {
 	for (const candidate of pathCandidates(inputPath)) {
 		const resolved = resolveWithinProject(projectPath, candidate);
 		if (!resolved) continue;
 		const realPath = await fs.realpath(resolved).catch(() => null);
 		if (!realPath || !isWithinRoot(realProjectPath, realPath)) continue;
-		const stat = await fs.stat(realPath).catch(() => null);
-		if (stat?.isFile()) return realPath;
+		const handle = await fs.open(
+			realPath,
+			constants.O_RDONLY | constants.O_NOFOLLOW,
+		).catch(() => null);
+		if (!handle) continue;
+		let accepted = false;
+		try {
+			const openedStat = await handle.stat();
+			if (!openedStat.isFile()) continue;
+			const verifiedPath = await fs.realpath(realPath);
+			if (!isWithinRoot(realProjectPath, verifiedPath)) continue;
+			const verifiedStat = await fs.stat(verifiedPath);
+			if (!isSameFile(openedStat, verifiedStat)) continue;
+			accepted = true;
+			return { filePath: verifiedPath, handle };
+		} catch {
+			continue;
+		} finally {
+			if (!accepted) await handle.close().catch(() => undefined);
+		}
 	}
 	return null;
 }
@@ -110,14 +142,12 @@ function formatFileSection(relativePath: string, content: string, truncated: boo
 	return `@${relativePath}\n${fence}\n${content}${suffix}\n${fence}`;
 }
 
-async function readFilePrefix(filePath: string, contentLimit: number): Promise<{
+async function readFilePrefix(handle: FileHandle, contentLimit: number): Promise<{
 	buffer: Buffer;
 	contentLength: number;
 	truncated: boolean;
 } | null> {
 	const readLimit = Math.max(BINARY_SAMPLE_BYTES, contentLimit + 1);
-	const handle = await fs.open(filePath, 'r').catch(() => null);
-	if (!handle) return null;
 	try {
 		const buffer = Buffer.allocUnsafe(readLimit);
 		let bytesRead = 0;
@@ -138,8 +168,6 @@ async function readFilePrefix(filePath: string, contentLimit: number): Promise<{
 		};
 	} catch {
 		return null;
-	} finally {
-		await handle.close().catch(() => undefined);
 	}
 }
 
@@ -151,36 +179,44 @@ export async function resolveFileMentionsInCommand(command: string, projectPath:
 
 	const realProjectPath = await fs.realpath(projectPath).catch(() => null);
 	if (!realProjectPath) return command;
-	const resolvedFiles: string[] = [];
+	const resolvedFiles: OpenedMentionFile[] = [];
 	const seen = new Set<string>();
 	for (const token of tokens) {
 		if (resolvedFiles.length >= MAX_MENTIONED_FILES) break;
-		const filePath = await resolveExistingFile(projectPath, realProjectPath, token.path);
-		if (!filePath || seen.has(filePath)) continue;
-		seen.add(filePath);
-		resolvedFiles.push(filePath);
+		const opened = await openExistingFile(projectPath, realProjectPath, token.path);
+		if (!opened) continue;
+		if (seen.has(opened.filePath)) {
+			await opened.handle.close().catch(() => undefined);
+			continue;
+		}
+		seen.add(opened.filePath);
+		resolvedFiles.push(opened);
 	}
 	if (resolvedFiles.length === 0) return command;
 
 	const sections: string[] = [];
 	let totalBytes = 0;
-	for (const filePath of resolvedFiles) {
-		const relativePath = displayPath(realProjectPath, filePath);
-		if (totalBytes >= MAX_TOTAL_BYTES) {
-			sections.push(`@${relativePath}\n[Garcon omitted this file because the @file context limit was reached.]`);
-			continue;
+	try {
+		for (const { filePath, handle } of resolvedFiles) {
+			const relativePath = displayPath(realProjectPath, filePath);
+			if (totalBytes >= MAX_TOTAL_BYTES) {
+				sections.push(`@${relativePath}\n[Garcon omitted this file because the @file context limit was reached.]`);
+				continue;
+			}
+			const remainingBytes = MAX_TOTAL_BYTES - totalBytes;
+			const allowedBytes = Math.min(MAX_FILE_BYTES, remainingBytes);
+			const prefix = await readFilePrefix(handle, allowedBytes);
+			if (!prefix) continue;
+			if (isProbablyBinary(prefix.buffer)) {
+				sections.push(`@${relativePath}\n[Garcon omitted this binary file.]`);
+				continue;
+			}
+			const content = prefix.buffer.subarray(0, prefix.contentLength).toString('utf8');
+			totalBytes += prefix.contentLength;
+			sections.push(formatFileSection(relativePath, content, prefix.truncated));
 		}
-		const remainingBytes = MAX_TOTAL_BYTES - totalBytes;
-		const allowedBytes = Math.min(MAX_FILE_BYTES, remainingBytes);
-		const prefix = await readFilePrefix(filePath, allowedBytes);
-		if (!prefix) continue;
-		if (isProbablyBinary(prefix.buffer)) {
-			sections.push(`@${relativePath}\n[Garcon omitted this binary file.]`);
-			continue;
-		}
-		const content = prefix.buffer.subarray(0, prefix.contentLength).toString('utf8');
-		totalBytes += prefix.contentLength;
-		sections.push(formatFileSection(relativePath, content, prefix.truncated));
+	} finally {
+		await Promise.all(resolvedFiles.map(({ handle }) => handle.close().catch(() => undefined)));
 	}
 
 	if (sections.length === 0) return command;
