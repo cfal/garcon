@@ -133,7 +133,7 @@ export class GitRepositoryController {
 	}
 
 	surfaceNotice(message: string): void {
-		if (this.noticeTimer) clearTimeout(this.noticeTimer);
+		this.dismissNotice();
 		this.lastNotice = message;
 		this.noticeTimer = setTimeout(() => {
 			this.lastNotice = null;

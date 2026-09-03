@@ -76,7 +76,7 @@ function pathCandidates(inputPath: string): string[] {
 }
 
 interface OpenedMentionFile {
-	filePath: string;
+	canonicalPath: string;
 	handle: FileHandle;
 }
 
@@ -108,7 +108,7 @@ async function openExistingFile(
 			const verifiedStat = await fs.stat(verifiedPath);
 			if (!isSameFile(openedStat, verifiedStat)) continue;
 			accepted = true;
-			return { filePath: verifiedPath, handle };
+			return { canonicalPath: verifiedPath, handle };
 		} catch {
 			continue;
 		} finally {
@@ -185,11 +185,11 @@ export async function resolveFileMentionsInCommand(command: string, projectPath:
 		if (resolvedFiles.length >= MAX_MENTIONED_FILES) break;
 		const opened = await openExistingFile(projectPath, realProjectPath, token.path);
 		if (!opened) continue;
-		if (seen.has(opened.filePath)) {
+		if (seen.has(opened.canonicalPath)) {
 			await opened.handle.close().catch(() => undefined);
 			continue;
 		}
-		seen.add(opened.filePath);
+		seen.add(opened.canonicalPath);
 		resolvedFiles.push(opened);
 	}
 	if (resolvedFiles.length === 0) return command;
@@ -197,8 +197,8 @@ export async function resolveFileMentionsInCommand(command: string, projectPath:
 	const sections: string[] = [];
 	let totalBytes = 0;
 	try {
-		for (const { filePath, handle } of resolvedFiles) {
-			const relativePath = displayPath(realProjectPath, filePath);
+		for (const { canonicalPath, handle } of resolvedFiles) {
+			const relativePath = displayPath(realProjectPath, canonicalPath);
 			if (totalBytes >= MAX_TOTAL_BYTES) {
 				sections.push(`@${relativePath}\n[Garcon omitted this file because the @file context limit was reached.]`);
 				continue;

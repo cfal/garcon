@@ -549,10 +549,7 @@ async function migrateInstalledChatSettingsBestEffort(
   signal: AbortSignal,
 ): Promise<JsonObject> {
   if (!isRecord(rawSettingsById)) return {};
-  const result: Record<string, JsonValue> = {};
-  for (const [agentId, value] of Object.entries(rawSettingsById)) {
-    result[agentId] = asJsonValue(value);
-  }
+  const result = { ...rawSettingsById };
   for (const integration of integrations.list()) {
     signal.throwIfAborted();
     const agentId = integration.descriptor.id;

@@ -42,9 +42,9 @@ interface ApiProviderModelDiscoveryFlatInput {
   modelDiscovery: ModelDiscoveryKind;
 }
 
-interface StoredDiscoveryCredential {
+interface StoredDiscoveryCredentialResult {
   apiKey?: string;
-  originMismatch: boolean;
+  hasKeyForDifferentOrigin: boolean;
 }
 
 export interface ApiProviderServiceDeps {
@@ -427,7 +427,7 @@ export class ApiProviderService {
   async discoverModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderModelDiscoveryInput(input);
     const storedCredential = flat.apiKey ? null : this.#storedApiKeyForDiscovery(flat);
-    if (storedCredential?.originMismatch) {
+    if (storedCredential?.hasKeyForDifferentOrigin) {
       return {
         success: false,
         error: 'Enter the API key for this base URL before fetching models.',
@@ -445,15 +445,18 @@ export class ApiProviderService {
   #storedApiKeyForDiscovery(input: Pick<
     ApiProviderModelDiscoveryFlatInput,
     'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl'
-  >): StoredDiscoveryCredential {
-    let originMismatch = false;
+  >): StoredDiscoveryCredentialResult {
+    let hasKeyForDifferentOrigin = false;
     if (input.endpointId) {
       const resolved = this.deps.store.getEndpoint(input.endpointId);
       if (resolved?.endpoint.protocol === input.protocol) {
         if (hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)) {
-          return { apiKey: resolved.endpoint.apiKey || undefined, originMismatch: false };
+          return {
+            apiKey: resolved.endpoint.apiKey || undefined,
+            hasKeyForDifferentOrigin: false,
+          };
         }
-        if (resolved.endpoint.apiKey) originMismatch = true;
+        if (resolved.endpoint.apiKey) hasKeyForDifferentOrigin = true;
       }
     }
     if (input.apiProviderId) {
@@ -464,9 +467,16 @@ export class ApiProviderService {
       const endpoint = protocolEndpoints?.find(
         (entry) => hasSameOrigin(entry.baseUrl, input.baseUrl),
       );
-      if (endpoint) return { apiKey: endpoint.apiKey || undefined, originMismatch: false };
-      if (protocolEndpoints?.some((entry) => entry.apiKey)) originMismatch = true;
+      if (endpoint) {
+        return {
+          apiKey: endpoint.apiKey || undefined,
+          hasKeyForDifferentOrigin: false,
+        };
+      }
+      if (protocolEndpoints?.some((entry) => entry.apiKey)) {
+        hasKeyForDifferentOrigin = true;
+      }
     }
-    return { originMismatch };
+    return { hasKeyForDifferentOrigin };
   }
 }
