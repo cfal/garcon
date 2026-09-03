@@ -248,6 +248,7 @@
 	onManageTags={() => {}}
 	{chatListAutohideAvailable}
 	onShowScheduledPrompts={() => {}}
+	onShowPreambles={() => {}}
 	onShowSettings={() => {}}
 	newWindowBlocked={false}
 />

@@ -21,6 +21,7 @@ export interface NewChatDialogSeed {
 export class AppShellStore {
 	showSettings = $state(false);
 	showScheduledPrompts = $state(false);
+	showPreambles = $state(false);
 	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
 	settingsTab = $state<SettingsTab>('providers');
@@ -49,6 +50,7 @@ export class AppShellStore {
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
+		this.showPreambles = false;
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
 	}
@@ -61,6 +63,7 @@ export class AppShellStore {
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
+		this.showPreambles = false;
 		this.showOnboardingWizard = true;
 	}
 
@@ -72,6 +75,7 @@ export class AppShellStore {
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showOnboardingWizard = false;
+		this.showPreambles = false;
 		this.showScheduledPrompts = true;
 	}
 
@@ -79,10 +83,23 @@ export class AppShellStore {
 		this.showScheduledPrompts = false;
 	}
 
+	openPreambles(): void {
+		this.dismissSnippets();
+		this.showSettings = false;
+		this.showScheduledPrompts = false;
+		this.showOnboardingWizard = false;
+		this.showPreambles = true;
+	}
+
+	closePreambles(): void {
+		this.showPreambles = false;
+	}
+
 	openSnippets(returnFocus?: () => void): void {
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
+		this.showPreambles = false;
 		this.#snippetsReturnFocus = returnFocus ?? null;
 		this.showSnippets = true;
 	}
