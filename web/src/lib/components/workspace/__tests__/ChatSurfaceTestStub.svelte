@@ -32,6 +32,8 @@
 		decidePermission: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'permission'),
 		exitPlanMode: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'plan'),
 		fork: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'fork'),
+		appendToDraft: (surfaceId, chatId, block) =>
+			recordPanelAction(surfaceId, chatId, `append-draft:${block}`),
 		generateTitle: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'title'),
 		interruptQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'interrupt'),
 		steerQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'steer'),

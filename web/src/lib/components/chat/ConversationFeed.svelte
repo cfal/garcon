@@ -65,6 +65,7 @@
 		isPreparingInitialScroll?: boolean;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		isVisible: boolean;
 		announcementsEnabled?: boolean;
@@ -92,6 +93,7 @@
 		isPreparingInitialScroll = false,
 		isProcessing = false,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		isVisible,
 		announcementsEnabled = true,
@@ -411,6 +413,7 @@
 						{onPermissionDecision}
 						{onExitPlanMode}
 						onForkChat={canShowForkAtMessage ? onForkChat : undefined}
+						{onAppendToDraft}
 						{onGenerateTitleFromMessage}
 						canForkAtMessageNow={canUseForkAtMessage}
 					/>
