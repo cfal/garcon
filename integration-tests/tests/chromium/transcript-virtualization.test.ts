@@ -249,6 +249,8 @@ function mixedOrderingRows(firstOrdinal: number): {
               message,
               attachments: [],
               steer: false,
+              preambleBoundary: null,
+              preamblePrefixReceipt: null,
             },
             providerMeta: null,
           }
