@@ -180,6 +180,24 @@ describe('PaginatedCodexHistorySource', () => {
     });
   });
 
+  it('tolerates a turn appended between the item and turn scans', async () => {
+    const source = new PaginatedCodexHistorySource(
+      profile,
+      () => clientForPages(
+        onePage([turn('turn-1', 1_753_056_000), turn('turn-2', 1_753_056_002)]),
+        onePage([entry('turn-1', {
+          type: 'agentMessage', id: 'assistant-1', text: 'before the race', phase: null, memoryCitation: null,
+        })]),
+      ),
+      noEvidence,
+    );
+
+    const messages = await source.load(new AbortController().signal);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ type: 'assistant-message', content: 'before the race' });
+  });
+
   it('supplements an itemless turn with exact client ids from rollout evidence', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codex-evidence-'));
     const nativePath = path.join(directory, 'rollout.jsonl');
@@ -259,8 +277,8 @@ describe('PaginatedCodexHistorySource', () => {
       const source = new PaginatedCodexHistorySource(
         { ...profile, historyBase: { threadId: 'thread-parent', endOrdinalExclusive: 2, endByteOffset: 50 } },
         () => ({
-          listThreadTurns: mock(async () => { throw new Error(failure); }),
-          listThreadItems: mock(async () => { throw new Error('must not list items'); }),
+          listThreadItems: mock(async () => { throw new Error(failure); }),
+          listThreadTurns: mock(async () => { throw new Error('must not list turns'); }),
           shutdown: mock(),
         }),
         noEvidence,
@@ -276,11 +294,11 @@ describe('PaginatedCodexHistorySource', () => {
   it('stops between page scans after abort and shuts down', async () => {
     const controller = new AbortController();
     const shutdown = mock();
-    const listThreadTurns = mock(async () => {
+    const listThreadItems = mock(async () => {
       controller.abort(new Error('stop history'));
       return { data: [], nextCursor: null, backwardsCursor: null };
     });
-    const listThreadItems = mock(async () => ({ data: [], nextCursor: null, backwardsCursor: null }));
+    const listThreadTurns = mock(async () => ({ data: [], nextCursor: null, backwardsCursor: null }));
     const source = new PaginatedCodexHistorySource(
       profile,
       () => ({ listThreadTurns, listThreadItems, shutdown }),
@@ -288,8 +306,8 @@ describe('PaginatedCodexHistorySource', () => {
     );
 
     await expect(source.load(controller.signal)).rejects.toThrow('stop history');
-    expect(listThreadTurns).toHaveBeenCalledTimes(1);
-    expect(listThreadItems).not.toHaveBeenCalled();
+    expect(listThreadItems).toHaveBeenCalledTimes(1);
+    expect(listThreadTurns).not.toHaveBeenCalled();
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
 });

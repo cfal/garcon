@@ -51,9 +51,13 @@ export class PaginatedCodexHistorySource {
     signal.throwIfAborted();
     const client = this.createClient();
     try {
+      // Items load before turn shells: a turn always exists before its items,
+      // so a turn appended between the scans only leaves an empty trailing
+      // shell. The reverse order would orphan that turn's items and fail the
+      // whole load against an actively growing thread.
+      const itemEntries = await this.#loadItemEntries(client, signal);
       const turnShells = await this.#loadTurnShells(client, signal);
       const turnById = new Map(turnShells.map((turn) => [turn.turnId, turn]));
-      const itemEntries = await this.#loadItemEntries(client, signal);
       const providerItems = convertProviderItems(itemEntries, turnById);
       const evidence = await this.loadUserMessageEvidence(
         this.profile.nativePath,
