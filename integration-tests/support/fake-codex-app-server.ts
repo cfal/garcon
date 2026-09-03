@@ -23,6 +23,7 @@ const emittedMessageControls = new Set<string>();
 let processRole: 'started' | 'resumed' | null = null;
 let processThreadId: string | null = null;
 let processTurnId: string | null = null;
+let interruptedTurnId: string | null = null;
 let buffered = '';
 
 const routingControlPoll = routingControlDirectory
@@ -89,6 +90,13 @@ function respond(line: string): void {
   }
   if (request.method === 'turn/interrupt' && routingControlDirectory) {
     write(request.id, {});
+    if (processThreadId && processTurnId) {
+      interruptedTurnId = processTurnId;
+      notify('turn/completed', {
+        threadId: processThreadId,
+        turn: codexTurn(processTurnId, 'interrupted', new Date().toISOString()),
+      });
+    }
     return;
   }
   if (request.method === 'thread/list') {
@@ -131,44 +139,21 @@ function respond(line: string): void {
     return;
   }
   if (request.method === 'thread/turns/list') {
+    const history = process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1'
+      ? fixturePaginatedHistory()
+      : paginatedHistoryForThread(request.params);
     write(request.id, {
-      data: process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1' ? [{
-        id: 'turn-1',
-        items: [],
-        itemsView: 'notLoaded',
-        status: 'completed',
-        error: null,
-        startedAt: 1_753_056_000,
-        completedAt: 1_753_056_001,
-        durationMs: 1_000,
-      }] : [],
+      data: history.turns,
       nextCursor: null,
       backwardsCursor: null,
     });
     return;
   }
   if (request.method === 'thread/items/list') {
-    const data = process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1' ? [
-      {
-        turnId: 'turn-1',
-        item: {
-          type: 'userMessage',
-          id: 'user-1',
-          content: [{ type: 'text', text: 'paginated prompt' }],
-        },
-      },
-      {
-        turnId: 'turn-1',
-        item: {
-          type: 'agentMessage',
-          id: 'assistant-1',
-          text: 'paginated answer',
-          phase: null,
-          memoryCitation: null,
-        },
-      },
-    ] : [];
-    write(request.id, { data, nextCursor: null, backwardsCursor: null });
+    const history = process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1'
+      ? fixturePaginatedHistory()
+      : paginatedHistoryForThread(request.params);
+    write(request.id, { data: history.items, nextCursor: null, backwardsCursor: null });
     return;
   }
   if (request.method === 'thread/fork') {
@@ -511,7 +496,7 @@ function notify(method: string, params: unknown): void {
 
 function codexTurn(
   id: string,
-  status: 'inProgress' | 'completed',
+  status: 'inProgress' | 'completed' | 'interrupted',
   timestamp: string,
 ): Record<string, unknown> {
   const startedAt = Date.parse(timestamp);
@@ -522,9 +507,229 @@ function codexTurn(
     status,
     error: null,
     startedAt,
-    completedAt: status === 'completed' ? startedAt : null,
-    durationMs: status === 'completed' ? 0 : null,
+    completedAt: status === 'inProgress' ? null : startedAt,
+    durationMs: status === 'inProgress' ? null : 0,
   };
+}
+
+function fixturePaginatedHistory(): {
+  turns: Record<string, unknown>[];
+  items: Array<{ turnId: string; item: Record<string, unknown> }>;
+} {
+  return {
+    turns: [{
+      id: 'turn-1',
+      items: [],
+      itemsView: 'notLoaded',
+      status: 'completed',
+      error: null,
+      startedAt: 1_753_056_000,
+      completedAt: 1_753_056_001,
+      durationMs: 1_000,
+    }],
+    items: [
+      {
+        turnId: 'turn-1',
+        item: {
+          type: 'userMessage',
+          id: 'user-1',
+          content: [{ type: 'text', text: 'paginated prompt' }],
+        },
+      },
+      {
+        turnId: 'turn-1',
+        item: {
+          type: 'agentMessage',
+          id: 'assistant-1',
+          text: 'paginated answer',
+          phase: null,
+          memoryCitation: null,
+        },
+      },
+    ],
+  };
+}
+
+function paginatedHistoryForThread(params: Record<string, unknown> | undefined): {
+  turns: Record<string, unknown>[];
+  items: Array<{ turnId: string; item: Record<string, unknown> }>;
+} {
+  const threadId = typeof params?.threadId === 'string' ? params.threadId : null;
+  const nativePath = threadId ? nativePathForThread(threadId) : null;
+  if (!nativePath) return { turns: [], items: [] };
+
+  const entries = readFileSync(nativePath, 'utf8')
+    .split('\n')
+    .flatMap((line, lineIndex) => {
+      if (!line.trim()) return [];
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        return [{ entry, lineIndex }];
+      } catch {
+        return [];
+      }
+    });
+  const outputs = new Map<string, unknown>();
+  for (const { entry } of entries) {
+    const payload = recordValue(entry.payload);
+    if (entry.type === 'response_item' && payload?.type === 'function_call_output') {
+      const callId = stringValue(payload.call_id);
+      if (callId) outputs.set(callId, payload.output);
+    }
+  }
+
+  const turns = new Map<string, { startedAt: number; completedAt: number }>();
+  const items: Array<{ turnId: string; item: Record<string, unknown> }> = [];
+  let currentTurnId: string | null = null;
+  for (const { entry, lineIndex } of entries) {
+    const payload = recordValue(entry.payload);
+    const timestamp = Date.parse(stringValue(entry.timestamp) ?? '') || Date.now();
+    if (entry.type === 'response_item' && payload?.type === 'message' && payload.role === 'user') {
+      currentTurnId = responseItemTurnId(payload) ?? `turn-${lineIndex}`;
+    }
+    if (!currentTurnId && entry.type !== 'session_meta') currentTurnId = `turn-${lineIndex}`;
+    if (!currentTurnId) continue;
+    const bounds = turns.get(currentTurnId);
+    turns.set(currentTurnId, {
+      startedAt: bounds?.startedAt ?? timestamp,
+      completedAt: timestamp,
+    });
+
+    const item = paginatedItem(entry, payload, lineIndex, outputs);
+    if (item) items.push({ turnId: currentTurnId, item });
+  }
+
+  return {
+    turns: [...turns.entries()].map(([id, bounds]) => ({
+      id,
+      items: [],
+      itemsView: 'notLoaded',
+      status: 'completed',
+      error: null,
+      startedAt: bounds.startedAt,
+      completedAt: bounds.completedAt,
+      durationMs: Math.max(0, bounds.completedAt - bounds.startedAt),
+    })),
+    items,
+  };
+}
+
+function paginatedItem(
+  entry: Record<string, unknown>,
+  payload: Record<string, unknown> | null,
+  lineIndex: number,
+  outputs: ReadonlyMap<string, unknown>,
+): Record<string, unknown> | null {
+  if (entry.type === 'event_msg' && payload?.type === 'context_compacted') {
+    return { type: 'contextCompaction', id: `compaction-${lineIndex}` };
+  }
+  if (entry.type !== 'response_item' || !payload) return null;
+  const id = stringValue(payload.id) ?? stringValue(payload.call_id) ?? `item-${lineIndex}`;
+  if (payload.type === 'message') {
+    const content = arrayValue(payload.content);
+    if (payload.role === 'user') {
+      return {
+        type: 'userMessage',
+        id,
+        content: content.flatMap((part) => {
+          const value = recordValue(part);
+          const text = value ? stringValue(value.text) : null;
+          return text ? [{ type: 'text', text }] : [];
+        }),
+      };
+    }
+    if (payload.role === 'assistant') {
+      return {
+        type: 'agentMessage',
+        id,
+        text: content.flatMap((part) => {
+          const value = recordValue(part);
+          const text = value ? stringValue(value.text) : null;
+          return text ? [text] : [];
+        }).join('\n'),
+        phase: null,
+        memoryCitation: null,
+      };
+    }
+  }
+  if (payload.type === 'reasoning') {
+    return {
+      type: 'reasoning',
+      id,
+      summary: responseTextParts(payload.summary),
+      content: responseTextParts(payload.content),
+    };
+  }
+  if (payload.type === 'function_call') {
+    const callId = stringValue(payload.call_id) ?? id;
+    return {
+      type: 'commandExecution',
+      id: callId,
+      command: functionCallCommand(payload),
+      cwd: '/',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: outputText(outputs.get(callId)),
+      exitCode: 0,
+      durationMs: 0,
+    };
+  }
+  return null;
+}
+
+function nativePathForThread(threadId: string): string | null {
+  const loaded = startedThreads.get(threadId);
+  if (loaded) return loaded;
+  return discoverCodexThreads().find((thread) => thread.id === threadId)?.path ?? null;
+}
+
+function responseItemTurnId(payload: Record<string, unknown>): string | null {
+  const metadata = recordValue(payload.internal_chat_message_metadata_passthrough);
+  return metadata ? stringValue(metadata.turn_id) : null;
+}
+
+function responseTextParts(value: unknown): string[] {
+  return arrayValue(value).flatMap((part) => {
+    if (typeof part === 'string') return part ? [part] : [];
+    const record = recordValue(part);
+    const text = record ? stringValue(record.text) : null;
+    return text ? [text] : [];
+  });
+}
+
+function functionCallCommand(payload: Record<string, unknown>): string {
+  const rawArguments = stringValue(payload.arguments);
+  if (!rawArguments) return stringValue(payload.name) ?? 'tool';
+  try {
+    const args = recordValue(JSON.parse(rawArguments));
+    const command = args?.command;
+    if (typeof command === 'string') return command;
+    if (Array.isArray(command)) return command.map(String).join(' ');
+  } catch {
+    return rawArguments;
+  }
+  return rawArguments;
+}
+
+function outputText(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  return value === undefined ? null : JSON.stringify(value);
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
 }
 
 function codexDiscoveryMode(): 'normal' | 'miss' | 'error' {
@@ -595,6 +800,7 @@ function publishControlledApprovals(): void {
       const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
         target?: unknown;
         targetThreadId?: unknown;
+        nativeTurn?: unknown;
         requestId?: unknown;
         command?: unknown;
         method?: unknown;
@@ -604,6 +810,8 @@ function publishControlledApprovals(): void {
       if (typeof control.requestId !== 'number' || !Number.isSafeInteger(control.requestId)) continue;
       if (typeof control.command !== 'string' || !control.command) continue;
       if (control.method !== undefined && (typeof control.method !== 'string' || !control.method)) continue;
+      const turnId = control.nativeTurn === 'interrupted' ? interruptedTurnId : processTurnId;
+      if (!turnId) continue;
       emittedApprovalControls.add(entry);
       answeredApprovalControls.set(control.requestId, entry);
       notifyServerRequest(
@@ -613,7 +821,7 @@ function publishControlledApprovals(): void {
           : 'item/commandExecution/requestApproval',
         {
           threadId: processThreadId,
-          turnId: processTurnId,
+          turnId,
           itemId: entry.slice(0, -'.request.json'.length),
           command: control.command,
         },
@@ -639,15 +847,18 @@ function publishControlledMessages(): void {
       const control = JSON.parse(readFileSync(join(routingControlDirectory, entry), 'utf8')) as {
         target?: unknown;
         targetThreadId?: unknown;
+        nativeTurn?: unknown;
         content?: unknown;
       };
       if (control.target !== processRole) continue;
       if (control.targetThreadId !== undefined && control.targetThreadId !== processThreadId) continue;
       if (typeof control.content !== 'string' || !control.content) continue;
+      const turnId = control.nativeTurn === 'interrupted' ? interruptedTurnId : processTurnId;
+      if (!turnId) continue;
       emittedMessageControls.add(entry);
       notify('item/completed', {
         threadId: processThreadId,
-        turnId: processTurnId,
+        turnId,
         item: {
           type: 'agentMessage',
           id: entry.slice(0, -'.message.json'.length),

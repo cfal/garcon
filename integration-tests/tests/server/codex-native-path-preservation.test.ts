@@ -78,8 +78,6 @@ describe('Codex native transcript path preservation', () => {
         await fixture.client.forkChat({
           sourceChatId,
           chatId: targetChatId,
-          transcriptViewId: source.transcriptViewId,
-          upToOrdinal: source.messages.at(-1)!.ordinal,
         });
 
         const beforeRestart = await readNativeSession(fixture.dirs.workspace, targetChatId);
@@ -138,6 +136,7 @@ function codexServerEnvironment(): Record<string, string> {
     GARCON_CODEX_CLI: fileURLToPath(
       new URL('../../support/fake-codex-app-server.ts', import.meta.url),
     ),
+    INTEGRATION_CODEX_FORK_JSONL: '1',
     PATH: `${dirname(process.execPath)}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
   };
 }
