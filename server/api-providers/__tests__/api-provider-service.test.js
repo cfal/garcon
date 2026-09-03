@@ -107,22 +107,43 @@ describe('ApiProviderService', () => {
     }));
   });
 
-  it('does not send stored endpoint API keys to a different origin', async () => {
+  it('requires an explicit API key when stored provider references target a different origin', async () => {
     const { service } = await tempService();
     const created = await service.create(openAiInput());
     const endpoint = created.endpoints[0];
     const fetchMock = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })));
     globalThis.fetch = fetchMock;
 
-    await service.discoverModels({
+    const endpointResult = await service.discoverModels({
       protocol: 'openai-compatible',
       baseUrl: 'https://untrusted.example/v1',
       endpointId: endpoint.id,
       modelDiscovery: 'openai-models',
     });
+    const providerResult = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      apiProviderId: created.id,
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(endpointResult).toEqual({
+      success: false,
+      error: 'Enter the API key for this base URL before fetching models.',
+    });
+    expect(providerResult).toEqual(endpointResult);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://untrusted.example/v1',
+      endpointId: endpoint.id,
+      apiKey: 'replacement-secret',
+      modelDiscovery: 'openai-models',
+    });
 
     expect(fetchMock).toHaveBeenCalledWith('https://untrusted.example/v1/models', expect.objectContaining({
-      headers: {},
+      headers: { Authorization: 'Bearer replacement-secret' },
     }));
   });
 

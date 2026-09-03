@@ -42,6 +42,11 @@ interface ApiProviderModelDiscoveryFlatInput {
   modelDiscovery: ModelDiscoveryKind;
 }
 
+interface StoredDiscoveryCredential {
+  apiKey?: string;
+  originMismatch: boolean;
+}
+
 export interface ApiProviderServiceDeps {
   store: ApiProviderStore;
   isApiProviderReferenced(apiProviderId: string): boolean;
@@ -421,8 +426,14 @@ export class ApiProviderService {
 
   async discoverModels(input: ApiProviderModelDiscoveryRequest): Promise<ApiProviderModelDiscoveryResponse> {
     const flat = flattenApiProviderModelDiscoveryInput(input);
-    const apiKey = flat.apiKey ?? this.#storedApiKeyForDiscovery(flat);
-    const discoveryInput = { ...flat, apiKey };
+    const storedCredential = flat.apiKey ? null : this.#storedApiKeyForDiscovery(flat);
+    if (storedCredential?.originMismatch) {
+      return {
+        success: false,
+        error: 'Enter the API key for this base URL before fetching models.',
+      };
+    }
+    const discoveryInput = { ...flat, apiKey: flat.apiKey ?? storedCredential?.apiKey };
     if (discoveryInput.modelDiscovery === 'ollama-tags') return testOllamaTags(discoveryInput);
     if (discoveryInput.modelDiscovery === 'anthropic-models') return testAnthropicModels(discoveryInput);
     if (discoveryInput.modelDiscovery === 'openai-models' || discoveryInput.modelDiscovery === 'openrouter-models') {
@@ -434,23 +445,28 @@ export class ApiProviderService {
   #storedApiKeyForDiscovery(input: Pick<
     ApiProviderModelDiscoveryFlatInput,
     'apiProviderId' | 'endpointId' | 'protocol' | 'baseUrl'
-  >): string | undefined {
+  >): StoredDiscoveryCredential {
+    let originMismatch = false;
     if (input.endpointId) {
       const resolved = this.deps.store.getEndpoint(input.endpointId);
-      if (
-        resolved?.endpoint.protocol === input.protocol &&
-        hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)
-      ) {
-        return resolved.endpoint.apiKey || undefined;
+      if (resolved?.endpoint.protocol === input.protocol) {
+        if (hasSameOrigin(resolved.endpoint.baseUrl, input.baseUrl)) {
+          return { apiKey: resolved.endpoint.apiKey || undefined, originMismatch: false };
+        }
+        originMismatch = true;
       }
     }
     if (input.apiProviderId) {
       const apiProvider = this.deps.store.getApiProvider(input.apiProviderId);
-      const endpoint = apiProvider?.endpoints.find(
-        (entry) => entry.protocol === input.protocol && hasSameOrigin(entry.baseUrl, input.baseUrl),
+      const protocolEndpoints = apiProvider?.endpoints.filter(
+        (entry) => entry.protocol === input.protocol,
       );
-      return endpoint?.apiKey || undefined;
+      const endpoint = protocolEndpoints?.find(
+        (entry) => hasSameOrigin(entry.baseUrl, input.baseUrl),
+      );
+      if (endpoint) return { apiKey: endpoint.apiKey || undefined, originMismatch: false };
+      if (protocolEndpoints?.length) originMismatch = true;
     }
-    return undefined;
+    return { originMismatch };
   }
 }
