@@ -442,8 +442,7 @@ export class RuntimeGoalCoordinator {
     const previous = session.cleanupAttachments;
     session.cleanupAttachments = previous
       ? async () => {
-        await previous();
-        await cleanup();
+        await Promise.all([previous(), cleanup()]);
       }
       : cleanup;
   }

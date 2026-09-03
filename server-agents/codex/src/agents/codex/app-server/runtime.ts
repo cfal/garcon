@@ -84,7 +84,6 @@ import { RuntimeGoalCoordinator } from './runtime-goal.js';
 import type { CodexGoalCommand } from '../goal-command.js';
 import { GoalAttachmentOperationQueue, GoalAttachmentOperations } from './goal-attachment-operations.js';
 import { cleanupOwnedGoalAttachments } from './goal-files.js';
-import { editedGoalStatus, formatGoalStatusMessage, formatGoalUpdatedMessage, goalStatusLabel } from './goal-display.js';
 import { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
   rejectedCodexSteer,
