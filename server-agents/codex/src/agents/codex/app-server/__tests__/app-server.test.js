@@ -2347,7 +2347,7 @@ describe('CodexAppServerRuntime', () => {
       expect.objectContaining({ outcome: 'finished' }),
     ]);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
 
@@ -2395,7 +2395,7 @@ describe('CodexAppServerRuntime', () => {
       expect.objectContaining({ outcome: 'finished' }),
     ]);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('restores running status when the interrupt request is rejected', async () => {
@@ -2459,7 +2459,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a resumed unmanaged turn that completes before its start response', async () => {
@@ -2491,7 +2491,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps the turn running when Codex reports a retryable stream error', async () => {
@@ -2550,7 +2550,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn() },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('ignores lifecycle notifications emitted by a stale app-server client', async () => {
@@ -2743,7 +2743,7 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('resumes a blocked goal after a capacity failure without duplicating input', async () => {
@@ -2810,7 +2810,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('retries when the initial unmanaged turn fails before its start response resolves', async () => {
@@ -3289,7 +3289,7 @@ describe('CodexAppServerRuntime', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(goalCalls).toEqual([control === 'pause' ? 'paused' : 'clear']);
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(fake.shutdown).not.toHaveBeenCalled();
     }
   });
 
@@ -3378,7 +3378,7 @@ describe('CodexAppServerRuntime', () => {
     });
     expect(fake.startTurn).toHaveBeenCalledTimes(4);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('fails a blocked goal after three capacity retries', async () => {
@@ -3444,7 +3444,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(3);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('ends the turn when Codex reports a non-retryable error', async () => {
@@ -3482,7 +3482,7 @@ describe('CodexAppServerRuntime', () => {
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ type: 'error', content: 'Codex turn failed' });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('streams raw Code Mode calls and their paired outputs through the shared contract', async () => {
@@ -4003,7 +4003,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('restores an active goal when replacement clear commits but its response is lost', async () => {
@@ -4049,7 +4049,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1' },
     });
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes cleanly when replacement and rollback both fail', async () => {
@@ -4071,7 +4071,7 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.setThreadGoal).toHaveBeenCalledTimes(2);
     expect(fake.getThreadGoal).toHaveBeenCalledTimes(3);
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('reports the current Codex goal without starting a turn', async () => {
@@ -4279,7 +4279,7 @@ describe('CodexAppServerRuntime', () => {
 
       expect(calls).toEqual(['resume', 'get', control]);
       expect(provider.isRunning('thread-1')).toBe(false);
-      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+      expect(fake.shutdown).not.toHaveBeenCalled();
     }
   });
 
@@ -4336,7 +4336,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps a restored active turn through a clear response and its turn boundary', async () => {
@@ -4385,7 +4385,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps a resumed goal turn after buffered terminal replay defers the prior finish', async () => {
@@ -4821,7 +4821,7 @@ describe('CodexAppServerRuntime', () => {
     await finished;
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
     expect(fake.startTurn).not.toHaveBeenCalled();
   });
 
@@ -5694,7 +5694,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('keeps the current turn alive when an active goal is cleared before its boundary', async () => {
@@ -5740,7 +5740,7 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
     });
     await finished;
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a paused active goal immediately between automatic turns', async () => {
@@ -5777,7 +5777,7 @@ describe('CodexAppServerRuntime', () => {
     }))).resolves.toBe(true);
 
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('finishes a no-op clear immediately between automatic turns', async () => {
@@ -5817,7 +5817,7 @@ describe('CodexAppServerRuntime', () => {
       'No Codex goal was set.',
     );
     expect(provider.isRunning('thread-1')).toBe(false);
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('materializes durable goal attachments before setting the goal and preserves them at terminal status', async () => {
@@ -7194,6 +7194,10 @@ describe('CodexAppServerRuntime', () => {
       requestByCommand.get('command-a'),
       requestByCommand.get('command-b'),
     ]);
+    expect(fake.respond.mock.calls).toEqual([
+      [71, { decision: 'decline' }],
+      [72, { decision: 'decline' }],
+    ]);
   });
 
   it('binds each native turn once across later operations and delayed starts', async () => {
@@ -7295,7 +7299,6 @@ describe('CodexAppServerRuntime', () => {
 
   it('[TLV5-L07.06-CODEX-UNIT-01] retains named turn routes through terminal publication until source retirement', async () => {
     const nativePath = path.join(tmpDir, 'post-terminal-route.jsonl');
-    const sourceClosed = createDeferred();
     const fake = new FakeClient({
       startThread: async () => ({
         thread: makeThread({ id: 'thread-1', path: nativePath }),
@@ -7308,7 +7311,6 @@ describe('CodexAppServerRuntime', () => {
         await fs.writeFile(nativePath, '{}\n');
         return { turn: makeTurn({ id: 'turn-a', status: 'inProgress' }) };
       },
-      shutdown: () => sourceClosed.promise,
     });
     const provider = createRuntime({ createClient: () => fake });
     const published = collectOperation('chat-1', 'run-a');
@@ -7325,16 +7327,39 @@ describe('CodexAppServerRuntime', () => {
       params: {
         threadId: 'thread-1',
         turnId: 'turn-a',
-        item: { type: 'agentMessage', id: 'late-item', text: 'after terminal', phase: null, memoryCitation: null },
+        item: {
+          type: 'subAgentActivity',
+          id: 'subagent-completed-worker',
+          kind: 'completed',
+          agentThreadId: 'worker-thread',
+          agentPath: '/root/worker',
+        },
       },
     });
 
-    expect(publishedMessages(published.events).map((message) => message.content)).toContain(
-      'after terminal',
-    );
+    expect(publishedMessages(published.events)).toContainEqual(expect.objectContaining({
+      action: 'agent_status',
+      details: expect.objectContaining({
+        target: '/root/worker',
+        agentStates: { '/root/worker': { status: 'completed' } },
+      }),
+    }));
+    expect(fake.shutdown).not.toHaveBeenCalled();
 
-    sourceClosed.resolve();
-    await Promise.resolve();
+    fake.emit('serverRequest', {
+      id: 'late-stdin-review',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-a',
+        itemId: 'parent-command',
+        approvalId: 'late-stdin-approval',
+        kind: 'writeStdin',
+      },
+    });
+    expect(fake.respond).toHaveBeenCalledWith('late-stdin-review', { decision: 'cancel' });
+    expect(permissionEvents(published.events)).toEqual([]);
+
     fake.emit('exit', 0);
     fake.emit('notification', {
       method: 'item/completed',
@@ -7347,6 +7372,111 @@ describe('CodexAppServerRuntime', () => {
     expect(publishedMessages(published.events).some(
       (message) => message.content === 'after retirement',
     )).toBe(false);
+  });
+
+  it('retires the previous same-chat source only after replacement activation succeeds', async () => {
+    const nativePaths = [
+      path.join(tmpDir, 'superseded-source-a.jsonl'),
+      path.join(tmpDir, 'superseded-source-b.jsonl'),
+    ];
+    const clients = nativePaths.map((nativePath, index) => new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: `thread-${index + 1}`, path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: `turn-${index + 1}`, status: 'inProgress' }) };
+      },
+    }));
+    let clientIndex = 0;
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: first.operation }));
+    clients[0].emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    expect(clients[0].shutdown).not.toHaveBeenCalled();
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: second.operation }));
+    expect(clients[0].shutdown).toHaveBeenCalledTimes(1);
+    clients[0].emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'retired-item', text: 'retired output', phase: null, memoryCitation: null },
+      },
+    });
+    clients[1].emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-2',
+        turnId: 'turn-2',
+        item: { type: 'agentMessage', id: 'current-item', text: 'current output', phase: null, memoryCitation: null },
+      },
+    });
+    expect(publishedMessages(first.events).some((message) => message.content === 'retired output'))
+      .toBe(false);
+    expect(publishedMessages(second.events).map((message) => message.content)).toContain('current output');
+
+    await provider.shutdown();
+    expect(clients[0].shutdown).toHaveBeenCalledTimes(1);
+    expect(clients[1].shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a retained source when replacement activation fails', async () => {
+    const oldPath = path.join(tmpDir, 'preserved-source.jsonl');
+    const oldClient = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: oldPath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        await fs.writeFile(oldPath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const failedClient = new FakeClient({
+      startThread: async () => { throw new Error('replacement unavailable'); },
+    });
+    let clientIndex = 0;
+    const clients = [oldClient, failedClient];
+    const provider = createRuntime({ createClient: () => clients[clientIndex++] });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({ chatId: 'chat-1', operation: first.operation }));
+    oldClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await expect(provider.startSession(makeRequest({
+      chatId: 'chat-1',
+      operation: second.operation,
+    }))).rejects.toThrow('replacement unavailable');
+    expect(oldClient.shutdown).not.toHaveBeenCalled();
+    expect(failedClient.shutdown).toHaveBeenCalledTimes(1);
+
+    oldClient.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'late-old-item', text: 'retained after failure', phase: null, memoryCitation: null },
+      },
+    });
+    expect(publishedMessages(first.events).map((message) => message.content))
+      .toContain('retained after failure');
   });
 
   it('[TLV5-L07.04-CODEX-UNIT-01] keeps identical native turn ids isolated by client and thread', async () => {

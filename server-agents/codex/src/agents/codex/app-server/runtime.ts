@@ -124,6 +124,7 @@ export type { CodexAppServerRuntimeOptions } from './runtime-session-state.js';
 export class CodexAppServerRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #sources = new Map<CodexAppServerClient, RunningCodexSession>();
+  #latestSourceByChat = new Map<string, RunningCodexSession>();
   #terminalOperations = new WeakSet<CodexOperation>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     session: RunningCodexSession;
@@ -133,6 +134,7 @@ export class CodexAppServerRuntime {
   #bufferingClients = new Set<CodexAppServerClient>();
   #bufferedClientEvents = new Map<CodexAppServerClient, BufferedClientEvent[]>();
   #clientShutdowns = new Set<Promise<void>>();
+  #clientShutdownByClient = new WeakMap<CodexAppServerClient, Promise<void>>();
   #utilityClient: CodexAppServerClient | null = null;
   #utilityQueue: Promise<unknown> = Promise.resolve();
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
@@ -969,11 +971,14 @@ export class CodexAppServerRuntime {
   }
 
   #shutdownClient(client: CodexAppServerClient): Promise<void> {
+    const existing = this.#clientShutdownByClient.get(client);
+    if (existing) return existing;
     const shutdown = Promise.resolve(client.shutdown()).catch((error) => {
       this.#logger.warn('Codex app-server shutdown failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     });
+    this.#clientShutdownByClient.set(client, shutdown);
     this.#clientShutdowns.add(shutdown);
     void shutdown.then(() => {
       this.#clientShutdowns.delete(shutdown);
@@ -1118,10 +1123,16 @@ export class CodexAppServerRuntime {
       terminalTurnIds: new Set(),
       superseded: false,
     };
-    const previous = this.#sessions.get(args.threadId);
-    if (previous) this.#supersedeSource(previous);
+    const previousSources = new Set([
+      this.#latestSourceByChat.get(args.chatId),
+      this.#sessions.get(args.threadId),
+    ]);
+    for (const previous of previousSources) {
+      if (previous) this.#supersedeSource(previous);
+    }
     this.#sessions.set(args.threadId, session);
     this.#sources.set(args.client, session);
+    this.#latestSourceByChat.set(args.chatId, session);
     return session;
   }
 
@@ -1678,6 +1689,19 @@ export class CodexAppServerRuntime {
       this.#pendingApprovals,
       session.client,
       opts.aborted ? 'aborted' : 'session-complete',
+      (approval) => {
+        try {
+          session.client.respond(
+            approval.requestId,
+            denialResponseForRequest(approval.method, approval.params),
+          );
+        } catch (error) {
+          this.#logger.warn('Codex terminal approval denial failed', {
+            method: approval.method,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
     );
     void session.cleanupAttachments?.();
 
@@ -1687,7 +1711,6 @@ export class CodexAppServerRuntime {
       this.#publishFinishedOnce(session, operation);
     }
 
-    void this.#shutdownClient(session.client);
   }
 
   #flushPendingFinish(session: RunningCodexSession): void {
@@ -1739,6 +1762,9 @@ export class CodexAppServerRuntime {
     if (!session) return;
     this.#sources.delete(client);
     if (this.#sessions.get(session.threadId) === session) this.#sessions.delete(session.threadId);
+    if (this.#latestSourceByChat.get(session.chatId) === session) {
+      this.#latestSourceByChat.delete(session.chatId);
+    }
     session.turnRoutes.clear();
     session.nextTurnOperation = null;
     session.goalOperation = null;
@@ -1746,13 +1772,12 @@ export class CodexAppServerRuntime {
   }
 
   #supersedeSource(session: RunningCodexSession): void {
+    if (session.superseded) return;
     session.superseded = true;
     cancelTurnStartWaiters(session, 'Codex session was superseded');
-    if (this.#sessions.get(session.threadId) === session) this.#sessions.delete(session.threadId);
-    session.turnRoutes.clear();
-    session.nextTurnOperation = null;
-    session.goalOperation = null;
-    cancelPendingApprovals(this.#logger, this.#pendingApprovals, session.client, 'cancelled');
+    this.#retireSource(session.client);
+    void session.cleanupAttachments?.();
+    void this.#shutdownClient(session.client);
   }
 
 }

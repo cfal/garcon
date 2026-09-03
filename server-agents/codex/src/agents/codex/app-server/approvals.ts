@@ -230,11 +230,13 @@ export function cancelPendingApprovals(
   pending: CodexPendingApprovalRegistry<object>,
   client: object,
   reason: 'cancelled' | 'session-complete' | 'aborted',
+  respond?: (approval: CodexTrackedApproval<object>) => void,
 ): void {
   const byRequestId = pending.get(client);
   if (!byRequestId) return;
   pending.delete(client);
   for (const approval of byRequestId.values()) {
+    respond?.(approval);
     publishPermissionCancelled(
       logger,
       approval.chatId,
