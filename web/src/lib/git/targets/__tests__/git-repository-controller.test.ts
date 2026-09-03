@@ -34,6 +34,7 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	git_changes_added: () => 'Added',
 	git_changes_deleted: () => 'Deleted',
 	git_changes_untracked: () => 'Untracked',
+	git_changes_whole_index_commit_notice: () => 'Committed the full staged index.',
 }));
 
 import {
@@ -263,6 +264,19 @@ describe('GitRepositoryController', () => {
 			controller.selectedFiles = new Set(['a.txt', 'b.txt']);
 			controller.deselectAllFiles();
 			expect(controller.selectedFiles.size).toBe(0);
+		});
+
+		it('surfaces whole-index continuation commits', async () => {
+			vi.mocked(gitCommit).mockResolvedValue({
+				success: true,
+				commitScope: 'whole-index',
+			});
+			controller.commitMessage = 'resolve conflict';
+			controller.selectedFiles = new Set(['a.txt']);
+
+			await controller.handleCommit('/project');
+
+			expect(controller.lastNotice).toBe('Committed the full staged index.');
 		});
 	});
 

@@ -57,6 +57,7 @@ export class GitRepositoryController {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
+	lastNotice = $state<string | null>(null);
 	private contextGeneration = 0;
 	private projectPath: string | null = null;
 	private statusGeneration = 0;
@@ -128,6 +129,17 @@ export class GitRepositoryController {
 
 	dismissError(): void {
 		this.lastError = null;
+	}
+
+	surfaceNotice(message: string): void {
+		this.lastNotice = message;
+		setTimeout(() => {
+			if (this.lastNotice === message) this.lastNotice = null;
+		}, 6000);
+	}
+
+	dismissNotice(): void {
+		this.lastNotice = null;
 	}
 
 	async fetchGitStatus(projectPath: string): Promise<void> {
@@ -230,6 +242,7 @@ export class GitRepositoryController {
 		this.showPushModal = false;
 		this.pushRemotes = [];
 		this.lastError = null;
+		this.lastNotice = null;
 		this.isLoading = false;
 		this.isCommitting = false;
 		this.isCreatingInitialCommit = false;
@@ -347,6 +360,11 @@ export class GitRepositoryController {
 			if (data.success) {
 				this.commitMessage = '';
 				this.selectedFiles = new Set();
+				if (data.commitScope === 'whole-index') {
+					this.surfaceNotice(m.git_changes_whole_index_commit_notice());
+				} else {
+					this.lastNotice = null;
+				}
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);
 				return true;
