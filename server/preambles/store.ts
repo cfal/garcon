@@ -1,0 +1,171 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import {
+  PREAMBLE_MAX_COUNT,
+  normalizePreamble,
+  type Preamble,
+  type PreambleDefinitionInput,
+  type PreamblesSnapshot,
+} from '../../common/preambles.js';
+import { hasNodeErrorCode } from '../lib/errors.js';
+import { writeJsonFileAtomic } from '../lib/json-file-store.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { PreambleDomainError } from './errors.js';
+import { preambleCombinedBudgetViolation } from './catalog-budget.js';
+
+const PREAMBLES_FILE_VERSION = 1;
+
+interface PreamblesFile {
+  readonly version: typeof PREAMBLES_FILE_VERSION;
+  revision: number;
+  preambles: Preamble[];
+}
+
+function emptyFile(): PreamblesFile {
+  return { version: PREAMBLES_FILE_VERSION, revision: 0, preambles: [] };
+}
+
+function normalizeFile(value: unknown): PreamblesFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('preambles.json must contain an object');
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.version !== PREAMBLES_FILE_VERSION) {
+    throw new Error(`Unsupported preambles.json version: ${String(raw.version)}`);
+  }
+  if (
+    Object.keys(raw).some((key) => !['version', 'revision', 'preambles'].includes(key))
+    || !Number.isSafeInteger(raw.revision)
+    || (raw.revision as number) < 0
+    || !Array.isArray(raw.preambles)
+    || raw.preambles.length > PREAMBLE_MAX_COUNT
+  ) throw new Error('preambles.json is invalid');
+  const ids = new Set<string>();
+  const preambles = raw.preambles.map((valuePreamble) => {
+    const preamble = normalizePreamble(valuePreamble);
+    if (!preamble || ids.has(preamble.id)) throw new Error('preambles.json contains an invalid preamble');
+    if (
+      preamble.scope.type === 'project-paths'
+      && preamble.scope.rules.some((rule) => !path.isAbsolute(rule.projectPath))
+    ) throw new Error('preambles.json contains a non-absolute project path');
+    ids.add(preamble.id);
+    return preamble;
+  });
+  if (preambleCombinedBudgetViolation(preambles)) {
+    throw new Error('preambles.json exceeds the combined preamble limit');
+  }
+  return { version: PREAMBLES_FILE_VERSION, revision: raw.revision as number, preambles };
+}
+
+export class PreambleStore {
+  readonly #filePath: string;
+  readonly #lock = new KeyedPromiseLock();
+  #file = emptyFile();
+
+  constructor(workspaceDir: string) {
+    this.#filePath = path.join(workspaceDir, 'preambles.json');
+  }
+
+  async init(): Promise<void> {
+    try {
+      this.#file = normalizeFile(JSON.parse(await fs.readFile(this.#filePath, 'utf8')));
+    } catch (error) {
+      if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+      this.#file = emptyFile();
+    }
+  }
+
+  snapshot(): PreamblesSnapshot {
+    return { revision: this.#file.revision, preambles: structuredClone(this.#file.preambles) };
+  }
+
+  async create(preamble: Preamble, expectedRevision: number): Promise<void> {
+    await this.#mutate(expectedRevision, (draft) => {
+      if (draft.preambles.length >= PREAMBLE_MAX_COUNT) {
+        throw new PreambleDomainError(
+          'PREAMBLE_LIMIT_REACHED',
+          `A maximum of ${PREAMBLE_MAX_COUNT} preambles is allowed`,
+          409,
+        );
+      }
+      if (draft.preambles.some((entry) => entry.id === preamble.id)) {
+        throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble ID already exists', 409);
+      }
+      draft.preambles.push(structuredClone(preamble));
+    });
+  }
+
+  async update(
+    id: string,
+    definition: PreambleDefinitionInput,
+    updatedAt: string,
+    expectedRevision: number,
+  ): Promise<void> {
+    await this.#mutate(expectedRevision, (draft) => {
+      const index = draft.preambles.findIndex((entry) => entry.id === id);
+      if (index < 0) throw this.#notFound();
+      const current = draft.preambles[index]!;
+      draft.preambles[index] = {
+        ...current,
+        ...structuredClone(definition),
+        updatedAt: nextUpdatedAt(current.updatedAt, updatedAt),
+      };
+    });
+  }
+
+  async remove(id: string, expectedRevision: number): Promise<void> {
+    await this.#mutate(expectedRevision, (draft) => {
+      const index = draft.preambles.findIndex((entry) => entry.id === id);
+      if (index < 0) throw this.#notFound();
+      draft.preambles.splice(index, 1);
+    });
+  }
+
+  async reorder(orderedIds: readonly string[], expectedRevision: number): Promise<void> {
+    await this.#mutate(expectedRevision, (draft) => {
+      if (
+        orderedIds.length !== draft.preambles.length
+        || new Set(orderedIds).size !== orderedIds.length
+      ) throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble order is invalid', 400);
+      const byId = new Map(draft.preambles.map((preamble) => [preamble.id, preamble]));
+      const reordered = orderedIds.map((id) => byId.get(id));
+      if (reordered.some((entry) => !entry)) {
+        throw new PreambleDomainError('PREAMBLE_VALIDATION_FAILED', 'Preamble order is invalid', 400);
+      }
+      draft.preambles = reordered as Preamble[];
+    });
+  }
+
+  async #mutate(expectedRevision: number, change: (draft: PreamblesFile) => void): Promise<void> {
+    await this.#lock.runExclusive('preambles', async () => {
+      if (expectedRevision !== this.#file.revision) {
+        throw new PreambleDomainError(
+          'PREAMBLE_REVISION_CONFLICT',
+          'Preambles changed in another client; refresh and try again',
+          409,
+          true,
+        );
+      }
+      if (this.#file.revision === Number.MAX_SAFE_INTEGER) {
+        throw new PreambleDomainError(
+          'PREAMBLE_REVISION_EXHAUSTED',
+          'Preamble revision limit reached',
+          409,
+        );
+      }
+      const draft = structuredClone(this.#file);
+      change(draft);
+      draft.revision += 1;
+      await writeJsonFileAtomic(this.#filePath, draft, { mode: 0o600 });
+      this.#file = draft;
+    });
+  }
+
+  #notFound(): PreambleDomainError {
+    return new PreambleDomainError('PREAMBLE_NOT_FOUND', 'Preamble not found', 404);
+  }
+}
+
+function nextUpdatedAt(current: string, candidate: string): string {
+  return new Date(Math.max(Date.parse(candidate), Date.parse(current) + 1)).toISOString();
+}
