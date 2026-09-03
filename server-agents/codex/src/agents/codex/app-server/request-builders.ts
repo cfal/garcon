@@ -99,6 +99,7 @@ function appendCommonThreadParams(
 export function buildThreadStartParams(request: CodexStartRequest): Record<string, unknown> {
   return appendCommonThreadParams({
     ephemeral: false,
+    historyMode: 'paginated',
   }, request);
 }
 

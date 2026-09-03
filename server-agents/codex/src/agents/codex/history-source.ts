@@ -1,8 +1,5 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import {
-  AgentIntegrationError,
-  type AgentLogger,
-} from '@garcon/server-agent-interface';
+import type { AgentLogger } from '@garcon/server-agent-interface';
 import type { CodexAppServerClientOptions } from './app-server/client.js';
 import { CodexAppServerClient } from './app-server/client.js';
 import {
@@ -62,20 +59,6 @@ export class CodexHistoryService {
   #paginated(
     profile: Extract<CodexHistoryProfile, { mode: 'paginated' }>,
   ): PaginatedCodexHistorySource {
-    assertCodexPaginatedHistoryMaterializable(profile, 'load-history');
     return new PaginatedCodexHistorySource(profile, this.#createClient);
   }
-}
-
-export function assertCodexPaginatedHistoryMaterializable(
-  profile: Extract<CodexHistoryProfile, { mode: 'paginated' }>,
-  operation: string,
-): void {
-  if (!profile.historyBase) return;
-  throw new AgentIntegrationError(
-    'OPERATION_UNSUPPORTED',
-    'Codex paginated history with an inherited base is not supported',
-    false,
-    { operation, historyMode: 'paginated', provider: 'codex' },
-  );
 }

@@ -235,6 +235,7 @@ class FakeClient extends EventEmitter {
     this.injectThreadItems = mock(script.injectThreadItems ?? (async () => ({})));
     this.listThreads = mock(script.listThreads ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
     this.listThreadTurns = mock(script.listThreadTurns ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
+    this.listThreadItems = mock(script.listThreadItems ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
     this.loadedThreads = mock(script.loadedThreads ?? (async () => ({ data: [] })));
     this.unsubscribeThread = mock(script.unsubscribeThread ?? (async () => ({ status: 'notSubscribed' })));
     this.startTurn = mock(script.startTurn ?? (async () => ({ turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } })));
@@ -829,6 +830,7 @@ describe('Codex app-server request builders', () => {
     expect(params).toMatchObject({
       model: 'gpt-5.4-codex',
       cwd: '/repo',
+      historyMode: 'paginated',
       sandbox: 'danger-full-access',
       approvalPolicy: 'never',
       approvalsReviewer: 'user',
@@ -6264,7 +6266,7 @@ describe('CodexAppServerRuntime', () => {
     expect(messages[3].content).toBe('Loaded from JSONL');
   });
 
-  it('loads paginated history through full canonical app-server items', async () => {
+  it('loads paginated history through canonical turn shells and item pages', async () => {
     const nativePath = path.join(tmpDir, 'paginated-thread.jsonl');
     await writeJsonl(nativePath, [{
       type: 'session_meta',
@@ -6277,10 +6279,21 @@ describe('CodexAppServerRuntime', () => {
     }]);
     const fake = new FakeClient({
       listThreadTurns: async () => ({
-        data: [makeTurn({ items: [
-          { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'canonical prompt' }] },
-          { type: 'agentMessage', id: 'assistant-1', text: 'canonical answer', phase: null, memoryCitation: null },
-        ] })],
+        data: [makeTurn({ items: [], itemsView: 'notLoaded' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+      listThreadItems: async () => ({
+        data: [
+          {
+            turnId: 'turn-1',
+            item: { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'canonical prompt' }] },
+          },
+          {
+            turnId: 'turn-1',
+            item: { type: 'agentMessage', id: 'assistant-1', text: 'canonical answer', phase: null, memoryCitation: null },
+          },
+        ],
         nextCursor: null,
         backwardsCursor: null,
       }),
@@ -6302,12 +6315,17 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.listThreadTurns).toHaveBeenCalledWith(expect.objectContaining({
       threadId: 'thread-1',
       sortDirection: 'asc',
-      itemsView: 'full',
+      itemsView: 'notLoaded',
+    }));
+    expect(fake.listThreadItems).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      turnId: null,
+      sortDirection: 'asc',
     }));
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('fails closed before loading an inherited paginated history', async () => {
+  it('loads inherited paginated history through the leaf thread', async () => {
     const nativePath = path.join(tmpDir, 'inherited-paginated-thread.jsonl');
     await writeJsonl(nativePath, [{
       type: 'session_meta',
@@ -6318,7 +6336,27 @@ describe('CodexAppServerRuntime', () => {
         history_base: { thread_id: 'thread-0', end_ordinal_exclusive: 1, end_byte_offset: 10 },
       },
     }]);
-    const fake = new FakeClient();
+    const fake = new FakeClient({
+      listThreadTurns: async () => ({
+        data: [makeTurn({ id: 'turn-inherited', items: [], itemsView: 'notLoaded' })],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+      listThreadItems: async () => ({
+        data: [{
+          turnId: 'turn-inherited',
+          item: {
+            type: 'agentMessage',
+            id: 'assistant-inherited',
+            text: 'inherited answer',
+            phase: null,
+            memoryCitation: null,
+          },
+        }],
+        nextCursor: null,
+        backwardsCursor: null,
+      }),
+    });
     const provider = createRuntime({ createClient: () => fake });
 
     await expect(provider.loadMessages({
@@ -6326,11 +6364,13 @@ describe('CodexAppServerRuntime', () => {
       agentSessionId: 'thread-1',
       nativePath,
       projectPath: '/repo',
-    })).rejects.toMatchObject({
-      code: 'OPERATION_UNSUPPORTED',
-      details: { operation: 'load-history', historyMode: 'paginated', provider: 'codex' },
-    });
-    expect(fake.listThreadTurns).not.toHaveBeenCalled();
+    })).resolves.toMatchObject([{ type: 'assistant-message', content: 'inherited answer' }]);
+    expect(fake.listThreadTurns).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+    }));
+    expect(fake.listThreadItems).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+    }));
   });
 
   it('resolves missing native paths through thread/list without loading threads', async () => {

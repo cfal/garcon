@@ -131,15 +131,11 @@ function respond(line: string): void {
     return;
   }
   if (request.method === 'thread/turns/list') {
-    const items = process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1' ? [
-      { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: 'paginated prompt' }] },
-      { type: 'agentMessage', id: 'assistant-1', text: 'paginated answer', phase: null, memoryCitation: null },
-    ] : [];
     write(request.id, {
-      data: items.length > 0 ? [{
+      data: process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1' ? [{
         id: 'turn-1',
-        items,
-        itemsView: 'full',
+        items: [],
+        itemsView: 'notLoaded',
         status: 'completed',
         error: null,
         startedAt: 1_753_056_000,
@@ -149,6 +145,30 @@ function respond(line: string): void {
       nextCursor: null,
       backwardsCursor: null,
     });
+    return;
+  }
+  if (request.method === 'thread/items/list') {
+    const data = process.env.INTEGRATION_CODEX_HISTORY_FIXTURE === '1' ? [
+      {
+        turnId: 'turn-1',
+        item: {
+          type: 'userMessage',
+          id: 'user-1',
+          content: [{ type: 'text', text: 'paginated prompt' }],
+        },
+      },
+      {
+        turnId: 'turn-1',
+        item: {
+          type: 'agentMessage',
+          id: 'assistant-1',
+          text: 'paginated answer',
+          phase: null,
+          memoryCitation: null,
+        },
+      },
+    ] : [];
+    write(request.id, { data, nextCursor: null, backwardsCursor: null });
     return;
   }
   if (request.method === 'thread/fork') {
@@ -205,7 +225,8 @@ function startThread(id: number, params: Record<string, unknown> | undefined): v
         cli_version: '0.144.6',
         source: 'vscode',
         model_provider: 'openai',
-        history_mode: 'legacy',
+        history_mode: params?.historyMode === 'paginated' ? 'paginated' : 'legacy',
+        ...(params?.historyMode === 'paginated' ? { history_base: null } : {}),
       },
     })}\n`,
     { mode: 0o600 },
