@@ -62,6 +62,7 @@ export class GitRepositoryController {
 	private projectPath: string | null = null;
 	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
+	private noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly branchSelector: GitBranchSelectorState;
 	private readonly surfaceId: string;
 
@@ -132,13 +133,17 @@ export class GitRepositoryController {
 	}
 
 	surfaceNotice(message: string): void {
+		if (this.noticeTimer) clearTimeout(this.noticeTimer);
 		this.lastNotice = message;
-		setTimeout(() => {
-			if (this.lastNotice === message) this.lastNotice = null;
+		this.noticeTimer = setTimeout(() => {
+			this.lastNotice = null;
+			this.noticeTimer = null;
 		}, 6000);
 	}
 
 	dismissNotice(): void {
+		if (this.noticeTimer) clearTimeout(this.noticeTimer);
+		this.noticeTimer = null;
 		this.lastNotice = null;
 	}
 
@@ -242,7 +247,7 @@ export class GitRepositoryController {
 		this.showPushModal = false;
 		this.pushRemotes = [];
 		this.lastError = null;
-		this.lastNotice = null;
+		this.dismissNotice();
 		this.isLoading = false;
 		this.isCommitting = false;
 		this.isCreatingInitialCommit = false;
@@ -363,7 +368,7 @@ export class GitRepositoryController {
 				if (data.commitScope === 'whole-index') {
 					this.surfaceNotice(m.git_changes_whole_index_commit_notice());
 				} else {
-					this.lastNotice = null;
+					this.dismissNotice();
 				}
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);

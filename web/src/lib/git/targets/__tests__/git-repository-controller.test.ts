@@ -278,6 +278,38 @@ describe('GitRepositoryController', () => {
 
 			expect(controller.lastNotice).toBe('Committed the full staged index.');
 		});
+
+		it('gives repeated whole-index commit notices a fresh timeout', async () => {
+			vi.useFakeTimers();
+			try {
+				controller.surfaceNotice('Committed the full staged index.');
+				await vi.advanceTimersByTimeAsync(5000);
+
+				controller.surfaceNotice('Committed the full staged index.');
+				await vi.advanceTimersByTimeAsync(1000);
+				expect(controller.lastNotice).toBe('Committed the full staged index.');
+
+				await vi.advanceTimersByTimeAsync(5000);
+				expect(controller.lastNotice).toBeNull();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('clears whole-index commit notice timers when reset', () => {
+			vi.useFakeTimers();
+			try {
+				controller.surfaceNotice('Committed the full staged index.');
+				expect(vi.getTimerCount()).toBe(1);
+
+				controller.resetForProject('/other-project', { deferMetadata: true });
+
+				expect(controller.lastNotice).toBeNull();
+				expect(vi.getTimerCount()).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 	});
 
 	describe('handleCommit', () => {
