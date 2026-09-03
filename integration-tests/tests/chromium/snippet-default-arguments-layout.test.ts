@@ -221,7 +221,7 @@ describe('snippet default argument layouts', () => {
           return (
             field?.value === expected &&
             document.activeElement === field &&
-            field.selectionStart === expected.length &&
+            field.selectionStart === 0 &&
             field.selectionEnd === expected.length
           );
         }, savedDefault);

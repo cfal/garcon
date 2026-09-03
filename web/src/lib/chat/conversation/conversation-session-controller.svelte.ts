@@ -88,7 +88,8 @@ type SessionTranscriptState = Pick<
 		noticeType: Parameters<ActiveTranscriptPort['appendLocalNotice']>[0],
 		content: string,
 	): void;
-	clearLocalNoticesForChat(chatId: string): void;
+	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void;
+	noticeRevisionForChat(chatId: string): number;
 };
 
 type SessionTranscriptLoadTarget = Pick<

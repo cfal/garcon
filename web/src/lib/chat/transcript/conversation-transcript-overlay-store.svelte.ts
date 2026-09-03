@@ -228,7 +228,8 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {
 		const feedStructureChanged = this.#notices.length > 0 || this.#optimisticInputs.length > 0;
 		this.#notices = [];
-		this.#noticeRevision = 0;
+		// The revision counter stays monotonic across replacements so a revision
+		// captured before the reset cannot clear notices appended after it.
 		this.#optimisticInputs = [];
 		this.#optimisticAfterOrdinals = new Map();
 		this.#resendCandidates = [];

@@ -92,7 +92,7 @@ describe('snippet palette focus', () => {
             Boolean(dialog) &&
             document.activeElement === textarea &&
             textarea?.value === expected &&
-            textarea.selectionStart === expected.length &&
+            textarea.selectionStart === 0 &&
             textarea.selectionEnd === expected.length
           );
         },
@@ -114,7 +114,7 @@ describe('snippet palette focus', () => {
       expect(argumentsField).toEqual({
         focused: true,
         value: 'staged changes',
-        selectionStart: 'staged changes'.length,
+        selectionStart: 0,
         selectionEnd: 'staged changes'.length,
       });
       await fixture.page.evaluate(() => {

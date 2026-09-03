@@ -326,8 +326,9 @@ function createDeps(chat = createRunningChat()) {
 		activeChatId: chat.id,
 		entries: [] as TranscriptMessage[],
 		chatMessages: [] as ChatMessage[],
-		localNotices: [] as LocalNoticeRow[],
-		localNoticesByChatId: {} as Record<string, LocalNoticeRow[]>,
+		localNotices: [] as (LocalNoticeRow & { revision: number })[],
+		localNoticesByChatId: {} as Record<string, (LocalNoticeRow & { revision: number })[]>,
+		noticeRevisionsByChatId: {} as Record<string, number>,
 		optimisticUserInputs: [] as OptimisticUserInput[],
 		excludedResendOrdinals: [] as number[],
 		clearResendExclusions: vi.fn(() => {
@@ -354,19 +355,33 @@ function createDeps(chat = createRunningChat()) {
 			() => new Promise<ChatMessage[]>(() => {}),
 		),
 		appendLocalNotice: vi.fn((noticeType: LocalNoticeType, content: string) => {
-			chatState.localNotices = [
+			const chatId = chatState.activeChatId ?? '';
+			const revision = (chatState.noticeRevisionsByChatId[chatId] ?? 0) + 1;
+			chatState.noticeRevisionsByChatId = {
+				...chatState.noticeRevisionsByChatId,
+				[chatId]: revision,
+			};
+			const notices = [
 				...chatState.localNotices,
 				{
-					kind: 'local-notice',
+					kind: 'local-notice' as const,
 					id: `local-${chatState.localNotices.length + 1}`,
 					noticeType,
 					content,
 					timestamp: new Date().toISOString(),
+					revision,
 				},
 			];
+			chatState.localNotices = notices;
+			chatState.localNoticesByChatId = { ...chatState.localNoticesByChatId, [chatId]: notices };
 		}),
 		appendLocalNoticeForChat: vi.fn(
 			(chatId: string, noticeType: LocalNoticeType, content: string) => {
+				const revision = (chatState.noticeRevisionsByChatId[chatId] ?? 0) + 1;
+				chatState.noticeRevisionsByChatId = {
+					...chatState.noticeRevisionsByChatId,
+					[chatId]: revision,
+				};
 				const notices = [
 					...(chatState.localNoticesByChatId[chatId] ?? []),
 					{
@@ -375,6 +390,7 @@ function createDeps(chat = createRunningChat()) {
 						noticeType,
 						content,
 						timestamp: new Date().toISOString(),
+						revision,
 					},
 				];
 				chatState.localNoticesByChatId = {
@@ -385,9 +401,18 @@ function createDeps(chat = createRunningChat()) {
 			},
 		),
 		clearLocalNotices: vi.fn(),
-		clearLocalNoticesForChat: vi.fn((chatId: string) => {
-			chatState.localNoticesByChatId = { ...chatState.localNoticesByChatId, [chatId]: [] };
-			if (chatState.activeChatId === chatId) chatState.localNotices = [];
+		noticeRevisionForChat: vi.fn(
+			(chatId: string) => chatState.noticeRevisionsByChatId[chatId] ?? 0,
+		),
+		clearLocalNoticesForChat: vi.fn((chatId: string, throughRevision?: number) => {
+			const retained = (chatState.localNoticesByChatId[chatId] ?? []).filter(
+				(notice) => throughRevision === undefined || notice.revision > throughRevision,
+			);
+			chatState.localNoticesByChatId = {
+				...chatState.localNoticesByChatId,
+				[chatId]: retained,
+			};
+			if (chatState.activeChatId === chatId) chatState.localNotices = retained;
 		}),
 		upsertOptimisticUserInput: vi.fn((input: OptimisticUserInput) => {
 			const index = chatState.optimisticUserInputs.findIndex(
@@ -1519,7 +1544,7 @@ describe('ConversationSessionController', () => {
 		]);
 	});
 
-	it('submits /fork with a message as a fork-run request after appending the status message', async () => {
+	it('submits /fork with a message as a fork-run request and clears the status notice on settle', async () => {
 		const chat = createRunningChat({ id: '123' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/fork continue from here';
@@ -1538,11 +1563,12 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('123');
 
-		expect(deps.chatState.localNotices).toHaveLength(1);
-		expect(deps.chatState.localNotices[0]).toMatchObject({
-			noticeType: 'progress',
-			content: 'Forking chat...',
-		});
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'progress',
+			'Forking chat...',
+		);
+		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
+		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.chatState.isUserScrolledUp).toBe(false);
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('123');
 
@@ -1579,15 +1605,36 @@ describe('ConversationSessionController', () => {
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
 		});
-		expect(deps.chatState.localNotices).toHaveLength(1);
-		expect(deps.chatState.localNotices[0]).toMatchObject({
-			noticeType: 'progress',
-			content: 'Forking chat...',
-		});
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'progress',
+			'Forking chat...',
+		);
+		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
+		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(createServerEntry('456'));
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
+	});
+
+	it('keeps the fork failure notice while clearing the progress notice', async () => {
+		const chat = createRunningChat({ id: '123' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork continue from here';
+		mockForkRunChat.mockRejectedValueOnce(
+			new ApiError(409, 'Chat is running', 'CHAT_RUNNING', undefined, true),
+		);
+		const controller = new ConversationSessionController(deps);
+
+		await controller.submitForChat('123');
+
+		expect(deps.chatState.localNotices).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to fork chat: Chat is running',
+			}),
+		]);
+		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 	});
 
 	it('rejects /fork when agent does not support fork', async () => {
