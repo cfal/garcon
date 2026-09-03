@@ -436,6 +436,84 @@ describe("selected-file commits", () => {
     }
   });
 
+  it("preserves the real index when a selected-file commit fails", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-failed-selected-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "unrelated.txt"]);
+      const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
+      await fs.writeFile(hookPath, "#!/bin/sh\nexit 1\n", "utf-8");
+      await fs.chmod(hookPath, 0o755);
+
+      await expect(git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      })).rejects.toThrow();
+
+      const staged = await runGitCommand(projectPath, [
+        "diff",
+        "--cached",
+        "--name-only",
+      ]);
+      expect(staged.stdout.trim()).toBe("unrelated.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("synchronizes hook-restaged files after a selected-file commit", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-hook-selected-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "unrelated.txt"]);
+      const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
+      await fs.writeFile(
+        hookPath,
+        "#!/bin/sh\nprintf 'formatted\\n' > a.txt\ngit add -- a.txt\n",
+        "utf-8",
+      );
+      await fs.chmod(hookPath, 0o755);
+
+      await git.commit({
+        projectPath,
+        message: "selected change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, ["show", "HEAD:a.txt"]);
+      const staged = await runGitCommand(projectPath, [
+        "diff",
+        "--cached",
+        "--name-only",
+      ]);
+      expect(committed.stdout).toBe("formatted\n");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("formatted\n");
+      expect(staged.stdout.trim()).toBe("unrelated.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("rejects paths outside the project root as invalid input", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-outside-commit-"),
@@ -498,6 +576,52 @@ describe("selected-file commits", () => {
 
       const parents = await runGitCommand(projectPath, ["show", "-s", "--format=%P", "HEAD"]);
       expect(parents.stdout.trim().split(" ")).toHaveLength(2);
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(status.stdout).toBe("");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("completes a conflicted cherry-pick with the resolved index", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-cherry-pick-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "b.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt", "b.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
+      const featureCommit = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "main change"]);
+      await expect(
+        runGitCommand(projectPath, ["cherry-pick", featureCommit.stdout.trim()]),
+      ).rejects.toThrow();
+      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+
+      await git.commit({
+        projectPath,
+        message: "feature change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
       const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
       expect(status.stdout).toBe("");
     } finally {
@@ -589,6 +713,53 @@ describe("selected-file commits", () => {
       await runGitCommand(projectPath, ["rebase", "--continue"]);
       const commitCount = await runGitCommand(projectPath, ["rev-list", "--count", "HEAD"]);
       expect(commitCount.stdout.trim()).toBe("3");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("completes an apply-backend rebase conflict with the resolved index", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-rebase-apply-commit-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "feature\n", "utf-8");
+      await fs.writeFile(path.join(projectPath, "b.txt"), "feature\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "a.txt", "b.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
+
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "main change"]);
+      await runGitCommand(projectPath, ["checkout", "feature"]);
+      await expect(
+        runGitCommand(projectPath, ["rebase", "--apply", "master"]),
+      ).rejects.toThrow();
+      await fs.access(path.join(projectPath, ".git", "rebase-apply"));
+      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+
+      await git.commit({
+        projectPath,
+        message: "feature change",
+        files: ["a.txt"],
+      });
+
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "--format=",
+        "--name-only",
+        "HEAD",
+      ]);
+      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
+      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

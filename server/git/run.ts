@@ -11,10 +11,11 @@ const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
 
 export function gitCommandEnv(options: GitCommandOptions): NodeJS.ProcessEnv | undefined {
-  if (!options.disableOptionalLocks) return undefined;
+  if (!options.disableOptionalLocks && !options.env) return undefined;
   return {
     ...process.env,
-    GIT_OPTIONAL_LOCKS: '0',
+    ...options.env,
+    ...(options.disableOptionalLocks ? { GIT_OPTIONAL_LOCKS: '0' } : {}),
   };
 }
 

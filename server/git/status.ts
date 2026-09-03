@@ -6,7 +6,7 @@ import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
-import { chunkGitPathspecs } from './pathspecs.js';
+import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../common/git-refs.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -60,10 +60,6 @@ type CommitMessageDiffRunner = (
 function normalizeRefResultLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
   return Math.min(limit, GIT_REF_RESULT_LIMITS.max);
-}
-
-function literalPathspec(file: string): string {
-  return `:(literal)${file}`;
 }
 
 async function hasCommitStateRef(projectPath: string, ref: string): Promise<boolean> {
@@ -120,6 +116,57 @@ async function requiresWholeIndexCommit(projectPath: string): Promise<boolean> {
     if (await hasCommitStateRef(projectPath, ref)) return true;
   }
   return hasRebaseOrAmConflictState(projectPath);
+}
+
+async function createTemporaryGitIndex(projectPath: string): Promise<string> {
+  const { stdout } = await runGit(
+    projectPath,
+    ['rev-parse', '--git-path', 'index'],
+    readOnlyGitOptions(),
+  );
+  const indexPath = path.resolve(projectPath, stdout.trim());
+  const temporaryIndexPath = path.join(
+    path.dirname(indexPath),
+    `.garcon-index-${process.pid}-${crypto.randomUUID()}`,
+  );
+  try {
+    await fs.copyFile(indexPath, temporaryIndexPath);
+  } catch (error) {
+    if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+  }
+  return temporaryIndexPath;
+}
+
+async function removeTemporaryGitIndex(temporaryIndexPath: string): Promise<void> {
+  await Promise.all([
+    fs.rm(temporaryIndexPath, { force: true }),
+    fs.rm(`${temporaryIndexPath}.lock`, { force: true }),
+  ]);
+}
+
+async function commitSelectedFiles(
+  projectPath: string,
+  message: string,
+  files: string[],
+): Promise<string> {
+  const pathspecs = files.map(literalGitPathspec);
+  const temporaryIndexPath = await createTemporaryGitIndex(projectPath);
+  const temporaryIndexOptions = { env: { GIT_INDEX_FILE: temporaryIndexPath } };
+  try {
+    for (const pathspec of pathspecs) {
+      await runGit(projectPath, ['add', '--', pathspec], temporaryIndexOptions);
+    }
+    const { stdout } = await runGit(
+      projectPath,
+      ['commit', '--only', '-m', message, '--', ...pathspecs],
+      temporaryIndexOptions,
+    );
+    // Partial commits restore their source index after hooks, so align committed paths explicitly.
+    await runGit(projectPath, ['reset', '--quiet', 'HEAD', '--', ...pathspecs]);
+    return stdout;
+  } finally {
+    await removeTemporaryGitIndex(temporaryIndexPath);
+  }
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -515,16 +562,15 @@ export function createStatusOperations(agents: GitAgentRunner) {
     const layout = await probeWorktreeLayout(projectPath);
     const lockKey = await fs.realpath(layout?.commonDir ?? projectPath);
     return selectedFileCommitLock.runExclusive(lockKey, async () => {
-      for (const file of files) {
-        await runGit(projectPath, ['add', '--', literalPathspec(file)]);
+      if (!(await requiresWholeIndexCommit(projectPath))) {
+        const stdout = await commitSelectedFiles(projectPath, message, files);
+        return { success: true, output: stdout };
       }
-      const commitArgs = await requiresWholeIndexCommit(projectPath)
-        ? ['commit', '-m', message]
-        : ['commit', '--only', '-m', message, '--', ...files.map(literalPathspec)];
-      const { stdout } = await runGit(
-        projectPath,
-        commitArgs,
-      );
+
+      for (const file of files) {
+        await runGit(projectPath, ['add', '--', literalGitPathspec(file)]);
+      }
+      const { stdout } = await runGit(projectPath, ['commit', '-m', message]);
       return { success: true, output: stdout };
     });
   }
