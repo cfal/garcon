@@ -1,6 +1,11 @@
-import { describe, it, expect } from 'bun:test';
+import { afterEach, describe, it, expect } from 'bun:test';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   cacheHeaders,
+  resolveStaticFilePath,
   staticHeaders,
 } from '../static.js';
 import createStaticRoutes from '../static.js';
@@ -15,6 +20,15 @@ const settings = {
 };
 
 const routes = createStaticRoutes(settings);
+const temporaryDirectories = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) =>
+      fs.rm(directory, { recursive: true, force: true })
+    ),
+  );
+});
 
 describe('cacheHeaders', () => {
   it('returns no-cache headers for html', () => {
@@ -72,6 +86,31 @@ describe('static app routes', () => {
     expect(routes['/chat']?.GET).toBeFunction();
     expect(routes['/chat/']).toBeDefined();
     expect(routes['/chat/']?.GET).toBeFunction();
+  });
+});
+
+describe('filesystem static paths', () => {
+  it('rejects symlinks whose targets escape the build directory', async () => {
+    const root = path.join(os.tmpdir(), `garcon-static-${randomUUID()}`);
+    const buildPath = path.join(root, 'build');
+    const outsidePath = path.join(root, 'secret.txt');
+    temporaryDirectories.push(root);
+    await fs.mkdir(buildPath, { recursive: true });
+    await fs.writeFile(outsidePath, 'secret\n', 'utf8');
+    await fs.symlink(outsidePath, path.join(buildPath, 'asset.txt'));
+
+    await expect(resolveStaticFilePath('/asset.txt', buildPath)).resolves.toBeNull();
+  });
+
+  it('resolves regular files inside the build directory', async () => {
+    const root = path.join(os.tmpdir(), `garcon-static-${randomUUID()}`);
+    const buildPath = path.join(root, 'build');
+    const assetPath = path.join(buildPath, 'asset.txt');
+    temporaryDirectories.push(root);
+    await fs.mkdir(buildPath, { recursive: true });
+    await fs.writeFile(assetPath, 'asset\n', 'utf8');
+
+    await expect(resolveStaticFilePath('/asset.txt', buildPath)).resolves.toBe(assetPath);
   });
 });
 
