@@ -410,28 +410,39 @@ describe('ChatRegistry', () => {
   });
 
   it('re-persists a rollback after another queued save captured the patch', async () => {
+    registry = new ChatRegistry(tempDir, { saveDelayMs: 0 });
+    await registry.init();
     registry.addChat(newChat());
     registry.addChat(newChat({ id: SECOND_CHAT_ID }));
-    await registry.flush();
     const firstRenameEntered = deferred();
     const releaseFirstRename = deferred();
     const rollbackPersisted = deferred();
     const originalRename = fs.rename.bind(fs);
-    const originalSetTimeout = globalThis.setTimeout;
-    let targetRenameCount = 0;
-    const timeout = spyOn(globalThis, 'setTimeout').mockImplementation(
-      (callback, _delay, ...args) => originalSetTimeout(callback, 0, ...args),
-    );
+    let wroteUnrolledBackSnapshot = false;
+    let failureInjected = false;
     const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
       if (target === path.join(tempDir, 'chats.json')) {
-        targetRenameCount += 1;
-        if (targetRenameCount === 1) {
+        const snapshot = JSON.parse(await fs.readFile(source, 'utf8'));
+        const firstModel = snapshot.sessions[CHAT_ID]?.model;
+        const secondModel = snapshot.sessions[SECOND_CHAT_ID]?.model;
+        if (firstModel === 'model-a' && secondModel === 'model-a') {
           firstRenameEntered.resolve();
           await releaseFirstRename.promise;
-        } else if (targetRenameCount === 3) {
-          throw new Error('disk full');
-        } else if (targetRenameCount === 4) {
+        } else if (firstModel === 'model-b' && secondModel === 'model-b') {
+          if (!wroteUnrolledBackSnapshot) {
+            wroteUnrolledBackSnapshot = true;
+          } else {
+            failureInjected = true;
+            throw new Error('disk full');
+          }
+        } else if (
+          failureInjected &&
+          firstModel === 'model-b' &&
+          secondModel === 'model-a'
+        ) {
           rollbackPersisted.resolve();
+        } else {
+          throw new Error('disk full');
         }
       }
       return originalRename(source, target);
@@ -457,7 +468,6 @@ describe('ChatRegistry', () => {
       await rollbackPersisted.promise;
     } finally {
       releaseFirstRename.resolve();
-      timeout.mockRestore();
       rename.mockRestore();
     }
 

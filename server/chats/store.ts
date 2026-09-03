@@ -42,6 +42,10 @@ const logger = createLogger('chats:store');
 export const CHAT_REGISTRY_VERSION = 5;
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
 const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
+
+interface ChatRegistryOptions {
+  saveDelayMs?: number;
+}
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
   'nativeSession',
@@ -423,10 +427,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   #chatMutationRevisions = new Map<string, number>();
   #agentSessionIdIndex = new Map<string, string>();
   #workspaceDir: string;
+  #saveDelayMs: number;
 
-  constructor(workspaceDir: string) {
+  constructor(workspaceDir: string, options: ChatRegistryOptions = {}) {
     super();
     this.#workspaceDir = workspaceDir;
+    this.#saveDelayMs = options.saveDelayMs ?? REGISTRY_SAVE_DEBOUNCE_MS;
   }
 
   #emitChatAdded(id: string): void { this.emit('chat-added', id); }
@@ -842,7 +848,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
         logger.warn('sessions: failed to persist registry:', error.message);
       });
-    }, REGISTRY_SAVE_DEBOUNCE_MS);
+    }, this.#saveDelayMs);
   }
 
   #advanceChatMutationRevision(id: string): number {
