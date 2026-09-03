@@ -13,6 +13,10 @@ export function ensureLedgerRootDirectory(rootDirectory: string): string {
 }
 
 export function ensureLedgerChatDirectory(rootDirectory: string, chatId: string): string {
+  const canonicalRootDirectory = ensureLedgerRootDirectory(rootDirectory);
+  if (canonicalRootDirectory !== rootDirectory) {
+    throw new Error(`Transcript ledger root changed: ${rootDirectory}`);
+  }
   const directory = path.join(rootDirectory, chatId);
   try {
     mkdirSync(directory, { mode: 0o700 });
