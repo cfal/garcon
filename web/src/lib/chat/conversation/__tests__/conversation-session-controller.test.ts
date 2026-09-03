@@ -58,7 +58,7 @@ import {
 	ConversationLifecycleState,
 	type LoadingStatus,
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session.js';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
@@ -180,6 +180,22 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		tags: [],
 		...overrides,
 		parentChat: overrides.parentChat ?? null,
+	};
+}
+
+function createDraftStartup(overrides: Partial<ChatStartupConfig> = {}): ChatStartupConfig {
+	const agentId = overrides.agentId ?? 'claude';
+	return {
+		agentId,
+		model: 'opus',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		permissionMode: 'default',
+		thinkingMode: 'none',
+		agentSettings: { ownerId: agentId, schemaVersion: 1, values: {} },
+		firstMessage: 'start from draft',
+		...overrides,
 	};
 }
 
@@ -2021,32 +2037,42 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
-	it('starts draft chats with the draft integration settings', async () => {
+	it('keeps native draft routing authoritative over active endpoint state', async () => {
 		const draft = createRunningChat({
 			id: 'draft-1',
 			status: 'draft',
-			model: 'opus',
-			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'off' } },
+			agentId: 'codex',
+			model: 'gpt-5.6-sol',
+			apiProviderId: 'stale-projection-provider',
+			modelEndpointId: 'stale-projection-endpoint',
+			modelProtocol: 'anthropic-messages',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { reasoningEffort: 'high' } },
 		});
 		const { deps } = createDeps(draft);
 		deps.sessions.isDraft = vi.fn(() => true);
+		deps.agentState.agentId = 'direct-anthropic-compatible';
+		deps.agentState.model = 'claude-sonnet-4-5';
+		deps.agentState.apiProviderId = 'anthropic-provider';
+		deps.agentState.modelEndpointId = 'anthropic-messages-endpoint';
+		deps.agentState.modelProtocol = 'anthropic-messages';
+		deps.agentState.agentSettings = {
+			ownerId: 'direct-anthropic-compatible',
+			schemaVersion: 1,
+			values: { thinkingMode: 'auto' },
+		};
 		deps.sessions.startupByChatId = {
-			'draft-1': {
-				agentId: 'claude',
-				model: 'opus',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-				permissionMode: 'default',
-				thinkingMode: 'none',
+			'draft-1': createDraftStartup({
+				agentId: 'codex',
+				model: 'gpt-5.6-sol',
+				thinkingMode: 'high',
 				agentSettings: {
-					ownerId: 'claude',
+					ownerId: 'codex',
 					schemaVersion: 1,
-					values: { thinkingMode: 'on' },
+					values: { reasoningEffort: 'high' },
 				},
 				firstMessage: 'start from draft',
 				tags: ['draft'],
-			},
+			}),
 		};
 		deps.composerState.inputText = 'start from draft';
 		mockStartChat.mockResolvedValueOnce({
@@ -2066,13 +2092,123 @@ describe('ConversationSessionController', () => {
 		expect(mockStartChat).toHaveBeenCalledWith(
 			expect.objectContaining({
 				chatId: 'draft-1',
+				agentId: 'codex',
+				projectPath: '/workspace/project',
+				model: 'gpt-5.6-sol',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
+				thinkingMode: 'high',
 				command: 'start from draft',
-				agentSettings: expect.objectContaining({ values: { thinkingMode: 'on' } }),
+				tags: ['draft'],
+				agentSettings: expect.objectContaining({
+					ownerId: 'codex',
+					values: { reasoningEffort: 'high' },
+				}),
 			}),
 		);
 		const startPayload = mockStartChat.mock.calls[0][0];
 		expect(startPayload).not.toHaveProperty('options');
 		expect(startPayload.images).toBeUndefined();
+	});
+
+	it('keeps queued draft startup isolated from a re-entrant active-chat switch', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			agentId: 'codex',
+			model: 'gpt-5.6-sol',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
+		});
+		const anthropicChat = createRunningChat({
+			id: 'anthropic-1',
+			agentId: 'direct-anthropic-compatible',
+			model: 'claude-sonnet-4-5',
+			apiProviderId: 'anthropic-provider',
+			modelEndpointId: 'anthropic-messages-endpoint',
+			modelProtocol: 'anthropic-messages',
+			agentSettings: {
+				ownerId: 'direct-anthropic-compatible',
+				schemaVersion: 1,
+				values: {},
+			},
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.byId[anthropicChat.id] = anthropicChat;
+		deps.sessions.startupByChatId = {
+			'draft-1': createDraftStartup({
+				agentId: 'codex',
+				model: 'gpt-5.6-sol',
+				thinkingMode: 'high',
+				agentSettings: {
+					ownerId: 'codex',
+					schemaVersion: 1,
+					values: { reasoningEffort: 'high' },
+				},
+				firstMessage: 'auto-start command',
+			}),
+		};
+		deps.agentState.setModelSelection.mockImplementation((selection) => {
+			deps.agentState.model = selection.model;
+			deps.agentState.apiProviderId = selection.apiProviderId;
+			deps.agentState.modelEndpointId = selection.modelEndpointId;
+			deps.agentState.modelProtocol = selection.modelProtocol;
+		});
+		mockStartChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'chat-start',
+			clientRequestId: 'req-1',
+			chatId: 'draft-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+			chat: createServerEntry('draft-1'),
+		});
+		const controller = new ConversationSessionController(deps);
+
+		controller.handleChatSwitch('draft-1');
+		deps.sessions.selectedChatId = anthropicChat.id;
+		deps.sessions.selectedChat = anthropicChat;
+		controller.handleChatSwitch(anthropicChat.id);
+
+		expect(deps.agentState.modelEndpointId).toBe('anthropic-messages-endpoint');
+		await vi.waitFor(() => expect(mockStartChat).toHaveBeenCalledOnce());
+		expect(mockStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: 'codex',
+				model: 'gpt-5.6-sol',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				thinkingMode: 'high',
+				agentSettings: expect.objectContaining({
+					ownerId: 'codex',
+					values: { reasoningEffort: 'high' },
+				}),
+				command: 'auto-start command',
+			}),
+		);
+	});
+
+	it('rejects a draft whose authoritative startup settings are missing', async () => {
+		const draft = createRunningChat({ id: 'draft-1', status: 'draft' });
+		const { deps } = createDeps(draft);
+		deps.composerState.inputText = 'preserve this draft';
+
+		const outcome = await new ConversationSessionController(deps).submitForChat('draft-1');
+
+		expect(outcome).toBe('rejected');
+		expect(mockStartChat).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('preserve this draft');
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		expect(deps.composerState.isSubmitting).toBe(false);
+		expect(deps.startupCoordinator.beginLocalStartup).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'draft-1',
+			'error',
+			'Failed to start chat: This draft is missing its startup settings. Create a new chat and try again.',
+		);
 	});
 
 	it('keeps a failed draft submission visible and retryable', async () => {
@@ -2085,6 +2221,7 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(draft);
 		deps.sessions.isDraft = vi.fn(() => true);
+		deps.sessions.startupByChatId = { 'draft-1': createDraftStartup() };
 		deps.composerState.inputText = 'retry this request';
 		deps.composerState.clearAfterSubmit.mockImplementation(() => {
 			deps.composerState.inputText = '';
@@ -2115,6 +2252,7 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(draft);
 		deps.sessions.isDraft = vi.fn(() => true);
+		deps.sessions.startupByChatId = { 'draft-1': createDraftStartup() };
 		deps.composerState.inputText = 'start from draft';
 		deps.composerState.images = [new File(['hello'], 'hello.txt', { type: 'text/plain' })];
 		deps.composerState.contentRevision = 1;

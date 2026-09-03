@@ -42,11 +42,27 @@ export interface SubmissionContext {
 	composerRevisionAfterClear: number | null;
 }
 
+type DraftSubmissionContext = Omit<SubmissionContext, 'startup'> & {
+	startup: ChatStartupConfig;
+};
+
 interface ExecutionModelSelection {
 	model: string;
 	apiProviderId: string | null;
 	modelEndpointId: string | null;
 	modelProtocol: ApiProtocol | null;
+}
+
+export function rejectMissingDraftStartup(
+	deps: Pick<RouteDeps, 'chatState'>,
+	chatId: string,
+): ConversationSubmissionOutcome {
+	deps.chatState.appendLocalNoticeForChat(
+		chatId,
+		'error',
+		m.chat_notice_failed_start_chat({ detail: m.chat_notice_missing_draft_startup() }),
+	);
+	return 'rejected';
 }
 
 export async function submitQueueRoute(
@@ -207,25 +223,24 @@ export function submitSteerPreferenceRoute(
 export async function submitDraftRoute(
 	deps: RouteDeps,
 	acceptedInputs: AcceptedInputSubmissionService,
-	context: SubmissionContext,
+	context: DraftSubmissionContext,
 ): Promise<ConversationSubmissionOutcome> {
 	const { chatId, chat, startup } = context;
-	const submission = acceptedInputs.start(() => ({
+	const submission = acceptedInputs.start({
 		chatId,
-		agentId: (startup?.agentId ?? chat.agentId) as typeof deps.agentState.agentId,
-		projectPath: chat.projectPath!,
-		model: startup?.model ?? chat.model ?? deps.agentState.model,
-		apiProviderId: startup?.apiProviderId ?? chat.apiProviderId ?? deps.agentState.apiProviderId,
-		modelEndpointId:
-			startup?.modelEndpointId ?? chat.modelEndpointId ?? deps.agentState.modelEndpointId,
-		modelProtocol: startup?.modelProtocol ?? chat.modelProtocol ?? deps.agentState.modelProtocol,
-		permissionMode: startup?.permissionMode ?? deps.agentState.permissionMode,
-		thinkingMode: startup?.thinkingMode ?? deps.agentState.thinkingMode,
-		agentSettings: startup?.agentSettings ?? deps.agentState.agentSettings,
+		agentId: startup.agentId,
+		projectPath: chat.projectPath,
+		model: startup.model,
+		apiProviderId: startup.apiProviderId ?? null,
+		modelEndpointId: startup.modelEndpointId ?? null,
+		modelProtocol: startup.modelProtocol ?? null,
+		permissionMode: startup.permissionMode,
+		thinkingMode: startup.thinkingMode,
+		agentSettings: startup.agentSettings,
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
-		tags: startup?.tags,
-	}));
+		tags: startup.tags,
+	});
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
 		context,
