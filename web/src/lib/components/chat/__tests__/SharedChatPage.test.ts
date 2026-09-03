@@ -379,6 +379,30 @@ describe('SharedChatPage', () => {
 		expect(screen.getByText('Deployment context')).toBeTruthy();
 	});
 
+	it('collapses long ordinary user messages and preserves expansion when prepending history', async () => {
+		const newest = response([], 50, 51);
+		newest.snapshot.messages = [
+			{
+				type: 'user-message',
+				timestamp: '2025-01-02T03:05:00.000Z',
+				content: '**Long shared prompt**\n\nKeep every detail available.',
+			},
+		];
+		newest.page.end = 51;
+		vi.mocked(sharesApi.getSharedChat)
+			.mockResolvedValueOnce(newest)
+			.mockResolvedValueOnce(response(['Earlier response'], 0, 51, { nextBefore: null }));
+
+		render(SharedChatPageTestHost);
+		await screen.findByText('Long shared prompt');
+		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await screen.findByText('Earlier response');
+		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+	});
+
 	it('renders attachments with duplicate filenames', async () => {
 		const chatRows = response([], 0, 1, { nextBefore: null });
 		chatRows.snapshot.messages = [
