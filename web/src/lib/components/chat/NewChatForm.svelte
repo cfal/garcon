@@ -555,7 +555,7 @@
 </script>
 
 <div
-	class="p-2 sm:p-4"
+	class="min-w-0 p-2 sm:p-4"
 	{@attach snippetExpansion.pending && snippetExpansionLayer}
 	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
 >
@@ -569,7 +569,7 @@
 			<div class="space-y-2">
 				<div class="relative">
 					<div class="flex gap-2">
-						<div class="relative flex-1">
+						<div class="relative min-w-0 flex-1">
 							<input
 								id="project-path-input"
 								type="text"
