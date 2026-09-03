@@ -429,6 +429,11 @@ interface SuccessResponse {
 	worktreePath?: string;
 }
 
+export interface GitCommitResponse extends SuccessResponse {
+	commitScope: 'selected-files' | 'whole-index';
+	indexSynchronized: boolean;
+}
+
 export interface GenerateCommitMessageResponse {
 	message?: string;
 	error?: string;
@@ -469,8 +474,8 @@ export async function gitCommit(
 	project: string,
 	message: string,
 	files: string[],
-): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/commit', { project, message, files });
+): Promise<GitCommitResponse> {
+	return apiPost<GitCommitResponse>('/api/v1/git/commit', { project, message, files });
 }
 
 export async function gitInitialCommit(project: string): Promise<SuccessResponse> {

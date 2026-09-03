@@ -15,11 +15,11 @@
 
 <p align="center">
   <a href="screenshots/readme-parallel-agents-dark.png">
-    <img src="screenshots/readme-parallel-agents-dark.png" alt="A dark Garcon workspace with Pi invoking the garcon-chat skill beside Codex applying the delivered order-validation review finding" width="100%" />
+    <img src="screenshots/readme-parallel-agents-dark.png" alt="A dark Garcon workspace with four tiled windows showing two collaborating agent chats, Chat Map, and Git with window-local tabs" width="100%" />
   </a>
 </p>
 
-<p align="center"><em>Pi routes a review finding through garcon-chat; Codex receives the provenance-prefixed message, applies the fix, and runs the tests beside it.</em></p>
+<p align="center"><em>Arrange the whole development loop as window-local tabs: agent chats, Chat Map, Git, files, terminals, history, and pull requests.</em></p>
 
 Agents, terminals, files, Git, and pull request commands run on the Garcon host under your account, using the agent logins and model endpoints you configure.
 
@@ -48,35 +48,36 @@ The terminal is excellent for one focused agent session. It gets harder when sev
 
 Garcon keeps the full loop together:
 
-- **Run work in parallel.** Keep up to four sessions in resizable panes, compare different agents or approaches, and continue or fork context where the provider supports it.
+- **Build the workspace around the task.** Tile up to four resizable windows, keep each window's chats, files, terminals, Git, history, pull requests, and Chat Map in local tabs, then drag tabs or chats between windows.
 - **Steer without waiting.** Queue the next instruction, interrupt or redirect the active turn, approve tool use, answer agent questions, pause the queue, or stop work in place.
 - **Review the real change.** Browse and edit files, use a terminal, inspect rendered reasoning, tool calls, edits, and diagrams, then stage individual lines, hunks, files, or folders.
-- **Find and organize the work.** Search chat metadata and indexed transcript content, save filters, tag, pin, archive, share read-only snapshots, and schedule one-off or recurring prompts.
-- **Move context deliberately.** Export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or send a task to another agent without hiding the exchange.
+- **Coordinate agents visibly.** Send provenance-labeled messages between chats, record delegated parents, and navigate fork, handoff, and delegation lineage in Chat Map.
+- **Find and organize the work.** Group chats by activity or project, search metadata and indexed transcripts, save filters, tag, pin, archive, share read-only snapshots, and schedule prompts.
+- **Move context deliberately.** Fork where the provider supports it, export complete Markdown or XML transcripts, create token-budgeted handoff artifacts, or delegate into a fresh chat.
 - **Close the loop from anywhere.** Work with branches, worktrees, history, pull requests, commits, and pushes from desktop or phone, with optional Telegram alerts when attention is needed.
 
 ## See It In Action
 
-<p align="center"><strong>Redirect a running turn</strong></p>
+<p align="center"><strong>Agents that can coordinate</strong></p>
 
 <p align="center">
   <a href="screenshots/readme-agent-steering.png">
-    <img src="screenshots/readme-agent-steering.png" alt="A light Garcon workspace with an active Codex verification turn and a queued follow-up offering Steer, Send now, and Pause controls" width="100%" />
+    <img src="screenshots/readme-agent-steering.png" alt="A light Garcon workspace with two agent chats showing a provenance-labeled inter-agent review message and the resulting response" width="100%" />
   </a>
 </p>
 
-<p align="center">Add the next instruction while tests run, or steer and interrupt immediately when the plan changes.</p>
+<p align="center">An agent can discover its chat ID and message up to 16 peers. Garcon preserves the sender, transcript, and delivery outcome, whether the target is idle or already running.</p>
 
 <table>
   <tr>
     <td width="70%" align="center">
       <a href="screenshots/readme-git-review.png">
-        <img src="screenshots/readme-git-review.png" alt="Garcon's dark Git workbench showing staged and unstaged TypeScript files, a large diff, and line-level staging controls" width="100%" />
+        <img src="screenshots/readme-git-review.png" alt="Garcon's dark windowed workspace showing the Git workbench beside an agent chat and terminal" width="100%" />
       </a>
     </td>
     <td width="30%" align="center">
       <a href="screenshots/readme-mobile-workspace.png">
-        <img src="screenshots/readme-mobile-workspace.png" alt="A light mobile Garcon session showing an active Codex turn, queued follow-up, steering controls, diff counts, and workspace navigation" width="100%" />
+        <img src="screenshots/readme-mobile-workspace.png" alt="A mobile Garcon workspace showing a detailed agent chat, workspace navigation, and active task context" width="100%" />
       </a>
     </td>
   </tr>
@@ -104,11 +105,12 @@ Use an existing agent login or subscription where its CLI supports one, or confi
 
 ## Automate And Delegate
 
-Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also exposes bounded status, complete transcript export, token-budgeted handoff artifacts, asynchronous delivery, active-turn steering, presentation-only rows, and Stop.
+Garcon's CLI starts or resumes ordinary visible chats through an already-running server. It also records delegated parentage, queries the live agent and model catalog, observes exact turns, exports transcripts, builds bounded handoff artifacts, appends presentation-only rows, delivers asynchronous work, steers active turns, and stops execution.
 
 ```bash
-# Start a visible agent chat.
+# Start a visible delegated chat and record its lineage in Chat Map.
 bun cli/main.ts --workspace default --cwd /path/to/project \
+  --parent 1785337200123456 \
   --agent codex --model gpt-5.4 --permissions acceptEdits \
   "Implement the validation and run its focused tests."
 
@@ -116,17 +118,19 @@ bun cli/main.ts --workspace default --cwd /path/to/project \
 bun cli/main.ts --workspace default send-async 1785337200123456 \
   --allow-steer "Address the review finding and rerun the tests."
 
-# Build a bounded, auditable context artifact for another model.
-bun cli/main.ts --workspace default handoff 1785337200123456 \
-  --context-window-size 131072 --output handoff.xml
+# Observe the chat or export its complete authoritative transcript.
+bun cli/main.ts --workspace default status 1785337200123456 --messages 20
+bun cli/main.ts --workspace default export 1785337200123456 \
+  --format xml --output transcript.xml
 ```
 
 See the [CLI and server guide](docs/cli.md) for server configuration, catalog discovery, message presentation, reattachment, status, export, handoff, queue behavior, and connection rules. `bun run build-exe` produces `garcon-cli-linux-x64` and `garcon-cli-darwin-arm64` when a repository checkout is not the desired invocation path.
 
-The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) repository makes the same control plane available to coding agents:
+The companion [cfal/garcon-skills](https://github.com/cfal/garcon-skills) repository exposes this control plane to Claude, Codex, Pi, and other skill-aware agents:
 
-- `garcon-agent` validates live agent, provider, model, permission, and effort choices before starting or resuming a Garcon chat.
-- `garcon-chat` sends a provenance-prefixed message between explicit chat IDs with `send-async --allow-steer`, returning as soon as Garcon accepts it.
+- `garcon-agent` validates live agent, provider, model, permission, and effort choices before starting or resuming a visible chat.
+- `garcon-message` sends in-band messages between one or many existing chats, visible by default and anonymous only when explicitly requested.
+- `garcon-amp` surrounds a durable parent agent with fresh Oracle, Finder, Librarian, and Reporter specialists for review, repository retrieval, external evidence, and transcript extraction.
 
 ```bash
 git clone https://github.com/cfal/garcon-skills.git
@@ -134,7 +138,9 @@ cd garcon-skills
 ./link.sh
 ```
 
-The current skills invoke `bun /garcon/cli/main`; adjust that path when Garcon is checked out elsewhere. Delegated turns inherit the target chat's saved execution settings and can edit files or run tools wherever that chat already permits them.
+The skills resolve `garcon-cli` from `PATH`, `$HOME/garcon`, or `/garcon`. Inter-agent messages remain ordinary, auditable transcript input; delegated chats keep explicit lineage instead of relying on a hidden side channel.
+
+Under the hood, `<garcon-get-chat-id />` gives an agent its runtime identity and `<garcon-send-message>` delivers a bounded message to up to 16 explicit chat IDs. Garcon infers the visible sender, supports deliberate anonymity, and creates no automatic replies.
 
 ## Trusted Local Use
 

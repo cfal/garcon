@@ -1,4 +1,10 @@
-import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/store.js';
+import {
+  AuthAccountAlreadyConfiguredError,
+  needsSetup,
+  getUserByUsername,
+  createUser,
+  getUser,
+} from '../auth/store.js';
 import { generateAuthToken } from '../auth/token.js';
 import { createRateLimiter, type RequestIpServer } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
@@ -76,6 +82,9 @@ async function noauthPostRegister(body: JsonBody): Promise<Response> {
       token,
     });
   } catch (error) {
+    if (error instanceof AuthAccountAlreadyConfiguredError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     logger.error('Registration error:', error);
     return Response.json({ error: 'Internal server error' }, { status: 500 });
   }

@@ -16,7 +16,7 @@ describe('ConversationFeedItemState', () => {
 		expect(disclosure.open('thinking', 'thinking', false)).toBe(false);
 	});
 
-	it('keeps input and result disclosures independent', () => {
+	it('keeps tool and message-body disclosures independent', () => {
 		const items = new ConversationFeedItemState();
 		items.reconcile('chat-1:generation-1', new Set(['row-1']), new Set());
 		const disclosure = items.disclosurePort('row-1');
@@ -25,6 +25,7 @@ describe('ConversationFeedItemState', () => {
 
 		expect(disclosure.open('tool-input', 'tool-1', false)).toBe(true);
 		expect(disclosure.open('tool-result', 'tool-1', false)).toBe(false);
+		expect(disclosure.open('user-body', 'body', false)).toBe(false);
 		expect(disclosure.open('cli-body', 'body', false)).toBe(true);
 	});
 

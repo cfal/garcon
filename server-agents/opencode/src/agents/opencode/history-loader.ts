@@ -10,6 +10,7 @@ import {
 } from '@garcon/common/chat-types';
 import path from 'node:path';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
+import { normalizeOpenCodeToolResultContent } from './tool-result-converter.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
@@ -382,7 +383,7 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
             push(new ToolResultMessage(
               ts,
               toolUse.toolId,
-              normalizeToolResultContent(state.output),
+              normalizeOpenCodeToolResultContent(part.tool, state),
               false,
             ), part.id, 1);
           } else if (state.status === 'error') {

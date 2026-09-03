@@ -13,6 +13,7 @@ export interface FileIdentityResponse {
 export type FileRevision = string;
 
 export const FILE_REVISION_HEADER = 'X-Garcon-File-Revision';
+export const MAX_FILE_VIEW_BYTES = 25 * 1024 * 1024;
 
 export type FileRevisionResponse =
   | { status: 'ready'; revision: FileRevision }

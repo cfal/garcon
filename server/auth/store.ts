@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { getConfigDir } from '../config.js';
 import { readJsonStateFile, writeJsonFileAtomic } from '../lib/json-file-store.ts';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 interface AuthData {
   jwtSecret?: unknown;
@@ -32,6 +33,14 @@ function authPath(): string {
 
 const cachedJwtSecrets = new Map<string, string>();
 const inflightJwtSecrets = new Map<string, Promise<string>>();
+const authWriteLock = new KeyedPromiseLock();
+
+export class AuthAccountAlreadyConfiguredError extends Error {
+  constructor() {
+    super('Account already configured');
+    this.name = 'AuthAccountAlreadyConfiguredError';
+  }
+}
 
 // Ensures the auth config directory exists.
 export async function init(): Promise<void> {
@@ -112,16 +121,19 @@ export async function getUserByUsername(username: string): Promise<AuthUser | nu
 
 // Creates the single user. Throws if a user already exists.
 export async function createUser(username: string, passwordHash: string): Promise<CreatedAuthUser> {
-  const data = await readFromDisk();
-  if (data.username && data.passwordHash) {
-    throw new Error('Account already configured');
-  }
-  data.username = username;
-  data.passwordHash = passwordHash;
-  const createdAt = new Date().toISOString();
-  data.createdAt = createdAt;
-  await writeToDisk(data);
-  return { username, createdAt };
+  const filePath = authPath();
+  return authWriteLock.runExclusive(filePath, async () => {
+    const data = await readFromDisk(filePath);
+    if (data.username && data.passwordHash) {
+      throw new AuthAccountAlreadyConfiguredError();
+    }
+    data.username = username;
+    data.passwordHash = passwordHash;
+    const createdAt = new Date().toISOString();
+    data.createdAt = createdAt;
+    await writeToDisk(data, filePath);
+    return { username, createdAt };
+  });
 }
 
 // Returns true if no user account has been set up yet.

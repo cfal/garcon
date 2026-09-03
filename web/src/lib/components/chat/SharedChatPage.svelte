@@ -22,6 +22,7 @@
 	import CollapsibleBody from '$lib/components/chat/rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from '$lib/components/chat/rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
+	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import { cn } from '$lib/utils/cn';
 	import { getAppTitle } from '$lib/context';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -299,7 +300,7 @@
 												title={userPresentation.title}
 											/>
 										{/if}
-										<CollapsibleBody disclosure={userPresentation?.disclosure}>
+										<CollapsibleBody disclosure={userMessageBodyDisclosure(userPresentation)}>
 											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
 												<Markdown
 													source={message.content}

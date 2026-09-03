@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -43,6 +43,25 @@ describe('TelegramSettingsStore', () => {
     const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
     expect(raw.telegram.botToken).toBe('bot-token');
     expect(raw.telegram.botUsername).toBe('garcon_bot');
+  });
+
+  it('does not publish Telegram mutations that fail to persist', async () => {
+    const store = new TelegramSettingsStore(filePath);
+    await store.init();
+    const rename = spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk full'));
+
+    try {
+      await expect(store.setBotToken(
+        'bot-token',
+        { id: 123, username: 'garcon_bot', firstName: 'Garcon' },
+      )).rejects.toThrow('disk full');
+    } finally {
+      rename.mockRestore();
+    }
+
+    expect(store.isConfigured).toBe(false);
+    expect(store.getBotToken()).toBe('');
+    expect(store.getPublicStatus().botTokenAvailable).toBe(false);
   });
 
   it('quarantines corrupt settings without overwriting the bot token', async () => {
