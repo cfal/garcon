@@ -62,6 +62,12 @@ export function sanitizeRecordedPreamblePrefixes(input: {
   readonly messages: readonly ChatMessage[];
   readonly evidence: readonly PreambleHistoryEvidence[];
 }): SanitizePreamblePrefixesResult {
+  if (input.evidence.length === 0) {
+    return {
+      kind: 'sanitized',
+      messages: input.messages.map((message) => ({ message })),
+    };
+  }
   const byKey = new Map(input.evidence.map((entry) => [entry.receipt.applicationKey, entry]));
   if (byKey.size !== input.evidence.length) {
     return { kind: 'mismatch', reason: 'duplicate application evidence' };

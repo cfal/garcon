@@ -127,11 +127,17 @@ describe('preamble native-history sanitation', () => {
     })).toEqual({ kind: 'sanitized', messages: [{ message }] });
   });
 
-  it('leaves ordinary messages unchanged when there is no evidence', () => {
-    const message = new UserMessage(AT, 'Visible prompt');
+  it('leaves all user-authored messages unchanged when there is no evidence', () => {
+    const messages = [
+      new UserMessage(AT, 'Visible prompt'),
+      new UserMessage(AT, '<garcon-preambles authored text'),
+    ];
     expect(sanitizeRecordedPreamblePrefixes({
-      messages: [message],
+      messages,
       evidence: [],
-    })).toEqual({ kind: 'sanitized', messages: [{ message }] });
+    })).toEqual({
+      kind: 'sanitized',
+      messages: messages.map((message) => ({ message })),
+    });
   });
 });
