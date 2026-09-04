@@ -24,6 +24,11 @@ interface InitializeMessage {
   };
 }
 
+// A CLI-side clear discards provider context that Garcon's durable transcript still describes,
+// and the runtime fails the clearing turn; new chat and handoff are the supported context
+// resets, so discovery must not advertise the command.
+const HIDDEN_CLI_COMMANDS = new Set(['clear']);
+
 export function parseInitSlashCommands(slashCommands: unknown, skills: unknown): SlashCommand[] {
   const skillNames = new Set(
     Array.isArray(skills) ? skills.filter((value): value is string => typeof value === 'string') : [],
@@ -33,12 +38,14 @@ export function parseInitSlashCommands(slashCommands: unknown, skills: unknown):
   return slashCommands
     .flatMap((value): SlashCommand[] => {
       if (typeof value === 'string') {
+        if (HIDDEN_CLI_COMMANDS.has(value)) return [];
         return [{
           name: value,
           source: skillNames.has(value) ? 'skill' : 'command',
         }];
       }
       if (!isRecord(value) || typeof value.name !== 'string') return [];
+      if (HIDDEN_CLI_COMMANDS.has(value.name)) return [];
       const description = typeof value.description === 'string'
         ? value.description
         : undefined;

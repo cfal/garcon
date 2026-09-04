@@ -8,15 +8,24 @@ import {
 describe('parseInitSlashCommands', () => {
   it('tags names present in skills as skills and others as commands', () => {
     const result = parseInitSlashCommands(
-      ['clear', 'compact', 'dogfood', 'pm-pr'],
+      ['beta', 'compact', 'dogfood', 'pm-pr'],
       ['dogfood', 'pm-pr'],
     );
     expect(result).toEqual([
-      { name: 'clear', source: 'command' },
+      { name: 'beta', source: 'command' },
       { name: 'compact', source: 'command' },
       { name: 'dogfood', source: 'skill' },
       { name: 'pm-pr', source: 'skill' },
     ]);
+  });
+
+  it('hides CLI commands whose semantics Garcon does not support', () => {
+    expect(parseInitSlashCommands(['clear', 'compact'], [])).toEqual([
+      { name: 'compact', source: 'command' },
+    ]);
+    expect(parseInitSlashCommands([
+      { name: 'clear', description: 'Clear conversation history and free up context' },
+    ], [])).toEqual([]);
   });
 
   it('sorts commands alphabetically', () => {
