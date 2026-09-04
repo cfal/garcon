@@ -612,6 +612,40 @@ describe('claudeResultFailureMessage', () => {
       ],
     })).toBe('Claude CLI turn failed: error_during_execution');
   });
+
+  it('prefers error list prose over the result text', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      errors: ['The run exceeded its turn limit.'],
+      result: 'API Error: 500',
+    })).toBe('The run exceeded its turn limit.');
+  });
+
+  it('uses the result text for an API failure labelled subtype success', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'API Error: 529 overloaded',
+    })).toBe('API Error: 529 overloaded');
+  });
+
+  it('never labels a failure with the success subtype', () => {
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      terminal_reason: 'api_error',
+    })).toBe('Claude CLI turn failed: api_error');
+    expect(claudeResultFailureMessage({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      api_error_status: 529,
+    })).toBe('Claude CLI turn failed: unknown error (API status 529)');
+  });
 });
 
 describe('Claude provider run boundaries', () => {

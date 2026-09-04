@@ -90,9 +90,11 @@ function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// Mirrors the Agent SDK's error-result text selection: CLI-raised terminal errors carry their
+// prose in errors[], an API-failed run arrives as subtype "success" with the prose in result,
+// and "success" must never label a failure.
+// https://github.com/anthropics/claude-agent-sdk-python/blob/a8b1e285/src/claude_agent_sdk/_internal/query.py#L55-L80
 export function claudeResultFailureMessage(message: ClaudeCLIMessage): string {
-  const result = typeof message.result === 'string' ? message.result.trim() : '';
-  if (result) return result.slice(0, 4_000);
   const errors = Array.isArray(message.errors)
     ? message.errors
       .filter((entry): entry is string => typeof entry === 'string')
@@ -100,7 +102,11 @@ export function claudeResultFailureMessage(message: ClaudeCLIMessage): string {
       .filter(entry => entry.length > 0 && !entry.startsWith('[ede_diagnostic]'))
     : [];
   if (errors.length > 0) return errors.join('\n').slice(0, 4_000);
-  const outcome = message.subtype || message.terminal_reason || 'unknown error';
+  const result = typeof message.result === 'string' ? message.result.trim() : '';
+  if (result) return result.slice(0, 4_000);
+  const outcome = (message.subtype !== undefined && message.subtype !== 'success' && message.subtype)
+    || message.terminal_reason
+    || 'unknown error';
   const apiStatus = message.api_error_status === null || message.api_error_status === undefined
     ? ''
     : ` (API status ${message.api_error_status})`;
