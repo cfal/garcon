@@ -204,7 +204,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'compact',
-	sidebarSortMode: 'recent',
+	sidebarSortMode: 'manual',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',

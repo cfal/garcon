@@ -24,7 +24,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('compact');
-		expect(store.sidebarSortMode).toBe('recent');
+		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('same-window');
@@ -518,7 +518,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('falls back to recent for invalid sidebar sort mode', () => {
+	it('falls back to manual for invalid sidebar sort mode', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({ sidebarSortMode: 'chronological' }),
@@ -526,7 +526,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.sidebarSortMode).toBe('recent');
+		expect(store.sidebarSortMode).toBe('manual');
 
 		store.destroy();
 	});
