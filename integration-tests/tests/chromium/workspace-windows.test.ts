@@ -588,13 +588,21 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element.
-    await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
-    if (input.expectBlocked) {
-      await target.getByText('4 windows max', { exact: true }).waitFor({ state: 'visible' });
-    } else {
-      const expectedLabel = input.expectedLabel ?? chatDropLabel(targetKind);
-      await target.getByText(expectedLabel, { exact: true }).waitFor({ state: 'visible' });
+    // Chromium omits dragover when a dispatch changes the hit-tested element, so
+    // keep nudging the pointer until the drop zone actually activates.
+    const expectedLabel = input.expectBlocked
+      ? '4 windows max'
+      : (input.expectedLabel ?? chatDropLabel(targetKind));
+    const label = target.getByText(expectedLabel, { exact: true });
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
+      await page.mouse.move(targetX, targetY);
+      if (await label.isVisible()) break;
+      if (Date.now() > deadline) {
+        await label.waitFor({ state: 'visible' });
+        break;
+      }
     }
   } finally {
     await page.mouse.up();
@@ -644,9 +652,19 @@ async function dragWorkspaceTabToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element.
-    await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
-    await target.getByText(input.expectedLabel, { exact: true }).waitFor({ state: 'visible' });
+    // Chromium omits dragover when a dispatch changes the hit-tested element, so
+    // keep nudging the pointer until the drop zone actually activates.
+    const label = target.getByText(input.expectedLabel, { exact: true });
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
+      await page.mouse.move(targetX, targetY);
+      if (await label.isVisible()) break;
+      if (Date.now() > deadline) {
+        await label.waitFor({ state: 'visible' });
+        break;
+      }
+    }
   } finally {
     await page.mouse.up();
   }
