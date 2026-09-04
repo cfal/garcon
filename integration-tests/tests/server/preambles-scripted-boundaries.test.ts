@@ -131,6 +131,15 @@ describe('scripted provider preamble boundaries', () => {
       ]);
       expectApplicationImmediatelyBefore(forkHistory, forkPrompt);
 
+      await reloadUntilNativeContains(fixture, forkChatId, forkReply);
+      const reloadedForkHistory = await fixture.client.getMessages(forkChatId);
+      expect(applicationTitles(reloadedForkHistory)).toEqual([
+        [PREAMBLE_TITLE],
+        [PREAMBLE_TITLE],
+      ]);
+      expectApplicationImmediatelyBefore(reloadedForkHistory, forkPrompt);
+      expect(JSON.stringify(reloadedForkHistory)).not.toContain(PREAMBLE_BODY);
+
       const continuationChatId = fixture.newChatId();
       const continuationPrompt = 'scripted continuation prompt';
       const continuationReply = 'scripted continuation reply';

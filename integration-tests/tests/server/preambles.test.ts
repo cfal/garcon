@@ -352,6 +352,20 @@ describe('preambles', () => {
         ['Global opening', 'Nested project', 'Global closing'],
         ['Global opening current', 'Nested project', 'Global closing'],
       ]);
+
+      const resumedHeld = fixture.fakeProviders.openAi.holdNext({
+        lastUserText: 'ordinary prompt after restart',
+      });
+      const resumed = await fixture.client.runDirectChat({
+        chatId: targetChatId,
+        content: 'ordinary prompt after restart',
+        agent: fixture.directAgents.openAi,
+      });
+      const resumedRequest = await resumedHeld.received;
+      expect(resumedRequest.lastUserText).not.toContain('SYNTHETIC_CURRENT_OPENING_BODY');
+      expect(resumedHeld.releaseText('ordinary response after restart')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(targetChatId, resumed.turnId);
+      expect(applicationTitles(await fixture.client.getMessages(targetChatId))).toHaveLength(2);
     });
   }, 60_000);
 
