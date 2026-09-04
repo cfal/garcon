@@ -29,7 +29,7 @@ async function clickPreambleRowAction(
 }
 
 describe('Lightpanda preambles', () => {
-  test('manages the catalog and renders an application notice', async () => {
+  test('[TLV5-PREAMBLE.06-LIGHTPANDA-01] manages the catalog and renders an application notice', async () => {
     await withE2eFixture('preambles', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();

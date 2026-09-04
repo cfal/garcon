@@ -210,7 +210,7 @@ describe('transcript ledger read-fold matrix', () => {
     }
   });
 
-  it('keeps preamble applications visible but outside every conversational fold', async () => {
+  it('[TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01] keeps preamble applications visible but outside every conversational fold', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-preamble-fold-matrix-'));
     const store = new TranscriptLedgerStore(root, {
       createViewId: () => VIEW_ID,

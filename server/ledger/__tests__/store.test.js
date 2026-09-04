@@ -518,7 +518,7 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one')).toHaveLength(1);
   });
 
-  it('atomically commits an applied-preamble notice immediately before its boundary input', () => {
+  it('[TLV5-PREAMBLE.02-STORE-UNIT-01] atomically commits an applied-preamble notice immediately before its boundary input', () => {
     const view = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),
       contentStartOrdinal: 1,

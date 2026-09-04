@@ -76,7 +76,7 @@ describe('preamble history evidence', () => {
 });
 
 describe('preamble native-history sanitation', () => {
-  it('strips an exact prefix and returns its immutable application evidence', () => {
+  it('[TLV5-PREAMBLE.04-NATIVE-UNIT-01] strips an exact prefix and returns its immutable application evidence', () => {
     const evidence = collectPreambleHistoryEvidence(rowGroup());
     const applied = application();
     const nativeMessage = new UserMessage(

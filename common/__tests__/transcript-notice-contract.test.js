@@ -16,7 +16,7 @@ import {
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('transcript notice contracts', () => {
-  it('round-trips immutable preamble title snapshots without accepting private fields', () => {
+  it('[TLV5-PREAMBLE.01-CONTRACT-01] round-trips immutable preamble title snapshots without accepting private fields', () => {
     const detail = {
       type: 'preamble-application',
       preambles: [

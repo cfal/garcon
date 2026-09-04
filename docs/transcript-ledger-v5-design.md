@@ -1,10 +1,22 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 29 integrated design. Supersedes
+Status: revision 30 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 30 adds provider-neutral preamble applications. A durable pending
+boundary on a new chat, fork, continuation, or in-place agent switch is
+consumed by the first ordinary input. When enabled catalog entries match,
+core commits one typed title-only application notice immediately before the
+visible user input in the same SQLite transaction, keeps the rendered body
+only in the transient provider prompt, and stores a private exact prefix
+receipt on the input. Reload and native-fidelity fork sanitize the normalized
+native history by that authoritative receipt and reconstruct the notice;
+unknown or changed recognizable frames fail closed. Provider integrations
+still receive one opaque prompt and require no preamble-specific contract or
+implementation.
 
 Revision 29 removes completed-attempt deduplication by emitting run from
 chat-ID discovery. A later request becomes eligible after the prior delivery
@@ -406,7 +418,10 @@ The decisions:
   process crash; durability across OS or power failure follows the
   configured `synchronous` level and the accepted-loss posture (4.3).
   Everything tentative, including the future-turn queue and resend
-  opt-out state, is process-ephemeral overlay and dies on restart.
+  opt-out state, is process-ephemeral overlay and dies on restart. A matched
+  preamble application is one core-originated row group: its typed notice and
+  boundary input commit atomically at adjacent ordinals and broadcast as one
+  ordered batch.
 - **L4 Durable before dispatch, idempotent by message identity.** An
   immediate input is appended and committed before provider dispatch; a
   steer before delivery is attempted; a dequeued queued entry before its
@@ -419,6 +434,11 @@ The decisions:
   rejected, never deduplicated into the replacement. A presentation-only chat
   row uses the same view-local identity and conflict boundary over its type,
   title, and content, but never dispatches agent work.
+  A pending preamble boundary is consumed only by the committed input's
+  private boundary proof. A matching application's body-free prefix receipt
+  is server-derived and excluded from the submission fingerprint, so an
+  identical retry returns the original input without another notice, prefix,
+  or dispatch.
 - **L5 At-most-once, observed order.** Every accepted event is committed
   at acceptance or the chat fences; there is no retry protocol and no
   producer event identity. Late provider content and session facts —
@@ -499,7 +519,12 @@ The decisions:
   sole exception:
   the failed conversion and preserved artifact are already known, so adoption
   proceeds with an empty frozen prefix and a durable warning instead of
-  permanently fencing the chat.
+  permanently fencing the chat. Before Reload or native-fidelity fork turns
+  normalized native history into rows, core strips only exact leading
+  preamble prefixes proven by receipts collected from the selected ledger
+  binding. A recognizable unknown, changed, or duplicate application fails
+  before cutover or target publication; receipt evidence absent from native
+  history is allowed for the commit-before-dispatch crash window.
 - **L11 Fail closed, per chat.** A commit failure or unknown commit
   outcome fences the chat's ledger for writes; `SQLITE_CORRUPT` or any
   other ledger failure on open or query fences that chat with a typed
@@ -512,7 +537,10 @@ The decisions:
   owning integration. Translation, native parsing, probes, and fork
   mechanics stay behind `@garcon/server-agent-interface` under
   `server-agents/<id>/`. Capabilities are nullable facets, never
-  optional methods or boolean flags.
+  optional methods or boolean flags. Preamble selection, framing, prompt
+  concatenation, receipt validation, and normalized-history sanitation remain
+  in provider-neutral core. Integrations receive the existing single opaque
+  prompt and expose the existing normalized import stream unchanged.
 
 ## 3. Data Model
 
@@ -545,7 +573,10 @@ the synchronous append call, with ordinals assigned by core. One
 provider occurrence that expands into several rendered rows (an item
 with tool call and result subrows, a message with several parts) is one
 batch: it commits atomically or not at all. Batches carry no identity;
-there is nothing to retry (L5).
+there is nothing to retry (L5). A matched preamble boundary is one
+core-originated batch containing exactly the `preamble-application` notice and
+its user input at adjacent ordinals. A zero-match boundary stores only the
+input with its private boundary proof.
 
 ### 3.3 Rows and writers
 
@@ -587,8 +618,13 @@ by reload, continuation/fork seeding, and adoption.
 Kind semantics:
 
 - `user-input`: appended when the input becomes outbound (7.1). `detail`
-  records the `clientMessageId`, the attachment manifest, and whether
-  the input was a steer (display styling).
+  records the `clientMessageId`, the attachment manifest, whether the input
+  was a steer (display styling), and two server-private nullable preamble
+  fields. `preambleBoundary` is `{kind, ownershipEpoch}` and proves that this
+  input consumed the binding's pending boundary, including when zero entries
+  matched. `preamblePrefixReceipt` is
+  `{format: 'preamble-v1', applicationKey, codeUnitLength, sha256}` and proves
+  the exact leading prefix for native sanitation without storing its body.
 - `notice`: durable advisory. An accepted active-run producer advisory is an
   ordinary notice; its optional title is presentation metadata, and its
   `runId` is never stored. Native drift is not represented by this row; its
@@ -610,6 +646,10 @@ Kind semantics:
   `TranscriptNoticeMessage` and `ErrorMessage` instances own
   their optional top-level `title`; a rendered CLI row's detail is only the
   `{type: 'cli-row'}` provenance marker.
+  A preamble application uses the fixed message `Preambles applied` and exact
+  public detail `{type: 'preamble-application', preambles: [{id, title}, ...]}`.
+  The ID/title pairs are immutable snapshots; no body, scope, path, catalog
+  revision, or receipt is present.
 - `agent-switch`: the durable ownership boundary written at in-place
   handoff, carrying `{fromAgentId, toAgentId, fromModel, toModel}` and
   rendered as the shared `AgentSwitchMessage`. V4 synthesized this
@@ -1158,7 +1198,11 @@ The guarantee is durable before provider dispatch, not durable at send:
 
 - An **immediate input** (starting a turn now) is validated under the
   ownership and pending-ownership fences, appended, and committed before
-  provider dispatch.
+  provider dispatch. If its binding has a pending preamble boundary, core
+  resolves the current enabled catalog against the canonical project path.
+  A nonempty match plus an otherwise-unhandled slash-leading input is rejected
+  before admission and leaves the boundary armed; otherwise the input commits
+  the boundary proof and consumes it exactly once.
 - A **steer** is appended and committed before delivery to the running
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
@@ -1226,7 +1270,12 @@ marked in flight rather than claiming an outcome nobody observed.
 An immediate or dequeued dispatch is composed by one synchronous method
 that commits the input row and computes the backward scan before
 returning; no provider callback can interleave between insert and scan,
-and dispatch consumes the returned immutable composition.
+and dispatch consumes the returned immutable composition. For a matched
+preamble boundary, that immutable composition also carries the rendered
+private prefix. Core resolves file mentions in visible authored input first,
+then prepends the receipt-covered prefix once to the complete turn prompt.
+The provider integration still receives one ordinary opaque prompt string;
+the body never enters the ledger or any context fold.
 
 V4's prepare/commit/promotion admission transaction, active-lifetime
 entries, and `input-not-sent` reset are deleted.
@@ -1391,6 +1440,7 @@ presentation-only in every consumer fold.
 | conversational `provider-row` | yes | yes | candidate | yes | yes | yes |
 | error `provider-row` | yes | no | no | no | yes | yes |
 | ledger-private `chat-id-request` notice | no | no | no | no | no | no |
+| typed `preamble-application` notice | yes | no | no | no | yes | yes |
 | every other `notice` | yes | no | no | no | yes | yes |
 | `agent-switch` | yes | no | no | no | yes | yes |
 | permission rows | specialized | no | no | no | specialized | yes |
@@ -1435,8 +1485,10 @@ model context, carryover, or export.
   once, in the prompt). Conversational history is never excluded otherwise: a
   message the user declined to resend remains history and reaches stateless
   providers as context. The frozen projection has one display-only exception
-  to the matrix: it preserves a carryover-quarantine notice so permanent prior
-  loss remains visible, but that notice never enters model context.
+  to the conversational matrix: it preserves carryover-quarantine and typed
+  preamble-application notices. The former keeps permanent prior loss visible;
+  the latter preserves immutable title snapshots next to copied boundary
+  inputs. Neither notice enters model context.
 - **Shares are snapshot artifacts**: publishing a share copies its
   rendering fold into the share store (the existing product behavior —
   `server/routes/shares.ts`, `server/chats/share-store.ts`,
@@ -1657,8 +1709,16 @@ It is never automatic and is the sole full-transcript replacement path:
    queue. The confirmation surfaces the rows the next scan would resend
    (7.2), since they will not exist in the replacement, and states that
    the current displayed history will be replaced.
-2. Core closes the current view-bound sink (5.3).
-3. Core creates a `staging` view row and inserts its rows
+2. Core collects preamble application evidence from the current binding's
+   notice/input pairs. If the registry still carries a pending boundary that
+   the ledger already proves consumed, core clears it only for the matching
+   ownership epoch. Core then flushes the complete current in-memory registry
+   state before any view replacement, even when no pending boundary remains in
+   memory. This flush is required because cutover can delete the only
+   zero-match boundary proof; a stale debounced `chats.json` write must never
+   re-arm that boundary after restart.
+3. Core closes the current view-bound sink (5.3).
+4. Core creates a `staging` view row and inserts its rows
    transactionally from two sources: the frozen prefix — every row
    before the current binding's `content_start_ordinal`, carried through
    the frozen projection — and the single native import: the current
@@ -1666,20 +1726,21 @@ It is never automatic and is the sole full-transcript replacement path:
    through its current tail, excluding the binding's native
    seed/carryover context by seed receipt so the inherited prefix is not
    duplicated.
-4. The frozen projection preserves conversational rows (`user-input` and
+5. The frozen projection preserves conversational rows (`user-input` and
    non-error `provider-row`) with retained `clientMessageId`
    (covered by the staging view's submission unique index) and every
    `agent-switch` boundary, so the record of which agent produced which
    stretch of the conversation survives reload rather than being lost
    with the owner that wrote it. It also preserves the durable carryover
-   quarantine notice, when present, because Reload cannot repair that prior
-   loss. The current-session `session` row (3.4) is placed at the staging
-   view's `content_start_ordinal`, so the reloaded view still knows its bound
-   native session. All other sessions, `run-ended` rows, notices, and
-   permission rows are not carried.
+   quarantine and typed preamble-application notices, when present, because
+   Reload cannot repair prior loss or discard immutable application title
+   snapshots from earlier bindings. The current-session `session` row (3.4)
+   is placed at the staging view's `content_start_ordinal`, so the reloaded
+   view still knows its bound native session. All other sessions, `run-ended`
+   rows, notices, and permission rows are not carried.
    Staged rows receive fresh dense ordinals; uniqueness and structure
    are enforced by the schema; no cross-view identity is promised.
-5. Atomic cutover is one transaction in the same database: delete the
+6. Atomic cutover is one transaction in the same database: delete the
    old `current` view row — the foreign-key cascade removes its rows —
    then promote `staging` to `current`. The order satisfies the
    immediate one-current constraint, and a crash exposes a valid old or
@@ -1688,10 +1749,10 @@ It is never automatic and is the sole full-transcript replacement path:
    pointer-file and directory-swap ceremony SQLite eliminated. Freed
    pages are reused by future appends; an optional best-effort `VACUUM`
    after cutover is housekeeping, not protocol.
-6. Core issues a sink bound to the new view; the typed full-transcript
+7. Core issues a sink bound to the new view; the typed full-transcript
    replacement event is a core-to-client broadcast, not a sink
    publication.
-7. Search deletes the replaced view's entries and indexes the new view,
+8. Search deletes the replaced view's entries and indexes the new view,
    in the same per-chat order as commits; query admission is
    current-view-qualified throughout, and a not-yet-indexed replacement
    returns absent results, never stale ones.
@@ -1707,15 +1768,26 @@ provider snapshot leases, mutation gates, or generalized reset
 machinery.
 
 Lossiness is per source. The native import is the provider's record: it
-lacks every Garcon-only row — notices, permission history, and inputs
-the provider never received — and inputs that were composed into one
-outgoing prompt reappear merged as one user message, because that is
-what the provider received. The frozen prefix preserves the prior
-conversational rows, agent-switch boundaries, and a carryover-quarantine
-notice, while dropping other lifecycle rows. The replaced view is deleted,
-and there is no undo. That lossiness is expected and is part of why reload is
-manual and confirmed; shares published earlier are unaffected because they
-are self-contained snapshots.
+lacks Garcon-only rows other than receipt-backed preamble applications —
+ordinary notices, permission history, and inputs the provider never received
+remain absent — and inputs that were composed into one outgoing prompt
+reappear merged as one user message, because that is what the provider
+received. Before staging, core sanitizes the normalized native stream in two
+ordered passes: exact carried-context removal, then exact preamble-prefix
+removal. Preamble evidence comes only from an adjacent typed application
+notice and receipt-bearing boundary input in the selected current binding.
+The sanitizer hashes exactly the receipt's `codeUnitLength`, strips only an
+exact known prefix, restores the private receipt and boundary proof on the
+imported input, and reconstructs the immutable title-only notice immediately
+before it. Evidence with no native occurrence is allowed for the
+commit-before-dispatch crash window. A malformed, unknown, changed, or reused
+leading Garcon preamble frame fails with `PREAMBLE_ENVELOPE_MISMATCH` before
+cutover; raw injected text is never presented. The frozen prefix preserves the
+prior conversational rows, agent-switch boundaries, carryover-quarantine
+notices, and preamble-application notices while dropping other lifecycle rows.
+The replaced view is deleted, and there is no undo. That lossiness is expected
+and is part of why reload is manual and confirmed; shares published earlier
+are unaffected because they are self-contained snapshots.
 
 Native import treats an exact synthetic chat-ID disclosure input as server
 control rather than user conversation and reconstructs a typed disclosure
@@ -1857,6 +1929,13 @@ native history rather than from the source's rows. The forked session is
 the target's execution state, and for a native fork the provider, not
 core, decided what it contains; copying the source's rows across would
 start the chat already disagreeing with the session it resumes from.
+Core collects preamble evidence only from adjacent application/input pairs in
+the source's selected current binding through the fork watermark. The target
+seed runs the same carried-context-then-preamble sanitation as Reload,
+reconstructing exact applications and refusing malformed, unknown, changed,
+or reused framed prefixes before the target is registered. Receipt evidence
+that has no native occurrence remains valid evidence of a commit whose
+dispatch or provider persistence never happened.
 Handoff forks keep the frozen projection, because there is no native
 session to read. The import is the one manual reload performs, with the
 same lossiness: provider-native rendering, no Garcon-only rows, and
@@ -2030,6 +2109,12 @@ relevant-entry definition under the 10.2 obligation.
 | --- | --- |
 | Crash before an input's acceptance commit | Input never existed; the client retries with the same `clientMessageId` and it appends once. |
 | Crash after an input's commit, before dispatch | Accepted loss: a retry returns the existing row and never re-dispatches; the row shows the will-send-with-next-message affordance and the next fresh input's scan is the recovery path. |
+| Pending preamble boundary with enabled matches receives an otherwise-unhandled slash command | Typed `PREAMBLE_SLASH_COMMAND_BLOCKED`; no input, notice, prefix, or dispatch; the prepared target and boundary remain available for a later ordinary input. An identical command retry returns the same typed rejection. |
+| Crash after a preamble boundary input commits but before the registry clear is durable | The input's private boundary proof suppresses reapplication and repairs the stale pending boundary only for the matching ownership epoch. |
+| Reload cannot durably flush the current registry before view replacement | Reload aborts before cutover; it cannot delete the only zero-match proof while disk still records the boundary as armed. |
+| Native import contains an exact known preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
+| Native import contains a malformed, unknown, changed, or reused leading preamble frame | Typed `PREAMBLE_ENVELOPE_MISMATCH`; Reload preserves the current view and native-fidelity target creation aborts. Raw framed content is never presented. |
+| Ledger preamble evidence has no native occurrence | Allowed as the commit-before-dispatch or provider-persistence crash window; unrelated native messages import normally. |
 | Crash with entries in the future-turn queue | Queue lost by design; no rows; resubmission is the user's explicit choice, idempotent by `clientMessageId`. |
 | Commit failure during dequeue | The entry stays queued while the chat fences; dequeue is one synchronous block, so a retry observes exactly one identity. |
 | Duplicate submission retry, same `clientMessageId`, identical content | Existing queue disposition or ledger row returned via the submission unique index; no second row; no re-dispatch. |
@@ -2369,6 +2454,24 @@ The catalog cites this revision, but its inventory is not repeated here.
   traced from `Request.signal` to the controller; a deterministic reader test
   abandons one synchronous query, proves only its Worker retires and restarts,
   and serves an immediate query through the peer.
+- **Preambles**: `TLV5-PREAMBLE.01-CONTRACT-01` locks the exact public
+  title-only notice and rejects private fields;
+  `TLV5-PREAMBLE.02-STORE-UNIT-01` proves the adjacent atomic row group,
+  boundary proof, receipt, transient prefix, and stored-body exclusion;
+  `TLV5-PREAMBLE.03-SERVER-01` exercises ordered enabled matching and
+  exactly-once application across new chat, fork, continuation, and in-place
+  agent-switch boundaries through the server boundary;
+  `TLV5-PREAMBLE.04-NATIVE-UNIT-01` proves exact receipt sanitation and
+  reconstructed immutable evidence;
+  `TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01` proves presentation/export
+  inclusion and exclusion from every conversational fold; and
+  `TLV5-PREAMBLE.06-LIGHTPANDA-01` exercises catalog management, enabled
+  state, scoped rules, and application-row rendering through the SPA.
+  Supporting focused cases cover zero-match proof durability, blocked slash
+  retention and typed replay, registry flush before Reload cutover, absent
+  native evidence, fail-closed mismatches, duplicate admission, reserved
+  separator boundaries, share/export privacy, and provider-neutral scripted
+  prompt delivery. `server-agents/**` contains no preamble-specific code.
 - **Reload**: gated on a native-bound binding with a non-null
   `nativeHistoryImport` (direct chats expose no Reload); staged build
   under a `staging` view with schema-enforced uniqueness; the frozen
@@ -2730,6 +2833,19 @@ stabilization defects. The current case inventory and gate status live in
     compaction surfaces as that operation's visible failure. Session-latest
     continuation routing stays deleted. Directoryless legacy import remains
     an explicit follow-up.
+25. Preambles are provider-neutral core composition. The current enabled
+    catalog resolves once at the first ordinary input after new chat, fork,
+    continuation, or in-place agent switch. A nonempty slash-leading provider
+    command is rejected before admission and leaves the boundary armed; core
+    does not change native slash-command parsing. A matched application is one
+    adjacent atomic notice/input group with a transient receipt-covered prefix;
+    a zero match still stores the boundary proof. Reload and native-fidelity
+    fork use exact ledger evidence to strip and reconstruct the application,
+    fail closed on an unprovable leading Garcon frame, and tolerate evidence
+    absent from native history after commit-before-dispatch failure. Core
+    flushes current registry state before Reload can delete the only zero-match
+    proof. Provider integrations retain their existing opaque-prompt and
+    normalized-history contracts; `server-agents/**` gains no preamble logic.
 
 Also resolved across revisions: store-what-you-showed with one core ledger and
 view-wide ordinals; pre-V5 adoption reconstructing the served composite from

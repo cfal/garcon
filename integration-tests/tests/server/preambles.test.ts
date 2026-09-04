@@ -79,7 +79,7 @@ function nextScheduledRun(now = Date.now()): string {
 }
 
 describe('preambles', () => {
-  test('applies ordered current preambles once at new-chat and fork boundaries', async () => {
+  test('[TLV5-PREAMBLE.03-SERVER-01] applies ordered current preambles once at every boundary', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
       const nestedProject = join(fixture.dirs.project, 'nested');
       await mkdir(nestedProject, { recursive: true });
