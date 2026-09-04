@@ -63,9 +63,24 @@
 		hint: () => string;
 		icon: typeof SunIcon;
 	}> = [
-		{ value: 'system', label: m.settings_theme_system, hint: m.onboarding_theme_system_hint, icon: MonitorIcon },
-		{ value: 'light', label: m.settings_theme_light, hint: m.onboarding_theme_light_hint, icon: SunIcon },
-		{ value: 'dark', label: m.settings_theme_dark, hint: m.onboarding_theme_dark_hint, icon: MoonIcon },
+		{
+			value: 'system',
+			label: m.settings_theme_system,
+			hint: m.onboarding_theme_system_hint,
+			icon: MonitorIcon,
+		},
+		{
+			value: 'light',
+			label: m.settings_theme_light,
+			hint: m.onboarding_theme_light_hint,
+			icon: SunIcon,
+		},
+		{
+			value: 'dark',
+			label: m.settings_theme_dark,
+			hint: m.onboarding_theme_dark_hint,
+			icon: MoonIcon,
+		},
 	];
 
 	const layoutOptions: Array<{
@@ -73,13 +88,21 @@
 		label: () => string;
 		hint: () => string;
 	}> = [
-		{ value: 'compact', label: m.onboarding_layout_compact, hint: m.onboarding_layout_compact_hint },
+		{
+			value: 'compact',
+			label: m.onboarding_layout_compact,
+			hint: m.onboarding_layout_compact_hint,
+		},
 		{
 			value: 'single-line',
 			label: m.onboarding_layout_single_line,
 			hint: m.onboarding_layout_single_line_hint,
 		},
-		{ value: 'default', label: m.onboarding_layout_detailed, hint: m.onboarding_layout_detailed_hint },
+		{
+			value: 'default',
+			label: m.onboarding_layout_detailed,
+			hint: m.onboarding_layout_detailed_hint,
+		},
 	];
 
 	const chatMaxWidthOptions: Array<{
@@ -98,12 +121,19 @@
 </script>
 
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
-	<Dialog.Content class="sm:max-w-xl" aria-describedby="onboarding-description">
+	<Dialog.Content
+		class="max-h-[85vh] overflow-y-auto sm:max-w-xl"
+		aria-describedby="onboarding-description"
+	>
 		<Dialog.Header>
 			<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{m.onboarding_wizard_title()}
 			</p>
-			<Dialog.Title bind:ref={pageTitleElement} tabindex={-1} class="text-xl font-semibold outline-none">{pageTitles[wizard.pageId]()}</Dialog.Title>
+			<Dialog.Title
+				bind:ref={pageTitleElement}
+				tabindex={-1}
+				class="text-xl font-semibold outline-none">{pageTitles[wizard.pageId]()}</Dialog.Title
+			>
 			<Dialog.Description id="onboarding-description">
 				{pageDescriptions[wizard.pageId]()}
 			</Dialog.Description>
@@ -111,7 +141,7 @@
 
 		<div class="min-h-40">
 			{#if wizard.pageId === 'theme'}
-				<fieldset class="grid grid-cols-3 gap-3">
+				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 					<legend class="sr-only">{m.onboarding_theme_title()}</legend>
 					{#each themeOptions as option (option.value)}
 						<label class={optionCardClass}>
@@ -130,7 +160,7 @@
 					{/each}
 				</fieldset>
 			{:else if wizard.pageId === 'chat-layout'}
-				<fieldset class="grid grid-cols-3 gap-3">
+				<fieldset class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 					<legend class="sr-only">{m.onboarding_layout_title()}</legend>
 					{#each layoutOptions as option (option.value)}
 						<label class={optionCardClass}>
@@ -160,7 +190,7 @@
 					<legend class="mb-2 text-sm font-medium text-foreground">
 						{m.settings_chat_max_width()}
 					</legend>
-					<div class="grid grid-cols-4 gap-2">
+					<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						{#each chatMaxWidthOptions as option (option.value)}
 							<label class={cn(optionCardClass, 'gap-1.5 p-2')}>
 								<input

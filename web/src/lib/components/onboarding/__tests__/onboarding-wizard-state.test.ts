@@ -1,12 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
-import {
-	ONBOARDING_PAGE_IDS,
-	OnboardingWizardState,
-} from '../onboarding-wizard-state.svelte';
+import { ONBOARDING_PAGE_IDS, OnboardingWizardState } from '../onboarding-wizard-state.svelte';
+
+const localSettingsStores: Array<ReturnType<typeof createLocalSettingsStore>> = [];
 
 function createWizard() {
 	const localSettings = createLocalSettingsStore();
+	localSettingsStores.push(localSettings);
 	const onClose = vi.fn();
 	const onOpenProviders = vi.fn();
 	const wizard = new OnboardingWizardState({ localSettings, onClose, onOpenProviders });
@@ -16,6 +16,12 @@ function createWizard() {
 describe('OnboardingWizardState', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	afterEach(() => {
+		for (const localSettings of localSettingsStores.splice(0)) {
+			localSettings.destroy();
+		}
 	});
 
 	it('walks the paged flow in order and clamps at the edges', () => {
