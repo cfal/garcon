@@ -6,7 +6,7 @@ import {
 	type Preamble,
 	type PreambleDefinitionInput,
 } from '$shared/preambles';
-import { normalizeProjectPath } from '$lib/utils/project-path.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface PreamblePathRuleDraft {
@@ -51,7 +51,7 @@ export class PreambleFormState {
 		if (this.pathRules.length > PREAMBLE_PATH_RULE_MAX_COUNT) {
 			return m.preambles_too_many_paths();
 		}
-		const paths = this.pathRules.map((rule) => normalizeProjectPath(rule.projectPath));
+		const paths = this.pathRules.map((rule) => rule.projectPath.trim());
 		if (paths.some((projectPath) => !projectPath)) return m.preambles_path_required();
 		if (new Set(paths).size !== paths.length) return m.preambles_duplicate_path();
 		return null;
@@ -71,7 +71,7 @@ export class PreambleFormState {
 		this.content = preamble?.content ?? '';
 		this.scopeType = preamble?.scope.type ?? 'global';
 		this.pathRules = preamble?.scope.type === 'project-paths'
-			? preamble.scope.rules.map((rule) => ({ key: crypto.randomUUID(), ...rule }))
+			? preamble.scope.rules.map((rule) => ({ key: createRandomId(), ...rule }))
 			: [];
 		this.saving = false;
 		this.error = null;
@@ -79,7 +79,7 @@ export class PreambleFormState {
 
 	addPath(projectPath = ''): string | null {
 		if (this.pathRules.length >= PREAMBLE_PATH_RULE_MAX_COUNT) return null;
-		const key = crypto.randomUUID();
+		const key = createRandomId();
 		this.pathRules.push({ key, projectPath, includeNested: false });
 		return key;
 	}

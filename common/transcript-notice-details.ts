@@ -98,7 +98,9 @@ export function isPreambleApplicationNoticeDetail(
   value: unknown,
 ): value is PreambleApplicationNoticeDetail {
   if (!hasType(value, 'preamble-application')) return false;
-  const preambles = (value as Record<string, unknown>).preambles;
+  const detail = value as Record<string, unknown>;
+  if (Object.keys(detail).some((key) => key !== 'type' && key !== 'preambles')) return false;
+  const preambles = detail.preambles;
   if (!Array.isArray(preambles) || preambles.length < 1 || preambles.length > PREAMBLE_MAX_COUNT) {
     return false;
   }

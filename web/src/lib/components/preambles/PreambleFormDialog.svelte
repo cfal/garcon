@@ -23,11 +23,12 @@
 	interface Props {
 		open: boolean;
 		preamble: Preamble | null;
+		isStale: boolean;
 		onSave: (definition: PreambleDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, preamble, onSave, onClose }: Props = $props();
+	let { open, preamble, isStale, onSave, onClose }: Props = $props();
 	const appShell = getAppShell();
 	const form = new PreambleFormState();
 	let pickerKey = $state<string | null>(null);
@@ -46,6 +47,7 @@
 	}
 
 	async function save(): Promise<void> {
+		if (isStale) return;
 		const definition = form.buildDefinition();
 		if (!definition || form.saving) return;
 		form.saving = true;
@@ -116,7 +118,11 @@
 			<Dialog.Description>{m.preambles_form_description()}</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+		<div
+			class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6"
+			inert={form.saving}
+			aria-busy={form.saving}
+		>
 			<div class="flex items-center justify-between gap-4 rounded-md border border-border p-3">
 				<div class="min-w-0">
 					<label for="preamble-enabled" class="text-sm font-medium text-foreground">
@@ -261,6 +267,11 @@
 				</p>
 			</div>
 
+			{#if isStale}
+				<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+					{m.preambles_edit_stale()}
+				</p>
+			{/if}
 			{#if form.error}
 				<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
 					{form.error}
@@ -272,7 +283,7 @@
 			<Button variant="secondary" onclick={closeForm} disabled={form.saving}>
 				{m.preambles_cancel()}
 			</Button>
-			<Button onclick={() => void save()} disabled={!form.canSave}>
+			<Button onclick={() => void save()} disabled={!form.canSave || isStale}>
 				{form.saving ? m.preambles_saving() : m.preambles_save()}
 			</Button>
 		</Dialog.Footer>

@@ -1,5 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '$lib/api/client';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
 import PreamblesSectionTestHost from './PreamblesSectionTestHost.svelte';
 
@@ -36,7 +38,7 @@ describe('PreamblesSection', () => {
 		expect(screen.queryByText('Global conventions')).toBeNull();
 		expect(screen.getByText('Project conventions')).toBeTruthy();
 		expect(
-			(screen.getByRole('button', { name: 'Move preamble up' }) as HTMLButtonElement).disabled,
+			(screen.getByRole('button', { name: 'Move Project conventions up' }) as HTMLButtonElement).disabled,
 		).toBe(true);
 
 		await fireEvent.input(filter, { target: { value: '/WORKSPACE/PROJECT' } });
@@ -71,5 +73,57 @@ describe('PreamblesSection', () => {
 		});
 		expect(await screen.findByText('Disabled')).toBeTruthy();
 		expect(screen.getByRole('switch', { name: 'Enable Global conventions' })).toBeTruthy();
+	});
+
+	it('marks an open edit stale when the catalog revision changes', async () => {
+		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			onStore: (value: PreamblesStore) => { store = value; },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		await screen.findByRole('heading', { name: 'Edit Preamble' });
+		store.applySnapshot({
+			revision: 2,
+			preambles: [{ ...original, title: 'Externally changed conventions' }],
+		});
+
+		await waitFor(() => {
+			expect(screen.getByText(/changed while the editor was open/i)).toBeTruthy();
+			expect(
+				(screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled,
+			).toBe(true);
+		});
+	});
+
+	it('keeps an edit stale after a revision-conflict refresh', async () => {
+		const original = preamble('global', 'Global conventions', 'Use the shared defaults.');
+		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
+		const update = vi.fn().mockRejectedValue(conflict);
+		const get = vi.fn().mockResolvedValue({
+			revision: 2,
+			preambles: [{ ...original, title: 'Externally changed conventions' }],
+		});
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, update },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Save Preamble' }));
+
+		await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({
+			expectedRevision: 1,
+		})));
+		expect(get).toHaveBeenCalledOnce();
+		expect(await screen.findByText(/changed while the editor was open/i)).toBeTruthy();
+		const saveButton = await screen.findByRole('button', { name: 'Save Preamble' });
+		expect(
+			(saveButton as HTMLButtonElement).disabled,
+		).toBe(true);
+		await fireEvent.click(saveButton);
+		expect(update).toHaveBeenCalledOnce();
 	});
 });

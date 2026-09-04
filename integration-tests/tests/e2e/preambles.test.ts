@@ -99,13 +99,13 @@ describe('Lightpanda preambles', () => {
       await app.waitForText('Project UI rules');
       expect(await app.exactTextCount('Global UI rules')).toBe(0);
       expect(await fixture.page.$eval(
-        'article button[aria-label="Move preamble up"]',
+        'article button[aria-label="Move Project UI rules up"]',
         (element) => (element as HTMLButtonElement).disabled,
       )).toBeTrue();
       await app.clickButton('Clear preamble filter');
       await app.waitForText('Global UI rules');
 
-      await clickPreambleRowAction(fixture, 'Project UI rules', 'Move preamble up');
+      await clickPreambleRowAction(fixture, 'Project UI rules', 'Move Project UI rules up');
       await fixture.page.waitForFunction(
         () => [...document.querySelectorAll<HTMLElement>('article h3')]
           .map((element) => element.textContent?.trim())
@@ -113,12 +113,12 @@ describe('Lightpanda preambles', () => {
         { timeout: 20_000 },
       );
 
-      await clickPreambleRowAction(fixture, 'Global UI rules', 'Edit preamble');
+      await clickPreambleRowAction(fixture, 'Global UI rules', 'Edit Global UI rules');
       await app.fill('#preamble-title', 'Global UI rules renamed');
       await app.clickButton('Save Preamble');
       await app.waitForText('Global UI rules renamed');
 
-      await clickPreambleRowAction(fixture, 'Project UI rules', 'Remove preamble');
+      await clickPreambleRowAction(fixture, 'Project UI rules', 'Remove Project UI rules');
       await app.waitForButton('Remove preamble');
       await app.clickButton('Remove preamble', { last: true });
       await fixture.page.waitForFunction(

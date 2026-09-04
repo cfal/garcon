@@ -24,6 +24,7 @@
 	let query = $state('');
 	let formOpen = $state(false);
 	let editingPreamble = $state<Preamble | null>(null);
+	let editingRevision = $state<number | null>(null);
 	let removePreamble = $state<Preamble | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
@@ -32,6 +33,12 @@
 	let operationError = $state<string | null>(null);
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
+	let formIsStale = $derived(
+		editingPreamble !== null
+			&& editingRevision !== null
+			&& preambles.snapshot !== null
+			&& preambles.snapshot.revision !== editingRevision,
+	);
 
 	$effect(() => {
 		if (!active) return;
@@ -40,18 +47,23 @@
 
 	function openCreate(): void {
 		editingPreamble = null;
+		editingRevision = null;
 		operationError = null;
 		formOpen = true;
 	}
 
 	function openEdit(preamble: Preamble): void {
 		editingPreamble = preamble;
+		editingRevision = preambles.snapshot?.revision ?? null;
 		operationError = null;
 		formOpen = true;
 	}
 
 	async function save(definition: PreambleDefinitionInput): Promise<void> {
-		if (editingPreamble) await preambles.update(editingPreamble.id, definition);
+		if (editingPreamble) {
+			if (editingRevision === null) throw new Error(m.preambles_edit_stale());
+			await preambles.update(editingPreamble.id, definition, editingRevision);
+		}
 		else await preambles.create(definition);
 	}
 
@@ -84,6 +96,8 @@
 
 	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
 		if (togglingPreambleId || preamble.enabled === enabled) return;
+		const revision = preambles.snapshot?.revision;
+		if (revision === undefined) return;
 		togglingPreambleId = preamble.id;
 		operationError = null;
 		try {
@@ -92,7 +106,7 @@
 				title: preamble.title,
 				content: preamble.content,
 				scope: preamble.scope,
-			});
+			}, revision);
 		} catch (error) {
 			operationError = error instanceof Error ? error.message : m.preambles_toggle_error();
 		} finally {
@@ -194,7 +208,7 @@
 			<p class="max-w-md text-xs text-muted-foreground">{m.preambles_no_matches_description()}</p>
 		</div>
 	{:else}
-		<div class="space-y-2" aria-live="polite">
+		<div class="space-y-2">
 			{#each visiblePreambles as preamble (preamble.id)}
 				{@const catalogIndex = preambles.preambles.findIndex((item) => item.id === preamble.id)}
 				<svelte:boundary>
@@ -227,6 +241,7 @@
 <PreambleFormDialog
 	open={formOpen}
 	preamble={editingPreamble}
+	isStale={formIsStale}
 	onSave={save}
 	onClose={() => (formOpen = false)}
 />

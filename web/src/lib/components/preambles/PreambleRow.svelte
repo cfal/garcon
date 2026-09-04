@@ -92,8 +92,8 @@
 				size="icon-sm"
 				onclick={onMoveUp}
 				disabled={disabled || reorderDisabled || index === 0}
-				title={m.preambles_move_up()}
-				aria-label={m.preambles_move_up()}
+				title={m.preambles_move_up_named({ title: preamble.title })}
+				aria-label={m.preambles_move_up_named({ title: preamble.title })}
 			>
 				<ArrowUp class="h-4 w-4" />
 			</Button>
@@ -102,8 +102,8 @@
 				size="icon-sm"
 				onclick={onMoveDown}
 				disabled={disabled || reorderDisabled || index === total - 1}
-				title={m.preambles_move_down()}
-				aria-label={m.preambles_move_down()}
+				title={m.preambles_move_down_named({ title: preamble.title })}
+				aria-label={m.preambles_move_down_named({ title: preamble.title })}
 			>
 				<ArrowDown class="h-4 w-4" />
 			</Button>
@@ -112,8 +112,8 @@
 				size="icon-sm"
 				onclick={onEdit}
 				{disabled}
-				title={m.preambles_edit()}
-				aria-label={m.preambles_edit()}
+				title={m.preambles_edit_named({ title: preamble.title })}
+				aria-label={m.preambles_edit_named({ title: preamble.title })}
 			>
 				<Pencil class="h-4 w-4" />
 			</Button>
@@ -123,8 +123,8 @@
 				class="text-destructive hover:text-destructive"
 				onclick={onRemove}
 				{disabled}
-				title={m.preambles_remove()}
-				aria-label={m.preambles_remove()}
+				title={m.preambles_remove_named({ title: preamble.title })}
+				aria-label={m.preambles_remove_named({ title: preamble.title })}
 			>
 				<Trash2 class="h-4 w-4" />
 			</Button>

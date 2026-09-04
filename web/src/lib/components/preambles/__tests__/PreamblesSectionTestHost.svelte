@@ -12,12 +12,15 @@
 	let {
 		snapshot,
 		deps = {},
+		onStore,
 	}: {
 		snapshot: PreamblesSnapshot;
 		deps?: PreamblesStoreDeps;
+		onStore?: (store: PreamblesStore) => void;
 	} = $props();
 	const preambles = new PreamblesStore(untrack(() => deps));
 	preambles.applySnapshot(untrack(() => snapshot));
+	untrack(() => onStore?.(preambles));
 	setAppShell(createAppShellStore());
 	setPreambles(preambles);
 </script>

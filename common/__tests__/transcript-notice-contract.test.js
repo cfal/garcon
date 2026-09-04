@@ -34,6 +34,10 @@ describe('transcript notice contracts', () => {
     })).toBeNull();
     expect(parseTranscriptNoticeDetail({
       ...detail,
+      content: 'private body',
+    })).toBeNull();
+    expect(parseTranscriptNoticeDetail({
+      ...detail,
       preambles: [detail.preambles[0], detail.preambles[0]],
     })).toBeNull();
   });

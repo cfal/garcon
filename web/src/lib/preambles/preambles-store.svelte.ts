@@ -99,12 +99,16 @@ export class PreamblesStore {
 		}
 	}
 
-	async update(id: string, definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
-		const current = await this.#requireSnapshot();
+	async update(
+		id: string,
+		definition: PreambleDefinitionInput,
+		expectedRevision: number,
+	): Promise<PreamblesSnapshot> {
+		await this.#requireSnapshot();
 		try {
 			const update = this.deps.update ?? updatePreamble;
 			return this.applySnapshot((await update({
-				expectedRevision: current.revision,
+				expectedRevision,
 				id,
 				preamble: definition,
 			})).snapshot);

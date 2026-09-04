@@ -72,20 +72,21 @@ describe('PreamblesStore', () => {
 		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'b']);
 	});
 
-	it('refreshes after a revision conflict and rethrows the mutation error', async () => {
+	it('refreshes a stale edit after a revision conflict without advancing its revision', async () => {
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
 		const get = vi.fn().mockResolvedValue(snapshot(4, ['a', 'b']));
-		const create = vi.fn().mockRejectedValue(conflict);
-		const store = new PreamblesStore({ get, create });
+		const update = vi.fn().mockRejectedValue(conflict);
+		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 
-		await expect(store.create({
+		await expect(store.update('a', {
 			enabled: true,
-			title: 'Preamble b',
-			content: 'Content b',
+			title: 'Edited preamble a',
+			content: 'Edited content a',
 			scope: { type: 'global' },
-		})).rejects.toBe(conflict);
+		}, 3)).rejects.toBe(conflict);
 
+		expect(update).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 3 }));
 		expect(get).toHaveBeenCalledOnce();
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
