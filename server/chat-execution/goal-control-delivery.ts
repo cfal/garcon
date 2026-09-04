@@ -50,6 +50,7 @@ export class GoalControlDelivery {
 
     const activeOptions = { ...this.options.getDrainOptions(chatId), ...options };
     assertTurnIdentifiers(activeOptions);
+    const admissionOptions = { ...activeOptions, commandType: 'goal-control' as const };
     const activeAttempt = this.options.ownership.attempt(chatId);
     const predecessor = activeAttempt?.identity();
     const successor = executionTurnIdentity(activeOptions)!;
@@ -73,10 +74,7 @@ export class GoalControlDelivery {
             ? activeAttempt.handoffTurn(predecessor, successor, handoff)
             : handoff;
           committedHandoff.validate();
-          inputInserted = await this.options.admitInput(chatId, content, {
-            ...activeOptions,
-            commandType: 'goal-control',
-          });
+          inputInserted = await this.options.admitInput(chatId, content, admissionOptions);
           if (!inputInserted) throw new DuplicateGoalControlInputError();
           await afterPendingRegistered?.();
           validateOwner();
