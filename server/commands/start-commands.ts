@@ -173,7 +173,6 @@ export class StartCommands {
               ? null
               : { chatId: input.parentChatId, relation: 'delegation' },
           });
-          this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
           await this.deps.settings.ensureInNormal(input.chatId);
           await this.deps.chats.flush();
         },
@@ -201,6 +200,8 @@ export class StartCommands {
           agentSettings: input.agentSettings,
         }),
     });
+
+    if (!this.deps.metadata.getChatMetadata(input.chatId)) this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
 
     if (recordsStartupPreferences(input.origin)) {
       try {

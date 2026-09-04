@@ -430,9 +430,37 @@ describe('TranscriptReloadService', () => {
 
       expect(registryUpdates).toContainEqual({
         patch: { pendingPreambleBoundary: null },
-        options: { flush: true },
+        options: undefined,
       });
       expect(entry.pendingPreambleBoundary).toBeNull();
+    });
+  });
+
+  it('flushes an already-cleared boundary state before native cutover', async () => {
+    const flushStarted = deferred();
+    const allowFlush = deferred();
+    const importStarted = deferred();
+    await withReload(async ({ reload, integration }) => {
+      integration.nativeHistoryImport.load = async function* load() {
+        importStarted.resolve();
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+      };
+
+      const reloading = reload.reload('chat-1');
+      await flushStarted.promise;
+      let imported = false;
+      void importStarted.promise.then(() => { imported = true; });
+      await Promise.resolve();
+      expect(imported).toBe(false);
+
+      allowFlush.resolve();
+      await reloading;
+      expect(imported).toBe(true);
+    }, {
+      flushRegistry: async () => {
+        flushStarted.resolve();
+        await allowFlush.promise;
+      },
     });
   });
 
@@ -658,6 +686,7 @@ async function withReload(run, options = {}) {
       registryUpdates.push({ patch, options: updateOptions });
       return Object.assign(entry, patch);
     },
+    flush: async () => options.flushRegistry?.(),
   };
   const integrations = {
     get: () => integration,

@@ -23,6 +23,7 @@ import { InvalidChatIdError, parseChatId, type ChatId } from '../../common/chat-
 import type { PermissionMode, ThinkingMode } from '../../common/chat-modes.js';
 import type { UserMessagePresentation } from '../../common/chat-types.js';
 import type { JsonObject } from '../../common/json.js';
+import { PREAMBLE_ERROR_CODES } from '../../common/preambles.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatStartupPreferences } from '../settings/types.js';
 import type {
@@ -393,11 +394,11 @@ export class CommandSupport {
 
   throwRecordedExecutionFailure(record: CommandLedgerRecord): void {
     if (record.status !== 'failed' && record.status !== 'rejected') return;
+    const preambleSlashBlocked = record.errorCode === PREAMBLE_ERROR_CODES.slashCommandBlocked;
     throw new CommandValidationError(
-      'INTERNAL_ERROR',
+      preambleSlashBlocked ? PREAMBLE_ERROR_CODES.slashCommandBlocked : 'INTERNAL_ERROR',
       record.error ?? 'The previous execution did not complete',
-      409,
-      false,
+      preambleSlashBlocked ? 422 : 409,
     );
   }
 

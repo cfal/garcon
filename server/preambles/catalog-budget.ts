@@ -4,7 +4,7 @@ import {
   PREAMBLE_FILE_CONTEXT_SEPARATOR,
   type Preamble,
 } from '../../common/preambles.js';
-import { applicablePreambles } from './matching.js';
+import { preambleMatchesProjectPath } from './matching.js';
 
 export type PreambleCatalogCompositionViolation =
   | {
@@ -33,7 +33,9 @@ export function preambleCatalogCompositionViolation(
     },
     ...[...projectPaths].map((projectPath) => ({
       projectPath,
-      entries: applicablePreambles(preambles, projectPath),
+      entries: preambles.filter((preamble) => (
+        preambleMatchesProjectPath(preamble, projectPath)
+      )),
     })),
   ];
   for (const candidate of candidates) {

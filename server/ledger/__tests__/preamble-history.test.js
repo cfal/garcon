@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { UserMessage } from '../../../common/chat-types.ts';
 import { createPreamblePrefix } from '../../../common/preamble-prefix.ts';
+import { stripResolvedFileMentionContext } from '../../agents/shared/file-mention-context.ts';
 import {
   collectPreambleHistoryEvidence,
   sanitizeRecordedPreamblePrefixes,
@@ -99,6 +100,26 @@ describe('preamble native-history sanitation', () => {
       { type: 'cli', format: 'plain', disclosure: 'full' },
     ));
     expect(result.messages[0].application).toEqual(evidence[0]);
+  });
+
+  it('survives native file-context sanitation when visible input starts with its reserved label', () => {
+    const evidence = collectPreambleHistoryEvidence(rowGroup());
+    const applied = application();
+    const label = 'Referenced file contents from @file mentions:\n\nVisible authored text';
+
+    for (const visiblePrompt of [label, `\n${label}`]) {
+      const recorded = stripResolvedFileMentionContext(`${applied.prefix}${visiblePrompt}`);
+      const result = sanitizeRecordedPreamblePrefixes({
+        messages: [new UserMessage(AT, recorded)],
+        evidence,
+      });
+
+      expect(recorded).toBe(`${applied.prefix}${visiblePrompt}`);
+      expect(result).toMatchObject({
+        kind: 'sanitized',
+        messages: [{ message: { content: visiblePrompt } }],
+      });
+    }
   });
 
   it('fails closed for unknown, changed, or reused native evidence', () => {

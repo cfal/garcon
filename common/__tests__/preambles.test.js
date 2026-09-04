@@ -142,7 +142,7 @@ describe('preamble prefix contract', () => {
     const key = preambleApplicationKey('view-one', 'message-one');
     expect(key).toBe('be8415a5759829f6b0de113e39770b992bb7176b59f5e6e32a65f65dda11bd1b');
     expect(renderPreamblePrefix(key, ['first\nbody', 'second body'])).toBe(
-      `<garcon-preambles version="1" application="${key}">\nfirst\nbody\n\nsecond body\n</garcon-preambles>\n\n`,
+      `<garcon-preambles version="1" application="${key}">\nfirst\nbody\n\nsecond body\n</garcon-preambles>\n\n<!-- garcon-preamble-input --> `,
     );
   });
 

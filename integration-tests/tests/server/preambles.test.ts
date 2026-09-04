@@ -137,7 +137,7 @@ describe('preambles', () => {
       });
       const firstProviderRequest = await firstHeld.received;
       expect(firstProviderRequest.lastUserText).toMatch(
-        /^<garcon-preambles version="1" application="[a-f0-9]{64}">\nSYNTHETIC_GLOBAL_OPENING_BODY\n\nSYNTHETIC_NESTED_PROJECT_BODY\n\nSYNTHETIC_GLOBAL_CLOSING_BODY\n<\/garcon-preambles>\n\nfirst visible prompt$/u,
+        /^<garcon-preambles version="1" application="[a-f0-9]{64}">\nSYNTHETIC_GLOBAL_OPENING_BODY\n\nSYNTHETIC_NESTED_PROJECT_BODY\n\nSYNTHETIC_GLOBAL_CLOSING_BODY\n<\/garcon-preambles>\n\n<!-- garcon-preamble-input --> first visible prompt$/u,
       );
       expect(firstProviderRequest.lastUserText).not.toContain('SYNTHETIC_DISABLED_GLOBAL_BODY');
       expect(firstHeld.releaseText('first synthetic response')).toBeTrue();
@@ -416,17 +416,35 @@ describe('preambles', () => {
       };
 
       const newChatId = fixture.newChatId();
-      await expectPreambleSlashBlocked(fixture.client.startDirectChat({
+      const blockedStart = {
         chatId: newChatId,
         content: '/provider-command',
         projectPath: fixture.dirs.project,
         agent,
-      }));
-      expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === newChatId))
-        .toBeTrue();
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+      };
+      await expectPreambleSlashBlocked(fixture.client.startDirectChat(blockedStart));
+      await expectPreambleSlashBlocked(fixture.client.startDirectChat(blockedStart));
+      const blockedNewChat = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === newChatId,
+      );
+      expect(blockedNewChat).toMatchObject({
+        title: 'New Session',
+        preview: {
+          firstMessage: 'New Session',
+          lastMessage: 'New Session',
+        },
+      });
       expect(userContents((await fixture.client.getMessages(newChatId)).messages))
         .not.toContain('/provider-command');
       await runRegularBoundary(newChatId, 'regular new-chat message', 1);
+      const admittedNewChat = (await fixture.client.listChats()).sessions.find(
+        (chat) => chat.id === newChatId,
+      );
+      expect(admittedNewChat?.title).toBe('regular new-chat message');
+      expect(admittedNewChat?.preview.firstMessage).toBe('regular new-chat message');
+      expect(admittedNewChat?.preview.lastMessage).not.toContain('/provider-command');
 
       const forkChatId = fixture.newChatId();
       await expectPreambleSlashBlocked(fixture.client.forkRunChat({

@@ -14,6 +14,7 @@ export interface PreamblePrefixApplication {
 }
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PREAMBLE_INPUT_BOUNDARY = '<!-- garcon-preamble-input --> ';
 export const PREAMBLE_OPEN_PREFIX = '<garcon-preambles ';
 
 export function preambleApplicationKey(viewId: string, clientMessageId: string): string {
@@ -31,7 +32,7 @@ export function renderPreamblePrefix(applicationKey: string, contents: readonly 
   return [
     `<garcon-preambles version="1" application="${applicationKey}">`,
     contents.join('\n\n'),
-    '</garcon-preambles>\n\n',
+    `</garcon-preambles>\n\n${PREAMBLE_INPUT_BOUNDARY}`,
   ].join('\n');
 }
 

@@ -298,7 +298,6 @@ export class TranscriptLedgerService {
     if (input.clientMessageId) {
       const key = inputKey(input.chatId, input.clientMessageId);
       if (composition.inserted) this.#preparedInputs.set(key, composition);
-      else this.#preparedInputs.delete(key);
     }
     return composition;
   }

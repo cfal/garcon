@@ -900,9 +900,10 @@ describe('TranscriptLedgerService', () => {
     });
   });
 
-  it('clears an unconsumed prepared composition when the committed input is retried', async () => {
+  it('keeps an unconsumed prepared composition when the committed input is retried', async () => {
     await withService(async ({ ledger }) => {
       const view = ledger.initializeChat('chat-1');
+      const boundary = { kind: 'new-chat', ownershipEpoch: 'epoch-one' };
       const input = {
         chatId: 'chat-1',
         viewId: view.viewId,
@@ -910,12 +911,24 @@ describe('TranscriptLedgerService', () => {
         attachments: [],
         clientMessageId: 'message-1',
         steer: false,
+        preambleBoundary: boundary,
+        preambles: [{
+          id: 'preamble-a',
+          enabled: true,
+          title: 'Repository conventions',
+          content: 'PRIVATE-PREAMBLE-BODY',
+          scope: { type: 'global' },
+          createdAt: TS,
+          updatedAt: TS,
+        }],
       };
 
-      expect(ledger.appendInputAndCompose(input).inserted).toBe(true);
+      const first = ledger.appendInputAndCompose(input);
+      expect(first.inserted).toBe(true);
       expect(ledger.appendInputAndCompose(input).inserted).toBe(false);
 
-      expect(ledger.takePreparedInput('chat-1', 'message-1')).toBeNull();
+      expect(ledger.takePreparedInput('chat-1', 'message-1')).toEqual(first);
+      expect(first.providerPrefix).toContain('PRIVATE-PREAMBLE-BODY');
       expect(ledger.currentRows('chat-1').filter((row) => row.kind === 'user-input'))
         .toHaveLength(1);
     });

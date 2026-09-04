@@ -21,9 +21,16 @@ export function applicablePreambles(
   canonicalProjectPath: string,
 ): Preamble[] {
   return preambles
-    .filter((preamble) => preamble.enabled && (
-      preamble.scope.type === 'global'
-      || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath))
-    ))
+    .filter((preamble) => preambleMatchesProjectPath(preamble, canonicalProjectPath))
     .map((preamble) => structuredClone(preamble));
+}
+
+export function preambleMatchesProjectPath(
+  preamble: Preamble,
+  canonicalProjectPath: string,
+): boolean {
+  return preamble.enabled && (
+    preamble.scope.type === 'global'
+    || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath))
+  );
 }

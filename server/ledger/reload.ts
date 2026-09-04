@@ -99,14 +99,11 @@ export class TranscriptReloadService {
     const preambleEvidence = collectPreambleHistoryEvidence(bindingRows);
     const pending = entry.pendingPreambleBoundary;
     if (pending && this.options.ledger.hasPreambleBoundaryProof(chatId, pending)) {
-      const updated = await this.options.registry.updateChat(
-        chatId,
-        { pendingPreambleBoundary: null },
-        { flush: true },
-      );
+      const updated = this.options.registry.updateChat(chatId, { pendingPreambleBoundary: null });
       if (!updated) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
       entry = updated;
     }
+    await this.options.registry.flush();
 
     this.options.ledger.closeProducer(chatId);
     let staging: TranscriptView | null = null;
