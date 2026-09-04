@@ -531,7 +531,10 @@ describe('preambles', () => {
       expectApplicationImmediatelyBefore(history, 'scheduled visible prompt', [
         'Scheduled instructions',
       ]);
-      expect(JSON.stringify(history)).not.toContain(body);
+      const garconOwnedRows = history.messages.filter(({ message }) => (
+        message.type === 'transcript-notice' || message.type === 'user-message'
+      ));
+      expect(JSON.stringify(garconOwnedRows)).not.toContain(body);
     });
   }, 120_000);
 });

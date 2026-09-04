@@ -285,6 +285,6 @@ function expectPrefixedPrompt(content: string | undefined, visiblePrompt: string
     PREAMBLE_BODY,
     '</garcon-preambles>',
     '',
-    visiblePrompt,
+    `<!-- garcon-preamble-input --> ${visiblePrompt}`,
   ].join('\n'));
 }
