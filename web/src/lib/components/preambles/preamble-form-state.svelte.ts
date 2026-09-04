@@ -16,6 +16,7 @@ export interface PreamblePathRuleDraft {
 }
 
 export class PreambleFormState {
+	enabled = $state(true);
 	title = $state('');
 	content = $state('');
 	scopeType = $state<'global' | 'project-paths'>('global');
@@ -60,7 +61,12 @@ export class PreambleFormState {
 		return !this.saving && !this.titleError && !this.contentError && !this.scopeError;
 	}
 
+	get canAddPath(): boolean {
+		return this.pathRules.length < PREAMBLE_PATH_RULE_MAX_COUNT;
+	}
+
 	reset(preamble: Preamble | null): void {
+		this.enabled = preamble?.enabled ?? true;
 		this.title = preamble?.title ?? '';
 		this.content = preamble?.content ?? '';
 		this.scopeType = preamble?.scope.type ?? 'global';
@@ -90,6 +96,7 @@ export class PreambleFormState {
 	buildDefinition(): PreambleDefinitionInput | null {
 		if (!this.canSave) return null;
 		return {
+			enabled: this.enabled,
 			title: this.title.trim(),
 			content: this.content,
 			scope: this.scopeType === 'global'

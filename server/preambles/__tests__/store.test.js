@@ -18,6 +18,7 @@ async function temporaryDirectory() {
 function preamble(id, overrides = {}) {
   return {
     id,
+    enabled: true,
     title: `Preamble ${id}`,
     content: `Body ${id}`,
     scope: { type: 'global' },
@@ -84,12 +85,14 @@ describe('PreambleStore', () => {
     expect(store.snapshot().preambles[0].title).toBe('Preamble a');
 
     await store.update('a', {
+      enabled: false,
       title: 'Updated',
       content: 'Updated body',
       scope: { type: 'global' },
     }, AT, 1);
     expect(store.snapshot().preambles[0]).toMatchObject({
       id: 'a',
+      enabled: false,
       title: 'Updated',
       createdAt: AT,
     });

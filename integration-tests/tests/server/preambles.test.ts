@@ -9,6 +9,7 @@ import type {
 } from '../../../common/preambles.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import type { ChatMessagesPage } from '../../support/garcon-client.js';
+import { GarconApiError } from '../../support/garcon-client.js';
 import {
   type IntegrationFixture,
   withIntegrationFixture,
@@ -41,11 +42,13 @@ describe('preambles', () => {
 
       const definitions: PreambleDefinitionInput[] = [
         {
+          enabled: true,
           title: 'Global opening',
           content: 'SYNTHETIC_GLOBAL_OPENING_BODY',
           scope: { type: 'global' },
         },
         {
+          enabled: true,
           title: 'Nested project',
           content: 'SYNTHETIC_NESTED_PROJECT_BODY',
           scope: {
@@ -54,8 +57,15 @@ describe('preambles', () => {
           },
         },
         {
+          enabled: true,
           title: 'Global closing',
           content: 'SYNTHETIC_GLOBAL_CLOSING_BODY',
+          scope: { type: 'global' },
+        },
+        {
+          enabled: false,
+          title: 'Disabled global',
+          content: 'SYNTHETIC_DISABLED_GLOBAL_BODY',
           scope: { type: 'global' },
         },
       ];
@@ -68,6 +78,7 @@ describe('preambles', () => {
         'Global opening',
         'Nested project',
         'Global closing',
+        'Disabled global',
       ]);
 
       const sourceChatId = fixture.newChatId();
@@ -84,6 +95,7 @@ describe('preambles', () => {
       expect(firstProviderRequest.lastUserText).toMatch(
         /^<garcon-preambles version="1" application="[a-f0-9]{64}">\nSYNTHETIC_GLOBAL_OPENING_BODY\n\nSYNTHETIC_NESTED_PROJECT_BODY\n\nSYNTHETIC_GLOBAL_CLOSING_BODY\n<\/garcon-preambles>\n\nfirst visible prompt$/u,
       );
+      expect(firstProviderRequest.lastUserText).not.toContain('SYNTHETIC_DISABLED_GLOBAL_BODY');
       expect(firstHeld.releaseText('first synthetic response')).toBeTrue();
       await fixture.client.waitForTurnTerminal(sourceChatId, first.turnId);
 
@@ -116,11 +128,51 @@ describe('preambles', () => {
       await fixture.client.waitForTurnTerminal(sourceChatId, ordinary.turnId);
       expect(applicationTitles(await fixture.client.getMessages(sourceChatId))).toHaveLength(1);
 
+      const slashForkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId, chatId: slashForkChatId });
+      let slashFailure: unknown;
+      try {
+        await fixture.client.runDirectChat({
+          chatId: slashForkChatId,
+          content: '/provider-command',
+          agent: fixture.directAgents.openAi,
+        });
+      } catch (error) {
+        slashFailure = error;
+      }
+      expect(slashFailure).toBeInstanceOf(GarconApiError);
+      expect(slashFailure).toMatchObject({
+        status: 422,
+        body: {
+          errorCode: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+          error: 'Matching preambles haven\u2019t been sent yet. Start with a regular message before using provider slash commands.',
+        },
+      });
+      expect(userContents((await fixture.client.getMessages(slashForkChatId)).messages)).not.toContain(
+        '/provider-command',
+      );
+
+      const afterSlashHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const afterSlash = await fixture.client.runDirectChat({
+        chatId: slashForkChatId,
+        content: 'regular message after blocked slash command',
+        agent: fixture.directAgents.openAi,
+      });
+      const afterSlashRequest = await afterSlashHeld.received;
+      expect(afterSlashRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_OPENING_BODY');
+      expect(afterSlashRequest.lastUserText).not.toContain('SYNTHETIC_DISABLED_GLOBAL_BODY');
+      expect(afterSlashHeld.releaseText('after slash synthetic response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(slashForkChatId, afterSlash.turnId);
+      expect(applicationTitles(await fixture.client.getMessages(slashForkChatId))).toHaveLength(2);
+
       const opening = catalog.preambles[0] as Preamble;
       const updated = await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
         id: opening.id,
         preamble: {
+          enabled: true,
           title: 'Global opening current',
           content: 'SYNTHETIC_CURRENT_OPENING_BODY',
           scope: { type: 'global' },

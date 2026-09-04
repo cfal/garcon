@@ -15,6 +15,7 @@ vi.stubGlobal('localStorage', {
 
 const preamble = {
 	id: 'preamble-a',
+	enabled: true,
 	title: 'Repository conventions',
 	content: 'Use the repository conventions.',
 	scope: { type: 'global' as const },
@@ -50,6 +51,7 @@ describe('preambles API contract', () => {
 
 		await expect(getPreambles()).resolves.toEqual({ revision: 1, preambles: [preamble] });
 		const definition = {
+			enabled: true,
 			title: 'Repository conventions',
 			content: 'Use the repository conventions.',
 			scope: { type: 'global' as const },

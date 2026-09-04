@@ -28,6 +28,7 @@
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
 	let movingPreambleId = $state<string | null>(null);
+	let togglingPreambleId = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
@@ -78,6 +79,24 @@
 			operationError = error instanceof Error ? error.message : m.preambles_reorder_error();
 		} finally {
 			movingPreambleId = null;
+		}
+	}
+
+	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
+		if (togglingPreambleId || preamble.enabled === enabled) return;
+		togglingPreambleId = preamble.id;
+		operationError = null;
+		try {
+			await preambles.update(preamble.id, {
+				enabled,
+				title: preamble.title,
+				content: preamble.content,
+				scope: preamble.scope,
+			});
+		} catch (error) {
+			operationError = error instanceof Error ? error.message : m.preambles_toggle_error();
+		} finally {
+			togglingPreambleId = null;
 		}
 	}
 </script>
@@ -183,7 +202,7 @@
 						{preamble}
 						index={catalogIndex}
 						total={preambles.preambles.length}
-						disabled={movingPreambleId !== null}
+						disabled={movingPreambleId !== null || togglingPreambleId !== null}
 						reorderDisabled={Boolean(normalizedQuery)}
 						onEdit={() => openEdit(preamble)}
 						onRemove={() => {
@@ -192,6 +211,7 @@
 						}}
 						onMoveUp={() => void move(preamble, 'up')}
 						onMoveDown={() => void move(preamble, 'down')}
+						onEnabledChange={(enabled) => void setEnabled(preamble, enabled)}
 					/>
 					{#snippet failed()}
 						<div class="rounded-md border border-destructive/50 p-3 text-sm text-destructive">

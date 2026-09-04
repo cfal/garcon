@@ -32,7 +32,7 @@ async function service(overrides = {}) {
 }
 
 function globalDefinition(title, content = `${title} body`) {
-  return { title, content, scope: { type: 'global' } };
+  return { enabled: true, title, content, scope: { type: 'global' } };
 }
 
 afterEach(async () => {
@@ -63,6 +63,7 @@ describe('PreambleService', () => {
     await preambles.create({
       expectedRevision: 1,
       preamble: {
+        enabled: true,
         title: 'Project',
         content: 'Project body',
         scope: {
@@ -96,6 +97,7 @@ describe('PreambleService', () => {
     await expect(preambles.create({
       expectedRevision: 0,
       preamble: {
+        enabled: true,
         title: 'Aliased',
         content: 'Body',
         scope: {
@@ -124,6 +126,27 @@ describe('PreambleService', () => {
       status: 422,
     });
     expect(preambles.snapshot()).toMatchObject({ revision: 1 });
+  });
+
+  it('excludes disabled preambles from matching and the combined budget', async () => {
+    const { preambles } = await service();
+    await preambles.create({
+      expectedRevision: 0,
+      preamble: { ...globalDefinition('First', 'a'.repeat(32_000)), enabled: false },
+    });
+    await preambles.create({
+      expectedRevision: 1,
+      preamble: globalDefinition('Second', 'b'.repeat(32_000)),
+    });
+
+    expect(preambles.resolve('/workspace')).toHaveLength(1);
+    expect(preambles.resolve('/workspace')[0]?.title).toBe('Second');
+    await expect(preambles.update({
+      expectedRevision: 2,
+      id: 'preamble-1',
+      preamble: globalDefinition('First', 'a'.repeat(32_000)),
+    })).rejects.toMatchObject({ code: 'PREAMBLE_COMBINED_LIMIT_EXCEEDED' });
+    expect(preambles.snapshot().preambles[0]?.enabled).toBe(false);
   });
 
   it('emits invalidation only after a successful persisted mutation', async () => {

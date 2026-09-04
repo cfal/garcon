@@ -855,6 +855,7 @@ describe('TranscriptLedgerService', () => {
         preambleBoundary: boundary,
         preambles: [{
           id: 'preamble-a',
+          enabled: true,
           title: 'Repository conventions',
           content: 'PRIVATE-PREAMBLE-BODY',
           scope: { type: 'global' },

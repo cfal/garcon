@@ -13,7 +13,7 @@
 
 <Dialog.Root open={appShell.showPreambles} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[80dvh] sm:max-h-[44rem] sm:max-w-3xl sm:rounded-lg sm:border"
+		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-[calc(100vw-2rem)] sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(44rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[44rem] sm:pointer-fine:max-w-3xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
 		showCloseButton={true}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border px-5 py-4 sm:px-6">

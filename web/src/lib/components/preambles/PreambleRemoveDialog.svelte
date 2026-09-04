@@ -23,7 +23,7 @@
 	}: Props = $props();
 </script>
 
-<Dialog.Root {open} onOpenChange={(value) => !value && !removing && onClose()}>
+<Dialog.Root {open} requestClose={() => !removing && onClose()}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>{m.preambles_remove_title()}</Dialog.Title>

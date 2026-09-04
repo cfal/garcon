@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
@@ -105,7 +106,7 @@
 
 <Dialog.Root {open} requestClose={closeForm}>
 	<Dialog.Content
-		class="flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[48rem] sm:max-w-3xl sm:rounded-lg sm:border"
+		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-[calc(100vw-2rem)] sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(48rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[48rem] sm:pointer-fine:max-w-3xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
 		showCloseButton={false}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border bg-background px-5 py-4 sm:px-6">
@@ -116,6 +117,16 @@
 		</Dialog.Header>
 
 		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+			<div class="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+				<div class="min-w-0">
+					<label for="preamble-enabled" class="text-sm font-medium text-foreground">
+						{m.preambles_enabled_label()}
+					</label>
+					<p class="text-xs text-muted-foreground">{m.preambles_enabled_description()}</p>
+				</div>
+				<Switch id="preamble-enabled" bind:checked={form.enabled} disabled={form.saving} />
+			</div>
+
 			<div class="space-y-1.5">
 				<label for="preamble-title" class="text-sm font-medium text-foreground">
 					{m.preambles_title_label()}
@@ -209,7 +220,12 @@
 								{/if}
 							</div>
 						{/each}
-						<Button type="button" variant="secondary" onclick={addPath}>
+						<Button
+							type="button"
+							variant="secondary"
+							onclick={addPath}
+							disabled={!form.canAddPath}
+						>
 							<Plus class="mr-2 h-4 w-4" />
 							{m.preambles_add_path()}
 						</Button>

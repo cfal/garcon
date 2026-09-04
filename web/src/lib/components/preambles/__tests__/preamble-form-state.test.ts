@@ -12,10 +12,28 @@ describe('PreambleFormState', () => {
 		form.scopeType = 'global';
 
 		expect(form.buildDefinition()).toEqual({
+			enabled: true,
 			title: 'Repository conventions',
 			content: 'Keep exact whitespace.\n',
 			scope: { type: 'global' },
 		});
+	});
+
+	it('defaults new preambles to enabled and preserves an edited disabled value', () => {
+		const form = new PreambleFormState();
+		form.reset(null);
+		expect(form.enabled).toBe(true);
+
+		form.reset({
+			id: 'disabled',
+			enabled: false,
+			title: 'Disabled preamble',
+			content: 'Disabled content',
+			scope: { type: 'global' },
+			createdAt: '2029-01-01T00:00:00.000Z',
+			updatedAt: '2029-01-01T00:00:00.000Z',
+		});
+		expect(form.enabled).toBe(false);
 	});
 
 	it('preserves independent nested choices across multiple path rules', () => {

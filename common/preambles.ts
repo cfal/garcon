@@ -33,6 +33,7 @@ export type PreambleScope =
 
 export interface Preamble {
   readonly id: string;
+  readonly enabled: boolean;
   readonly title: string;
   readonly content: string;
   readonly scope: PreambleScope;
@@ -41,6 +42,7 @@ export interface Preamble {
 }
 
 export interface PreambleDefinitionInput {
+  readonly enabled: boolean;
   readonly title: string;
   readonly content: string;
   readonly scope: PreambleScope;
@@ -105,6 +107,7 @@ export const PREAMBLE_ERROR_CODES = {
   projectPathInaccessible: 'PREAMBLE_PROJECT_PATH_INACCESSIBLE',
   projectPathNotDirectory: 'PREAMBLE_PROJECT_PATH_NOT_DIRECTORY',
   envelopeMismatch: 'PREAMBLE_ENVELOPE_MISMATCH',
+  slashCommandBlocked: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
 } as const;
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
@@ -190,27 +193,37 @@ export function normalizePreambleScope(value: unknown): PreambleScope | null {
 
 export function normalizePreambleDefinitionInput(value: unknown): PreambleDefinitionInput | null {
   const raw = asRecord(value);
-  if (!raw || !hasOnlyKeys(raw, ['title', 'content', 'scope'])) return null;
+  if (!raw || !hasOnlyKeys(raw, ['enabled', 'title', 'content', 'scope'])) return null;
   const title = normalizePreambleTitle(raw.title);
   const scope = normalizePreambleScope(raw.scope);
   if (
-    !title
+    typeof raw.enabled !== 'boolean'
+    || !title
     || typeof raw.content !== 'string'
     || raw.content.trim().length === 0
     || raw.content.length > PREAMBLE_CONTENT_MAX_LENGTH
     || raw.content.includes(PREAMBLE_FILE_CONTEXT_SEPARATOR)
     || !scope
   ) return null;
-  return { title, content: raw.content, scope };
+  return { enabled: raw.enabled, title, content: raw.content, scope };
 }
 
 export function normalizePreamble(value: unknown): Preamble | null {
   const raw = asRecord(value);
-  if (!raw || !hasOnlyKeys(raw, ['id', 'title', 'content', 'scope', 'createdAt', 'updatedAt'])) {
+  if (!raw || !hasOnlyKeys(raw, [
+    'id',
+    'enabled',
+    'title',
+    'content',
+    'scope',
+    'createdAt',
+    'updatedAt',
+  ])) {
     return null;
   }
   const id = nonEmptyString(raw.id);
   const definition = normalizePreambleDefinitionInput({
+    enabled: raw.enabled,
     title: raw.title,
     content: raw.content,
     scope: raw.scope,

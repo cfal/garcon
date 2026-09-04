@@ -21,6 +21,7 @@ const CREATED_AT = '2026-09-03T10:00:00.000Z';
 
 function definition(overrides = {}) {
   return {
+    enabled: true,
     title: 'Repository conventions',
     content: 'Follow the repository conventions.',
     scope: { type: 'global' },
@@ -74,6 +75,8 @@ describe('preamble contracts', () => {
   });
 
   it('rejects blank, oversized, file-context-colliding, and unknown fields', () => {
+
+    expect(normalizePreambleDefinitionInput({ ...definition(), enabled: undefined })).toBeNull();
     expect(normalizePreambleDefinitionInput(definition({ content: '  ' }))).toBeNull();
     expect(normalizePreambleDefinitionInput(definition({ content: 'x'.repeat(PREAMBLE_CONTENT_MAX_LENGTH + 1) }))).toBeNull();
     expect(normalizePreambleDefinitionInput(definition({ content: `before${PREAMBLE_FILE_CONTEXT_SEPARATOR}after` }))).toBeNull();

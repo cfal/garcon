@@ -50,6 +50,15 @@ describe('Lightpanda preambles', () => {
       await app.clickButton('Save Preamble');
       await app.waitForText('Global UI rules');
 
+      await clickPreambleRowAction(fixture, 'Global UI rules', 'Disable Global UI rules');
+      await app.waitForText('Disabled');
+      await clickPreambleRowAction(fixture, 'Global UI rules', 'Enable Global UI rules');
+      await fixture.page.waitForFunction(
+        () => ![...document.querySelectorAll<HTMLElement>('article')]
+          .some((element) => element.textContent?.includes('Disabled')),
+        { timeout: 20_000 },
+      );
+
       await app.clickButton('Add preamble');
       await app.fill('#preamble-title', 'Project UI rules');
       await app.fill(
@@ -62,13 +71,26 @@ describe('Lightpanda preambles', () => {
       );
       await app.clickButton('Add project path');
       await app.fill('input[aria-label="Project path"]', fixture.integration.dirs.project);
-      await fixture.page.$eval(
-        'input[type="checkbox"]',
-        (element) => (element as HTMLInputElement).click(),
-      );
+      await fixture.page.evaluate(() => {
+        const label = [...document.querySelectorAll<HTMLLabelElement>('label')]
+          .find((element) => element.textContent?.includes('Apply to nested paths'));
+        const checkbox = label?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        if (!checkbox) throw new Error('Missing nested-path checkbox.');
+        checkbox.click();
+      });
       await app.waitForButton('Save Preamble');
       await app.clickButton('Save Preamble');
       await app.waitForText('Project UI rules');
+
+      const scopedCatalog = await fixture.integration.client.get<PreamblesSnapshot>(
+        '/api/v1/preambles',
+      );
+      const scoped = scopedCatalog.preambles.find((preamble) => preamble.title === 'Project UI rules');
+      expect(scoped?.enabled).toBe(true);
+      expect(scoped?.scope).toEqual({
+        type: 'project-paths',
+        rules: [{ projectPath: fixture.integration.dirs.project, includeNested: true }],
+      });
 
       await app.fill(
         'input[placeholder="Filter by title, text, or project path"]',
@@ -109,6 +131,7 @@ describe('Lightpanda preambles', () => {
       expect(catalog.preambles.map((preamble) => preamble.title)).toEqual([
         'Global UI rules renamed',
       ]);
+      expect(catalog.preambles[0]?.enabled).toBe(true);
 
       await app.clickButton('Close');
       const chatId = fixture.integration.newChatId();

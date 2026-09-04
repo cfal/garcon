@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import type { Preamble } from '$shared/preambles';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
@@ -17,6 +18,7 @@
 		onRemove: () => void;
 		onMoveUp: () => void;
 		onMoveDown: () => void;
+		onEnabledChange: (enabled: boolean) => void;
 	}
 
 	let {
@@ -29,10 +31,15 @@
 		onRemove,
 		onMoveUp,
 		onMoveDown,
+		onEnabledChange,
 	}: Props = $props();
 </script>
 
-<article class="rounded-md border border-border bg-card p-3">
+<article
+	class="rounded-md border border-border p-3 transition-colors {preamble.enabled
+		? 'bg-card'
+		: 'bg-muted/30'}"
+>
 	<div class="flex min-w-0 items-start gap-3">
 		<div class="min-w-0 flex-1 space-y-2">
 			<div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -46,6 +53,11 @@
 				{:else}
 					<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
 						{m.preambles_project_paths_badge({ count: preamble.scope.rules.length })}
+					</span>
+				{/if}
+				{#if !preamble.enabled}
+					<span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+						{m.preambles_disabled_badge()}
 					</span>
 				{/if}
 			</div>
@@ -65,7 +77,16 @@
 				</ul>
 			{/if}
 		</div>
-		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex">
+		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex sm:items-center">
+			<Switch
+				class="col-span-2 mx-auto mb-1 sm:col-span-1 sm:mb-0 sm:mr-1"
+				checked={preamble.enabled}
+				disabled={disabled}
+				onCheckedChange={onEnabledChange}
+				aria-label={preamble.enabled
+					? m.preambles_disable_toggle({ title: preamble.title })
+					: m.preambles_enable_toggle({ title: preamble.title })}
+			/>
 			<Button
 				variant="ghost"
 				size="icon-sm"

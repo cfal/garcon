@@ -5,6 +5,7 @@ import type { Preamble } from '$shared/preambles';
 function preamble(overrides: Partial<Preamble> = {}): Preamble {
 	return {
 		id: 'preamble-a',
+		enabled: true,
 		title: 'Repository conventions',
 		content: 'Run focused checks first.',
 		scope: {
@@ -33,5 +34,9 @@ describe('preamble filter', () => {
 		];
 		expect(filterPreambles(items, 'shared').map((item) => item.id)).toEqual(['first', 'second']);
 		expect(filterPreambles(items, '   ')).toEqual(items);
+	});
+
+	it('keeps disabled preambles searchable', () => {
+		expect(matchesPreambleFilter(preamble({ enabled: false }), 'repository')).toBe(true);
 	});
 });

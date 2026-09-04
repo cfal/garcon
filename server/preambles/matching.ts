@@ -21,7 +21,9 @@ export function applicablePreambles(
   canonicalProjectPath: string,
 ): Preamble[] {
   return preambles
-    .filter((preamble) => preamble.scope.type === 'global'
-      || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath)))
+    .filter((preamble) => preamble.enabled && (
+      preamble.scope.type === 'global'
+      || preamble.scope.rules.some((rule) => preambleRuleMatches(rule, canonicalProjectPath))
+    ))
     .map((preamble) => structuredClone(preamble));
 }

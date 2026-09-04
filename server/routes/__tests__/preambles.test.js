@@ -41,6 +41,7 @@ describe('preamble routes', () => {
     expect(await get.json()).toEqual(emptySnapshot);
 
     const definition = {
+      enabled: true,
       title: 'Repository conventions',
       content: 'Follow the repository conventions.',
       scope: { type: 'global' },
@@ -65,6 +66,7 @@ describe('preamble routes', () => {
     const preambles = service();
     const routes = createPreambleRoutes(preambles);
     const definition = {
+      enabled: false,
       title: 'Project conventions',
       content: 'Use the project rules.',
       scope: {

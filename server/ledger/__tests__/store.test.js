@@ -1738,6 +1738,7 @@ function inputDetail(clientMessageId, content, attachments = []) {
 function preamble(id, title, content) {
   return {
     id,
+    enabled: true,
     title,
     content,
     scope: { type: 'global' },

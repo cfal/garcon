@@ -15,13 +15,14 @@ export function preambleCombinedBudgetViolation(
 ): PreambleCombinedBudgetViolation | null {
   const projectPaths = new Set<string>();
   for (const preamble of preambles) {
+    if (!preamble.enabled) continue;
     if (preamble.scope.type !== 'project-paths') continue;
     for (const rule of preamble.scope.rules) projectPaths.add(rule.projectPath);
   }
   const candidates = [
     {
       projectPath: null,
-      entries: preambles.filter((preamble) => preamble.scope.type === 'global'),
+      entries: preambles.filter((preamble) => preamble.enabled && preamble.scope.type === 'global'),
     },
     ...[...projectPaths].map((projectPath) => ({
       projectPath,

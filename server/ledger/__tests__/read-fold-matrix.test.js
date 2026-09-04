@@ -229,6 +229,7 @@ describe('transcript ledger read-fold matrix', () => {
         preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'epoch-one' },
         preambles: [{
           id: 'preamble-1',
+          enabled: true,
           title: 'Repository conventions',
           content: 'private body sentinel',
           scope: {
