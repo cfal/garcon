@@ -108,6 +108,19 @@ describe('ConversationFeedProjectionState', () => {
 		expect(hidden.model.indexByRowId.has('generation-1:1')).toBe(true);
 		expect(hidden.model.indexByRowId.has('generation-1:4')).toBe(true);
 		expect(hidden.geometry).not.toBe(initial.geometry);
+
+		const restored = projections.reconcile(
+			input({
+				rows: bashRows,
+				mutationClock,
+				hiddenBashCommands: null,
+			}),
+		);
+
+		expect(restored.model.indexByRowId.has('generation-1:2')).toBe(true);
+		expect(restored.model.indexByRowId.has('generation-1:3')).toBe(false);
+		expect(restored.renderModel.items).toHaveLength(4);
+		expect(restored.geometry).not.toBe(hidden.geometry);
 	});
 
 	it('acknowledges content-only streaming without publishing new geometry', () => {

@@ -446,6 +446,41 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('preserves the hidden bash command pattern reference across unrelated writes', () => {
+		const store = createLocalSettingsStore();
+		store.addHiddenBashCommandPattern({ pattern: 'git *', mode: 'glob' });
+		const patterns = store.hiddenBashCommandPatterns;
+
+		store.set('sidebarWidth', 360);
+
+		expect(store.hiddenBashCommandPatterns).toBe(patterns);
+		store.destroy();
+	});
+
+	it('preserves the hidden bash command pattern reference across unrelated storage events', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ hiddenBashCommandPatterns: [{ pattern: 'git *', mode: 'glob' }] }),
+		);
+		const store = createLocalSettingsStore();
+		const patterns = store.hiddenBashCommandPatterns;
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ ...store.snapshot(), sidebarWidth: 360 }),
+		);
+
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings),
+			}),
+		);
+
+		expect(store.sidebarWidth).toBe(360);
+		expect(store.hiddenBashCommandPatterns).toBe(patterns);
+		store.destroy();
+	});
+
 	it('drops malformed and duplicate persisted bash command patterns', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
@@ -454,6 +489,7 @@ describe('LocalSettingsStore', () => {
 					{ pattern: 'git *', mode: 'glob' },
 					{ pattern: 'git *', mode: 'glob' },
 					{ pattern: '', mode: 'glob' },
+					{ pattern: '([unclosed', mode: 'regex' },
 					{ pattern: 'x', mode: 'shell' },
 					'string',
 					null,

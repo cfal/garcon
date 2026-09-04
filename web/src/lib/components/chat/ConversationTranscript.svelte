@@ -9,10 +9,6 @@
 		filterHiddenToolRenderItems,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
-	import {
-		compileHiddenBashCommandPatterns,
-		type HiddenBashCommandPattern,
-	} from '$lib/chat/transcript/hidden-bash-commands.js';
 	import { CHAT_FEED_CONTENT_BASE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 
 	interface PermissionDecision {
@@ -26,7 +22,6 @@
 		rows: ChatDisplayRow[];
 		showThinking?: boolean;
 		hiddenToolTypes?: HideableToolType[];
-		hiddenBashCommandPatterns?: HiddenBashCommandPattern[];
 		pendingPermissionRequests?: readonly PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
@@ -40,7 +35,6 @@
 		rows,
 		showThinking = true,
 		hiddenToolTypes = [],
-		hiddenBashCommandPatterns = [],
 		pendingPermissionRequests = [],
 		chatContext = null,
 		onPermissionDecision,
@@ -51,10 +45,7 @@
 	}: Props = $props();
 
 	const renderModel = $derived(buildConversationFeedRenderModel(rows));
-	const hiddenBashCommands = $derived(compileHiddenBashCommandPatterns(hiddenBashCommandPatterns));
-	const renderItems = $derived(
-		filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes, hiddenBashCommands),
-	);
+	const renderItems = $derived(filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes));
 </script>
 
 <div class={CHAT_FEED_CONTENT_BASE_CLASS}>

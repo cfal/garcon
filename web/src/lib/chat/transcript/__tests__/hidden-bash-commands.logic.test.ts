@@ -90,6 +90,7 @@ describe('normalizeHiddenBashCommandPatterns', () => {
 				{ pattern: 'git *', mode: 'glob' },
 				{ pattern: '^git', mode: 'regex' },
 				{ pattern: '', mode: 'glob' },
+				{ pattern: '([unclosed', mode: 'regex' },
 				{ pattern: 'x', mode: 'shell' },
 				{ pattern: 42, mode: 'glob' },
 				'string',

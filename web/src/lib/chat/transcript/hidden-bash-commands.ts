@@ -71,8 +71,9 @@ export function normalizeHiddenBashCommandPatterns(value: unknown): HiddenBashCo
 	for (const entry of value) {
 		if (typeof entry !== 'object' || entry === null) continue;
 		const { pattern, mode } = entry as { pattern?: unknown; mode?: unknown };
-		if (typeof pattern !== 'string' || pattern.trim().length === 0) continue;
+		if (typeof pattern !== 'string') continue;
 		if (!isHiddenBashCommandPatternMode(mode)) continue;
+		if (validateHiddenBashCommandPattern(pattern, mode) !== 'ok') continue;
 		const key = `${mode}:${pattern}`;
 		if (seen.has(key)) continue;
 		seen.add(key);

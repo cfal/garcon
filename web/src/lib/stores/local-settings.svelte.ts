@@ -326,6 +326,20 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 	);
 }
 
+function hiddenBashCommandPatternsEqual(
+	left: readonly HiddenBashCommandPattern[],
+	right: readonly HiddenBashCommandPattern[],
+): boolean {
+	return (
+		left === right ||
+		(left.length === right.length &&
+			left.every(
+				(pattern, index) =>
+					pattern.pattern === right[index].pattern && pattern.mode === right[index].mode,
+			))
+	);
+}
+
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		theme: parseTheme(parsed.theme),
@@ -576,7 +590,7 @@ export class LocalSettingsStore {
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
-			hiddenBashCommandPatterns: this.hiddenBashCommandPatterns.map((pattern) => ({ ...pattern })),
+			hiddenBashCommandPatterns: this.hiddenBashCommandPatterns,
 			globalShortcuts: { ...this.globalShortcuts },
 			completionSoundMode: this.completionSoundMode,
 			completionSoundVolume: this.completionSoundVolume,
@@ -620,9 +634,9 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
-		this.hiddenBashCommandPatterns = snap.hiddenBashCommandPatterns.map((pattern) => ({
-			...pattern,
-		}));
+		if (!hiddenBashCommandPatternsEqual(this.hiddenBashCommandPatterns, snap.hiddenBashCommandPatterns)) {
+			this.hiddenBashCommandPatterns = snap.hiddenBashCommandPatterns;
+		}
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.completionSoundMode = snap.completionSoundMode;
 		this.completionSoundVolume = snap.completionSoundVolume;

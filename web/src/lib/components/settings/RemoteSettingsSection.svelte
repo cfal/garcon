@@ -35,8 +35,8 @@
 <div class="space-y-3">
 	<GitHubCliSettingsCard />
 
-	<!-- Browser-local preference; intentionally outside the remote snapshot
-	     gate so it stays usable while remote settings load or fail. -->
+	<!-- Keeps this browser-local preference outside the remote snapshot gate
+	     so it remains usable while remote settings load or fail. -->
 	<HiddenBashCommandsSettingsCard />
 
 	{#if !remoteSettings.hasSnapshot}

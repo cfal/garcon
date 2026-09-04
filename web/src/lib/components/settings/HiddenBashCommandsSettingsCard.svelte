@@ -1,5 +1,5 @@
-<!-- Browser-local exception inside Remote Settings: persists through the
-     local settings store, never through remoteSettings.update. -->
+<!-- Persists this Remote Settings exception through the browser-local store,
+     never through remoteSettings.update. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';

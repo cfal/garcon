@@ -199,8 +199,8 @@
 	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
 		announcement = { sequence: announcement.sequence + 1, text };
 	});
-	// Compiled apart from the projection input so its reference only changes
-	// when the pattern list changes, not on every row mutation.
+	// Compiles apart from the projection input so its reference changes only
+	// with the pattern list, not with every row mutation.
 	const hiddenBashCommands = $derived(
 		compileHiddenBashCommandPatterns(localSettings.hiddenBashCommandPatterns),
 	);

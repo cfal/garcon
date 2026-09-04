@@ -1325,7 +1325,7 @@
 	"settings_chat_reduce_motion": "Reduce motion",
 	"settings_chat_hidden_tools": "Hide tool calls",
 	"settings_hidden_bash_commands_title": "Hide bash commands",
-	"settings_hidden_bash_commands_description": "Bash tool calls whose command matches a pattern are hidden from the chat transcript, together with their results. Stored in this browser only.",
+	"settings_hidden_bash_commands_description": "Bash tool calls whose command matches a pattern are hidden from the chat transcript, together with their results. Globs match the whole command; regexes match anywhere. Stored in this browser only.",
 	"settings_hidden_bash_commands_pattern_label": "Command pattern",
 	"settings_hidden_bash_commands_mode_label": "Pattern type",
 	"settings_hidden_bash_commands_mode_regex": "Regex",

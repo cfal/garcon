@@ -256,6 +256,7 @@ export class ConversationFeedAnnouncerState {
 		const resumedLiveEnd =
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
 		if (resumedLiveEnd) this.#detachedStatusAnnounced = false;
+		// Detached mutation metadata carries message types but no command content.
 		const responseUpdatedOutsideWindow =
 			!input.isLiveWindow &&
 			Object.entries(input.mutationClock.lastResponseRevisionByMessageType).some(
