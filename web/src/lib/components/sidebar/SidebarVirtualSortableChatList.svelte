@@ -41,6 +41,7 @@
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.svelte.js';
@@ -60,6 +61,7 @@
 		overscan?: number;
 		reorder: SidebarChatReorderState;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
+		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chat: ChatSessionRecord) => void;
 		onStartRenameChat: (chat: ChatSessionRecord) => void;
@@ -92,6 +94,7 @@
 		overscan = DEFAULT_CHAT_ROW_OVERSCAN,
 		reorder,
 		onPersistReorder,
+		onSortChatOrder,
 		onChatSelect,
 		onDeleteChat,
 		onStartRenameChat,
@@ -939,6 +942,9 @@
 							{onMultiSelectToggle}
 							onMoveToTop={getMoveToTop(row)}
 							onMoveToBottom={getMoveToBottom(row)}
+							onSortChatOrder={displayOptions.sortMode === 'manual'
+								? onSortChatOrder
+								: undefined}
 							{hasPinnedChats}
 						/>
 					{/if}

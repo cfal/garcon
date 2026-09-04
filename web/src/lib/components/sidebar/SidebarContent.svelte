@@ -12,6 +12,7 @@
 	} from './sidebar-display-options';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -48,6 +49,7 @@
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
+		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
@@ -79,6 +81,7 @@
 		onTogglePinned,
 		onToggleArchive,
 		onQuickMove,
+		onSortChatOrder,
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -125,5 +128,6 @@
 		{onTogglePinned}
 		{onToggleArchive}
 		{onQuickMove}
+		{onSortChatOrder}
 	/>
 </ScrollArea>

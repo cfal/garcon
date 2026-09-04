@@ -3,9 +3,17 @@ import type { Page, Request } from 'playwright';
 import {
   parseReorderChatRequest,
   parseReorderChatResponse,
+  parseSortChatOrderRequest,
+  parseSortChatOrderResponse,
   type ReorderChatRequest,
   type ReorderChatResponse,
+  type SortChatOrderRequest,
+  type SortChatOrderResponse,
 } from '../../../common/chat-order-contracts.js';
+import {
+  compareChatOrderNewestFirst,
+  type ChatOrderSortKey,
+} from '../../../common/chat-order-sort.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   withChromiumFixture,
@@ -28,10 +36,15 @@ interface ReorderExchange {
 
 interface ChromiumFixture extends BaseChromiumFixture {
   reorderExchanges: ReorderExchange[];
+  sortExchanges: ReorderExchange[];
 }
 
 function isReorderRequest(request: Request): boolean {
   return request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/chats/reorder';
+}
+
+function isSortRequest(request: Request): boolean {
+  return request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/chats/sort';
 }
 
 async function normalOrder(integration: IntegrationFixture): Promise<string[]> {
@@ -68,6 +81,53 @@ function capturedReorderRequests(fixture: ChromiumFixture): ReorderChatRequest[]
     if (!parsed) throw new Error(`Invalid captured reorder request: ${request.body ?? '<empty>'}`);
     return parsed;
   });
+}
+
+function capturedSortRequests(fixture: ChromiumFixture): SortChatOrderRequest[] {
+  return fixture.sortExchanges.map(({ request }) => {
+    const parsed = parseSortChatOrderRequest(request.body ? JSON.parse(request.body) : null);
+    if (!parsed) throw new Error(`Invalid captured sort request: ${request.body ?? '<empty>'}`);
+    return parsed;
+  });
+}
+
+async function expectedNormalOrder(
+  integration: IntegrationFixture,
+  sortKey: ChatOrderSortKey,
+): Promise<string[]> {
+  const compare = compareChatOrderNewestFirst(sortKey);
+  return (await integration.client.listChats()).sessions
+    .filter((chat) => chat.orderGroup === 'normal')
+    .map((chat) => ({
+      id: chat.id,
+      createdAt: chat.activity.createdAt,
+      lastActivityAt: chat.activity.lastActivityAt,
+    }))
+    .sort(compare)
+    .map((chat) => chat.id);
+}
+
+async function sortFromChatMenu(
+  fixture: ChromiumFixture,
+  chatId: string,
+  label: 'By creation time' | 'By recent activity',
+): Promise<SortChatOrderResponse> {
+  const row = fixture.page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
+  await row.hover();
+  await row.locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]').click();
+  const reorderChats = fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true });
+  await reorderChats.focus();
+  await reorderChats.press('ArrowRight');
+  const preset = fixture.page.getByRole('menuitem', { name: label, exact: true });
+  await preset.waitFor();
+  const responsePromise = fixture.page.waitForResponse(
+    (response) => isSortRequest(response.request()),
+    { timeout: 10_000 },
+  );
+  await preset.click();
+  const parsed = parseSortChatOrderResponse(await (await responsePromise).json());
+  if (!parsed) throw new Error('Invalid chat order sort response.');
+  return parsed;
 }
 
 async function dragRelative(
@@ -241,10 +301,16 @@ async function withSidebarChromiumFixture<T>(
     async (baseFixture) => {
       const fixture = Object.assign(baseFixture, {
         reorderExchanges: [] as ReorderExchange[],
+        sortExchanges: [] as ReorderExchange[],
       });
       const exchangesByRequest = new Map<Request, ReorderExchange>();
       fixture.page.on('request', (request) => {
-        if (!isReorderRequest(request)) return;
+        const exchanges = isReorderRequest(request)
+          ? fixture.reorderExchanges
+          : isSortRequest(request)
+            ? fixture.sortExchanges
+            : null;
+        if (!exchanges) return;
         const exchange: ReorderExchange = {
           request: {
             method: request.method(),
@@ -252,7 +318,7 @@ async function withSidebarChromiumFixture<T>(
             body: request.postData(),
           },
         };
-        fixture.reorderExchanges.push(exchange);
+        exchanges.push(exchange);
         exchangesByRequest.set(request, exchange);
       });
       fixture.page.on('response', async (response) => {
@@ -269,6 +335,7 @@ async function withSidebarChromiumFixture<T>(
       const fixture = baseFixture as ChromiumFixture;
       return {
         reorderExchanges: fixture.reorderExchanges,
+        sortExchanges: fixture.sortExchanges,
         sidebarOrder: await sidebarOrder(fixture.page).catch(() => []),
         serverOrder: await normalOrder(fixture.integration).catch(() => []),
         dimmedRows: await fixture.page
@@ -371,6 +438,65 @@ describe('Chromium sidebar chat reorder', () => {
       ];
       await waitForSidebarOrder(fixture.page, movedToTop);
       expect(await normalOrder(fixture.integration)).toEqual(movedToTop);
+
+      const creationOrder = await expectedNormalOrder(fixture.integration, 'created');
+      const creationResponse = await sortFromChatMenu(
+        fixture,
+        movedToTop[0]!,
+        'By creation time',
+      );
+      expect(creationResponse).toEqual({
+        success: true,
+        sortKey: 'created',
+        changed: true,
+      });
+      expect(capturedSortRequests(fixture)).toEqual([{ sortKey: 'created' }]);
+      await fixture.page.getByText('Chats reordered.', { exact: true }).waitFor();
+      await waitForSidebarOrder(fixture.page, creationOrder);
+      expect(await normalOrder(fixture.integration)).toEqual(creationOrder);
+
+      const activitySourceId = creationOrder.at(-1);
+      if (!activitySourceId) throw new Error('Expected an activity sort source.');
+      const eventCursor = fixture.integration.client.markEvents();
+      const continued = await fixture.integration.client.runDirectChat({
+        chatId: activitySourceId,
+        content: 'activity-sort-follow-up',
+        agent: fixture.integration.directAgents.openAi,
+      });
+      await fixture.integration.client.waitForTurnTerminal(activitySourceId, continued.turnId, {
+        afterIndex: eventCursor,
+      });
+      const activityOrder = await expectedNormalOrder(fixture.integration, 'activity');
+      expect(activityOrder).not.toEqual(creationOrder);
+
+      const activityResponse = await sortFromChatMenu(
+        fixture,
+        creationOrder[0]!,
+        'By recent activity',
+      );
+      expect(activityResponse).toEqual({
+        success: true,
+        sortKey: 'activity',
+        changed: true,
+      });
+      expect(capturedSortRequests(fixture)).toEqual([
+        { sortKey: 'created' },
+        { sortKey: 'activity' },
+      ]);
+      await waitForSidebarOrder(fixture.page, activityOrder);
+      expect(await normalOrder(fixture.integration)).toEqual(activityOrder);
+
+      await fixture.page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await fixture.page.getByRole('menuitemradio', { name: 'Recent activity', exact: true }).click();
+      const recentRow = fixture.page.locator(CHAT_ROW_SELECTOR).first();
+      await recentRow.hover();
+      await recentRow
+        .locator('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]')
+        .click();
+      await fixture.page.getByRole('menuitem', { name: 'Select', exact: true }).waitFor();
+      expect(
+        await fixture.page.getByRole('menuitem', { name: 'Reorder chats', exact: true }).count(),
+      ).toBe(0);
       expect(fixture.browserErrors).toEqual([]);
     });
   }, 120_000);

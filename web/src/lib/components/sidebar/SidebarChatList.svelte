@@ -24,6 +24,7 @@
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
+	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarChatListProps {
 		viewportRef?: HTMLElement | null;
@@ -61,6 +62,7 @@
 			onSuccess?: () => void,
 			onFailure?: () => void,
 		) => void;
+		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
@@ -93,6 +95,7 @@
 		onOpenInNewWindow,
 		newWindowBlocked = false,
 		onQuickMove,
+		onSortChatOrder,
 	}: SidebarChatListProps = $props();
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
@@ -227,6 +230,7 @@
 		{onManageTags}
 		{onOpenInNewWindow}
 		{newWindowBlocked}
+		{onSortChatOrder}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
 		{hasPinnedChats}
