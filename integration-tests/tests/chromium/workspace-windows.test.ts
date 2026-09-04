@@ -598,7 +598,9 @@ async function dragChatToWindow(
 }
 
 // Chromium omits dragover when a dispatch changes the hit-tested element, so
-// keep nudging the pointer until the drop zone actually activates.
+// keep nudging the pointer until the drop zone actually activates. The drop
+// must land at the position where activation was observed: moving afterwards
+// can land on an element that never received dragover, which rejects the drop.
 async function nudgePointerUntilVisible(
   page: Page,
   label: Locator,
@@ -609,6 +611,7 @@ async function nudgePointerUntilVisible(
   const deadline = Date.now() + 20_000;
   for (;;) {
     await page.mouse.move(targetX + nudgeX, targetY);
+    if (await label.isVisible()) return;
     await page.mouse.move(targetX, targetY);
     if (await label.isVisible()) return;
     if (Date.now() > deadline) {
