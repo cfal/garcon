@@ -70,11 +70,6 @@ describe('MobilePresentationPlanner', () => {
 				windowId: 'window-main',
 			},
 			{
-				type: 'register-surface',
-				surface: { id: 'singleton:files', type: 'singleton', kind: 'files' },
-				windowId: 'window-main',
-			},
-			{
 				type: 'set-mobile-presentation',
 				activeId: 'singleton:git',
 				returnStack: [],
@@ -135,7 +130,9 @@ describe('MobilePresentationPlanner', () => {
 			},
 		]);
 
-		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
+		expect(
+			planner.resolveReturn(new Set(['singleton:commit', 'singleton:files']), commitActive),
+		).toEqual({
 			activeId: CANONICAL_CHAT_SURFACE_ID,
 			returnStack: [],
 		});

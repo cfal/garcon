@@ -21,6 +21,7 @@ import {
 	type WorkspaceWindowId,
 } from './surface-types.js';
 import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	WorkspaceTransitionArbiter,
@@ -585,13 +586,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					removalBlocked = true;
 					return [];
 				}
-				const mutations: WorkspaceLayoutMutation[] = [
+				const removalMutation: WorkspaceLayoutMutation =
 					surface.type === 'terminal'
 						? { type: 'unplace-terminal', terminalId: surface.terminalId }
-						: { type: 'remove-surface', surfaceId },
-				];
+						: { type: 'remove-surface', surfaceId };
+				const mutations: WorkspaceLayoutMutation[] = [removalMutation];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.#presentation.resolveMobileReturn(surfaceId, latest);
+					// Resolve against the post-removal snapshot so window active/MRU
+					// fallbacks no longer name the removed surface.
+					const fallback = this.#presentation.resolveMobileReturn(
+						surfaceId,
+						reduceWorkspaceLayout(latest, [removalMutation]),
+					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',

@@ -14,6 +14,7 @@ import {
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
 import { collectWindowNodes, windowNodeById } from './window-tree.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import { isCanonicalFirstRunLayout } from './canonical-layout.js';
@@ -373,7 +374,12 @@ export class TerminalPlacementService {
 				if (!latest.surfaces[surfaceId]) return [];
 				const mutations: WorkspaceLayoutMutation[] = [{ type: 'forget-terminal', terminalId }];
 				if (this.deps.isMobile() && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.deps.resolveMobileReturn(surfaceId, latest);
+					// Resolve against the post-removal snapshot so window active/MRU
+					// fallbacks no longer name the removed surface.
+					const fallback = this.deps.resolveMobileReturn(
+						surfaceId,
+						reduceWorkspaceLayout(latest, mutations),
+					);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',
@@ -509,7 +515,12 @@ export class TerminalPlacementService {
 				}
 			}
 			if (this.deps.isMobile() && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
-				const fallback = this.deps.resolveMobileReturn(removedSurfaceIds, latest);
+				// Resolve against the post-removal snapshot so window active/MRU
+				// fallbacks no longer name a removed surface.
+				const fallback = this.deps.resolveMobileReturn(
+					removedSurfaceIds,
+					reduceWorkspaceLayout(latest, mutations),
+				);
 				mobileFallbackId = fallback.activeId;
 				mutations.push({
 					type: 'set-mobile-presentation',

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout.js';
@@ -464,10 +464,10 @@ describe('WorkspaceRoot', () => {
 		installContext();
 		const { container } = renderRoot();
 
-		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(1);
-		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(1);
+		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
+		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
 		expect(screen.getByRole('tab', { name: 'Chat A' }).getAttribute('draggable')).toBe('true');
-		expect(container.querySelector('[data-workspace-window-close]')).toBeNull();
+		expect(container.querySelectorAll('[data-workspace-window-close]')).toHaveLength(2);
 		const panel = container.querySelector(
 			'[data-workspace-surface-id="chat-view:window-main"]',
 		) as HTMLElement;
@@ -552,10 +552,15 @@ describe('WorkspaceRoot', () => {
 				},
 			]),
 		);
-		renderRoot();
+		const { container } = renderRoot();
 		expect(screen.getByRole('tab', { name: 'Dev server' })).toBeTruthy();
+		const mainWindow = container.querySelector(
+			'[data-workspace-window-id="window-main"]',
+		) as HTMLElement;
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(
+			within(mainWindow).getByRole('button', { name: m.workspace_window_actions() }),
+		);
 
 		expect(screen.getByRole('menuitem', { name: m.terminal_rename() })).toBeTruthy();
 		expect(screen.getByRole('menuitem', { name: m.terminal_paste() })).toBeTruthy();
@@ -579,7 +584,9 @@ describe('WorkspaceRoot', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_save() }));
 		await waitFor(() => expect(terminals.rename).toHaveBeenCalledWith(terminalId, 'Build logs'));
 
-		await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+		await fireEvent.click(
+			within(mainWindow).getByRole('button', { name: m.workspace_window_actions() }),
+		);
 		await fireEvent.click(screen.getByRole('menuitem', { name: m.terminal_terminate() }));
 		expect(workspace.terminateTerminalSession).toHaveBeenCalledWith(terminalId);
 	});
@@ -623,19 +630,6 @@ describe('WorkspaceRoot', () => {
 
 	it('adds a sidebar Chat to the exact Chat-less center destination', async () => {
 		const { layout, windowDnd, workspace } = installContext();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
 		const { container } = renderRoot();
 		const destination = container.querySelector(
 			'[data-workspace-window-id="window-files"]',
@@ -693,7 +687,7 @@ describe('WorkspaceRoot', () => {
 			expect(workspace.showChatInWindow).toHaveBeenCalledWith('chat-a', 'window-2'),
 		);
 		expect(layout.surface(chatViewSurfaceId('window-2'))).toMatchObject({ chatId: 'chat-a' });
-		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(2);
+		expect(collectWindowNodes(layout.snapshot.desktopRoot)).toHaveLength(3);
 	});
 
 	it('keeps one live Chat surface mounted while its local tab becomes hidden', async () => {
@@ -724,7 +718,7 @@ describe('WorkspaceRoot', () => {
 		expect(liveChat.getAttribute('data-visible')).toBe('false');
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('true');
 		expect(composerLayer.hasAttribute('inert')).toBe(true);
-		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(1);
+		expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
 		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
 		const chatPanelId = chatTab.getAttribute('aria-controls');
 		expect(chatPanelId).not.toBeNull();
@@ -782,7 +776,7 @@ describe('WorkspaceRoot', () => {
 		expect(panelB.dataset.commandOwner).toBe('true');
 		expect(panelB.dataset.ownsComposer).toBe('true');
 		expect(liveChatBody.classList.contains('top-10')).toBe(true);
-		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(2);
+		expect(container.querySelectorAll('[data-workspace-window-titlebar]')).toHaveLength(3);
 	});
 
 	it('restores a rekeyed Chat panel at its transferred row target', async () => {
@@ -820,7 +814,7 @@ describe('WorkspaceRoot', () => {
 		if (!destination) throw new Error('Expected destination panel');
 		destination.attachPresentation(panelPresentation({ kind: 'end' }));
 		await waitFor(() => expect(destination.scroll.isPinnedToBottom).toBe(false));
-		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1);
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2);
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
 		expect(screen.getByTestId('conversation-panel').dataset.transcriptViewId).toBe('view-chat-a');
 		expect(screen.getByTestId('conversation-panel').dataset.panelPinned).toBe('false');
@@ -872,20 +866,7 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it('lets the first pointer gesture act in a visible Files pane without moving the composer', async () => {
-		const { layout, runtime, workspace } = installContext();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
+		const { runtime, workspace } = installContext();
 		const { container } = renderRoot();
 		const filesWindow = container.querySelector<HTMLElement>(
 			'[data-workspace-window-id="window-files"]',
@@ -927,20 +908,7 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it('restores Chat ownership from the detached composer without opening a window gesture', async () => {
-		const { layout, runtime, workspace } = installContext();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
+		const { runtime, workspace } = installContext();
 		const { container } = renderRoot();
 		const filesRenderer = container.querySelector<HTMLElement>(
 			'[data-workspace-window-id="window-files"] [data-testid="surface-renderer-stub"]',
@@ -961,20 +929,7 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it('releases a pane pointer interaction when pointer-up lands outside its window', async () => {
-		const { layout, workspace } = installContext();
-		layout.publish(
-			layout.revision,
-			reduceWorkspaceLayout(layout.snapshot, [
-				{
-					type: 'register-surface-in-new-window',
-					surface: portableSingletonDescriptor('files'),
-					targetWindowId: 'window-main',
-					edge: 'right',
-					newWindowId: 'window-files',
-					partitionId: 'partition-files',
-				},
-			]),
-		);
+		const { workspace } = installContext();
 		const { container } = renderRoot();
 		const filesRenderer = container.querySelector<HTMLElement>(
 			'[data-workspace-window-id="window-files"] [data-testid="surface-renderer-stub"]',
@@ -1089,14 +1044,14 @@ describe('WorkspaceRoot', () => {
 		const gitWindow = container.querySelector('[data-workspace-window-id="window-2"]')!;
 		const composerLayer = container.querySelector('[data-workspace-live-chat-body]')?.parentElement;
 		if (!composerLayer) throw new Error('Expected composer layer');
-		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2);
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(3);
 
 		await fireEvent.click(
 			container.querySelector('[data-workspace-window-fullscreen="window-2"]') as HTMLButtonElement,
 		);
 
 		await waitFor(() => expect(layout.snapshot.fullscreenWindowId).toBe('window-2'));
-		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2);
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(3);
 		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
 		expect(container.querySelector('[data-workspace-window-id="window-2"]')).toBe(gitWindow);
 		expect(mainWindow.classList.contains('hidden')).toBe(true);
@@ -1151,7 +1106,7 @@ describe('WorkspaceRoot', () => {
 		);
 
 		await waitFor(() =>
-			expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1),
+			expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(2),
 		);
 		expect(container.querySelector('[data-workspace-window-id="window-main"]')).toBe(mainWindow);
 	});
