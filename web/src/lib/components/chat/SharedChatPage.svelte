@@ -300,7 +300,10 @@
 												title={userPresentation.title}
 											/>
 										{/if}
-										<CollapsibleBody disclosure={userMessageBodyDisclosure(userPresentation)}>
+										<CollapsibleBody
+											disclosure={userMessageBodyDisclosure(userPresentation)}
+											previewHeight={userPresentation?.style ? 'default' : 'tall'}
+										>
 											<div class={userPresentation?.style ? 'mt-1 text-sm' : 'text-sm'}>
 												<Markdown
 													source={message.content}

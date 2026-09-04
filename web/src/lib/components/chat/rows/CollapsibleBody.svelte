@@ -4,6 +4,7 @@
 
 	interface Props {
 		disclosure?: 'expanded' | 'collapsed';
+		previewHeight?: 'default' | 'tall';
 		alwaysExpanded?: boolean;
 		expanded?: boolean;
 		onExpandedChange?: (expanded: boolean) => void;
@@ -12,6 +13,7 @@
 
 	let {
 		disclosure,
+		previewHeight = 'default',
 		alwaysExpanded = false,
 		expanded,
 		onExpandedChange,
@@ -86,6 +88,7 @@
 		bind:clientWidth={bodyWidth}
 		class:collapsible-body-collapsed={!bodyExpanded}
 		class:collapsible-body-truncated={showDisclosure && !bodyExpanded}
+		class:collapsible-body-tall={previewHeight === 'tall'}
 		onfocusin={expandOnFocus}
 	>
 		<div class="flow-root" data-slot="collapsible-body-content" bind:offsetHeight={contentHeight}>

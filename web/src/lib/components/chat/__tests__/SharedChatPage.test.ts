@@ -360,6 +360,7 @@ describe('SharedChatPage', () => {
 					style: 'custom',
 					customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
 					title: 'Deployment context',
+					disclosure: 'collapsed',
 				},
 			},
 		];
@@ -377,9 +378,12 @@ describe('SharedChatPage', () => {
 		expect(bubble?.style.getPropertyValue('--cli-presentation-accent-dark')).toBe('#c4b5fd');
 		expect(screen.getByText('CLI custom').className).toContain('sr-only');
 		expect(screen.getByText('Deployment context')).toBeTruthy();
+		expect(bubble?.querySelector('.collapsible-body-collapsed')).toBeTruthy();
+		expect(bubble?.querySelector('.collapsible-body-tall')).toBeNull();
 	});
 
 	it('collapses long ordinary user messages and preserves expansion when prepending history', async () => {
+		collapsibleLayout.contentHeight = 320;
 		const newest = response([], 50, 51);
 		newest.snapshot.messages = [
 			{
@@ -395,6 +399,7 @@ describe('SharedChatPage', () => {
 
 		render(SharedChatPageTestHost);
 		await screen.findByText('Long shared prompt');
+		expect(document.querySelector('.collapsible-body-tall')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
 		expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
 

@@ -1066,11 +1066,24 @@
 	border-color: var(--composer-thinking-status-border);
 }
 .collapsible-body-collapsed {
-	max-height: 10rem;
+	max-height: var(--collapsible-body-max-height, 10rem);
 	overflow: hidden;
 }
 
 .collapsible-body-truncated {
-	-webkit-mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
-	mask-image: linear-gradient(to bottom, black 7rem, transparent 10rem);
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		black var(--collapsible-body-fade-start, 7rem),
+		transparent var(--collapsible-body-max-height, 10rem)
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		black var(--collapsible-body-fade-start, 7rem),
+		transparent var(--collapsible-body-max-height, 10rem)
+	);
+}
+
+.collapsible-body-tall {
+	--collapsible-body-max-height: 16rem;
+	--collapsible-body-fade-start: 13rem;
 }

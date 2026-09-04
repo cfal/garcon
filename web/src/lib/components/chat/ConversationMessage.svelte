@@ -511,6 +511,7 @@
 							{/if}
 							<CollapsibleBody
 								disclosure={userMessageDisclosure}
+								previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
 								alwaysExpanded={Boolean(userMessagePresentation) &&
 									localSettings.alwaysExpandCliMessages}
 								expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}

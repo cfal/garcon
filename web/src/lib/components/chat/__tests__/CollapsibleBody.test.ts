@@ -52,6 +52,21 @@ describe('CollapsibleBody', () => {
 		});
 	});
 
+	it('shows more content when the tall preview height is requested', async () => {
+		layout.contentHeight = 220;
+		const { container } = render(CollapsibleBodyTestHost, {
+			content: 'Taller preview content',
+			previewHeight: 'tall',
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+			expect(container.querySelector('[data-slot="collapsible-body"]')?.classList).toContain(
+				'collapsible-body-tall',
+			);
+		});
+	});
+
 	it('normalizes restored expansion when the body now fits without clipping', async () => {
 		layout.contentHeight = 80;
 		const onExpandedChange = vi.fn();
@@ -74,6 +89,9 @@ describe('CollapsibleBody', () => {
 
 		const showMore = await screen.findByRole('button', { name: 'Show more' });
 		expect(showMore.getAttribute('aria-expanded')).toBe('false');
+		expect(
+			document.getElementById(showMore.getAttribute('aria-controls')!)?.classList,
+		).not.toContain('collapsible-body-tall');
 		expect(document.getElementById(showMore.getAttribute('aria-controls')!)?.classList).toContain(
 			'collapsible-body-collapsed',
 		);

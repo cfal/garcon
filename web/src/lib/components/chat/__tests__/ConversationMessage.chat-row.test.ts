@@ -512,6 +512,7 @@ describe('ConversationMessage chat rows', () => {
 	});
 
 	it('collapses overflowing ordinary user messages automatically', async () => {
+		collapsibleLayout.contentHeight = 320;
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage(AT, '## Long user prompt\n\nPreserve **all details**.'),
 		});
@@ -520,6 +521,9 @@ describe('ConversationMessage chat rows', () => {
 		expect(button.getAttribute('aria-expanded')).toBe('false');
 		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
 			'collapsible-body-collapsed',
+		);
+		expect(document.getElementById(button.getAttribute('aria-controls')!)?.classList).toContain(
+			'collapsible-body-tall',
 		);
 		expect(container.querySelector('[data-user-message-presentation]')).toBeNull();
 		expect(screen.getByText('Long user prompt').tagName).toBe('H2');
@@ -544,6 +548,7 @@ describe('ConversationMessage chat rows', () => {
 	});
 
 	it('keeps ordinary user messages collapsed when CLI messages are always expanded', () => {
+		collapsibleLayout.contentHeight = 320;
 		render(ConversationMessageHost, {
 			message: new UserMessage(AT, 'Long ordinary user prompt'),
 			alwaysExpandCliMessages: true,
@@ -555,6 +560,7 @@ describe('ConversationMessage chat rows', () => {
 	});
 
 	it('preserves ordinary user expansion across remounts', async () => {
+		collapsibleLayout.contentHeight = 320;
 		const itemState = new ConversationFeedItemState();
 		const disclosureState = itemState.disclosurePort('user-row-1');
 		const message = new UserMessage(AT, 'Long ordinary user prompt');
@@ -579,9 +585,11 @@ describe('ConversationMessage chat rows', () => {
 
 		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
 		expect(container.querySelector('.collapsible-body-collapsed')).toBeNull();
+		expect(container.querySelector('.collapsible-body-tall')).toBeNull();
 	});
 
 	it('collapses styleless CLI user messages without changing the bubble style', async () => {
+		collapsibleLayout.contentHeight = 320;
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage(AT, 'Long user content', undefined, undefined, {
 				origin: 'cli',
@@ -590,6 +598,7 @@ describe('ConversationMessage chat rows', () => {
 		});
 
 		expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
+		expect(container.querySelector('.collapsible-body-tall')).toBeTruthy();
 		expect(container.querySelector('[data-user-message-presentation]')).toBeNull();
 		expect(screen.queryByText('CLI notice')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));

@@ -18,6 +18,7 @@ function propertyGetter(property: HeightProperty): (() => number) | undefined {
 export class CollapsibleBodyLayoutHarness {
 	contentHeight = 240;
 	collapsedHeight = 160;
+	tallCollapsedHeight = 256;
 	childMarginHeight = 0;
 	width = 600;
 
@@ -27,7 +28,10 @@ export class CollapsibleBodyLayoutHarness {
 		const offsetHeight = propertyGetter('offsetHeight');
 		const scrollHeight = propertyGetter('scrollHeight');
 		const readContentHeight = () => this.contentHeight;
-		const readCollapsedHeight = () => this.collapsedHeight;
+		const readCollapsedHeight = (element: HTMLDivElement) =>
+			element.classList.contains('collapsible-body-tall')
+				? this.tallCollapsedHeight
+				: this.collapsedHeight;
 		const readChildMarginHeight = () => this.childMarginHeight;
 		const readWidth = () => this.width;
 		const hasContainedChildMargin = (element: HTMLDivElement) =>
@@ -45,7 +49,7 @@ export class CollapsibleBodyLayoutHarness {
 			if (this.dataset.slot !== BODY_SLOT) return clientHeight?.call(this) ?? 0;
 			const naturalHeight = bodyContentHeight(this);
 			return this.classList.contains('collapsible-body-collapsed')
-				? Math.min(naturalHeight, readCollapsedHeight())
+				? Math.min(naturalHeight, readCollapsedHeight(this))
 				: naturalHeight;
 		});
 		vi.spyOn(HTMLDivElement.prototype, 'clientWidth', 'get').mockImplementation(function (
