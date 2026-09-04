@@ -3,7 +3,6 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import {
   getNativeMessageRevisionSource,
   getNativeMessageSource,
@@ -11,14 +10,7 @@ import {
 import {
   findFactorySessionFileBySessionId,
   loadFactoryChatMessages,
-  loadFactoryChatMessagesFromEvents,
 } from '../history-loader.js';
-
-const PREAMBLE_PREFIX = createPreamblePrefix({
-  viewId: 'view-native-history',
-  clientMessageId: 'message-native-history',
-  contents: ['Synthetic Factory instructions.'],
-}).prefix;
 
 let tmpDir;
 let originalFactoryHomeOverride;
@@ -42,21 +34,6 @@ describe('factory history loader', () => {
       process.env.FACTORY_HOME_OVERRIDE = originalFactoryHomeOverride;
     }
     await fs.rm(tmpDir, { force: true, recursive: true });
-  });
-
-  it('preserves a framed preamble and visible prompt exactly', () => {
-    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
-    const messages = loadFactoryChatMessagesFromEvents([{
-      type: 'message',
-      timestamp: '2026-03-29T01:00:00.000Z',
-      message: {
-        role: 'user',
-        content: [{ type: 'text', text: prompt }],
-      },
-    }]);
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
   });
 
   it('normalizes persisted Factory session messages into visible canonical messages', async () => {

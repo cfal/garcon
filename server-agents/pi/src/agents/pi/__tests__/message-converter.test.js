@@ -1,23 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import { convertPiMessage } from '../message-converter.js';
 
-const PREAMBLE_PREFIX = createPreamblePrefix({
-  viewId: 'view-native-history',
-  clientMessageId: 'message-native-history',
-  contents: ['Synthetic Pi instructions.'],
-}).prefix;
-
 describe('convertPiMessage', () => {
-  it('preserves a framed preamble and visible prompt exactly', () => {
-    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
-    const messages = convertPiMessage({ role: 'user', content: prompt });
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
-  });
-
   it('converts user text and images', () => {
     const messages = convertPiMessage({
       role: 'user',

@@ -7,13 +7,11 @@ import {
   ToolResultMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
-import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import {
   OpenCodeTranscriptNotFoundError,
   loadLegacyOpenCodeChatMessages,
   loadOpenCodeChatMessages,
   loadRequiredOpenCodeChatMessages,
-  convertOpenCodeStoredMessages,
 } from '../history-loader.js';
 import { FILE_CONTEXT_SEPARATOR } from '@garcon/server-agent-common/shared/file-mention-context';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
@@ -21,12 +19,6 @@ import { convertOpenCodeEventToChatMessages } from '../event-converter.js';
 
 let originalError;
 let originalWarn;
-
-const PREAMBLE_PREFIX = createPreamblePrefix({
-  viewId: 'view-native-history',
-  clientMessageId: 'message-native-history',
-  contents: ['Synthetic OpenCode instructions.'],
-}).prefix;
 
 function deferred() {
   let resolve;
@@ -69,21 +61,6 @@ afterEach(() => {
 });
 
 describe('OpenCode history loader', () => {
-  it('preserves a framed preamble and visible prompt exactly', () => {
-    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
-    const messages = convertOpenCodeStoredMessages([{
-      info: {
-        id: 'message-prefix',
-        role: 'user',
-        time: { created: '2026-07-04T00:00:00.000Z' },
-      },
-      parts: [{ id: 'part-prefix', type: 'text', text: prompt }],
-    }]);
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
-  });
-
   it('loads user, assistant, thinking, tool use, and tool result messages', async () => {
     const getClient = mock(() => Promise.resolve({
       session: {

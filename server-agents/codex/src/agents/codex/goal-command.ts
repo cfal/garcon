@@ -1,5 +1,3 @@
-import type { AgentGoalInputDelivery } from '@garcon/server-agent-interface';
-
 const CODEX_GOAL_COMMAND_RE = /^\s*\/goal(?:\s+([\s\S]*))?$/i;
 
 export type CodexGoalCommand =
@@ -29,11 +27,4 @@ export function parseCodexGoalCommand(command: string): CodexGoalCommand | null 
   if (lower === 'replace') return { kind: 'unsupported', subcommand: lower };
   if (lower.startsWith('replace ')) return { kind: 'replace', objective: argument.slice(8).trim() };
   return { kind: 'set', objective: argument };
-}
-
-export function classifyCodexGoalInput(command: string): AgentGoalInputDelivery {
-  const goal = parseCodexGoalCommand(command);
-  return goal && (!('objective' in goal) || typeof goal.objective !== 'string')
-    ? 'control-only'
-    : 'provider-prompt';
 }

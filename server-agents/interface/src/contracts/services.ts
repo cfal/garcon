@@ -104,25 +104,16 @@ export type AgentSteerResult =
     };
 
 export interface AgentGoals {
-  classifyInput(prompt: string): AgentGoalInputDelivery;
   submitControl(request: AgentGoalControlRequest): Promise<boolean>;
 }
 
-export type AgentGoalInputDelivery = 'provider-prompt' | 'control-only';
-
 export interface AgentGoalControlRequest extends AgentResumeRequestV5 {
-  readonly beforeDelivery: (
-    handoff: AgentGoalControlHandoff,
-  ) => Promise<AgentGoalControlPreparation>;
+  readonly beforeDelivery: (handoff: AgentGoalControlHandoff) => Promise<void>;
 }
 
 export interface AgentGoalControlHandoff {
   validate(): void;
   commit(): void;
-}
-
-export interface AgentGoalControlPreparation {
-  readonly providerPrefix: string;
 }
 
 // Native, in-place context compaction. A provider that implements this rewrites

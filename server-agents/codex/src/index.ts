@@ -45,7 +45,6 @@ import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
 import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
-import { classifyCodexGoalInput } from './agents/codex/goal-command.js';
 
 const CODEX_DESCRIPTOR = {
   id: 'codex',
@@ -155,7 +154,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
       steer: (request) => runtime.steer(request),
     };
     this.goals = {
-      classifyInput: classifyCodexGoalInput,
       submitControl: async (request) => (
         await producer.runExisting(
           request,

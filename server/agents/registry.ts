@@ -544,10 +544,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   ): { readonly inserted: boolean } {
     const session = this.#registry.getChat(chatId);
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
-    const goalInputDelivery = this.#directory.get(session.agentId)?.goals?.classifyInput(
-      message.content,
-    ) ?? 'provider-prompt';
-    const pending = options.commandType === 'steer' || goalInputDelivery === 'control-only'
+    const pending = options.commandType === 'steer' || options.commandType === 'goal-control'
       ? null
       : session.pendingPreambleBoundary ?? null;
     const alreadyConsumed = pending
@@ -555,6 +552,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       : false;
     const boundary = pending && !alreadyConsumed ? pending : null;
     const preambles = boundary ? this.#preambles.resolve(session.projectPath) : [];
+    if (boundary && preambles.length > 0 && message.content.trimStart().startsWith('/')) {
+      throw new DomainError(
+        'PREAMBLE_SLASH_COMMAND_BLOCKED',
+        'Matching preambles haven\u2019t been sent yet. Start with a regular message before using provider slash commands.',
+        422,
+      );
+    }
     let composition;
     try {
       composition = this.#ledger.appendInputAndCompose({

@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
-import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import { loadAmpChatMessages } from '../history-loader.js';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
-
-const PREAMBLE_PREFIX = createPreamblePrefix({
-  viewId: 'view-native-history',
-  clientMessageId: 'message-native-history',
-  contents: ['Synthetic Amp instructions.'],
-}).prefix;
 
 const THREAD_EXPORT_FIXTURE = {
   id: 'T-123',
@@ -88,22 +81,6 @@ const THREAD_EXPORT_FIXTURE = {
 };
 
 describe('amp history loader', () => {
-  it('preserves a framed preamble and visible prompt exactly', () => {
-    const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
-    const messages = loadAmpChatMessages({
-      id: 'T-prefix',
-      created: 1773796295774,
-      messages: [{
-        role: 'user',
-        messageId: 0,
-        content: [{ type: 'text', text: prompt }],
-      }],
-    });
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'user-message', content: prompt });
-  });
-
   it('normalizes Amp export messages into chat messages', () => {
     const messages = loadAmpChatMessages(THREAD_EXPORT_FIXTURE);
 

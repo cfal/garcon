@@ -4,14 +4,7 @@ import {
   extractTextContent,
   parseApplyPatch,
 } from '../history-normalizer.js';
-import { createPreamblePrefix } from '@garcon/common/preamble-prefix';
 import { BashToolUseMessage, CodexSubagentToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '@garcon/common/chat-types';
-
-const PREAMBLE_PREFIX = createPreamblePrefix({
-  viewId: 'view-native-history',
-  clientMessageId: 'message-native-history',
-  contents: ['Synthetic Codex instructions.'],
-}).prefix;
 
 describe('extractTextContent', () => {
   it('returns string content directly', () => {
@@ -406,24 +399,6 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item message role=user', () => {
-    it('preserves a framed preamble and visible prompt exactly', () => {
-      const prompt = `${PREAMBLE_PREFIX}Inspect the synthetic workspace.`;
-      const result = normalizeCodexJsonlEntry({
-        type: 'response_item',
-        timestamp: ts,
-        payload: {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: prompt }],
-        },
-      });
-
-      expect(result.canonical).toEqual([]);
-      expect(result.fallbackUser).toEqual([
-        { type: 'user-message', timestamp: ts, content: prompt },
-      ]);
-    });
-
     it('produces fallback user-message', () => {
       const entry = {
         type: 'response_item',

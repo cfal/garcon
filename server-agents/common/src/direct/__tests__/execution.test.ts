@@ -12,7 +12,6 @@ import type {
 import { DirectExecution } from '../execution.js';
 
 const SESSION_ID = '10000000-0000-4000-8000-000000000001';
-const PROVIDER_PREFIX = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
 const NATIVE_SESSION = {
   ownerId: 'direct-test',
   schemaVersion: 1,
@@ -61,7 +60,6 @@ function request(modelEndpointId: string): AgentRuntimeResumeRequest {
     agentSessionId: SESSION_ID,
     nativeSession: NATIVE_SESSION,
     prompt: 'continue',
-    providerPrefix: '',
     attachments: [],
     admission: {
       signal: new AbortController().signal,
@@ -82,14 +80,13 @@ describe('DirectExecution', () => {
     const start: AgentRuntimeStartRequest = {
       ...base,
       carriedContext: { prefix: '<carried>history</carried>\n\n' },
-      providerPrefix: PROVIDER_PREFIX,
     };
     const events: AgentRuntimeEvent[] = [];
 
     await execution.start(start, (event) => events.push(event));
 
     expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
-      command: `<carried>history</carried>\n\n${PROVIDER_PREFIX}continue`,
+      command: '<carried>history</carried>\n\ncontinue',
     }));
     expect(startSession.mock.calls[0][0]).not.toHaveProperty('priorContext');
     expect(events).toEqual([{
@@ -110,12 +107,12 @@ describe('DirectExecution', () => {
     const runTurn = mock(async () => {});
     const runtime = { runTurn };
     const execution = new DirectExecution(host(), runtime as never);
-    const resume = { ...request('endpoint-b'), providerPrefix: PROVIDER_PREFIX };
+    const resume = request('endpoint-b');
 
     await expect(execution.resume(resume, () => {})).resolves.toBeUndefined();
     expect(runTurn).toHaveBeenCalledWith(expect.objectContaining({
       nativeSession: NATIVE_SESSION,
-      command: `${PROVIDER_PREFIX}continue`,
+      command: 'continue',
     }));
     expect(runTurn.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });

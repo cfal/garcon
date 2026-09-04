@@ -44,8 +44,8 @@ implements AgentRuntimeExecution {
       return established;
     };
     const command = request.carriedContext
-      ? `${request.carriedContext.prefix}${request.providerPrefix}${request.prompt}`
-      : `${request.providerPrefix}${request.prompt}`;
+      ? `${request.carriedContext.prefix}${request.prompt}`
+      : request.prompt;
     const result = await this.runtime.startSession({
       ...executionFields(request),
       command,
@@ -66,7 +66,7 @@ implements AgentRuntimeExecution {
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
       nativeSession: request.nativeSession,
-      command: `${request.providerPrefix}${request.prompt}`,
+      command: request.prompt,
       images: request.attachments,
       endpoint,
       operation: runtimeOperation(request.runId, publish),

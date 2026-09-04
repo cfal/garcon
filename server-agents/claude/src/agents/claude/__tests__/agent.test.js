@@ -71,46 +71,12 @@ function startRequest(projectPath, signal = new AbortController().signal) {
       markStarted: mock(async () => undefined),
     },
     prompt: 'hello',
-    providerPrefix: '',
     attachments: [],
     carriedContext: null,
   };
 }
 
 describe('ClaudeExecution', () => {
-  it('composes carried context and a provider preamble only at the outbound boundary', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-prefix-'));
-    try {
-      const claude = createClaudeStub(new Error('unused'));
-      claude.startClaudeCliSession = mock(async (request) => {
-        request.onSessionActivated?.();
-      });
-      const execution = createExecution(claude, projectPath);
-      const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
-      const started = await execution.start({
-        ...startRequest(projectPath),
-        carriedContext: { prefix: '<carried>history</carried>\n\n' },
-        providerPrefix,
-      }, () => {});
-
-      expect(claude.startClaudeCliSession).toHaveBeenCalledWith(expect.objectContaining({
-        command: `<carried>history</carried>\n\n${providerPrefix}hello`,
-      }));
-
-      await execution.resume({
-        ...startRequest(projectPath),
-        agentSessionId: started.agentSessionId,
-        nativeSession: started.nativeSession,
-        providerPrefix,
-      }, () => {});
-      expect(claude.runClaudeTurn).toHaveBeenCalledWith(expect.objectContaining({
-        command: `${providerPrefix}hello`,
-      }));
-    } finally {
-      await fs.rm(projectPath, { recursive: true, force: true });
-    }
-  });
-
   it('emits a failed event when fire-and-forget startup rejects', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-claude-agent-'));
     try {

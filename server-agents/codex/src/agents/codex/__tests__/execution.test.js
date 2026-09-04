@@ -110,7 +110,6 @@ function startRequest(overrides = {}) {
       markStarted: mock(() => undefined),
     },
     prompt: 'hello',
-    providerPrefix: '',
     attachments: [],
     carriedContext: null,
     ...overrides,
@@ -254,56 +253,6 @@ describe('CodexExecution', () => {
       format: 'v3-xml',
       codeUnitLength: prefix.length,
     });
-  });
-
-  it('parses a goal before applying the provider preamble to its objective', async () => {
-    const runtime = createRuntime();
-    const execution = new CodexExecution(
-      createHost(),
-      runtime,
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
-
-    await execution.start(startRequest({
-      prompt: '/goal ship the migration',
-      providerPrefix,
-    }), () => {});
-
-    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      command: `${providerPrefix}ship the migration`,
-      providerPrefix: '',
-      codexGoalCommand: {
-        kind: 'set',
-        objective: `${providerPrefix}ship the migration`,
-      },
-    }));
-  });
-
-  it('persists carried context before the provider preamble on an ordinary start', async () => {
-    const runtime = createRuntime();
-    const execution = new CodexExecution(
-      createHost(),
-      runtime,
-      createPathNativeSessionCodec('codex'),
-      createConfig(),
-    );
-    const carriedPrefix = renderCarriedContext([
-      new UserMessage('2026-07-19T00:00:00.000Z', 'earlier'),
-    ]).prefix;
-    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
-
-    await execution.start(startRequest({
-      prompt: 'continue',
-      carriedContext: { prefix: carriedPrefix },
-      providerPrefix,
-    }), () => {});
-
-    expect(runtime.startSession).toHaveBeenCalledWith(expect.objectContaining({
-      command: `${carriedPrefix}${providerPrefix}continue`,
-      providerPrefix: '',
-    }));
   });
 
   it('rejects goal controls that cannot start a new thread', async () => {

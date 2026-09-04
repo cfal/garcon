@@ -38,7 +38,7 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
     };
     const agentSessionId = await this.runtime.startSession({
       ...executionFields(request),
-      command: `${seed}${request.providerPrefix}${request.prompt}`,
+      command: `${seed}${request.prompt}`,
       images: request.attachments,
       operation: runtimeOperation(request.runId, publish),
       onSessionActivated: (sessionId) => void establish(sessionId),
@@ -52,7 +52,7 @@ export class OpenCodeExecution implements AgentRuntimeExecution {
   ): Promise<void> {
     await this.runtime.runTurn({
       ...executionFields(request),
-      command: `${request.providerPrefix}${request.prompt}`,
+      command: request.prompt,
       images: request.attachments,
       agentSessionId: request.agentSessionId,
       operation: runtimeOperation(request.runId, publish),

@@ -328,6 +328,7 @@ describe('TranscriptReloadService', () => {
         preambleBoundary: boundary,
         preambles: [{
           id: 'preamble-1',
+          enabled: true,
           title: 'Repository rules',
           content: 'private preamble body',
           scope: { type: 'global' },
@@ -365,7 +366,7 @@ describe('TranscriptReloadService', () => {
     });
   });
 
-  it('rejects missing preamble evidence without cutting over', async () => {
+  it('allows a committed preamble application absent from native history after a pre-dispatch crash', async () => {
     await withReload(async ({ ledger, reload, oldViewId }) => {
       ledger.appendInputAndCompose({
         chatId: 'chat-1',
@@ -377,6 +378,7 @@ describe('TranscriptReloadService', () => {
         preambleBoundary: { kind: 'new-chat', ownershipEpoch: 'ownership-1' },
         preambles: [{
           id: 'preamble-1',
+          enabled: true,
           title: 'Repository rules',
           content: 'private preamble body',
           scope: { type: 'global' },
@@ -385,12 +387,23 @@ describe('TranscriptReloadService', () => {
         }],
       });
 
-      await expect(reload.reload('chat-1')).rejects.toMatchObject({
-        code: 'PREAMBLE_ENVELOPE_MISMATCH',
-      });
-      expect(ledger.currentView('chat-1').viewId).toBe(oldViewId);
-      expect(ledger.conversationMessages('chat-1').at(-1)?.content)
-        .toBe('visible boundary prompt');
+      await reload.reload('chat-1');
+
+      expect(ledger.currentView('chat-1').viewId).not.toBe(oldViewId);
+      const rows = ledger.currentRows('chat-1');
+      expect(rows.map((row) => row.kind)).toEqual([
+        'user-input',
+        'provider-row',
+        'session',
+        'user-input',
+        'provider-row',
+      ]);
+      expect(rows).not.toContainEqual(expect.objectContaining({
+        kind: 'notice',
+        detail: expect.objectContaining({ type: 'preamble-application' }),
+      }));
+      expect(JSON.stringify(rows)).not.toContain('private preamble body');
+      expect(JSON.stringify(rows)).not.toContain('visible boundary prompt');
     });
   });
 

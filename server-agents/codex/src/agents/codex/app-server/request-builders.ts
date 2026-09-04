@@ -292,17 +292,11 @@ export function buildTurnStartParams(request: {
   thinkingMode?: ThinkingMode;
   clientMessageId?: string;
   skills?: CodexSkillRef[];
-  providerPrefix?: string;
 }): Record<string, unknown> {
   const { approvalPolicy } = codexSandboxSettings(request.permissionMode);
   const params: Record<string, unknown> = {
     threadId: request.threadId,
-    input: buildUserInput(
-      commandWithAttachmentPaths(request.command, request.filePaths),
-      request.imagePaths,
-      request.skills,
-      request.providerPrefix,
-    ),
+    input: buildUserInput(commandWithAttachmentPaths(request.command, request.filePaths), request.imagePaths, request.skills),
     cwd: request.projectPath,
     approvalPolicy,
     approvalsReviewer: 'user',
@@ -344,11 +338,8 @@ export function buildUserInput(
   command: string,
   imagePaths?: string[],
   skills?: CodexSkillRef[],
-  providerPrefix = '',
 ): Array<Record<string, unknown>> {
-  const input: Array<Record<string, unknown>> = providerPrefix
-    ? [{ type: 'text', text: providerPrefix, text_elements: [] }]
-    : [];
+  const input: Array<Record<string, unknown>> = [];
 
   const parsed = skills?.length ? parseLeadingSlashCommand(command) : null;
   const skill = parsed ? skills!.find((candidate) => candidate.name === parsed.name) : null;

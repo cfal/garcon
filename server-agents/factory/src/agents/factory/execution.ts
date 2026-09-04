@@ -37,7 +37,7 @@ export class FactoryExecution implements AgentRuntimeExecution {
     };
     const result = await this.runtime.startSession({
       ...executionFields(request),
-      command: `${seed}${request.providerPrefix}${request.prompt}`,
+      command: `${seed}${request.prompt}`,
       images: request.attachments.map(toFactoryImage),
       operation: runtimeOperation(request.runId, publish),
       onSessionActivated: (session) => void establish(session),
@@ -51,7 +51,7 @@ export class FactoryExecution implements AgentRuntimeExecution {
   ): Promise<void> {
     await this.runtime.runTurn({
       ...executionFields(request),
-      command: `${request.providerPrefix}${request.prompt}`,
+      command: request.prompt,
       agentSessionId: request.agentSessionId,
       images: request.attachments.map(toFactoryImage),
       operation: runtimeOperation(request.runId, publish),

@@ -81,6 +81,7 @@ describe('AgentRegistry session cache', () => {
   function definition(id, title, content) {
     return {
       id,
+      enabled: true,
       title,
       content,
       scope: { type: 'global' },
@@ -232,50 +233,82 @@ describe('AgentRegistry session cache', () => {
   });
 
   for (const queued of [false, true]) {
-    it(`defers a fork boundary for ${queued ? 'queued' : 'direct'} control-only goal input`, async () => {
-      armBoundary('epoch-goal-control', 'fork');
+    it(`rejects a ${queued ? 'queued' : 'direct'} provider slash command until matching preambles are sent`, async () => {
+      armBoundary('epoch-slash', 'fork');
       const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
-      const classifyInput = mock((prompt) => (
-        prompt === '/goal' ? 'control-only' : 'provider-prompt'
-      ));
-      const integrations = {
-        has: () => true,
-        get: () => ({ goals: { classifyInput } }),
-        require: () => { throw new Error('unused'); },
-        list: () => [],
-      };
       const registry = createRegistry(
         { ensure: async () => ledger.currentView(CHAT_ID) },
         { resolve },
-        integrations,
       );
 
-      await admit(registry, 'goal-control', 'agent-run', '/goal', queued);
+      await expect(Promise.resolve().then(() => (
+        admit(registry, 'provider-slash', 'agent-run', '  /provider-command', queued)
+      ))).rejects.toMatchObject({
+        code: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+        status: 422,
+      });
 
-      expect(classifyInput).toHaveBeenCalledWith('/goal');
-      expect(resolve).not.toHaveBeenCalled();
       expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
         kind: 'fork',
-        ownershipEpoch: 'epoch-goal-control',
+        ownershipEpoch: 'epoch-slash',
       });
-      expect(ledger.currentRows(CHAT_ID)).toEqual([
-        expect.objectContaining({
-          kind: 'user-input',
-          detail: expect.objectContaining({ preambleBoundary: null }),
-        }),
-      ]);
+      expect(ledger.currentRows(CHAT_ID)).toEqual([]);
 
       await admit(registry, 'provider-prompt', 'agent-run', 'continue', queued);
 
       expect(resolve).toHaveBeenCalledWith('/repo');
       expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
-      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual([
-        'user-input',
-        'notice',
-        'user-input',
-      ]);
+      expect(ledger.currentRows(CHAT_ID).map((row) => row.kind)).toEqual(['notice', 'user-input']);
     });
   }
+
+  it('allows a provider slash command when no enabled preamble matches and consumes the boundary', async () => {
+    armBoundary('epoch-empty-slash');
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve: () => [] },
+    );
+
+    await expect(admit(registry, 'empty-slash', 'agent-run', '/provider-command')).resolves.toEqual({
+      inserted: true,
+    });
+
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toBeNull();
+    expect(ledger.currentRows(CHAT_ID)).toEqual([
+      expect.objectContaining({
+        kind: 'user-input',
+        detail: expect.objectContaining({
+          preambleBoundary: {
+            kind: 'new-chat',
+            ownershipEpoch: 'epoch-empty-slash',
+          },
+        }),
+      }),
+    ]);
+  });
+
+  it('keeps Garcon-owned goal control outside preamble boundary handling', async () => {
+    armBoundary('epoch-goal-control', 'fork');
+    const resolve = mock(() => [definition('preamble-one', 'One', 'one body')]);
+    const registry = createRegistry(
+      { ensure: async () => ledger.currentView(CHAT_ID) },
+      { resolve },
+    );
+
+    await admit(registry, 'goal-control', 'goal-control', '/goal');
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(chats.getChat(CHAT_ID).pendingPreambleBoundary).toEqual({
+      kind: 'fork',
+      ownershipEpoch: 'epoch-goal-control',
+    });
+    expect(ledger.currentRows(CHAT_ID)).toEqual([
+      expect.objectContaining({
+        kind: 'user-input',
+        detail: expect.objectContaining({ preambleBoundary: null }),
+      }),
+    ]);
+  });
 
   it('updates the execution cache before an accepted session publish returns', () => {
     const registry = createRegistry();

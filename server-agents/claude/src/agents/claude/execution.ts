@@ -50,7 +50,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     const runtimeRequest = {
       ...executionFields(request),
       agentSessionId,
-      command: `${request.carriedContext?.prefix ?? ''}${request.providerPrefix}${request.prompt}`,
+      command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
       images: request.attachments,
       envOverrides,
       operation: runtimeOperation(request.runId, publish),
@@ -100,7 +100,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     await this.runtime.runClaudeTurn({
       ...executionFields(request),
       agentSessionId: request.agentSessionId,
-      command: `${request.providerPrefix}${request.prompt}`,
+      command: request.prompt,
       images: request.attachments,
       nativePath: this.nativeSessions.decode(request.nativeSession).path,
       envOverrides: await this.#endpointEnvironment(request),

@@ -73,7 +73,10 @@ export class GoalControlDelivery {
             ? activeAttempt.handoffTurn(predecessor, successor, handoff)
             : handoff;
           committedHandoff.validate();
-          inputInserted = await this.options.admitInput(chatId, content, activeOptions);
+          inputInserted = await this.options.admitInput(chatId, content, {
+            ...activeOptions,
+            commandType: 'goal-control',
+          });
           if (!inputInserted) throw new DuplicateGoalControlInputError();
           await afterPendingRegistered?.();
           validateOwner();

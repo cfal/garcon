@@ -100,7 +100,7 @@ type PreparedPrompt =
   | {
       readonly dispatch: true;
       readonly prompt: string;
-      readonly providerPrefix: string;
+      readonly outboundPrompt: string;
       readonly attachments: ReturnType<typeof attachments>;
       readonly excludedOrdinals: ReadonlySet<number>;
       readonly viewId: TranscriptViewId;
@@ -196,8 +196,7 @@ export class AgentRuntimeRouter {
       const handle = await integration.execution.start({
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         sink: producer.sink,
-        prompt: prepared.prompt,
-        providerPrefix: prepared.providerPrefix,
+        prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       });
@@ -249,8 +248,7 @@ export class AgentRuntimeRouter {
         sink: producer.sink,
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
-        prompt: prepared.prompt,
-        providerPrefix: prepared.providerPrefix,
+        prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
       });
       await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -340,7 +338,6 @@ export class AgentRuntimeRouter {
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
-      providerPrefix: '',
       attachments: attachments(opts.images),
       beforeDelivery: async (handoff) => {
         await beforeDelivery(this.#goalRunHandoff({
@@ -351,8 +348,7 @@ export class AgentRuntimeRouter {
           nextTurn: operationMetadata(operation),
           downstream: handoff,
         }));
-        const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
-        return { providerPrefix: composition?.providerPrefix ?? '' };
+        this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
       },
     });
   }
@@ -397,7 +393,6 @@ export class AgentRuntimeRouter {
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
-        providerPrefix: '',
         attachments: [],
       };
       const handle = await compaction.compact(request);
@@ -717,10 +712,11 @@ export class AgentRuntimeRouter {
       ? promptRows.flatMap((row) => row.detail.attachments)
       : attachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    const resolvedPrompt = await resolveFileMentionsInCommand(prompt, entry.projectPath);
     return {
       dispatch: true,
-      prompt: await resolveFileMentionsInCommand(prompt, entry.projectPath),
-      providerPrefix: composition?.providerPrefix ?? '',
+      prompt: resolvedPrompt,
+      outboundPrompt: `${composition?.providerPrefix ?? ''}${resolvedPrompt}`,
       attachments: [...preparedAttachments],
       excludedOrdinals: excluded,
       viewId,

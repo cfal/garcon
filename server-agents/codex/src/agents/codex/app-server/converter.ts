@@ -27,7 +27,6 @@ import {
   type CompactionTrigger,
 } from '@garcon/common/chat-types';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
-import { PREAMBLE_OPEN_PREFIX } from '@garcon/common/preamble-prefix';
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
@@ -416,13 +415,10 @@ function convertKnownDynamicTool(
 }
 
 function userInputText(content: CodexUserInput[]): string {
-  const text = (content ?? [])
+  return (content ?? [])
     .map((item) => item.type === 'text' ? item.text : '')
-    .filter(Boolean);
-  if (text[0]?.startsWith(PREAMBLE_OPEN_PREFIX)) {
-    return `${text[0]}${text.slice(1).join('\n')}`;
-  }
-  return text.join('\n');
+    .filter(Boolean)
+    .join('\n');
 }
 
 function stringField(value: unknown): string | undefined {

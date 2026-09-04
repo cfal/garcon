@@ -37,15 +37,6 @@ describe('buildUserInput', () => {
     ]);
   });
 
-  it('keeps a private provider prefix separate from leading skill parsing', () => {
-    const providerPrefix = '<garcon-preambles>private instructions</garcon-preambles>\n\n';
-    expect(buildUserInput('/dogfood test the app', undefined, SKILLS, providerPrefix)).toEqual([
-      { type: 'text', text: providerPrefix, text_elements: [] },
-      { type: 'skill', name: 'dogfood', path: '/skills/dogfood' },
-      { type: 'text', text: 'test the app', text_elements: [] },
-    ]);
-  });
-
   it('falls back to plain text when the name is not a known skill', () => {
     expect(buildUserInput('/unknown do thing', undefined, SKILLS)).toEqual([
       { type: 'text', text: '/unknown do thing', text_elements: [] },

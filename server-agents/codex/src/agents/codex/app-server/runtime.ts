@@ -12,7 +12,7 @@ import {
 import {
   AgentIntegrationError,
   type AgentSessionConfiguration,
-  type AgentGoalControlRequest,
+  type AgentGoalControlHandoff,
   type AgentLogger,
   type AgentSteerRequest,
   type AgentSteerResult,
@@ -253,7 +253,6 @@ export class CodexAppServerRuntime {
       thinkingMode: request.thinkingMode,
       clientMessageId: request.clientMessageId,
       skills,
-      providerPrefix: request.providerPrefix,
     }));
     if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
     adoptTurn(session, turn.turn.id, operation);
@@ -295,7 +294,7 @@ export class CodexAppServerRuntime {
 
   submitGoalControl(
     request: CodexResumeRequest,
-    beforeDelivery?: AgentGoalControlRequest['beforeDelivery'],
+    beforeDelivery?: (handoff: AgentGoalControlHandoff) => Promise<void>,
   ): Promise<boolean> {
     return this.#goal.submitGoalControl(request, beforeDelivery);
   }
