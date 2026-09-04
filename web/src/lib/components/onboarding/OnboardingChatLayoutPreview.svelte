@@ -49,8 +49,8 @@
 	data-onboarding-layout-preview={layout}
 	data-selected={isSelected}
 	class={cn(
-		'w-full min-w-0 overflow-hidden rounded-md border border-border px-2 text-left select-none',
-		layout === 'single-line' ? 'py-[2px] pl-[9px]' : 'py-[5px] pl-[9px]',
+		'w-full min-w-0 overflow-hidden rounded-md border border-border pl-[9px] pr-2 text-left select-none',
+		layout === 'single-line' ? 'py-[2px]' : 'py-[5px]',
 		isSelected ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
 	)}
 	aria-hidden="true"
