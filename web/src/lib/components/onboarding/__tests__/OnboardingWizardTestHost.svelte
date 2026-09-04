@@ -18,4 +18,6 @@
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<OnboardingWizard />
+{#if appShell.showOnboardingWizard}
+	<OnboardingWizard />
+{/if}

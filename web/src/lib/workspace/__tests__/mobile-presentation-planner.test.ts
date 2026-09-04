@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CANONICAL_CHAT_SURFACE_ID, canonicalWorkspaceSnapshot } from '../canonical-layout.js';
+import {
+	CANONICAL_CHAT_SURFACE_ID,
+	CANONICAL_FILES_SURFACE_ID,
+	canonicalWorkspaceSnapshot,
+} from '../canonical-layout.js';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
 import { MobilePresentationPlanner } from '../mobile-presentation-planner.js';
 
@@ -107,7 +111,7 @@ describe('MobilePresentationPlanner', () => {
 		);
 	});
 
-	it('falls back to an inactive window tab when the active surface is excluded', () => {
+	it("prefers another window's active surface over an inactive tab", () => {
 		const planner = new MobilePresentationPlanner({
 			getContext: () => null,
 			getRouteIdentity: () => '/',
@@ -130,9 +134,39 @@ describe('MobilePresentationPlanner', () => {
 			},
 		]);
 
-		expect(
-			planner.resolveReturn(new Set(['singleton:commit', 'singleton:files']), commitActive),
-		).toEqual({
+		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
+			activeId: CANONICAL_FILES_SURFACE_ID,
+			returnStack: [],
+		});
+	});
+
+	it('falls back to an inactive window tab when no other window is active', () => {
+		const planner = new MobilePresentationPlanner({
+			getContext: () => null,
+			getRouteIdentity: () => '/',
+		});
+		const chatOnly = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: CANONICAL_FILES_SURFACE_ID },
+		]);
+		const commitActive = reduceWorkspaceLayout(chatOnly, [
+			{
+				type: 'register-surface',
+				surface: { id: 'singleton:commit', type: 'singleton', kind: 'commit' },
+				windowId: 'window-main',
+			},
+			{
+				type: 'activate-window-tab',
+				windowId: 'window-main',
+				surfaceId: 'singleton:commit',
+			},
+			{
+				type: 'set-mobile-presentation',
+				activeId: 'singleton:commit',
+				returnStack: [],
+			},
+		]);
+
+		expect(planner.resolveReturn('singleton:commit', commitActive)).toEqual({
 			activeId: CANONICAL_CHAT_SURFACE_ID,
 			returnStack: [],
 		});

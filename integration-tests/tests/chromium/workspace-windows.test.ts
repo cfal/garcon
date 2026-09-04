@@ -639,21 +639,22 @@ async function verifyCanonicalSeparatorClearance(
     .getByRole('separator', { name: 'Resize windows' })
     .first()
     .locator('[data-workspace-window-resize-hit-area]');
-  const chatWindow = page.locator(`[data-workspace-window-id="${chatWindowId}"]`);
+  const chatContent = page.locator(`[data-workspace-window-content="${chatWindowId}"]`);
   const disclosure = page
     .locator(`[data-workspace-window-id="${filesWindowId}"] button.file-tree-disclosure-slot`)
     .first();
   await disclosure.waitFor({ state: 'visible' });
-  const [hitAreaBox, chatWindowBox, disclosureBox] = await Promise.all([
+  const [hitAreaBox, chatContentBox, disclosureBox] = await Promise.all([
     resizeHitArea.boundingBox(),
-    chatWindow.boundingBox(),
+    chatContent.boundingBox(),
     disclosure.boundingBox(),
   ]);
-  if (!hitAreaBox || !chatWindowBox || !disclosureBox) {
+  if (!hitAreaBox || !chatContentBox || !disclosureBox) {
     throw new Error('Missing canonical separator clearance geometry.');
   }
 
-  expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatWindowBox.x + chatWindowBox.width);
+  expect(hitAreaBox.width).toBeGreaterThanOrEqual(12);
+  expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatContentBox.x + chatContentBox.width);
   expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
 }
 
@@ -725,17 +726,17 @@ async function workspaceWindowIds(page: Page): Promise<string[]> {
 async function resizeFirstPartition(page: Page): Promise<{ value: string; persisted: string }> {
   await page.waitForFunction(() => localStorage.getItem('workspace_layout_v2') !== null);
   const resizer = page.getByRole('separator', { name: 'Resize windows' }).first();
-  const bounds = await resizer.boundingBox();
+  const hitArea = resizer.locator('[data-workspace-window-resize-hit-area]');
+  const hitAreaBounds = await hitArea.boundingBox();
   const orientation = await resizer.getAttribute('aria-orientation');
   const initialValue = await resizer.getAttribute('aria-valuenow');
   const initialPersisted = await page.evaluate(() => localStorage.getItem('workspace_layout_v2'));
-  if (!bounds || !initialValue || !initialPersisted) {
+  if (!hitAreaBounds || !initialValue || !initialPersisted) {
     throw new Error('Missing workspace partition resize state.');
   }
 
-  const x = bounds.x + bounds.width / 2;
-  // Orthogonal separator hit areas can cover a vertical separator's midpoint.
-  const y = orientation === 'vertical' ? bounds.y + bounds.height * 0.25 : bounds.y + bounds.height / 2;
+  const x = hitAreaBounds.x + hitAreaBounds.width / 2;
+  const y = hitAreaBounds.y + hitAreaBounds.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(

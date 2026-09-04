@@ -152,13 +152,12 @@
 				: 'inset-x-0 top-1/2 h-px -translate-y-1/2',
 		)}
 	></div>
-	<!-- Biases the vertical hit area into the right window's empty gutter so it clears
-	     the left scrollbar and right-side disclosure controls. -->
+	<!-- The vertical target stays inside the content gutters reserved by adjacent windows. -->
 	<div
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'pointer-events-auto absolute z-10',
-			isHorizontal ? 'left-1/2 bottom-0 top-10 w-1.5' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? '-left-1 bottom-0 top-10 w-3' : 'inset-x-0 bottom-0 h-6',
 		)}
 	></div>
 	<!-- Track background -->

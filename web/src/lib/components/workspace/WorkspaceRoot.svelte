@@ -433,12 +433,15 @@
 		aria-hidden={isMobile}
 	>
 		{#each geometry.windows as { workspaceWindow, rect } (workspaceWindow.id)}
+			{@const renderedRect = displayRect(workspaceWindow.id, rect)}
 			<WorkspaceWindow
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!isMobile && (!fullscreenWindowId || fullscreenWindowId === workspaceWindow.id)}
+				hasLeftSeparator={renderedRect.left > 0}
+				hasRightSeparator={renderedRect.left + renderedRect.width < 1}
 				presentations={renderedPresentations}
-				style={rectStyle(displayRect(workspaceWindow.id, rect))}
+				style={rectStyle(renderedRect)}
 				labelFor={label}
 				panelActions={conversationPanelActions}
 				{composerInsetPx}

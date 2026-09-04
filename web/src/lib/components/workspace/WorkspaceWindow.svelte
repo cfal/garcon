@@ -33,6 +33,8 @@
 		workspaceWindow,
 		isCurrent,
 		isVisible,
+		hasLeftSeparator = false,
+		hasRightSeparator = false,
 		presentations,
 		style,
 		labelFor,
@@ -48,6 +50,8 @@
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
 		isVisible: boolean;
+		hasLeftSeparator?: boolean;
+		hasRightSeparator?: boolean;
 		presentations: readonly RenderedPortablePresentation[];
 		style: string;
 		labelFor: (surfaceId: string) => string;
@@ -264,7 +268,11 @@
 		{/snippet}
 	</WorkspaceWindowTitleBar>
 	<div
-		class="relative min-h-0 flex-1 overflow-hidden"
+		class={cn(
+			'relative min-h-0 flex-1 overflow-hidden',
+			hasLeftSeparator && 'ml-1.5',
+			hasRightSeparator && 'mr-1.5',
+		)}
 		data-workspace-window-content={workspaceWindow.id}
 	>
 		{#if chatSurface}

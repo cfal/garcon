@@ -5,6 +5,12 @@ import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
 
 const OnboardingWizardTestHost = (await import('./OnboardingWizardTestHost.svelte')).default;
 
+async function waitForAnimationFrames(count: number): Promise<void> {
+	for (let index = 0; index < count; index += 1) {
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+	}
+}
+
 describe('OnboardingWizard', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -31,6 +37,7 @@ describe('OnboardingWizard', () => {
 		renderWizard();
 
 		const themeHeading = await screen.findByRole('heading', { name: 'Choose your theme' });
+		await waitForAnimationFrames(2);
 		await waitFor(() => expect(document.activeElement).toBe(themeHeading));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -105,5 +112,16 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
 		expect(appShell.showOnboardingWizard).toBe(false);
 		expect(appShell.showSettings).toBe(false);
+	});
+
+	it('restarts on the theme page after closing', async () => {
+		const { appShell } = renderWizard();
+		await advanceToDonePage();
+		await fireEvent.click(screen.getByRole('button', { name: 'Start using Garcon' }));
+
+		appShell.openOnboardingWizard();
+
+		await screen.findByRole('heading', { name: 'Choose your theme' });
+		expect(screen.queryByRole('heading', { name: "You're all set" })).toBeNull();
 	});
 });

@@ -37,6 +37,11 @@
 
 	let pageTitleElement = $state<HTMLElement | null>(null);
 
+	function handleOpenAutoFocus(event: Event): void {
+		event.preventDefault();
+		pageTitleElement?.focus();
+	}
+
 	// Moves focus to the page heading on each step change so assistive
 	// technology announces the new page; focus otherwise stays on Continue.
 	$effect(() => {
@@ -124,6 +129,7 @@
 	<Dialog.Content
 		class="max-h-[85vh] overflow-y-auto sm:max-w-xl"
 		aria-describedby="onboarding-description"
+		onOpenAutoFocus={handleOpenAutoFocus}
 	>
 		<Dialog.Header>
 			<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
