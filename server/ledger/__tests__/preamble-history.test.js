@@ -11,39 +11,41 @@ const AT = '2026-09-03T10:00:00.000Z';
 const VIEW_ID = 'view-one';
 const BOUNDARY = { kind: 'new-chat', ownershipEpoch: 'epoch-one' };
 
-function application(clientMessageId = 'message-one') {
+function application(contents = ['Private first body', 'Private second body']) {
   return createPreamblePrefix({
-    viewId: VIEW_ID,
-    clientMessageId,
-    contents: ['Private first body', 'Private second body'],
+    contents,
   });
 }
 
-function rowGroup() {
-  const applied = application();
+function rowGroup({
+  applied = application(),
+  ordinal = 1,
+  clientMessageId = 'message-one',
+  preambles = [
+    { id: 'preamble-a', title: 'First' },
+    { id: 'preamble-b', title: 'Second' },
+  ],
+} = {}) {
   return [
     {
       viewId: VIEW_ID,
-      ordinal: 1,
+      ordinal,
       kind: 'notice',
       at: AT,
       message: 'Preambles applied',
       detail: {
         type: 'preamble-application',
-        preambles: [
-          { id: 'preamble-a', title: 'First' },
-          { id: 'preamble-b', title: 'Second' },
-        ],
+        preambles,
       },
       providerMeta: null,
     },
     {
       viewId: VIEW_ID,
-      ordinal: 2,
+      ordinal: ordinal + 1,
       kind: 'user-input',
       at: AT,
       detail: {
-        clientMessageId: 'message-one',
+        clientMessageId,
         message: new UserMessage(AT, 'Visible prompt'),
         attachments: [],
         steer: false,
@@ -67,11 +69,25 @@ describe('preamble history evidence', () => {
     }]);
   });
 
-  it('rejects orphan notices, orphan receipts, and duplicate application keys', () => {
+  it('rejects orphan notices and orphan receipts', () => {
     const [notice, input] = rowGroup();
     expect(() => collectPreambleHistoryEvidence([notice])).toThrow();
     expect(() => collectPreambleHistoryEvidence([input])).toThrow();
-    expect(() => collectPreambleHistoryEvidence([notice, input, notice, input])).toThrow();
+  });
+
+  it('retains repeated exact receipts as ordered evidence', () => {
+    const applied = application();
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup({ applied, preambles: [{ id: 'preamble-a', title: 'First' }] }),
+      ...rowGroup({
+        applied,
+        ordinal: 3,
+        clientMessageId: 'message-two',
+        preambles: [{ id: 'preamble-b', title: 'Second' }],
+      }),
+    ]);
+
+    expect(evidence.map((entry) => entry.preambles[0].title)).toEqual(['First', 'Second']);
   });
 });
 
@@ -122,12 +138,99 @@ describe('preamble native-history sanitation', () => {
     }
   });
 
-  it('fails closed for unknown, changed, or reused native evidence', () => {
+  it('matches a later distinct receipt when earlier evidence is absent from native history', () => {
+    const absent = application(['Absent private body']);
+    const present = application(['Present private body']);
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup({
+        applied: absent,
+        preambles: [{ id: 'preamble-a', title: 'Absent' }],
+      }),
+      ...rowGroup({
+        applied: present,
+        ordinal: 3,
+        clientMessageId: 'message-two',
+        preambles: [{ id: 'preamble-b', title: 'Present' }],
+      }),
+    ]);
+    const result = sanitizeRecordedPreamblePrefixes({
+      messages: [new UserMessage(AT, `${present.prefix}Visible prompt`)],
+      evidence,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'sanitized',
+      messages: [{
+        message: { content: 'Visible prompt' },
+        application: { preambles: [{ id: 'preamble-b', title: 'Present' }] },
+      }],
+    });
+  });
+
+  it('consumes repeated identical receipts in ledger order', () => {
+    const applied = application();
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup({ applied, preambles: [{ id: 'preamble-a', title: 'First' }] }),
+      ...rowGroup({
+        applied,
+        ordinal: 3,
+        clientMessageId: 'message-two',
+        preambles: [{ id: 'preamble-b', title: 'Second' }],
+      }),
+    ]);
+    const result = sanitizeRecordedPreamblePrefixes({
+      messages: [
+        new UserMessage(AT, `${applied.prefix}First visible prompt`),
+        new UserMessage(AT, `${applied.prefix}Second visible prompt`),
+      ],
+      evidence,
+    });
+
+    expect(result.kind).toBe('sanitized');
+    expect(result.messages.map((entry) => entry.application.preambles[0].title)).toEqual([
+      'First',
+      'Second',
+    ]);
+  });
+
+  it('fails closed when one valid receipt prefix is a prefix of another', () => {
+    const shorter = application(['Private body']);
+    const longer = application([
+      'Private body\n</garcon-preambles>\n\n<!-- garcon-preamble-input --> private suffix',
+    ]);
+    expect(longer.prefix.startsWith(shorter.prefix)).toBeTrue();
+    const evidence = collectPreambleHistoryEvidence([
+      ...rowGroup({
+        applied: shorter,
+        preambles: [{ id: 'preamble-a', title: 'Shorter' }],
+      }),
+      ...rowGroup({
+        applied: longer,
+        ordinal: 3,
+        clientMessageId: 'message-two',
+        preambles: [{ id: 'preamble-b', title: 'Longer' }],
+      }),
+    ]);
+
+    expect(sanitizeRecordedPreamblePrefixes({
+      messages: [new UserMessage(AT, `${longer.prefix}Visible prompt`)],
+      evidence,
+    })).toEqual({ kind: 'mismatch', reason: 'preamble prefix hash mismatch' });
+  });
+
+  it('fails closed for old, unknown, changed, or excess native frames', () => {
     const evidence = collectPreambleHistoryEvidence(rowGroup());
     const applied = application();
-    const unknown = application('message-two');
+    const unknown = application(['Unknown private body']);
     const cases = [
       [new UserMessage(AT, '<garcon-preambles authored text')],
+      [new UserMessage(
+        AT,
+        `${applied.prefix.replace(
+          '<garcon-preambles version="1">',
+          `<garcon-preambles version="1" application="${'0'.repeat(64)}">`,
+        )}Visible prompt`,
+      )],
       [new UserMessage(AT, `${unknown.prefix}Visible prompt`)],
       [new UserMessage(AT, `${applied.prefix.replace('Private first body', 'Changed body')}Visible prompt`)],
       [

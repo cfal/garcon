@@ -40,8 +40,6 @@ export function preparePreambleInput(input: {
   }
   const application = input.boundary
     ? createPreamblePrefix({
-        viewId: input.viewId,
-        clientMessageId: input.detail.clientMessageId!,
         contents: input.preambles.map((preamble) => preamble.content),
       })
     : null;

@@ -137,7 +137,7 @@ describe('preambles', () => {
       });
       const firstProviderRequest = await firstHeld.received;
       expect(firstProviderRequest.lastUserText).toMatch(
-        /^<garcon-preambles version="1" application="[a-f0-9]{64}">\nSYNTHETIC_GLOBAL_OPENING_BODY\n\nSYNTHETIC_NESTED_PROJECT_BODY\n\nSYNTHETIC_GLOBAL_CLOSING_BODY\n<\/garcon-preambles>\n\n<!-- garcon-preamble-input --> first visible prompt$/u,
+        /^<garcon-preambles version="1">\nSYNTHETIC_GLOBAL_OPENING_BODY\n\nSYNTHETIC_NESTED_PROJECT_BODY\n\nSYNTHETIC_GLOBAL_CLOSING_BODY\n<\/garcon-preambles>\n\n<!-- garcon-preamble-input --> first visible prompt$/u,
       );
       expect(firstProviderRequest.lastUserText).not.toContain('SYNTHETIC_DISABLED_GLOBAL_BODY');
       expect(firstHeld.releaseText('first synthetic response')).toBeTrue();

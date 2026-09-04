@@ -40,10 +40,7 @@ export function preambleCatalogCompositionViolation(
   ];
   for (const candidate of candidates) {
     if (candidate.entries.length === 0) continue;
-    const prefix = renderPreamblePrefix(
-      '0'.repeat(64),
-      candidate.entries.map((entry) => entry.content),
-    );
+    const prefix = renderPreamblePrefix(candidate.entries.map((entry) => entry.content));
     if (prefix.includes(PREAMBLE_FILE_CONTEXT_SEPARATOR)) {
       return { kind: 'file-context-separator', projectPath: candidate.projectPath };
     }

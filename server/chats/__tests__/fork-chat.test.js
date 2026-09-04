@@ -556,8 +556,6 @@ describe('forkChatFileCopy', () => {
 
   it('passes selected current-binding preamble evidence to native fork import', async () => {
     const application = createPreamblePrefix({
-      viewId: 'source-view',
-      clientMessageId: 'message-2',
       contents: ['private preamble body'],
     });
     const boundary = { kind: 'new-chat', ownershipEpoch: 'source-epoch' };
@@ -602,8 +600,6 @@ describe('forkChatFileCopy', () => {
   for (const native of [true, false]) {
     it(`rejects a ${native ? 'native' : 'handoff'} fork cutoff between a preamble notice and input`, async () => {
       const application = createPreamblePrefix({
-        viewId: 'source-view',
-        clientMessageId: 'message-2',
         contents: ['private preamble body'],
       });
       const notice = {

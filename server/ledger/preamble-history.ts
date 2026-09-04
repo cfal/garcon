@@ -30,7 +30,6 @@ export function collectPreambleHistoryEvidence(
   rows: readonly LedgerRow[],
 ): readonly PreambleHistoryEvidence[] {
   const evidence: PreambleHistoryEvidence[] = [];
-  const keys = new Set<string>();
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index]!;
     if (row.kind === 'notice' && isPreambleApplicationNoticeDetail(row.detail)) {
@@ -41,8 +40,6 @@ export function collectPreambleHistoryEvidence(
         || !input.detail.preamblePrefixReceipt
       ) throw new Error('Preamble application notice is not adjacent to its input receipt');
       const receipt = input.detail.preamblePrefixReceipt;
-      if (keys.has(receipt.applicationKey)) throw new Error('Duplicate preamble application receipt');
-      keys.add(receipt.applicationKey);
       evidence.push({
         receipt,
         boundary: input.detail.preambleBoundary,
@@ -68,28 +65,37 @@ export function sanitizeRecordedPreamblePrefixes(input: {
       messages: input.messages.map((message) => ({ message })),
     };
   }
-  const byKey = new Map(input.evidence.map((entry) => [entry.receipt.applicationKey, entry]));
-  if (byKey.size !== input.evidence.length) {
-    return { kind: 'mismatch', reason: 'duplicate application evidence' };
-  }
-  const used = new Set<string>();
+  const used = new Set<number>();
   const messages: SanitizedPreambleMessage[] = [];
   for (const message of input.messages) {
     if (!(message instanceof UserMessage) || !message.content.startsWith(PREAMBLE_OPEN_PREFIX)) {
       messages.push({ message });
       continue;
     }
-    const applicationKey = parseOpeningApplicationKey(message.content);
-    const evidence = applicationKey ? byKey.get(applicationKey) : undefined;
-    if (!applicationKey || !evidence || used.has(applicationKey)) {
-      return { kind: 'mismatch', reason: 'unknown preamble application' };
+    if (!hasVersionOneOpeningFrame(message.content)) {
+      return { kind: 'mismatch', reason: 'unknown preamble frame' };
     }
-    const prefix = message.content.slice(0, evidence.receipt.codeUnitLength);
-    const sha256 = crypto.createHash('sha256').update(prefix).digest('hex');
-    if (sha256 !== evidence.receipt.sha256) {
+    const matchingSignatures = new Map<string, number[]>();
+    for (const [index, candidate] of input.evidence.entries()) {
+      const prefix = message.content.slice(0, candidate.receipt.codeUnitLength);
+      if (crypto.createHash('sha256').update(prefix).digest('hex') !== candidate.receipt.sha256) {
+        continue;
+      }
+      const signature = `${candidate.receipt.codeUnitLength}:${candidate.receipt.sha256}`;
+      const indices = matchingSignatures.get(signature) ?? [];
+      indices.push(index);
+      matchingSignatures.set(signature, indices);
+    }
+    if (matchingSignatures.size !== 1) {
       return { kind: 'mismatch', reason: 'preamble prefix hash mismatch' };
     }
-    used.add(applicationKey);
+    const evidenceIndex = matchingSignatures.values().next().value?.find((index) => !used.has(index));
+    if (evidenceIndex === undefined) {
+      return { kind: 'mismatch', reason: 'preamble prefix receipt already consumed' };
+    }
+    const evidence = input.evidence[evidenceIndex]!;
+    const prefix = message.content.slice(0, evidence.receipt.codeUnitLength);
+    used.add(evidenceIndex);
     messages.push({
       message: new UserMessage(
         message.timestamp,
@@ -104,11 +110,7 @@ export function sanitizeRecordedPreamblePrefixes(input: {
   return { kind: 'sanitized', messages };
 }
 
-function parseOpeningApplicationKey(content: string): string | null {
+function hasVersionOneOpeningFrame(content: string): boolean {
   const end = content.indexOf('\n');
-  if (end < 0) return null;
-  const match = /^<garcon-preambles version="1" application="([a-f0-9]{64})">$/u.exec(
-    content.slice(0, end),
-  );
-  return match?.[1] ?? null;
+  return end >= 0 && content.slice(0, end) === '<garcon-preambles version="1">';
 }

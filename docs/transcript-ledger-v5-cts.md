@@ -17,8 +17,8 @@ browser workflow.
 
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 30, SHA-256
-  `fa2729c70d568c5cd4fecdaceab1bf9346e86468c9a0dfc131979c34ddbdfc3d`
+- `docs/transcript-ledger-v5-design.md`, revision 31, SHA-256
+  `61aca7cea1a62569e6f01b018cb1f58816eb93aad011cc0248cbd685067e13e3`
 
 Current inventory: 417 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
@@ -394,7 +394,7 @@ routine local testing.
 | TLV5-PREAMBLE.01      | The public application notice contains only a fixed type plus unique immutable `{id, title}` snapshots; bodies, paths, scopes, revisions, and receipts are rejected. | Shared contract                                        |
 | TLV5-PREAMBLE.02      | A matched boundary commits one adjacent notice/input group atomically, stores its private proof and exact receipt, and keeps the body only in the transient provider prefix; a zero match stores only the proof-bearing input. | Store and service unit                                 |
 | TLV5-PREAMBLE.03      | New chat, fork, continuation, and in-place agent-switch boundaries resolve the current enabled matching catalog once in visible order; blocked provider slash input stores nothing and retains the boundary. | Core unit, server black-box, provider scripted         |
-| TLV5-PREAMBLE.04      | Reload and native-fidelity fork collect exact binding evidence, sanitize carried context before receipt-proven prefixes, reconstruct the notice and private input fields, tolerate absent native occurrences, and fail closed before publication on unprovable leading frames. | Native-import, Reload, fork, and scripted-provider unit |
+| TLV5-PREAMBLE.04      | Reload and native-fidelity fork collect exact binding evidence, sanitize carried context before receipt-proven prefixes, require one matching receipt signature before selecting the earliest unused exact receipt, reconstruct the notice and private input fields, tolerate absent native occurrences, and fail closed before publication on unprovable, ambiguous, or excess leading frames. | Native-import, Reload, fork, and scripted-provider unit |
 | TLV5-PREAMBLE.05      | Application notices render, freeze, share, and export with IDs/titles only while remaining absent from search, preview, resend, model context, and carryover input. | Canonical read-fold matrix and presentation tests      |
 | TLV5-PREAMBLE.06      | The lazy SPA catalog creates, edits, deletes, reorders, filters, disables, and re-enables entries; scoped rules retain independent nested flags and the historical application row remains title-only and adjacent. | Component and Lightpanda browser behavior              |
 
@@ -875,7 +875,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PREAMBLE.01-CONTRACT-01 | `common/__tests__/transcript-notice-contract.test.js`: immutable preamble title snapshots round-trip while top-level and nested private fields are rejected | PREAMBLE.01 |
 | TLV5-PREAMBLE.02-STORE-UNIT-01 | `server/ledger/__tests__/store.test.js`: one transaction commits the title-only application notice immediately before its proof- and receipt-bearing input while the body remains transient | PREAMBLE.02 |
 | TLV5-PREAMBLE.03-SERVER-01 | `integration-tests/tests/server/preambles.test.ts`: ordered current enabled preambles apply exactly once at new-chat, fork, continuation, and in-place agent-switch boundaries | PREAMBLE.03 |
-| TLV5-PREAMBLE.04-NATIVE-UNIT-01 | `server/ledger/__tests__/preamble-history.test.js`: exact receipt sanitation strips the private prefix and returns immutable application evidence for reconstruction | PREAMBLE.04 |
+| TLV5-PREAMBLE.04-NATIVE-UNIT-01 | `server/ledger/__tests__/preamble-history.test.js`: exact receipt sanitation strips the private prefix, maps distinct and byte-identical evidence deterministically without a provider-visible application identifier, rejects prefix-related signature ambiguity, and returns immutable application evidence for reconstruction | PREAMBLE.04 |
 | TLV5-PREAMBLE.05-READ-FOLDS-CORE-UNIT-01 | `server/ledger/__tests__/read-fold-matrix.test.js`: the application notice stays visible and body-free while every conversational fold excludes it | PREAMBLE.05, L01.02 |
 | TLV5-PREAMBLE.06-LIGHTPANDA-01 | `integration-tests/tests/e2e/preambles.test.ts`: the SPA manages enabled and scoped catalog entries and renders the historical application notice adjacent to its user row | PREAMBLE.06 |
 | TLV5-L01.02-EXPORT-SERVER-01   | `integration-tests/tests/server/garcon-cli-export.test.ts`: authenticated CLI export captures succinct Markdown and XML artifacts, applies filters, preserves ordinal gaps, and writes/replaces files atomically | L01.02 |

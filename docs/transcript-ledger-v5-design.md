@@ -1,10 +1,21 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 30 integrated design. Supersedes
+Status: revision 31 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 31 removes the per-application identifier from the version-one
+preamble frame and its private receipt. Exact `codeUnitLength` and SHA-256
+remain sufficient proof of the complete prefix. Native sanitation matches
+each framed message to the sole matching receipt signature and then the
+earliest unused exact receipt in ledger order;
+identical prefixes are intentionally indistinguishable and consume identical
+evidence in that order. Missing native occurrences remain valid crash-window
+evidence, while a malformed frame, an unmatched exact prefix, more native
+occurrences than matching receipts, or more than one distinct matching
+receipt signature fails closed.
 
 Revision 30 adds provider-neutral preamble applications. A durable pending
 boundary on a new chat, fork, continuation, or in-place agent switch is
@@ -522,8 +533,9 @@ The decisions:
   permanently fencing the chat. Before Reload or native-fidelity fork turns
   normalized native history into rows, core strips only exact leading
   preamble prefixes proven by receipts collected from the selected ledger
-  binding. A recognizable unknown, changed, or duplicate application fails
-  before cutover or target publication; receipt evidence absent from native
+  binding. A recognizable malformed, unmatched, or multi-signature prefix, or
+  an excess native occurrence without matching evidence, fails before cutover or target
+  publication; receipt evidence absent from native
   history is allowed for the commit-before-dispatch crash window.
 - **L11 Fail closed, per chat.** A commit failure or unknown commit
   outcome fences the chat's ledger for writes; `SQLITE_CORRUPT` or any
@@ -623,7 +635,7 @@ Kind semantics:
   fields. `preambleBoundary` is `{kind, ownershipEpoch}` and proves that this
   input consumed the binding's pending boundary, including when zero entries
   matched. `preamblePrefixReceipt` is
-  `{format: 'preamble-v1', applicationKey, codeUnitLength, sha256}` and proves
+  `{format: 'preamble-v1', codeUnitLength, sha256}` and proves
   the exact leading prefix for native sanitation without storing its body.
 - `notice`: durable advisory. An accepted active-run producer advisory is an
   ordinary notice; its optional title is presentation metadata, and its
@@ -1776,12 +1788,17 @@ received. Before staging, core sanitizes the normalized native stream in two
 ordered passes: exact carried-context removal, then exact preamble-prefix
 removal. Preamble evidence comes only from an adjacent typed application
 notice and receipt-bearing boundary input in the selected current binding.
-The sanitizer hashes exactly the receipt's `codeUnitLength`, strips only an
-exact known prefix, restores the private receipt and boundary proof on the
-imported input, and reconstructs the immutable title-only notice immediately
-before it. Evidence with no native occurrence is allowed for the
-commit-before-dispatch crash window. A malformed, unknown, changed, or reused
-leading Garcon preamble frame fails with `PREAMBLE_ENVELOPE_MISMATCH` before
+The sanitizer hashes exactly each receipt's `codeUnitLength`, requires one
+distinct matching length/hash signature, selects its earliest unused receipt
+in ledger order, restores that private receipt
+and boundary proof on the imported input, and reconstructs the immutable
+title-only notice immediately before it. Identical prefixes consume identical
+evidence in ledger order because the removed application identifier served
+only as sanitation correlation and is no longer required. Evidence with no
+native occurrence is allowed
+for the commit-before-dispatch crash window. A malformed, unmatched, or
+multi-signature leading Garcon preamble frame, or an excess native occurrence without matching
+evidence, fails with `PREAMBLE_ENVELOPE_MISMATCH` before
 cutover; raw injected text is never presented. The frozen prefix preserves the
 prior conversational rows, agent-switch boundaries, carryover-quarantine
 notices, and preamble-application notices while dropping other lifecycle rows.
@@ -1932,9 +1949,9 @@ start the chat already disagreeing with the session it resumes from.
 Core collects preamble evidence only from adjacent application/input pairs in
 the source's selected current binding through the fork watermark. The target
 seed runs the same carried-context-then-preamble sanitation as Reload,
-reconstructing exact applications and refusing malformed, unknown, changed,
-or reused framed prefixes before the target is registered. Receipt evidence
-that has no native occurrence remains valid evidence of a commit whose
+reconstructing exact applications and refusing malformed, unmatched, or
+multi-signature framed prefixes and excess native occurrences before the target is registered.
+Receipt evidence that has no native occurrence remains valid evidence of a commit whose
 dispatch or provider persistence never happened.
 Handoff forks keep the frozen projection, because there is no native
 session to read. The import is the one manual reload performs, with the
@@ -2112,8 +2129,8 @@ relevant-entry definition under the 10.2 obligation.
 | Pending preamble boundary with enabled matches receives an otherwise-unhandled slash command | Typed `PREAMBLE_SLASH_COMMAND_BLOCKED`; no input, notice, prefix, or dispatch; the prepared target and boundary remain available for a later ordinary input. An identical command retry returns the same typed rejection. |
 | Crash after a preamble boundary input commits but before the registry clear is durable | The input's private boundary proof suppresses reapplication and repairs the stale pending boundary only for the matching ownership epoch. |
 | Reload cannot durably flush the current registry before view replacement | Reload aborts before cutover; it cannot delete the only zero-match proof while disk still records the boundary as armed. |
-| Native import contains an exact known preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
-| Native import contains a malformed, unknown, changed, or reused leading preamble frame | Typed `PREAMBLE_ENVELOPE_MISMATCH`; Reload preserves the current view and native-fidelity target creation aborts. Raw framed content is never presented. |
+| Native import contains an exact receipt-matched preamble prefix | Core strips the receipt-covered prefix, reconstructs its title-only notice, and restores the private receipt and boundary proof on the imported input. |
+| Native import contains a malformed, unmatched, or multi-signature leading preamble frame, or more framed occurrences than matching receipts | Typed `PREAMBLE_ENVELOPE_MISMATCH`; Reload preserves the current view and native-fidelity target creation aborts. Raw framed content is never presented. |
 | Ledger preamble evidence has no native occurrence | Allowed as the commit-before-dispatch or provider-persistence crash window; unrelated native messages import normally. |
 | Crash with entries in the future-turn queue | Queue lost by design; no rows; resubmission is the user's explicit choice, idempotent by `clientMessageId`. |
 | Commit failure during dequeue | The entry stays queued while the chat fences; dequeue is one synchronous block, so a retry observes exactly one identity. |

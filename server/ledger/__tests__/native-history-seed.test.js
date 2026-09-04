@@ -86,8 +86,6 @@ describe('native history ledger seed', () => {
       prefix: carriedPrefix,
     });
     const application = createPreamblePrefix({
-      viewId: 'view-1',
-      clientMessageId: 'message-1',
       contents: ['private preamble body'],
     });
     const boundary = { kind: 'new-chat', ownershipEpoch: 'ownership-1' };
@@ -134,8 +132,6 @@ describe('native history ledger seed', () => {
 
   it('allows receipt-bearing ledger evidence absent from native history after a pre-dispatch crash', async () => {
     const application = createPreamblePrefix({
-      viewId: 'view-1',
-      clientMessageId: 'message-1',
       contents: ['private preamble body'],
     });
     const preambleEvidence = [{
@@ -162,8 +158,6 @@ describe('native history ledger seed', () => {
 
   it('fails closed when a receipt-bearing native prefix was changed', async () => {
     const application = createPreamblePrefix({
-      viewId: 'view-1',
-      clientMessageId: 'message-1',
       contents: ['private preamble body'],
     });
     const preambleEvidence = [{

@@ -13,7 +13,6 @@ import {
 import {
   createPreamblePrefix,
   parsePreamblePrefixReceipt,
-  preambleApplicationKey,
   renderPreamblePrefix,
 } from '../preamble-prefix.js';
 
@@ -138,28 +137,27 @@ describe('preamble contracts', () => {
 });
 
 describe('preamble prefix contract', () => {
-  it('freezes the application key and exact version-one envelope', () => {
-    const key = preambleApplicationKey('view-one', 'message-one');
-    expect(key).toBe('be8415a5759829f6b0de113e39770b992bb7176b59f5e6e32a65f65dda11bd1b');
-    expect(renderPreamblePrefix(key, ['first\nbody', 'second body'])).toBe(
-      `<garcon-preambles version="1" application="${key}">\nfirst\nbody\n\nsecond body\n</garcon-preambles>\n\n<!-- garcon-preamble-input --> `,
+  it('freezes the exact version-one envelope without an application identifier', () => {
+    expect(renderPreamblePrefix(['first\nbody', 'second body'])).toBe(
+      '<garcon-preambles version="1">\nfirst\nbody\n\nsecond body\n</garcon-preambles>\n\n<!-- garcon-preamble-input --> ',
     );
   });
 
   it('creates and validates a body-free exact sanitation receipt', () => {
     const application = createPreamblePrefix({
-      viewId: 'view-one',
-      clientMessageId: 'message-one',
       contents: ['private body'],
     });
     expect(application).not.toBeNull();
     expect(application.receipt.codeUnitLength).toBe(application.prefix.length);
     expect(application.receipt).not.toHaveProperty('content');
+    expect(application.receipt).not.toHaveProperty('applicationKey');
     expect(parsePreamblePrefixReceipt(application.receipt)).toEqual(application.receipt);
     expect(parsePreamblePrefixReceipt({ ...application.receipt, extra: true })).toBeNull();
+    expect(parsePreamblePrefixReceipt({
+      ...application.receipt,
+      applicationKey: '0'.repeat(64),
+    })).toBeNull();
     expect(createPreamblePrefix({
-      viewId: 'view-one',
-      clientMessageId: 'message-one',
       contents: [],
     })).toBeNull();
   });
