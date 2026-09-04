@@ -54,11 +54,15 @@
 	});
 	let cadence = $derived.by(() => {
 		if (scheduledPrompt.schedule.type === 'once') return m.scheduled_prompts_once();
-		const interval = scheduledPrompt.schedule.intervalDays;
+		const intervalHours = scheduledPrompt.schedule.intervalHours;
 		const base =
-			interval === 1
-				? m.scheduled_prompts_daily()
-				: m.scheduled_prompts_every_days({ count: interval });
+			intervalHours === 1
+				? m.scheduled_prompts_hourly()
+				: intervalHours === 24
+					? m.scheduled_prompts_daily()
+					: intervalHours % 24 === 0
+						? m.scheduled_prompts_every_days({ count: intervalHours / 24 })
+						: m.scheduled_prompts_every_hours({ count: intervalHours });
 		return scheduledPrompt.schedule.endAt
 			? `${base}, ${m.scheduled_prompts_until({ date: formatScheduledInstant(scheduledPrompt.schedule.endAt) })}`
 			: `${base}, ${m.scheduled_prompts_forever().toLowerCase()}`;

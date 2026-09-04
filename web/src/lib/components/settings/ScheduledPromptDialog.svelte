@@ -15,8 +15,7 @@
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
 	import {
-		SCHEDULED_PROMPT_INTERVAL_DAYS_MAX,
-		SCHEDULED_PROMPT_INTERVAL_DAYS_MIN,
+		SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
 		type ScheduledPrompt,
 		type ScheduledPromptDefinitionInput,
 	} from '$shared/scheduled-prompts';
@@ -209,19 +208,32 @@
 					</div>
 				{:else}
 					<div class="grid gap-3 sm:grid-cols-2">
+						<div class="space-y-1 text-sm">
+							<label for="scheduled-prompt-interval" class="font-medium">
+								{m.scheduled_prompts_repeat_every()}
+							</label>
+							<div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+								<input
+									id="scheduled-prompt-interval"
+									type="number"
+									min={SCHEDULED_PROMPT_INTERVAL_HOURS_MIN}
+									max={form.intervalAmountMax}
+									step="1"
+									bind:value={form.intervalAmount}
+									class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								/>
+								<select
+									aria-label={m.scheduled_prompts_interval_unit()}
+									bind:value={form.intervalUnit}
+									class="h-10 rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								>
+									<option value="hours">{m.scheduled_prompts_hours()}</option>
+									<option value="days">{m.scheduled_prompts_days()}</option>
+								</select>
+							</div>
+						</div>
 						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_every_n_days()}</span>
-							<input
-								type="number"
-								min={SCHEDULED_PROMPT_INTERVAL_DAYS_MIN}
-								max={SCHEDULED_PROMPT_INTERVAL_DAYS_MAX}
-								step="1"
-								bind:value={form.intervalDays}
-								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
-							/>
-						</label>
-						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_time()}</span>
+							<span class="font-medium">{m.scheduled_prompts_first_run_time()}</span>
 							<input
 								type="time"
 								step="60"

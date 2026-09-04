@@ -116,9 +116,9 @@ describe('scheduled prompt persistence', () => {
     await store.create(
       scheduledPrompt('repeat', {
         type: 'recurring',
-        intervalDays: 2,
+        intervalHours: 1,
         nextRunAt: '2030-01-02T09:00:00.000Z',
-        endAt: '2030-01-04T09:00:00.000Z',
+        endAt: '2030-01-02T11:00:00.000Z',
       }),
       1,
     );
@@ -128,8 +128,10 @@ describe('scheduled prompt persistence', () => {
     expect(store.get('once')).toBeNull();
 
     const first = await store.claimOccurrence('repeat', '2030-01-02T09:00:00.000Z');
-    expect(first?.nextScheduledPrompt?.schedule.nextRunAt).toBe('2030-01-04T09:00:00.000Z');
-    const final = await store.claimOccurrence('repeat', '2030-01-04T09:00:00.000Z');
+    expect(first?.nextScheduledPrompt?.schedule.nextRunAt).toBe('2030-01-02T10:00:00.000Z');
+    const second = await store.claimOccurrence('repeat', '2030-01-02T10:00:00.000Z');
+    expect(second?.nextScheduledPrompt?.schedule.nextRunAt).toBe('2030-01-02T11:00:00.000Z');
+    const final = await store.claimOccurrence('repeat', '2030-01-02T11:00:00.000Z');
     expect(final?.nextScheduledPrompt).toBeNull();
     expect(store.get('repeat')).toBeNull();
   });
@@ -141,26 +143,55 @@ describe('scheduled prompt persistence', () => {
     await store.create(
       scheduledPrompt('once', {
         type: 'once',
-        nextRunAt: '2030-01-02T09:00:00.000Z',
+        nextRunAt: '2030-01-01T08:00:00.000Z',
       }),
       0,
     );
     await store.create(
       scheduledPrompt('repeat', {
         type: 'recurring',
-        intervalDays: 2,
+        intervalHours: 2,
         nextRunAt: '2030-01-01T09:00:00.000Z',
         endAt: null,
       }),
       1,
     );
 
-    const result = await store.reconcileMissed(new Date('2030-01-10T12:00:00.000Z'));
+    const result = await store.reconcileMissed(new Date('2030-01-01T14:30:00.000Z'));
 
     expect(result.changed).toBe(true);
     expect(result.events).toHaveLength(2);
     expect(store.get('once')).toBeNull();
-    expect(store.get('repeat')?.schedule.nextRunAt).toBe('2030-01-11T09:00:00.000Z');
+    expect(store.get('repeat')?.schedule.nextRunAt).toBe('2030-01-01T15:00:00.000Z');
+  });
+
+  it('includes the current minute only when startup reconciliation requests it', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    await store.create(
+      scheduledPrompt('repeat', {
+        type: 'recurring',
+        intervalHours: 1,
+        nextRunAt: '2030-01-01T09:00:00.000Z',
+        endAt: null,
+      }),
+      0,
+    );
+
+    const scheduledMinute = new Date('2030-01-01T09:00:00.000Z');
+    expect(await store.reconcileMissed(scheduledMinute)).toEqual({
+      changed: false,
+      events: [],
+    });
+    expect(store.get('repeat')?.schedule.nextRunAt).toBe('2030-01-01T09:00:00.000Z');
+
+    const result = await store.reconcileMissed(scheduledMinute, {
+      includeCurrentMinute: true,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.events[0]?.message).toContain('Skipped 1 missed occurrence;');
+    expect(store.get('repeat')?.schedule.nextRunAt).toBe('2030-01-01T10:00:00.000Z');
   });
 });
 
