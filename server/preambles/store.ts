@@ -11,7 +11,7 @@ import { hasNodeErrorCode } from '../lib/errors.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { PreambleDomainError } from './errors.js';
-import { preambleCombinedBudgetViolation } from './catalog-budget.js';
+import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
 const PREAMBLES_FILE_VERSION = 1;
 
@@ -51,8 +51,8 @@ function normalizeFile(value: unknown): PreamblesFile {
     ids.add(preamble.id);
     return preamble;
   });
-  if (preambleCombinedBudgetViolation(preambles)) {
-    throw new Error('preambles.json exceeds the combined preamble limit');
+  if (preambleCatalogCompositionViolation(preambles)) {
+    throw new Error('preambles.json contains an invalid combined preamble composition');
   }
   return { version: PREAMBLES_FILE_VERSION, revision: raw.revision as number, preambles };
 }

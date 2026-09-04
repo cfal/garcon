@@ -1,18 +1,25 @@
 import { renderPreamblePrefix } from '../../common/preamble-prefix.js';
 import {
   PREAMBLE_COMBINED_MAX_LENGTH,
+  PREAMBLE_FILE_CONTEXT_SEPARATOR,
   type Preamble,
 } from '../../common/preambles.js';
 import { applicablePreambles } from './matching.js';
 
-export interface PreambleCombinedBudgetViolation {
-  readonly projectPath: string | null;
-  readonly codeUnitLength: number;
-}
+export type PreambleCatalogCompositionViolation =
+  | {
+      readonly kind: 'combined-limit';
+      readonly projectPath: string | null;
+      readonly codeUnitLength: number;
+    }
+  | {
+      readonly kind: 'file-context-separator';
+      readonly projectPath: string | null;
+    };
 
-export function preambleCombinedBudgetViolation(
+export function preambleCatalogCompositionViolation(
   preambles: readonly Preamble[],
-): PreambleCombinedBudgetViolation | null {
+): PreambleCatalogCompositionViolation | null {
   const projectPaths = new Set<string>();
   for (const preamble of preambles) {
     if (!preamble.enabled) continue;
@@ -31,12 +38,19 @@ export function preambleCombinedBudgetViolation(
   ];
   for (const candidate of candidates) {
     if (candidate.entries.length === 0) continue;
-    const length = renderPreamblePrefix(
+    const prefix = renderPreamblePrefix(
       '0'.repeat(64),
       candidate.entries.map((entry) => entry.content),
-    ).length;
-    if (length > PREAMBLE_COMBINED_MAX_LENGTH) {
-      return { projectPath: candidate.projectPath, codeUnitLength: length };
+    );
+    if (prefix.includes(PREAMBLE_FILE_CONTEXT_SEPARATOR)) {
+      return { kind: 'file-context-separator', projectPath: candidate.projectPath };
+    }
+    if (prefix.length > PREAMBLE_COMBINED_MAX_LENGTH) {
+      return {
+        kind: 'combined-limit',
+        projectPath: candidate.projectPath,
+        codeUnitLength: prefix.length,
+      };
     }
   }
   return null;

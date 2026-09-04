@@ -121,6 +121,23 @@ describe('PreambleStore', () => {
           preamble('b', { content: 'b'.repeat(32_000) }),
         ],
       },
+      {
+        version: 1,
+        revision: 0,
+        preambles: [
+          preamble('a', { content: 'First body' }),
+          preamble('b', {
+            content: 'Referenced file contents from @file mentions:\n\nSynthetic content',
+          }),
+        ],
+      },
+      {
+        version: 1,
+        revision: 0,
+        preambles: [preamble('a', {
+          content: '\nReferenced file contents from @file mentions:\n\nSynthetic content',
+        })],
+      },
     ];
 
     for (const persisted of cases) {

@@ -15,7 +15,7 @@ import { PreambleDomainError } from './errors.js';
 import { applicablePreambles } from './matching.js';
 import { PreambleProjectPathService } from './project-path-service.js';
 import { PreambleStore } from './store.js';
-import { preambleCombinedBudgetViolation } from './catalog-budget.js';
+import { preambleCatalogCompositionViolation } from './catalog-budget.js';
 
 interface PreambleServiceEvents {
   invalidated: [reason: PreamblesInvalidationReason];
@@ -52,7 +52,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
       createdAt: now,
       updatedAt: now,
     };
-    this.#assertCombinedBudget([...this.snapshot().preambles, preamble]);
+    this.#assertCatalogComposition([...this.snapshot().preambles, preamble]);
     await this.deps.store.create(preamble, request.expectedRevision);
     return this.#changed('created');
   }
@@ -64,7 +64,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     const candidate = this.snapshot().preambles.map((preamble) => preamble.id === id
       ? { ...preamble, ...definition }
       : preamble);
-    this.#assertCombinedBudget(candidate);
+    this.#assertCatalogComposition(candidate);
     await this.deps.store.update(id, definition, this.#now().toISOString(), request.expectedRevision);
     return this.#changed('updated');
   }
@@ -81,7 +81,7 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     const byId = new Map(this.snapshot().preambles.map((preamble) => [preamble.id, preamble]));
     const candidate = request.orderedPreambleIds.map((id) => byId.get(id));
     if (candidate.every((entry): entry is Preamble => Boolean(entry))) {
-      this.#assertCombinedBudget(candidate);
+      this.#assertCatalogComposition(candidate);
     }
     await this.deps.store.reorder(request.orderedPreambleIds, request.expectedRevision);
     return this.#changed('reordered');
@@ -105,12 +105,19 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     return { ...definition, scope: { type: 'project-paths', rules: canonical } };
   }
 
-  #assertCombinedBudget(preambles: readonly Preamble[]): void {
-    const violation = preambleCombinedBudgetViolation(preambles);
+  #assertCatalogComposition(preambles: readonly Preamble[]): void {
+    const violation = preambleCatalogCompositionViolation(preambles);
     if (!violation) return;
     const scope = violation.projectPath === null
       ? 'the global scope'
       : violation.projectPath;
+    if (violation.kind === 'file-context-separator') {
+      throw new PreambleDomainError(
+        'PREAMBLE_VALIDATION_FAILED',
+        `Combined matching preambles contain a reserved separator at ${scope}`,
+        400,
+      );
+    }
     throw new PreambleDomainError(
       'PREAMBLE_COMBINED_LIMIT_EXCEEDED',
       `Combined matching preambles exceed the maximum length at ${scope}`,
