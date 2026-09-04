@@ -1,5 +1,3 @@
-<!-- Persists this Remote Settings exception through the browser-local store,
-     never through remoteSettings.update. -->
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
@@ -10,7 +8,10 @@
 		validateHiddenBashCommandPattern,
 		type HiddenBashCommandPattern,
 		type HiddenBashCommandPatternMode,
+		type HiddenBashCommandPatternValidation,
 	} from '$lib/chat/transcript/hidden-bash-commands.js';
+
+	type PatternValidationError = Exclude<HiddenBashCommandPatternValidation, 'ok'>;
 
 	const localSettings = getLocalSettings();
 
@@ -20,16 +21,20 @@
 
 	const patterns = $derived(localSettings.hiddenBashCommandPatterns);
 
-	function errorText(validation: ReturnType<typeof validateHiddenBashCommandPattern>): string {
-		if (validation === 'empty') return m.settings_hidden_bash_commands_error_empty();
-		return m.settings_hidden_bash_commands_error_invalid_regex();
+	function validationErrorText(validation: PatternValidationError): string {
+		switch (validation) {
+			case 'empty':
+				return m.settings_hidden_bash_commands_error_empty();
+			case 'invalid-regex':
+				return m.settings_hidden_bash_commands_error_invalid_regex();
+		}
 	}
 
 	function addPattern(event: SubmitEvent) {
 		event.preventDefault();
 		const validation = validateHiddenBashCommandPattern(draft, mode);
 		if (validation !== 'ok') {
-			error = errorText(validation);
+			error = validationErrorText(validation);
 			return;
 		}
 		if (patterns.some((entry) => entry.pattern === draft && entry.mode === mode)) {
