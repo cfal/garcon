@@ -34,6 +34,32 @@ function applicationTitles(snapshot: ChatMessagesPage): string[][] {
       : []);
 }
 
+function expectApplicationImmediatelyBefore(
+  snapshot: ChatMessagesPage,
+  userContent: string,
+  titles: readonly string[],
+): void {
+  const userIndex = snapshot.messages.findIndex(({ message }) => (
+    message.type === 'user-message' && message.content === userContent
+  ));
+  expect(userIndex).toBeGreaterThan(0);
+  expect(snapshot.messages[userIndex - 1]?.message).toMatchObject({
+    type: 'transcript-notice',
+    detail: {
+      type: 'preamble-application',
+      preambles: titles.map((title) => ({ title })),
+    },
+  });
+}
+
+const MINUTE_MS = 60_000;
+
+function nextScheduledRun(now = Date.now()): string {
+  let nextRunAt = Math.floor(now / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+  if (nextRunAt - now < 10_000) nextRunAt += MINUTE_MS;
+  return new Date(nextRunAt).toISOString();
+}
+
 describe('preambles', () => {
   test('applies ordered current preambles once at new-chat and fork boundaries', async () => {
     await withIntegrationFixture('preambles', async (fixture) => {
@@ -114,6 +140,11 @@ describe('preambles', () => {
       expect(JSON.stringify(firstHistory)).not.toContain('SYNTHETIC_GLOBAL_OPENING_BODY');
       expect(JSON.stringify(firstHistory)).not.toContain('SYNTHETIC_NESTED_PROJECT_BODY');
       expect(JSON.stringify(firstHistory)).not.toContain('SYNTHETIC_GLOBAL_CLOSING_BODY');
+      expectApplicationImmediatelyBefore(firstHistory, 'first visible prompt', [
+        'Global opening',
+        'Nested project',
+        'Global closing',
+      ]);
 
       const ordinaryHeld = fixture.fakeProviders.openAi.holdNext({
         lastUserText: 'ordinary visible prompt',
@@ -212,6 +243,73 @@ describe('preambles', () => {
         ['Global opening current', 'Nested project', 'Global closing'],
       ]);
       expect(JSON.stringify(forkHistory)).not.toContain('SYNTHETIC_CURRENT_OPENING_BODY');
+      expectApplicationImmediatelyBefore(forkHistory, 'fork visible prompt', [
+        'Global opening current',
+        'Nested project',
+        'Global closing',
+      ]);
+
+      const continuationChatId = fixture.newChatId();
+      const continuationHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const continuation = await fixture.client.post<{ chat: { id: string }; turnId?: string }>(
+        '/api/v1/chats/handoff-run',
+        {
+          clientRequestId: crypto.randomUUID(),
+          clientMessageId: crypto.randomUUID(),
+          sourceChatId,
+          chatId: continuationChatId,
+          command: 'continuation visible prompt',
+        },
+      );
+      const continuationRequest = await continuationHeld.received;
+      expect(continuationRequest.lastUserText).toContain('SYNTHETIC_CURRENT_OPENING_BODY');
+      expect(continuationRequest.lastUserText).toContain('SYNTHETIC_NESTED_PROJECT_BODY');
+      expect(continuationRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_CLOSING_BODY');
+      expect(continuationRequest.lastUserText).toEndWith('continuation visible prompt');
+      expect(continuationHeld.releaseText('continuation synthetic response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(continuationChatId, continuation.turnId);
+
+      const continuationHistory = await fixture.client.getMessages(continuationChatId);
+      expect(applicationTitles(continuationHistory)).toEqual([
+        ['Global opening', 'Nested project', 'Global closing'],
+        ['Global opening current', 'Nested project', 'Global closing'],
+      ]);
+      expectApplicationImmediatelyBefore(continuationHistory, 'continuation visible prompt', [
+        'Global opening current',
+        'Nested project',
+        'Global closing',
+      ]);
+      expect(JSON.stringify(continuationHistory)).not.toContain('SYNTHETIC_CURRENT_OPENING_BODY');
+
+      const switchHeld = fixture.fakeProviders.anthropic.holdNext({
+        model: fixture.directAgents.anthropic.provider.model,
+      });
+      const switched = await fixture.client.handoffDirectChat({
+        chatId: sourceChatId,
+        content: 'agent switch visible prompt',
+        agent: fixture.directAgents.anthropic,
+      });
+      const switchRequest = await switchHeld.received;
+      expect(switchRequest.lastUserText).toContain('SYNTHETIC_CURRENT_OPENING_BODY');
+      expect(switchRequest.lastUserText).toContain('SYNTHETIC_NESTED_PROJECT_BODY');
+      expect(switchRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_CLOSING_BODY');
+      expect(switchRequest.lastUserText).toEndWith('agent switch visible prompt');
+      expect(switchHeld.releaseText('agent switch synthetic response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(sourceChatId, switched.turnId);
+
+      const switchedHistory = await fixture.client.getMessages(sourceChatId);
+      expect(applicationTitles(switchedHistory)).toEqual([
+        ['Global opening', 'Nested project', 'Global closing'],
+        ['Global opening current', 'Nested project', 'Global closing'],
+      ]);
+      expectApplicationImmediatelyBefore(switchedHistory, 'agent switch visible prompt', [
+        'Global opening current',
+        'Nested project',
+        'Global closing',
+      ]);
+      expect(JSON.stringify(switchedHistory)).not.toContain('SYNTHETIC_CURRENT_OPENING_BODY');
 
       await fixture.restartGarcon();
       expect(applicationTitles(await fixture.client.getMessages(targetChatId))).toEqual([
@@ -220,4 +318,56 @@ describe('preambles', () => {
       ]);
     });
   }, 60_000);
+
+  test('applies preambles to scheduled new chats', async () => {
+    await withIntegrationFixture('scheduled-preambles', async (fixture) => {
+      const body = 'SYNTHETIC_SCHEDULED_PREAMBLE_BODY';
+      await createPreamble(fixture, 0, {
+        enabled: true,
+        title: 'Scheduled instructions',
+        content: body,
+        scope: { type: 'global' },
+      });
+
+      const agent = fixture.directAgents.openAi;
+      const initial = await fixture.client.getScheduledPrompts();
+      await fixture.client.createScheduledPrompt({
+        expectedRevision: initial.revision,
+        scheduledPrompt: {
+          schedule: { type: 'once', runAtUtc: nextScheduledRun() },
+          target: {
+            type: 'new-chat',
+            agentId: agent.agentId,
+            projectPath: fixture.dirs.project,
+            model: agent.provider.model,
+            apiProviderId: agent.provider.providerId,
+            modelEndpointId: agent.provider.endpointId,
+            modelProtocol: agent.provider.protocol,
+            permissionMode: 'default',
+            thinkingMode: 'none',
+            agentSettingsById: { [agent.agentId]: agent.agentSettings },
+            tags: ['scheduled-preamble'],
+          },
+          prompt: 'scheduled visible prompt',
+        },
+      });
+
+      const providerRequest = await fixture.fakeProviders.openAi.waitForRequest(
+        { model: agent.provider.model },
+        { timeoutMs: 90_000 },
+      );
+      expect(providerRequest.lastUserText).toContain(body);
+      expect(providerRequest.lastUserText).toEndWith('scheduled visible prompt');
+
+      const chat = (await fixture.client.listChats()).sessions.find((entry) => (
+        entry.tags.includes('scheduled-preamble')
+      ));
+      if (!chat) throw new Error('Scheduled preamble chat was not created.');
+      const history = await fixture.client.getMessages(chat.id);
+      expectApplicationImmediatelyBefore(history, 'scheduled visible prompt', [
+        'Scheduled instructions',
+      ]);
+      expect(JSON.stringify(history)).not.toContain(body);
+    });
+  }, 120_000);
 });
