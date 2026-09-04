@@ -22,6 +22,7 @@ const HEARTBEAT_TIMEOUT_MS = 6_000;
 const HEARTBEAT_JITTER_MS = 1_500;
 const CONNECTION_STABILITY_MS = 10_000;
 const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
+const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -39,6 +40,7 @@ export type WsConnectionIssue =
 	| 'browser-offline'
 	| 'browser-online'
 	| 'visibility-visible'
+	| 'connect-timeout'
 	| 'connect-threw'
 	| 'missing-auth'
 	| 'manual-disconnect';
@@ -120,6 +122,7 @@ export class WsConnection {
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
 	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	#connectTimeout: ReturnType<typeof setTimeout> | null = null;
 	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
@@ -215,6 +218,7 @@ export class WsConnection {
 
 			websocket.onopen = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				this.#clearConnectTimeout();
 				const now = Date.now();
 				this.#lastInboundAt = now;
 				this.#connectStartedAt = null;
@@ -293,6 +297,8 @@ export class WsConnection {
 				});
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
+
+			this.#scheduleConnectTimeout(websocket);
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
 			const episodeId = this.#beginOutage();
@@ -375,6 +381,7 @@ export class WsConnection {
 
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
+		this.#clearConnectTimeout();
 		this.#clearStabilityTimeout();
 		this.#suspendHeartbeat();
 		this.#setConnected(false);
@@ -507,6 +514,7 @@ export class WsConnection {
 
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearConnectTimeout();
 		this.#clearStabilityTimeout();
 		this.#suspendHeartbeat();
 		if (options.rejectPending) this.#rejectAllPending();
@@ -694,6 +702,39 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#scheduleConnectTimeout(socket: WebSocket): void {
+		this.#clearConnectTimeout();
+		this.#connectTimeout = setTimeout(() => {
+			this.#connectTimeout = null;
+			if (
+				this.#destroyed ||
+				!this.#isCurrentSocket(socket) ||
+				socket.readyState !== WebSocket.CONNECTING
+			)
+				return;
+
+			console.warn('WebSocket connection attempt timed out');
+			const episodeId = this.#beginOutage();
+			this.#rejectAllPending();
+			this.#closeExisting({ rejectPending: false });
+			this.#setConnectionStatus({
+				phase: 'reconnecting',
+				reason: 'connect-timeout',
+				episodeId,
+				nextRetryAt: null,
+				lastDisconnectedAt: this.#lastDisconnectedAt,
+			});
+			this.#scheduleReconnect('connect-timeout', episodeId);
+		}, CONNECT_ATTEMPT_TIMEOUT_MS);
+	}
+
+	#clearConnectTimeout(): void {
+		if (this.#connectTimeout !== null) {
+			clearTimeout(this.#connectTimeout);
+			this.#connectTimeout = null;
 		}
 	}
 
