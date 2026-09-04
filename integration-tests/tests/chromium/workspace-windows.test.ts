@@ -598,9 +598,11 @@ async function dragChatToWindow(
 }
 
 // Chromium omits dragover when a dispatch changes the hit-tested element, so
-// keep nudging the pointer until the drop zone actually activates. The drop
-// must land at the position where activation was observed: moving afterwards
-// can land on an element that never received dragover, which rejects the drop.
+// keep nudging the pointer until the drop zone actually activates. Each
+// position gets a short grace period so activation is attributed to the
+// position the pointer is actually at. After activation, re-dispatch at the
+// same coordinates: the drop is rejected unless a dragover was processed
+// after the final DOM change under the pointer.
 async function nudgePointerUntilVisible(
   page: Page,
   label: Locator,
@@ -610,13 +612,20 @@ async function nudgePointerUntilVisible(
 ): Promise<void> {
   const deadline = Date.now() + 20_000;
   for (;;) {
-    await page.mouse.move(targetX + nudgeX, targetY);
-    if (await label.isVisible()) return;
-    await page.mouse.move(targetX, targetY);
-    if (await label.isVisible()) return;
-    if (Date.now() > deadline) {
-      await label.waitFor({ state: 'visible' });
-      return;
+    for (const x of [targetX + nudgeX, targetX]) {
+      await page.mouse.move(x, targetY);
+      const activated = await label.waitFor({ state: 'visible', timeout: 500 }).then(
+        () => true,
+        () => false,
+      );
+      if (activated) {
+        await page.mouse.move(x, targetY);
+        await label.waitFor({ state: 'visible', timeout: 500 });
+        return;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`Drop zone label never activated near (${targetX}, ${targetY}).`);
+      }
     }
   }
 }

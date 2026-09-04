@@ -347,7 +347,7 @@
 				<div
 					data-workspace-window-drop-result
 					class={cn(
-						'absolute flex items-center justify-center rounded-lg border-2 transition-all duration-150',
+						'pointer-events-none absolute flex items-center justify-center rounded-lg border-2 transition-all duration-150',
 						activeResultInset,
 						dropResultClass(),
 					)}
