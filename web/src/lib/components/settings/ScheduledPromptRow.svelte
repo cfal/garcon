@@ -23,6 +23,15 @@
 		onMoveDown: () => void;
 	}
 
+	function recurringCadenceLabel(intervalHours: number): string {
+		if (intervalHours === 1) return m.scheduled_prompts_hourly();
+		if (intervalHours === 24) return m.scheduled_prompts_daily();
+		if (intervalHours % 24 === 0) {
+			return m.scheduled_prompts_every_days({ count: intervalHours / 24 });
+		}
+		return m.scheduled_prompts_every_hours({ count: intervalHours });
+	}
+
 	let {
 		scheduledPrompt,
 		index,
@@ -54,14 +63,10 @@
 	});
 	let cadence = $derived.by(() => {
 		if (scheduledPrompt.schedule.type === 'once') return m.scheduled_prompts_once();
-		const interval = scheduledPrompt.schedule.intervalDays;
-		const base =
-			interval === 1
-				? m.scheduled_prompts_daily()
-				: m.scheduled_prompts_every_days({ count: interval });
+		const label = recurringCadenceLabel(scheduledPrompt.schedule.intervalHours);
 		return scheduledPrompt.schedule.endAt
-			? `${base}, ${m.scheduled_prompts_until({ date: formatScheduledInstant(scheduledPrompt.schedule.endAt) })}`
-			: `${base}, ${m.scheduled_prompts_forever().toLowerCase()}`;
+			? `${label}, ${m.scheduled_prompts_until({ date: formatScheduledInstant(scheduledPrompt.schedule.endAt) })}`
+			: `${label}, ${m.scheduled_prompts_forever().toLowerCase()}`;
 	});
 	let target = $derived.by(() => {
 		if (scheduledPrompt.target.type === 'new-chat') {

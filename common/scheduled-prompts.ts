@@ -15,8 +15,8 @@ import {
   expandTemplate,
 } from './template-tokens.js';
 
-export const SCHEDULED_PROMPT_INTERVAL_DAYS_MIN = 1;
-export const SCHEDULED_PROMPT_INTERVAL_DAYS_MAX = 3650;
+export const SCHEDULED_PROMPT_INTERVAL_HOURS_MIN = 1;
+export const SCHEDULED_PROMPT_INTERVAL_HOURS_MAX = 3650 * 24;
 export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
@@ -34,7 +34,7 @@ export interface OneOffScheduledPromptSchedule {
 
 export interface RecurringScheduledPromptSchedule {
   type: 'recurring';
-  intervalDays: number;
+  intervalHours: number;
   nextRunAt: string;
   endAt: string | null;
 }
@@ -86,7 +86,7 @@ export interface OneOffScheduleInput {
 export interface RecurringScheduleInput {
   type: 'recurring';
   firstRunAtUtc: string;
-  intervalDays: number;
+  intervalHours: number;
   endAtUtc: string | null;
 }
 
@@ -253,6 +253,15 @@ function isAgentSettingsById(value: unknown): value is Record<string, AgentSetti
   return parseAgentSettingsById(value) !== null;
 }
 
+function isScheduledPromptIntervalHours(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= SCHEDULED_PROMPT_INTERVAL_HOURS_MIN &&
+    value <= SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
+  );
+}
+
 export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptTarget | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -267,19 +276,12 @@ export function normalizeScheduledPromptSchedule(value: unknown): ScheduledPromp
   const raw = asRecord(value);
   if (!raw || !isMinuteAlignedIso(raw.nextRunAt)) return null;
   if (raw.type === 'once') return { type: 'once', nextRunAt: raw.nextRunAt };
-  if (
-    raw.type !== 'recurring' ||
-    typeof raw.intervalDays !== 'number' ||
-    !Number.isSafeInteger(raw.intervalDays) ||
-    raw.intervalDays < SCHEDULED_PROMPT_INTERVAL_DAYS_MIN ||
-    raw.intervalDays > SCHEDULED_PROMPT_INTERVAL_DAYS_MAX
-  )
-    return null;
+  if (raw.type !== 'recurring' || !isScheduledPromptIntervalHours(raw.intervalHours)) return null;
   if (raw.endAt !== null && !isMinuteAlignedIso(raw.endAt)) return null;
   if (typeof raw.endAt === 'string' && raw.endAt < raw.nextRunAt) return null;
   return {
     type: 'recurring',
-    intervalDays: raw.intervalDays,
+    intervalHours: raw.intervalHours,
     nextRunAt: raw.nextRunAt,
     endAt: raw.endAt as string | null,
   };
@@ -337,17 +339,14 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
   } else if (
     schedule.type === 'recurring' &&
     isMinuteAlignedIso(schedule.firstRunAtUtc) &&
-    typeof schedule.intervalDays === 'number' &&
-    Number.isSafeInteger(schedule.intervalDays) &&
-    schedule.intervalDays >= SCHEDULED_PROMPT_INTERVAL_DAYS_MIN &&
-    schedule.intervalDays <= SCHEDULED_PROMPT_INTERVAL_DAYS_MAX &&
+    isScheduledPromptIntervalHours(schedule.intervalHours) &&
     (schedule.endAtUtc === null || isMinuteAlignedIso(schedule.endAtUtc)) &&
     (schedule.endAtUtc === null || schedule.endAtUtc >= schedule.firstRunAtUtc)
   ) {
     normalizedSchedule = {
       type: 'recurring',
       firstRunAtUtc: schedule.firstRunAtUtc,
-      intervalDays: schedule.intervalDays,
+      intervalHours: schedule.intervalHours,
       endAtUtc: schedule.endAtUtc as string | null,
     };
   }

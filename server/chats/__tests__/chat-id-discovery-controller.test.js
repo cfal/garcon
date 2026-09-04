@@ -80,7 +80,7 @@ describe('ChatIdDiscoveryController', () => {
     });
   });
 
-  it('deduplicates each run and serializes overlapping requests per chat', async () => {
+  it('serializes overlapping requests per chat', async () => {
     const delivery = deferred();
     const deliverControlInput = mock(() => delivery.promise);
     const { appendNotice, controller } = createController({ execution: { deliverControlInput } });
@@ -95,10 +95,20 @@ describe('ChatIdDiscoveryController', () => {
     delivery.resolve();
     await delivery.promise;
     await Promise.resolve();
+    expect(appendNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('delivers sequential requests from the same run after each attempt settles', async () => {
+    const deliverControlInput = mock(async () => undefined);
+    const { appendNotice, controller } = createController({ execution: { deliverControlInput } });
+
     controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
-    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-2', at: AT });
+    await Promise.resolve();
+    controller.request({ chatId: CHAT_ID, viewId: VIEW_ID, runId: 'run-1', at: AT });
+    await Promise.resolve();
 
     expect(deliverControlInput).toHaveBeenCalledTimes(2);
+    expect(appendNotice).toHaveBeenCalledTimes(2);
   });
 
   it('treats independent no-run markers as separate requests', async () => {

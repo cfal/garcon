@@ -1,10 +1,18 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 28 integrated design. Supersedes
+Status: revision 29 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 29 removes completed-attempt deduplication by emitting run from
+chat-ID discovery. A later request becomes eligible after the prior delivery
+settles even when both markers belong to one long-lived provider turn, as can
+happen across multiple compactions. Run identity remains delivery-routing
+correlation, not request identity; only the per-chat in-flight gate and the
+view-scoped control-turn recursion fence suppress markers. Request storage,
+delivery routing, and outcome semantics otherwise remain unchanged.
 
 Revision 28 keeps revision 27's single visible discovery outcome while
 restoring the request marker as one ledger-private hidden notice. The cleaned
@@ -1177,7 +1185,9 @@ The guarantee is durable before provider dispatch, not durable at send:
   marker until view replacement or deletion. Outside the per-chat in-flight
   delivery gate, a marker correlated to a different run remains eligible. This
   conservative recursion fence may drop an independent uncorrelated request
-  rather than recursively dispatching a control turn's late output.
+  rather than recursively dispatching a control turn's late output. After a
+  delivery settles, a later marker from the same emitting run is eligible
+  again; run identity is not a request-deduplication key.
 - A **future-turn queued input** remains only in the process-ephemeral
   queue, indexed by `clientMessageId`. It is not a transcript row.
   Dequeue is one synchronous block: commit the `user-input` row (the
@@ -2153,6 +2163,11 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     to a different run. The serialized delivery remains bound to its original
     emitting run; avoiding duplicate control input takes priority over an outcome
     for every overlapping marker.
+22. After a discovery delivery settles, a later marker is eligible again even
+    when it belongs to the same emitting run. Provider turns may survive multiple
+    compactions, so run identity cannot bound discovery requests. A looping
+    provider can therefore request repeated disclosures within one run; each
+    iteration requires another provider emission and control delivery.
 
 ## 17. Testing Strategy
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   SCHEDULED_PROMPT_CHAT_ID_TOKEN,
+  SCHEDULED_PROMPT_INTERVAL_HOURS_MAX,
+  SCHEDULED_PROMPT_INTERVAL_HOURS_MIN,
   SCHEDULED_PROMPT_MAX_LENGTH,
   normalizeScheduledPrompt,
   normalizeScheduledPromptDefinitionInput,
@@ -15,6 +17,19 @@ function definition(prompt) {
     schedule: { type: 'once', runAtUtc: '2030-01-01T09:00:00.000Z' },
     target: { type: 'existing-chat', chatId: CHAT_ID, busyBehavior: 'queue' },
     prompt,
+  };
+}
+
+function recurringDefinition(intervalHours) {
+  return {
+    schedule: {
+      type: 'recurring',
+      firstRunAtUtc: '2030-01-01T09:00:00.000Z',
+      intervalHours,
+      endAtUtc: null,
+    },
+    target: { type: 'existing-chat', chatId: CHAT_ID, busyBehavior: 'queue' },
+    prompt: 'Continue the work',
   };
 }
 
@@ -58,5 +73,25 @@ describe('scheduled prompt variables', () => {
         updatedAt: '2029-01-01T00:00:00.000Z',
       }),
     ).not.toBeNull();
+  });
+});
+
+describe('scheduled prompt recurring intervals', () => {
+  it('accepts the inclusive hourly interval bounds', () => {
+    for (const intervalHours of [SCHEDULED_PROMPT_INTERVAL_HOURS_MIN, SCHEDULED_PROMPT_INTERVAL_HOURS_MAX]) {
+      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalHours))?.schedule).toMatchObject({
+        type: 'recurring',
+        intervalHours,
+      });
+    }
+  });
+
+  it('rejects invalid hourly intervals and the retired day-based field', () => {
+    for (const intervalHours of [0, 1.5, SCHEDULED_PROMPT_INTERVAL_HOURS_MAX + 1]) {
+      expect(normalizeScheduledPromptDefinitionInput(recurringDefinition(intervalHours))).toBeNull();
+    }
+    const legacy = recurringDefinition(undefined);
+    legacy.schedule.intervalDays = 1;
+    expect(normalizeScheduledPromptDefinitionInput(legacy)).toBeNull();
   });
 });

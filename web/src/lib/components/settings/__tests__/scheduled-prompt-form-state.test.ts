@@ -158,17 +158,63 @@ describe('ScheduledPromptFormState', () => {
 		expect(definition.schedule.firstRunAtUtc).toBe(new Date(2030, 0, 1, 9, 0, 0, 0).toISOString());
 	});
 
+	it('builds hourly and daily intervals through one hourly contract', () => {
+		const form = createForm();
+		form.scheduleType = 'recurring';
+		form.targetType = 'existing-chat';
+		form.existingChatId = '123';
+		form.prompt = 'Continue the work';
+		form.intervalUnit = 'hours';
+		form.intervalAmount = 6;
+		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
+
+		const hourly = form.buildDefinition(now);
+		expect(hourly?.schedule).toMatchObject({ type: 'recurring', intervalHours: 6 });
+
+		form.intervalUnit = 'days';
+		form.intervalAmount = 2;
+		const daily = form.buildDefinition(now);
+		expect(daily?.schedule).toMatchObject({ type: 'recurring', intervalHours: 48 });
+
+		form.intervalAmount = 3_651;
+		expect(form.buildDefinition(now)).toBeNull();
+
+		form.intervalAmount = 1.5;
+		expect(form.buildDefinition(now)).toBeNull();
+	});
+
 	it('preserves an unchanged recurring UTC end instant', async () => {
 		const form = createForm();
 		const nextRunAt = new Date(2030, 0, 2, 9, 0, 0, 0).toISOString();
 		const endAt = new Date(2030, 0, 10, 10, 0, 0, 0).toISOString();
-		await form.initialize(existingPrompt({ type: 'recurring', intervalDays: 2, nextRunAt, endAt }));
+		await form.initialize(
+			existingPrompt({ type: 'recurring', intervalHours: 48, nextRunAt, endAt }),
+		);
 
 		const definition = form.buildDefinition(new Date(2030, 0, 1, 8, 0, 0, 0));
 
 		expect(definition?.schedule.type).toBe('recurring');
 		if (definition?.schedule.type !== 'recurring') throw new Error('Expected recurring schedule');
+		expect(form.intervalUnit).toBe('days');
+		expect(form.intervalAmount).toBe(2);
+		expect(definition.schedule.intervalHours).toBe(48);
 		expect(definition.schedule.endAtUtc).toBe(endAt);
+	});
+
+	it('hydrates non-day intervals as hours', async () => {
+		const form = createForm();
+		const nextRunAt = new Date(2030, 0, 2, 9, 0, 0, 0).toISOString();
+		await form.initialize(
+			existingPrompt({ type: 'recurring', intervalHours: 5, nextRunAt, endAt: null }),
+		);
+
+		expect(form.intervalUnit).toBe('hours');
+		expect(form.intervalAmount).toBe(5);
+		expect(form.buildDefinition(new Date(2030, 0, 1, 8, 0, 0, 0))?.schedule).toMatchObject({
+			type: 'recurring',
+			intervalHours: 5,
+			firstRunAtUtc: nextRunAt,
+		});
 	});
 
 	it('blocks a stale endpoint target until another model is explicitly selected', async () => {
