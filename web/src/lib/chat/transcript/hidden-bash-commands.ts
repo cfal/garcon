@@ -1,12 +1,10 @@
 import { BashToolUseMessage } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
 
-export type HiddenBashCommandPatternMode = 'regex' | 'glob';
+export const HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES = ['regex', 'glob'] as const;
 
-export const HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES: readonly HiddenBashCommandPatternMode[] = [
-	'regex',
-	'glob',
-];
+export type HiddenBashCommandPatternMode =
+	(typeof HIDDEN_BASH_COMMAND_PATTERN_MODE_VALUES)[number];
 
 export interface HiddenBashCommandPattern {
 	pattern: string;
