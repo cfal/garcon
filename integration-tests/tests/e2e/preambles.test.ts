@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { PreamblesSnapshot } from '../../../common/preambles.js';
 import type { ShareChatResponse } from '../../../common/share-types.js';
 import {
@@ -14,14 +16,14 @@ async function clickPreambleRowAction(
 ): Promise<void> {
   await fixture.page.waitForFunction(({ title, action }) => {
     const row = [...document.querySelectorAll<HTMLElement>('article')]
-      .find((element) => element.textContent?.includes(title));
+      .find((element) => element.querySelector('h3')?.textContent?.trim() === title);
     const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       .find((element) => element.getAttribute('aria-label') === action);
     return Boolean(button && !button.disabled);
   }, { timeout: 20_000 }, { title, action });
   await fixture.page.evaluate(({ title, action }) => {
     const row = [...document.querySelectorAll<HTMLElement>('article')]
-      .find((element) => element.textContent?.includes(title));
+      .find((element) => element.querySelector('h3')?.textContent?.trim() === title);
     const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
       .find((element) => element.getAttribute('aria-label') === action);
     if (!button) throw new Error(`Missing ${action} action for ${title}.`);
@@ -29,10 +31,77 @@ async function clickPreambleRowAction(
   }, { title, action });
 }
 
+async function exposeLightpandaTranscript(fixture: E2eFixture): Promise<void> {
+  await fixture.page.waitForFunction(
+    () => document.querySelector('[data-chat-scroll-viewport]')?.getAttribute('aria-busy')
+      === 'false',
+    { timeout: 20_000 },
+  );
+  await fixture.page.$eval('[data-chat-scroll-viewport]', (element) => {
+    Object.defineProperty(element, 'clientHeight', {
+      configurable: true,
+      get: () => 720,
+    });
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await fixture.page.waitForFunction(
+    () => [...document.querySelectorAll<HTMLElement>(
+      '[data-chat-message-type="transcript-notice"]',
+    )].some((element) => element.textContent?.includes('Preambles applied')),
+    { timeout: 20_000 },
+  );
+}
+
+async function selectDirectory(
+  fixture: E2eFixture,
+  name: string,
+  expectedPath: string,
+): Promise<void> {
+  await fixture.page.waitForFunction(
+    (expectedName) => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Select Directory"]');
+      return [...(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+        .some((button) => button.textContent?.trim() === expectedName);
+    },
+    { timeout: 20_000 },
+    name,
+  );
+  await fixture.page.evaluate((expectedName) => {
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Select Directory"]');
+    const button = [...(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === expectedName);
+    if (!button) throw new Error(`Missing directory picker entry: ${expectedName}`);
+    button.click();
+  }, name);
+  await fixture.page.waitForFunction(
+    (path) => [...document.querySelectorAll<HTMLInputElement>('input[aria-label="Project path"]')]
+      .some((input) => input.value === path),
+    { timeout: 20_000 },
+    expectedPath,
+  );
+  await fixture.page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Select Directory"]');
+    const close = dialog?.previousElementSibling;
+    if (!(close instanceof HTMLButtonElement)) throw new Error('Missing directory picker backdrop.');
+    close.click();
+  });
+  await fixture.page.waitForFunction(
+    () => document.querySelector('[role="dialog"][aria-label="Select Directory"]') === null,
+    { timeout: 20_000 },
+  );
+}
+
 describe('Lightpanda preambles', () => {
   test('[TLV5-PREAMBLE.06-LIGHTPANDA-01] manages the catalog and renders an application notice', async () => {
     await withE2eFixture('preambles', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
+      const primaryProjectPath = join(fixture.integration.dirs.project, 'primary');
+      const secondaryProjectPath = join(fixture.integration.dirs.project, 'secondary');
+      await Promise.all([
+        mkdir(primaryProjectPath, { recursive: true }),
+        mkdir(secondaryProjectPath, { recursive: true }),
+      ]);
+      await fixture.page.setViewport({ width: 1_280, height: 2_000 });
       await app.open();
       await fixture.waitForSpaWebSocket();
 
@@ -71,7 +140,7 @@ describe('Lightpanda preambles', () => {
         (elements) => (elements[1] as HTMLInputElement | undefined)?.click(),
       );
       await app.clickButton('Add project path');
-      await app.fill('input[aria-label="Project path"]', fixture.integration.dirs.project);
+      await selectDirectory(fixture, 'primary', primaryProjectPath);
       await fixture.page.evaluate(() => {
         const label = [...document.querySelectorAll<HTMLLabelElement>('label')]
           .find((element) => element.textContent?.includes('Apply to nested paths'));
@@ -79,6 +148,8 @@ describe('Lightpanda preambles', () => {
         if (!checkbox) throw new Error('Missing nested-path checkbox.');
         checkbox.click();
       });
+      await app.clickButton('Add project path');
+      await selectDirectory(fixture, 'secondary', secondaryProjectPath);
       await app.waitForButton('Save Preamble');
       await app.clickButton('Save Preamble');
       await app.waitForText('Project UI rules');
@@ -90,7 +161,10 @@ describe('Lightpanda preambles', () => {
       expect(scoped?.enabled).toBe(true);
       expect(scoped?.scope).toEqual({
         type: 'project-paths',
-        rules: [{ projectPath: fixture.integration.dirs.project, includeNested: true }],
+        rules: [
+          { projectPath: primaryProjectPath, includeNested: true },
+          { projectPath: secondaryProjectPath, includeNested: false },
+        ],
       });
 
       await app.fill(
@@ -114,6 +188,46 @@ describe('Lightpanda preambles', () => {
         { timeout: 20_000 },
       );
 
+      await app.clickButton('Close');
+      const held = fixture.integration.fakeProviders.openAi.holdNext({
+        model: fixture.integration.directAgents.openAi.provider.model,
+      });
+      const providerRequest = await app.startOpenAiDirectChat('visible UI boundary prompt', {
+        projectPath: primaryProjectPath,
+        requestMatcher: { model: fixture.integration.directAgents.openAi.provider.model },
+      });
+      expect(providerRequest.lastUserText).toContain('SYNTHETIC_PROJECT_UI_BODY');
+      expect(providerRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_UI_BODY');
+      expect(providerRequest.lastUserText).toEndWith('visible UI boundary prompt');
+      expect(held.releaseText('visible UI response')).toBeTrue();
+      await app.waitForAssistantMessageContaining('visible UI response');
+      await app.waitForChatProcessing(false);
+      await exposeLightpandaTranscript(fixture);
+
+      expect(await fixture.page.evaluate(() => {
+        const rows = [...document.querySelectorAll<HTMLElement>('[data-chat-message-type]')];
+        const noticeIndex = rows.findIndex((element) =>
+          element.dataset.chatMessageType === 'transcript-notice'
+          && element.textContent?.includes('Preambles applied'));
+        const userIndex = rows.findIndex((element) =>
+          element.dataset.chatMessageType === 'user-message'
+          && element.textContent?.trim() === 'visible UI boundary prompt');
+        const notice = rows[noticeIndex];
+        return {
+          adjacent: noticeIndex >= 0 && userIndex === noticeIndex + 1,
+          titles: notice
+            ? [...notice.querySelectorAll('span')].map((element) => element.textContent?.trim())
+            : [],
+        };
+      })).toEqual({
+        adjacent: true,
+        titles: ['Preambles applied', 'Project UI rules', 'Global UI rules'],
+      });
+
+      await app.clickButton('More actions');
+      await app.waitForMenuItemEnabled('Preambles');
+      await app.clickMenuItem('Preambles');
+      await app.waitForText('Global UI rules');
       await clickPreambleRowAction(fixture, 'Global UI rules', 'Edit Global UI rules');
       await app.fill('#preamble-title', 'Global UI rules renamed');
       await app.clickButton('Save Preamble');
@@ -124,7 +238,7 @@ describe('Lightpanda preambles', () => {
       await app.clickButton('Remove preamble', { last: true });
       await fixture.page.waitForFunction(
         () => ![...document.querySelectorAll<HTMLElement>('article')]
-          .some((element) => element.textContent?.includes('Project UI rules')),
+          .some((element) => element.querySelector('h3')?.textContent?.trim() === 'Project UI rules'),
         { timeout: 20_000 },
       );
 
@@ -133,20 +247,30 @@ describe('Lightpanda preambles', () => {
         'Global UI rules renamed',
       ]);
       expect(catalog.preambles[0]?.enabled).toBe(true);
-
       await app.clickButton('Close');
-      const held = fixture.integration.fakeProviders.openAi.holdNext({
-        model: fixture.integration.directAgents.openAi.provider.model,
-      });
-      const providerRequest = await app.startOpenAiDirectChat('visible UI boundary prompt', {
-        projectPath: fixture.integration.dirs.project,
-        requestMatcher: { model: fixture.integration.directAgents.openAi.provider.model },
-      });
-      expect(providerRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_UI_BODY');
-      expect(providerRequest.lastUserText).toEndWith('visible UI boundary prompt');
-      expect(held.releaseText('visible UI response')).toBeTrue();
-      await app.waitForAssistantMessageContaining('visible UI response');
-      await app.waitForChatProcessing(false);
+
+      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
+      await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
+      await exposeLightpandaTranscript(fixture);
+      expect(await fixture.page.evaluate(() => {
+        const notice = [...document.querySelectorAll<HTMLElement>(
+          '[data-chat-message-type="transcript-notice"]',
+        )].find((element) => element.textContent?.includes('Preambles applied'));
+        return notice?.innerText ?? '';
+      })).toContain('Project UI rules');
+      expect(await fixture.page.evaluate(() => {
+        const notice = [...document.querySelectorAll<HTMLElement>(
+          '[data-chat-message-type="transcript-notice"]',
+        )].find((element) => element.textContent?.includes('Preambles applied'));
+        return notice?.innerText ?? '';
+      })).toContain('Global UI rules');
+      expect(await fixture.page.evaluate(() => {
+        const notice = [...document.querySelectorAll<HTMLElement>(
+          '[data-chat-message-type="transcript-notice"]',
+        )].find((element) => element.textContent?.includes('Preambles applied'));
+        return notice?.innerText ?? '';
+      })).not.toContain('Global UI rules renamed');
 
       const chatId = await fixture.page.evaluate(() =>
         decodeURIComponent(globalThis.location.pathname.slice('/chat/'.length)),
@@ -159,7 +283,8 @@ describe('Lightpanda preambles', () => {
         waitUntil: [],
       });
       await app.waitForText('Preambles applied');
-      await app.waitForText('Global UI rules renamed');
+      await app.waitForText('Project UI rules');
+      await app.waitForText('Global UI rules');
       expect(await fixture.page.evaluate(() => {
         const rows = [...document.querySelectorAll<HTMLElement>('main .chat-message')];
         const noticeIndex = rows.findIndex((element) =>
@@ -170,6 +295,8 @@ describe('Lightpanda preambles', () => {
       })).toBeTrue();
       expect(await fixture.page.evaluate(() =>
         document.body.innerText.includes('SYNTHETIC_GLOBAL_UI_BODY'))).toBeFalse();
+      expect(await fixture.page.evaluate(() =>
+        document.body.innerText.includes('SYNTHETIC_PROJECT_UI_BODY'))).toBeFalse();
       fixture.assertNoBrowserErrors();
     });
   }, 60_000);
