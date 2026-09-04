@@ -7,6 +7,7 @@ import type {
   PreamblesMutationResponse,
   PreamblesSnapshot,
 } from '../../../common/preambles.js';
+import type { AgentRunFailedMessage } from '../../../common/ws-events.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import type { ChatMessagesPage } from '../../support/garcon-client.js';
 import { GarconApiError } from '../../support/garcon-client.js';
@@ -197,6 +198,41 @@ describe('preambles', () => {
       expect(afterSlashHeld.releaseText('after slash synthetic response')).toBeTrue();
       await fixture.client.waitForTurnTerminal(slashForkChatId, afterSlash.turnId);
       expect(applicationTitles(await fixture.client.getMessages(slashForkChatId))).toHaveLength(2);
+
+      const queuedSlashForkChatId = fixture.newChatId();
+      await fixture.client.forkChat({ sourceChatId, chatId: queuedSlashForkChatId });
+      const queuedSlashCursor = fixture.client.markEvents();
+      await fixture.client.enqueueNew(queuedSlashForkChatId, '/queued-provider-command');
+      const queuedSlashFailure = await fixture.client.waitForEvent(
+        (event): event is AgentRunFailedMessage => (
+          event.type === 'agent-run-failed' && event.chatId === queuedSlashForkChatId
+        ),
+        'queued preamble slash-command rejection',
+        { afterIndex: queuedSlashCursor },
+      );
+      expect(queuedSlashFailure.error).toContain('Matching preambles haven’t been sent yet');
+      expect((await fixture.client.getExecutionControl(queuedSlashForkChatId)).queue.entries)
+        .toHaveLength(0);
+      expect(userContents((await fixture.client.getMessages(queuedSlashForkChatId)).messages))
+        .not.toContain('/queued-provider-command');
+
+      const queuedRegularHeld = fixture.fakeProviders.openAi.holdNext({
+        model: fixture.directAgents.openAi.provider.model,
+      });
+      const queuedRegularCursor = fixture.client.markEvents();
+      await fixture.client.enqueueNew(queuedSlashForkChatId, 'queued regular message');
+      const queuedRegularRequest = await queuedRegularHeld.received;
+      expect(queuedRegularRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_OPENING_BODY');
+      expect(queuedRegularRequest.lastUserText).toEndWith('queued regular message');
+      expect(queuedRegularHeld.releaseText('queued regular response')).toBeTrue();
+      await fixture.client.waitForTurnTerminal(queuedSlashForkChatId, undefined, {
+        afterIndex: queuedRegularCursor,
+      });
+      expectApplicationImmediatelyBefore(
+        await fixture.client.getMessages(queuedSlashForkChatId),
+        'queued regular message',
+        ['Global opening', 'Nested project', 'Global closing'],
+      );
 
       const opening = catalog.preambles[0] as Preamble;
       const updated = await fixture.client.put<PreamblesMutationResponse>('/api/v1/preambles', {

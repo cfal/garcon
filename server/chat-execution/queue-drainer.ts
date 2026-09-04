@@ -6,6 +6,7 @@ import {
   type StoredQueueEntry,
 } from './control-state.ts';
 import { createLogger } from '../lib/log.ts';
+import { DomainError } from '../lib/domain-error.ts';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { DequeuedTurnInput } from './chat-execution-control-transitions.ts';
@@ -94,6 +95,7 @@ export class QueueDrainer {
 
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;
+      let admissionFailure: DomainError | null = null;
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
         result = await controls.dequeueNextTurn(chatId, (input) => {
@@ -104,7 +106,16 @@ export class QueueDrainer {
             return true;
           }
           options = optionsForQueuedTurn(this.deps.getDrainOptions(chatId), input.entry);
-          inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
+          try {
+            inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
+          } catch (error) {
+            if (
+              !(error instanceof DomainError)
+              || error.code !== 'PREAMBLE_SLASH_COMMAND_BLOCKED'
+            ) throw error;
+            admissionFailure = error;
+            return false;
+          }
           return inputInserted;
         });
       } catch (error) {
@@ -117,6 +128,15 @@ export class QueueDrainer {
         return;
       }
       if (!options) throw new Error('Queued input admission did not produce dispatch options');
+      if (admissionFailure) {
+        logger.warn('queue: queued turn rejected before admission', {
+          chatId,
+          entryId: result.input.entry.id,
+          code: admissionFailure.code,
+        });
+        callbacks.publishTurnFailed(chatId, admissionFailure.message, options);
+        continue;
+      }
       if (!result.inserted) continue;
       try {
         const input = result.input;
