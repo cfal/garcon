@@ -437,21 +437,21 @@
 		}
 	});
 
-	// Opens the settings dialog to the Providers tab on the first authenticated
-	// load right after a successful registration. Gated on a persisted
-	// flag set during the registration flow so cold loads for existing users
-	// or auth-disabled sessions do not receive a blocking onboarding modal.
-	let settingsAutoOpened = $state(false);
+	// Opens the onboarding wizard on the first authenticated load right after
+	// a successful registration. Gated on a persisted flag set during the
+	// registration flow so cold loads for existing users or auth-disabled
+	// sessions do not receive a blocking onboarding modal.
+	let onboardingAutoOpened = $state(false);
 	$effect(() => {
-		if (auth.isLoading || !auth.isAuthenticated || settingsAutoOpened) return;
+		if (auth.isLoading || !auth.isAuthenticated || onboardingAutoOpened) return;
 		if (auth.authDisabled) {
-			settingsAutoOpened = true;
+			onboardingAutoOpened = true;
 			return;
 		}
-		settingsAutoOpened = true;
+		onboardingAutoOpened = true;
 		if (getLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered) === '1') {
 			removeLocalStorageItem(LOCAL_STORAGE_KEYS.justRegistered);
-			appShell.openSettings('providers');
+			appShell.openOnboardingWizard();
 		}
 	});
 </script>
