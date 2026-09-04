@@ -38,6 +38,7 @@
 		onPermissionDecision?: (permissionOccurrenceId: string, decision: PermissionDecision) => void;
 		onExitPlanMode?: (permissionOccurrenceId: string, choice: string, plan: string) => void;
 		onForkChat?: (upToSeq?: number) => void;
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow: boolean;
 		itemState: ConversationFeedItemState;
@@ -61,6 +62,7 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow,
 		itemState,
@@ -110,6 +112,7 @@
 			{onPermissionDecision}
 			{onExitPlanMode}
 			{onForkChat}
+			{onAppendToDraft}
 			{onGenerateTitleFromMessage}
 			{canForkAtMessageNow}
 			{itemState}

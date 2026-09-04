@@ -47,6 +47,17 @@ describe('ChatDraftStore', () => {
 		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBe('Existing\n\nReview block');
 	});
 
+	it('skips duplicate suppression only when appending allows duplicates', () => {
+		const drafts = new ChatDraftStore();
+		drafts.appendBlock('chat-a', 'Review block');
+
+		expect(drafts.appendBlock('chat-a', 'Review block')).toBe('duplicate');
+		expect(drafts.appendBlock('chat-a', 'Review block', { allowDuplicate: true })).toBe(
+			'appended',
+		);
+		expect(drafts.view('chat-a').text).toBe('Review block\n\nReview block');
+	});
+
 	it.each([
 		{ initial: '', expected: 'Review block' },
 		{ initial: 'Existing\n', expected: 'Existing\n\nReview block' },

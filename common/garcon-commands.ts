@@ -65,13 +65,17 @@ export function extractGarconCommands(
   const content = message.content;
   let start = 0;
   let end = content.length;
+  // Providers append trailing whitespace to standalone command messages, so
+  // commands are recognized against the trimmed trailing edge while the
+  // retained remainder keeps its original bytes.
+  let parseEnd = trimEndIndex(content, start, end);
   const leading: GarconEdgeCommand[] = [];
   const trailing: GarconEdgeCommand[] = [];
   const issues: GarconCommandIssue[] = [];
   const malformedStarts = new Set<number>();
 
   while (start < end) {
-    const parsed = parseLeadingCommand(content, start, end);
+    const parsed = parseLeadingCommand(content, start, parseEnd);
     if (parsed.kind === 'none') break;
     if (parsed.kind === 'malformed') {
       recordIssue(
@@ -84,11 +88,11 @@ export function extractGarconCommands(
       break;
     }
     leading.push(parsed.command);
-    start = trimStartIndex(content, parsed.end, end);
+    start = trimStartIndex(content, parsed.end, parseEnd);
   }
 
   while (start < end) {
-    const parsed = parseTrailingCommand(content, start, end);
+    const parsed = parseTrailingCommand(content, start, parseEnd);
     if (parsed.kind === 'none') break;
     if (parsed.kind === 'malformed') {
       recordIssue(
@@ -102,6 +106,7 @@ export function extractGarconCommands(
     }
     trailing.push(parsed.command);
     end = trimEndIndex(content, start, parsed.start);
+    parseEnd = end;
   }
 
   if (leading.length === 0 && trailing.length === 0 && issues.length === 0) {
@@ -157,7 +162,6 @@ function parseLeadingCommand(content: string, start: number, end: number): Parse
     && content.startsWith(GARCON_GET_CHAT_ID, start)
   ) {
     const commandEnd = start + GARCON_GET_CHAT_ID.length;
-    if (hasOnlyTrailingWhitespace(content, commandEnd, end)) return { kind: 'none' };
     return {
       kind: 'valid',
       command: { type: 'get-chat-id' },
@@ -183,17 +187,12 @@ function parseLeadingCommand(content: string, start: number, end: number): Parse
     return { kind: 'malformed', command: 'send-message', candidateStart: start };
   }
   const commandEnd = closerStart + GARCON_SEND_MESSAGE_CLOSE.length;
-  if (hasOnlyTrailingWhitespace(content, commandEnd, end)) return { kind: 'none' };
   return {
     kind: 'valid',
     command,
     start,
     end: commandEnd,
   };
-}
-
-function hasOnlyTrailingWhitespace(content: string, commandEnd: number, end: number): boolean {
-  return commandEnd < end && content.slice(commandEnd, end).trim().length === 0;
 }
 
 function parseTrailingCommand(content: string, start: number, end: number): ParsedEdge {

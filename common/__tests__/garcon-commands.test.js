@@ -37,6 +37,42 @@ describe('Garcon edge commands', () => {
     });
     expect(extractGarconCommands(new AssistantMessage(AT, GARCON_GET_CHAT_ID)))
       .toEqual({ message: null, commands: [{ type: 'get-chat-id' }], issues: [] });
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `${GARCON_GET_CHAT_ID}\n\n`,
+    ))).toEqual({ message: null, commands: [{ type: 'get-chat-id' }], issues: [] });
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `answer\n${GARCON_GET_CHAT_ID}\n`,
+    ))).toEqual({
+      message: new AssistantMessage(AT, 'answer'),
+      commands: [{ type: 'get-chat-id' }],
+      issues: [],
+    });
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `${GARCON_GET_CHAT_ID}\nanswer  `,
+    ))).toEqual({
+      message: new AssistantMessage(AT, 'answer  '),
+      commands: [{ type: 'get-chat-id' }],
+      issues: [],
+    });
+  });
+
+  it('extracts whole-message commands despite trailing whitespace', () => {
+    expect(extractGarconCommands(new AssistantMessage(
+      AT,
+      `${send(FIRST, false)}\n`,
+    ))).toEqual({
+      message: null,
+      commands: [{
+        type: 'send-message',
+        recipients: [FIRST],
+        hideSender: false,
+        body: 'message',
+      }],
+      issues: [],
+    });
   });
 
   it('extracts multiple command kinds in document order from both edges', () => {
@@ -176,6 +212,11 @@ describe('Garcon edge commands', () => {
       expect(result?.commands).toEqual([]);
       expect(result?.issues).toHaveLength(1);
     }
+    const padded = `${send('invalid', false)}\n`;
+    const result = extractGarconCommands(new AssistantMessage(AT, padded));
+    expect(result?.message?.content).toBe(padded);
+    expect(result?.commands).toEqual([]);
+    expect(result?.issues).toHaveLength(1);
   });
 
   it('rejects more than 16 unique recipients but permits duplicates within the cap', () => {
@@ -191,11 +232,10 @@ describe('Garcon edge commands', () => {
     )).commands[0].recipients).toEqual([FIRST]);
   });
 
-  it('does not consume commands in prose, outer whitespace, or non-assistant rows', () => {
+  it('does not consume commands in prose, leading whitespace, or non-assistant rows', () => {
     for (const content of [
       `Explanation ${GARCON_GET_CHAT_ID}`,
       ` ${GARCON_GET_CHAT_ID}`,
-      `${GARCON_GET_CHAT_ID} `,
       '<garcon-get-chat-id/>',
       '<GARCON-GET-CHAT-ID />',
       `Example: ${send(FIRST, false)}`,

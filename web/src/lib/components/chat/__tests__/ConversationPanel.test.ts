@@ -178,6 +178,7 @@ function makeActions(): ConversationPanelActions {
 		decidePermission: vi.fn(),
 		exitPlanMode: vi.fn(),
 		fork: vi.fn(),
+		appendToDraft: vi.fn(),
 		generateTitle: vi.fn().mockResolvedValue(undefined),
 		interruptQueue: vi.fn().mockResolvedValue(undefined),
 		steerQueue: vi.fn().mockResolvedValue(undefined),

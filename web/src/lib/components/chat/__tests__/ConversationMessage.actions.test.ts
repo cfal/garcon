@@ -4,11 +4,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
+const copyToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
+
 const appCss = readFileSync('src/app.css', 'utf8');
+
+function selectIn(element: HTMLElement, text: string): void {
+	const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+	let node = walker.nextNode();
+	while (node && !(node.textContent ?? '').includes(text)) node = walker.nextNode();
+	if (!node) throw new Error(`no text node containing ${text}`);
+	const start = (node.textContent ?? '').indexOf(text);
+	const selection = window.getSelection();
+	const range = document.createRange();
+	range.setStart(node, start);
+	range.setEnd(node, start + text.length);
+	selection?.removeAllRanges();
+	selection?.addRange(range);
+}
+
+function menuItemLabels(): (string | undefined)[] {
+	return screen.getAllByRole('menuitem').map((item) => item.textContent?.trim());
+}
 
 describe('ConversationMessage actions', () => {
 	afterEach(() => {
 		cleanup();
+		window.getSelection()?.removeAllRanges();
 	});
 
 	it('exposes the canonical transcript row identity without adding a wrapper', () => {
@@ -400,5 +422,76 @@ describe('ConversationMessage actions', () => {
 		});
 		expect(textSurface.textContent).toBe(text);
 		expect(textSurface.className).toContain('select-text');
+	});
+
+	it('swaps copy text for selection actions when the selection is inside the message', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'selected text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		selectIn(trigger, 'selected text');
+		await fireEvent.contextMenu(trigger);
+
+		expect(await screen.findByRole('menuitem', { name: 'Copy selection' })).toBeTruthy();
+		expect(menuItemLabels()).toEqual([
+			'Copy selection',
+			'Quote selection',
+			'Select text',
+			'Send to new session',
+		]);
+	});
+
+	it('copies the snapshotted selection even after the live selection changes', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'selected text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		selectIn(trigger, 'selected text');
+		await fireEvent.contextMenu(trigger);
+		await screen.findByRole('menuitem', { name: 'Copy selection' });
+		window.getSelection()?.removeAllRanges();
+
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy selection' }));
+
+		expect(copyToClipboard).toHaveBeenCalledWith('selected text');
+	});
+
+	it('quotes the selection into the chat draft and repeats on request', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'selected text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		selectIn(trigger, 'selected text');
+		await fireEvent.contextMenu(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Quote selection' }));
+
+		const preview = screen.getByTestId('draft-preview');
+		expect(preview.textContent).toBe('> selected text\n\n');
+
+		selectIn(trigger, 'selected text');
+		await fireEvent.contextMenu(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Quote selection' }));
+
+		expect(preview.textContent).toBe('> selected text\n\n> selected text\n\n');
+	});
+
+	it('keeps the plain message menu when the selection is outside the message', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'selected text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		const outside = document.createElement('div');
+		outside.textContent = 'elsewhere';
+		document.body.append(outside);
+		selectIn(outside, 'elsewhere');
+		await fireEvent.contextMenu(trigger);
+		outside.remove();
+
+		expect(await screen.findByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: 'Quote selection' })).toBeNull();
 	});
 });
