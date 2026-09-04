@@ -19,7 +19,6 @@ interface ChatIdDiscoveryRequest {
 }
 
 interface ChatIdDiscoveryAttempt {
-  readonly runId: string | null;
   readonly abortController: AbortController;
   pending: boolean;
 }
@@ -54,9 +53,7 @@ export class ChatIdDiscoveryController {
     if (controlRunId && (!hasRun || controlRunId === input.runId)) return;
     const current = this.#attempts.get(input.chatId);
     if (current?.pending) return;
-    if (hasRun && current?.runId === input.runId) return;
     const attempt = {
-      runId: input.runId,
       abortController: new AbortController(),
       pending: true,
     };

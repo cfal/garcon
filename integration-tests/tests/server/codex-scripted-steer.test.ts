@@ -125,26 +125,35 @@ describe('scripted Codex strict steering', () => {
     });
   }, 120_000);
 
-  test('[TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01] immediately steers a requested chat ID without creating user input', async () => {
+  test('[TLV5-CHAT-ID-DISCOVERY.05-CODEX-SCRIPTED-01] immediately steers sequential chat ID requests in one run without creating user input', async () => {
     if (!environment) throw new Error('Scripted Codex environment was not initialized.');
     const testEnvironment = environment;
-    let releasePath = '';
+    let firstReleasePath = '';
+    let secondReleasePath = '';
     const receivedReply = marker('CHAT_ID_RECEIVED');
     testEnvironment.model.scriptTurn(() => [
       codexAssistantMessage(`<garcon-get-chat-id />${marker('CHAT_ID_REQUEST')}`),
       codexExecCommandCall(
-        'call_chat_id_gate',
-        `while [ ! -f "${releasePath}" ]; do sleep 0.05; done`,
+        'call_first_chat_id_gate',
+        `while [ ! -f "${firstReleasePath}" ]; do sleep 0.05; done`,
       ),
     ]);
-    const steeredHeld = testEnvironment.model.scriptHeldTurn([
+    const firstSteeredHeld = testEnvironment.model.scriptHeldTurn(() => [
+      codexAssistantMessage(`<garcon-get-chat-id />${marker('CHAT_ID_SECOND_REQUEST')}`),
+      codexExecCommandCall(
+        'call_second_chat_id_gate',
+        `while [ ! -f "${secondReleasePath}" ]; do sleep 0.05; done`,
+      ),
+    ]);
+    const secondSteeredHeld = testEnvironment.model.scriptHeldTurn([
       codexAssistantMessage(receivedReply),
     ]);
 
     try {
       await withIntegrationFixture('codex-scripted-chat-id-discovery', async (fixture) => {
         const chatId = fixture.newChatId();
-        releasePath = path.join(fixture.dirs.project, 'release-chat-id-tool');
+        firstReleasePath = path.join(fixture.dirs.project, 'release-first-chat-id-tool');
+        secondReleasePath = path.join(fixture.dirs.project, 'release-second-chat-id-tool');
         const cursor = fixture.client.markEvents();
         const active = await fixture.client.startChat(liveCodexStartRequest({
           chatId,
@@ -163,13 +172,31 @@ describe('scripted Codex strict steering', () => {
           `Codex chat ID disclosure for ${chatId}`,
           { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
         );
-        await writeFile(releasePath, 'release', 'utf8');
+        await writeFile(firstReleasePath, 'release', 'utf8');
 
-        const steeredRequest = await steeredHeld.requested;
-        expect(steeredRequest.userTexts.join('\n')).toContain(
+        const firstSteeredRequest = await firstSteeredHeld.requested;
+        expect(firstSteeredRequest.userTexts.join('\n')).toContain(
           `<garcon-chat-id>${chatId}</garcon-chat-id>`,
         );
-        steeredHeld.release();
+        const secondCursor = fixture.client.markEvents();
+        firstSteeredHeld.release();
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some((entry) => (
+              entry.message.type === 'transcript-notice'
+              && entry.message.detail?.type === 'chat-id-disclosure'
+            )),
+          `second Codex chat ID disclosure for ${chatId}`,
+          { afterIndex: secondCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+        await writeFile(secondReleasePath, 'release', 'utf8');
+
+        const secondSteeredRequest = await secondSteeredHeld.requested;
+        expect(secondSteeredRequest.userTexts.join('\n')).toContain(
+          `<garcon-chat-id>${chatId}</garcon-chat-id>`,
+        );
+        secondSteeredHeld.release();
         expectFinished((await fixture.client.waitForTurnTerminal(chatId, active.turnId, {
           afterIndex: cursor,
           timeoutMs: LIVE_TURN_TIMEOUT_MS,
@@ -181,11 +208,18 @@ describe('scripted Codex strict steering', () => {
         expect(JSON.stringify(page.messages)).not.toContain('<garcon-chat-id>');
         expect(messagesOfType(page.messages, 'transcript-notice')
           .filter((message) => message.detail?.type.startsWith('chat-id-')))
-          .toEqual([expect.objectContaining({
-            title: 'Chat ID auto-discovery',
-            content: `Sent chat ID ${chatId} to agent.`,
-            detail: { type: 'chat-id-disclosure' },
-          })]);
+          .toEqual([
+            expect.objectContaining({
+              title: 'Chat ID auto-discovery',
+              content: `Sent chat ID ${chatId} to agent.`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+            expect.objectContaining({
+              title: 'Chat ID auto-discovery',
+              content: `Sent chat ID ${chatId} to agent.`,
+              detail: { type: 'chat-id-disclosure' },
+            }),
+          ]);
 
         await reloadUntilNativeContains(fixture, chatId, receivedReply);
         const reloaded = await fixture.client.getMessages(chatId);
@@ -197,8 +231,14 @@ describe('scripted Codex strict steering', () => {
         prepareWorkspace: testEnvironment.prepareWorkspace,
       });
     } finally {
-      if (releasePath) await writeFile(releasePath, 'release', 'utf8').catch(() => undefined);
-      steeredHeld.release();
+      if (firstReleasePath) {
+        await writeFile(firstReleasePath, 'release', 'utf8').catch(() => undefined);
+      }
+      if (secondReleasePath) {
+        await writeFile(secondReleasePath, 'release', 'utf8').catch(() => undefined);
+      }
+      firstSteeredHeld.release();
+      secondSteeredHeld.release();
       testEnvironment.model.reset();
     }
   }, 120_000);
