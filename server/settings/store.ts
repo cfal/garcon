@@ -40,6 +40,7 @@ import {
 import type { IChatRegistry } from '../chats/store.js';
 import { isRecord } from '../../common/json.js';
 import type { ReorderChatRequest } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 
 import type {
   ChatFolder,
@@ -480,6 +481,12 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     isKnownChat: (chatId: string) => boolean,
   ): Promise<ChatReorderResult> {
     return this.#chatOrder.reorderChat(request, isKnownChat);
+  }
+
+  async sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+  ): Promise<{ changed: boolean }> {
+    return this.#chatOrder.sortChatOrder(compareChatIds);
   }
 
   getSavedSearches(): SavedChatSearch[] {

@@ -11,9 +11,12 @@ import type { JsonObject } from '../../common/json.js';
 import { AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS } from '../../common/handoff-timeouts.js';
 import {
   parseReorderChatRequest,
+  parseSortChatOrderRequest,
   type ReorderChatRequest,
   type ReorderChatResponse,
+  type SortChatOrderResponse,
 } from '../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../common/chat-order-sort.js';
 import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
@@ -57,6 +60,7 @@ import {
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import { safeFenceDiagnostic, StaleTranscriptViewError } from '../ledger/errors.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
+import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
@@ -154,6 +158,7 @@ interface SettingsDep {
     request: ReorderChatRequest,
     isKnownChat: (chatId: string) => boolean,
   ): Promise<ChatReorderResult>;
+  sortChatOrder(compareChatIds: ChatOrderIdComparator): Promise<{ changed: boolean }>;
 }
 
 interface PathCacheDep {
@@ -720,6 +725,33 @@ export default function createChatRoutes({
     }
   }
 
+  async function postSortChatOrder(body: unknown): Promise<Response> {
+    try {
+      const request = parseSortChatOrderRequest(body);
+      if (!request) {
+        return jsonError(
+          'Invalid chat order sort request',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
+
+      const compareChatIds = buildChatOrderComparator(
+        request.sortKey,
+        metadata.listAllChatMetadata(),
+      );
+      const result = await settings.sortChatOrder(compareChatIds);
+      return Response.json({
+        success: true,
+        sortKey: request.sortKey,
+        changed: result.changed,
+      } satisfies SortChatOrderResponse);
+    } catch (error: unknown) {
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function patchChatTags(body: Record<string, unknown>): Promise<Response> {
     try {
       const chatId = String(body.chatId || '').trim();
@@ -1208,6 +1240,7 @@ export default function createChatRoutes({
     '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },
     '/api/v1/chats/read': { POST: withJsonBody(postMarkRead) },
     '/api/v1/chats/reorder': { POST: withJsonBody(postReorderChat) },
+    '/api/v1/chats/sort': { POST: withJsonBody(postSortChatOrder) },
     '/api/v1/chats/tags': { PATCH: withJsonBody(patchChatTags) },
   };
 }
