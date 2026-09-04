@@ -20,11 +20,11 @@ describe('LocalSettingsStore', () => {
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGrouping).toBe('project');
+		expect(store.sidebarGrouping).toBe('project-and-activity');
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
-		expect(store.sidebarChatItemLayout).toBe('default');
-		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarChatItemLayout).toBe('compact');
+		expect(store.sidebarSortMode).toBe('recent');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('same-window');
@@ -51,7 +51,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('persists every chat item layout and defaults malformed values to default', () => {
+	it('persists every chat item layout and defaults malformed values to compact', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('sidebarChatItemLayout', 'single-line');
@@ -69,7 +69,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarChatItemLayout: 'condensed' }),
 		);
 		const malformed = createLocalSettingsStore();
-		expect(malformed.sidebarChatItemLayout).toBe('default');
+		expect(malformed.sidebarChatItemLayout).toBe('compact');
 		malformed.destroy();
 	});
 
@@ -435,7 +435,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('falls back to manual for invalid sidebar sort mode', () => {
+	it('falls back to recent for invalid sidebar sort mode', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({ sidebarSortMode: 'chronological' }),
@@ -443,7 +443,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarSortMode).toBe('recent');
 
 		store.destroy();
 	});
@@ -486,7 +486,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
 		);
 		const oldToken = createLocalSettingsStore();
-		expect(oldToken.sidebarGrouping).toBe('project');
+		expect(oldToken.sidebarGrouping).toBe('project-and-activity');
 		oldToken.destroy();
 	});
 
