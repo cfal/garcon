@@ -4,8 +4,10 @@ import {
   type AgentNativeForkRequest,
   type AgentEstablishedSession,
 } from '@garcon/server-agent-interface';
+import { missingNativePoint } from '@garcon/server-agent-common/forking/jsonl-forking';
 import { CodexAppServerRpcError } from './app-server/client.js';
 import type { CodexHistoryProfile } from './history-profile.js';
+import { codexTurnIdFromEntryId } from './message-source-identity.js';
 
 export interface CodexForkingOptions {
   readonly journal: AgentNativeFork;
@@ -18,6 +20,12 @@ export interface CodexForkingOptions {
   }) => Promise<CodexHistoryProfile | null>;
   readonly forkPaginatedWhole: (
     request: AgentNativeForkRequest,
+  ) => Promise<AgentEstablishedSession | null>;
+  // Forks through the named turn, inclusive. The app-server rejects an in-progress or unknown
+  // turn, which maps to the same typed refusal the JSONL point path produces.
+  readonly forkPaginatedPoint: (
+    request: AgentNativeForkRequest,
+    lastTurnId: string,
   ) => Promise<AgentEstablishedSession | null>;
 }
 
@@ -32,14 +40,14 @@ export function createCodexForking(options: CodexForkingOptions): AgentNativeFor
       });
       if (!profile) return options.journal.fork(request);
       if (profile.mode === 'legacy') return options.journal.fork(request);
-      if (request.providerMeta) throw paginatedForkUnsupported('fork-at-message');
+      if (request.providerMeta) return forkPaginatedAtTurn(options, request);
 
       try {
         const forked = await options.forkPaginatedWhole(request);
         if (forked) return { kind: 'materialized', session: forked };
-        throw paginatedForkUnsupported('fork');
+        throw paginatedForkUnsupported();
       } catch (error) {
-        if (isUnsupportedPaginatedFork(error)) throw paginatedForkUnsupported('fork');
+        if (isUnsupportedPaginatedFork(error)) throw paginatedForkUnsupported();
         throw error;
       }
     },
@@ -47,6 +55,26 @@ export function createCodexForking(options: CodexForkingOptions): AgentNativeFor
       return options.journal.discard(session, signal);
     },
   };
+}
+
+// Paginated history forks at turn granularity, so the anchor row's source identity names the turn
+// to fork through. An identity the provider has not correlated yet cannot name one and refuses as
+// unsettled, matching the JSONL point path.
+async function forkPaginatedAtTurn(
+  options: CodexForkingOptions,
+  request: AgentNativeForkRequest,
+): Promise<ReturnType<AgentNativeFork['fork']>> {
+  const lastTurnId = codexTurnIdFromEntryId(request.providerMeta?.entryId);
+  if (!lastTurnId) throw missingNativePoint();
+  try {
+    const forked = await options.forkPaginatedPoint(request, lastTurnId);
+    if (forked) return { kind: 'materialized', session: forked };
+    throw paginatedForkUnsupported();
+  } catch (error) {
+    if (isUnsettledPaginatedForkPoint(error)) throw missingNativePoint();
+    if (isUnsupportedPaginatedFork(error)) throw paginatedForkUnsupported();
+    throw error;
+  }
 }
 
 export function isCodexThreadNotFound(error: unknown): boolean {
@@ -75,13 +103,23 @@ function isUnsupportedPaginatedFork(error: unknown): boolean {
     && /paginated_threads|paginated threads|not supported/i.test(value.message);
 }
 
-function paginatedForkUnsupported(operation: 'fork' | 'fork-at-message'): AgentIntegrationError {
+// The app-server rejects a lastTurnId naming an in-progress turn or a turn absent from native
+// history, either as INVALID_REQUEST. Both mean the selected point is not a settled native
+// position yet, so they share the JSONL point path's typed retryable refusal.
+// https://github.com/openai/codex/blob/41e22fee981a63b3698df7ed36bad393cda24715/codex-rs/thread-store/src/local/paginated_fork.rs#L114-L120
+// https://github.com/openai/codex/blob/41e22fee981a63b3698df7ed36bad393cda24715/codex-rs/thread-store/src/local/thread_history/turn_lookup.rs#L47-L49
+function isUnsettledPaginatedForkPoint(error: unknown): boolean {
+  return error instanceof CodexAppServerRpcError
+    && error.code === -32600
+    && (/identifies an in-progress turn/.test(error.message)
+      || /^turn not found: /.test(error.message));
+}
+
+function paginatedForkUnsupported(): AgentIntegrationError {
   return new AgentIntegrationError(
     'OPERATION_UNSUPPORTED',
-    operation === 'fork-at-message'
-      ? 'Codex paginated history cannot be forked at a message'
-      : 'Codex paginated history cannot be forked by the installed Codex CLI',
+    'Codex paginated history cannot be forked by the installed Codex CLI',
     false,
-    { operation, historyMode: 'paginated', provider: 'codex' },
+    { operation: 'fork', historyMode: 'paginated', provider: 'codex' },
   );
 }

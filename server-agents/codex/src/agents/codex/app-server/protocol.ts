@@ -1,4 +1,4 @@
-export type JsonRpcId = number;
+export type JsonRpcId = string | number;
 
 export interface JsonRpcSuccess<T = unknown> {
   id: JsonRpcId;
@@ -35,8 +35,13 @@ export interface InitializeResponse {
 export interface CodexThread {
   id: string;
   forkedFromId: string | null;
+  parentThreadId?: string | null;
+  sessionId?: string;
+  historyMode?: 'legacy' | 'paginated';
   preview: string;
   ephemeral: boolean;
+  model?: string | null;
+  reasoningEffort?: string | null;
   modelProvider: string;
   createdAt: number;
   updatedAt: number;
@@ -62,9 +67,12 @@ type CodexHttpErrorInfo = { httpStatusCode: number | null };
 
 export type CodexErrorInfo =
   | 'contextWindowExceeded'
+  | 'sessionBudgetExceeded'
   | 'usageLimitExceeded'
+  | 'rateLimitExceeded'
   | 'serverOverloaded'
   | 'cyberPolicy'
+  | 'misalignmentPolicyViolation'
   | 'internalServerError'
   | 'unauthorized'
   | 'badRequest'
@@ -81,6 +89,11 @@ export interface CodexTurnError {
   message: string;
   codexErrorInfo: CodexErrorInfo | null;
   additionalDetails: string | null;
+  misalignment?: {
+    errorType?: string | null;
+    detailedExplanation?: string | null;
+    steer?: { message: string } | null;
+  } | null;
 }
 
 export interface CodexTurn {
@@ -108,6 +121,25 @@ export interface ThreadTurnsListResponse {
   readonly backwardsCursor: string | null;
 }
 
+export interface ThreadItemEntry {
+  readonly turnId: string;
+  readonly item: CodexThreadItem;
+}
+
+export interface ThreadItemsListParams {
+  readonly threadId: string;
+  readonly turnId?: string | null;
+  readonly cursor?: string | null;
+  readonly limit?: number;
+  readonly sortDirection: 'asc' | 'desc';
+}
+
+export interface ThreadItemsListResponse {
+  readonly data: ThreadItemEntry[];
+  readonly nextCursor: string | null;
+  readonly backwardsCursor: string | null;
+}
+
 export type CodexUserInput =
   | { type: 'text'; text: string; text_elements?: unknown[] }
   | { type: 'image'; url: string }
@@ -121,8 +153,17 @@ export type CodexWebSearchAction =
   | { type: 'findInPage' | 'find_in_page'; url?: string | null; pattern?: string | null }
   | { type: 'other' };
 
-export type CodexCollabAgentTool = 'spawnAgent' | 'sendInput' | 'resumeAgent' | 'wait' | 'closeAgent';
-export type CodexCollabAgentToolCallStatus = 'inProgress' | 'completed' | 'failed';
+export type CodexCollabAgentTool =
+  | 'spawnAgent'
+  | 'sendInput'
+  | 'resumeAgent'
+  | 'wait'
+  | 'closeAgent'
+  | 'sendMessage'
+  | 'followupTask'
+  | 'interruptAgent'
+  | 'listAgents';
+export type CodexCollabAgentToolCallStatus = 'inProgress' | 'completed' | 'failed' | 'interrupted';
 export type CodexCollabAgentStatus =
   | 'pendingInit'
   | 'running'
@@ -136,6 +177,12 @@ export interface CodexCollabAgentState {
   status: CodexCollabAgentStatus;
   message: string | null;
 }
+
+export type CodexFunctionCallOutputContentItem =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; image_url: string; detail?: 'auto' | 'low' | 'high' | 'original' | null }
+  | { type: 'input_audio'; audio_url: string }
+  | { type: 'encrypted_content'; encrypted_content: string };
 
 export type CodexThreadItem =
   | { type: 'userMessage'; id: string; content: CodexUserInput[]; clientId?: string | null }
@@ -180,6 +227,13 @@ export type CodexThreadItem =
       durationMs: number | null;
     }
   | {
+      type: 'functionCallOutput';
+      id: string;
+      name: string;
+      namespace?: string | null;
+      output: string | CodexFunctionCallOutputContentItem[];
+    }
+  | {
       type: 'collabAgentToolCall';
       id: string;
       tool: CodexCollabAgentTool;
@@ -194,7 +248,7 @@ export type CodexThreadItem =
   | {
       type: 'subAgentActivity';
       id: string;
-      kind: 'started' | 'interacted' | 'interrupted';
+      kind: 'started' | 'interacted' | 'interrupted' | 'completed';
       agentThreadId: string;
       agentPath: string;
     }
@@ -216,6 +270,7 @@ const CODEX_THREAD_ITEM_TYPES = new Set<CodexThreadItem['type']>([
   'fileChange',
   'mcpToolCall',
   'dynamicToolCall',
+  'functionCallOutput',
   'collabAgentToolCall',
   'subAgentActivity',
   'webSearch',
@@ -234,6 +289,22 @@ const CODEX_TURN_STATUSES = new Set<CodexTurn['status']>([
   'inProgress',
 ]);
 
+const CODEX_ERROR_INFO_STRINGS = new Set<Extract<CodexErrorInfo, string>>([
+  'contextWindowExceeded',
+  'sessionBudgetExceeded',
+  'usageLimitExceeded',
+  'rateLimitExceeded',
+  'serverOverloaded',
+  'cyberPolicy',
+  'misalignmentPolicyViolation',
+  'internalServerError',
+  'unauthorized',
+  'badRequest',
+  'threadRollbackFailed',
+  'sandboxError',
+  'other',
+]);
+
 const CODEX_ITEMS_VIEWS = new Set<CodexTurn['itemsView']>([
   'notLoaded',
   'summary',
@@ -245,8 +316,8 @@ export function parseThreadTurnsListResponse(value: unknown): ThreadTurnsListRes
   if (!Array.isArray(response.data)) {
     throw new Error('Invalid thread/turns/list response data');
   }
-  const nextCursor = nullableProtocolString(response.nextCursor, 'nextCursor');
-  const backwardsCursor = nullableProtocolString(response.backwardsCursor, 'backwardsCursor');
+  const nextCursor = nullableProtocolString(response.nextCursor, 'thread/turns/list nextCursor');
+  const backwardsCursor = nullableProtocolString(response.backwardsCursor, 'thread/turns/list backwardsCursor');
   return {
     data: response.data.map((turn, index) => parseCodexTurn(turn, index)),
     nextCursor,
@@ -264,30 +335,99 @@ function parseCodexTurn(value: unknown, index: number): CodexTurn {
     throw new Error(`Invalid Codex turn ${turn.id} status`);
   }
   if (!Array.isArray(turn.items)) throw new Error(`Invalid Codex turn ${turn.id} items`);
-  const items = turn.items.map((item, itemIndex) => {
-    const parsed = protocolRecord(item, `turn ${turn.id} item ${itemIndex}`);
-    if (typeof parsed.id !== 'string' || !parsed.id) {
-      throw new Error(`Invalid Codex turn ${turn.id} item ${itemIndex} id`);
-    }
-    if (!CODEX_THREAD_ITEM_TYPES.has(parsed.type as CodexThreadItem['type'])) {
-      throw new Error(`Unsupported Codex thread item type: ${String(parsed.type)}`);
-    }
-    validateCodexThreadItem(parsed, `Codex turn ${turn.id} item ${itemIndex}`);
-    return parsed as unknown as CodexThreadItem;
-  });
-  if (turn.error !== null && turn.error !== undefined) {
-    protocolRecord(turn.error, `Codex turn ${turn.id} error`);
-  }
+  const items = turn.items.map((item, itemIndex) => (
+    parseCodexThreadItem(item, `Codex turn ${turn.id} item ${itemIndex}`)
+  ));
+  const error = parseCodexTurnError(turn.error, `Codex turn ${turn.id} error`);
   return {
     id: turn.id,
     items,
     itemsView: turn.itemsView as CodexTurn['itemsView'],
     status: turn.status as CodexTurn['status'],
-    error: (turn.error ?? null) as CodexTurnError | null,
+    error,
     startedAt: nullableProtocolNumber(turn.startedAt, `turn ${turn.id} startedAt`),
     completedAt: nullableProtocolNumber(turn.completedAt, `turn ${turn.id} completedAt`),
     durationMs: nullableProtocolNumber(turn.durationMs, `turn ${turn.id} durationMs`),
   };
+}
+
+function parseCodexTurnError(value: unknown, label: string): CodexTurnError | null {
+  if (value === null || value === undefined) return null;
+  const error = protocolRecord(value, label);
+  protocolString(error.message, `${label} message`);
+  nullableProtocolString(error.additionalDetails, `${label} additionalDetails`);
+  validateCodexErrorInfo(error.codexErrorInfo, `${label} codexErrorInfo`);
+  if (error.misalignment !== null && error.misalignment !== undefined) {
+    const misalignment = protocolRecord(error.misalignment, `${label} misalignment`);
+    nullableProtocolString(misalignment.errorType, `${label} misalignment errorType`);
+    nullableProtocolString(
+      misalignment.detailedExplanation,
+      `${label} misalignment detailedExplanation`,
+    );
+    if (misalignment.steer !== null && misalignment.steer !== undefined) {
+      const steer = protocolRecord(misalignment.steer, `${label} misalignment steer`);
+      protocolString(steer.message, `${label} misalignment steer message`);
+    }
+  }
+  return error as unknown as CodexTurnError;
+}
+
+function validateCodexErrorInfo(value: unknown, label: string): void {
+  if (value === null || value === undefined) return;
+  if (typeof value === 'string') {
+    if (!CODEX_ERROR_INFO_STRINGS.has(value as Extract<CodexErrorInfo, string>)) {
+      throw new Error(`Invalid ${label}`);
+    }
+    return;
+  }
+  const info = protocolRecord(value, label);
+  const keys = Object.keys(info);
+  if (keys.length !== 1) throw new Error(`Invalid ${label}`);
+  const [kind] = keys;
+  const detail = protocolRecord(info[kind], `${label} ${kind}`);
+  if (kind === 'activeTurnNotSteerable') {
+    if (!['review', 'compact'].includes(String(detail.turnKind))) {
+      throw new Error(`Invalid ${label} activeTurnNotSteerable turnKind`);
+    }
+    return;
+  }
+  if (![
+    'httpConnectionFailed',
+    'responseStreamConnectionFailed',
+    'responseStreamDisconnected',
+    'responseTooManyFailedAttempts',
+  ].includes(kind)) throw new Error(`Invalid ${label}`);
+  nullableProtocolNumber(detail.httpStatusCode, `${label} ${kind} httpStatusCode`);
+}
+
+export function parseThreadItemsListResponse(value: unknown): ThreadItemsListResponse {
+  const response = protocolRecord(value, 'thread/items/list response');
+  if (!Array.isArray(response.data)) {
+    throw new Error('Invalid thread/items/list response data');
+  }
+  return {
+    data: response.data.map((value, index) => {
+      const entry = protocolRecord(value, `thread/items/list entry ${index}`);
+      const turnId = protocolString(entry.turnId, `thread/items/list entry ${index} turnId`);
+      if (!turnId) throw new Error(`Invalid thread/items/list entry ${index} turnId`);
+      return {
+        turnId,
+        item: parseCodexThreadItem(entry.item, `thread/items/list entry ${index} item`),
+      };
+    }),
+    nextCursor: nullableProtocolString(response.nextCursor, 'thread/items/list nextCursor'),
+    backwardsCursor: nullableProtocolString(response.backwardsCursor, 'thread/items/list backwardsCursor'),
+  };
+}
+
+function parseCodexThreadItem(value: unknown, label: string): CodexThreadItem {
+  const item = protocolRecord(value, label);
+  if (typeof item.id !== 'string' || !item.id) throw new Error(`Invalid ${label} id`);
+  if (!CODEX_THREAD_ITEM_TYPES.has(item.type as CodexThreadItem['type'])) {
+    throw new Error(`Unsupported Codex thread item type: ${String(item.type)}`);
+  }
+  validateCodexThreadItem(item, label);
+  return item as unknown as CodexThreadItem;
 }
 
 function validateCodexThreadItem(item: Record<string, unknown>, label: string): void {
@@ -331,11 +471,26 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
         throw new Error(`Invalid ${label} success`);
       }
       return;
+    case 'functionCallOutput':
+      protocolString(item.name, `${label} name`);
+      nullableProtocolString(item.namespace, `${label} namespace`);
+      validateFunctionCallOutput(item.output, `${label} output`);
+      return;
     case 'collabAgentToolCall':
-      if (!['spawnAgent', 'sendInput', 'resumeAgent', 'wait', 'closeAgent'].includes(String(item.tool))) {
+      if (![
+        'spawnAgent',
+        'sendInput',
+        'resumeAgent',
+        'wait',
+        'closeAgent',
+        'sendMessage',
+        'followupTask',
+        'interruptAgent',
+        'listAgents',
+      ].includes(String(item.tool))) {
         throw new Error(`Invalid ${label} tool`);
       }
-      if (!['inProgress', 'completed', 'failed'].includes(String(item.status))) {
+      if (!['inProgress', 'completed', 'failed', 'interrupted'].includes(String(item.status))) {
         throw new Error(`Invalid ${label} status`);
       }
       protocolString(item.senderThreadId, `${label} senderThreadId`);
@@ -346,7 +501,7 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
       protocolRecord(item.agentsStates, `${label} agentsStates`);
       return;
     case 'subAgentActivity':
-      if (!['started', 'interacted', 'interrupted'].includes(String(item.kind))) {
+      if (!['started', 'interacted', 'interrupted', 'completed'].includes(String(item.kind))) {
         throw new Error(`Invalid ${label} kind`);
       }
       protocolString(item.agentThreadId, `${label} agentThreadId`);
@@ -380,6 +535,35 @@ function validateCodexThreadItem(item: Record<string, unknown>, label: string): 
   }
 }
 
+function validateFunctionCallOutput(value: unknown, label: string): void {
+  if (typeof value === 'string') return;
+  const items = protocolArray(value, label);
+  for (const [index, content] of items.entries()) {
+    const item = protocolRecord(content, `${label} item ${index}`);
+    switch (item.type) {
+      case 'input_text':
+        protocolString(item.text, `${label} item ${index} text`);
+        break;
+      case 'input_image':
+        protocolString(item.image_url, `${label} item ${index} image_url`);
+        if (
+          item.detail !== undefined
+          && item.detail !== null
+          && !['auto', 'low', 'high', 'original'].includes(String(item.detail))
+        ) throw new Error(`Invalid ${label} item ${index} detail`);
+        break;
+      case 'input_audio':
+        protocolString(item.audio_url, `${label} item ${index} audio_url`);
+        break;
+      case 'encrypted_content':
+        protocolString(item.encrypted_content, `${label} item ${index} encrypted_content`);
+        break;
+      default:
+        throw new Error(`Invalid ${label} item ${index} type`);
+    }
+  }
+}
+
 function protocolString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`Invalid ${label}`);
   return value;
@@ -405,7 +589,7 @@ function protocolRecord(value: unknown, label: string): Record<string, unknown> 
 
 function nullableProtocolString(value: unknown, label: string): string | null {
   if (value === undefined || value === null) return null;
-  if (typeof value !== 'string') throw new Error(`Invalid thread/turns/list ${label}`);
+  if (typeof value !== 'string') throw new Error(`Invalid ${label}`);
   return value;
 }
 
@@ -421,6 +605,10 @@ export interface ThreadStartResponse {
   modelProvider: string;
   serviceTier: string | null;
   cwd: string;
+  approvalPolicy?: unknown;
+  approvalsReviewer?: string;
+  reasoningEffort?: string | null;
+  sandbox?: CodexThreadSettingsSandboxPolicy;
 }
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
@@ -522,11 +710,55 @@ export interface ErrorNotification {
   error: CodexTurnError;
 }
 
+export interface ServerRequestResolvedNotification {
+  threadId: string;
+  requestId: JsonRpcId;
+}
+
+export type CodexThreadSettingsSandboxPolicy =
+  | { readonly type: 'dangerFullAccess' }
+  | {
+      readonly type: 'workspaceWrite';
+      readonly writableRoots?: readonly string[];
+      readonly networkAccess?: boolean;
+      readonly excludeTmpdirEnvVar?: boolean;
+      readonly excludeSlashTmp?: boolean;
+    }
+  | { readonly type: string; readonly [key: string]: unknown };
+
+export interface ThreadSettingsUpdateParams {
+  readonly threadId: string;
+  readonly model: string;
+  readonly approvalPolicy: 'never' | 'on-request';
+  readonly approvalsReviewer: 'user';
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly effort?: string;
+}
+
+export interface CodexThreadSettings {
+  readonly cwd: string;
+  readonly approvalPolicy: unknown;
+  readonly approvalsReviewer: string;
+  readonly sandboxPolicy: CodexThreadSettingsSandboxPolicy;
+  readonly model: string;
+  readonly modelProvider: string;
+  readonly serviceTier: string | null;
+  readonly effort: string | null;
+  readonly [key: string]: unknown;
+}
+
+export interface ThreadSettingsUpdatedNotification {
+  readonly threadId: string;
+  readonly threadSettings: CodexThreadSettings;
+}
+
 export interface CommandExecutionRequestApprovalParams {
   threadId: string;
   turnId: string;
   itemId: string;
   approvalId?: string | null;
+  kind?: 'command' | 'writeStdin';
+  startedAtMs?: number;
   reason?: string | null;
   command?: string | null;
   cwd?: string | null;

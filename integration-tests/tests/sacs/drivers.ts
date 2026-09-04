@@ -143,6 +143,7 @@ function filesystemHistorySource(
 function pathBackedForkingFacet(agentId: string): SacsNativeForkingFacet {
   return {
     kind: 'native-forking',
+    pointForks: true,
     async unsettle(fixture, chatId, marker) {
       const path = await resolvePersistedNativePath(fixture, chatId, agentId);
       const original = await readFile(path, 'utf8');
@@ -156,6 +157,7 @@ function pathBackedForkingFacet(agentId: string): SacsNativeForkingFacet {
 
 const openCodeForkingFacet: SacsNativeForkingFacet = {
   kind: 'native-forking',
+  pointForks: true,
   async unsettle(fixture, chatId, marker) {
     const binding = await waitForPersistedChat({
       directories: fixture.dirs,
@@ -217,6 +219,20 @@ function retainJsonlRecords(original: Uint8Array, type: string): string {
     return parsed.type === type ? [line] : [];
   });
   return retained.length > 0 ? `${retained.join('\n')}\n` : '';
+}
+
+function retainCodexLegacySessionMetadata(original: Uint8Array): string {
+  const metadataLine = Buffer.from(original).toString('utf8').split('\n').find((line) => {
+    if (!line.trim()) return false;
+    const parsed = JSON.parse(line) as { type?: unknown };
+    return parsed.type === 'session_meta';
+  });
+  if (!metadataLine) return '';
+  const metadata = JSON.parse(metadataLine) as { payload?: Record<string, unknown> };
+  if (!metadata.payload) return '';
+  const payload: Record<string, unknown> = { ...metadata.payload, history_mode: 'legacy' };
+  delete payload.history_base;
+  return `${JSON.stringify({ ...metadata, payload })}\n`;
 }
 
 async function prepareOpenCodeHistorySource(
@@ -397,9 +413,7 @@ function heldTurn(held: { readonly requested: Promise<unknown>; release(): void 
 }
 
 const claudeHistorySource = filesystemHistorySource('claude');
-const codexHistorySource = filesystemHistorySource('codex', (original) => (
-  retainJsonlRecords(original, 'session_meta')
-));
+const codexHistorySource = filesystemHistorySource('codex', retainCodexLegacySessionMetadata);
 const piHistorySource = filesystemHistorySource('pi', (original) => (
   retainJsonlRecords(original, 'session')
 ), (original) => (
@@ -460,7 +474,7 @@ const codexDriver: SacsDriverFactory = {
   nativeSessions: NATIVE_SESSIONS,
   nativeHistoryImport: nativeHistoryImport(codexHistorySource),
   legacyHistoryImport: legacyHistoryImport(codexHistorySource),
-  forking: pathBackedForkingFacet('codex'),
+  forking: { kind: 'native-forking', pointForks: false },
   async start() {
     const environment = await startScriptedCodexTestEnvironment();
     return {

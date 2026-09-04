@@ -12,6 +12,10 @@ import type {
   JsonRpcServerRequest,
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
+import type {
+  CodexConfirmedThreadSettings,
+  CodexThreadSettingsTarget,
+} from './request-builders.js';
 
 export type RunningStatus = (
   'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted'
@@ -32,6 +36,13 @@ interface TurnStartWaiter {
   reject: (error: Error) => void;
 }
 
+export interface ThreadSettingsWaiter {
+  readonly target: CodexThreadSettingsTarget;
+  readonly timeout: ReturnType<typeof setTimeout>;
+  resolve(): void;
+  reject(error: Error): void;
+}
+
 export class TurnStartWaitCancelledError extends Error {}
 
 export type BufferedClientEvent =
@@ -44,6 +55,7 @@ export interface RunningCodexSession {
   nativePath: string | null;
   codexHome: string | null;
   client: CodexAppServerClient;
+  runtimeIdentity: string;
   activeTurnId: string | null;
   status: RunningStatus;
   permissionMode: PermissionMode;
@@ -59,6 +71,8 @@ export interface RunningCodexSession {
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
   pendingFinishOperation: CodexOperation | null;
+  interruptAcknowledgement: Promise<boolean> | null;
+  terminalWaiters: Set<() => void>;
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
@@ -71,14 +85,23 @@ export interface RunningCodexSession {
   turnRoutes: Map<string, CodexOperation>;
   terminalTurnIds: Set<string>;
   superseded: boolean;
+  confirmedThreadSettings: CodexConfirmedThreadSettings;
+  pendingThreadSettings: ThreadSettingsWaiter | null;
+  threadSettingsUpdateChain: Promise<void>;
+  configurationFenced: boolean;
+  // Wall-clock stamp taken when the session finishes while its source stays
+  // retained; drives the idle reclamation sweep for retained writers.
+  idleSince: number | null;
 }
 
 export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
+  settingsUpdateTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
   capacityRetryDelay?: (delayMs: number) => Promise<void>;
   nativePathDiscoveryRefresh?: NativePathDiscoveryRefreshLimiterOptions;
+  retainedSourceIdlePurge?: { intervalMs?: number; maxIdleMs?: number };
   logger?: AgentLogger;
   skillDiscovery?: CodexSkillDiscovery;
   cleanupOwnedGoalAttachments?: typeof cleanupOwnedGoalAttachments;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 
 describe('bundled Codex history API compatibility', () => {
-  it('recognizes thread/turns/list as a public method', async () => {
+  it('recognizes paginated turn and item list methods', async () => {
     const client = new CodexAppServerClient({ shutdownGraceMs: 100 });
     try {
       const initialized = await client.connect();
@@ -22,6 +22,19 @@ describe('bundled Codex history API compatibility', () => {
       }
       expect(failure).toBeInstanceOf(CodexAppServerRpcError);
       expect(failure.code).not.toBe(-32601);
+
+      failure = undefined;
+      try {
+        await client.listThreadItems({
+          threadId: '00000000-0000-0000-0000-000000000000',
+          limit: 1,
+          sortDirection: 'asc',
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(CodexAppServerRpcError);
+      expect(failure.message).not.toMatch(/^method not found$/i);
     } finally {
       await client.shutdown();
     }

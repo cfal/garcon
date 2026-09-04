@@ -36,6 +36,7 @@ function request(providerMeta = null) {
 function setup(profile, nativeImplementation = async () => startedSession) {
   const legacyFork = mock(async () => materialized);
   const forkPaginatedWhole = mock(nativeImplementation);
+  const forkPaginatedPoint = mock(nativeImplementation);
   const resolveProfile = mock(async () => profile);
   return {
     forking: createCodexForking({
@@ -45,9 +46,11 @@ function setup(profile, nativeImplementation = async () => startedSession) {
       },
       resolveProfile,
       forkPaginatedWhole,
+      forkPaginatedPoint,
     }),
     legacyFork,
     forkPaginatedWhole,
+    forkPaginatedPoint,
     resolveProfile,
   };
 }
@@ -65,15 +68,70 @@ describe('createCodexForking', () => {
     expect(point.forkPaginatedWhole).not.toHaveBeenCalled();
   });
 
-  it('rejects paginated point forks before either mutation strategy runs', async () => {
+  it('forks a paginated point natively through the turn named by its source identity', async () => {
+    const values = setup(paginatedProfile);
+    await expect(values.forking.fork(request({ entryId: 'turn:turn-1:item:item-2' })))
+      .resolves.toEqual(materialized);
+    expect(values.forkPaginatedPoint.mock.calls[0][1]).toBe('turn-1');
+    expect(values.forkPaginatedPoint.mock.calls[0][0].providerMeta)
+      .toEqual({ entryId: 'turn:turn-1:item:item-2' });
+    expect(values.forkPaginatedWhole).not.toHaveBeenCalled();
+    expect(values.legacyFork).not.toHaveBeenCalled();
+
+    const toolIdentity = setup(paginatedProfile);
+    await expect(toolIdentity.forking.fork(request({ entryId: 'turn:turn-2:tool:call-9' })))
+      .resolves.toEqual(materialized);
+    expect(toolIdentity.forkPaginatedPoint.mock.calls[0][1]).toBe('turn-2');
+  });
+
+  it('refuses a paginated point whose identity names no turn', async () => {
     const values = setup(paginatedProfile);
     await expect(values.forking.fork(request({ entryId: 'item-2' }))).rejects.toMatchObject({
-      code: 'OPERATION_UNSUPPORTED',
-      retryable: false,
-      details: { operation: 'fork-at-message', historyMode: 'paginated', provider: 'codex' },
+      code: 'TRANSCRIPT_UNAVAILABLE',
+      retryable: true,
+      details: { nativeForkReason: 'not-settled' },
     });
-    expect(values.legacyFork).not.toHaveBeenCalled();
+    expect(values.forkPaginatedPoint).not.toHaveBeenCalled();
     expect(values.forkPaginatedWhole).not.toHaveBeenCalled();
+    expect(values.legacyFork).not.toHaveBeenCalled();
+  });
+
+  it('maps in-progress and unknown lastTurnId rejections to the typed unsettled refusal', async () => {
+    const inProgress = setup(paginatedProfile, async () => {
+      throw new CodexAppServerRpcError(
+        "lastTurnId 'turn-1' identifies an in-progress turn",
+        -32600,
+      );
+    });
+    await expect(inProgress.forking.fork(request({ entryId: 'turn:turn-1:item:item-2' })))
+      .rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        retryable: true,
+        details: { nativeForkReason: 'not-settled' },
+      });
+
+    const unknown = setup(paginatedProfile, async () => {
+      throw new CodexAppServerRpcError('turn not found: turn-9', -32600);
+    });
+    await expect(unknown.forking.fork(request({ entryId: 'turn:turn-9:item:item-2' })))
+      .rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        retryable: true,
+        details: { nativeForkReason: 'not-settled' },
+      });
+  });
+
+  it('maps the upstream paginated rejection of a point fork to typed unsupported', async () => {
+    const values = setup(paginatedProfile, async () => {
+      throw new CodexAppServerRpcError('paginated_threads is not supported yet', -32601);
+    });
+    await expect(values.forking.fork(request({ entryId: 'turn:turn-1:item:item-2' })))
+      .rejects.toMatchObject({
+        code: 'OPERATION_UNSUPPORTED',
+        retryable: false,
+        details: { operation: 'fork', historyMode: 'paginated', provider: 'codex' },
+      });
+    expect(values.legacyFork).not.toHaveBeenCalled();
   });
 
   it('uses only provider-native thread/fork for a paginated full fork', async () => {

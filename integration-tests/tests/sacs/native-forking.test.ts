@@ -23,6 +23,10 @@ const EXPECTED_FORKING_DRIVER_IDS = [
   'codex',
   ...(process.platform === 'linux' ? ['opencode'] : []),
 ];
+const EXPECTED_POINT_FORKING_DRIVER_IDS = [
+  'claude',
+  ...(process.platform === 'linux' ? ['opencode'] : []),
+];
 
 test('[TLV5-FORK.01-SACS-CAPABILITY-01] registers the native forking facet for every native-fork provider', () => {
   expect(sacsScriptedDriverFactories
@@ -30,10 +34,15 @@ test('[TLV5-FORK.01-SACS-CAPABILITY-01] registers the native forking facet for e
     .map((driver) => driver.id)
     .toSorted())
     .toEqual([...EXPECTED_FORKING_DRIVER_IDS].toSorted());
+  expect(sacsScriptedDriverFactories
+    .filter((driver) => driver.forking?.pointForks)
+    .map((driver) => driver.id)
+    .toSorted())
+    .toEqual([...EXPECTED_POINT_FORKING_DRIVER_IDS].toSorted());
 });
 
 for (const driverFactory of sacsScriptedDriverFactories) {
-  if (!driverFactory.forking) continue;
+  if (!driverFactory.forking?.pointForks) continue;
   const forking = driverFactory.forking;
 
   describe(`SACS native forking: ${driverFactory.label}`, () => {

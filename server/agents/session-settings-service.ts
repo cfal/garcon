@@ -81,13 +81,27 @@ export class AgentSessionSettingsService {
         : currentSettings;
 
       if (entry.agentSessionId && integration.sessionConfiguration) {
-        await integration.sessionConfiguration.apply(entry.agentSessionId, {
+        const configuration = {
           model: next.model,
           permissionMode,
           thinkingMode,
           settings,
-          endpoint: toAgentEndpointSelection(this.deps.endpointResolver, next),
-        });
+          endpoint,
+        };
+        await integration.sessionConfiguration.apply(
+          entry.agentSessionId,
+          configuration,
+          {
+            model: previous.model,
+            permissionMode: normalizePermissionMode(entry.permissionMode),
+            thinkingMode: normalizeSupportedThinkingMode(
+              entry.thinkingMode,
+              integration.descriptor.supportedThinkingModes,
+            ),
+            settings: currentSettings,
+            endpoint: toAgentEndpointSelection(this.deps.endpointResolver, previous),
+          },
+        );
       }
 
       const updated = await this.deps.registry.updateChat(chatId, {
