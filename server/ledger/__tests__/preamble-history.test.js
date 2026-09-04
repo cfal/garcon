@@ -127,6 +127,7 @@ describe('preamble native-history sanitation', () => {
     const applied = application();
     const unknown = application('message-two');
     const cases = [
+      [new UserMessage(AT, '<garcon-preambles authored text')],
       [new UserMessage(AT, `${unknown.prefix}Visible prompt`)],
       [new UserMessage(AT, `${applied.prefix.replace('Private first body', 'Changed body')}Visible prompt`)],
       [

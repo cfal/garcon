@@ -1,6 +1,6 @@
 import type { Page } from 'puppeteer-core';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
-import type { RecordedCompletionRequest } from './fake-openai-server.js';
+import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 
 interface ClickOptions {
@@ -46,7 +46,7 @@ export class SpaDriver {
 
   async startOpenAiDirectChat(
     content: string,
-    options: { projectPath?: string } = {},
+    options: { projectPath?: string; requestMatcher?: RequestMatcher } = {},
   ): Promise<RecordedCompletionRequest> {
     return this.#startDirectChat({
       content,
@@ -56,7 +56,10 @@ export class SpaDriver {
       modelLabel: 'Integration Echo',
       waitForRequest: () =>
         this.#integration.fakeProviders.openAi.waitForRequest(
-          { lastUserText: content },
+          options.requestMatcher ?? {
+            lastUserText: content,
+            model: this.#integration.directAgents.openAi.provider.model,
+          },
           { timeoutMs: 20_000 },
         ),
     });

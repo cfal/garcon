@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { PreamblesSnapshot } from '../../../common/preambles.js';
+import type { ShareChatResponse } from '../../../common/share-types.js';
 import {
   type E2eFixture,
   withE2eFixture,
@@ -134,24 +135,41 @@ describe('Lightpanda preambles', () => {
       expect(catalog.preambles[0]?.enabled).toBe(true);
 
       await app.clickButton('Close');
-      const chatId = fixture.integration.newChatId();
       const held = fixture.integration.fakeProviders.openAi.holdNext({
         model: fixture.integration.directAgents.openAi.provider.model,
       });
-      const started = await fixture.integration.client.startDirectChat({
-        chatId,
-        content: 'visible UI boundary prompt',
+      const providerRequest = await app.startOpenAiDirectChat('visible UI boundary prompt', {
         projectPath: fixture.integration.dirs.project,
-        agent: fixture.integration.directAgents.openAi,
+        requestMatcher: { model: fixture.integration.directAgents.openAi.provider.model },
       });
-      await held.received;
+      expect(providerRequest.lastUserText).toContain('SYNTHETIC_GLOBAL_UI_BODY');
+      expect(providerRequest.lastUserText).toEndWith('visible UI boundary prompt');
       expect(held.releaseText('visible UI response')).toBeTrue();
-      await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await app.waitForAssistantMessageContaining('visible UI response');
+      await app.waitForChatProcessing(false);
 
-      await app.openChat(chatId);
+      const chatId = await fixture.page.evaluate(() =>
+        decodeURIComponent(globalThis.location.pathname.slice('/chat/'.length)),
+      );
+      const share = await fixture.integration.client.post<ShareChatResponse>(
+        '/api/v1/chats/share',
+        { chatId },
+      );
+      await fixture.page.goto(`${fixture.integration.garcon.baseUrl}${share.shareUrl}`, {
+        waitUntil: [],
+      });
       await app.waitForText('Preambles applied');
       await app.waitForText('Global UI rules renamed');
-      expect(await app.exactTextCount('SYNTHETIC_GLOBAL_UI_BODY')).toBe(0);
+      expect(await fixture.page.evaluate(() => {
+        const rows = [...document.querySelectorAll<HTMLElement>('main .chat-message')];
+        const noticeIndex = rows.findIndex((element) =>
+          element.textContent?.includes('Preambles applied'));
+        const userIndex = rows.findIndex((element) =>
+          element.textContent?.trim() === 'visible UI boundary prompt');
+        return noticeIndex >= 0 && userIndex === noticeIndex + 1;
+      })).toBeTrue();
+      expect(await fixture.page.evaluate(() =>
+        document.body.innerText.includes('SYNTHETIC_GLOBAL_UI_BODY'))).toBeFalse();
       fixture.assertNoBrowserErrors();
     });
   }, 60_000);
