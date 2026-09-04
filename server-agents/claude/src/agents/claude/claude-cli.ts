@@ -76,6 +76,9 @@ import {
   type PendingPermission,
 } from './runtime-state.js';
 
+const CONVERSATION_RESET_FAILURE = 'Claude CLI cleared the conversation mid-turn.'
+  + ' The chat transcript is unchanged; send the message again to continue from it.';
+
 class ClaudeCliRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #processRetirements = new ClaudeProcessRetirementTracker();
@@ -232,6 +235,10 @@ class ClaudeCliRuntime {
       case 'command_lifecycle':
         break;
 
+      case 'conversation_reset':
+        this.#handleConversationReset(session, msg);
+        break;
+
       case 'user':
         if (!session.activeTurn) return;
         this.#handleUserMessage(session, msg);
@@ -306,6 +313,29 @@ class ClaudeCliRuntime {
       if (!activeTurn?.protocol.inputStarted) return;
       activeTurn.pendingCompaction = parseCompactMetadata(msg.compact_metadata);
     }
+  }
+
+  // A CLI-side flow (for example a forwarded /clear) discarded the conversation and moved the
+  // process to a fresh one; new_conversation_id names the fresh conversation, not a session id.
+  // Garcon has no durable context-reset boundary, so the turn fails and the process retires
+  // while the chat keeps its native binding: the next turn resumes the durable session the
+  // transcript still describes. Frames from the retired process are dropped by its identity
+  // guard, which keeps the post-reset re-initialization from misreading as a session mismatch.
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/a8b1e285/src/claude_agent_sdk/types.py#L1417-L1440
+  #handleConversationReset(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
+    const activeTurn = session.activeTurn;
+    this.#dependencies.logger.warn('Claude CLI discarded the conversation', {
+      chatId: session.chatId,
+      runId: activeTurn?.operation.runId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: session.process?.pid ?? null,
+      newConversationId: msg.new_conversation_id ?? null,
+    });
+    if (activeTurn) {
+      activeTurn.protocol.clearRecordedResultFailure();
+      this.#failSession(session, CONVERSATION_RESET_FAILURE);
+    }
+    this.#retireSessionProcessInBackground(session);
   }
 
   #providerStateHandlers(session: ClaudeRunningSession): ClaudeProviderStateHandlers {

@@ -16,6 +16,7 @@ export interface ClaudeCLIMessage {
   uuid?: string;
   isReplay?: boolean;
   session_id?: string;
+  new_conversation_id?: string;
   model?: string;
   is_error?: boolean;
   api_error_status?: number | string | null;
@@ -249,6 +250,12 @@ export class ClaudeTurnState {
   observeBackgroundTaskCount(count: number): void {
     this.#backgroundTaskCount = count;
     if (count > 0) this.#backgroundContinuationPending = true;
+  }
+
+  // Mirrors the SDK clearing its remembered error result when a non-result message arrives:
+  // the conversation moved on, so the stale error must not mask the later terminal failure.
+  clearRecordedResultFailure(): void {
+    this.#resultFailure = null;
   }
 
   recordResultBeforeStart(message: ClaudeCLIMessage): void {
