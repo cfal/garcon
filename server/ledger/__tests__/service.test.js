@@ -37,7 +37,7 @@ describe('TranscriptLedgerService', () => {
           rows: [{
             message: new AssistantMessage(
               TS,
-              '<garcon-get-chat-id />\nContinuing the response.',
+              '<garcon-get-chat-id />\n\nContinuing the response.',
             ),
           }],
         });
@@ -70,7 +70,7 @@ describe('TranscriptLedgerService', () => {
 
         lease.sink.publish({
           type: 'rows',
-          rows: [{ message: new AssistantMessage(TS, '<garcon-get-chat-id />') }],
+          rows: [{ message: new AssistantMessage(TS, '<garcon-get-chat-id />\n\n') }],
         });
 
         expect(requests).toHaveBeenCalledWith({
