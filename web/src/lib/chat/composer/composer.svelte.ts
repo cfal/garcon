@@ -2,7 +2,10 @@ import {
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
-import type { ChatDraftAppendResult } from '$lib/chat/composer/chat-draft-append.js';
+import type {
+	ChatDraftAppendOptions,
+	ChatDraftAppendResult,
+} from '$lib/chat/composer/chat-draft-append.js';
 import {
 	ChatDraftStore,
 	type ChatDraftSnapshot,
@@ -48,8 +51,12 @@ export class ComposerState {
 	}
 
 	/** Appends an editable block to the active draft without submitting it. */
-	appendDraftBlock(chatId: string, block: string): ChatDraftAppendResult {
-		const result = this.drafts.appendBlock(chatId, block);
+	appendDraftBlock(
+		chatId: string,
+		block: string,
+		options?: ChatDraftAppendOptions,
+	): ChatDraftAppendResult {
+		const result = this.drafts.appendBlock(chatId, block, options);
 		if (result !== 'appended') return result;
 		this.#nextDraftAppendRequestId += 1;
 		this.draftAppendRequest = { chatId, requestId: this.#nextDraftAppendRequestId };

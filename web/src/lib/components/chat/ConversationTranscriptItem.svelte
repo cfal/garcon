@@ -41,6 +41,7 @@
 			plan: string,
 		) => void;
 		onForkChat?: (upToSeq?: number) => void;
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		itemState?: ConversationFeedItemState;
@@ -56,6 +57,7 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 		itemState,
@@ -126,6 +128,7 @@
 			{showThinking}
 			{chatContext}
 			{onForkChat}
+			{onAppendToDraft}
 			{onGenerateTitleFromMessage}
 			{canForkAtMessageNow}
 			{disclosureState}

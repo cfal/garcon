@@ -248,6 +248,7 @@
 				pendingPermissionRequests={pendingPermissions}
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
+				onAppendToDraft={(block) => actions?.appendToDraft(surfaceId, chatId, block)}
 				onGenerateTitleFromMessage={(message, ordinal) =>
 					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve()}
 				reserveComposerTraySpace={capSpace.feed}

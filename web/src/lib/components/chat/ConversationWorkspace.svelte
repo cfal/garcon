@@ -331,6 +331,10 @@
 			const panel = assertRenderedPanel(surfaceId, chatId);
 			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
 		},
+		appendToDraft(surfaceId, chatId, block) {
+			assertRenderedPanel(surfaceId, chatId);
+			composerState.appendDraftBlock(chatId, block, { allowDuplicate: true });
+		},
 		async generateTitle(surfaceId, chatId, message, ordinal) {
 			assertRenderedPanel(surfaceId, chatId);
 			await sessions.generateChatTitleFromMessage(chatId, message, ordinal);

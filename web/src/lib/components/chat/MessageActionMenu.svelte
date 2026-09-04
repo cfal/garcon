@@ -6,22 +6,27 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
 	import TextSelect from '@lucide/svelte/icons/text-select';
+	import Quote from '@lucide/svelte/icons/quote';
 
 	interface Props {
+		hasSelection: boolean;
 		canFork?: boolean;
 		canForkNow?: boolean;
 		onFork?: (event: MouseEvent) => void;
 		onCopy: () => void | Promise<void>;
+		onQuoteSelection: () => void;
 		onSendToNewSession: () => void;
 		onSelectText: () => void;
 		onGenerateTitleFromMessage?: () => void | Promise<void>;
 	}
 
 	let {
+		hasSelection,
 		canFork = false,
 		canForkNow = true,
 		onFork,
 		onCopy,
+		onQuoteSelection,
 		onSendToNewSession,
 		onSelectText,
 		onGenerateTitleFromMessage,
@@ -35,8 +40,15 @@
 
 <ContextMenuItem onclick={onCopy}>
 	<Copy />
-	{m.chat_message_copy_text()}
+	{hasSelection ? m.chat_message_copy_selection() : m.chat_message_copy_text()}
 </ContextMenuItem>
+
+{#if hasSelection}
+	<ContextMenuItem onclick={onQuoteSelection}>
+		<Quote />
+		{m.chat_message_quote_selection()}
+	</ContextMenuItem>
+{/if}
 
 <ContextMenuItem onclick={onSelectText}>
 	<TextSelect />

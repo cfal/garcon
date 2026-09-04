@@ -49,6 +49,7 @@ import {
 	prepareChatImages,
 } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import {
+	rejectMissingDraftStartup,
 	submitDraftRoute,
 	submitGoalControlRoute,
 	submitQueueRoute,
@@ -630,6 +631,8 @@ export class ConversationSessionController {
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
+		const isDraft = selected.status === 'draft';
+		const startup = deps.sessions.startupByChatId[chatId];
 		const draft = deps.composerState.draftSnapshot(chatId);
 		const text = messageOverride ?? draft.text.trim();
 		const submissionImages = imageOverride ?? draft.attachments;
@@ -659,7 +662,7 @@ export class ConversationSessionController {
 		const specializedContext = {
 			chatId,
 			chat: selected,
-			startup: deps.sessions.startupByChatId[chatId],
+			startup,
 			text,
 			content: slash.content,
 			images: [] as ChatImage[],
@@ -674,8 +677,8 @@ export class ConversationSessionController {
 		if (slash.kind === 'goal-control') {
 			return submitGoalControlRoute(deps, this.#acceptedInputs, this.#queue, specializedContext);
 		}
+		if (isDraft && !startup) return rejectMissingDraftStartup(deps, chatId);
 
-		const isDraft = selected.status === 'draft';
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
 		let directAdmission: DirectAdmissionBarrier | null = null;
 		if (!isDraft && !activeTurn) {
@@ -759,7 +762,7 @@ export class ConversationSessionController {
 			const context = {
 				chatId,
 				chat: selected,
-				startup: deps.sessions.startupByChatId[chatId],
+				startup,
 				text,
 				content: slash.content,
 				images: imagePayload,
@@ -771,7 +774,10 @@ export class ConversationSessionController {
 			if (route === 'queue') {
 				return submitQueueRoute(deps, this.#acceptedInputs, this.#queue, context);
 			}
-			if (route === 'draft') return submitDraftRoute(deps, this.#acceptedInputs, context);
+			if (route === 'draft') {
+				if (!startup) return 'rejected';
+				return submitDraftRoute(deps, this.#acceptedInputs, { ...context, startup });
+			}
 			const currentChat = deps.sessions.byId[chatId];
 			const handoff = this.#executionDraft.handoffRequest(currentChat?.agentOwnershipEpoch ?? '');
 			const outcome = await submitRunRoute(

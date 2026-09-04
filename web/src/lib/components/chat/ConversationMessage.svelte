@@ -49,6 +49,7 @@
 		ContextMenuContent,
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatQuoteBlock } from '$lib/chat/composer/quote-selection.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
 	import MessageActionMenu from './MessageActionMenu.svelte';
@@ -85,6 +86,8 @@
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		/** Appends a formatted block to the active chat draft. Omitted when no composer owns the chat. */
+		onAppendToDraft?: (block: string) => void;
 		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
@@ -112,6 +115,7 @@
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		onAppendToDraft,
 		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 		disclosureState,
@@ -238,10 +242,13 @@
 	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
 	let messageMenuContentRef = $state<HTMLElement | null>(null);
 	let selectTextDialogOpen = $state(false);
+	let messageSelectionText = $state<string | null>(null);
 	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
 	let suppressNextMenuButtonClick = false;
 	let releaseMessageMenu: (() => void) | null = null;
 	let releaseSelectionDialog: (() => void) | null = null;
+
+	const hasMessageSelection = $derived(messageSelectionText !== null);
 
 	async function releaseAfterPortalClose(release: (() => void) | null): Promise<void> {
 		if (!release) return;
@@ -368,9 +375,33 @@
 		};
 	});
 
+	// Snapshots the live selection on the capture-phase contextmenu event, before Bits UI
+	// focus management can collapse it. Each menu open overwrites the previous snapshot.
+	function captureMessageSelection(): void {
+		const trigger = messageMenuTriggerRef;
+		const selection = window.getSelection();
+		if (!trigger || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+			messageSelectionText = null;
+			return;
+		}
+		const fullyInsideMessage = Array.from({ length: selection.rangeCount }, (_, index) => {
+			const range = selection.getRangeAt(index);
+			return trigger.contains(range.startContainer) && trigger.contains(range.endContainer);
+		}).every(Boolean);
+		const text = selection.toString();
+		messageSelectionText = fullyInsideMessage && text.trim() ? text : null;
+	}
+
 	async function copyText() {
-		if (!messageMenuText) return;
-		await copyToClipboard(messageMenuText);
+		const text = messageSelectionText ?? messageMenuText;
+		if (!text) return;
+		await copyToClipboard(text);
+	}
+
+	function quoteSelection() {
+		const text = messageSelectionText;
+		if (!text) return;
+		onAppendToDraft?.(formatQuoteBlock(text));
 	}
 
 	function sendToNewSession() {
@@ -495,6 +526,7 @@
 				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
+						oncontextmenucapture={captureMessageSelection}
 						class={cn(
 							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full',
 							!userMessagePresentation?.style && 'data-[state=open]:bg-user-bubble-selected',
@@ -560,10 +592,12 @@
 						onInteractOutside={closeMessageMenuFromInteractOutside}
 					>
 						<MessageActionMenu
+							hasSelection={hasMessageSelection}
 							canFork={Boolean(onForkChat && forkUpToSeq)}
 							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}
+							onQuoteSelection={quoteSelection}
 							onSendToNewSession={sendToNewSession}
 							onSelectText={openSelectTextDialog}
 							onGenerateTitleFromMessage={canGenerateTitleFromMessage
@@ -693,6 +727,7 @@
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
+								oncontextmenucapture={captureMessageSelection}
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 							>
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
@@ -713,10 +748,12 @@
 								onInteractOutside={closeMessageMenuFromInteractOutside}
 							>
 								<MessageActionMenu
+									hasSelection={hasMessageSelection}
 									canFork={Boolean(onForkChat && forkUpToSeq)}
 									canForkNow={canForkAtMessageNow}
 									onFork={handleFork}
 									onCopy={copyText}
+									onQuoteSelection={quoteSelection}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
 									onGenerateTitleFromMessage={canGenerateTitleFromMessage

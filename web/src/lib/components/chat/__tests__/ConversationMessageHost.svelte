@@ -111,6 +111,8 @@
 	localSettings.showQuickCommitTray = true;
 	setLocalSettings(localSettings);
 	onDestroy(() => localSettings.destroy());
+
+	let draftPreview = $state('');
 </script>
 
 <ConversationMessage
@@ -118,10 +120,13 @@
 	{rowId}
 	{forkUpToSeq}
 	{onForkChat}
+	onAppendToDraft={(block) => (draftPreview += block)}
 	{onGenerateTitleFromMessage}
 	{canForkAtMessageNow}
 	{disclosureState}
 />
+
+<output data-testid="draft-preview">{draftPreview}</output>
 
 {#if chatTitleUpdate}
 	<button

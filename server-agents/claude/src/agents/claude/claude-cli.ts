@@ -76,6 +76,8 @@ import {
   type PendingPermission,
 } from './runtime-state.js';
 
+const CONVERSATION_RESET_FAILURE = 'Claude CLI cleared the conversation mid-turn. The chat transcript is unchanged; send the message again to continue from it.';
+
 class ClaudeCliRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #processRetirements = new ClaudeProcessRetirementTracker();
@@ -151,6 +153,13 @@ class ClaudeCliRuntime {
         sessionId: sessionId.slice(0, 8),
         error: errorMessage(err),
       });
+    });
+  }
+
+  #controlResponse(requestId: string | undefined, response: Record<string, unknown>): string {
+    return JSON.stringify({
+      type: 'control_response',
+      response: { request_id: requestId, ...response },
     });
   }
 
@@ -232,6 +241,10 @@ class ClaudeCliRuntime {
       case 'command_lifecycle':
         break;
 
+      case 'conversation_reset':
+        this.#handleConversationReset(session, msg);
+        break;
+
       case 'user':
         if (!session.activeTurn) return;
         this.#handleUserMessage(session, msg);
@@ -306,6 +319,28 @@ class ClaudeCliRuntime {
       if (!activeTurn?.protocol.inputStarted) return;
       activeTurn.pendingCompaction = parseCompactMetadata(msg.compact_metadata);
     }
+  }
+
+  // A CLI-side flow (for example a forwarded /clear) discarded the conversation; the frame's
+  // new_conversation_id names that fresh conversation, not a session id. Garcon has no durable
+  // context-reset boundary, so the turn fails and the process retires while the chat keeps its
+  // native binding; the retired process's identity guard drops the post-reset re-initialization
+  // that would otherwise misread as a session mismatch.
+  // https://github.com/anthropics/claude-agent-sdk-python/blob/a8b1e285/src/claude_agent_sdk/types.py#L1417-L1440
+  #handleConversationReset(session: ClaudeRunningSession, msg: ClaudeCLIMessage): void {
+    const activeTurn = session.activeTurn;
+    this.#dependencies.logger.warn('Claude CLI discarded the conversation', {
+      chatId: session.chatId,
+      runId: activeTurn?.operation.runId ?? null,
+      sessionId: session.id.slice(0, 8),
+      processId: session.process?.pid ?? null,
+      newConversationId: msg.new_conversation_id ?? null,
+    });
+    if (activeTurn) {
+      activeTurn.protocol.clearRecordedResultFailure();
+      this.#failSession(session, CONVERSATION_RESET_FAILURE);
+    }
+    this.#retireSessionProcessInBackground(session);
   }
 
   #providerStateHandlers(session: ClaudeRunningSession): ClaudeProviderStateHandlers {
@@ -498,13 +533,9 @@ class ClaudeCliRuntime {
     const request = msg.request;
     const subtype = request?.subtype;
     if (!request || subtype !== 'can_use_tool') {
-      this.#trySendToCLI(session.id, JSON.stringify({
-        type: 'control_response',
-        response: {
-          subtype: 'error',
-          request_id: msg.request_id,
-          error: `Unsupported control request subtype: ${subtype || 'missing'}`,
-        },
+      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+        subtype: 'error',
+        error: `Unsupported control request subtype: ${subtype || 'missing'}`,
       }));
       return;
     }
@@ -515,13 +546,9 @@ class ClaudeCliRuntime {
         eventType: 'permission',
         reason: 'missing active operation',
       });
-      this.#trySendToCLI(session.id, JSON.stringify({
-        type: 'control_response',
-        response: {
-          subtype: 'error',
-          request_id: msg.request_id,
-          error: 'Claude tool permission arrived outside the active Garcon turn',
-        },
+      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+        subtype: 'error',
+        error: 'Claude tool permission arrived outside the active Garcon turn',
       }));
       return;
     }
@@ -536,13 +563,9 @@ class ClaudeCliRuntime {
         { toolName, toolInput, toolUseId },
         { allow: true, alwaysAllow: false },
       );
-      this.#trySendToCLI(session.id, JSON.stringify({
-        type: 'control_response',
-        response: {
-          subtype: 'success',
-          request_id: msg.request_id,
-          response,
-        },
+      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+        subtype: 'success',
+        response,
       }));
       return;
     }
@@ -772,13 +795,9 @@ class ClaudeCliRuntime {
       throw new Error('Claude permission occurrence is no longer pending');
     }
     const response = buildClaudePermissionApprovalResponse(pending, decision);
-    await this.#writeToCLI(pending.agentSessionId, JSON.stringify({
-      type: 'control_response',
-      response: {
-        subtype: 'success',
-        request_id: pending.cliRequestId,
-        response,
-      },
+    await this.#writeToCLI(pending.agentSessionId, this.#controlResponse(pending.cliRequestId, {
+      subtype: 'success',
+      response,
     }));
     this.#pendingPermissions.delete(pending);
   }

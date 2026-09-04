@@ -594,6 +594,152 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('fails and retires the process when the CLI discards the conversation', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const published = collectOperation('run-conversation-reset');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
+      await enqueueInputStarted(fake);
+      enqueueCliMessage(fake, {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'partial answer' }] },
+      });
+      enqueueCliMessage(fake, {
+        type: 'conversation_reset',
+        new_conversation_id: 'conversation-2',
+        uuid: 'reset-1',
+        session_id: 'expected-session',
+      });
+      enqueueCliMessage(fake, {
+        type: 'system',
+        subtype: 'init',
+        session_id: 'unexpected-session',
+      });
+      enqueueCliMessage(fake, {
+        type: 'assistant',
+        session_id: 'unexpected-session',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'reset answer' }] },
+      });
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI cleared the conversation mid-turn.'
+          + ' The chat transcript is unchanged; send the message again to continue from it.',
+      ]);
+      expect(publishedMessages(published.events).map((message) => message.content))
+        .toContain('partial answer');
+      expect(JSON.stringify(publishedMessages(published.events))).not.toContain('reset answer');
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('reports the reset failure over an error result recorded earlier in the turn', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const published = collectOperation('run-reset-after-error-result');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
+      const input = await enqueueInputStarted(fake);
+      enqueueCliMessage(fake, {
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: 'API is overloaded',
+        user_message_uuid: input.uuid,
+      });
+      enqueueCliMessage(fake, {
+        type: 'conversation_reset',
+        new_conversation_id: 'conversation-2',
+      });
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failureMessages(published.events)).toEqual([
+        'Claude CLI cleared the conversation mid-turn.'
+          + ' The chat transcript is unchanged; send the message again to continue from it.',
+      ]);
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('fails a turn when the conversation is discarded before the input starts', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const published = collectOperation('run-reset-before-start');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: published.operation,
+      }));
+      await waitForWrittenUserMessage(fake);
+      enqueueCliMessage(fake, {
+        type: 'conversation_reset',
+        new_conversation_id: 'conversation-2',
+      });
+
+      await expect(start).resolves.toBe('expected-session');
+      expect(failureMessages(published.events)).toHaveLength(1);
+      expect(fake.proc.stdin.end).toHaveBeenCalledTimes(1);
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('resumes the unchanged native binding on the turn after a conversation reset', async () => {
+    const originalSpawn = Bun.spawn;
+    const reset = createFakeClaudeProcess();
+    const retry = createFakeClaudeProcess();
+    Bun.spawn = mock()
+      .mockReturnValueOnce(reset.proc)
+      .mockReturnValueOnce(retry.proc);
+
+    try {
+      const runtime = createRuntime();
+      const resetRun = collectOperation('run-reset-resume');
+      const retryRun = collectOperation('run-reset-resume-next');
+      const start = runtime.startClaudeCliSession(startOptions({
+        operation: resetRun.operation,
+      }));
+      await enqueueInputStarted(reset);
+      enqueueCliMessage(reset, {
+        type: 'conversation_reset',
+        new_conversation_id: 'conversation-2',
+      });
+      await expect(start).resolves.toBe('expected-session');
+
+      const next = runtime.runClaudeTurn(startOptions({
+        command: 'continue after reset',
+        operation: retryRun.operation,
+      }));
+      await enqueueResult(retry);
+      await expect(next).resolves.toBeUndefined();
+      expect(Bun.spawn).toHaveBeenCalledTimes(2);
+      expect(Bun.spawn.mock.calls[1][0]).toContain('--resume=expected-session');
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('handles a terminal result without a trailing newline', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();
