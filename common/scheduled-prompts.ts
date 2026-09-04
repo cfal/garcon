@@ -253,6 +253,15 @@ function isAgentSettingsById(value: unknown): value is Record<string, AgentSetti
   return parseAgentSettingsById(value) !== null;
 }
 
+function isScheduledPromptIntervalHours(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= SCHEDULED_PROMPT_INTERVAL_HOURS_MIN &&
+    value <= SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
+  );
+}
+
 export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptTarget | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -267,14 +276,7 @@ export function normalizeScheduledPromptSchedule(value: unknown): ScheduledPromp
   const raw = asRecord(value);
   if (!raw || !isMinuteAlignedIso(raw.nextRunAt)) return null;
   if (raw.type === 'once') return { type: 'once', nextRunAt: raw.nextRunAt };
-  if (
-    raw.type !== 'recurring' ||
-    typeof raw.intervalHours !== 'number' ||
-    !Number.isSafeInteger(raw.intervalHours) ||
-    raw.intervalHours < SCHEDULED_PROMPT_INTERVAL_HOURS_MIN ||
-    raw.intervalHours > SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
-  )
-    return null;
+  if (raw.type !== 'recurring' || !isScheduledPromptIntervalHours(raw.intervalHours)) return null;
   if (raw.endAt !== null && !isMinuteAlignedIso(raw.endAt)) return null;
   if (typeof raw.endAt === 'string' && raw.endAt < raw.nextRunAt) return null;
   return {
@@ -337,10 +339,7 @@ export function normalizeScheduledPromptDefinitionInput(value: unknown): Schedul
   } else if (
     schedule.type === 'recurring' &&
     isMinuteAlignedIso(schedule.firstRunAtUtc) &&
-    typeof schedule.intervalHours === 'number' &&
-    Number.isSafeInteger(schedule.intervalHours) &&
-    schedule.intervalHours >= SCHEDULED_PROMPT_INTERVAL_HOURS_MIN &&
-    schedule.intervalHours <= SCHEDULED_PROMPT_INTERVAL_HOURS_MAX &&
+    isScheduledPromptIntervalHours(schedule.intervalHours) &&
     (schedule.endAtUtc === null || isMinuteAlignedIso(schedule.endAtUtc)) &&
     (schedule.endAtUtc === null || schedule.endAtUtc >= schedule.firstRunAtUtc)
   ) {

@@ -125,9 +125,13 @@ export class ScheduledPromptFormState {
 			this.#originalNextRunAt = scheduledPrompt.schedule.nextRunAt;
 			this.#originalLocalTime = this.time;
 			const intervalHours = scheduledPrompt.schedule.intervalHours;
-			this.intervalUnit = intervalHours % HOURS_PER_DAY === 0 ? 'days' : 'hours';
-			this.intervalAmount =
-				this.intervalUnit === 'days' ? intervalHours / HOURS_PER_DAY : intervalHours;
+			if (intervalHours % HOURS_PER_DAY === 0) {
+				this.intervalUnit = 'days';
+				this.intervalAmount = intervalHours / HOURS_PER_DAY;
+			} else {
+				this.intervalUnit = 'hours';
+				this.intervalAmount = intervalHours;
+			}
 			this.recurrenceEnd = scheduledPrompt.schedule.endAt ? 'until' : 'forever';
 			this.endDate = scheduledPrompt.schedule.endAt
 				? localDateValue(new Date(scheduledPrompt.schedule.endAt))
@@ -193,6 +197,18 @@ export class ScheduledPromptFormState {
 		};
 	}
 
+	private buildRecurringEndAtUtc(): string | null {
+		if (this.recurrenceEnd !== 'until') return null;
+		if (
+			this.#originalEndAt &&
+			this.#originalEndDate === this.endDate &&
+			this.#originalLocalTime === this.time
+		) {
+			return this.#originalEndAt;
+		}
+		return localDateTimeToUtcIso(this.endDate, this.time);
+	}
+
 	private buildSchedule(now: Date): ScheduledPromptDefinitionInput['schedule'] | null {
 		const minimum = Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
 		if (this.scheduleType === 'once') {
@@ -208,21 +224,18 @@ export class ScheduledPromptFormState {
 			intervalHours > SCHEDULED_PROMPT_INTERVAL_HOURS_MAX
 		)
 			return null;
-		const firstRunAtUtc =
+		let firstRunAtUtc: string | null;
+		if (
 			this.#originalNextRunAt &&
 			this.#originalLocalTime === this.time &&
 			Date.parse(this.#originalNextRunAt) >= minimum
-				? this.#originalNextRunAt
-				: nextLocalTimeUtcIso(this.time, now);
+		) {
+			firstRunAtUtc = this.#originalNextRunAt;
+		} else {
+			firstRunAtUtc = nextLocalTimeUtcIso(this.time, now);
+		}
 		if (!firstRunAtUtc || Date.parse(firstRunAtUtc) < minimum) return null;
-		const endAtUtc =
-			this.recurrenceEnd !== 'until'
-				? null
-				: this.#originalEndAt &&
-					  this.#originalEndDate === this.endDate &&
-					  this.#originalLocalTime === this.time
-					? this.#originalEndAt
-					: localDateTimeToUtcIso(this.endDate, this.time);
+		const endAtUtc = this.buildRecurringEndAtUtc();
 		if (this.recurrenceEnd === 'until' && (!endAtUtc || endAtUtc < firstRunAtUtc)) return null;
 		return { type: 'recurring', firstRunAtUtc, intervalHours, endAtUtc };
 	}
