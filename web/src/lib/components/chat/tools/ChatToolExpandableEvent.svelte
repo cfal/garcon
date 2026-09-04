@@ -57,65 +57,66 @@
 	</svg>
 {/snippet}
 
-<div class="my-1 {className}">
-	<ChatEventCard variant="default" compact>
-		{#snippet header()}
-			{#if onTitleClick}
-				<div class="flex w-full items-center gap-1.5">
-					{#if toolName}
-						<span class="text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0">
-							{toolName}
-						</span>
-					{/if}
-					<button
-						type="button"
-						class="text-primary hover:text-primary/80 font-mono hover:underline truncate text-left transition-colors text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
-						onclick={(e) => {
-							e.stopPropagation();
-							onTitleClick?.();
-						}}
-					>
-						{title}
-					</button>
-					<span class="flex-1"></span>
-					<button
-						type="button"
-						class="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						onclick={handleToggle}
-						aria-expanded={isOpen}
-						aria-controls={toolId ? `tool-body-${toolId}` : undefined}
-						aria-label={isOpen ? m.editor_actions_collapse() : m.editor_actions_expand()}
-					>
-						{@render chevronSvg()}
-					</button>
-				</div>
-			{:else}
-				<button
-					type="button"
-					class="flex w-full items-center gap-1.5 text-left"
-					onclick={handleToggle}
-					aria-expanded={isOpen}
-					aria-controls={toolId ? `tool-body-${toolId}` : undefined}
-				>
-					{#if toolName}
-						<span class="text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0">
-							{toolName}
-						</span>
-					{/if}
-					<span class="text-foreground/85 truncate flex-1 text-xs">
-						{title}
-					</span>
-					{@render chevronSvg()}
-				</button>
+{#snippet rowHeader()}
+	{#if onTitleClick}
+		<!-- The overlay button spans the header so the whole row toggles while the file-title
+		button above it keeps its own action; nested buttons forbid wrapping the row in one. -->
+		<div class="relative flex w-full items-center gap-1.5">
+			<button
+				type="button"
+				class="absolute inset-0 z-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				onclick={handleToggle}
+				aria-expanded={isOpen}
+				aria-controls={toolId ? `tool-body-${toolId}` : undefined}
+				aria-label={isOpen ? m.editor_actions_collapse() : m.editor_actions_expand()}
+			></button>
+			{#if toolName}
+				<span class="pointer-events-none z-10 text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0">
+					{toolName}
+				</span>
 			{/if}
-		{/snippet}
+			<button
+				type="button"
+				class="relative z-10 text-primary hover:text-primary/80 font-mono hover:underline truncate text-left transition-colors text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
+				onclick={(e) => {
+					e.stopPropagation();
+					onTitleClick?.();
+				}}
+			>
+				{title}
+			</button>
+			<span class="pointer-events-none z-10 flex-1"></span>
+			<span class="pointer-events-none z-10 flex size-4 shrink-0 items-center justify-center">
+				{@render chevronSvg()}
+			</span>
+		</div>
+	{:else}
+		<button
+			type="button"
+			class="flex w-full items-center gap-1.5 text-left"
+			onclick={handleToggle}
+			aria-expanded={isOpen}
+			aria-controls={toolId ? `tool-body-${toolId}` : undefined}
+		>
+			{#if toolName}
+				<span class="text-[11px] font-medium text-muted-foreground tracking-wide flex-shrink-0">
+					{toolName}
+				</span>
+			{/if}
+			<span class="text-foreground/85 truncate flex-1 text-xs">
+				{title}
+			</span>
+			{@render chevronSvg()}
+		</button>
+	{/if}
+{/snippet}
 
-		{#snippet body()}
-			{#if isOpen}
-				<div id={toolId ? `tool-body-${toolId}` : undefined} class="pt-1.5">
-					{@render children()}
-				</div>
-			{/if}
-		{/snippet}
-	</ChatEventCard>
+{#snippet rowBody()}
+	<div id={toolId ? `tool-body-${toolId}` : undefined} class="pt-1.5">
+		{@render children()}
+	</div>
+{/snippet}
+
+<div class="my-0.5 {className}">
+	<ChatEventCard variant="default" compact header={rowHeader} body={isOpen ? rowBody : undefined} />
 </div>
