@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations.js';
+import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { estimateConversationFeedItemSize } from '../conversation-feed-virtual-items.js';
@@ -50,6 +51,7 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 		rows: rows(),
 		mutationClock: clock(1, { replacement: 1 }),
 		hiddenToolTypes: NO_HIDDEN_TOOL_TYPES,
+		hiddenBashCommands: null,
 		showThinking: true,
 		isLiveWindow: true,
 		showRefreshError: false,
@@ -69,6 +71,43 @@ describe('ConversationFeedProjectionState', () => {
 		expect(projection.model.items[0]?.key).toContain('chat-1:generation-1');
 		expect(projection.model.indexByRowId.get('generation-1:1')).toBe(1);
 		expect(projection.renderModel.items[0]?.id).toBe('generation-1:1');
+	});
+
+	it('hides pattern-matched bash rows and rebuilds geometry when the matcher changes', () => {
+		const bashRows: ChatDisplayRow[] = [
+			{ kind: 'message', id: 'generation-1:1', message: new UserMessage(TS, 'prompt') },
+			{
+				kind: 'message',
+				id: 'generation-1:2',
+				message: new BashToolUseMessage(TS, 'bash-1', 'git status'),
+			},
+			{
+				kind: 'message',
+				id: 'generation-1:3',
+				message: new ToolResultMessage(TS, 'bash-1', { raw: 'ok' }, false),
+			},
+			{ kind: 'message', id: 'generation-1:4', message: new AssistantMessage(TS, 'done') },
+		];
+		const mutationClock = clock(3, { replacement: 1, 'live-append': 3 });
+		const projections = new ConversationFeedProjectionState();
+		const initial = projections.reconcile(input({ rows: bashRows, mutationClock }));
+
+		expect(initial.model.indexByRowId.has('generation-1:2')).toBe(true);
+
+		const hidden = projections.reconcile(
+			input({
+				rows: bashRows,
+				mutationClock,
+				hiddenBashCommands: compileHiddenBashCommandPatterns([
+					{ pattern: 'git *', mode: 'glob' },
+				]),
+			}),
+		);
+
+		expect(hidden.model.indexByRowId.has('generation-1:2')).toBe(false);
+		expect(hidden.model.indexByRowId.has('generation-1:1')).toBe(true);
+		expect(hidden.model.indexByRowId.has('generation-1:4')).toBe(true);
+		expect(hidden.geometry).not.toBe(initial.geometry);
 	});
 
 	it('acknowledges content-only streaming without publishing new geometry', () => {

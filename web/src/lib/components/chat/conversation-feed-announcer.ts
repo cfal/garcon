@@ -1,5 +1,6 @@
 import {
 	AssistantMessage,
+	BashToolUseMessage,
 	CliRowMessage,
 	ExternalToolUseMessage,
 	McpToolUseMessage,
@@ -9,6 +10,7 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { BashCommandMatcher } from '$lib/chat/transcript/hidden-bash-commands.js';
 import { cliPresentationLabel } from '$lib/chat/transcript/cli-presentation-style';
 import {
 	conversationFeedMutationKindsSince,
@@ -65,6 +67,7 @@ interface ConversationFeedAnnouncerInput {
 	isLiveWindow: boolean;
 	detachedStatus: string;
 	hiddenToolTypes: readonly string[];
+	hiddenBashCommands: BashCommandMatcher | null;
 	floatingPermissionOccurrences: readonly string[];
 }
 
@@ -127,6 +130,7 @@ export class ConversationFeedAnnouncementBatcher {
 export function announcementForAppendedRow(
 	row: ChatDisplayRow,
 	hiddenToolTypes: readonly string[],
+	hiddenBashCommands?: BashCommandMatcher | null,
 ): string | null {
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
@@ -147,6 +151,13 @@ export function announcementForAppendedRow(
 	}
 	if (message instanceof PermissionRequestMessage) return m.chat_permission_permission_required();
 	if (!isToolUseMessage(message)) return null;
+	if (
+		message instanceof BashToolUseMessage &&
+		hiddenBashCommands &&
+		hiddenBashCommands(message.command)
+	) {
+		return null;
+	}
 	if (
 		message instanceof UnknownToolUseMessage ||
 		message instanceof ExternalToolUseMessage ||
@@ -301,7 +312,7 @@ export class ConversationFeedAnnouncerState {
 		const responseUpdated =
 			addedPermissionAnnouncements.length > 0 ||
 			announcementCandidates.some((row) =>
-				this.#isResponseAnnouncement(row, input.hiddenToolTypes),
+				this.#isResponseAnnouncement(row, input.hiddenToolTypes, input.hiddenBashCommands),
 			);
 		if (!input.pinnedToBottom) {
 			if (!responseUpdated || this.#detachedStatusAnnounced) {
@@ -322,7 +333,11 @@ export class ConversationFeedAnnouncerState {
 					const suffix = prior && next.startsWith(prior) ? next.slice(prior.length) : next;
 					return suffix ? [{ kind: 'stream', rowId: row.id, source: suffix }] : [];
 				}
-				const content = announcementForAppendedRow(row, input.hiddenToolTypes);
+				const content = announcementForAppendedRow(
+					row,
+					input.hiddenToolTypes,
+					input.hiddenBashCommands,
+				);
 				return content ? [{ kind: 'discrete', text: content }] : [];
 			},
 		);
@@ -336,7 +351,11 @@ export class ConversationFeedAnnouncerState {
 		return clearedDetachedStatus ? { kind: 'clear' } : null;
 	}
 
-	#isResponseAnnouncement(row: ChatDisplayRow, hiddenToolTypes: readonly string[]): boolean {
+	#isResponseAnnouncement(
+		row: ChatDisplayRow,
+		hiddenToolTypes: readonly string[],
+		hiddenBashCommands: BashCommandMatcher | null,
+	): boolean {
 		if (row.kind !== 'message') return false;
 		if (
 			row.message instanceof AssistantMessage ||
@@ -345,7 +364,8 @@ export class ConversationFeedAnnouncerState {
 			return true;
 		}
 		return (
-			isToolUseMessage(row.message) && announcementForAppendedRow(row, hiddenToolTypes) !== null
+			isToolUseMessage(row.message) &&
+			announcementForAppendedRow(row, hiddenToolTypes, hiddenBashCommands) !== null
 		);
 	}
 

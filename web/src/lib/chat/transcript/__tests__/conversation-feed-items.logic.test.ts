@@ -15,6 +15,7 @@ import {
 	UserMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
+import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
@@ -145,6 +146,30 @@ describe('buildConversationFeedRenderItems', () => {
 			'assistant-message',
 		]);
 		expect(filterHiddenToolRenderItems(model.items, [])).toBe(model.items);
+	});
+
+	it('hides bash rows matching a command pattern together with their paired result', () => {
+		const model = buildConversationFeedRenderModel(
+			rows([
+				new UserMessage(TS, 'start'),
+				new BashToolUseMessage(TS, 'bash-1', 'git status'),
+				new ToolResultMessage(TS, 'bash-1', { raw: 'clean' }, false),
+				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
+				new ToolResultMessage(TS, 'bash-2', { raw: 'bar' }, false),
+				new AssistantMessage(TS, 'done'),
+			]),
+		);
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		if (!hiddenBashCommands) throw new Error('expected compiled bash command matcher');
+
+		const visible = filterHiddenToolRenderItems(model.items, [], hiddenBashCommands);
+
+		expect(visible.flatMap((item) => (item.kind === 'message' ? [item.message.type] : []))).toEqual(
+			['user-message', 'bash-tool-use', 'tool-result', 'assistant-message'],
+		);
+		expect(filterHiddenToolRenderItems(model.items, [], null)).toBe(model.items);
 	});
 
 	it('assigns layout only to rows with visible standalone presentation', () => {
