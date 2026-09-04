@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const WORKBENCH_PANEL =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
@@ -72,19 +73,6 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
     .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
     .waitFor({ state: 'visible' });
   await collapseCanonicalFilesWindow(fixture.page);
-}
-
-// The canonical desktop layout already includes a Files window; close it so
-// Git surfaces get the full workspace width these geometry checks assume.
-async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
-  const filesWindowId = await page
-    .locator('[data-workspace-window-active-surface="singleton:files"]')
-    .getAttribute('data-workspace-window-id');
-  if (!filesWindowId) return;
-  await page.locator(`[data-workspace-window-close="${filesWindowId}"]`).click();
-  await page.waitForFunction(
-    () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
-  );
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {

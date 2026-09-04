@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
+import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 const TWO_TRUNCATED_CLOSABLE_TABS_WIDTH = 178;
@@ -121,16 +122,8 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
   return openedWindowId;
 }
 
-// The canonical desktop layout already owns a dedicated Files window.
-async function canonicalFilesWindowId(page: Page): Promise<string> {
-  const windowId = await page
-    .locator('[data-workspace-window-active-surface="singleton:files"]')
-    .getAttribute('data-workspace-window-id');
-  if (!windowId) throw new Error('Missing canonical Files window.');
-  return windowId;
-}
-
-async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
+async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {
+  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
   await page.getByRole('menuitem', { name: label, exact: true }).click();
 }
 
@@ -588,24 +581,40 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element, so
-    // keep nudging the pointer until the drop zone actually activates.
     const expectedLabel = input.expectBlocked
       ? '4 windows max'
       : (input.expectedLabel ?? chatDropLabel(targetKind));
     const label = target.getByText(expectedLabel, { exact: true });
-    const deadline = Date.now() + 20_000;
-    for (;;) {
-      await page.mouse.move(targetX + (targetKind === 'right' ? -1 : 1), targetY);
-      await page.mouse.move(targetX, targetY);
-      if (await label.isVisible()) break;
-      if (Date.now() > deadline) {
-        await label.waitFor({ state: 'visible' });
-        break;
-      }
-    }
+    await nudgePointerUntilVisible(
+      page,
+      label,
+      targetX,
+      targetY,
+      targetKind === 'right' ? -1 : 1,
+    );
   } finally {
     await page.mouse.up();
+  }
+}
+
+// Chromium omits dragover when a dispatch changes the hit-tested element, so
+// keep nudging the pointer until the drop zone actually activates.
+async function nudgePointerUntilVisible(
+  page: Page,
+  label: Locator,
+  targetX: number,
+  targetY: number,
+  nudgeX: number,
+): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    await page.mouse.move(targetX + nudgeX, targetY);
+    await page.mouse.move(targetX, targetY);
+    if (await label.isVisible()) return;
+    if (Date.now() > deadline) {
+      await label.waitFor({ state: 'visible' });
+      return;
+    }
   }
 }
 
@@ -652,19 +661,14 @@ async function dragWorkspaceTabToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    // Chromium omits dragover when a dispatch changes the hit-tested element, so
-    // keep nudging the pointer until the drop zone actually activates.
     const label = target.getByText(input.expectedLabel, { exact: true });
-    const deadline = Date.now() + 20_000;
-    for (;;) {
-      await page.mouse.move(targetX + (input.target === 'right' ? -1 : 1), targetY);
-      await page.mouse.move(targetX, targetY);
-      if (await label.isVisible()) break;
-      if (Date.now() > deadline) {
-        await label.waitFor({ state: 'visible' });
-        break;
-      }
-    }
+    await nudgePointerUntilVisible(
+      page,
+      label,
+      targetX,
+      targetY,
+      input.target === 'right' ? -1 : 1,
+    );
   } finally {
     await page.mouse.up();
   }

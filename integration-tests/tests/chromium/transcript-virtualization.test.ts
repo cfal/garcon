@@ -33,6 +33,7 @@ import {
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
 
 const FEED_SELECTOR = '[data-chat-scroll-viewport]';
 const SIZER_SELECTOR = '[data-chat-virtual-sizer]';
@@ -4320,10 +4321,7 @@ async function verifyWindowCountGeometryStability(
 
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
   // The canonical desktop layout already provides the fourth window (Files).
-  const filesWindowId = await fixture.page
-    .locator('[data-workspace-window-active-surface="singleton:files"]')
-    .getAttribute('data-workspace-window-id');
-  if (!filesWindowId) throw new Error('Missing canonical Files window.');
+  const filesWindowId = await canonicalFilesWindowId(fixture.page);
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);

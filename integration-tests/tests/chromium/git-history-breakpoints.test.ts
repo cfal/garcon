@@ -9,6 +9,7 @@ import {
 } from '../../support/integration-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { requireCurrentWebBuild } from '../../support/web-build-gate.js';
+import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
@@ -280,19 +281,6 @@ async function openChatWorkspace(
       timeout: 20_000,
     });
   await collapseCanonicalFilesWindow(fixture.page);
-}
-
-// The canonical desktop layout already includes a Files window; close it so
-// the History layout keeps the viewport-driven widths the band checks assume.
-async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
-  const filesWindowId = await page
-    .locator('[data-workspace-window-active-surface="singleton:files"]')
-    .getAttribute('data-workspace-window-id');
-  if (!filesWindowId) return;
-  await page.locator(`[data-workspace-window-close="${filesWindowId}"]`).click();
-  await page.waitForFunction(
-    () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
-  );
 }
 
 async function openWorkspaceAddMenuItem(page: Page, label: string): Promise<void> {
