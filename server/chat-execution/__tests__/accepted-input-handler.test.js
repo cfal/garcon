@@ -332,7 +332,7 @@ describe('AcceptedInputHandler', () => {
     expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
       error: blocked,
       retryable: false,
-      preserveForkPreparation: true,
+      preserveForkPreparation: false,
     });
   });
 

@@ -586,7 +586,7 @@ export class AcceptedInputHandler {
         && error instanceof DomainError
         && error.code === 'PREAMBLE_SLASH_COMMAND_BLOCKED';
       let retryable = !retainPreparedTarget;
-      let preserveForkPreparation = retainPreparedTarget;
+      let preserveForkPreparation = false;
       if (input.preparation && !retainPreparedTarget) {
         try {
           await input.preparation.compensate();
