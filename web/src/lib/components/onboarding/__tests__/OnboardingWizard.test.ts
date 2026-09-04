@@ -59,6 +59,35 @@ describe('OnboardingWizard', () => {
 		expect(localSettings.chatMaxWidth).toBe('medium');
 	});
 
+	it('renders real sidebar previews for each layout option and tracks the selection', async () => {
+		const { localSettings } = renderWizard();
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+		await screen.findByRole('heading', { name: 'Chat list layout' });
+
+		const previews = document.querySelectorAll('[data-onboarding-layout-preview]');
+		expect(previews).toHaveLength(3);
+
+		const previewFor = (layout: string) => {
+			const preview = document.querySelector(`[data-onboarding-layout-preview="${layout}"]`);
+			if (!preview) throw new Error(`Missing layout preview for ${layout}`);
+			return preview;
+		};
+
+		// Only the detailed layout renders the sample last-message line.
+		const sampleMessage = 'Draft the release notes and verify the upgrade path.';
+		expect(previewFor('default').textContent).toContain(sampleMessage);
+		expect(previewFor('compact').textContent).not.toContain(sampleMessage);
+		expect(previewFor('single-line').textContent).not.toContain(sampleMessage);
+
+		expect(previewFor(localSettings.sidebarChatItemLayout).getAttribute('data-selected')).toBe(
+			'true',
+		);
+
+		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
+		expect(previewFor('single-line').getAttribute('data-selected')).toBe('true');
+		expect(previewFor('compact').getAttribute('data-selected')).toBe('false');
+	});
+
 	it('finishes by closing the wizard, or closes into provider settings', async () => {
 		const { appShell } = renderWizard();
 		await advanceToDonePage();

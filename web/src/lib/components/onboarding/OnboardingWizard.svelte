@@ -21,6 +21,7 @@
 		OnboardingWizardState,
 		type OnboardingPageId,
 	} from './onboarding-wizard-state.svelte.js';
+	import OnboardingChatLayoutPreview from './OnboardingChatLayoutPreview.svelte';
 
 	const appShell = getAppShell();
 	const ls = getLocalSettings();
@@ -141,27 +142,16 @@
 								checked={ls.sidebarChatItemLayout === option.value}
 								onchange={() => wizard.selectChatItemLayout(option.value)}
 							/>
-							<span
-								class="flex h-14 w-full flex-col justify-center gap-1.5 rounded-md bg-muted/60 px-2"
-								aria-hidden="true"
-							>
-								{#if option.value === 'single-line'}
-									<span class="h-1 w-3/4 rounded-full bg-muted-foreground/50"></span>
-									<span class="h-1 w-2/3 rounded-full bg-muted-foreground/50"></span>
-									<span class="h-1 w-3/4 rounded-full bg-muted-foreground/50"></span>
-								{:else if option.value === 'compact'}
-									<span class="h-1.5 w-3/4 rounded-full bg-muted-foreground/60"></span>
-									<span class="h-1 w-1/2 rounded-full bg-muted-foreground/40"></span>
-									<span class="mt-1 h-1.5 w-2/3 rounded-full bg-muted-foreground/60"></span>
-									<span class="h-1 w-1/2 rounded-full bg-muted-foreground/40"></span>
-								{:else}
-									<span class="h-1.5 w-3/4 rounded-full bg-muted-foreground/60"></span>
-									<span class="h-1 w-full rounded-full bg-muted-foreground/40"></span>
-									<span class="h-1 w-1/3 rounded-full bg-muted-foreground/30"></span>
-								{/if}
+							<span class="flex w-full flex-1 items-center">
+								<OnboardingChatLayoutPreview
+									layout={option.value}
+									isSelected={ls.sidebarChatItemLayout === option.value}
+								/>
 							</span>
-							<span class="text-sm font-medium text-foreground">{option.label()}</span>
-							<span class="text-xs text-muted-foreground">{option.hint()}</span>
+							<span class="flex flex-col items-center gap-1">
+								<span class="text-sm font-medium text-foreground">{option.label()}</span>
+								<span class="text-xs text-muted-foreground">{option.hint()}</span>
+							</span>
 						</label>
 					{/each}
 				</fieldset>
