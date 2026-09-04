@@ -10,6 +10,7 @@
 	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
 	import AgentCommandsSettingsCard from './AgentCommandsSettingsCard.svelte';
+	import HiddenBashCommandsSettingsCard from './HiddenBashCommandsSettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
 
@@ -33,6 +34,10 @@
 
 <div class="space-y-3">
 	<GitHubCliSettingsCard />
+
+	<!-- Browser-local preference; intentionally outside the remote snapshot
+	     gate so it stays usable while remote settings load or fail. -->
+	<HiddenBashCommandsSettingsCard />
 
 	{#if !remoteSettings.hasSnapshot}
 		<div class="py-12 flex items-center justify-center text-muted-foreground">

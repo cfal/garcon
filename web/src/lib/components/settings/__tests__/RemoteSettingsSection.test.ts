@@ -209,6 +209,14 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
+	it('shows the hidden bash commands card while remote settings have not loaded', () => {
+		setTestRemoteSettingsStore(new RemoteSettingsStore());
+		render(RemoteSettingsSectionTestHost);
+
+		expect(screen.getByText('Hide bash commands')).toBeTruthy();
+		expect(screen.getByLabelText('Command pattern')).toBeTruthy();
+	});
+
 	it('persists agent command settings while the parent hides and restores them', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeSnapshot());

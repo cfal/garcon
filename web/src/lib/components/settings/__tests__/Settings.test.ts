@@ -77,7 +77,11 @@ describe('Settings', () => {
 			).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Shortcuts' })).toBeTruthy();
 			expect(screen.queryByRole('heading', { name: 'Remote Settings' })).toBeNull();
-			expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
+			expect(
+				screen.getByText(
+					'These settings are stored on the garcon server, except where a card notes browser-local storage.',
+				),
+			).toBeTruthy();
 			expect(appShell.settingsTab).toBe('remote');
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
