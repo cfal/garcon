@@ -13,6 +13,8 @@ interface ScheduledPromptsFile {
   prompts: ScheduledPrompt[];
 }
 
+const HOUR_MS = 3_600_000;
+
 export interface OccurrenceClaim {
   scheduledPrompt: ScheduledPrompt;
   nextScheduledPrompt: ScheduledPrompt | null;
@@ -72,7 +74,7 @@ function clonePrompt(scheduledPrompt: ScheduledPrompt): ScheduledPrompt {
 function nextRecurringRun(scheduledPrompt: ScheduledPrompt): string | null {
   if (scheduledPrompt.schedule.type !== 'recurring') return null;
   const next = new Date(
-    Date.parse(scheduledPrompt.schedule.nextRunAt) + scheduledPrompt.schedule.intervalDays * 86_400_000,
+    Date.parse(scheduledPrompt.schedule.nextRunAt) + scheduledPrompt.schedule.intervalHours * HOUR_MS,
   ).toISOString();
   return scheduledPrompt.schedule.endAt && next > scheduledPrompt.schedule.endAt ? null : next;
 }
@@ -222,14 +224,13 @@ export class ScheduledPromptStore {
             });
             continue;
           }
-          let missedCount = 0;
-          let nextRunAt = scheduledPrompt.schedule.nextRunAt;
-          while (missed(nextRunAt)) {
-            nextRunAt = new Date(
-              Date.parse(nextRunAt) + scheduledPrompt.schedule.intervalDays * 86_400_000,
-            ).toISOString();
-            missedCount += 1;
-          }
+          const nextRunMs = Date.parse(scheduledPrompt.schedule.nextRunAt);
+          const intervalMs = scheduledPrompt.schedule.intervalHours * HOUR_MS;
+          const elapsedMs = minute - nextRunMs;
+          const missedCount = options.includeCurrentMinute
+            ? Math.floor(elapsedMs / intervalMs) + 1
+            : Math.ceil(elapsedMs / intervalMs);
+          const nextRunAt = new Date(nextRunMs + missedCount * intervalMs).toISOString();
           if (scheduledPrompt.schedule.endAt && nextRunAt > scheduledPrompt.schedule.endAt) {
             events.push({
               scheduledPromptId: scheduledPrompt.id,
