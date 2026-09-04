@@ -582,9 +582,12 @@ export class AcceptedInputHandler {
       return reservation;
     } catch (error) {
       let failure: unknown = error;
-      let retryable = true;
-      let preserveForkPreparation = false;
-      if (input.preparation) {
+      const retainPreparedTarget = Boolean(input.preparation)
+        && error instanceof DomainError
+        && error.code === 'PREAMBLE_SLASH_COMMAND_BLOCKED';
+      let retryable = !retainPreparedTarget;
+      let preserveForkPreparation = retainPreparedTarget;
+      if (input.preparation && !retainPreparedTarget) {
         try {
           await input.preparation.compensate();
         } catch (compensationError) {

@@ -53,6 +53,23 @@ function expectApplicationImmediatelyBefore(
   });
 }
 
+async function expectPreambleSlashBlocked(request: Promise<unknown>): Promise<void> {
+  let failure: unknown;
+  try {
+    await request;
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(GarconApiError);
+  expect(failure).toMatchObject({
+    status: 422,
+    body: {
+      errorCode: 'PREAMBLE_SLASH_COMMAND_BLOCKED',
+      error: 'Matching preambles haven’t been sent yet. Start with a regular message before using provider slash commands.',
+    },
+  });
+}
+
 const MINUTE_MS = 60_000;
 
 function nextScheduledRun(now = Date.now()): string {
@@ -366,6 +383,85 @@ describe('preambles', () => {
       expect(resumedHeld.releaseText('ordinary response after restart')).toBeTrue();
       await fixture.client.waitForTurnTerminal(targetChatId, resumed.turnId);
       expect(applicationTitles(await fixture.client.getMessages(targetChatId))).toHaveLength(2);
+    });
+  }, 60_000);
+
+  test('retains newly prepared boundary chats after blocking an opening slash command', async () => {
+    await withIntegrationFixture('preamble-slash-boundaries', async (fixture) => {
+      const body = 'SYNTHETIC_RETAINED_BOUNDARY_BODY';
+      await createPreamble(fixture, 0, {
+        enabled: true,
+        title: 'Retained boundary instructions',
+        content: body,
+        scope: { type: 'global' },
+      });
+      const agent = fixture.directAgents.openAi;
+
+      const runRegularBoundary = async (
+        chatId: string,
+        content: string,
+        expectedApplicationCount: number,
+      ): Promise<void> => {
+        const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+        const run = await fixture.client.runDirectChat({ chatId, content, agent });
+        const providerRequest = await held.received;
+        expect(providerRequest.lastUserText).toContain(body);
+        expect(providerRequest.lastUserText).toEndWith(content);
+        expect(held.releaseText(`response for ${content}`)).toBeTrue();
+        await fixture.client.waitForTurnTerminal(chatId, run.turnId);
+        const history = await fixture.client.getMessages(chatId);
+        expect(applicationTitles(history)).toHaveLength(expectedApplicationCount);
+        expectApplicationImmediatelyBefore(history, content, ['Retained boundary instructions']);
+        expect(JSON.stringify(history)).not.toContain(body);
+      };
+
+      const newChatId = fixture.newChatId();
+      await expectPreambleSlashBlocked(fixture.client.startDirectChat({
+        chatId: newChatId,
+        content: '/provider-command',
+        projectPath: fixture.dirs.project,
+        agent,
+      }));
+      expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === newChatId))
+        .toBeTrue();
+      expect(userContents((await fixture.client.getMessages(newChatId)).messages))
+        .not.toContain('/provider-command');
+      await runRegularBoundary(newChatId, 'regular new-chat message', 1);
+
+      const forkChatId = fixture.newChatId();
+      await expectPreambleSlashBlocked(fixture.client.forkRunChat({
+        sourceChatId: newChatId,
+        chatId: forkChatId,
+        command: '/provider-command',
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        model: agent.provider.model,
+        apiProviderId: agent.provider.providerId,
+        modelEndpointId: agent.provider.endpointId,
+        modelProtocol: agent.provider.protocol,
+      }));
+      expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === forkChatId))
+        .toBeTrue();
+      expect(userContents((await fixture.client.getMessages(forkChatId)).messages))
+        .not.toContain('/provider-command');
+      await runRegularBoundary(forkChatId, 'regular fork message', 2);
+
+      const continuationChatId = fixture.newChatId();
+      await expectPreambleSlashBlocked(fixture.client.post('/api/v1/chats/handoff-run', {
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+        sourceChatId: newChatId,
+        chatId: continuationChatId,
+        command: '/provider-command',
+      }));
+      expect(
+        (await fixture.client.listChats()).sessions.some((chat) => chat.id === continuationChatId),
+      ).toBeTrue();
+      expect(userContents((await fixture.client.getMessages(continuationChatId)).messages))
+        .not.toContain('/provider-command');
+      await runRegularBoundary(continuationChatId, 'regular continuation message', 2);
     });
   }, 60_000);
 

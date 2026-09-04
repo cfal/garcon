@@ -294,6 +294,48 @@ describe('AcceptedInputHandler', () => {
     });
   });
 
+  test('retains a prepared target when preambles block its opening slash command', async () => {
+    const events = [];
+    const blocked = new DomainError(
+      'PREAMBLE_SLASH_COMMAND_BLOCKED',
+      'Start with a regular message',
+      422,
+    );
+    const settle = settlement({
+      markPreScheduleFailure: mock(async () => { events.push('settled'); }),
+    });
+    const { handler } = scaffold({
+      admitInput: mock(async () => { throw blocked; }),
+      discardPreparedInput: mock(() => { events.push('discarded'); }),
+      releaseDirect: mock(async () => { events.push('released'); }),
+    });
+    const compensate = mock(async () => { events.push('compensated'); });
+
+    await expect(handler.schedule({
+      command: command(),
+      content: '/provider-command',
+      options: {
+        clientRequestId: 'request-1',
+        clientMessageId: 'message-1',
+        turnId: 'turn-1',
+      },
+      settlement: settle,
+      preparation: {
+        operation: 'chat-start',
+        prepare: mock(async () => { events.push('prepared'); }),
+        compensate,
+      },
+    })).rejects.toBe(blocked);
+
+    expect(events).toEqual(['prepared', 'discarded', 'released', 'settled']);
+    expect(compensate).not.toHaveBeenCalled();
+    expect(settle.markPreScheduleFailure).toHaveBeenCalledWith(command(), {
+      error: blocked,
+      retryable: false,
+      preserveForkPreparation: true,
+    });
+  });
+
   test('finishes initial-input compensation before execution admission is released', async () => {
     const events = [];
     const providerError = new Error('provider failed');
