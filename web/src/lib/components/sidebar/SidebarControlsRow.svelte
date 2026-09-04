@@ -36,7 +36,6 @@
 	interface SidebarControlsRowProps {
 		isLoading: boolean;
 		visibleUnreadCount?: number;
-		isMarkingAllRead?: boolean;
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: SidebarChatItemLayout;
@@ -63,7 +62,6 @@
 	let {
 		isLoading,
 		visibleUnreadCount = 0,
-		isMarkingAllRead = false,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
 		chatItemLayout = 'default',
@@ -90,16 +88,11 @@
 	let buttonLabel = $derived(m.sidebar_chats_new_chat());
 	let showMarkAllRead = $derived(visibleUnreadCount > 0);
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
-	let isMarkAllReadDisabled = $derived(isLoading || isMarkingAllRead);
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
 	let groupsByProject = $derived(sidebarGroupingUsesProjects(chatGrouping));
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let primaryButtonWidth = $state(0);
 	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
-
-	function handleMarkAllRead() {
-		onMarkAllRead?.();
-	}
 
 	function handleToggleGroupNestedProjectPaths() {
 		if (!groupsByProject) return;
@@ -167,10 +160,7 @@
 				{#if showQuickSearchSeparator}
 					<DropdownMenuSeparator />
 				{/if}
-				<DropdownMenuItem
-					onclick={handleMarkAllRead}
-					disabled={!showMarkAllRead || isMarkAllReadDisabled}
-				>
+				<DropdownMenuItem onclick={onMarkAllRead} disabled={!showMarkAllRead || isLoading}>
 					<SquareCheck class="h-3.5 w-3.5" />
 					{m.sidebar_chats_mark_all_read()}
 				</DropdownMenuItem>
