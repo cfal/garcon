@@ -152,12 +152,12 @@
 				: 'inset-x-0 top-1/2 h-px -translate-y-1/2',
 		)}
 	></div>
-	<!-- Keeps resize hit targets clear of adjacent title-bar controls. -->
+	<!-- Keeps resize hit targets clear of adjacent title-bar controls. The vertical hit area starts at the track edge with no left overhang so it never covers edge-flush scrollbars in the window to its left. -->
 	<div
 		data-workspace-window-resize-hit-area
 		class={cn(
 			'pointer-events-auto absolute z-10',
-			isHorizontal ? '-left-5 bottom-0 top-10 w-11' : 'inset-x-0 bottom-0 h-6',
+			isHorizontal ? 'left-0 bottom-0 top-10 w-2.5' : 'inset-x-0 bottom-0 h-6',
 		)}
 	></div>
 	<!-- Track background -->

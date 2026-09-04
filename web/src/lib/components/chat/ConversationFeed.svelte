@@ -466,9 +466,10 @@
 			{@render feedContent()}
 		</div>
 	</ScrollAreaPrimitive.Viewport>
+	<!-- The translate keeps the edge-flush scrollbar clear of the workspace window separator hit area. -->
 	<Scrollbar
 		orientation="vertical"
-		class={cn('w-1.5', isPreparingInitialScroll && 'invisible')}
+		class={cn('w-1.5 -translate-x-1', isPreparingInitialScroll && 'invisible')}
 		data-chat-feed-scrollbar
 		onpointerdowncapture={handleScrollbarPointerDownCapture}
 		onwheel={handleScrollbarWheel}
