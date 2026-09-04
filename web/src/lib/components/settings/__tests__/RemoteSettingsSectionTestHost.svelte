@@ -1,8 +1,9 @@
 <script lang="ts">
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
-	import { setGhCapability, setModelCatalog, setRemoteSettings } from '$lib/context';
+	import { setGhCapability, setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestGhCapability } from './gh-capability-test-context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
+	import { getTestLocalSettingsStore } from './local-settings-test-context';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
@@ -10,9 +11,16 @@
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
 	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
+	import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
+	import { setTestLocalSettingsStore } from './local-settings-test-context';
+	import { onDestroy } from 'svelte';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
 	setGhCapability(getTestGhCapability());
+
+	setTestLocalSettingsStore(new LocalSettingsStore());
+	setLocalSettings(getTestLocalSettingsStore());
+	onDestroy(() => getTestLocalSettingsStore().destroy());
 
 	const selectableAgentIds = [
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,

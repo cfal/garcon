@@ -13,8 +13,10 @@ import {
 	ReadToolUseMessage,
 	ToolResultMessage,
 	UserMessage,
+	WriteStdinToolUseMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
+import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 import {
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
@@ -145,6 +147,65 @@ describe('buildConversationFeedRenderItems', () => {
 			'assistant-message',
 		]);
 		expect(filterHiddenToolRenderItems(model.items, [])).toBe(model.items);
+	});
+
+	it('hides bash rows matching a command pattern together with their paired result', () => {
+		const model = buildConversationFeedRenderModel(
+			rows([
+				new UserMessage(TS, 'start'),
+				new BashToolUseMessage(TS, 'bash-1', 'git status'),
+				new ToolResultMessage(TS, 'bash-1', { raw: 'clean' }, false),
+				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
+				new ToolResultMessage(TS, 'bash-2', { raw: 'bar' }, false),
+				new AssistantMessage(TS, 'done'),
+			]),
+		);
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		if (!hiddenBashCommands) throw new Error('expected compiled bash command matcher');
+
+		const visible = filterHiddenToolRenderItems(model.items, [], hiddenBashCommands);
+
+		expect(visible.flatMap((item) => (item.kind === 'message' ? [item.message.type] : []))).toEqual(
+			['user-message', 'bash-tool-use', 'tool-result', 'assistant-message'],
+		);
+		expect(filterHiddenToolRenderItems(model.items, [], null)).toBe(model.items);
+	});
+
+	it('keeps permission requests and write-stdin rows visible when a bash pattern matches', () => {
+		const requestedBash = new BashToolUseMessage(TS, 'bash-1', 'git status');
+		const model = buildConversationFeedRenderModel(
+			rows([
+				new PermissionRequestMessage(TS, 'permission-1', requestedBash),
+				new WriteStdinToolUseMessage(TS, 'stdin-1', { chars: 'continue' }),
+			]),
+		);
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		if (!hiddenBashCommands) throw new Error('expected compiled bash command matcher');
+
+		const visible = filterHiddenToolRenderItems(model.items, [], hiddenBashCommands);
+
+		expect(visible.flatMap((item) => (item.kind === 'message' ? [item.message.type] : []))).toEqual(
+			['permission-request', 'write-stdin-tool-use'],
+		);
+	});
+
+	it('leaves an unpaired result for the layout stage to hide without guessing its tool type', () => {
+		const model = buildConversationFeedRenderModel(
+			rows([new ToolResultMessage(TS, 'outside-window', { raw: 'result' }, false)]),
+		);
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		if (!hiddenBashCommands) throw new Error('expected compiled bash command matcher');
+
+		const filtered = filterHiddenToolRenderItems(model.items, [], hiddenBashCommands);
+
+		expect(filtered).toHaveLength(1);
+		expect(conversationFeedItemLayout(filtered[0])).toBe('hidden');
 	});
 
 	it('assigns layout only to rows with visible standalone presentation', () => {

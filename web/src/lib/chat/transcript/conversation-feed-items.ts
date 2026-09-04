@@ -13,6 +13,7 @@ import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
+import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;
@@ -54,14 +55,23 @@ export type ConversationFeedItemLayout = 'hidden' | 'standard' | 'permission';
 export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem>(
 	items: T[],
 	hiddenToolTypes: readonly string[],
+	hiddenBashCommands?: BashCommandMatcher | null,
 ): T[] {
-	if (hiddenToolTypes.length === 0) return items;
+	if (hiddenToolTypes.length === 0 && !hiddenBashCommands) return items;
 	const hidden = new Set(hiddenToolTypes);
 	return items.filter((item) => {
 		if (item.kind !== 'message') return true;
-		const toolType =
-			item.message instanceof ToolResultMessage ? item.pairedToolUse?.type : item.message.type;
-		return !toolType || !hidden.has(toolType);
+		if (item.message instanceof ToolResultMessage) {
+			if (hiddenBashCommands && isHiddenBashToolUse(item.pairedToolUse, hiddenBashCommands)) {
+				return false;
+			}
+			const toolType = item.pairedToolUse?.type;
+			return !toolType || !hidden.has(toolType);
+		}
+		if (hiddenBashCommands && isHiddenBashToolUse(item.message, hiddenBashCommands)) {
+			return false;
+		}
+		return !hidden.has(item.message.type);
 	});
 }
 

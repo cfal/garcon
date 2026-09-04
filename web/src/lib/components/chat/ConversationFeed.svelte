@@ -28,6 +28,7 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 	import {
 		conversationScrollbarScrollDirection,
 		conversationScrollbarTrackDirection,
@@ -198,11 +199,17 @@
 	const announcementBatcher = new ConversationFeedAnnouncementBatcher((text) => {
 		announcement = { sequence: announcement.sequence + 1, text };
 	});
+	// Compiles apart from the projection input so its reference changes only
+	// with the pattern list, not with every row mutation.
+	const hiddenBashCommands = $derived(
+		compileHiddenBashCommandPatterns(localSettings.hiddenBashCommandPatterns),
+	);
 	const projectionInput = $derived({
 		surfaceIdentity,
 		rows: chatState.visibleRows,
 		mutationClock: chatState.feedMutationClock,
 		hiddenToolTypes: localSettings.hiddenToolTypes,
+		hiddenBashCommands,
 		showThinking: localSettings.showThinking,
 		isLiveWindow: !chatState.hasLaterMessages,
 		showRefreshError: chatState.loadStatus === 'error' && chatState.displayMessageCount > 0,
@@ -231,6 +238,7 @@
 			isLiveWindow: !chatState.hasLaterMessages,
 			detachedStatus: m.chat_feed_new_response_available(),
 			hiddenToolTypes: localSettings.hiddenToolTypes,
+			hiddenBashCommands,
 			floatingPermissionOccurrences: projectionInput.pendingPermissions.map(
 				(request) => request.permissionOccurrenceId,
 			),

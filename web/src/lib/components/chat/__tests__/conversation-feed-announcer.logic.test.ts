@@ -20,6 +20,7 @@ import {
 	plainAnnouncementText,
 } from '../conversation-feed-announcer';
 import type { ConversationFeedMutationClock } from '$lib/chat/transcript/conversation-feed-mutations';
+import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands';
 
 function clock(
 	dataRevision: number,
@@ -62,6 +63,7 @@ const enabled = {
 	isLiveWindow: true,
 	detachedStatus: 'New response available',
 	hiddenToolTypes: [] as string[],
+	hiddenBashCommands: null,
 	floatingPermissionOccurrences: [] as string[],
 };
 
@@ -268,6 +270,35 @@ describe('ConversationFeedAnnouncerState', () => {
 		).toBe('New response available');
 	});
 
+	it('keeps detached response status type-based when command content is unavailable', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const olderRows = [assistantRow('1', 'older response')];
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: olderRows,
+			mutationClock: clock(1),
+			...enabled,
+			pinnedToBottom: false,
+			isLiveWindow: false,
+			hiddenBashCommands,
+		});
+
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: olderRows,
+				mutationClock: clock(2, 2, 0, { 'bash-tool-use': 2 }),
+				...enabled,
+				pinnedToBottom: false,
+				isLiveWindow: false,
+				hiddenBashCommands,
+			}),
+		).toBe('New response available');
+	});
+
 	it.each([
 		'wait-tool-use',
 		'unknown-tool-use',
@@ -462,6 +493,57 @@ describe('ConversationFeedAnnouncerState', () => {
 				hiddenToolTypes: ['bash-tool-use'],
 			}),
 		).toBeNull();
+	});
+
+	it('does not announce or treat as a response bash output hidden by a command pattern', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({
+			surfaceIdentity: 'chat:generation',
+			rows: [assistantRow('1', 'existing')],
+			mutationClock: clock(1),
+			...enabled,
+		});
+		const hiddenBashCommands = compileHiddenBashCommandPatterns([
+			{ pattern: 'git *', mode: 'glob' },
+		]);
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [
+					assistantRow('1', 'existing'),
+					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
+				],
+				mutationClock: clock(2, 2),
+				...enabled,
+				pinnedToBottom: false,
+				hiddenBashCommands,
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [
+					assistantRow('1', 'existing'),
+					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
+				],
+				mutationClock: clock(2, 2),
+				...enabled,
+				hiddenBashCommands,
+			}),
+		).toBeNull();
+		expect(
+			announcer.reconcile({
+				surfaceIdentity: 'chat:generation',
+				rows: [
+					assistantRow('1', 'existing'),
+					messageRow('2', new BashToolUseMessage('', 'tool-1', 'git status')),
+					messageRow('3', new BashToolUseMessage('', 'tool-2', 'pwd')),
+				],
+				mutationClock: clock(3, 3),
+				...enabled,
+				hiddenBashCommands,
+			}),
+		).toBe('Bash');
 	});
 
 	it('announces only the newly streamed suffix at the live end', () => {

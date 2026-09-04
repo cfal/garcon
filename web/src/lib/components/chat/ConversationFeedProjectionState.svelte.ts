@@ -17,6 +17,7 @@ import {
 	type ConversationFeedRenderModel,
 } from '$lib/chat/transcript/conversation-feed-items.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+import type { BashCommandMatcher } from '$lib/chat/transcript/hidden-bash-commands.js';
 import {
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
@@ -29,6 +30,7 @@ export interface ConversationFeedProjectionInput {
 	rows: ChatDisplayRow[];
 	mutationClock: ConversationFeedMutationClock;
 	hiddenToolTypes: readonly string[];
+	hiddenBashCommands: BashCommandMatcher | null;
 	showThinking: boolean;
 	isLiveWindow: boolean;
 	showRefreshError: boolean;
@@ -71,6 +73,7 @@ function sameInput(
 		left.mutationClock.dataRevision === right.mutationClock.dataRevision &&
 		left.mutationClock.lastRevisionByKind === right.mutationClock.lastRevisionByKind &&
 		left.hiddenToolTypes === right.hiddenToolTypes &&
+		left.hiddenBashCommands === right.hiddenBashCommands &&
 		left.showThinking === right.showThinking &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
@@ -89,6 +92,7 @@ function sameProjectionConfiguration(
 		left &&
 		left.surfaceIdentity === right.surfaceIdentity &&
 		left.hiddenToolTypes === right.hiddenToolTypes &&
+		left.hiddenBashCommands === right.hiddenBashCommands &&
 		left.showThinking === right.showThinking &&
 		left.isLiveWindow === right.isLiveWindow &&
 		left.showRefreshError === right.showRefreshError &&
@@ -238,7 +242,11 @@ export class ConversationFeedProjectionState {
 		items: ConversationFeedRenderItem[],
 		input: ConversationFeedProjectionInput,
 	): ConversationFeedRenderItem[] {
-		return filterHiddenToolRenderItems(items, input.hiddenToolTypes).filter(
+		return filterHiddenToolRenderItems(
+			items,
+			input.hiddenToolTypes,
+			input.hiddenBashCommands,
+		).filter(
 			(item) =>
 				conversationFeedItemLayout(item) !== 'hidden' &&
 				(item.kind !== 'message' ||
