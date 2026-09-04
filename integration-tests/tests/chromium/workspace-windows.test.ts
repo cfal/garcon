@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Locator, Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
@@ -7,6 +7,7 @@ import { canonicalFilesWindowId } from '../../support/chromium-workspace.js';
 
 const WINDOW_SELECTOR = '[data-workspace-window-id]';
 const TWO_TRUNCATED_CLOSABLE_TABS_WIDTH = 178;
+const MAX_DROP_ZONE_NUDGE_PASSES = 3;
 
 function conversationPanel(page: Page, windowId: string): Locator {
   return page.locator(
@@ -597,12 +598,9 @@ async function dragChatToWindow(
   }
 }
 
-// Chromium omits dragover when a dispatch changes the hit-tested element, so
-// keep nudging the pointer until the drop zone actually activates. Each
-// position gets a short grace period so activation is attributed to the
-// position the pointer is actually at. After activation, re-dispatch at the
-// same coordinates: the drop is rejected unless a dragover was processed
-// after the final DOM change under the pointer.
+// Chromium can omit dragover when a dispatch changes the hit-tested element.
+// This helper nudges through a bounded set of positions, then dispatches once
+// more at the activated position after the final DOM change.
 async function nudgePointerUntilVisible(
   page: Page,
   label: Locator,
@@ -610,24 +608,53 @@ async function nudgePointerUntilVisible(
   targetY: number,
   nudgeX: number,
 ): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  for (;;) {
+  for (let attempt = 0; attempt < MAX_DROP_ZONE_NUDGE_PASSES; attempt += 1) {
     for (const x of [targetX + nudgeX, targetX]) {
       await page.mouse.move(x, targetY);
-      const activated = await label.waitFor({ state: 'visible', timeout: 500 }).then(
-        () => true,
-        () => false,
-      );
+      let activated = false;
+      try {
+        await label.waitFor({ state: 'visible', timeout: 500 });
+        activated = true;
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+      }
       if (activated) {
         await page.mouse.move(x, targetY);
         await label.waitFor({ state: 'visible', timeout: 500 });
         return;
       }
-      if (Date.now() > deadline) {
-        throw new Error(`Drop zone label never activated near (${targetX}, ${targetY}).`);
-      }
     }
   }
+  throw new Error(
+    `Drop zone label never activated near (${targetX}, ${targetY}) after ${MAX_DROP_ZONE_NUDGE_PASSES} nudge passes.`,
+  );
+}
+
+async function verifyCanonicalSeparatorClearance(
+  page: Page,
+  chatWindowId: string,
+  filesWindowId: string,
+): Promise<void> {
+  const resizeHitArea = page
+    .getByRole('separator', { name: 'Resize windows' })
+    .first()
+    .locator('[data-workspace-window-resize-hit-area]');
+  const chatWindow = page.locator(`[data-workspace-window-id="${chatWindowId}"]`);
+  const disclosure = page
+    .locator(`[data-workspace-window-id="${filesWindowId}"] button.file-tree-disclosure-slot`)
+    .first();
+  await disclosure.waitFor({ state: 'visible' });
+  const [hitAreaBox, chatWindowBox, disclosureBox] = await Promise.all([
+    resizeHitArea.boundingBox(),
+    chatWindow.boundingBox(),
+    disclosure.boundingBox(),
+  ]);
+  if (!hitAreaBox || !chatWindowBox || !disclosureBox) {
+    throw new Error('Missing canonical separator clearance geometry.');
+  }
+
+  expect(hitAreaBox.x).toBeGreaterThanOrEqual(chatWindowBox.x + chatWindowBox.width);
+  expect(hitAreaBox.x + hitAreaBox.width).toBeLessThan(disclosureBox.x);
 }
 
 function chatDropLabel(target: ChatDropTarget): string {
@@ -759,6 +786,12 @@ describe('Chromium workspace windows', () => {
   test('drags Chat onto any window, blocks the cap, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await createGitFixture(fixture.integration.dirs.project);
+      await mkdir(join(fixture.integration.dirs.project, 'src'));
+      await writeFile(
+        join(fixture.integration.dirs.project, 'src', 'workspace.ts'),
+        'export const workspace = true;\n',
+        'utf8',
+      );
       markPhase('creating source chats');
       const chatA = await createChat(
         fixture,
@@ -773,6 +806,9 @@ describe('Chromium workspace windows', () => {
         .locator('[data-workspace-window-current="true"]')
         .getAttribute('data-workspace-window-id');
       if (!chatWindowId) throw new Error('Missing initial Chat window.');
+      const filesWindowId = await canonicalFilesWindowId(fixture.page);
+      markPhase('verifying canonical separator clearance');
+      await verifyCanonicalSeparatorClearance(fixture.page, chatWindowId, filesWindowId);
       expect(await fixture.page.locator('[data-workspace-window-focus-ring]').count()).toBe(0);
       expect(
         await fixture.page.locator(`[data-workspace-window-add-trigger="${chatWindowId}"]`).count(),
@@ -859,7 +895,6 @@ describe('Chromium workspace windows', () => {
       expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(3);
 
       markPhase('opening a non-Chat target window');
-      const filesWindowId = await canonicalFilesWindowId(fixture.page);
       await fixture.page
         .locator(`[data-workspace-window-id="${filesWindowId}"]`)
         .waitFor({ state: 'visible' });
