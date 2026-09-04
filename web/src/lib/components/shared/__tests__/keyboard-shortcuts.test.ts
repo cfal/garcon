@@ -413,6 +413,36 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
+	it('requests rename on Ctrl-R while Chat owns focus and consumes the browser default', async () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
+
+		const input = document.createElement('input');
+		document.body.appendChild(input);
+		input.focus();
+
+		try {
+			const event = new KeyboardEvent('keydown', {
+				key: 'r',
+				ctrlKey: true,
+				bubbles: true,
+				cancelable: true,
+			});
+			input.dispatchEvent(event);
+			expect(appShell.requestRenameSelectedChat).toHaveBeenCalledOnce();
+			expect(event.defaultPrevented).toBe(true);
+		} finally {
+			input.remove();
+		}
+	});
+
 	it('moves left between tabs on Ctrl-Shift-J while a workspace window owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
