@@ -6,6 +6,16 @@ import { SpaDriver } from '../../support/spa-driver.js';
 describe('Lightpanda multi-chat isolation', () => {
   test('keeps concurrent direct chats isolated while switching in the sidebar', async () => {
     await withE2eFixture('multi-chat', async (fixture) => {
+      // Sidebar previews are asserted, so pin the detailed chat-item layout.
+      await fixture.page.evaluateOnNewDocument(() => {
+        const key = 'pref_local_settings';
+        const parsed = JSON.parse(globalThis.localStorage.getItem(key) ?? '{}') as unknown;
+        const stored = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        globalThis.localStorage.setItem(
+          key,
+          JSON.stringify({ ...stored, sidebarChatItemLayout: 'default' }),
+        );
+      });
       const app = new SpaDriver(fixture.page, fixture.integration);
       const first = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-a' });
       const second = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-multi-b' });

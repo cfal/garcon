@@ -66,7 +66,8 @@ async function allowDirectChats(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
     globalThis.localStorage.setItem(
       'pref_local_settings',
-      JSON.stringify({ allowDirectChats: true }),
+      // The sidebar-preview assertions need the detailed chat-item layout.
+      JSON.stringify({ allowDirectChats: true, sidebarChatItemLayout: 'default' }),
     );
   });
 }

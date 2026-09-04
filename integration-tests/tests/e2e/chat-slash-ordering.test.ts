@@ -5,6 +5,16 @@ import { SpaDriver } from '../../support/spa-driver.js';
 describe('Lightpanda chat slash ordering', () => {
   test('renames, moves, and tags without reaching the provider', async () => {
     await withE2eFixture('chat-slash-ordering', async (fixture) => {
+      // Manual-order slash commands are exercised against manual sidebar sort.
+      await fixture.page.evaluateOnNewDocument(() => {
+        const key = 'pref_local_settings';
+        const parsed = JSON.parse(globalThis.localStorage.getItem(key) ?? '{}') as unknown;
+        const stored = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        globalThis.localStorage.setItem(
+          key,
+          JSON.stringify({ ...stored, sidebarSortMode: 'manual' }),
+        );
+      });
       const messages = ['plain-a', 'plain-b', 'filter-pair-c', 'filter-pair-d'];
       const chatIds = messages.map(() => fixture.integration.newChatId());
       for (const [index, chatId] of chatIds.entries()) {

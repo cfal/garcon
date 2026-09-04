@@ -39,7 +39,7 @@ describe('Lightpanda workspace windows', () => {
       await app.fill('textarea[placeholder="Reply..."]', 'Draft survives window destruction');
 
       await app.openNewWorkspaceWindow('Open Git Workbench');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       expect(gitWindowId).not.toBe(chatWindowId);
       await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
@@ -93,12 +93,12 @@ describe('Lightpanda workspace windows', () => {
       if (!chat) throw new Error('Missing persisted Chat fixture.');
 
       await app.openNewWorkspaceWindow('Open Git Workbench');
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       const gitWindowId = await app.workspaceWindowIdForSurface('singleton:git');
       await app.selectWorkspaceWindowSurface('Open Git Compare', gitWindowId);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       await waitForPersistedWindowState(fixture.page, {
-        windowCount: 2,
+        windowCount: 3,
         chatIds: [chat.id],
         requiredSingletons: ['git', 'git-compare'],
       });
@@ -106,7 +106,7 @@ describe('Lightpanda workspace windows', () => {
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
-      await app.waitForWorkspaceWindowCount(2);
+      await app.waitForWorkspaceWindowCount(3);
       await waitForWindowActiveSurface(fixture.page, gitWindowId, 'singleton:git-compare');
       expect(
         await fixture.page.$$eval(
@@ -224,7 +224,7 @@ describe('Lightpanda workspace windows', () => {
         [secondChatWindowId]: chatBId,
       });
 
-      const filesWindowId = await app.openNewWorkspaceWindow('Open Files');
+      const filesWindowId = await app.workspaceWindowIdForSurface('singleton:files');
       await app.waitForWorkspaceWindowCount(3);
       expect(await fixture.page.$$('[data-workspace-new-window-menu]')).toHaveLength(0);
       await waitForWindowActiveSurface(fixture.page, filesWindowId, 'singleton:files');

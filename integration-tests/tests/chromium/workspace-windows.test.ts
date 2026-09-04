@@ -51,7 +51,9 @@ async function openChat(fixture: ChromiumFixture, chatId: string): Promise<void>
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator(WINDOW_SELECTOR).waitFor({ state: 'visible' });
+  await fixture.page
+    .locator('[data-workspace-window-current="true"]')
+    .waitFor({ state: 'visible' });
   await fixture.page
     .locator(`[data-sidebar-virtual-row="${chatId}"]`)
     .waitFor({ state: 'visible' });
@@ -119,8 +121,16 @@ async function openNewWindow(page: Page, label: string): Promise<string> {
   return openedWindowId;
 }
 
-async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {
-  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
+// The canonical desktop layout already owns a dedicated Files window.
+async function canonicalFilesWindowId(page: Page): Promise<string> {
+  const windowId = await page
+    .locator('[data-workspace-window-active-surface="singleton:files"]')
+    .getAttribute('data-workspace-window-id');
+  if (!windowId) throw new Error('Missing canonical Files window.');
+  return windowId;
+}
+
+async function openWindowTab(page: Page, windowId: string, label: string): Promise<void> {  await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
   await page.getByRole('menuitem', { name: label, exact: true }).click();
 }
 
@@ -283,7 +293,7 @@ async function openChatTabBelow(
         `[data-workspace-window-menu="${openedWindowId}"] [data-workspace-window-tab-action="move-to-window"]`,
       )
       .count(),
-  ).toBe(1);
+  ).toBe(2);
   await page.keyboard.press('Escape');
   return openedWindowId;
 }
@@ -663,11 +673,14 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
   }
 
   const x = bounds.x + bounds.width / 2;
-  const y = bounds.y + bounds.height / 2;
+  // Orthogonal separator hit areas can cover a vertical separator's midpoint.
+  const y = orientation === 'vertical' ? bounds.y + bounds.height * 0.25 : bounds.y + bounds.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(
-    orientation === 'vertical' ? x + 80 : x,
+    // Drag toward the widened side so the far column stays wide enough for
+    // later center-drop phases.
+    orientation === 'vertical' ? x - 80 : x,
     orientation === 'horizontal' ? y + 80 : y,
     { steps: 10 },
   );
@@ -744,7 +757,7 @@ describe('Chromium workspace windows', () => {
           .locator(`[data-workspace-window-titlebar="${chatWindowId}"]`)
           .evaluate((element) => element.getBoundingClientRect().height),
       ).toBe(40);
-      expect(await fixture.page.locator('[data-workspace-window-close]').count()).toBe(0);
+      expect(await fixture.page.locator('[data-workspace-window-close]').count()).toBe(2);
 
       markPhase('verifying adaptive labels and Chat tab actions');
       await openWindowTab(fixture.page, chatWindowId, 'Open Git Compare');
@@ -779,6 +792,7 @@ describe('Chromium workspace windows', () => {
       ).toEqual([
         'move-left',
         'move-right',
+        'move-to-window',
         'move-new-left',
         'move-new-right',
         'move-new-top',
@@ -796,16 +810,22 @@ describe('Chromium workspace windows', () => {
         await fixture.page.locator('[data-workspace-window-tab-actions-separator]').count(),
       ).toBe(1);
       await fixture.page.keyboard.press('Escape');
+      // The canonical split leaves the Chat tab rail below the full-label
+      // threshold, so widen the window before exercising adaptive label modes.
+      await fixture.page.getByRole('separator', { name: 'Resize windows' }).first().focus();
+      for (let step = 0; step < 8; step += 1) {
+        await fixture.page.keyboard.press('ArrowRight');
+      }
       await verifyAdaptiveTabLabels(fixture.page, chatWindowId);
       const movedChatWindowId = await openChatTabBelow(
         fixture.page,
         chatWindowId,
         'echo:workspace-window-chat-a-with-a-deliberately-long-title-for-tab-measurement',
       );
-      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
+      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(3);
 
       markPhase('opening a non-Chat target window');
-      const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+      const filesWindowId = await canonicalFilesWindowId(fixture.page);
       await fixture.page
         .locator(`[data-workspace-window-id="${filesWindowId}"]`)
         .waitFor({ state: 'visible' });
@@ -944,6 +964,7 @@ describe('Chromium workspace windows', () => {
       await dragChatToWindow(fixture.page, {
         chatId: chatA,
         windowId: filesWindowId,
+        target: 'bottom',
       });
       await fixture.page.waitForFunction(
         () => document.querySelectorAll('[data-workspace-window-id]').length === 4,
@@ -1351,7 +1372,7 @@ describe('Chromium workspace windows', () => {
       if (!chatWindowId) throw new Error('Missing Chat workspace window.');
 
       markPhase('opening a Files window and selecting a file row');
-      const portableWindowId = await openNewWindow(fixture.page, 'Open Files');
+      const portableWindowId = await canonicalFilesWindowId(fixture.page);
       await fixture.page.waitForFunction(
         (expectedWindowId) =>
           document
@@ -1510,6 +1531,16 @@ describe('Chromium workspace windows', () => {
         });
 
         markPhase('opening and activating a Files window');
+        // The shrink assertion needs the canonical Files window to open mid-test.
+        const canonicalFilesId = await canonicalFilesWindowId(fixture.page);
+        await fixture.page
+          .locator(`[data-workspace-window-close="${canonicalFilesId}"]`)
+          .click();
+        await fixture.page.waitForFunction(
+          (expectedCount) =>
+            document.querySelectorAll('[data-workspace-window-id]').length === expectedCount,
+          1,
+        );
         const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
         await fixture.page
           .locator(`[data-file-tree-row] [role="rowheader"][title="${filePath}"]`)
@@ -1602,7 +1633,7 @@ describe('Chromium workspace windows', () => {
           .getAttribute('data-workspace-window-id');
         if (!firstWindowId) throw new Error('Missing the first Chat window.');
 
-        const secondWindowId = await openNewWindow(fixture.page, 'Open Files');
+        const secondWindowId = await canonicalFilesWindowId(fixture.page);
         await dragChatToWindow(fixture.page, {
           chatId: secondChatId,
           windowId: secondWindowId,
@@ -1778,7 +1809,7 @@ describe('Chromium workspace windows', () => {
         const chatWindow = fixture.page.locator('[data-workspace-window-current="true"]');
         const chatWindowId = await chatWindow.getAttribute('data-workspace-window-id');
         if (!chatWindowId) throw new Error('Missing current Chat window.');
-        const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+        const filesWindowId = await canonicalFilesWindowId(fixture.page);
         await openFile(fixture.page, filePath);
         await fixture.page.waitForFunction(() =>
           [...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]')].some(

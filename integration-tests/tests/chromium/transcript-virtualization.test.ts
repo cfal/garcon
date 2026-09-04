@@ -4319,7 +4319,11 @@ async function verifyWindowCountGeometryStability(
   ).toBeLessThanOrEqual(1);
 
   const secondTerminalWindowId = await openNewWorkspaceWindow(fixture.page, 'New Terminal');
-  const filesWindowId = await openNewWorkspaceWindow(fixture.page, 'Open Files');
+  // The canonical desktop layout already provides the fourth window (Files).
+  const filesWindowId = await fixture.page
+    .locator('[data-workspace-window-active-surface="singleton:files"]')
+    .getAttribute('data-workspace-window-id');
+  if (!filesWindowId) throw new Error('Missing canonical Files window.');
   await focusWorkspaceWindow(fixture.page, chatIdentity.windowId);
   await waitForTranscriptReady(fixture.page);
   await expectFixedTranscriptTypography(fixture.page);

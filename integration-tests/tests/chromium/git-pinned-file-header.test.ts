@@ -68,7 +68,23 @@ async function openChatWorkspace(fixture: ChromiumFixture, projectPath: string):
     { waitUntil: 'domcontentloaded' },
   );
   if (!response?.ok()) throw new Error(`SPA navigation failed with ${response?.status()}.`);
-  await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
+  await fixture.page
+    .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
+    .waitFor({ state: 'visible' });
+  await collapseCanonicalFilesWindow(fixture.page);
+}
+
+// The canonical desktop layout already includes a Files window; close it so
+// Git surfaces get the full workspace width these geometry checks assume.
+async function collapseCanonicalFilesWindow(page: Page): Promise<void> {
+  const filesWindowId = await page
+    .locator('[data-workspace-window-active-surface="singleton:files"]')
+    .getAttribute('data-workspace-window-id');
+  if (!filesWindowId) return;
+  await page.locator(`[data-workspace-window-close="${filesWindowId}"]`).click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+  );
 }
 
 async function switchToGitWorkbench(page: Page): Promise<void> {
@@ -319,7 +335,9 @@ describe('Chromium pinned Git file headers', () => {
 
       markPhase('checking the Compare header variant');
       await fixture.page.setViewportSize({ width: 1_440, height: 900 });
-      await fixture.page.locator('[data-workspace-window-titlebar]').waitFor({ state: 'visible' });
+      await fixture.page
+        .locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]')
+        .waitFor({ state: 'visible' });
       await openWorkspaceAddMenuItem(fixture.page, 'Open Git Compare');
       await fixture.page.locator(COMPARE_PANEL).waitFor();
       await waitForDiff(fixture.page, COMPARE_PANEL);

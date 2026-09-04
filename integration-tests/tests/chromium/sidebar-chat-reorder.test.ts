@@ -287,6 +287,21 @@ async function withSidebarChromiumFixture<T>(
 describe('Chromium sidebar chat reorder', () => {
   test('survives repeated inverse drags, chat creation, and subsequent reorder actions', async () => {
     await withSidebarChromiumFixture('sidebar-chat-reorder', async (fixture) => {
+      // Drag reorder is only enabled under manual sidebar sort.
+      await fixture.page.addInitScript(() => {
+        const key = 'pref_local_settings';
+        try {
+          const stored = JSON.parse(globalThis.localStorage.getItem(key) ?? '{}');
+          const snapshot =
+            stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+          globalThis.localStorage.setItem(
+            key,
+            JSON.stringify({ ...snapshot, sidebarSortMode: 'manual' }),
+          );
+        } catch {
+          globalThis.localStorage.setItem(key, JSON.stringify({ sidebarSortMode: 'manual' }));
+        }
+      });
       const chatIds = await createChats(fixture.integration, 4);
       const original = await normalOrder(fixture.integration);
       expect(original).toHaveLength(chatIds.length);
