@@ -20,6 +20,10 @@ import {
 	DEFAULT_SNIPPET_TRIGGER,
 	normalizeSnippetTrigger,
 } from '$lib/chat/composer/snippet-trigger.js';
+import {
+	normalizeHiddenBashCommandPatterns,
+	type HiddenBashCommandPattern,
+} from '$lib/chat/transcript/hidden-bash-commands.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
@@ -151,6 +155,7 @@ export interface LocalSettingsSnapshot {
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	language: string;
 	hiddenToolTypes: HideableToolType[];
+	hiddenBashCommandPatterns: HiddenBashCommandPattern[];
 	globalShortcuts: GlobalShortcutOverrides;
 	completionSoundMode: CompletionSoundMode;
 	completionSoundVolume: number;
@@ -211,6 +216,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	markdownViewerOpenPlacement: 'same-window',
 	language: 'en',
 	hiddenToolTypes: [],
+	hiddenBashCommandPatterns: [],
 	globalShortcuts: {},
 	completionSoundMode: 'off',
 	completionSoundVolume: 0.7,
@@ -382,6 +388,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
+		hiddenBashCommandPatterns: normalizeHiddenBashCommandPatterns(
+			parsed.hiddenBashCommandPatterns,
+		),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
 		completionSoundVolume: parseCompletionSoundVolume(parsed.completionSoundVolume),
@@ -452,6 +461,9 @@ export class LocalSettingsStore {
 	);
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
+	hiddenBashCommandPatterns = $state<HiddenBashCommandPattern[]>(
+		DEFAULTS.hiddenBashCommandPatterns,
+	);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
 	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
@@ -483,6 +495,9 @@ export class LocalSettingsStore {
 		const next = { ...this.snapshot(), [key]: value };
 		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
 		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
+		if (key === 'hiddenBashCommandPatterns') {
+			next.hiddenBashCommandPatterns = normalizeHiddenBashCommandPatterns(value);
+		}
 		if (key === 'chatListDock') {
 			next.chatListDock = normalizeChatListDock(value);
 		}
@@ -510,6 +525,19 @@ export class LocalSettingsStore {
 			? Array.from(new Set([...this.hiddenToolTypes, ...selected]))
 			: this.hiddenToolTypes.filter((toolType) => !selected.has(toolType));
 		this.set('hiddenToolTypes', hiddenToolTypes);
+	}
+
+	addHiddenBashCommandPattern(pattern: HiddenBashCommandPattern): void {
+		this.set('hiddenBashCommandPatterns', [...this.hiddenBashCommandPatterns, pattern]);
+	}
+
+	removeHiddenBashCommandPattern(pattern: HiddenBashCommandPattern): void {
+		this.set(
+			'hiddenBashCommandPatterns',
+			this.hiddenBashCommandPatterns.filter(
+				(entry) => entry.pattern !== pattern.pattern || entry.mode !== pattern.mode,
+			),
+		);
 	}
 
 	snapshot(): LocalSettingsSnapshot {
@@ -548,6 +576,7 @@ export class LocalSettingsStore {
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
+			hiddenBashCommandPatterns: this.hiddenBashCommandPatterns.map((pattern) => ({ ...pattern })),
 			globalShortcuts: { ...this.globalShortcuts },
 			completionSoundMode: this.completionSoundMode,
 			completionSoundVolume: this.completionSoundVolume,
@@ -591,6 +620,9 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
+		this.hiddenBashCommandPatterns = snap.hiddenBashCommandPatterns.map((pattern) => ({
+			...pattern,
+		}));
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.completionSoundMode = snap.completionSoundMode;
 		this.completionSoundVolume = snap.completionSoundVolume;
