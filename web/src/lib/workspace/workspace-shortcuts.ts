@@ -218,6 +218,11 @@ export class WorkspaceShortcutDispatcher {
 				this.deps.appShell.openSidebarSearch();
 				return;
 			}
+			if (descriptor?.type === 'chat' && matches('rename-chat')) {
+				event.preventDefault();
+				this.deps.appShell.requestRenameSelectedChat();
+				return;
+			}
 			if (descriptor?.type === 'chat' && matches('delete-chat')) {
 				event.preventDefault();
 				this.deps.appShell.requestDeleteSelectedChat();
