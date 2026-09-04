@@ -668,6 +668,12 @@ describe('ChatRegistry', () => {
   it('rejects malformed ownership, settings, and native-session records', async () => {
     for (const entry of [
       persistedEntry({ agentOwnershipEpoch: '' }),
+      persistedEntry({
+        pendingPreambleBoundary: {
+          kind: 'new-chat',
+          ownershipEpoch: 'stale-epoch',
+        },
+      }),
       persistedEntry({ agentSettingsById: null }),
       persistedEntry({ nativeSession: nativeSession('other') }),
     ]) {

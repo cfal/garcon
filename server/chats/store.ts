@@ -262,12 +262,20 @@ function normalizeChatRegistryEntry(
   const agentSessionId = normalizeNullableString(rawEntry.agentSessionId);
   const carryOverSegments = parseCarryOverSegmentRefs(rawEntry.carryOverSegments);
   const nativeSeedReceipt = normalizeNativeSeedReceipt(rawEntry.nativeSeedReceipt);
+  const agentOwnershipEpoch = normalizeOwnershipEpoch(rawEntry.agentOwnershipEpoch);
+  const pendingPreambleBoundary = parsePendingPreambleBoundary(rawEntry.pendingPreambleBoundary);
+  if (
+    pendingPreambleBoundary
+    && pendingPreambleBoundary.ownershipEpoch !== agentOwnershipEpoch
+  ) {
+    throw new Error('Preamble boundary ownership epoch mismatch');
+  }
   assertSeedReceiptBinding({ agentSessionId, nativeSeedReceipt });
   return {
     agentId,
     agentSessionId,
     nativeSession,
-    agentOwnershipEpoch: normalizeOwnershipEpoch(rawEntry.agentOwnershipEpoch),
+    agentOwnershipEpoch,
     agentSettingsById,
     projectPath: normalizeString(rawEntry.projectPath),
     tags: Array.isArray(rawEntry.tags) ? rawEntry.tags.filter((tag): tag is string => typeof tag === 'string') : [],
@@ -286,7 +294,7 @@ function normalizeChatRegistryEntry(
     carryOverSegments,
     nativeSeedReceipt,
     carryOverMigrationQuarantine: normalizeMigrationQuarantine(rawEntry.carryOverMigrationQuarantine),
-    pendingPreambleBoundary: parsePendingPreambleBoundary(rawEntry.pendingPreambleBoundary),
+    pendingPreambleBoundary,
     parentChat: readParentChat(rawEntry.parentChat, chatId),
   };
 }
