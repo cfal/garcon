@@ -4,17 +4,10 @@ import { Lexer, type MarkedExtension, type TokenizerExtension } from 'marked';
 const WORD_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
 const CHAT_ID_AT_START = new RegExp(`^(\\d{${CHAT_ID_LENGTH}})(?![\\p{L}\\p{M}\\p{N}_])`, 'u');
 const CHAT_ID_AHEAD = new RegExp(`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{M}\\p{N}_])`, 'u');
+const GFM_URL_AT_START = Lexer.rules.inline.gfm.url;
 
 function startsWithGfmEmail(source: string): boolean {
-	const atIndex = source.indexOf('@', CHAT_ID_LENGTH);
-	if (atIndex === -1) return false;
-
-	const whitespaceIndex = source.search(/\s/u);
-	if (whitespaceIndex !== -1 && whitespaceIndex < atIndex) return false;
-
-	const candidate = whitespaceIndex === -1 ? source : source.slice(0, whitespaceIndex);
-	const firstToken = Lexer.lexInline(candidate, { gfm: true }).at(0);
-	return firstToken?.type === 'link' && firstToken.href.startsWith('mailto:');
+	return GFM_URL_AT_START.exec(source) !== null;
 }
 
 const chatReferenceTokenizer: TokenizerExtension = {

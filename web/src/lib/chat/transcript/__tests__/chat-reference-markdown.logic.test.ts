@@ -136,4 +136,19 @@ describe('createChatReferenceMarkdownExtension', () => {
 				.join(''),
 		).toContain(ordinary);
 	});
+
+	it('preserves repeated punctuation-delimited references before an unrelated email', () => {
+		const source = `${`${CHAT_ID},`.repeat(500)}user@example.com`;
+		const { marked, tokens } = lex(source);
+		const collected = collectTokens(marked, tokens);
+
+		expect(collected.filter((token) => token.type === 'chatReference')).toHaveLength(500);
+		expect(collected.filter((token) => token.type === 'link')).toHaveLength(1);
+		expect(collected.find((token) => token.type === 'link')).toMatchObject({
+			raw: 'user@example.com',
+			text: 'user@example.com',
+			href: 'mailto:user@example.com',
+		});
+		expect(tokens.map((token) => token.raw).join('')).toBe(source);
+	});
 });
