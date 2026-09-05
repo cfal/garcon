@@ -408,10 +408,12 @@ export function createStatusOperations(agents: GitAgentRunner) {
       // intent also wins over worktree deletion, so AD/MD read as added or
       // modified rather than deleted. Renames and copies drop out as before:
       // their porcelain line carries "old -> new", which is not a path this
-      // endpoint's consumers could act on.
+      // endpoint's consumers could act on. R/C can appear in either column;
+      // the unstaged form (DR, via an intent-to-add destination) pairs a
+      // worktree rename the same way.
       const staged = status[0];
       const unstaged = status[1];
-      if (staged === 'R' || staged === 'C') return;
+      if (staged === 'R' || staged === 'C' || unstaged === 'R' || unstaged === 'C') return;
       if (staged === 'A' || unstaged === 'A') {
         added.push(file);
       } else if (

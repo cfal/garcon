@@ -1138,10 +1138,43 @@ describe("getStatus", () => {
     );
     try {
       await initRepoWithCommit(projectPath);
+      // Pins rename detection on so the precondition cannot depend on the
+      // machine's global git configuration.
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
       await runGitCommand(projectPath, ["mv", "a.txt", "moved.txt"]);
       await fs.writeFile(path.join(projectPath, "moved.txt"), "two\n", "utf-8");
       expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
         .toBe("RM a.txt -> moved.txt");
+
+      const status = await git.getStatus({ projectPath });
+
+      expect(status.modified).toEqual([]);
+      expect(status.added).toEqual([]);
+      expect(status.deleted).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("drops unstaged rename entries reported through an intent-to-add destination", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      // Both files committed alike, then the destination is turned into an
+      // intent-to-add entry and the source vanishes from the worktree: git
+      // pairs that as an unstaged rename and reports R in the second column.
+      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DR a.txt -> dst.txt");
 
       const status = await git.getStatus({ projectPath });
 
