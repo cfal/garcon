@@ -25,6 +25,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('compact');
 		expect(store.sidebarSortMode).toBe('manual');
+		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 		expect(store.textEditorOpenPlacement).toBe('same-window');
@@ -446,6 +447,25 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarSortMode).toBe('manual');
 
 		store.destroy();
+	});
+
+	it('persists search result sorting and rejects invalid values', () => {
+		const store = createLocalSettingsStore();
+		for (const sort of ['activity', 'created', 'relevance'] as const) {
+			store.set('sidebarSearchResultSort', sort);
+			const restored = createLocalSettingsStore();
+			expect(restored.sidebarSearchResultSort).toBe(sort);
+			restored.destroy();
+		}
+		store.destroy();
+
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarSearchResultSort: 'oldest' }),
+		);
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarSearchResultSort).toBe('relevance');
+		malformed.destroy();
 	});
 
 	it('persists every sidebar inactivity duration and rejects malformed values', () => {

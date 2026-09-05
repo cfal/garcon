@@ -51,6 +51,7 @@ describe('SidebarFilterState', () => {
 		expect(state.canSaveCurrentFilter).toBe(true);
 		expect(state.currentFilter).toEqual({
 			textTokens: [],
+			titles: [],
 			tags: [['ops']],
 			agents: [],
 			models: [],
@@ -123,6 +124,7 @@ describe('SidebarFilterState', () => {
 		expect(state.canSaveCurrentFilter).toBe(true);
 		expect(state.currentFilter).toEqual({
 			textTokens: [],
+			titles: [],
 			tags: [],
 			agents: [],
 			models: [],
@@ -146,5 +148,17 @@ describe('SidebarFilterState', () => {
 
 		expect(state.currentFilter.orderGroup).toEqual({ group: 'archived', negated: true });
 		expect(state.filteredChats.map((chat) => chat.id)).toEqual(['chat-1']);
+	});
+
+	it('preserves title groups when merging a saved folder with search', () => {
+		const state = new SidebarFilterState({
+			get chats() {
+				return [makeChat({ title: 'Authentication error handling' })];
+			},
+		});
+		state.searchQuery = 'title:auth|login title:"error handling"';
+
+		expect(state.currentFilter.titles).toEqual([['auth', 'login'], ['error handling']]);
+		expect(state.filteredChats).toHaveLength(1);
 	});
 });

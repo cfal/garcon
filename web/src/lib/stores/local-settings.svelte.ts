@@ -20,6 +20,10 @@ import {
 	DEFAULT_SNIPPET_TRIGGER,
 	normalizeSnippetTrigger,
 } from '$lib/chat/composer/snippet-trigger.js';
+import {
+	CHAT_SEARCH_SORT_VALUES,
+	type ChatSearchSort,
+} from '$shared/chat-search';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const COMPLETION_SOUND_MODE_VALUES = ['off', 'default', 'custom'] as const;
@@ -140,6 +144,7 @@ export interface LocalSettingsSnapshot {
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: SidebarChatItemLayout;
 	sidebarSortMode: SidebarSortMode;
+	sidebarSearchResultSort: ChatSearchSort;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
@@ -200,6 +205,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarGroupNestedProjectPaths: false,
 	sidebarChatItemLayout: 'compact',
 	sidebarSortMode: 'manual',
+	sidebarSearchResultSort: 'relevance',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
@@ -270,6 +276,12 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 	return typeof value === 'string' && SIDEBAR_SORT_MODE_VALUES.includes(value as SidebarSortMode)
 		? (value as SidebarSortMode)
 		: DEFAULTS.sidebarSortMode;
+}
+
+function parseSidebarSearchResultSort(value: unknown): ChatSearchSort {
+	return typeof value === 'string' && CHAT_SEARCH_SORT_VALUES.includes(value as ChatSearchSort)
+		? (value as ChatSearchSort)
+		: DEFAULTS.sidebarSearchResultSort;
 }
 
 function parseSidebarChatGrouping(value: unknown): SidebarChatGrouping {
@@ -356,6 +368,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
+		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
 			parsed.codeEditorLineNumbers,
@@ -439,6 +452,7 @@ export class LocalSettingsStore {
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<SidebarChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
+	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
@@ -537,6 +551,7 @@ export class LocalSettingsStore {
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
 			sidebarSortMode: this.sidebarSortMode,
+			sidebarSearchResultSort: this.sidebarSearchResultSort,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
@@ -580,6 +595,7 @@ export class LocalSettingsStore {
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
 		this.sidebarSortMode = snap.sidebarSortMode;
+		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
 		this.codeEditorFontSize = snap.codeEditorFontSize;

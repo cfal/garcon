@@ -28,7 +28,11 @@
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
-	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+	import {
+		transcriptSearchCandidateSignature,
+		transcriptSearchContentRevisionSignature,
+		transcriptSearchTimeOrderSignature,
+	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import { SIDEBAR_SECTION_COLLAPSE_KEYS } from './sidebar-virtual-chat-list';
 	import {
@@ -40,6 +44,7 @@
 		SidebarChatItemLayout,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
+	import type { ChatSearchSort } from '$shared/chat-search';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -140,7 +145,19 @@
 	let transcriptSearchTarget = $derived(
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
 	);
-	let transcriptSearchChatSignature = $derived(transcriptSearchFacetSignature(chats));
+	let transcriptSearchCandidateSet = $derived(
+		transcriptSearchCandidateSignature(chats, transcriptSearchTarget),
+	);
+	let transcriptSearchContentRevision = $derived(
+		transcriptSearchContentRevisionSignature(chats, transcriptSearchTarget),
+	);
+	let transcriptSearchTimeOrder = $derived(
+		transcriptSearchTimeOrderSignature(
+			chats,
+			transcriptSearchTarget,
+			localSettings.sidebarSearchResultSort,
+		),
+	);
 	let transcriptSearchEnabled = $derived(
 		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
 	);
@@ -177,10 +194,11 @@
 	$effect(() => {
 		const query = transcriptSearchTarget;
 		const enabled = transcriptSearchEnabled;
-		transcriptSearchChatSignature;
+		transcriptSearchCandidateSet;
+		localSettings.sidebarSearchResultSort;
 		transcriptSearchRetryVersion;
 		if (!enabled || !query.trim()) {
-			sidebarSearch.clearTranscriptSearch();
+			untrack(() => sidebarSearch.clearTranscriptSearch());
 			return;
 		}
 
@@ -193,6 +211,14 @@
 			clearTimeout(timeoutId);
 			controller.abort();
 		};
+	});
+
+	$effect(() => {
+		const query = transcriptSearchTarget;
+		transcriptSearchContentRevision;
+		transcriptSearchTimeOrder;
+		if (query !== untrack(() => sidebarSearch.transcriptSearchQuery)) return;
+		untrack(() => sidebarSearch.scheduleTranscriptSearchRevalidation());
 	});
 
 	function handleChatClick(chatId: string) {
@@ -400,6 +426,12 @@
 
 	function handleSetSortMode(sortMode: SidebarSortMode): void {
 		localSettings.set('sidebarSortMode', sortMode);
+	}
+
+	function handleSetSearchResultSort(sort: ChatSearchSort): void {
+		if (sort === localSettings.sidebarSearchResultSort) return;
+		localSettings.set('sidebarSearchResultSort', sort);
+		sidebarSearch.resetTranscriptSearchForSortChange();
 	}
 
 	function handleToggleChatListAutohide(): void {
@@ -633,6 +665,19 @@
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
 	transcriptSearchStatus={sidebarSearch.transcriptSearchStatus}
 	transcriptSearchError={sidebarSearch.transcriptSearchError}
+	sort={localSettings.sidebarSearchResultSort}
+	showTranscriptPagination={sidebarSearch.transcriptSearchPage !== null}
+	hasMoreTranscriptResults={sidebarSearch.transcriptSearchPage?.hasMore === true &&
+		!sidebarSearch.transcriptSearchLimitReached}
+	loadingMoreTranscriptResults={sidebarSearch.transcriptSearchLoadingMore}
+	transcriptSearchPageError={sidebarSearch.transcriptSearchPageError}
+	transcriptSearchRevalidating={sidebarSearch.transcriptSearchRevalidating}
+	transcriptSearchRevalidationError={sidebarSearch.transcriptSearchRevalidationError}
+	transcriptSearchLimitReached={sidebarSearch.transcriptSearchLimitReached}
+	transcriptSearchAnnouncement={sidebarSearch.transcriptSearchAnnouncement}
+	transcriptSearchAnnouncementVersion={sidebarSearch.transcriptSearchAnnouncementVersion}
+	resultsResetVersion={sidebarSearch.transcriptSearchResultsResetVersion}
+	revalidationVersion={sidebarSearch.transcriptSearchRevalidationVersion}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}
 	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
@@ -646,6 +691,9 @@
 	onRetryTranscriptSearch={() => {
 		transcriptSearchRetryVersion += 1;
 	}}
+	onSortChange={handleSetSearchResultSort}
+	onLoadMoreTranscriptResults={() => sidebarSearch.loadMoreTranscriptResults()}
+	onRetryTranscriptSearchRevalidation={() => sidebarSearch.retryTranscriptSearchRevalidation()}
 	reduceMotion={localSettings.reduceMotion}
 	onClose={() => sidebarSearch.closeSearchDialog()}
 />

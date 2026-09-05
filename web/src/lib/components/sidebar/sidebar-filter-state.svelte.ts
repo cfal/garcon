@@ -44,7 +44,8 @@ function getSystemFolders(): FolderEntry[] {
 function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): ChatFilterSpec {
 	const merged = emptyFilterSpec();
 	merged.textTokens = Array.from(new Set([...(base?.textTokens ?? []), ...search.textTokens]));
-	merged.tags = mergeTagGroups(base?.tags, search.tags);
+	merged.titles = mergeOrGroups(base?.titles, search.titles);
+	merged.tags = mergeOrGroups(base?.tags, search.tags);
 	merged.agents = Array.from(new Set([...(base?.agents ?? []), ...search.agents]));
 	merged.models = Array.from(new Set([...(base?.models ?? []), ...search.models]));
 	merged.project = Array.from(new Set([...(base?.project ?? []), ...search.project]));
@@ -53,7 +54,7 @@ function mergeChatFilters(base: ChatFilterSpec | null, search: ChatFilterSpec): 
 	return merged;
 }
 
-function mergeTagGroups(a: string[][] | undefined, b: string[][]): string[][] {
+function mergeOrGroups(a: string[][] | undefined, b: string[][]): string[][] {
 	const seen = new Set<string>();
 	const result: string[][] = [];
 	for (const group of [...(a ?? []), ...b]) {
@@ -87,7 +88,7 @@ export class SidebarFilterState {
 			id: f.id,
 			name: f.name,
 			isSystem: false,
-			filter: f.filter as ChatFilterSpec,
+			filter: { ...emptyFilterSpec(), ...f.filter },
 		}));
 		return [...systemFolders, ...user];
 	}
