@@ -694,7 +694,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       logger.info('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await runGit(projectPath, ['fetch', remoteName], readOnlyGitOptions());
+    const { stdout } = await runGit(projectPath, ['fetch', remoteName], networkGitOptions());
     return { success: true, output: stdout || 'Fetch completed successfully', remoteName };
   }
 
