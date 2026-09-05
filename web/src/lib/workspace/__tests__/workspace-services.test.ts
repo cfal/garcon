@@ -14,7 +14,7 @@ import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { windowIdOfSurface, windowNodeById } from '../window-tree.js';
 import {
-	COMPACT_ENTER_WINDOW_WIDTH_PX,
+	MIN_WINDOW_WIDTH_PX,
 	WORKSPACE_RESIZE_BOUND_SAFETY_PX,
 } from '../window-geometry-policy.js';
 import {
@@ -225,40 +225,13 @@ describe('createWorkspaceServices', () => {
 		await services.coordinator.openChatInNewWindow('chat-2');
 		const root = services.layout.snapshot.desktopRoot;
 		if (root.type !== 'partition') throw new Error('Expected partition root');
-		const requiredWidth = COMPACT_ENTER_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
+		const requiredWidth = MIN_WINDOW_WIDTH_PX + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
 
 		expect(services.coordinator.resolvePartitionRatioBounds(root.id)).toEqual({
 			min: requiredWidth / (hostWidth * 0.5),
 			max: 1 - requiredWidth / hostWidth,
 			adjustable: true,
 		});
-	});
-
-	it('suspends singleton controllers hidden by the compact projection', async () => {
-		rootLocalSettings = createLocalSettingsStore();
-		({ services } = assembleWorkspaceServices(rootLocalSettings));
-		const files = services.singletonSurfaces.files();
-		expect(files.presentationVisible).toBe(true);
-
-		services.hostGeometry.size = { width: 600, height: 700 };
-		services.hostGeometry.layoutPublished(services.layout.snapshot);
-		expect(services.hostGeometry.compactActive).toBe(true);
-		expect(files.presentationVisible).toBe(false);
-		expect(services.coordinator.isChatPresented).toBe(true);
-
-		services.coordinator.activateWindow('window-files');
-		expect(files.presentationVisible).toBe(true);
-		expect(services.coordinator.isChatPresented).toBe(false);
-
-		services.coordinator.activateWindow(DEFAULT_WINDOW);
-		expect(files.presentationVisible).toBe(false);
-		await services.coordinator.focusSurface('singleton:files');
-		expect(files.presentationVisible).toBe(true);
-
-		services.hostGeometry.size = { width: 1000, height: 700 };
-		services.hostGeometry.layoutPublished(services.layout.snapshot);
-		expect(services.hostGeometry.compactActive).toBe(false);
-		expect(files.presentationVisible).toBe(true);
 	});
 
 	it('cancels root-owned window drag before a main-inert transition', () => {

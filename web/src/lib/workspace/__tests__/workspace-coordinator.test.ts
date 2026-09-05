@@ -79,7 +79,6 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
-		isCompactProjectionActive?: () => boolean;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -189,7 +188,6 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
-		isCompactProjectionActive: options.isCompactProjectionActive ?? (() => false),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
@@ -1588,23 +1586,6 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
 	});
 
-	it('preserves compact navigation focus while activating a Chat window', async () => {
-		const { coordinator, appShell } = createHarness();
-		coordinator.noteWindowChromeFocus('window-files', 'singleton:files');
-
-		coordinator.activateWindowFromCompactNavigation('window-main');
-
-		expect(coordinator.currentWindowId).toBe('window-main');
-		expect(coordinator.lastFocusedSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
-		expect(coordinator.focusOwner).toEqual({
-			kind: 'window-chrome',
-			windowId: 'window-main',
-			surfaceId: CANONICAL_CHAT_SURFACE_ID,
-		});
-		await tick();
-		expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
-	});
-
 	it('promotes a presented pane when keyboard focus enters it', () => {
 		const { coordinator } = createHarness();
 
@@ -2767,5 +2748,80 @@ describe('generic terminal creation', () => {
 			'Terminal unavailable',
 		);
 		expect(terminals.create).toHaveBeenCalledOnce();
+	});
+});
+
+describe('responsive window merging', () => {
+	it('keeps the current tab, transfers files and terminals, and never invokes close guards', async () => {
+		const { coordinator, layout, files, terminals } = createHarness({ includePortableTabs: false });
+		await coordinator.openChatInNewWindow('other-chat', 'window-main', 'bottom');
+		const chatWindowId = coordinator.currentWindowId;
+		await coordinator.placeFileSession('dirty', { type: 'window', windowId: chatWindowId });
+		const terminalId = await coordinator.createTerminal(chatWindowId);
+		await coordinator.focusSurface(CANONICAL_CHAT_SURFACE_ID);
+		const selected = windowTabs(layout.snapshot, 'window-main').activeId;
+		await expect(coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }))).resolves.toBe(
+			true,
+		);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(coordinator.currentWindowId).toBe('window-main');
+		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(selected);
+		expect(windowTabs(layout.snapshot, 'window-main').order).toEqual(
+			expect.arrayContaining([
+				'singleton:files',
+				fileSurfaceId('dirty'),
+				terminalSurfaceId(terminalId),
+			]),
+		);
+		expect(coordinator.closeGuardRequest).toBeNull();
+		expect(files.confirmDestructive).not.toHaveBeenCalled();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		const revision = layout.revision;
+		await coordinator.fitWindowsToHost(() => ({ width: 2400, height: 1200 }));
+		expect(layout.revision).toBe(revision);
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+	});
+	it('transfers the last Chat view into a non-Chat current window without selecting it', async () => {
+		const { coordinator, layout } = createHarness({ includePortableTabs: false });
+		await coordinator.showChatInCurrentWindow('retained-chat');
+		await coordinator.focusSurface('singleton:files');
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		const transfer = vi.fn(() => publication);
+		coordinator.registerChatSurfaceTransferPort({ prepareChatSurfaceTransfer: transfer });
+		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(windowTabs(layout.snapshot, 'window-files').activeId).toBe('singleton:files');
+		expect(layout.surface(chatViewSurfaceId('window-files'))).toMatchObject({
+			chatId: 'retained-chat',
+		});
+		expect(transfer).toHaveBeenCalledOnce();
+		expect(publication.publish).toHaveBeenCalledOnce();
+	});
+	it('does not prune fullscreen, mobile, or an unmeasured host', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.fitWindowsToHost(() => null);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		await coordinator.enterWindowFullscreen('window-main');
+		await coordinator.fitWindowsToHost(() => ({ width: 1, height: 1 }));
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		await coordinator.enterMobilePresentation();
+		await coordinator.fitWindowsToHost(() => ({ width: 1, height: 1 }));
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+	});
+	it('defers a merge while a close guard owns a source and succeeds after cancellation', async () => {
+		const guard = deferred<boolean>();
+		const { coordinator, layout } = createHarness({ confirmDestructive: () => guard.promise });
+		await coordinator.placeFileSession('guarded', { type: 'window', windowId: 'window-files' });
+		const closing = coordinator.closeSurface(fileSurfaceId('guarded'));
+		await Promise.resolve();
+		await expect(coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }))).resolves.toBe(
+			false,
+		);
+		expect(windowCountOf(layout.snapshot)).toBe(2);
+		guard.resolve(false);
+		await closing;
+		await coordinator.fitWindowsToHost(() => ({ width: 300, height: 200 }));
+		expect(windowCountOf(layout.snapshot)).toBe(1);
+		expect(layout.surface(fileSurfaceId('guarded'))).not.toBeNull();
 	});
 });

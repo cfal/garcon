@@ -568,6 +568,42 @@ function removeOwnedSurfaceDescriptors(
 	};
 }
 
+function mergeWindow(
+	snapshot: WorkspaceLayoutSnapshot,
+	sourceWindowId: WorkspaceWindowId,
+	destinationWindowId: WorkspaceWindowId,
+): WorkspaceLayoutSnapshot {
+	if (sourceWindowId === destinationWindowId) return snapshot;
+	const source = windowNodeById(snapshot.desktopRoot, sourceWindowId);
+	const destination = windowNodeById(snapshot.desktopRoot, destinationWindowId);
+	if (!source || !destination) throw new Error('Cannot merge missing workspace windows');
+	const sourceChatId = chatViewSurfaceId(sourceWindowId);
+	const destinationChatId = chatViewSurfaceId(destinationWindowId);
+	const sourceChat = snapshot.surfaces[sourceChatId];
+	const transferChat = sourceChat?.type === 'chat' && !snapshot.surfaces[destinationChatId];
+	const movedIds = source.tabs.order.flatMap((id) => {
+		if (id !== sourceChatId) return [id];
+		return transferChat ? [destinationChatId] : [];
+	});
+	const root = removeWindowAndCollapse(snapshot.desktopRoot, sourceWindowId)!;
+	const merged = mapWindows(root, (window) =>
+		window.id === destinationWindowId
+			? { ...window, tabs: tabsWithOrder(window.tabs, [...window.tabs.order, ...movedIds]) }
+			: window,
+	);
+	const next = removeOwnedSurfaceDescriptors(
+		snapshot,
+		sourceChat ? [sourceChatId] : [],
+		merged,
+		null,
+	);
+	if (!transferChat) return next;
+	return {
+		...next,
+		surfaces: { ...next.surfaces, [destinationChatId]: { ...sourceChat, id: destinationChatId } },
+	};
+}
+
 function closeWindow(
 	snapshot: WorkspaceLayoutSnapshot,
 	windowId: WorkspaceWindowId,
@@ -663,6 +699,8 @@ function applyMutation(
 			);
 		case 'move-tab-to-new-window':
 			return moveTabToNewWindow(snapshot, mutation);
+		case 'merge-window':
+			return mergeWindow(snapshot, mutation.sourceWindowId, mutation.destinationWindowId);
 		case 'close-window':
 			return closeWindow(snapshot, mutation.windowId);
 		case 'set-partition-ratio':

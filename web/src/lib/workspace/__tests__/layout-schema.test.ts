@@ -10,7 +10,7 @@ import {
 	serializeWorkspaceLayout,
 	WORKSPACE_LAYOUT_MAX_PARSE_DEPTH,
 	WORKSPACE_LAYOUT_MAX_PARSE_NODES,
-	WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW,
+	WORKSPACE_LAYOUT_MAX_TAB_REFS,
 	WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS,
 } from '../layout-schema';
 import { portableSingletonDescriptor } from '../surface-types';
@@ -398,7 +398,7 @@ describe('workspace layout V2 schema', () => {
 		'accepts the per-window %s budget and truncates the next reference',
 		(field) => {
 			const refs: PersistedWorkspaceSurfaceRef[] = Array.from(
-				{ length: WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW },
+				{ length: WORKSPACE_LAYOUT_MAX_TAB_REFS },
 				(_, index) =>
 					index === 0
 						? { type: 'chat', chatId: 'chat-budget' }
@@ -426,8 +426,8 @@ describe('workspace layout V2 schema', () => {
 			);
 			expect(truncated.source).toBe('valid');
 			const restoredWindow = windowNodeById(truncated.snapshot.desktopRoot, 'window-main');
-			expect(restoredWindow?.tabs.order).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
-			expect(restoredWindow?.tabs.mru).toHaveLength(WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+			expect(restoredWindow?.tabs.order).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
+			expect(restoredWindow?.tabs.mru).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
 			expect(truncated.snapshot.surfaces['terminal:terminal-over-budget']).toBeUndefined();
 		},
 	);
@@ -507,4 +507,64 @@ describe('workspace layout V2 schema', () => {
 		const result = parsePersistedWorkspaceLayout(null);
 		expect(result).toEqual({ source: 'absent', snapshot: canonicalWorkspaceSnapshot() });
 	});
+});
+
+it('preserves a merged window with more than 256 persisted tabs', () => {
+	const terminals = (prefix: string) =>
+		Array.from({ length: 200 }, (_, i) => ({ type: 'terminal' as const, terminalId: prefix + i }));
+	const left = [{ type: 'chat', chatId: null }, ...terminals('left-')];
+	const right = terminals('right-');
+	const raw = JSON.stringify({
+		version: 2,
+		root: {
+			type: 'partition',
+			id: 'partition-root',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'window', id: 'window-left', order: left, active: left[0], mru: left },
+				{ type: 'window', id: 'window-right', order: right, active: right[0], mru: right },
+			],
+		},
+		unplacedTerminalIds: [],
+	});
+	const original = parsePersistedWorkspaceLayout(raw);
+	expect(original.source).toBe('valid');
+	const merged = reduceWorkspaceLayout(original.snapshot, [
+		{ type: 'merge-window', sourceWindowId: 'window-right', destinationWindowId: 'window-left' },
+	]);
+	const restored = parsePersistedWorkspaceLayout(JSON.stringify(serializeWorkspaceLayout(merged)));
+	expect(restored.source).toBe('valid');
+	expect(windowNodeById(restored.snapshot.desktopRoot, 'window-left')?.tabs.order).toHaveLength(
+		401,
+	);
+	expect(restored.snapshot.surfaces).toEqual(merged.surfaces);
+});
+
+it('bounds persisted tab references across the workspace rather than per window', () => {
+	const makeWindow = (id: string) => {
+		const order = Array.from({ length: WORKSPACE_LAYOUT_MAX_TAB_REFS }, (_, index) =>
+			index === 0
+				? { type: 'chat', chatId: null }
+				: { type: 'terminal', terminalId: id + '-' + index },
+		);
+		return { type: 'window', id, order, mru: order, active: order[0] };
+	};
+	const parsed = parsePersistedWorkspaceLayout(
+		JSON.stringify({
+			version: 2,
+			root: {
+				type: 'partition',
+				id: 'partition-root',
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [makeWindow('window-left'), makeWindow('window-right')],
+			},
+			unplacedTerminalIds: [],
+		}),
+	);
+	expect(parsed.source).toBe('valid');
+	expect(
+		collectWindowNodes(parsed.snapshot.desktopRoot).flatMap((window) => window.tabs.order),
+	).toHaveLength(WORKSPACE_LAYOUT_MAX_TAB_REFS);
 });

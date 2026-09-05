@@ -16,7 +16,6 @@ export const resolveUnmeasuredWorkspaceSplit: WorkspaceSplitAdmissionResolver = 
 	resolveWorkspaceSplitAdmission({
 		snapshot,
 		hostSize: null,
-		singleWindowProjectionActive: false,
 		...request,
 	});
 

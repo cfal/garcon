@@ -47,6 +47,7 @@ import { WorkspaceWindowDestructionService } from './workspace-window-destructio
 import {
 	clampWorkspacePartitionRatio,
 	mapWorkspaceSplitAdmissions,
+	type WorkspaceHostSize,
 	type WorkspacePartitionRatioBounds,
 	type WorkspacePartitionRatioBoundsResolver,
 	type WorkspaceSplitAdmission,
@@ -72,7 +73,6 @@ interface WorkspaceCoordinatorDeps {
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
-	isCompactProjectionActive(): boolean;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
 	getRouteIdentity(): string;
@@ -107,7 +107,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			files: deps.files,
 			singletons: deps.singletons,
 			surfaceFrames: deps.surfaceFrames,
-			isCompactProjectionActive: deps.isCompactProjectionActive,
 			onLayoutChanged: deps.onLayoutChanged,
 			getRouteIdentity: deps.getRouteIdentity,
 		});
@@ -118,10 +117,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			surfaceReservations: this.#reservedSurfaceIds,
 			windowReservations: this.#reservedWindowIds,
 			isMobile: () => this.isMobile,
-			cancelWorkspaceDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
+			cancelWorkspaceDrag: () => {
+				deps.workspaceInteractionGate.cancelBeforeInertTransition();
+				this.#presentation.cancelPendingWindowPointerInteraction();
+			},
 			commitWithPresentationTarget: (mutations, resolveTarget, options) =>
 				this.#presentation.commitWithPresentationTarget(mutations, resolveTarget, options),
 			resolveSplitAdmission: deps.resolveSplitAdmission,
+			currentWindowId: () => this.currentWindowId,
 			present: (surfaceId) => this.#presentation.presentSurface(surfaceId),
 		});
 		this.#fileDialog = new FileDialogCoordinator({
@@ -356,16 +359,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#presentation.cancelPendingWindowPointerInteraction();
 	}
 
-	syncProjectionVisibility(): void {
-		this.#presentation.syncProjectionVisibility();
+	fitWindowsToHost(getHostSize: () => WorkspaceHostSize | null): Promise<boolean> {
+		return this.#tabMovement.fitToHost(getHostSize);
 	}
 
 	activateWindow(windowId: WorkspaceWindowId): void {
 		this.#presentation.activateWindow(windowId);
-	}
-
-	activateWindowFromCompactNavigation(windowId: WorkspaceWindowId): void {
-		this.#presentation.activateWindowFromCompactNavigation(windowId);
 	}
 
 	async focusChat(): Promise<void> {

@@ -25,10 +25,7 @@ export interface VisibleChatPresentation {
 
 export interface VisiblePresentationOptions {
 	readonly includeDialog?: boolean;
-	readonly projectedWindowId?: WorkspaceWindowId | null;
 }
-
-export type WorkspaceProjectionOptions = Pick<VisiblePresentationOptions, 'projectedWindowId'>;
 
 export function portablePresentationKey(
 	presentation: WorkspaceWindowId,
@@ -57,7 +54,7 @@ export function visiblePresentationMap(
 		visible.set('mobile', snapshot.mobileActiveSurfaceId);
 		return visible;
 	}
-	const explicitWindowId = snapshot.fullscreenWindowId ?? options.projectedWindowId ?? null;
+	const explicitWindowId = snapshot.fullscreenWindowId;
 	const explicitWindow = explicitWindowId
 		? windowNodeById(snapshot.desktopRoot, explicitWindowId)
 		: null;
@@ -76,14 +73,12 @@ export function visiblePresentationMap(
 export function visiblePortablePresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	isMobile: boolean,
-	options: WorkspaceProjectionOptions = {},
 ): PortablePresentation[] {
 	const presentations: PortablePresentation[] = [];
 	for (const [presentation, surfaceId] of visiblePresentationMap(
 		snapshot,
 		isMobile ? 'mobile' : 'desktop',
 		{
-			...options,
 			includeDialog: false,
 		},
 	)) {
@@ -100,11 +95,9 @@ export function visiblePortablePresentations(
 export function visibleChatPresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	mode: 'desktop' | 'mobile',
-	options: WorkspaceProjectionOptions = {},
 ): VisibleChatPresentation[] {
 	const presentations: VisibleChatPresentation[] = [];
 	for (const [presentation, surfaceId] of visiblePresentationMap(snapshot, mode, {
-		...options,
 		includeDialog: false,
 	})) {
 		const surface = snapshot.surfaces[surfaceId];
@@ -154,7 +147,6 @@ export function renderedPortablePresentations(
 	isMobile: boolean,
 	visible: readonly PortablePresentation[],
 	retainedSingletonKeys: ReadonlySet<string>,
-	options: WorkspaceProjectionOptions = {},
 ): RenderedPortablePresentation[] {
 	if (isMobile) {
 		const rendered: RenderedPortablePresentation[] = [];
@@ -166,18 +158,18 @@ export function renderedPortablePresentations(
 		return rendered;
 	}
 	const visibleKeys = visibleDesktopPresentationKeys(visible);
-	const projectedWindowId = snapshot.fullscreenWindowId ?? options.projectedWindowId ?? null;
+	const fullscreenWindowId = snapshot.fullscreenWindowId;
 	const rendered: RenderedPortablePresentation[] = [];
 	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
 		for (const surfaceId of workspaceWindow.tabs.order) {
 			if (snapshot.surfaces[surfaceId]?.type === 'chat') continue;
 			const key = portablePresentationKey(workspaceWindow.id, surfaceId);
 			const isVisible = visibleKeys.has(key);
-			const isHiddenProjectedActive =
-				projectedWindowId !== null &&
-				workspaceWindow.id !== projectedWindowId &&
+			const isHiddenFullscreenActive =
+				fullscreenWindowId !== null &&
+				workspaceWindow.id !== fullscreenWindowId &&
 				workspaceWindow.tabs.activeId === surfaceId;
-			if (!isVisible && !retainedSingletonKeys.has(key) && !isHiddenProjectedActive) continue;
+			if (!isVisible && !retainedSingletonKeys.has(key) && !isHiddenFullscreenActive) continue;
 			rendered.push({
 				surfaceId,
 				presentation: workspaceWindow.id,

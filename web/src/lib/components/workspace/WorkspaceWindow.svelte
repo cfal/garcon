@@ -25,10 +25,7 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import PortableSurfaceFrame from './PortableSurfaceFrame.svelte';
 	import WorkspaceWindowTitleBar from './WorkspaceWindowTitleBar.svelte';
-	import {
-		workspaceWindowBodyTopPx,
-		WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX,
-	} from './workspace-window-chrome.js';
+	import { WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX } from './workspace-window-chrome.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -50,7 +47,6 @@
 		surfaceStyle,
 		onSendToChat,
 		onAppendToChatDraft,
-		hasCompactNavigation = false,
 	}: {
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
@@ -68,7 +64,6 @@
 		surfaceStyle: string;
 		onSendToChat(message: string): Promise<boolean>;
 		onAppendToChatDraft: ChatDraftAppend;
-		hasCompactNavigation?: boolean;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -127,7 +122,7 @@
 		return 'inset-x-0 bottom-0';
 	});
 	const dropLayerTopPx = $derived(
-		dnd.payload?.kind === 'chat' ? undefined : workspaceWindowBodyTopPx(hasCompactNavigation),
+		dnd.payload?.kind === 'chat' ? undefined : WORKSPACE_WINDOW_TITLEBAR_HEIGHT_PX,
 	);
 
 	function dropZoneLabel(zone: WorkspaceWindowDropZonePresentation): string {
@@ -280,13 +275,6 @@
 			{/if}
 		{/snippet}
 	</WorkspaceWindowTitleBar>
-	{#if hasCompactNavigation}
-		<div
-			class="shrink-0"
-			style:height={`${WORKSPACE_COMPACT_SWITCHER_HEIGHT_PX}px`}
-			aria-hidden="true"
-		></div>
-	{/if}
 	<div
 		class={cn(
 			'relative min-h-0 flex-1 overflow-hidden',

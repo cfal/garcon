@@ -121,6 +121,11 @@ export interface WorkspaceLayoutCommitPort {
 
 export type WorkspaceLayoutMutation =
 	| {
+			type: 'merge-window';
+			sourceWindowId: WorkspaceWindowId;
+			destinationWindowId: WorkspaceWindowId;
+	  }
+	| {
 			type: 'register-surface';
 			surface: SurfaceDescriptor;
 			windowId?: WorkspaceWindowId;

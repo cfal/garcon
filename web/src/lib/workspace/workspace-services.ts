@@ -155,20 +155,24 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
 	const workspaceInteractionGate = new WorkspaceInteractionGate();
-	const hostGeometry = new WorkspaceHostGeometryState({
+	const hostGeometry: WorkspaceHostGeometryState = new WorkspaceHostGeometryState({
 		getSnapshot: () => layout.snapshot,
 		getIsMobile: () => deps.appShell.isMobile,
-		beforeCompactProjection: () => {
-			workspaceInteractionGate.cancelBeforeInertTransition();
-			placement?.cancelPendingWindowPointerInteraction();
+		onResizeSettled: async (): Promise<boolean> => {
+			try {
+				return (await placement?.fitWindowsToHost(() => hostGeometry.size)) ?? true;
+			} catch (error) {
+				deps.notifications.error(
+					error instanceof Error ? error.message : m.workspace_open_failed(),
+				);
+				return true;
+			}
 		},
-		onCompactProjectionChanged: () => placement?.syncProjectionVisibility(),
 	});
 	const resolveSplitAdmission: WorkspaceSplitAdmissionResolver = (snapshot, request) =>
 		resolveWorkspaceSplitAdmission({
 			snapshot,
 			hostSize: hostGeometry.size,
-			singleWindowProjectionActive: hostGeometry.singleWindowProjectionActive,
 			...request,
 		});
 	const resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver = (
@@ -313,9 +317,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		surfaceFrames,
 		resolveSplitAdmission,
 		resolvePartitionRatioBounds,
-		isCompactProjectionActive: () => hostGeometry.compactActive,
 		onLayoutChanged: (snapshot) => {
-			hostGeometry.layoutPublished(snapshot);
+			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
 		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,

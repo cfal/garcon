@@ -9,10 +9,9 @@ import type {
 } from '../surface-types';
 import { WORKSPACE_WINDOW_RESOURCE_CEILING } from '../surface-types';
 import {
-	COMPACT_ENTER_WINDOW_HEIGHT_PX,
-	COMPACT_ENTER_WINDOW_WIDTH_PX,
+	MIN_WINDOW_WIDTH_PX,
 	clampWorkspacePartitionRatio,
-	resolveWorkspaceCompactActive,
+	workspaceWindowsToPrune,
 	resolveWorkspacePartitionRatioBounds,
 	resolveWorkspaceSplitAdmission,
 } from '../window-geometry-policy';
@@ -78,7 +77,6 @@ describe('workspace split admission', () => {
 		const result = resolveWorkspaceSplitAdmission({
 			snapshot: snapshot(workspaceWindow('window-main')),
 			hostSize: { width, height },
-			singleWindowProjectionActive: false,
 			targetWindowId: 'window-main',
 			edge,
 		});
@@ -98,7 +96,6 @@ describe('workspace split admission', () => {
 				),
 			),
 			hostSize: { width: 1439, height: 600 },
-			singleWindowProjectionActive: false,
 			targetWindowId: 'window-target',
 			edge: 'right',
 		});
@@ -112,7 +109,6 @@ describe('workspace split admission', () => {
 			resolveWorkspaceSplitAdmission({
 				snapshot: one,
 				hostSize: null,
-				singleWindowProjectionActive: false,
 				targetWindowId: 'window-main',
 				edge: 'right',
 			}),
@@ -126,33 +122,22 @@ describe('workspace split admission', () => {
 			resolveWorkspaceSplitAdmission({
 				snapshot: snapshot(root),
 				hostSize: null,
-				singleWindowProjectionActive: false,
 				targetWindowId: 'window-1',
 				edge: 'right',
 			}),
 		).toEqual({ allowed: false, reason: 'resource-ceiling' });
 	});
 
-	it('blocks fullscreen and an active single-window projection', () => {
+	it('blocks fullscreen', () => {
 		const ordinary = snapshot(workspaceWindow('window-main'));
 		expect(
 			resolveWorkspaceSplitAdmission({
 				snapshot: { ...ordinary, fullscreenWindowId: 'window-main' },
 				hostSize: { width: 2000, height: 1200 },
-				singleWindowProjectionActive: false,
 				targetWindowId: 'window-main',
 				edge: 'right',
 			}),
 		).toEqual({ allowed: false, reason: 'fullscreen' });
-		expect(
-			resolveWorkspaceSplitAdmission({
-				snapshot: ordinary,
-				hostSize: { width: 2000, height: 1200 },
-				singleWindowProjectionActive: true,
-				targetWindowId: 'window-main',
-				edge: 'right',
-			}),
-		).toEqual({ allowed: false, reason: 'too-small' });
 	});
 
 	it('checks only the target and accounts for sole-tab source collapse', () => {
@@ -166,7 +151,6 @@ describe('workspace split admission', () => {
 		const input = {
 			snapshot: snapshot(root),
 			hostSize: { width: 960, height: 600 },
-			singleWindowProjectionActive: false,
 			targetWindowId: 'window-target' as const,
 			edge: 'right' as const,
 		};
@@ -190,7 +174,6 @@ describe('workspace split admission', () => {
 			resolveWorkspaceSplitAdmission({
 				snapshot: snapshot(largeTarget),
 				hostSize: { width: 1200, height: 600 },
-				singleWindowProjectionActive: false,
 				targetWindowId: 'window-large',
 				edge: 'right',
 			}),
@@ -202,7 +185,6 @@ describe('workspace split admission', () => {
 		const base = {
 			snapshot: current,
 			hostSize: { width: 1200, height: 800 },
-			singleWindowProjectionActive: false,
 			edge: 'right' as const,
 		};
 		expect(resolveWorkspaceSplitAdmission({ ...base, targetWindowId: 'window-stale' })).toBeNull();
@@ -223,7 +205,7 @@ describe('workspace split admission', () => {
 	});
 });
 
-describe('workspace compact policy', () => {
+describe('workspace pruning policy', () => {
 	const horizontal = partition(
 		'root',
 		'horizontal',
@@ -231,65 +213,44 @@ describe('workspace compact policy', () => {
 		workspaceWindow('window-left'),
 		workspaceWindow('window-right'),
 	);
-
-	it('enters on either critical dimension and never folds a sole window', () => {
-		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: false,
-				root: horizontal,
-				hostSize: { width: COMPACT_ENTER_WINDOW_WIDTH_PX * 2 - 1, height: 800 },
-			}),
-		).toBe(true);
-		const vertical = partition(
-			'vertical',
-			'vertical',
-			0.5,
-			workspaceWindow('window-top'),
-			workspaceWindow('window-bottom'),
+	it('keeps the current window and never removes the last window', () => {
+		expect(workspaceWindowsToPrune(horizontal, { width: 479, height: 800 }, 'window-left')).toEqual(
+			['window-right'],
 		);
 		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: false,
-				root: vertical,
-				hostSize: { width: 800, height: COMPACT_ENTER_WINDOW_HEIGHT_PX * 2 - 1 },
-			}),
-		).toBe(true);
+			workspaceWindowsToPrune(horizontal, { width: 479, height: 800 }, 'window-right'),
+		).toEqual(['window-left']);
 		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: false,
-				root: workspaceWindow('window-only'),
-				hostSize: { width: 1, height: 1 },
-			}),
-		).toBe(false);
+			workspaceWindowsToPrune(
+				workspaceWindow('window-only'),
+				{ width: 1, height: 1 },
+				'window-only',
+			),
+		).toEqual([]);
 	});
-
-	it('holds through the hysteresis band and exits only when every leaf is safe', () => {
-		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: false,
-				root: horizontal,
-				hostSize: { width: 500, height: 800 },
-			}),
-		).toBe(false);
-		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: true,
-				root: horizontal,
-				hostSize: { width: 500, height: 800 },
-			}),
-		).toBe(true);
-		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: true,
-				root: horizontal,
-				hostSize: { width: 600, height: 400 },
-			}),
-		).toBe(false);
+	it('keeps fitting, unmeasured, and stale-target layouts untouched', () => {
+		expect(workspaceWindowsToPrune(horizontal, { width: 480, height: 160 }, 'window-left')).toEqual(
+			[],
+		);
+		expect(workspaceWindowsToPrune(horizontal, null, 'window-left')).toEqual([]);
+		expect(workspaceWindowsToPrune(horizontal, { width: 1, height: 1 }, 'window-missing')).toEqual(
+			[],
+		);
+	});
+	it('rechecks after each collapse and stops before removing usable windows', () => {
+		const root = partition('outer', 'vertical', 0.5, horizontal, workspaceWindow('window-bottom'));
+		expect(workspaceWindowsToPrune(root, { width: 400, height: 600 }, 'window-left')).toEqual([
+			'window-right',
+		]);
+		expect(workspaceWindowsToPrune(root, { width: 400, height: 300 }, 'window-left')).toEqual([
+			'window-right',
+			'window-bottom',
+		]);
 	});
 });
 
 describe('workspace partition ratio bounds', () => {
-	it('derives horizontal and vertical bounds from the compact floor', () => {
+	it('derives horizontal and vertical bounds from the minimum window size', () => {
 		const horizontal = partition(
 			'h',
 			'horizontal',
@@ -396,16 +357,27 @@ describe('workspace partition ratio bounds', () => {
 			partition: root,
 			partitionAxisPixels: 1200,
 		});
-		expect(Math.floor(bounds.min * 1200 * 0.5)).toBeGreaterThanOrEqual(
-			COMPACT_ENTER_WINDOW_WIDTH_PX,
-		);
+		expect(Math.floor(bounds.min * 1200 * 0.5)).toBeGreaterThanOrEqual(MIN_WINDOW_WIDTH_PX);
 		const resized = { ...root, ratio: bounds.min };
-		expect(
-			resolveWorkspaceCompactActive({
-				wasActive: false,
-				root: resized,
-				hostSize: { width: 1200, height: 600 },
-			}),
-		).toBe(false);
+		expect(workspaceWindowsToPrune(resized, { width: 1200, height: 600 }, 'window-a')).toEqual([]);
 	});
+});
+
+it('grows an undersized current window by removing its sibling before an unrelated window', () => {
+	const root = partition(
+		'outer',
+		'horizontal',
+		1 / 3,
+		workspaceWindow('window-unrelated'),
+		partition(
+			'inner',
+			'horizontal',
+			0.15,
+			workspaceWindow('window-current'),
+			workspaceWindow('window-sibling'),
+		),
+	);
+	expect(workspaceWindowsToPrune(root, { width: 1200, height: 800 }, 'window-current')).toEqual([
+		'window-sibling',
+	]);
 });

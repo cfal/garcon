@@ -787,3 +787,43 @@ describe('WorkspaceLayoutStore', () => {
 		expect(store.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'chat-a' });
 	});
 });
+
+describe('window merging', () => {
+	it('moves every file tab without imposing a per-window limit or modifying descriptors', () => {
+		const files = Array.from({ length: 300 }, (_, index) => ({
+			id: fileSurfaceId('merge-' + index),
+			type: 'file' as const,
+			fileSessionId: 'merge-' + index,
+		}));
+		const base = reduceWorkspaceLayout(
+			canonicalWorkspaceSnapshot(),
+			files.map((surface) => ({
+				type: 'register-surface' as const,
+				surface,
+				windowId: 'window-files' as const,
+			})),
+		);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'merge-window', sourceWindowId: 'window-files', destinationWindowId: 'window-main' },
+		]);
+		expect(collectWindowNodes(next.desktopRoot)).toHaveLength(1);
+		expect(next.surfaces).toEqual(base.surfaces);
+		expect(windowNodeById(next.desktopRoot, 'window-main')?.tabs.order).toHaveLength(302);
+		expect(windowNodeById(next.desktopRoot, 'window-main')?.tabs.activeId).toBe(
+			CANONICAL_CHAT_SURFACE_ID,
+		);
+		expect(next.unplacedTerminalIds).toEqual([]);
+	});
+	it('drops only extra Chat presentations and retains the destination Chat', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'retained-chat' },
+			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'sidebar-chat' },
+		]);
+		const next = reduceWorkspaceLayout(base, [
+			{ type: 'merge-window', sourceWindowId: 'window-files', destinationWindowId: 'window-main' },
+		]);
+		expect(next.surfaces[CANONICAL_CHAT_SURFACE_ID]).toMatchObject({ chatId: 'retained-chat' });
+		expect(next.surfaces[chatViewSurfaceId('window-files')]).toBeUndefined();
+		expect(next.surfaces['singleton:files']).toEqual(base.surfaces['singleton:files']);
+	});
+});

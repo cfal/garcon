@@ -2,6 +2,7 @@ import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	chatViewSurfaceId,
 	type WorkspaceLayoutReader,
+	type WorkspaceLayoutSnapshot,
 	type WorkspacePartitionId,
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
@@ -13,7 +14,11 @@ import {
 	type ChatSurfaceTransferPort,
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
-import type { WorkspaceSplitAdmissionResolver } from './window-geometry-policy.js';
+import {
+	workspaceWindowsToPrune,
+	type WorkspaceHostSize,
+	type WorkspaceSplitAdmissionResolver,
+} from './window-geometry-policy.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 
 interface ReservationSet<T> {
@@ -32,6 +37,7 @@ interface WorkspaceTabMovementServiceDeps {
 		options?: WorkspaceCommitOptions,
 	): Promise<boolean>;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
+	currentWindowId(): WorkspaceWindowId;
 	present(surfaceId: string): void;
 }
 
@@ -48,6 +54,62 @@ export class WorkspaceTabMovementService {
 		return () => {
 			if (this.#chatSurfaceTransferPort === port) this.#chatSurfaceTransferPort = null;
 		};
+	}
+
+	async fitToHost(getHostSize: () => WorkspaceHostSize | null): Promise<boolean> {
+		const sourcesFor = (snapshot: WorkspaceLayoutSnapshot) =>
+			this.deps.isMobile() || snapshot.fullscreenWindowId
+				? []
+				: workspaceWindowsToPrune(snapshot.desktopRoot, getHostSize(), this.deps.currentWindowId());
+		if (sourcesFor(this.deps.layout.snapshot).length === 0) return true;
+		this.deps.cancelWorkspaceDrag();
+		let deferred = false;
+		let transferPublication: WorkspacePublication | null = null;
+		await this.deps.commitWithPresentationTarget(
+			(latest) => {
+				transferPublication = null;
+				const sourceIds = sourcesFor(latest);
+				if (sourceIds.length === 0) return [];
+				const destinationWindowId = this.deps.currentWindowId();
+				const affectedIds = [...sourceIds, destinationWindowId];
+				if (
+					affectedIds.some(
+						(id) =>
+							this.deps.windowReservations.has(id) ||
+							windowNodeById(latest.desktopRoot, id)?.tabs.order.some((surfaceId) =>
+								this.deps.surfaceReservations.has(surfaceId),
+							),
+					)
+				) {
+					deferred = true;
+					return [];
+				}
+				const destinationSurfaceId = chatViewSurfaceId(destinationWindowId);
+				if (!latest.surfaces[destinationSurfaceId]) {
+					const sourceChat = sourceIds
+						.map((id) => latest.surfaces[chatViewSurfaceId(id)])
+						.find((surface) => surface?.type === 'chat');
+					if (sourceChat?.type === 'chat' && sourceChat.chatId) {
+						transferPublication =
+							this.#chatSurfaceTransferPort?.prepareChatSurfaceTransfer({
+								sourceSurfaceId: sourceChat.id,
+								destinationSurfaceId,
+								chatId: sourceChat.chatId,
+							}) ?? null;
+					}
+				}
+				return sourceIds.map((sourceWindowId) => ({
+					type: 'merge-window' as const,
+					sourceWindowId,
+					destinationWindowId,
+				}));
+			},
+			() => null,
+			{
+				publication: deferredChatSurfaceTransferPublication(() => transferPublication),
+			},
+		);
+		return !deferred;
 	}
 
 	async moveToWindow(

@@ -44,25 +44,27 @@ async function initializeCapacityProject(project: string): Promise<void> {
   }
 }
 
-test('opens generic commands as tabs when compact geometry blocks new windows', async () => {
+test('opens generic commands as tabs when narrow geometry blocks new windows', async () => {
   await withChromiumFixture(
-    'workspace-compact-generic-placement',
+    'workspace-narrow-generic-placement',
     async (fixture) => {
       const { page, integration } = fixture;
       await initializeCapacityProject(integration.dirs.project);
       const chatId = integration.newChatId();
       const started = await integration.client.startDirectChat({
         chatId,
-        content: 'Synthetic compact placement fixture',
+        content: 'Synthetic narrow placement fixture',
         projectPath: integration.dirs.project,
         agent: integration.directAgents.openAi,
       });
       await integration.client.waitForTurnTerminal(chatId, started.turnId);
-      await page.setViewportSize({ width: 800, height: 900 });
+      await page.setViewportSize({ width: 800, height: 400 });
       await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, {
         waitUntil: 'domcontentloaded',
       });
-      await page.locator('[data-workspace-compact="true"]').waitFor();
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+      );
       const currentWindow = page.locator('[data-workspace-window-current="true"]');
       const windowId = await currentWindow.getAttribute('data-workspace-window-id');
 
@@ -81,7 +83,7 @@ test('opens generic commands as tabs when compact geometry blocks new windows', 
               ?.startsWith(prefix),
           { id: windowId, prefix: surfacePrefix },
         );
-        expect(await page.locator('[data-workspace-window-id]').count()).toBe(2);
+        expect(await page.locator('[data-workspace-window-id]').count()).toBe(1);
         expect(await currentWindow.getAttribute('data-workspace-window-id')).toBe(
           windowId,
         );
@@ -344,33 +346,25 @@ for (const count of [4, 6, 8]) {
           await integration.client.waitForTurnTerminal(chatIds[0]!, turn.turnId);
         }
 
-        markPhase('retaining compact navigation identity, focus, and drafts');
+        markPhase('merging windows while preserving drafts and the dirty editor');
+        if (chatIds[1]) {
+          await page
+            .locator('[data-workspace-window-titlebar="' + windowIds[1] + '"]')
+            .click({ position: { x: 20, y: 3 } });
+          await page
+            .locator('textarea[placeholder="Reply..."]')
+            .fill('Background chat draft retained');
+        }
         await page
           .locator('[data-workspace-window-titlebar="window-main"]')
           .click({ position: { x: 20, y: 3 } });
         await page
           .locator('textarea[placeholder="Reply..."]')
           .fill('capacity draft retained');
-        await page.setViewportSize({ width: 800, height: 900 });
-        await page.locator('[data-workspace-compact="true"]').waitFor();
-        const next = page.getByRole('button', { name: 'Next window' });
-        await next.evaluate((element) => {
-          element.setAttribute('data-capacity-retained', 'true');
-        });
-        await next.focus();
-        for (let index = 0; index < count * 2; index++) {
-          await page.keyboard.press('Enter');
-          await page.evaluate(
-            () =>
-              new Promise<void>((resolve) =>
-                requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-              ),
-          );
-          await page.waitForFunction(
-            () =>
-              document.activeElement?.getAttribute('data-capacity-retained') === 'true',
-          );
-        }
+        await page.setViewportSize({ width: 780, height: 300 });
+        await page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+        );
         expect(
           await page
             .locator('[data-workspace-window-current="true"]')
@@ -379,15 +373,40 @@ for (const count of [4, 6, 8]) {
         expect(await page.locator('textarea[placeholder="Reply..."]').inputValue()).toBe(
           'capacity draft retained',
         );
-        expect(await page.locator('[data-capacity-retained="true"]').count()).toBe(1);
         await page.setViewportSize({ width: 2560, height: 1440 });
-        await page.waitForFunction(
-          () =>
-            !document.querySelector('[data-workspace-single-window-projection="true"]'),
-        );
-        expect(await page.locator('[data-workspace-window-id]:visible').count()).toBe(
-          count,
-        );
+        await page.waitForFunction(() => {
+          const raw = localStorage.getItem('workspace_layout_v2');
+          return raw !== null && JSON.parse(raw).root.type === 'window';
+        });
+        if (chatIds[1]) {
+          await page.locator('[data-sidebar-virtual-row="' + chatIds[1] + '"]').click();
+          await page.waitForFunction(
+            () =>
+              document.querySelector<HTMLTextAreaElement>(
+                'textarea[placeholder="Reply..."]',
+              )?.value === 'Background chat draft retained',
+          );
+          await page.locator('[data-sidebar-virtual-row="' + chatIds[0] + '"]').click();
+          await page.waitForFunction(
+            () =>
+              document.querySelector<HTMLTextAreaElement>(
+                'textarea[placeholder="Reply..."]',
+              )?.value === 'capacity draft retained',
+          );
+        }
+        await page.locator('[role="tab"][aria-controls*="-panel-terminal:"]').click();
+        await terminalInput.waitFor({ state: 'attached' });
+        await terminalInput.focus();
+        output = '';
+        const mergedEcho = new Promise<void>((resolve) => {
+          terminalReady = resolve;
+        });
+        await page.keyboard.type('printf "capacity-terminal-ready\\n"');
+        await page.keyboard.press('Enter');
+        await withTimeout(mergedEcho, 10000, () => 'Merged terminal did not echo input');
+        const editorTab = page.getByRole('tab', { name: 'capacity.txt *', exact: true });
+        await editorTab.click();
+        await editor.waitFor();
         expect(await editor.textContent()).toContain('Unsaved synthetic capacity edit');
         await editor.focus();
         await page.keyboard.press('Control+s');
@@ -399,7 +418,7 @@ for (const count of [4, 6, 8]) {
             document.querySelectorAll(
               '[data-workspace-window-id]:not([aria-hidden="true"])',
             ).length === expected,
-          count,
+          1,
         );
         expect(
           await page
@@ -407,11 +426,11 @@ for (const count of [4, 6, 8]) {
             .evaluateAll((windows) =>
               windows.map((window) => window.getAttribute('data-workspace-window-id')),
             ),
-        ).toEqual(windowIds);
+        ).toEqual(['window-main']);
         await cdp.send('HeapProfiler.collectGarbage');
         const afterMetrics = await cdp.send('Performance.getMetrics');
         const values = Object.fromEntries(
-          afterMetrics.metrics.map(({ name, value }) => [name, value]),
+          beforeMetrics.metrics.map(({ name, value }) => [name, value]),
         );
         expect(values.JSHeapUsedSize).toBeLessThan(768 * 1024 * 1024);
         expect(values.Nodes).toBeLessThan(100_000);

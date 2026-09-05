@@ -28,22 +28,6 @@ async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Prom
   );
 }
 
-async function waitForCompactWorkspace(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('.workspace-host-region')
-        ?.getAttribute('data-workspace-compact') === 'true',
-  );
-}
-
-async function waitForTiledWorkspace(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const host = document.querySelector('.workspace-host-region');
-    return host !== null && !host.hasAttribute('data-workspace-single-window-projection');
-  });
-}
-
 async function runGit(projectPath: string, args: string[]): Promise<void> {
   const child = Bun.spawn(['git', ...args], {
     cwd: projectPath,
@@ -1139,247 +1123,98 @@ describe('Chromium workspace windows', () => {
     });
   });
 
-  test('projects undersized desktop layouts without changing persisted topology', async () => {
-    await withChromiumFixture('workspace-window-compact-projection', async (fixture, markPhase) => {
-      await fixture.page.setViewportSize({ width: 1600, height: 900 });
+  test('merges undersized windows and persists the surviving layout without moving focus', async () => {
+    await withChromiumFixture('workspace-window-pruning', async (fixture, markPhase) => {
+      const { page } = fixture;
+      await page.setViewportSize({ width: 1600, height: 900 });
       await createGitFixture(fixture.integration.dirs.project);
-      markPhase('creating a two-window workspace');
-      const chatA = await createChat(fixture, 'compact-projection-chat-a');
-      const chatB = await createChat(fixture, 'compact-projection-chat-b');
-      await openChat(fixture, chatA);
-      await fixture.page
-        .locator(`[data-sidebar-virtual-row="${chatB}"]`)
-        .waitFor({ state: 'visible' });
-      const mainWindowId = await fixture.page
-        .locator('[data-workspace-window-current="true"]')
-        .getAttribute('data-workspace-window-id');
-      if (!mainWindowId) throw new Error('Missing initial Chat window.');
-      const filesWindowId = await canonicalFilesWindowId(fixture.page);
-      await fixture.page
-        .locator(`[data-workspace-window-titlebar="${mainWindowId}"]`)
-        .click({ position: { x: 3, y: 3 } });
-      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
-      const composer = fixture.page.locator('textarea[placeholder="Reply..."]');
-      await composer.fill('draft retained through compact projection');
-
-      await fixture.page.waitForFunction(() => {
-        const raw = localStorage.getItem('workspace_layout_v2');
-        if (!raw) return false;
-        const root = (JSON.parse(raw) as { root?: { type?: string } }).root;
-        return root?.type === 'partition';
-      });
-      const initialPersisted = await fixture.page.evaluate(() =>
-        localStorage.getItem('workspace_layout_v2'),
+      const chatId = await createChat(fixture, 'synthetic-pruning-chat');
+      await openChat(fixture, chatId);
+      const current = page.locator('[data-workspace-window-current="true"]');
+      const id = await current.getAttribute('data-workspace-window-id');
+      await current.evaluate((element) =>
+        element.setAttribute('data-pruning-survivor', 'true'),
       );
-      if (!initialPersisted) throw new Error('Workspace layout was not persisted.');
-      const initialWindowIds = await workspaceWindowIds(fixture.page);
-      const identityByWindow = await fixture.page.locator(WINDOW_SELECTOR).evaluateAll((windows) =>
-        Object.fromEntries(
-          windows.map((workspaceWindow, index) => {
-            const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
-            if (!windowId) throw new Error('Workspace window has no ID.');
-            const marker = `compact-identity-${index}`;
-            (workspaceWindow as HTMLElement).dataset.compactIdentity = marker;
-            return [windowId, marker];
-          }),
-        ),
+      const composer = page.locator('textarea[placeholder="Reply..."]');
+      await composer.fill('Synthetic draft retained after pruning');
+      const filesId = await canonicalFilesWindowId(page);
+      markPhase('merging after resize settles');
+      await page.setViewportSize({ width: 800, height: 900 });
+      await page.waitForFunction(
+        () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
       );
-
-      markPhase('entering compact projection after host shrink');
-      await fixture.page.setViewportSize({ width: 800, height: 900 });
-      const host = fixture.page.locator('.workspace-host-region');
-      await waitForCompactWorkspace(fixture.page);
-      expect(await host.getAttribute('data-workspace-single-window-projection')).toBe('true');
-      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
-      expect(await fixture.page.locator(`${WINDOW_SELECTOR}:visible`).count()).toBe(1);
-      expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(0);
-      const compactGeometry = await fixture.page.evaluate((expectedWindowId) => {
-        const workspaceHost = document.querySelector<HTMLElement>('.workspace-host-region');
-        const workspaceWindow = document.querySelector<HTMLElement>(
-          `[data-workspace-window-id="${expectedWindowId}"]`,
-        );
-        const titlebar = document.querySelector<HTMLElement>(
-          `[data-workspace-window-titlebar="${expectedWindowId}"]`,
-        );
-        const switcher = document.querySelector<HTMLElement>('[data-workspace-compact-switcher]');
-        const content = workspaceWindow?.querySelector<HTMLElement>(
-          '[data-workspace-window-content]',
-        );
-        const liveChatBody = document.querySelector<HTMLElement>('[data-workspace-live-chat-body]');
-        if (
-          !workspaceHost ||
-          !workspaceWindow ||
-          !titlebar ||
-          !switcher ||
-          !content ||
-          !liveChatBody
-        ) {
-          throw new Error('Compact workspace geometry is incomplete.');
-        }
-        const hostRect = workspaceHost.getBoundingClientRect();
-        const windowRect = workspaceWindow.getBoundingClientRect();
-        return {
-          hostWidth: hostRect.width,
-          windowWidth: windowRect.width,
-          windowLeft: windowRect.left - hostRect.left,
-          titlebarHeight: titlebar.getBoundingClientRect().height,
-          switcherHeight: switcher.getBoundingClientRect().height,
-          contentTop: content.getBoundingClientRect().top - windowRect.top,
-          liveChatTop: liveChatBody.getBoundingClientRect().top - windowRect.top,
-        };
-      }, mainWindowId);
-      expect(compactGeometry.hostWidth).toBe(480);
-      expect(compactGeometry.windowWidth).toBe(480);
-      expect(compactGeometry.windowLeft).toBe(0);
-      expect(compactGeometry.titlebarHeight).toBe(40);
-      expect(compactGeometry.switcherHeight).toBe(36);
-      expect(compactGeometry.contentTop).toBe(76);
-      expect(compactGeometry.liveChatTop).toBe(76);
-      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
-        initialPersisted,
-      );
-
-      markPhase('switching every compact navigation path');
-      await fixture.page.getByRole('button', { name: 'Next window' }).click();
-      await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
-      await fixture.page.getByRole('button', { name: 'Window 2 of 2' }).click();
-      await fixture.page.locator(`[data-workspace-compact-window-id="${mainWindowId}"]`).click();
-      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
-      await fixture.page.keyboard.press('Control+Shift+O');
-      await waitForCurrentWorkspaceWindow(fixture.page, filesWindowId);
-      await fixture.page.getByRole('button', { name: 'Previous window' }).click();
-      await waitForCurrentWorkspaceWindow(fixture.page, mainWindowId);
-      await fixture.page.waitForFunction(() => {
-        const input = document.querySelector<HTMLTextAreaElement>(
-          'textarea[placeholder="Reply..."]',
-        );
-        return input?.value === 'draft retained through compact projection';
-      });
-
-      markPhase('blocking edge drops while retaining the compact window');
-      await dragChatToWindow(fixture.page, {
-        chatId: chatB,
-        windowId: mainWindowId,
-        expectBlocked: true,
-        expectedLabel: 'Too small to split.',
-      });
-      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
-      const chatTab = fixture.page.locator(
-        `[id="${mainWindowId}-tab-chat-view:${mainWindowId}"][draggable="true"]`,
-      );
-      const projectedWindow = fixture.page.locator(`[data-workspace-window-id="${mainWindowId}"]`);
-      const tabBox = await chatTab.boundingBox();
-      const windowBox = await projectedWindow.boundingBox();
-      if (!tabBox || !windowBox) throw new Error('Missing compact tab DnD geometry.');
-      await fixture.page.mouse.move(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
-      await fixture.page.mouse.down();
-      try {
-        await fixture.page.mouse.move(tabBox.x + tabBox.width / 2 + 24, tabBox.y, { steps: 4 });
-        await fixture.page.mouse.move(
-          windowBox.x + windowBox.width - 12,
-          windowBox.y + windowBox.height / 2,
-          { steps: 20 },
-        );
-        const dropLayer = projectedWindow.locator('[data-workspace-window-drop-layer]');
-        await dropLayer.waitFor({ state: 'visible' });
-        await fixture.page.mouse.move(
-          windowBox.x + windowBox.width - 13,
-          windowBox.y + windowBox.height / 2,
-        );
-        expect(
-          await dropLayer.evaluate((element, expectedWindowId) => {
-            const workspaceWindow = document.querySelector<HTMLElement>(
-              `[data-workspace-window-id="${expectedWindowId}"]`,
-            );
-            if (!workspaceWindow) throw new Error('Missing projected window.');
-            return (
-              element.getBoundingClientRect().top - workspaceWindow.getBoundingClientRect().top
-            );
-          }, mainWindowId),
-        ).toBe(76);
-      } finally {
-        await fixture.page.mouse.up();
-      }
-
-      markPhase('recovering width with chat-list auto-hide');
-      await fixture.page.locator('[data-workspace-compact-window-list-trigger]').click();
-      await fixture.page.getByRole('menuitem', { name: 'Turn on auto-hide' }).click();
-      await waitForTiledWorkspace(fixture.page);
-      expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(1);
-      expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(800);
-      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
-        initialPersisted,
-      );
-
-      markPhase('disabling auto-hide and preserving compact hysteresis');
-      const chatListPanel = fixture.page.locator('[data-workspace-chat-list-panel]');
-      await fixture.page.getByRole('button', { name: 'Show chat sidebar' }).focus();
-      await fixture.page.keyboard.press('Enter');
-      await fixture.page.waitForFunction(
-        () =>
-          document
-            .querySelector('[data-workspace-chat-list-panel]')
-            ?.getAttribute('aria-hidden') === 'false',
-      );
-      await chatListPanel.getByRole('button', { name: 'More actions' }).first().click();
-      await fixture.page.getByRole('menuitemcheckbox', { name: 'Autohide sidebar' }).click();
-      await waitForCompactWorkspace(fixture.page);
-
-      await fixture.page.setViewportSize({ width: 1000, height: 900 });
-      await waitForCompactWorkspace(fixture.page);
-      await fixture.page.setViewportSize({ width: 1120, height: 900 });
-      await waitForTiledWorkspace(fixture.page);
-      await fixture.page.setViewportSize({ width: 1000, height: 900 });
-      expect(await host.getAttribute('data-workspace-compact')).toBeNull();
-      await fixture.page.setViewportSize({ width: 800, height: 900 });
-      await waitForCompactWorkspace(fixture.page);
-
-      markPhase('giving manual fullscreen priority and restoring compact projection');
-      await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
-      await fixture.page.waitForFunction(
-        () =>
-          document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden') ===
-          'true',
-      );
-      expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(0);
-      await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
-      await waitForCompactWorkspace(fixture.page);
-      expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(1);
-
-      markPhase('restoring exact tiled identity and reloading narrow');
-      await fixture.page.setViewportSize({ width: 1600, height: 900 });
-      await waitForTiledWorkspace(fixture.page);
-      expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
+      expect(await current.getAttribute('data-workspace-window-id')).toBe(id);
+      expect(await current.getAttribute('data-pruning-survivor')).toBe('true');
+      expect(await composer.inputValue()).toBe('Synthetic draft retained after pruning');
       expect(
-        await fixture.page
-          .locator(WINDOW_SELECTOR)
-          .evaluateAll((windows) =>
-            Object.fromEntries(
-              windows.map((workspaceWindow) => [
-                workspaceWindow.getAttribute('data-workspace-window-id'),
-                (workspaceWindow as HTMLElement).dataset.compactIdentity,
-              ]),
-            ),
-          ),
-      ).toEqual(identityByWindow);
-      expect(await composer.inputValue()).toBe('draft retained through compact projection');
-      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
-        initialPersisted,
+        await composer.evaluate((element) => document.activeElement === element),
+      ).toBe(true);
+      expect(
+        await page.locator('[data-workspace-window-id="' + filesId + '"]').count(),
+      ).toBe(0);
+      expect(await page.getByRole('tab', { name: 'Files', exact: true }).count()).toBe(1);
+      expect(await page.locator('[data-workspace-compact-switcher]').count()).toBe(0);
+      expect(await page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(
+        0,
       );
-
-      await fixture.page.setViewportSize({ width: 800, height: 900 });
-      await waitForCompactWorkspace(fixture.page);
-      await fixture.page.reload({ waitUntil: 'domcontentloaded' });
-      await waitForCompactWorkspace(fixture.page);
-      expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
-      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
-        initialPersisted,
-      );
+      await page.waitForFunction(() => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        return raw !== null && JSON.parse(raw).root.type === 'window';
+      });
+      markPhase('growing and reloading do not recreate windows');
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('[data-workspace-window-id]').waitFor();
+      expect(await page.locator('[data-workspace-window-id]').count()).toBe(1);
+      expect(
+        await page
+          .locator('[data-workspace-window-id]')
+          .getAttribute('data-workspace-window-id'),
+      ).toBe(id);
       fixture.assertNoBrowserErrors();
     });
   });
 
-  test('clamps parent resizing before nested windows cross the compact floor', async () => {
+  test('moves the last Chat into the current Files window without losing its draft', async () => {
+    await withChromiumFixture(
+      'workspace-window-pruning-chat-transfer',
+      async (fixture) => {
+        const { page } = fixture;
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await createGitFixture(fixture.integration.dirs.project);
+        const chatId = await createChat(fixture, 'synthetic-pruning-transfer-chat');
+        await openChat(fixture, chatId);
+        await page
+          .locator('textarea[placeholder="Reply..."]')
+          .fill('Draft survives Chat transfer');
+        const filesId = await canonicalFilesWindowId(page);
+        await page.locator(`[data-workspace-window-titlebar="${filesId}"]`).click({
+          position: { x: 20, y: 3 },
+        });
+        await page.setViewportSize({ width: 800, height: 900 });
+        await page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 1,
+        );
+        const survivor = page.locator('[data-workspace-window-current="true"]');
+        expect(await survivor.getAttribute('data-workspace-window-id')).toBe(filesId);
+        expect(await survivor.getAttribute('data-workspace-window-active-surface')).toBe(
+          'singleton:files',
+        );
+        await page
+          .locator(`[role="tab"][aria-controls="${filesId}-panel-chat-view:${filesId}"]`)
+          .click();
+        await page.waitForFunction(
+          () =>
+            document.querySelector<HTMLTextAreaElement>(
+              'textarea[placeholder="Reply..."]',
+            )?.value === 'Draft survives Chat transfer',
+        );
+        fixture.assertNoBrowserErrors();
+      },
+    );
+  });
+
+  test('clamps parent resizing before nested windows cross the minimum size', async () => {
     await withChromiumFixture(
       'workspace-window-nested-resize-bounds',
       async (fixture, markPhase) => {
@@ -1461,7 +1296,7 @@ describe('Chromium workspace windows', () => {
             windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
           );
         expect(Math.floor(Math.min(...clampedWidths))).toBeGreaterThanOrEqual(240);
-        expect(await host.getAttribute('data-workspace-compact')).toBeNull();
+        expect(await workspaceWindowIds(fixture.page)).toHaveLength(3);
         await fixture.page.waitForFunction(
           (previous) => localStorage.getItem('workspace_layout_v2') !== previous,
           initialPersisted,
@@ -1481,7 +1316,7 @@ describe('Chromium workspace windows', () => {
             windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
           );
         expect(Math.floor(Math.min(...restoredWidths))).toBeGreaterThanOrEqual(240);
-        expect(await host.getAttribute('data-workspace-compact')).toBeNull();
+        expect(await workspaceWindowIds(fixture.page)).toHaveLength(3);
         expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
           resizedPersisted,
         );

@@ -135,12 +135,6 @@
 	const chatListAutohideActive = $derived(
 		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
 	);
-	const chatListConsumesWorkspaceWidth = $derived(
-		!isMobile && !hideLeftSidebar && !chatListAutohideActive,
-	);
-	const canEnableChatListAutohide = $derived(
-		hoverCapability.current && !localSettings.chatListAutohide,
-	);
 	const chatListAutohide = new ChatListAutohideState({
 		get active() {
 			return chatListAutohideActive;
@@ -561,10 +555,6 @@
 		else chatListAutohide.collapse();
 	}
 
-	function enableChatListAutohide(): void {
-		localSettings.set('chatListAutohide', true);
-	}
-
 	function handleDesktopChatListFocus(): void {
 		workspace.noteChatListFocus();
 	}
@@ -748,9 +738,6 @@
 					{isMobile}
 					onRegisterReload={handleRegisterReload}
 					chatActions={workspaceChatActions}
-					{chatListConsumesWorkspaceWidth}
-					{canEnableChatListAutohide}
-					onEnableChatListAutohide={enableChatListAutohide}
 				/>
 			</div>
 			{#if isMobile && !mobileKeyboardVisible && !mobileTransientSurface}

@@ -20,10 +20,8 @@ import {
 
 export const SPLIT_MIN_WINDOW_WIDTH_PX = 360;
 export const SPLIT_MIN_WINDOW_HEIGHT_PX = 240;
-export const COMPACT_ENTER_WINDOW_WIDTH_PX = 240;
-export const COMPACT_ENTER_WINDOW_HEIGHT_PX = 160;
-export const COMPACT_EXIT_WINDOW_WIDTH_PX = 300;
-export const COMPACT_EXIT_WINDOW_HEIGHT_PX = 200;
+export const MIN_WINDOW_WIDTH_PX = 240;
+export const MIN_WINDOW_HEIGHT_PX = 160;
 export const WORKSPACE_RESIZE_BOUND_SAFETY_PX = 1;
 
 export interface WorkspaceHostSize {
@@ -61,7 +59,6 @@ export interface WorkspaceSplitRequest {
 export interface WorkspaceSplitAdmissionInput extends WorkspaceSplitRequest {
 	readonly snapshot: WorkspaceLayoutSnapshot;
 	readonly hostSize: WorkspaceHostSize | null;
-	readonly singleWindowProjectionActive: boolean;
 }
 
 export type WorkspaceSplitAdmissionResolver = (
@@ -104,7 +101,6 @@ export function resolveWorkspaceSplitAdmission(
 	input: WorkspaceSplitAdmissionInput,
 ): WorkspaceSplitAdmission | null {
 	if (input.snapshot.fullscreenWindowId) return { allowed: false, reason: 'fullscreen' };
-	if (input.singleWindowProjectionActive) return { allowed: false, reason: 'too-small' };
 
 	const root = rootAfterProjectedSourceCollapse(
 		input.snapshot.desktopRoot,
@@ -139,23 +135,44 @@ export function floorWorkspacePixels(fraction: number, hostPixels: number): numb
 	return Math.floor(fraction * hostPixels);
 }
 
-export function resolveWorkspaceCompactActive(input: {
-	readonly wasActive: boolean;
-	readonly root: DesktopWorkspaceNode;
-	readonly hostSize: WorkspaceHostSize | null;
-}): boolean {
-	const { wasActive, root, hostSize } = input;
-	if (!hostSize) return false;
-	const windows = computeWindowRects(root).windows;
-	if (windows.length < 2) return false;
+function siblingWindowId(
+	root: DesktopWorkspaceNode,
+	windowId: WorkspaceWindowId,
+): WorkspaceWindowId | null {
+	if (root.type === 'window') return null;
+	const [first, second] = root.children;
+	if (first.type === 'window' && first.id === windowId) return collectWindowNodes(second)[0].id;
+	if (second.type === 'window' && second.id === windowId) return collectWindowNodes(first)[0].id;
+	return siblingWindowId(first, windowId) ?? siblingWindowId(second, windowId);
+}
 
-	const minimumWidth = wasActive ? COMPACT_EXIT_WINDOW_WIDTH_PX : COMPACT_ENTER_WINDOW_WIDTH_PX;
-	const minimumHeight = wasActive ? COMPACT_EXIT_WINDOW_HEIGHT_PX : COMPACT_ENTER_WINDOW_HEIGHT_PX;
-	return windows.some(
-		({ rect }) =>
-			floorWorkspacePixels(rect.width, hostSize.width) < minimumWidth ||
-			floorWorkspacePixels(rect.height, hostSize.height) < minimumHeight,
-	);
+export function workspaceWindowsToPrune(
+	root: DesktopWorkspaceNode,
+	hostSize: WorkspaceHostSize | null,
+	currentWindowId: WorkspaceWindowId,
+): WorkspaceWindowId[] {
+	if (!hostSize || !windowNodeById(root, currentWindowId)) return [];
+	const removed: WorkspaceWindowId[] = [];
+	let remaining = root;
+	while (true) {
+		const windows = computeWindowRects(remaining).windows;
+		if (windows.length < 2) break;
+		const undersized = windows.filter(
+			({ rect }) =>
+				floorWorkspacePixels(rect.width, hostSize.width) < MIN_WINDOW_WIDTH_PX ||
+				floorWorkspacePixels(rect.height, hostSize.height) < MIN_WINDOW_HEIGHT_PX,
+		);
+		if (undersized.length === 0) break;
+		const sourceWindowId =
+			undersized.find(({ workspaceWindow }) => workspaceWindow.id !== currentWindowId)
+				?.workspaceWindow.id ?? siblingWindowId(remaining, currentWindowId);
+		if (!sourceWindowId) break;
+		const collapsed = removeWindowAndCollapse(remaining, sourceWindowId);
+		if (!collapsed) break;
+		removed.push(sourceWindowId);
+		remaining = collapsed;
+	}
+	return removed;
 }
 
 function minimumLeafAxisFraction(
@@ -178,9 +195,7 @@ export function resolveWorkspacePartitionRatioBounds(input: {
 		return { min: MIN_PARTITION_RATIO, max: MAX_PARTITION_RATIO, adjustable: true };
 	}
 	const criticalPixels =
-		partition.direction === 'horizontal'
-			? COMPACT_ENTER_WINDOW_WIDTH_PX
-			: COMPACT_ENTER_WINDOW_HEIGHT_PX;
+		partition.direction === 'horizontal' ? MIN_WINDOW_WIDTH_PX : MIN_WINDOW_HEIGHT_PX;
 	const requiredPixels = criticalPixels + WORKSPACE_RESIZE_BOUND_SAFETY_PX;
 	const firstFraction = minimumLeafAxisFraction(partition.children[0], partition.direction);
 	const secondFraction = minimumLeafAxisFraction(partition.children[1], partition.direction);

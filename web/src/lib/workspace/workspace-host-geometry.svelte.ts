@@ -1,36 +1,23 @@
 import { untrack } from 'svelte';
 import type { Attachment } from 'svelte/attachments';
-import type { WorkspaceLayoutSnapshot, WorkspaceWindowId } from './surface-types.js';
-import { resolveWorkspaceCompactActive, type WorkspaceHostSize } from './window-geometry-policy.js';
+import type { WorkspaceLayoutSnapshot } from './surface-types.js';
+import type { WorkspaceHostSize } from './window-geometry-policy.js';
 
 interface WorkspaceHostGeometryStateDeps {
 	getSnapshot(): WorkspaceLayoutSnapshot;
 	getIsMobile(): boolean;
-	beforeCompactProjection(): void;
-	onCompactProjectionChanged(active: boolean): void;
+	onResizeSettled(): Promise<boolean>;
 }
+
+const WORKSPACE_RESIZE_SETTLE_MS = 150;
 
 export class WorkspaceHostGeometryState {
 	size = $state.raw<WorkspaceHostSize | null>(null);
-	#compact = $state(false);
-	#awaitingTiledMeasurement = $state(false);
 	#element: HTMLElement | null = null;
 	#measureFrame: number | null = null;
-	#lastFullscreenWindowId: WorkspaceWindowId | null;
-	#lastIsMobile: boolean;
+	#settleTimer: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(private readonly deps: WorkspaceHostGeometryStateDeps) {
-		this.#lastFullscreenWindowId = deps.getSnapshot().fullscreenWindowId;
-		this.#lastIsMobile = deps.getIsMobile();
-	}
-
-	get compactActive(): boolean {
-		return !this.deps.getIsMobile() && this.#compact;
-	}
-
-	get singleWindowProjectionActive(): boolean {
-		return !this.deps.getIsMobile() && (this.#compact || this.#awaitingTiledMeasurement);
-	}
+	constructor(private readonly deps: WorkspaceHostGeometryStateDeps) {}
 
 	readonly attach: Attachment<HTMLElement> = (element) =>
 		untrack(() => {
@@ -41,32 +28,23 @@ export class WorkspaceHostGeometryState {
 			return () => {
 				observer.disconnect();
 				if (this.#measureFrame !== null) cancelAnimationFrame(this.#measureFrame);
+				if (this.#settleTimer !== null) clearTimeout(this.#settleTimer);
 				this.#measureFrame = null;
-				this.#setCompact(false);
+				this.#settleTimer = null;
 				this.#element = null;
 				this.size = null;
-				this.#awaitingTiledMeasurement = false;
 			};
 		});
 
-	layoutPublished(snapshot: WorkspaceLayoutSnapshot): void {
-		const isMobile = this.deps.getIsMobile();
-		const returnedToDesktop = this.#lastIsMobile && !isMobile;
-		this.#lastIsMobile = isMobile;
-		const exitedFullscreen =
-			this.#lastFullscreenWindowId !== null && snapshot.fullscreenWindowId === null;
-		this.#lastFullscreenWindowId = snapshot.fullscreenWindowId;
-
-		if (returnedToDesktop || exitedFullscreen) {
-			this.#beginTiledMeasurementHold();
-			this.#scheduleMeasure();
-			return;
-		}
-		if (!isMobile && !snapshot.fullscreenWindowId) this.#reconcile(snapshot);
+	layoutPublished(): void {
+		// Fullscreen and mobile change the host box on the following DOM update.
+		this.#scheduleMeasure();
 	}
 
 	#scheduleMeasure(): void {
 		if (!this.#element || this.#measureFrame !== null) return;
+		if (this.#settleTimer !== null) clearTimeout(this.#settleTimer);
+		this.#settleTimer = null;
 		this.#measureFrame = requestAnimationFrame(() => {
 			this.#measureFrame = null;
 			this.#measure();
@@ -74,43 +52,31 @@ export class WorkspaceHostGeometryState {
 	}
 
 	#measure(): void {
-		const element = this.#element;
-		if (!element) return;
-		const rect = element.getBoundingClientRect();
-		if (rect.width <= 0 || rect.height <= 0) return;
-		const previous = this.size;
-		if (!previous || previous.width !== rect.width || previous.height !== rect.height) {
+		const rect = this.#element?.getBoundingClientRect();
+		if (!rect || rect.width <= 0 || rect.height <= 0) {
+			this.size = null;
+			return;
+		}
+		if (!this.size || this.size.width !== rect.width || this.size.height !== rect.height) {
 			this.size = { width: rect.width, height: rect.height };
 		}
-		const snapshot = this.deps.getSnapshot();
-		if (this.deps.getIsMobile() || snapshot.fullscreenWindowId) return;
-		this.#reconcile(snapshot);
-		this.#awaitingTiledMeasurement = false;
+		if (this.#settleTimer !== null) clearTimeout(this.#settleTimer);
+		this.#settleTimer = null;
+		if (this.deps.getIsMobile() || this.deps.getSnapshot().fullscreenWindowId) return;
+		this.#scheduleFit();
 	}
 
-	#reconcile(snapshot: WorkspaceLayoutSnapshot): void {
-		this.#setCompact(
-			resolveWorkspaceCompactActive({
-				wasActive: this.#compact,
-				root: snapshot.desktopRoot,
-				hostSize: this.size,
-			}),
-		);
-	}
-
-	#beginTiledMeasurementHold(): void {
-		if (!this.#compact && !this.#awaitingTiledMeasurement) {
-			this.deps.beforeCompactProjection();
-		}
-		this.#awaitingTiledMeasurement = true;
-	}
-
-	#setCompact(next: boolean): void {
-		if (next === this.#compact) return;
-		if (next) {
-			if (!this.#awaitingTiledMeasurement) this.deps.beforeCompactProjection();
-		}
-		this.#compact = next;
-		this.deps.onCompactProjectionChanged(next);
+	#scheduleFit(): void {
+		this.#settleTimer = setTimeout(async () => {
+			this.#settleTimer = null;
+			if (
+				this.#element &&
+				!this.deps.getIsMobile() &&
+				!this.deps.getSnapshot().fullscreenWindowId
+			) {
+				const settled = await this.deps.onResizeSettled();
+				if (!settled && this.#element && this.#settleTimer === null) this.#scheduleFit();
+			}
+		}, WORKSPACE_RESIZE_SETTLE_MS);
 	}
 }

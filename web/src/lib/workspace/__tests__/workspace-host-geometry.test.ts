@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalWorkspaceSnapshot } from '../canonical-layout';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
-import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceHostGeometryState } from '../workspace-host-geometry.svelte';
 import {
 	installResizeObserverHarness,
@@ -26,18 +25,13 @@ function twoWindowSnapshot(): WorkspaceLayoutSnapshot {
 	return canonicalWorkspaceSnapshot();
 }
 
-function singleWindowSnapshot(): WorkspaceLayoutSnapshot {
-	return reduceWorkspaceLayout(twoWindowSnapshot(), [
-		{ type: 'remove-surface', surfaceId: 'singleton:files' },
-	]);
-}
-
 describe('WorkspaceHostGeometryState', () => {
 	let restoreResizeObserver: () => void;
 	let frames: Map<number, FrameRequestCallback>;
 	let nextFrameId: number;
 
 	beforeEach(() => {
+		vi.useFakeTimers();
 		restoreResizeObserver = installResizeObserverHarness();
 		frames = new Map();
 		nextFrameId = 1;
@@ -51,6 +45,7 @@ describe('WorkspaceHostGeometryState', () => {
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		restoreResizeObserver();
 		vi.unstubAllGlobals();
 	});
@@ -70,13 +65,11 @@ describe('WorkspaceHostGeometryState', () => {
 		let currentSnapshot = options?.snapshot ?? twoWindowSnapshot();
 		let isMobile = options?.isMobile ?? false;
 		let measured = { width: options?.width ?? 900, height: options?.height ?? 700 };
-		const beforeCompactProjection = vi.fn();
-		const onCompactProjectionChanged = vi.fn();
+		const onResizeSettled = vi.fn().mockResolvedValue(true);
 		const geometry = new WorkspaceHostGeometryState({
 			getSnapshot: () => currentSnapshot,
 			getIsMobile: () => isMobile,
-			beforeCompactProjection,
-			onCompactProjectionChanged,
+			onResizeSettled,
 		});
 		const element = document.createElement('div');
 		vi.spyOn(element, 'getBoundingClientRect').mockImplementation(() =>
@@ -87,8 +80,7 @@ describe('WorkspaceHostGeometryState', () => {
 		return {
 			geometry,
 			element,
-			beforeCompactProjection,
-			onCompactProjectionChanged,
+			onResizeSettled,
 			detach,
 			setSnapshot(snapshot: WorkspaceLayoutSnapshot) {
 				currentSnapshot = snapshot;
@@ -115,7 +107,7 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.setMeasured(0, 0);
 		ResizeObserverHarness.emit(harness.element, 0, 0);
 		flushFrames();
-		expect(harness.geometry.size).toBe(initialSize);
+		expect(harness.geometry.size).toBeNull();
 
 		harness.setMeasured(840, 650);
 		ResizeObserverHarness.emit(harness.element, 840, 650);
@@ -134,104 +126,46 @@ describe('WorkspaceHostGeometryState', () => {
 		expect(ResizeObserverHarness.instances[0]?.observed.size).toBe(0);
 	});
 
-	it('enters compact once and reconciles layout changes without observer churn', () => {
-		const harness = createHarness({ width: 470, height: 700 });
-		expect(harness.geometry.compactActive).toBe(true);
-		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
-
-		harness.geometry.layoutPublished(twoWindowSnapshot());
-		expect(ResizeObserverHarness.instances).toHaveLength(1);
-		expect(harness.onCompactProjectionChanged).toHaveBeenCalledTimes(1);
-
-		const singleWindow = singleWindowSnapshot();
-		harness.setSnapshot(singleWindow);
-		harness.geometry.layoutPublished(singleWindow);
-		expect(harness.geometry.compactActive).toBe(false);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true], [false]]);
+	it('waits for resizing to settle and retries reserved merges', async () => {
+		const harness = createHarness();
+		harness.onResizeSettled.mockResolvedValueOnce(false);
+		await vi.advanceTimersByTimeAsync(149);
+		expect(harness.onResizeSettled).not.toHaveBeenCalled();
+		harness.setMeasured(400, 300);
+		ResizeObserverHarness.emit(harness.element, 400, 300);
+		flushFrames();
+		await vi.advanceTimersByTimeAsync(150);
+		expect(harness.onResizeSettled).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(150);
+		expect(harness.onResizeSettled).toHaveBeenCalledTimes(2);
 		harness.detach();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(harness.onResizeSettled).toHaveBeenCalledTimes(2);
 	});
-
-	it('publishes the compact exit when its host detaches', () => {
-		const harness = createHarness({ width: 470, height: 700 });
-		expect(harness.geometry.compactActive).toBe(true);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
-
-		harness.detach();
-
-		expect(harness.geometry.compactActive).toBe(false);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true], [false]]);
-	});
-
-	it('retains the compact latch while mobile without recreating the attachment', () => {
-		const harness = createHarness({ width: 470, height: 700 });
-		harness.setMobile(true);
-		harness.geometry.layoutPublished(twoWindowSnapshot());
-		expect(harness.geometry.compactActive).toBe(false);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
-
+	it.each(['mobile', 'fullscreen'])('waits for fresh desktop geometry after %s', async (mode) => {
+		const snapshot = twoWindowSnapshot();
+		const harness = createHarness({
+			snapshot:
+				mode === 'fullscreen' ? { ...snapshot, fullscreenWindowId: 'window-main' } : snapshot,
+			isMobile: mode === 'mobile',
+		});
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(harness.onResizeSettled).not.toHaveBeenCalled();
 		harness.setMobile(false);
-		harness.geometry.layoutPublished(twoWindowSnapshot());
-		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
+		harness.setSnapshot(snapshot);
+		harness.setMeasured(500, 400);
+		harness.geometry.layoutPublished();
+		expect(harness.onResizeSettled).not.toHaveBeenCalled();
 		flushFrames();
-		expect(harness.geometry.compactActive).toBe(true);
-		expect(ResizeObserverHarness.instances).toHaveLength(1);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
+		expect(harness.geometry.size).toEqual({ width: 500, height: 400 });
+		await vi.advanceTimersByTimeAsync(150);
+		expect(harness.onResizeSettled).toHaveBeenCalledOnce();
 		harness.detach();
 	});
-
-	it('holds one window until fullscreen exit is measured against the tiled host', () => {
-		const tiled = twoWindowSnapshot();
-		const fullscreen = { ...tiled, fullscreenWindowId: 'window-main' as const };
-		const harness = createHarness({ snapshot: tiled, width: 900, height: 700 });
-
-		harness.setSnapshot(fullscreen);
-		harness.geometry.layoutPublished(fullscreen);
-		harness.setMeasured(1200, 700);
-		ResizeObserverHarness.emit(harness.element, 1200, 700);
-		flushFrames();
-		expect(harness.geometry.compactActive).toBe(false);
-
-		harness.setSnapshot(tiled);
-		harness.setMeasured(900, 700);
-		harness.geometry.layoutPublished(tiled);
-		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
-		expect(harness.geometry.compactActive).toBe(false);
-		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
-		flushFrames();
-		expect(harness.geometry.singleWindowProjectionActive).toBe(false);
-		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
+	it('cancels a settled callback on detach', async () => {
+		const harness = createHarness();
 		harness.detach();
-	});
-
-	it('cancels once when a post-fullscreen safety hold resolves to compact', () => {
-		const tiled = twoWindowSnapshot();
-		const fullscreen = { ...tiled, fullscreenWindowId: 'window-main' as const };
-		const harness = createHarness({ snapshot: fullscreen, width: 470, height: 700 });
-
-		harness.setSnapshot(tiled);
-		harness.geometry.layoutPublished(tiled);
-		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
-		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onCompactProjectionChanged).not.toHaveBeenCalled();
-		flushFrames();
-		expect(harness.geometry.compactActive).toBe(true);
-		expect(harness.beforeCompactProjection).toHaveBeenCalledTimes(1);
-		expect(harness.onCompactProjectionChanged.mock.calls).toEqual([[true]]);
-		harness.detach();
-	});
-
-	it('waits for the desktop host measurement after returning from mobile', () => {
-		const harness = createHarness({ isMobile: true, width: 470, height: 700 });
-		expect(harness.geometry.compactActive).toBe(false);
-		harness.setMobile(false);
-		harness.setMeasured(900, 700);
-		harness.geometry.layoutPublished(twoWindowSnapshot());
-		expect(harness.geometry.singleWindowProjectionActive).toBe(true);
-		flushFrames();
-		expect(harness.geometry.singleWindowProjectionActive).toBe(false);
-		expect(harness.geometry.compactActive).toBe(false);
-		harness.detach();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(harness.onResizeSettled).not.toHaveBeenCalled();
 	});
 });

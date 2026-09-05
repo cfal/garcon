@@ -35,7 +35,7 @@ export interface WorkspaceLayoutParseResult {
 
 export const WORKSPACE_LAYOUT_MAX_PARSE_DEPTH = 64;
 export const WORKSPACE_LAYOUT_MAX_PARSE_NODES = 256;
-export const WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW = 256;
+export const WORKSPACE_LAYOUT_MAX_TAB_REFS = 2048;
 export const WORKSPACE_LAYOUT_MAX_UNPLACED_TERMINALS = 256;
 
 class WorkspaceLayoutBudgetExceeded extends Error {}
@@ -95,6 +95,7 @@ interface TreeBuildState {
 	surfaces: Record<string, SurfaceDescriptor>;
 	seenGlobalSurfaceIds: Set<string>;
 	visitedNodes: number;
+	visitedTabRefs: number;
 }
 
 function restoredRefSurfaceId(
@@ -110,7 +111,11 @@ function restoreWindow(
 ): WorkspaceWindowNode | null {
 	const id = asWindowId(node.id);
 	if (!id || !Array.isArray(node.order)) return null;
-	const orderRefs = node.order.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW);
+	const orderRefs = node.order.slice(
+		0,
+		Math.max(0, WORKSPACE_LAYOUT_MAX_TAB_REFS - state.visitedTabRefs),
+	);
+	state.visitedTabRefs += orderRefs.length;
 	const order: string[] = [];
 	let chatPlaced = false;
 	for (const rawRef of orderRefs) {
@@ -138,7 +143,7 @@ function restoreWindow(
 	const persistedMru: string[] = [];
 	const persistedMruSet = new Set<string>();
 	if (Array.isArray(node.mru)) {
-		for (const rawRef of node.mru.slice(0, WORKSPACE_LAYOUT_MAX_TABS_PER_WINDOW)) {
+		for (const rawRef of node.mru.slice(0, orderRefs.length)) {
 			const ref = parseV2Ref(rawRef);
 			if (!ref) continue;
 			const surfaceId = restoredRefSurfaceId(ref, id);
@@ -247,6 +252,7 @@ function parseV2(value: Record<string, unknown>): WorkspaceLayoutParseResult {
 		surfaces: {},
 		seenGlobalSurfaceIds: new Set(),
 		visitedNodes: 0,
+		visitedTabRefs: 0,
 	};
 	const restored = restoreNode(value.root, state);
 	if (!restored) return { source: 'fallback', snapshot: canonicalWorkspaceSnapshot() };
