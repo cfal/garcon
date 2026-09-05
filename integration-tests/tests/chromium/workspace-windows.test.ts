@@ -585,9 +585,10 @@ async function dragChatToWindow(
     await page.mouse.move(sourceX + 24, sourceY, { steps: 4 });
     await page.mouse.move(targetX, targetY, { steps: 20 });
     await target.locator('[data-workspace-window-drop-layer]').waitFor({ state: 'visible' });
-    const expectedLabel = input.expectBlocked
-      ? '4 windows max'
-      : (input.expectedLabel ?? chatDropLabel(targetKind));
+    let expectedLabel = input.expectedLabel;
+    if (!expectedLabel) {
+      expectedLabel = input.expectBlocked ? 'Window limit reached.' : chatDropLabel(targetKind);
+    }
     const label = target.getByText(expectedLabel, { exact: true });
     await nudgePointerUntilVisible(
       page,
@@ -1103,6 +1104,434 @@ describe('Chromium workspace windows', () => {
 
       fixture.assertNoBrowserErrors();
     });
+  });
+
+  test('projects undersized desktop layouts without changing persisted topology', async () => {
+    await withChromiumFixture('workspace-window-compact-projection', async (fixture, markPhase) => {
+      await fixture.page.setViewportSize({ width: 1600, height: 900 });
+      await createGitFixture(fixture.integration.dirs.project);
+      markPhase('creating a two-window workspace');
+      const chatA = await createChat(fixture, 'compact-projection-chat-a');
+      const chatB = await createChat(fixture, 'compact-projection-chat-b');
+      await openChat(fixture, chatA);
+      await fixture.page
+        .locator(`[data-sidebar-virtual-row="${chatB}"]`)
+        .waitFor({ state: 'visible' });
+      const mainWindowId = await fixture.page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!mainWindowId) throw new Error('Missing initial Chat window.');
+      const filesWindowId = await openNewWindow(fixture.page, 'Open Files');
+      await fixture.page
+        .locator(`[data-workspace-window-titlebar="${mainWindowId}"]`)
+        .click({ position: { x: 3, y: 3 } });
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-current') === 'true',
+        mainWindowId,
+      );
+      const composer = fixture.page.locator('textarea[placeholder="Reply..."]');
+      await composer.fill('draft retained through compact projection');
+
+      await fixture.page.waitForFunction(() => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        if (!raw) return false;
+        const root = (JSON.parse(raw) as { root?: { type?: string } }).root;
+        return root?.type === 'partition';
+      });
+      const initialPersisted = await fixture.page.evaluate(() =>
+        localStorage.getItem('workspace_layout_v2'),
+      );
+      if (!initialPersisted) throw new Error('Workspace layout was not persisted.');
+      const initialWindowIds = await workspaceWindowIds(fixture.page);
+      const identityByWindow = await fixture.page.locator(WINDOW_SELECTOR).evaluateAll((windows) =>
+        Object.fromEntries(
+          windows.map((workspaceWindow, index) => {
+            const windowId = workspaceWindow.getAttribute('data-workspace-window-id');
+            if (!windowId) throw new Error('Workspace window has no ID.');
+            const marker = `compact-identity-${index}`;
+            (workspaceWindow as HTMLElement).dataset.compactIdentity = marker;
+            return [windowId, marker];
+          }),
+        ),
+      );
+
+      markPhase('entering compact projection after host shrink');
+      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      const host = fixture.page.locator('.workspace-host-region');
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      expect(await host.getAttribute('data-workspace-single-window-projection')).toBe('true');
+      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
+      expect(await fixture.page.locator(`${WINDOW_SELECTOR}:visible`).count()).toBe(1);
+      expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(0);
+      const compactGeometry = await fixture.page.evaluate((expectedWindowId) => {
+        const workspaceHost = document.querySelector<HTMLElement>('.workspace-host-region');
+        const workspaceWindow = document.querySelector<HTMLElement>(
+          `[data-workspace-window-id="${expectedWindowId}"]`,
+        );
+        const titlebar = document.querySelector<HTMLElement>(
+          `[data-workspace-window-titlebar="${expectedWindowId}"]`,
+        );
+        const switcher = document.querySelector<HTMLElement>('[data-workspace-compact-switcher]');
+        const content = workspaceWindow?.querySelector<HTMLElement>(
+          '[data-workspace-window-content]',
+        );
+        const liveChatBody = document.querySelector<HTMLElement>('[data-workspace-live-chat-body]');
+        if (
+          !workspaceHost ||
+          !workspaceWindow ||
+          !titlebar ||
+          !switcher ||
+          !content ||
+          !liveChatBody
+        ) {
+          throw new Error('Compact workspace geometry is incomplete.');
+        }
+        const hostRect = workspaceHost.getBoundingClientRect();
+        const windowRect = workspaceWindow.getBoundingClientRect();
+        return {
+          hostWidth: hostRect.width,
+          windowWidth: windowRect.width,
+          windowLeft: windowRect.left - hostRect.left,
+          titlebarHeight: titlebar.getBoundingClientRect().height,
+          switcherHeight: switcher.getBoundingClientRect().height,
+          contentTop: content.getBoundingClientRect().top - windowRect.top,
+          liveChatTop: liveChatBody.getBoundingClientRect().top - windowRect.top,
+        };
+      }, mainWindowId);
+      expect(compactGeometry.hostWidth).toBe(460);
+      expect(compactGeometry.windowWidth).toBe(460);
+      expect(compactGeometry.windowLeft).toBe(0);
+      expect(compactGeometry.titlebarHeight).toBe(40);
+      expect(compactGeometry.switcherHeight).toBe(36);
+      expect(compactGeometry.contentTop).toBe(76);
+      expect(compactGeometry.liveChatTop).toBe(76);
+      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+        initialPersisted,
+      );
+
+      markPhase('switching every compact navigation path');
+      await fixture.page.getByRole('button', { name: 'Next window' }).click();
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-current') === 'true',
+        filesWindowId,
+      );
+      await fixture.page.getByRole('button', { name: 'Window 2 of 2' }).click();
+      await fixture.page.locator(`[data-workspace-compact-window-id="${mainWindowId}"]`).click();
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-current') === 'true',
+        mainWindowId,
+      );
+      await fixture.page.keyboard.press('Control+Shift+O');
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-current') === 'true',
+        filesWindowId,
+      );
+      await fixture.page.getByRole('button', { name: 'Previous window' }).click();
+      await fixture.page.waitForFunction(
+        (expectedWindowId) =>
+          document
+            .querySelector(`[data-workspace-window-id="${expectedWindowId}"]`)
+            ?.getAttribute('data-workspace-window-current') === 'true',
+        mainWindowId,
+      );
+      await fixture.page.waitForFunction(() => {
+        const input = document.querySelector<HTMLTextAreaElement>(
+          'textarea[placeholder="Reply..."]',
+        );
+        return input?.value === 'draft retained through compact projection';
+      });
+
+      markPhase('blocking edge drops while retaining the compact window');
+      await dragChatToWindow(fixture.page, {
+        chatId: chatB,
+        windowId: mainWindowId,
+        expectBlocked: true,
+        expectedLabel: 'Too small to split.',
+      });
+      expect(await fixture.page.locator(WINDOW_SELECTOR).count()).toBe(2);
+      const chatTab = fixture.page.locator(
+        `[id="${mainWindowId}-tab-chat-view:${mainWindowId}"][draggable="true"]`,
+      );
+      const projectedWindow = fixture.page.locator(`[data-workspace-window-id="${mainWindowId}"]`);
+      const tabBox = await chatTab.boundingBox();
+      const windowBox = await projectedWindow.boundingBox();
+      if (!tabBox || !windowBox) throw new Error('Missing compact tab DnD geometry.');
+      await fixture.page.mouse.move(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
+      await fixture.page.mouse.down();
+      try {
+        await fixture.page.mouse.move(tabBox.x + tabBox.width / 2 + 24, tabBox.y, { steps: 4 });
+        await fixture.page.mouse.move(
+          windowBox.x + windowBox.width - 12,
+          windowBox.y + windowBox.height / 2,
+          { steps: 20 },
+        );
+        const dropLayer = projectedWindow.locator('[data-workspace-window-drop-layer]');
+        await dropLayer.waitFor({ state: 'visible' });
+        await fixture.page.mouse.move(
+          windowBox.x + windowBox.width - 13,
+          windowBox.y + windowBox.height / 2,
+        );
+        expect(
+          await dropLayer.evaluate((element, expectedWindowId) => {
+            const workspaceWindow = document.querySelector<HTMLElement>(
+              `[data-workspace-window-id="${expectedWindowId}"]`,
+            );
+            if (!workspaceWindow) throw new Error('Missing projected window.');
+            return (
+              element.getBoundingClientRect().top - workspaceWindow.getBoundingClientRect().top
+            );
+          }, mainWindowId),
+        ).toBe(76);
+      } finally {
+        await fixture.page.mouse.up();
+      }
+
+      markPhase('recovering width with chat-list auto-hide');
+      await fixture.page.getByRole('button', { name: 'Turn on auto-hide' }).click();
+      await fixture.page.waitForFunction(
+        () =>
+          !document
+            .querySelector('.workspace-host-region')
+            ?.hasAttribute('data-workspace-single-window-projection'),
+      );
+      expect(await fixture.page.getByRole('separator', { name: 'Resize windows' }).count()).toBe(1);
+      expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(780);
+      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+        initialPersisted,
+      );
+
+      markPhase('disabling auto-hide and preserving compact hysteresis');
+      const chatListPanel = fixture.page.locator('[data-workspace-chat-list-panel]');
+      await fixture.page.getByRole('button', { name: 'Show chat sidebar' }).focus();
+      await fixture.page.keyboard.press('Enter');
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-workspace-chat-list-panel]')
+            ?.getAttribute('aria-hidden') === 'false',
+      );
+      await chatListPanel.getByRole('button', { name: 'More actions' }).first().click();
+      await fixture.page.getByRole('menuitemcheckbox', { name: 'Autohide sidebar' }).click();
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      await fixture.page.getByRole('button', { name: 'Dismiss' }).click();
+      expect(await fixture.page.getByRole('button', { name: 'Dismiss' }).count()).toBe(0);
+
+      await fixture.page.setViewportSize({ width: 850, height: 900 });
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      await fixture.page.setViewportSize({ width: 920, height: 900 });
+      await fixture.page.waitForFunction(
+        () =>
+          !document
+            .querySelector('.workspace-host-region')
+            ?.hasAttribute('data-workspace-single-window-projection'),
+      );
+      await fixture.page.setViewportSize({ width: 850, height: 900 });
+      expect(await host.getAttribute('data-workspace-compact')).toBeNull();
+      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+
+      markPhase('giving manual fullscreen priority and restoring compact projection');
+      await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
+      await fixture.page.waitForFunction(
+        () =>
+          document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden') ===
+          'true',
+      );
+      expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(0);
+      await projectedWindow.locator(`[data-workspace-window-fullscreen="${mainWindowId}"]`).click();
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      expect(await fixture.page.locator('[data-workspace-compact-switcher]').count()).toBe(1);
+
+      markPhase('restoring exact tiled identity and reloading narrow');
+      await fixture.page.setViewportSize({ width: 1600, height: 900 });
+      await fixture.page.waitForFunction(
+        () =>
+          !document
+            .querySelector('.workspace-host-region')
+            ?.hasAttribute('data-workspace-single-window-projection'),
+      );
+      expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
+      expect(
+        await fixture.page
+          .locator(WINDOW_SELECTOR)
+          .evaluateAll((windows) =>
+            Object.fromEntries(
+              windows.map((workspaceWindow) => [
+                workspaceWindow.getAttribute('data-workspace-window-id'),
+                (workspaceWindow as HTMLElement).dataset.compactIdentity,
+              ]),
+            ),
+          ),
+      ).toEqual(identityByWindow);
+      expect(await composer.inputValue()).toBe('draft retained through compact projection');
+      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+        initialPersisted,
+      );
+
+      await fixture.page.setViewportSize({ width: 780, height: 900 });
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      await fixture.page.reload({ waitUntil: 'domcontentloaded' });
+      await fixture.page.waitForFunction(
+        () =>
+          document
+            .querySelector('.workspace-host-region')
+            ?.getAttribute('data-workspace-compact') === 'true',
+      );
+      expect(await workspaceWindowIds(fixture.page)).toEqual(initialWindowIds);
+      expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+        initialPersisted,
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('clamps parent resizing before nested windows cross the compact floor', async () => {
+    await withChromiumFixture(
+      'workspace-window-nested-resize-bounds',
+      async (fixture, markPhase) => {
+        await fixture.page.setViewportSize({ width: 1760, height: 900 });
+        await createGitFixture(fixture.integration.dirs.project);
+        const chatId = await createChat(fixture, 'workspace-window-nested-resize-bounds');
+        await openChat(fixture, chatId);
+
+        markPhase('creating three nested horizontal windows');
+        await openNewWindow(fixture.page, 'Open Files');
+        await openNewWindow(fixture.page, 'Open Git Workbench');
+        await fixture.page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+        );
+        const host = fixture.page.locator('.workspace-host-region');
+        expect(await host.evaluate((element) => element.getBoundingClientRect().width)).toBe(1440);
+        const verticalResizers = fixture.page.locator(
+          '[role="separator"][aria-label="Resize windows"][aria-orientation="vertical"]',
+        );
+        expect(await verticalResizers.count()).toBe(2);
+        const resizerPositions = await verticalResizers.evaluateAll((resizers) =>
+          resizers.map((resizer, index) => ({ index, left: resizer.getBoundingClientRect().left })),
+        );
+        const rootResizerIndex = resizerPositions.sort((left, right) => left.left - right.left)[0]
+          ?.index;
+        if (rootResizerIndex === undefined) throw new Error('Missing root workspace resizer.');
+        const rootResizer = verticalResizers.nth(rootResizerIndex);
+        await fixture.page.waitForFunction(() => {
+          const raw = localStorage.getItem('workspace_layout_v2');
+          if (!raw) return false;
+          let windowCount = 0;
+          const visit = (node: unknown): void => {
+            if (!node || typeof node !== 'object') return;
+            const candidate = node as { type?: unknown; children?: unknown[] };
+            if (candidate.type === 'window') {
+              windowCount += 1;
+              return;
+            }
+            candidate.children?.forEach(visit);
+          };
+          visit((JSON.parse(raw) as { root?: unknown }).root);
+          return windowCount === 3;
+        });
+        const initialPersisted = await fixture.page.evaluate(() =>
+          localStorage.getItem('workspace_layout_v2'),
+        );
+        if (!initialPersisted) throw new Error('Workspace layout was not persisted.');
+
+        markPhase('dragging the parent partition to its nested minimum');
+        const rootBounds = await rootResizer.boundingBox();
+        if (!rootBounds) throw new Error('Root workspace resizer has no bounds.');
+        const rootMaximum = await rootResizer.getAttribute('aria-valuemax');
+        if (!rootMaximum) throw new Error('Root workspace resizer has no maximum.');
+        await fixture.page.mouse.move(
+          rootBounds.x + rootBounds.width / 2,
+          rootBounds.y + rootBounds.height / 2,
+        );
+        await fixture.page.mouse.down();
+        await fixture.page.mouse.move(rootBounds.x + 1000, rootBounds.y + rootBounds.height / 2, {
+          steps: 20,
+        });
+        await fixture.page.mouse.up();
+        await fixture.page.waitForFunction(
+          ({ expectedIndex, expectedMaximum }) =>
+            document
+              .querySelectorAll(
+                '[role="separator"][aria-label="Resize windows"][aria-orientation="vertical"]',
+              )
+              [expectedIndex]?.getAttribute('aria-valuenow') === expectedMaximum,
+          { expectedIndex: rootResizerIndex, expectedMaximum: rootMaximum },
+        );
+        const clampedWidths = await fixture.page
+          .locator(WINDOW_SELECTOR)
+          .evaluateAll((windows) =>
+            windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
+          );
+        expect(Math.floor(Math.min(...clampedWidths))).toBeGreaterThanOrEqual(240);
+        expect(await host.getAttribute('data-workspace-compact')).toBeNull();
+        await fixture.page.waitForFunction(
+          (previous) => localStorage.getItem('workspace_layout_v2') !== previous,
+          initialPersisted,
+        );
+        const resizedPersisted = await fixture.page.evaluate(() =>
+          localStorage.getItem('workspace_layout_v2'),
+        );
+
+        markPhase('restoring the bounded nested ratio');
+        await fixture.page.reload({ waitUntil: 'domcontentloaded' });
+        await fixture.page.waitForFunction(
+          () => document.querySelectorAll('[data-workspace-window-id]').length === 3,
+        );
+        const restoredWidths = await fixture.page
+          .locator(WINDOW_SELECTOR)
+          .evaluateAll((windows) =>
+            windows.map((workspaceWindow) => workspaceWindow.getBoundingClientRect().width),
+          );
+        expect(Math.floor(Math.min(...restoredWidths))).toBeGreaterThanOrEqual(240);
+        expect(await host.getAttribute('data-workspace-compact')).toBeNull();
+        expect(await fixture.page.evaluate(() => localStorage.getItem('workspace_layout_v2'))).toBe(
+          resizedPersisted,
+        );
+        fixture.assertNoBrowserErrors();
+      },
+    );
   });
 
   test('reveals and isolates inline close controls on multiplexed tabs', async () => {
