@@ -460,7 +460,6 @@
 		<SidebarSearchDock
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
-			{isMarkingAllRead}
 			chatGrouping={displayOptions.grouping}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			chatItemLayout={displayOptions.chatItemLayout}

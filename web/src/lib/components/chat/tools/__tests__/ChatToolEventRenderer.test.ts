@@ -167,6 +167,51 @@ describe('ChatToolEventRenderer', () => {
 		expect(disclosureButton.getAttribute('aria-expanded')).toBe('true');
 	});
 
+	it('reserves no header gap or body slot while an Edit row is collapsed', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-collapsed-gap',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen: () => {},
+		});
+
+		const disclosureButton = screen.getByRole('button', { name: 'Expand' });
+		const card = disclosureButton.closest('article');
+		expect(card).toBeTruthy();
+		expect(disclosureButton.closest('div.mb-2')).toBeNull();
+		expect(card!.querySelector('#tool-body-tool-collapsed-gap')).toBeNull();
+
+		await fireEvent.click(disclosureButton);
+		expect(disclosureButton.closest('div.mb-2')).toBeTruthy();
+		expect(screen.getByText('const a = 2;')).toBeTruthy();
+	});
+
+	it('spans the whole header row with the disclosure toggle while the title keeps its own action', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new EditToolUseMessage(
+				'',
+				'tool-row-click',
+				'/tmp/example.ts',
+				'const a = 1;',
+				'const a = 2;',
+			),
+			mode: 'input',
+			onFileOpen: () => {},
+		});
+
+		const rowToggle = screen.getByRole('button', { name: 'Expand' });
+		expect(rowToggle.className).toContain('absolute inset-0');
+		expect(screen.getByText('Edit').className).toContain('pointer-events-none');
+		expect(screen.getByRole('button', { name: 'example.ts' }).className).not.toContain(
+			'absolute inset-0',
+		);
+	});
+
 	it('renders streaming Edit without diff as non-expandable single row', () => {
 		const onFileOpen = () => {};
 		render(ChatToolEventRenderer, {
