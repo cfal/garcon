@@ -458,9 +458,9 @@ describe('AppShell responsive workspace binding', () => {
 		localSettings.chatListAutohide = true;
 		await waitFor(() => expect(workspaceRoot.dataset.chatListConsumesWidth).toBe('false'));
 		expect(workspaceRoot.dataset.canEnableChatListAutohide).toBe('false');
-		expect(
-			document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden'),
-		).toBe('false');
+		expect(document.querySelector('[data-workspace-chat-list]')?.getAttribute('aria-hidden')).toBe(
+			'false',
+		);
 	});
 
 	it.each([

@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/sve
 import type { ComponentProps } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceCompactWindowSwitcher from '../WorkspaceCompactWindowSwitcher.svelte';
-import type {
-	WorkspaceWindowId,
-	WorkspaceWindowNode,
-} from '$lib/workspace/surface-types.js';
+import type { WorkspaceWindowId, WorkspaceWindowNode } from '$lib/workspace/surface-types.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const windows = [
@@ -72,15 +69,11 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 		);
 		expect(onActivate).toHaveBeenLastCalledWith('window-main');
 
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
 		expect(onActivate).toHaveBeenLastCalledWith('window-3');
 
 		await rerender({ ...props, currentWindowId: 'window-3' });
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
 		expect(onActivate).toHaveBeenLastCalledWith('window-main');
 	});
 
@@ -115,18 +108,14 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 		await fireEvent.click(
 			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
 		);
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }));
 
 		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
 		expect(onDismissHint).toHaveBeenCalledOnce();
 
 		await rerender({ ...props, showRecoveryHint: false });
 		expect(screen.queryByRole('img', { name: hint })).toBeNull();
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 		expect(
 			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
 		).toBeTruthy();
@@ -147,8 +136,6 @@ describe('WorkspaceCompactWindowSwitcher', () => {
 		renderSwitcher({ chatListConsumesWorkspaceWidth: false });
 
 		expect(screen.queryByRole('img')).toBeNull();
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 	});
 });
