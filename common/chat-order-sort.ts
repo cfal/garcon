@@ -3,6 +3,12 @@ import { CHAT_ID_LENGTH, chatIdCreatedAt } from './chat-id.js';
 export const CHAT_ORDER_SORT_KEYS = ['created', 'activity'] as const;
 export type ChatOrderSortKey = (typeof CHAT_ORDER_SORT_KEYS)[number];
 
+const CHAT_ORDER_SORT_KEY_SET = new Set<string>(CHAT_ORDER_SORT_KEYS);
+
+export function isChatOrderSortKey(value: unknown): value is ChatOrderSortKey {
+  return typeof value === 'string' && CHAT_ORDER_SORT_KEY_SET.has(value);
+}
+
 export interface ChatOrderTimestamps {
   id: string;
   createdAt: string | null;
