@@ -41,7 +41,6 @@ import {
   resolvePathWithinProject,
   runGit,
   runGitWithStdin,
-  stripDiffHeaders,
 } from './run.js';
 import {
   assertExistingCommitRef,
@@ -400,103 +399,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
     });
 
     return { branch, hasCommits, modified, added, deleted, untracked };
-  }
-
-  async function getDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let diff;
-    if (isUntracked) {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        diff = `--- directory: ${file}`;
-      } else {
-        const fileContent = await fs.readFile(filePath, 'utf-8');
-        const lines = fileContent.split('\n');
-        diff = `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
-      }
-    } else if (isDeleted) {
-      const { stdout: fileContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      const lines = fileContent.split('\n');
-      diff = `--- a/${file}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
-    } else {
-      const { stdout: unstagedDiff } = await runGit(
-        projectPath,
-        ['diff', '--', file],
-        readOnlyGitOptions(),
-      );
-      if (unstagedDiff) {
-        diff = stripDiffHeaders(unstagedDiff);
-      } else {
-        const { stdout: stagedDiff } = await runGit(
-          projectPath,
-          ['diff', '--cached', '--', file],
-          readOnlyGitOptions(),
-        );
-        diff = stripDiffHeaders(stagedDiff) || '';
-      }
-    }
-
-    return { diff };
-  }
-
-  async function getFileWithDiff({ projectPath, file }: FileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-
-    const { stdout: statusOutput } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', file],
-      readOnlyGitOptions(),
-    );
-    const isUntracked = statusOutput.startsWith('??');
-    const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
-
-    let currentContent = '';
-    let oldContent = '';
-
-    if (isDeleted) {
-      const { stdout: headContent } = await runGit(
-        projectPath,
-        ['show', `HEAD:${file}`],
-        readOnlyGitOptions(),
-      );
-      oldContent = headContent;
-      currentContent = headContent;
-    } else {
-      const filePath = resolvePathWithinProject(projectPath, file);
-      const stats = await fs.stat(filePath);
-      if (stats.isDirectory()) {
-        throw new GitDomainError('INVALID_INPUT', 'Cannot generate a line diff for a directory. Select a file instead.');
-      }
-      currentContent = await fs.readFile(filePath, 'utf-8');
-      if (!isUntracked) {
-        try {
-          const { stdout: headContent } = await runGit(
-            projectPath,
-            ['show', `HEAD:${file}`],
-            readOnlyGitOptions(),
-          );
-          oldContent = headContent;
-        } catch {
-          oldContent = '';
-        }
-      }
-    }
-
-    return { currentContent, oldContent, isDeleted, isUntracked };
   }
 
   async function initialCommit({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -973,8 +875,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   return {
     getStatus,
-    getDiff,
-    getFileWithDiff,
     initialCommit,
     commit,
     getBranches,

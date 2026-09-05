@@ -916,8 +916,6 @@ export interface RevertCommitOptions extends ProjectOptions {
 
 export interface GitService {
   getStatus(options: ProjectOptions): Promise<unknown>;
-  getDiff(options: FileOptions): Promise<unknown>;
-  getFileWithDiff(options: FileOptions): Promise<unknown>;
   initialCommit(options: ProjectOptions): Promise<unknown>;
   commit(options: CommitOptions): Promise<GitCommitResult>;
   getBranches(options: ProjectOptions): Promise<unknown>;

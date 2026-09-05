@@ -292,8 +292,6 @@ describe("createGitService", () => {
   it("returns an object with all expected service methods", () => {
     const expectedMethods = [
       "getStatus",
-      "getDiff",
-      "getFileWithDiff",
       "initialCommit",
       "commit",
       "getBranches",
