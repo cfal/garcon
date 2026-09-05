@@ -92,6 +92,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
       await waitForFullscreenState(fixture.page, chatWindowId, false);
       await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
+      await waitForWorkspaceWindowVisible(fixture.page, terminalWindow.windowId);
       expect(
         await fixture.page.$eval(
           `[data-workspace-window-id="${terminalWindow.windowId}"]`,
@@ -235,6 +236,23 @@ async function waitForCurrentWorkspaceWindow(page: Page, windowId: string): Prom
       document
         .querySelector('[data-workspace-window-current="true"]')
         ?.getAttribute('data-workspace-window-id') === expectedWindowId,
+    { timeout: 20_000 },
+    windowId,
+  );
+}
+
+async function waitForWorkspaceWindowVisible(page: Page, windowId: string): Promise<void> {
+  await page.waitForFunction(
+    (expectedWindowId) => {
+      const workspaceWindow = document.querySelector<HTMLElement>(
+        `[data-workspace-window-id="${expectedWindowId}"]`,
+      );
+      return (
+        workspaceWindow !== null &&
+        !workspaceWindow.classList.contains('hidden') &&
+        !workspaceWindow.inert
+      );
+    },
     { timeout: 20_000 },
     windowId,
   );
