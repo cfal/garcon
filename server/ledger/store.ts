@@ -323,6 +323,7 @@ export class TranscriptLedgerStore {
     chatId: string,
     viewId: TranscriptViewId,
     afterOrdinal: number,
+    kind?: LedgerRow['kind'],
   ): readonly LedgerRow[] {
     if (!Number.isSafeInteger(afterOrdinal) || afterOrdinal < 0) {
       throw new TypeError('Transcript replay cursor must be a non-negative integer');
@@ -333,12 +334,13 @@ export class TranscriptLedgerStore {
       if (afterOrdinal > highWatermark) {
         throw new TypeError('Transcript replay cursor is ahead of the current view');
       }
+      const params: (string | number)[] = kind === undefined ? [viewId, afterOrdinal] : [viewId, afterOrdinal, kind];
       return entry.db.query<StoredLedgerRow, [string, number]>(`
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows
-        WHERE view_id = ? AND ordinal > ?
+        WHERE view_id = ? AND ordinal > ?${kind === undefined ? '' : ' AND kind = ?'}
         ORDER BY ordinal
-      `).all(viewId, afterOrdinal).map(decodeStoredRow);
+      `).all(...(params as [string, number])).map(decodeStoredRow);
     });
   }
 
