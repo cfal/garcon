@@ -14,6 +14,7 @@ import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { probeWorktreeLayout } from './worktree-layout.js';
 import { isExpectedMissingGitResult } from './comparison-errors.js';
 import { commitSelectedFiles } from './selected-file-commit.js';
+import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -784,19 +785,34 @@ export function createStatusOperations(agents: GitAgentRunner) {
     };
   }
 
+  async function headHasPath(projectPath: string, file: string): Promise<boolean> {
+    try {
+      await runGit(projectPath, ['cat-file', '-e', `HEAD:${file}`], readOnlyGitOptions());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
     const { stdout: statusOutput } = await runGit(
       projectPath,
-      ['status', '--porcelain', '--', file],
+      ['status', '--porcelain=v1', '-z', '-uall'],
       readOnlyGitOptions(),
     );
-    if (!statusOutput.trim()) {
+    // The global read keeps rename entries intact: a destination-only
+    // pathspec cannot pair the rename and reports DA, hiding the source path
+    // that the worktree side of the change spans.
+    const entry = parsePorcelainV1Z(statusOutput).find(
+      (candidate) => candidate.path.replace(/\/+$/, '') === file.replace(/\/+$/, ''),
+    );
+    if (!entry) {
       throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
     }
+    const status = `${entry.indexStatus}${entry.workTreeStatus}`;
 
-    const status = statusOutput.substring(0, 2);
     if (status === '??') {
       const filePath = resolvePathWithinProject(projectPath, file);
       const stats = await fs.stat(filePath);
@@ -805,29 +821,33 @@ export function createStatusOperations(agents: GitAgentRunner) {
       } else {
         await fs.unlink(filePath);
       }
-    } else if (status === 'A ' || status[1] === 'A' || status === 'AU') {
+    } else if (entry.workTreeStatus === 'R' || entry.workTreeStatus === 'C') {
+      // A worktree rename or copy is one change spanning two paths: revert
+      // both sides to the index so the source reappears and the destination
+      // drops its worktree copy.
+      const renamePaths = entry.originalPath ? [entry.originalPath, entry.path] : [entry.path];
+      await runGit(projectPath, ['restore', '--', ...renamePaths]);
+    } else if (UNMERGED_STATUSES.has(status)) {
+      // Conflicts resolve against HEAD: reset clears the stages, and restore
+      // rewrites the worktree to HEAD's version only when HEAD has the path
+      // (it does for UU/UD/AA and an ours-added AU). When HEAD lacks the path
+      // (DD/DU/UA) reset leaves any worktree leftover untracked.
+      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+      if (await headHasPath(projectPath, file)) {
+        await runGit(projectPath, ['restore', '--', file]);
+      }
+    } else if (status === 'A ') {
       // The workbench only offers discard on unstaged changes, so AM/AD/AT land
       // in the restore branch below and keep their staged addition. Reset
       // remains for index-only additions (endpoint-reachable, no worktree
-      // changes to restore) and unmerged-added states (AA/AU/UA), where it
-      // clears the conflict instead of falling through as a silent no-op.
+      // changes to restore).
       await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-    } else if (status === 'UU' || status === 'UD' || status === 'DU' || status === 'DD') {
-      // Unmerged conflicts resolve by reverting to HEAD. Reset clears the
-      // conflict stages; when our side kept the file (X=U: UU/UD) restore also
-      // rewrites the worktree to HEAD's version. When our side deleted it
-      // (X=D: DU/DD) HEAD has no version to restore to, so reset leaves any
-      // worktree leftover untracked, matching the AA/AU/UA behavior above.
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
-      if (status[0] === 'U') {
-        await runGit(projectPath, ['restore', '--', file]);
-      }
-    } else if (status.includes('M') || status.includes('D') || status.includes('T')) {
-      // T routes worktree typechanges (regular file versus symlink) through
-      // restore, which rewrites the worktree entry back to the indexed type,
-      // so AT lands back at a staged addition. Staged-only typechanges ('T ')
-      // land here as a no-op, exactly like 'M ', because the workbench only
-      // offers discard on unstaged changes.
+    } else if (entry.workTreeStatus !== ' ' && 'MDT'.includes(entry.workTreeStatus)) {
+      // Unstaged modifications, deletions, and typechanges revert the worktree
+      // to the index, keeping any staged facet: AT lands back at a staged
+      // addition once restore rewrites the worktree entry to the indexed
+      // type. Staged-only states ('M ', 'D ', 'T ') have no worktree side to
+      // discard and fall through as no-ops.
       await runGit(projectPath, ['restore', '--', file]);
     }
 

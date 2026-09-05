@@ -1475,6 +1475,90 @@ describe("discard", () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it("reverts both-added conflicts to the HEAD version without leaving markers", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      // A real add/add conflict: HEAD keeps its own version while the
+      // worktree holds the merge markers.
+      await runGitCommand(projectPath, ["checkout", "-b", "other"]);
+      await fs.writeFile(path.join(projectPath, "f.txt"), "theirs\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "f.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "theirs adds"]);
+      await runGitCommand(projectPath, ["checkout", "master"]);
+      await fs.writeFile(path.join(projectPath, "f.txt"), "ours\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "f.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "ours adds"]);
+      try {
+        await runGitCommand(projectPath, ["merge", "other"]);
+      } catch {
+        // Expected merge conflict.
+      }
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("AA f.txt");
+
+      await git.discard({ projectPath, file: "f.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("");
+      expect(await fs.readFile(path.join(projectPath, "f.txt"), "utf-8"))
+        .toBe("ours\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("reverts unstaged renames by restoring both source and destination", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DR a.txt -> dst.txt");
+
+      await git.discard({ projectPath, file: "dst.txt" });
+
+      // The source reappears at its index content and leaves the status; the
+      // destination keeps its intent-to-add index state.
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\n");
+      const status = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
+      expect(status.includes("a.txt")).toBe(false);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves index-only deletions untouched instead of failing restore", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.rm(path.join(projectPath, "a.txt"));
+      await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("D  a.txt");
+
+      await git.discard({ projectPath, file: "a.txt" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("D  a.txt");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("commit message generation", () => {
