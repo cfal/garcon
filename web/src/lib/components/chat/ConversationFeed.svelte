@@ -3,11 +3,7 @@
 	import ConversationFeedVirtualRow from './ConversationFeedVirtualRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import {
-		getLocalSettings,
-		getModelCatalog,
-		getRemoteSettings,
-	} from '$lib/context';
+	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';

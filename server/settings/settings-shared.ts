@@ -31,7 +31,7 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
   }
   if ('hiddenBashCommandPatterns' in normalized) {
     const patterns = parseHiddenBashCommandPatterns(normalized.hiddenBashCommandPatterns);
-    if (patterns) normalized.hiddenBashCommandPatterns = patterns;
+    if (patterns !== null) normalized.hiddenBashCommandPatterns = patterns;
     else delete normalized.hiddenBashCommandPatterns;
   }
   if ('chatTitle' in normalized) {

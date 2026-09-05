@@ -6,13 +6,13 @@ import { SpaDriver } from '../../support/spa-driver.js';
 const GARCON_AMP_PATTERNS = [
   {
     pattern: '^/tmp/garcon-amp-[0-9]+/(?:oracle|finder|librarian|reporter)(?:\\s|$)',
-    mode: 'regex' as const,
+    mode: 'regex',
   },
   {
     pattern: '^\\./(?:oracle|finder|librarian|reporter)(?:\\s|$)',
-    mode: 'regex' as const,
+    mode: 'regex',
   },
-];
+] as const;
 
 async function openRemoteSettings(app: SpaDriver): Promise<void> {
   await app.clickButton('More actions');

@@ -436,7 +436,7 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
 
   if ('hiddenBashCommandPatterns' in raw) {
     const patterns = parseHiddenBashCommandPatterns(raw.hiddenBashCommandPatterns);
-    if (patterns) normalized.hiddenBashCommandPatterns = patterns;
+    if (patterns !== null) normalized.hiddenBashCommandPatterns = patterns;
   }
 
   const chatTitle = normalizeChatTitleUiSettings(raw.chatTitle);

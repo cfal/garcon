@@ -260,7 +260,7 @@ export default function createWorkspaceRoutes(
     }
     if ('hiddenBashCommandPatterns' in patch) {
       const patterns = parseHiddenBashCommandPatterns(patch.hiddenBashCommandPatterns);
-      if (patterns) patch.hiddenBashCommandPatterns = patterns;
+      if (patterns !== null) patch.hiddenBashCommandPatterns = patterns;
       else delete patch.hiddenBashCommandPatterns;
     }
     const notifications = asPlainObject(patch.notifications);
@@ -301,7 +301,7 @@ export default function createWorkspaceRoutes(
     return null;
   }
 
-  function remoteUiPatchError(raw: unknown): string | null {
+  function hiddenBashCommandPatternsPatchError(raw: unknown): string | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const ui = raw as Record<string, unknown>;
     if (
@@ -372,9 +372,9 @@ export default function createWorkspaceRoutes(
       if (promptPatchError) {
         return jsonError(promptPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
-      const uiPatchError = remoteUiPatchError(input.ui);
-      if (uiPatchError) {
-        return jsonError(uiPatchError, 400, 'INVALID_REMOTE_SETTINGS', false);
+      const bashPatternsError = hiddenBashCommandPatternsPatchError(input.ui);
+      if (bashPatternsError) {
+        return jsonError(bashPatternsError, 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
       const transcriptSearchEnabled = featureEnabledPatch(input, 'transcriptSearch');
