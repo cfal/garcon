@@ -40,7 +40,7 @@ describe('buildChatOrderComparator', () => {
       .toEqual(['1735776000000000', '1735689600000000']);
   });
 
-  it('uses the supplied metadata snapshot', () => {
+  it('reads metadata by reference from the supplied map', () => {
     const byId = new Map([
       ['a', metadata('a', '2025-01-02T00:00:00.000Z')],
       ['b', metadata('b', '2025-01-01T00:00:00.000Z')],

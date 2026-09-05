@@ -6,6 +6,7 @@ import {
 } from '../../common/chat-order-sort.js';
 import type { ChatMetadata } from './metadata-store.js';
 
+/** Reads from a caller-owned metadata snapshot that remains stable while sorting. */
 export function buildChatOrderComparator(
   sortKey: ChatOrderSortKey,
   metadataByChatId: ReadonlyMap<string, ChatMetadata>,
