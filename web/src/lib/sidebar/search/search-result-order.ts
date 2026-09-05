@@ -37,6 +37,17 @@ export function sortChatSearchResultsByIdOrder(
 	});
 }
 
+export function sortChatSearchResultsWithCommittedTimeOrder(
+	chats: readonly ChatSessionRecord[],
+	sort: ChatSearchSort,
+	committedTimeOrder: readonly string[] | null,
+): ChatSessionRecord[] {
+	if (sort === 'relevance' || committedTimeOrder === null) {
+		return sortChatSearchResults(chats, sort);
+	}
+	return sortChatSearchResultsByIdOrder(chats, committedTimeOrder);
+}
+
 export function visibleChatSearchTimePrefix(
 	sortedChats: readonly ChatSessionRecord[],
 	loadedTranscriptChatIds: ReadonlySet<string>,

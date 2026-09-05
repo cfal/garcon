@@ -25,8 +25,7 @@ import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	captureChatSearchTimeOrder,
-	sortChatSearchResults,
-	sortChatSearchResultsByIdOrder,
+	sortChatSearchResultsWithCommittedTimeOrder,
 	visibleChatSearchTimePrefix,
 } from '$lib/sidebar/search/search-result-order.js';
 import { compareChatOrderNewestFirst } from '$shared/chat-order-sort';
@@ -169,15 +168,11 @@ export class SidebarSearchStore {
 	get dialogDisplayChats(): ChatSessionRecord[] {
 		const sort = this.deps.getSearchResultSort();
 		const merged = this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats);
-		let sorted: ChatSessionRecord[];
-		if (sort === 'relevance' || this.transcriptSearchCommittedTimeOrder === null) {
-			sorted = sortChatSearchResults(merged, sort);
-		} else {
-			sorted = sortChatSearchResultsByIdOrder(
-				merged,
-				this.transcriptSearchCommittedTimeOrder,
-			);
-		}
+		const sorted = sortChatSearchResultsWithCommittedTimeOrder(
+			merged,
+			sort,
+			this.transcriptSearchCommittedTimeOrder,
+		);
 		if (sort === 'relevance' || this.transcriptSearchQuery !== this.draftQuery) return sorted;
 		return visibleChatSearchTimePrefix(
 			sorted,
@@ -493,7 +488,8 @@ export class SidebarSearchStore {
 		if (!this.transcriptSearchQuery) return;
 		const searchIndexChanged = previousStatus?.phase !== status.phase
 			|| status.chats.indexed > (previousStatus?.chats.indexed ?? -1);
-		if (this.transcriptSearchLoading) {
+		if (this.transcriptSearchLoading || this.transcriptSearchLoadingMore
+			|| this.transcriptSearchRevalidating) {
 			if (searchIndexChanged) this.transcriptSearchRevalidationDirty = true;
 			return;
 		}
@@ -772,6 +768,7 @@ export class SidebarSearchStore {
 			this.transcriptSearchCommittedTimeOrder = committedTimeOrder;
 			this.transcriptSearchResults = dedupeSearchResults(refreshed);
 			this.transcriptSearchPage = latest.page;
+			this.transcriptSearchPageError = null;
 			this.transcriptSearchIndex = latest.index;
 			this.transcriptSearchIndexing = latest.index.pendingChatCount > 0
 				|| latest.index.unindexedChatCount > 0;
