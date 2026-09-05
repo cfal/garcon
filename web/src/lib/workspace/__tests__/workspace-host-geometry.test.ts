@@ -23,15 +23,12 @@ function domRect(width: number, height: number): DOMRect {
 }
 
 function twoWindowSnapshot(): WorkspaceLayoutSnapshot {
-	return reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-		{
-			type: 'open-chat-in-new-window',
-			chatId: 'chat-second',
-			targetWindowId: 'window-main',
-			edge: 'right',
-			newWindowId: 'window-second',
-			partitionId: 'partition-root',
-		},
+	return canonicalWorkspaceSnapshot();
+}
+
+function singleWindowSnapshot(): WorkspaceLayoutSnapshot {
+	return reduceWorkspaceLayout(twoWindowSnapshot(), [
+		{ type: 'remove-surface', surfaceId: 'singleton:files' },
 	]);
 }
 
@@ -144,8 +141,9 @@ describe('WorkspaceHostGeometryState', () => {
 		expect(ResizeObserverHarness.instances).toHaveLength(1);
 		expect(harness.geometry.compactSession).toBe(1);
 
-		harness.setSnapshot(canonicalWorkspaceSnapshot());
-		harness.geometry.layoutPublished(canonicalWorkspaceSnapshot());
+		const singleWindow = singleWindowSnapshot();
+		harness.setSnapshot(singleWindow);
+		harness.geometry.layoutPublished(singleWindow);
 		expect(harness.geometry.compactActive).toBe(false);
 		expect(harness.geometry.compactSession).toBe(1);
 		harness.detach();

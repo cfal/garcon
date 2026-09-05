@@ -227,6 +227,7 @@
 	function hasRightSeparator(rect: WorkspaceWindowRect): boolean {
 		return rect.left + rect.width < 1 - WINDOW_EDGE_EPSILON;
 	}
+
 	const composerPlacement = $derived.by(
 		(): {
 			surface: ChatViewSurfaceDescriptor;
