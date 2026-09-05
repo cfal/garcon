@@ -302,7 +302,7 @@ describe('metadata-store', () => {
         getPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
-        previewTimeoutMs: 500,
+        previewTimeoutMs: 200,
         repairDeadlineMs: 30,
       });
       const startedAt = Date.now();
@@ -311,7 +311,7 @@ describe('metadata-store', () => {
 
       // The deadline must beat the first per-preview timeout, proving init
       // returned via the deadline rather than by draining the stalled pool.
-      expect(Date.now() - startedAt).toBeLessThan(500);
+      expect(Date.now() - startedAt).toBeLessThan(200);
       expect(index.getChatMetadata('stall-0')).toBeNull();
 
       // Past the deadline the pool must not dequeue the remaining entries:
