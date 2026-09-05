@@ -815,9 +815,7 @@ describe('WorkspaceRoot', () => {
 		);
 		const { container } = renderRoot();
 		const liveChat = screen.getByTestId('chat-surface-stub');
-		const liveChatBody = container.querySelector<HTMLElement>(
-			'[data-workspace-live-chat-body]',
-		)!;
+		const liveChatBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
 		const panelA = screen
 			.getAllByTestId('conversation-panel')
 			.find((panel) => panel.dataset.chatId === 'chat-a')!;
@@ -1182,9 +1180,7 @@ describe('WorkspaceRoot', () => {
 		const gitRenderer = gitWindow.querySelector<HTMLElement>(
 			'[data-testid="surface-renderer-stub"]',
 		)!;
-		const liveChatBody = container.querySelector<HTMLElement>(
-			'[data-workspace-live-chat-body]',
-		)!;
+		const liveChatBody = container.querySelector<HTMLElement>('[data-workspace-live-chat-body]')!;
 
 		expect(host.dataset.workspaceCompact).toBe('true');
 		expect(host.dataset.workspaceSingleWindowProjection).toBe('true');
@@ -1199,9 +1195,7 @@ describe('WorkspaceRoot', () => {
 		expect(liveChatBody.style.top).toBe('76px');
 		expect(liveChatBody.dataset.workspaceLiveChatBodyTopPx).toBe('76');
 
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
 		await waitFor(() => expect(workspace.activateWindow).toHaveBeenCalledWith('window-2'));
 		await waitFor(() => expect(gitWindow.classList.contains('hidden')).toBe(false));
 
@@ -1239,7 +1233,9 @@ describe('WorkspaceRoot', () => {
 		expect(host.dataset.workspaceSingleWindowProjection).toBe('true');
 		expect(mainWindow.getAttribute('style')).toContain('width: 100%');
 		expect(
-			container.querySelector('[data-workspace-window-id="window-2"]')?.classList.contains('hidden'),
+			container
+				.querySelector('[data-workspace-window-id="window-2"]')
+				?.classList.contains('hidden'),
 		).toBe(true);
 		expect(container.querySelector('[data-workspace-compact-switcher]')).toBeNull();
 		expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
@@ -1312,30 +1308,24 @@ describe('WorkspaceRoot', () => {
 			screen.getByRole('button', { name: m.workspace_compact_enable_autohide() }),
 		);
 		expect(onEnableChatListAutohide).toHaveBeenCalledOnce();
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		);
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }));
+		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 
-		await fireEvent.click(
-			screen.getByRole('button', { name: m.workspace_compact_next_window() }),
-		);
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.workspace_compact_next_window() }));
+		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_fullscreen() }));
 		await waitFor(() =>
-			expect(screen.queryByRole('navigation', { name: m.workspace_compact_window_list() })).toBeNull(),
+			expect(
+				screen.queryByRole('navigation', { name: m.workspace_compact_window_list() }),
+			).toBeNull(),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_exit_fullscreen() }));
 		await waitFor(() =>
-			expect(screen.getByRole('navigation', { name: m.workspace_compact_window_list() })).toBeTruthy(),
+			expect(
+				screen.getByRole('navigation', { name: m.workspace_compact_window_list() }),
+			).toBeTruthy(),
 		);
-		expect(
-			screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeNull();
+		expect(screen.queryByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeNull();
 
 		hostGeometry.compactSession = 2;
 		await view.rerender({
@@ -1352,9 +1342,7 @@ describe('WorkspaceRoot', () => {
 			canEnableChatListAutohide: true,
 			onEnableChatListAutohide,
 		});
-		expect(
-			screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() }),
-		).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.workspace_compact_dismiss_hint() })).toBeTruthy();
 	});
 
 	it('keeps surviving keyed window identity when another window closes', async () => {

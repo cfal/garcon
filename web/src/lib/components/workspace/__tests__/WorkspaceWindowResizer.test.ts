@@ -155,9 +155,7 @@ describe('WorkspaceWindowResizer', () => {
 			maxRatio: 0.6,
 			disabled: true,
 		});
-		const target = container.querySelector<HTMLElement>(
-			'[data-workspace-window-resize-hit-area]',
-		)!;
+		const target = container.querySelector<HTMLElement>('[data-workspace-window-resize-hit-area]')!;
 
 		expect(separator.getAttribute('aria-disabled')).toBe('true');
 		expect(separator.getAttribute('tabindex')).toBe('-1');

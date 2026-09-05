@@ -28,10 +28,7 @@ export interface VisiblePresentationOptions {
 	readonly projectedWindowId?: WorkspaceWindowId | null;
 }
 
-export type WorkspaceProjectionOptions = Pick<
-	VisiblePresentationOptions,
-	'projectedWindowId'
->;
+export type WorkspaceProjectionOptions = Pick<VisiblePresentationOptions, 'projectedWindowId'>;
 
 export function portablePresentationKey(
 	presentation: WorkspaceWindowId,
@@ -87,15 +84,15 @@ export function visiblePortablePresentations(
 			includeDialog: false,
 		}),
 	].flatMap(([presentation, surfaceId]) => {
-			const surface = snapshot.surfaces[surfaceId];
-			if (!surface || surface.type === 'chat') return [];
-			return [
-				{
-					surfaceId,
-					presentation: presentation as WorkspaceWindowId | 'mobile',
-				},
-			];
-		});
+		const surface = snapshot.surfaces[surfaceId];
+		if (!surface || surface.type === 'chat') return [];
+		return [
+			{
+				surfaceId,
+				presentation: presentation as WorkspaceWindowId | 'mobile',
+			},
+		];
+	});
 }
 
 export function visibleChatPresentations(
@@ -103,20 +100,20 @@ export function visibleChatPresentations(
 	mode: 'desktop' | 'mobile',
 	options: WorkspaceProjectionOptions = {},
 ): VisibleChatPresentation[] {
-	return [
-		...visiblePresentationMap(snapshot, mode, { ...options, includeDialog: false }),
-	].flatMap(([presentation, surfaceId]) => {
-		const surface = snapshot.surfaces[surfaceId];
-		if (surface?.type !== 'chat' || !surface.chatId) return [];
-		return [
-			{
-				surfaceId: surface.id,
-				chatId: surface.chatId,
-				presentation: presentation as WorkspaceWindowId | 'mobile',
-				windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
-			},
-		];
-	});
+	return [...visiblePresentationMap(snapshot, mode, { ...options, includeDialog: false })].flatMap(
+		([presentation, surfaceId]) => {
+			const surface = snapshot.surfaces[surfaceId];
+			if (surface?.type !== 'chat' || !surface.chatId) return [];
+			return [
+				{
+					surfaceId: surface.id,
+					chatId: surface.chatId,
+					presentation: presentation as WorkspaceWindowId | 'mobile',
+					windowId: presentation === 'mobile' ? null : (presentation as WorkspaceWindowId),
+				},
+			];
+		},
+	);
 }
 
 export function nextRetainedSingletonPresentationKeys(
