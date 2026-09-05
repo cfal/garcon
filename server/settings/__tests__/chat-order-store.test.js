@@ -288,11 +288,6 @@ describe('ChatOrderStore.sortChatOrder', () => {
       normalChatIds: ['n-a', 'n-b', 'n-c'],
       archivedChatIds: ['a-a'],
     });
-    const before = {
-      pinned: [...harness.settings.pinnedChatIds].sort(),
-      normal: [...harness.settings.normalChatIds].sort(),
-      archived: [...harness.settings.archivedChatIds].sort(),
-    };
 
     const result = await harness.store.sortChatOrder(() => 0);
 
@@ -300,9 +295,6 @@ describe('ChatOrderStore.sortChatOrder', () => {
     expect(harness.settings.pinnedChatIds).toEqual(['p-a', 'p-b']);
     expect(harness.settings.normalChatIds).toEqual(['n-a', 'n-b', 'n-c']);
     expect(harness.settings.archivedChatIds).toEqual(['a-a']);
-    expect([...harness.settings.pinnedChatIds].sort()).toEqual(before.pinned);
-    expect([...harness.settings.normalChatIds].sort()).toEqual(before.normal);
-    expect([...harness.settings.archivedChatIds].sort()).toEqual(before.archived);
     expect(harness.saveCalls).toEqual([]);
     expect(harness.listChanges).toEqual([]);
   });
