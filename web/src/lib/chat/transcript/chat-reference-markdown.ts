@@ -7,6 +7,7 @@ const CHAT_ID_AHEAD = new RegExp(`\\d{${CHAT_ID_LENGTH}}(?![\\p{L}\\p{M}\\p{N}_]
 const GFM_URL_AT_START = Lexer.rules.inline.gfm.url;
 
 function startsWithGfmEmail(source: string): boolean {
+	if (source.indexOf('@', CHAT_ID_LENGTH) === -1) return false;
 	return GFM_URL_AT_START.exec(source) !== null;
 }
 

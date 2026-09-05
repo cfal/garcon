@@ -151,4 +151,17 @@ describe('createChatReferenceMarkdownExtension', () => {
 		});
 		expect(tokens.map((token) => token.raw).join('')).toBe(source);
 	});
+
+	it.each(['.', '-'])(
+		'preserves repeated %s-delimited references without an email',
+		(separator) => {
+			const source = `${`${CHAT_ID}${separator}`.repeat(500)}end`;
+			const { marked, tokens } = lex(source);
+			const collected = collectTokens(marked, tokens);
+
+			expect(collected.filter((token) => token.type === 'chatReference')).toHaveLength(500);
+			expect(collected.some((token) => token.type === 'link')).toBe(false);
+			expect(tokens.map((token) => token.raw).join('')).toBe(source);
+		},
+	);
 });
