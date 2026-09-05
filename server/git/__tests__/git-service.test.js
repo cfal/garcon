@@ -5698,6 +5698,41 @@ describe("porcelain conflict and comparison robustness", () => {
     }
   });
 
+  it("reports no conflicts when a rename source name parses as an unmerged status", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-conflict-rename-"),
+    );
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      // A rename source literally named "UU a.txt" turns into a second
+      // porcelain token; a parser that fails to consume it would fabricate a
+      // UU conflict from the file name itself.
+      await fs.writeFile(path.join(projectPath, "UU a.txt"), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "UU a.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add named source"]);
+      await fs.copyFile(path.join(projectPath, "UU a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      await fs.rm(path.join(projectPath, "UU a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain", "-z"])).stdout)
+        .toBe("DR dst.txt\0UU a.txt\0");
+
+      const { conflicts } = await git.getConflicts({ projectPath });
+
+      expect(conflicts).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("parses compare output for paths containing tabs", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-compare-z-"),
