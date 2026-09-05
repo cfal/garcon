@@ -209,6 +209,6 @@ describe('UserMessageNavigatorDialog', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
 		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-		expect(screen.queryByRole('dialog')).toBeNull();
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 	});
 });

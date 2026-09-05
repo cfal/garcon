@@ -1900,6 +1900,8 @@ describe('SidebarVirtualSortableChatList', () => {
 
 	it('suppresses document text selection while a touch long press is pending', async () => {
 		vi.useFakeTimers();
+		const setBodyStyleProperty = vi.spyOn(document.body.style, 'setProperty');
+		const removeBodyStyleProperty = vi.spyOn(document.body.style, 'removeProperty');
 
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
@@ -1914,9 +1916,9 @@ describe('SidebarVirtualSortableChatList', () => {
 			changedTouches: [touchAt(1, 20, 44)],
 		});
 		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
-		expect(document.body.style.getPropertyValue('-webkit-user-select')).toBe('none');
-		expect(document.body.style.getPropertyValue('-webkit-touch-callout')).toBe('none');
 		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('none');
+		expect(setBodyStyleProperty).toHaveBeenCalledWith('-webkit-user-select', 'none');
+		expect(setBodyStyleProperty).toHaveBeenCalledWith('-webkit-touch-callout', 'none');
 		expect(row0.className).toContain('select-none');
 
 		await fireEvent.touchMove(window, {
@@ -1926,9 +1928,9 @@ describe('SidebarVirtualSortableChatList', () => {
 		await tick();
 
 		expect(document.body.style.getPropertyValue('user-select')).toBe('');
-		expect(document.body.style.getPropertyValue('-webkit-user-select')).toBe('');
-		expect(document.body.style.getPropertyValue('-webkit-touch-callout')).toBe('');
 		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('');
+		expect(removeBodyStyleProperty).toHaveBeenCalledWith('-webkit-user-select');
+		expect(removeBodyStyleProperty).toHaveBeenCalledWith('-webkit-touch-callout');
 	});
 
 	it('clears existing text selection when a touch long press drag activates', async () => {

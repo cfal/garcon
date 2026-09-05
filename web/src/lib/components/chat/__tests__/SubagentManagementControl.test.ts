@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SubagentManagementControl from '../SubagentManagementControl.svelte';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
@@ -71,7 +71,7 @@ describe('SubagentManagementControl', () => {
 		await fireEvent.click(await screen.findByRole('button', { name: /review-auth/ }));
 
 		expect(onJumpToTool).toHaveBeenCalledWith('tool-input-tool-subagent-1');
-		expect(screen.queryByText('Main chat')).toBeNull();
+		await waitFor(() => expect(screen.queryByText('Main chat')).toBeNull());
 	});
 
 	it('renders nothing without subagents', () => {
