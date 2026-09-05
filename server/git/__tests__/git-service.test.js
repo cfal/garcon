@@ -6,7 +6,8 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-types.js";
 import { createGitService as createProductionGitService } from "../git-service.js";
-import { runGitWithStdin } from "../run.ts";
+import { runGitWithStdin } from "../run.js";
+import { resolveNetworkGitTimeoutMs } from "../status.js";
 import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
@@ -1058,12 +1059,19 @@ describe("selected-file commits", () => {
   });
 });
 
+describe("network git timeout", () => {
+  it("caps at the runner default, tightens with the idle budget, and keeps a floor", () => {
+    expect(resolveNetworkGitTimeoutMs(120)).toBe(30_000);
+    expect(resolveNetworkGitTimeoutMs(20)).toBe(18_000);
+    expect(resolveNetworkGitTimeoutMs(2)).toBe(1_000);
+  });
+});
+
 describe("discard", () => {
   const git = createProductionGitService({
     agents: mockAgents,
     classifyGitError: mockClassifyGitError,
   });
-
   it("fully discards staged-added files that also changed in the worktree", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),

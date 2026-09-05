@@ -58,12 +58,16 @@ const WHOLE_INDEX_COMMIT_STATE_REFS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT
 const NETWORK_GIT_TIMEOUT_MARGIN_MS = 2_000;
 const NETWORK_GIT_DEFAULT_TIMEOUT_MS = 30_000;
 
+export function resolveNetworkGitTimeoutMs(idleSeconds: number): number {
+  return Math.min(
+    NETWORK_GIT_DEFAULT_TIMEOUT_MS,
+    Math.max(1_000, idleSeconds * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
+  );
+}
+
 function networkGitOptions(): GitCommandOptions {
   return {
-    timeoutMs: Math.min(
-      NETWORK_GIT_DEFAULT_TIMEOUT_MS,
-      Math.max(1_000, getHttpIdleTimeoutSeconds() * 1000 - NETWORK_GIT_TIMEOUT_MARGIN_MS),
-    ),
+    timeoutMs: resolveNetworkGitTimeoutMs(getHttpIdleTimeoutSeconds()),
     // Fails fast on credential prompts instead of hanging until the timeout.
     env: { GIT_TERMINAL_PROMPT: '0' },
   };
