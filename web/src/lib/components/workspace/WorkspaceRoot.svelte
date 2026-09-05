@@ -526,14 +526,21 @@
 		{/each}
 		{#if !projectedWindowId}
 			{#each geometry.partitions as { partition, bounds } (partition.id)}
+				{@const ratioBounds = workspace.resolvePartitionRatioBounds(partition.id) ?? {
+					min: partition.ratio,
+					max: partition.ratio,
+					adjustable: false,
+				}}
 				<WorkspaceWindowResizer
 					direction={partition.direction}
 					ratio={rootState.partitionRatio(partition.id, partition.ratio)}
 					style={resizerStyle(partition, bounds)}
 					boundsFraction={partition.direction === 'horizontal' ? bounds.width : bounds.height}
+					minRatio={ratioBounds.min}
+					maxRatio={ratioBounds.max}
+					disabled={!ratioBounds.adjustable}
 					onPreview={(next) => rootState.setPartitionRatioPreview(partition.id, next)}
 					onCommit={(next) => void workspace.setPartitionRatio(partition.id, next)}
-					onReset={() => void workspace.setPartitionRatio(partition.id, 0.5)}
 				/>
 			{/each}
 		{/if}

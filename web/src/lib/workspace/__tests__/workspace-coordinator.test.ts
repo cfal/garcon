@@ -21,7 +21,10 @@ import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';
-import type { WorkspaceSplitAdmissionResolver } from '../window-geometry-policy';
+import type {
+	WorkspacePartitionRatioBoundsResolver,
+	WorkspaceSplitAdmissionResolver,
+} from '../window-geometry-policy';
 import { resolveUnmeasuredWorkspaceSplit } from './workspace-geometry-test-fixtures';
 import { WorkspacePresentationController } from '../workspace-presentation-controller.svelte';
 
@@ -75,6 +78,7 @@ function createHarness(
 		failLayoutPublishAt?: number;
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
+		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -183,7 +187,7 @@ function createHarness(
 		} as never,
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
-		resolvePartitionRatioBounds: () => null,
+		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
@@ -1779,6 +1783,48 @@ describe('WorkspaceCoordinator', () => {
 		coordinator.focusOwner = { kind: 'surface', surfaceId: CANONICAL_CHAT_SURFACE_ID };
 		expect(coordinator.focusNextTabInFocusedWindow()).toBe(false);
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CANONICAL_CHAT_SURFACE_ID);
+	});
+
+	it('rechecks and clamps partition ratios inside the serialized commit', async () => {
+		let min = 0.4;
+		let max = 0.6;
+		let adjustable = true;
+		const resolver = vi.fn<WorkspacePartitionRatioBoundsResolver>((snapshot, partitionId) => {
+			const root = snapshot.desktopRoot;
+			if (root.type !== 'partition' || root.id !== partitionId) return null;
+			return { currentRatio: root.ratio, bounds: { min, max, adjustable } };
+		});
+		const { coordinator, layout } = createHarness({ resolvePartitionRatioBounds: resolver });
+		await coordinator.openSingletonInNewWindow('git-history');
+		const root = layout.snapshot.desktopRoot;
+		if (root.type !== 'partition') throw new Error('Expected partition root');
+
+		await coordinator.setPartitionRatio(root.id, 0.9);
+		expect(layout.snapshot.desktopRoot).toMatchObject({ ratio: 0.6 });
+		expect(resolver).toHaveBeenLastCalledWith(
+			expect.objectContaining({ desktopRoot: expect.objectContaining({ ratio: 0.5 }) }),
+			root.id,
+		);
+
+		min = 0.6;
+		max = 0.6;
+		adjustable = false;
+		const revision = layout.revision;
+		await coordinator.setPartitionRatio(root.id, 0.2);
+
+		expect(layout.revision).toBe(revision);
+		expect(layout.snapshot.desktopRoot).toMatchObject({ ratio: 0.6 });
+	});
+
+	it('drops stale partition resize events', async () => {
+		const { coordinator, layout } = createHarness({
+			resolvePartitionRatioBounds: () => null,
+		});
+		const revision = layout.revision;
+
+		await coordinator.setPartitionRatio('partition-missing', 0.7);
+
+		expect(layout.revision).toBe(revision);
 	});
 
 	it('switches a terminal tab in place and swaps an already placed target', async () => {
