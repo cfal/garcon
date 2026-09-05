@@ -1,3 +1,4 @@
+import { CLAUDE_FABLE_5_1_MODEL } from '@garcon/common/models';
 import { normalizeThinkingMode } from '@garcon/common/chat-modes';
 import type {
   ClaudeThinkingMode,
@@ -9,6 +10,7 @@ import { withSingleQueryControl } from '@garcon/server-agent-common/shared/singl
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { ClaudeCliVersionProbe } from './cli-version.js';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
+import type { ClaudeModelSource } from './runtime-types.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -17,8 +19,11 @@ const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
+const LEGACY_CLAUDE_FABLE_MODEL = 'fable';
+
 interface ClaudeCLIArgOptions {
   model?: string;
+  modelSource?: ClaudeModelSource;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
@@ -30,6 +35,7 @@ interface ClaudeCLIArgOptions {
 
 interface ClaudeSingleQueryOptions {
   model?: string;
+  modelSource?: ClaudeModelSource;
   cwd?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
@@ -64,8 +70,16 @@ function mapThinkingModeToClaudeEffort(
   return normalizedMode;
 }
 
+// Normalizes the legacy persisted alias so existing chats also use the pinned model.
+export function canonicalClaudeModel(model: string, modelSource: ClaudeModelSource): string {
+  return modelSource === 'native' && model === LEGACY_CLAUDE_FABLE_MODEL
+    ? CLAUDE_FABLE_5_1_MODEL
+    : model;
+}
+
 export function buildClaudeCLIArgs({
   model,
+  modelSource = 'native',
   permissionMode,
   thinkingMode,
   prompt = '',
@@ -83,7 +97,7 @@ export function buildClaudeCLIArgs({
       ]
     : ['--print', '--no-session-persistence'];
 
-  if (model) args.push('--model', model);
+  if (model) args.push('--model', canonicalClaudeModel(model, modelSource));
 
   const effectiveMode = permissionMode || 'default';
   const providerMode = providerStartupPermissionMode(effectiveMode);
@@ -121,6 +135,7 @@ export async function runSingleQuery(
   prompt: string,
   {
     model,
+    modelSource = 'native',
     cwd,
     permissionMode,
     thinkingMode,
@@ -128,7 +143,7 @@ export async function runSingleQuery(
     envOverrides,
     timeoutMs,
     signal,
-  }: ClaudeSingleQueryOptions = {},
+  }: ClaudeSingleQueryOptions = { modelSource: 'native' },
   dependencies: ClaudeCliDependencies = defaultClaudeCliDependencies(),
 ): Promise<string> {
   return withSingleQueryControl({ signal, timeoutMs }, async (querySignal) => {
@@ -136,6 +151,7 @@ export async function runSingleQuery(
     await dependencies.versionProbe.assertCompatible(claudeBinary);
     const args = buildClaudeCLIArgs({
       model,
+      modelSource,
       permissionMode,
       thinkingMode,
       claudeThinkingMode,

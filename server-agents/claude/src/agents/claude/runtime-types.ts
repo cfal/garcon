@@ -6,6 +6,8 @@ import type {
 } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
 
+export type ClaudeModelSource = 'native' | 'endpoint';
+
 export interface ClaudeExecutionAdmission {
   readonly signal: AbortSignal;
   markStarted(): Promise<void>;
@@ -15,6 +17,7 @@ export interface ClaudeExecutionRequest {
   readonly chatId: string;
   readonly projectPath: string;
   readonly model: string;
+  readonly modelSource: ClaudeModelSource;
   readonly permissionMode: PermissionMode;
   readonly thinkingMode: ThinkingMode;
   readonly claudeThinkingMode?: ClaudeThinkingMode;

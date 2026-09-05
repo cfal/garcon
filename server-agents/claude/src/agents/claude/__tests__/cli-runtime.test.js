@@ -251,6 +251,7 @@ function startOptions(overrides = {}) {
     chatId: 'chat-1',
     projectPath: '/tmp',
     model: 'sonnet',
+    modelSource: 'native',
     permissionMode: 'default',
     thinkingMode: 'none',
     operation: { runId: 'run-default', publish() {} },
@@ -1904,7 +1905,7 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
 
       const resumed = runtime.runClaudeTurn(startOptions({
         command: 'switch model',
-        model: 'opus',
+        model: 'fable',
       }));
       await enqueueResult(fake);
       await resumed;
@@ -1914,7 +1915,45 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
         .filter((message) => message.type === 'control_request');
       expect(controls.map((message) => message.request)).toContainEqual({
         subtype: 'set_model',
-        model: 'opus',
+        model: 'claude-fable-5-1',
+      });
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('preserves endpoint model IDs through the control protocol', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = createRuntime();
+      const endpointOptions = {
+        modelSource: 'endpoint',
+        envOverrides: { ANTHROPIC_BASE_URL: 'https://endpoint.test' },
+      };
+      const start = runtime.startClaudeCliSession(startOptions({ model: 'sonnet', ...endpointOptions }));
+      await enqueueResult(fake);
+      await start;
+
+      const resumed = runtime.runClaudeTurn(startOptions({
+        command: 'switch endpoint model',
+        model: 'fable',
+        ...endpointOptions,
+      }));
+      await enqueueResult(fake);
+      await resumed;
+
+      const controls = fake.proc.stdin.write.mock.calls
+        .map(([line]) => JSON.parse(line))
+        .filter((message) => message.type === 'control_request');
+      expect(controls.map((message) => message.request)).toContainEqual({
+        subtype: 'set_model',
+        model: 'fable',
       });
       expect(Bun.spawn).toHaveBeenCalledTimes(1);
     } finally {

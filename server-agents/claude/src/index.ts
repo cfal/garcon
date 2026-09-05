@@ -242,6 +242,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
           return await runSingleQuery(request.prompt, {
             cwd: request.projectPath,
             model: request.model,
+            modelSource: resolved ? 'endpoint' : 'native',
             ...singleQueryRuntimeOptions(request),
             envOverrides: {
               ...buildClaudeHostEnvironment(config),

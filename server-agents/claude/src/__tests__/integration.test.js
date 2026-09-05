@@ -72,6 +72,22 @@ describe('ClaudeAgentIntegration', () => {
     expect(host.environment.get).not.toHaveBeenCalled();
   });
 
+  it('exposes only Fable 5.1 under the fable selection', async () => {
+    const integration = new ClaudeAgentIntegration(createHost());
+    const catalog = await integration.catalog.snapshot({
+      strict: false,
+      signal: new AbortController().signal,
+    });
+
+    expect(catalog.models.filter(({ value }) => value.includes('fable'))).toEqual([
+      {
+        value: 'fable',
+        label: 'Fable 5.1',
+        supportsImages: true,
+      },
+    ]);
+  });
+
   it('preserves version 1 settings and native-session migration envelopes', async () => {
     const integration = new ClaudeAgentIntegration(createHost());
     const signal = new AbortController().signal;

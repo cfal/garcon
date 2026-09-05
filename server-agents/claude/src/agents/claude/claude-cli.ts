@@ -29,11 +29,13 @@ import { ClaudeProcessRetirementTracker } from './process-retirements.js';
 import { ClaudeControlBroker } from './cli-control.js';
 import {
   buildClaudeCLIArgs,
+  canonicalClaudeModel,
   runSingleQuery,
   type ClaudeCliDependencies,
 } from './cli-invocation.js';
 import { buildClaudePermissionApprovalResponse, isClaudeAskUserQuestionTool } from './permission-response.js';
 import {
+  createClaudeSessionOptions,
   mergeClaudeSessionOptions,
   normalizeClaudeThinkingModeForState,
   type ClaudeSessionOptions,
@@ -834,6 +836,7 @@ class ClaudeCliRuntime {
   ): string[] {
     return buildClaudeCLIArgs({
       model: options.model,
+      modelSource: options.modelSource,
       permissionMode: options.permissionMode,
       thinkingMode: options.thinkingMode,
       claudeThinkingMode: options.claudeThinkingMode,
@@ -963,7 +966,7 @@ class ClaudeCliRuntime {
     session.process = proc;
     session.currentThinkingMode = options.thinkingMode || 'none';
     session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
-    session.currentModel = options.model || '';
+    session.currentModel = canonicalClaudeModel(options.model || '', options.modelSource);
     session.currentEnvOverrides = options.envOverrides;
     const transport = new ClaudeProcessTransport<ClaudeCLIMessage>({
       process: proc,
@@ -1043,17 +1046,7 @@ class ClaudeCliRuntime {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!agentSessionId) throw new Error('agentSessionId is required when starting a Claude session');
 
-    const allOpts: ClaudeSessionOptions = {
-      agentSessionId,
-      sessionId: agentSessionId,
-      chatId,
-      model,
-      permissionMode,
-      projectPath,
-      thinkingMode,
-      claudeThinkingMode,
-      envOverrides,
-    };
+    const allOpts = createClaudeSessionOptions(request);
 
     let completeInitialization: (() => void) | null = null;
     const initialization = new Promise<void>((resolve) => {
@@ -1155,17 +1148,7 @@ class ClaudeCliRuntime {
     assertClaudeExecutionOpen(requestAdmission);
     if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
 
-    const allOpts: ClaudeSessionOptions = {
-      agentSessionId,
-      sessionId: agentSessionId,
-      chatId,
-      model,
-      permissionMode,
-      projectPath,
-      thinkingMode,
-      claudeThinkingMode,
-      envOverrides,
-    };
+    const allOpts = createClaudeSessionOptions(request);
 
     let session = this.#runningSessions.get(agentSessionId);
     if (session?.initialization) {
@@ -1218,7 +1201,10 @@ class ClaudeCliRuntime {
       const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(
         session.options.claudeThinkingMode,
       );
-      const desiredModel = session.options.model || '';
+      const desiredModel = canonicalClaudeModel(
+        session.options.model || '',
+        session.options.modelSource,
+      );
       const desiredPermissionMode = session.options.permissionMode || 'default';
       const previousProviderPermissionMode = session.process
         ? providerStartupPermissionMode(session.currentPermissionMode)

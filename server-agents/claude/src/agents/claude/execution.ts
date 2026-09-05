@@ -19,6 +19,7 @@ import {
   buildClaudeEndpointRuntime,
   buildClaudeHostEnvironment,
 } from './endpoint-runtime.js';
+import type { ClaudeModelSource } from './runtime-types.js';
 import {
   createClaudeNativePath,
   prepareClaudeNativeSessionRelocation,
@@ -195,10 +196,12 @@ export class ClaudeExecution implements AgentRuntimeExecution {
 }
 
 function executionFields(request: AgentRuntimeExecutionContext) {
+  const modelSource: ClaudeModelSource = request.endpoint ? 'endpoint' : 'native';
   return {
     chatId: request.chatId,
     projectPath: request.projectPath,
     model: request.model,
+    modelSource,
     permissionMode: request.permissionMode,
     thinkingMode: request.thinkingMode,
     claudeThinkingMode: claudeThinkingMode(request.settings.values.claudeThinkingMode),
