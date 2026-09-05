@@ -1648,6 +1648,115 @@ describe("discard", () => {
     }
   });
 
+  it("keeps a tracked rename destination as a modification when its content differs", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "true"]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "one\ntwo\nthree\nfour\n", "utf-8");
+      await runGitCommand(projectPath, ["commit", "-am", "longer source"]);
+      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await runGitCommand(projectPath, ["add", "dst.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
+      await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
+      await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
+      // The destination drifts from its committed content while staying
+      // similar enough for the rename pairing.
+      await fs.writeFile(
+        path.join(projectPath, "dst.txt"),
+        "one\ntwo\nthree\nfour\nedited\n",
+        "utf-8",
+      );
+      await fs.rm(path.join(projectPath, "a.txt"));
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("DR a.txt -> dst.txt");
+
+      await git.discard({ projectPath, file: "dst.txt" });
+
+      // Resetting the destination leaves the never-hashed edit as an unstaged
+      // modification instead of truncating it to the committed content.
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("M dst.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("one\ntwo\nthree\nfour\n");
+      expect(await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"))
+        .toBe("one\ntwo\nthree\nfour\nedited\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a conflicted file named like a pathspec glob literally", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      // A conflicted path literally named "*" must not expand in the reset
+      // and restore pathspecs: globbed, it would rewrite every tracked file.
+      await fs.writeFile(path.join(projectPath, "*"), "head-star\n", "utf-8");
+      await runGitCommand(projectPath, ["add", "*"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add star"]);
+      await plantUnmergedStages(projectPath, "*", [
+        [1, "base\n"],
+        [2, "ours\n"],
+        [3, "theirs\n"],
+      ]);
+      await fs.writeFile(path.join(projectPath, "a.txt"), "edited\n", "utf-8");
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("UU *\n M a.txt");
+
+      await git.discard({ projectPath, file: "*" });
+
+      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
+        .toBe("M a.txt");
+      expect(await fs.readFile(path.join(projectPath, "*"), "utf-8"))
+        .toBe("head-star\n");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
+        .toBe("edited\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the requested path's own entry over a rename original", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-discard-"),
+    );
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["config", "status.renames", "copies"]);
+      await fs.writeFile(path.join(projectPath, "z.txt"), "one\n", "utf-8");
+      await runGitCommand(projectPath, ["rm", "a.txt"]);
+      await runGitCommand(projectPath, ["add", "z.txt"]);
+      await runGitCommand(projectPath, ["commit", "-m", "add z"]);
+      // The copy destination sorts before its source, so the copy entry is
+      // listed first and an originalPath-first lookup would hijack the
+      // source's own modification entry.
+      await fs.copyFile(path.join(projectPath, "z.txt"), path.join(projectPath, "a2.txt"));
+      await runGitCommand(projectPath, ["add", "-N", "a2.txt"]);
+      await fs.writeFile(path.join(projectPath, "z.txt"), "one\nedit\n", "utf-8");
+      const listed = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
+      expect(listed).toContain("C z.txt -> a2.txt");
+      expect(listed).toContain("M z.txt");
+
+      await git.discard({ projectPath, file: "z.txt" });
+
+      // The source's own modification entry governs: its edit reverts while
+      // the copy destination keeps its intent-to-add entry untouched.
+      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8"))
+        .toBe("one\n");
+      expect((await runGitCommand(projectPath, ["ls-files", "--cached", "a2.txt"])).stdout)
+        .toContain("a2.txt");
+      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8"))
+        .toBe("one\n");
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("leaves index-only deletions untouched instead of failing restore", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
